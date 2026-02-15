@@ -27,6 +27,8 @@ namespace TrueReplayer
 
         public static bool IsReplayingAction { get; set; } = false;
 
+        public static string? LastTriggerHotkey { get; set; }
+
         public static bool IgnoreProfileHotkeys { get; set; } = false;
 
         public static void Start()
@@ -177,6 +179,7 @@ namespace TrueReplayer
 
                     if (key == UserProfile.Current.ReplayHotkey)
                     {
+                        LastTriggerHotkey = key;
                         OnHotkeyPressed?.Invoke(key);
                         return (IntPtr)1;
                     }
@@ -190,6 +193,7 @@ namespace TrueReplayer
                     if (!IsReplayingAction && UserProfile.Current.ProfileKeyEnabled && isProfileKey && MainController.Instance != null && !MainController.Instance.IsRecording())
                     {
                         var profileName = ProfileHotkeys.FirstOrDefault(p => p.Value == key).Key;
+                        LastTriggerHotkey = key;
                         OnHotkeyPressed?.Invoke($"PROFILE::{profileName}");
                         return (IntPtr)1;
                     }

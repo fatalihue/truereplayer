@@ -285,6 +285,8 @@ namespace TrueReplayer.Services
 
             try
             {
+                await WaitForHotkeyReleaseAsync(token);
+
                 while (!token.IsCancellationRequested && (isInfinite || iteration < _loopCount))
                 {
                     iteration++;
@@ -326,6 +328,56 @@ namespace TrueReplayer.Services
                 }
             }
             catch (TaskCanceledException) { }
+        }
+
+        private static readonly Dictionary<string, int> ModifierGenericVkCodes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Ctrl"] = 0x11,   // VK_CONTROL (left or right)
+            ["Alt"] = 0x12,    // VK_MENU (left or right)
+            ["Shift"] = 0x10,  // VK_SHIFT (left or right)
+        };
+
+        private async Task WaitForHotkeyReleaseAsync(CancellationToken token)
+        {
+            var hotkey = InputHookManager.LastTriggerHotkey;
+            InputHookManager.LastTriggerHotkey = null;
+
+            if (string.IsNullOrEmpty(hotkey))
+                return;
+
+            var vkCodes = new List<int>();
+
+            foreach (var part in hotkey.Split('+'))
+            {
+                var trimmed = part.Trim();
+                if (ModifierGenericVkCodes.TryGetValue(trimmed, out int genericVk))
+                    vkCodes.Add(genericVk);
+                else if (Helpers.KeyUtils.TryResolveVirtualKeyCode(trimmed, out ushort vk))
+                    vkCodes.Add(vk);
+            }
+
+            if (vkCodes.Count == 0)
+                return;
+
+            var deadline = DateTime.Now.AddMilliseconds(2000);
+
+            while (!token.IsCancellationRequested && DateTime.Now < deadline)
+            {
+                bool anyPressed = false;
+                foreach (var vk in vkCodes)
+                {
+                    if ((NativeMethods.GetAsyncKeyState(vk) & 0x8000) != 0)
+                    {
+                        anyPressed = true;
+                        break;
+                    }
+                }
+
+                if (!anyPressed)
+                    break;
+
+                await Task.Delay(10, token);
+            }
         }
 
         public void Stop()
