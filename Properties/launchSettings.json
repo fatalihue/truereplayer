@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "TrueReplayerApp2 (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "TrueReplayerApp2 (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

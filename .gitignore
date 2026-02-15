@@ -1,0 +1,17 @@
+# Claude Code local settings
+.claude/
+
+# Visual Studio build output
+bin/
+obj/
+
+# Visual Studio user-specific files
+.vs/
+*.user
+*.suo
+
+# NuGet
+packages/
+
+# Temporary key
+*.pfx

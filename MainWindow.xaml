@@ -1,0 +1,239 @@
+<Window x:Class="TrueReplayer.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:TrueReplayer"
+        xmlns:controls="using:CommunityToolkit.WinUI.UI.Controls"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:converters="using:TrueReplayer.Converters"
+        xmlns:models="using:TrueReplayer.Models"
+        mc:Ignorable="d">
+
+    <!-- Fundo principal da interface -->
+    <Grid Background="#2b2b2b">
+        <Grid.Resources>
+            <converters:NonNegativeIntConverter x:Key="NonNegativeIntConverter" />
+            <converters:InsertionHighlightConverter x:Key="InsertionHighlightConverter" />
+        </Grid.Resources>
+
+        <!-- Layout principal com colunas e linhas -->
+        <Grid HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Padding="5" RowSpacing="4" ColumnSpacing="2" RequestedTheme="Dark">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.86*" />
+                <ColumnDefinition Width="6*" />
+                <ColumnDefinition Width="1.86*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- Título da aplicação -->
+            <TextBlock Text="🎮 TrueReplayer" FontSize="24" FontWeight="SemiBold" Foreground="#6e6e6e" Grid.ColumnSpan="3" />
+
+            <!-- Lista de perfis -->
+            <ListView x:Name="ProfilesListBox"
+                      x:FieldModifier="public"
+                      Grid.Row="1"
+                      Grid.Column="0"
+                      Margin="0,0,8,0"
+                      Background="#2b2b2b"
+                      BorderBrush="#3e3e3e"
+                      BorderThickness="1"
+                      SelectionMode="Single"
+                      IsItemClickEnabled="True"
+                      ItemClick="ProfilesListBox_ItemClick"
+                      RightTapped="ProfilesListBox_RightTapped">
+
+                <!-- Menu de contexto para gerenciamento de perfis -->
+                <ListView.ContextFlyout>
+                    <MenuFlyout>
+                        <MenuFlyoutItem Text="New Profile" Click="CreateNewProfile_Click">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="" Foreground="LimeGreen" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Text="Delete" Click="DeleteProfile_Click">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="" Foreground="Red" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Text="Directory" Click="OpenProfileFolder_Click">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="" Foreground="Yellow" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Text="Rename" Click="RenameProfile_Click">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="" Foreground="LimeGreen" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Text="Assign Profile Key" Click="AssignProfileHotkey_Click">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="" Foreground="LightBlue" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Text="Remove Profile Key" Click="RemoveProfileHotkey_Click">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="" Foreground="Red" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                    </MenuFlyout>
+                </ListView.ContextFlyout>
+
+                <!-- Estilo dos itens da lista de perfis -->
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="Margin" Value="0" />
+                        <Setter Property="MinHeight" Value="22" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListViewItem">
+                                    <ContentPresenter />
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+
+                <!-- Modelo de dados para exibição de perfis -->
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="models:ProfileEntry">
+                        <StackPanel Orientation="Horizontal" Padding="2" Margin="0">
+                            <TextBlock Text="{x:Bind Name}" Margin="0,-4,4,-4" VerticalAlignment="Center" Foreground="Gray" FontSize="14" />
+                            <TextBlock Text="{x:Bind Hotkey}" Margin="0,-4,0,-4" VerticalAlignment="Center" Foreground="Yellow" FontSize="14" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+
+            <!-- Tabela de ações -->
+            <controls:DataGrid x:Name="ActionsDataGrid"
+                               SelectionMode="Extended"
+                               Grid.Row="1" Grid.Column="1"
+                               AutoGenerateColumns="False"
+                               ItemsSource="{x:Bind Actions, Mode=OneWay}"
+                               CanUserSortColumns="False"
+                               CanUserReorderColumns="False"
+                               HeadersVisibility="All"
+                               GridLinesVisibility="Vertical"
+                               BorderThickness="1"
+                               BorderBrush="#3e3e3e"
+                               RowBackground="#2b2b2b"
+                               AlternatingRowBackground="#333333"
+                               Foreground="White"
+                               Margin="-8,0,0,0"
+                               Background="#2b2b2b">
+
+                <!-- Estilo das linhas da tabela -->
+                <controls:DataGrid.RowStyle>
+                    <Style TargetType="controls:DataGridRow">
+                        <Setter Property="Background"
+                                Value="{Binding ShouldHighlight, Converter={StaticResource InsertionHighlightConverter}}" />
+                    </Style>
+                </controls:DataGrid.RowStyle>
+
+                <!-- Colunas da tabela de ações -->
+                <controls:DataGrid.Columns>
+                    <controls:DataGridComboBoxColumn Header="Action" Width="140" Binding="{Binding ActionType}" ItemsSource="{x:Bind ActionTypes}" />
+                    <controls:DataGridTemplateColumn Header="Key" Width="90">
+                        <controls:DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DisplayKey}" Foreground="White"
+                                           VerticalAlignment="Center" HorizontalAlignment="Stretch"
+                                           TextAlignment="Left" Padding="8,0" />
+                            </DataTemplate>
+                        </controls:DataGridTemplateColumn.CellTemplate>
+                        <controls:DataGridTemplateColumn.CellEditingTemplate>
+                            <DataTemplate>
+                                <TextBox PreviewKeyDown="KeyEditTextBox_PreviewKeyDown"
+                                         Text="{Binding DisplayKey, Mode=OneWay}"
+                                         Background="#1e1e1e" Foreground="White"
+                                         HorizontalContentAlignment="Left"
+                                         VerticalContentAlignment="Center"
+                                         Padding="8,0" />
+                            </DataTemplate>
+                        </controls:DataGridTemplateColumn.CellEditingTemplate>
+                    </controls:DataGridTemplateColumn>
+                    <controls:DataGridTextColumn Header="X" Binding="{Binding X}" Width="65" />
+                    <controls:DataGridTextColumn Header="Y" Binding="{Binding Y}" Width="65" />
+                    <controls:DataGridTextColumn Header="Delay" Binding="{Binding Delay, Converter={StaticResource NonNegativeIntConverter}}" Width="Auto" />
+                    <controls:DataGridTextColumn Header="Comment" Binding="{Binding Comment}" Width="Auto" />
+                </controls:DataGrid.Columns>
+            </controls:DataGrid>
+
+            <!-- Painel de configurações -->
+            <Border Grid.Row="1" Grid.Column="2" Background="#2b2b2b" BorderBrush="#3e3e3e" BorderThickness="1" Padding="1">
+                <ScrollViewer VerticalScrollBarVisibility="Visible">
+                    <StackPanel x:Name="ConfigPanel" Padding="0" Spacing="2">
+
+                        <!-- Configurações gerais -->
+                        <StackPanel Spacing="1">
+                            <TextBlock Text="⚙️ Settings" FontSize="15" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,0" />
+                            <StackPanel Spacing="0">
+                                <ToggleSwitch x:Name="UseCustomDelaySwitch" x:FieldModifier="public" Foreground="White" IsOn="True" OnContent="Fixed Delay (ms)" OffContent="Fixed Delay (ms)" Margin="0,0,0,-5" Padding="0" FontSize="14" />
+                                <TextBox x:Name="CustomDelayTextBox" x:FieldModifier="public" Text="100" GotFocus="TextBox_SelectAll" Margin="0,0,0,0" Padding="5" FontSize="14" />
+                            </StackPanel>
+                            <StackPanel Spacing="0">
+                                <ToggleSwitch x:Name="EnableLoopSwitch" x:FieldModifier="public" Foreground="White" IsOn="False" OnContent="Loop Count" OffContent="Loop Count" Margin="0,0,0,-5" Padding="0" FontSize="14" />
+                                <TextBox x:Name="LoopCountTextBox" x:FieldModifier="public" Text="1" GotFocus="TextBox_SelectAll" Margin="0,0,0,0" Padding="5" FontSize="14" />
+                            </StackPanel>
+                            <StackPanel Spacing="0">
+                                <ToggleSwitch x:Name="LoopIntervalSwitch" x:FieldModifier="public" Foreground="White" IsOn="False" OnContent="Loop Delay (ms)" OffContent="Loop Delay (ms)" Margin="0,0,0,-5" Padding="0" FontSize="14" />
+                                <TextBox x:Name="LoopIntervalTextBox" x:FieldModifier="public" Text="1000" GotFocus="TextBox_SelectAll" Margin="0,0,0,2" Padding="5" FontSize="14" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Configurações de ações -->
+                        <StackPanel Spacing="0">
+                            <ToggleSwitch x:Name="ProfileKeySwitch" x:FieldModifier="public" IsOn="True" Foreground="White" OnContent="Profile Keys" OffContent="Profile Keys" Margin="0,0,0,-10" Padding="0" FontSize="14" />
+                            <ToggleSwitch x:Name="RecordMouseSwitch" x:FieldModifier="public" IsOn="True" Foreground="White" OnContent="Mouse Clicks" OffContent="Mouse Clicks" Margin="0,0,0,-10" Padding="0" FontSize="14" />
+                            <ToggleSwitch x:Name="RecordScrollSwitch" x:FieldModifier="public" IsOn="True" Foreground="White" OnContent="Mouse Scroll" OffContent="Mouse Scroll" Margin="0,0,0,-10" Padding="0" FontSize="14" />
+                            <ToggleSwitch x:Name="RecordKeyboardSwitch" x:FieldModifier="public" IsOn="True" Foreground="White" OnContent="Keyboard" OffContent="Keyboard" Margin="0,0,0,-10" Padding="0" FontSize="14" />
+                            <ToggleSwitch x:Name="AlwaysOnTopSwitch" x:FieldModifier="public" IsOn="False" Toggled="AlwaysOnTopSwitch_Toggled" Foreground="White" OnContent="Always On Top" OffContent="Always On Top" Margin="0,0,0,-10" Padding="0" FontSize="14" />
+                            <ToggleSwitch x:Name="MinimizeToTraySwitch" x:FieldModifier="public" IsOn="False" Foreground="White" OnContent="System Tray" OffContent="System Tray" Margin="0,0,0,-10" Padding="0" FontSize="14" />
+                        </StackPanel>
+
+                        <!-- Configurações de teclas de atalho -->
+                        <Rectangle Height="1" Fill="Gray" Opacity="0.3" Margin="0,10,0,3" />
+                        <StackPanel Spacing="1">
+                            <TextBlock Text="⚡ Hotkeys" FontSize="14" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,2" />
+                            <StackPanel Spacing="1">
+                                <TextBlock Text="Start Recording" Foreground="White" Margin="0,2,0,0" />
+                                <TextBox x:Name="ToggleRecordingTextBox" x:FieldModifier="public" Width="Auto" IsReadOnly="True" />
+                            </StackPanel>
+                            <StackPanel Spacing="1">
+                                <TextBlock Text="Start Replay" Foreground="White" Margin="0,5,0,0" Padding="0"/>
+                                <TextBox x:Name="ToggleReplayTextBox" x:FieldModifier="public" Width="Auto" IsReadOnly="True" />
+                            </StackPanel>
+                            <StackPanel Spacing="1">
+                                <TextBlock Text="Toggle Profile Keys" Foreground="White" Margin="0,5,0,0" Padding="0"/>
+                                <TextBox x:Name="ToggleProfileKeyTextBox" x:FieldModifier="public" Width="Auto" IsReadOnly="True" />
+                            </StackPanel>
+                        </StackPanel>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <!-- Botões de ação -->
+            <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Left" Margin="-1,0,0,0" Spacing="0">
+                <Button x:Name="RecordingButton" Content="Recording" Width="156" Margin="1" Click="RecordingButton_Click" Padding="1,8" CornerRadius="5" />
+                <Button x:Name="ReplayButton" Content="Replay" Width="90" Margin="1" Click="ReplayButton_Click" Padding="1,8" CornerRadius="5" />
+                <Button x:Name="SaveButton" Content="Save" Width="90" Margin="1" Click="SaveButton_Click" Padding="1,8" CornerRadius="5" />
+                <Button x:Name="LoadButton" Content="Load" Width="90" Margin="1" Click="LoadButton_Click" Padding="1,8" CornerRadius="5" />
+                <Button x:Name="CopyButton" Content="Copy" Width="90" Margin="1" Click="CopyButton_Click" Padding="1,8" CornerRadius="5" />
+                <Button x:Name="ClearButton" Content="Clear" Width="90" Margin="1" Click="ClearButton_Click" Padding="1,8" CornerRadius="5" />
+            </StackPanel>
+
+            <!-- Botão de redefinição -->
+            <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,-1,0" Spacing="0">
+                <Button x:Name="ResetButton" Content="Reset Settings" Width="164" Margin="1" Click="ResetButton_Click" Padding="1,8" CornerRadius="5" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
