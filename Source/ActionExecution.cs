@@ -22,10 +22,11 @@ namespace TrueReplayer.Services
         private readonly Button recordingButton;
         private readonly Func<bool> getMouse, getScroll, getKeyboard;
         private readonly Action<DateTime> setLastActionTime;
+        private readonly Action<string>? onStatusChanged;
 
         public bool IsRecording { get; private set; }
 
-        public RecordingService(ActionRecorder recorder, Button recordingButton, Func<bool> getMouse, Func<bool> getScroll, Func<bool> getKeyboard, Action<DateTime> setLastActionTime)
+        public RecordingService(ActionRecorder recorder, Button recordingButton, Func<bool> getMouse, Func<bool> getScroll, Func<bool> getKeyboard, Action<DateTime> setLastActionTime, Action<string>? onStatusChanged = null)
         {
             this.recorder = recorder;
             this.recordingButton = recordingButton;
@@ -33,6 +34,7 @@ namespace TrueReplayer.Services
             this.getScroll = getScroll;
             this.getKeyboard = getKeyboard;
             this.setLastActionTime = setLastActionTime;
+            this.onStatusChanged = onStatusChanged;
         }
 
         public void ToggleRecording()
@@ -41,24 +43,36 @@ namespace TrueReplayer.Services
             else StartRecording();
         }
 
+        private void SetButtonText(string text)
+        {
+            if (recordingButton.Content is StackPanel sp)
+            {
+                var tb = sp.Children.OfType<TextBlock>().FirstOrDefault();
+                if (tb != null) { tb.Text = text; return; }
+            }
+            recordingButton.Content = text;
+        }
+
         private void StartRecording()
         {
             IsRecording = true;
-            recordingButton.Content = "Pause";
-            recordingButton.Background = new SolidColorBrush(Colors.Orange);
+            SetButtonText("Pause");
+            recordingButton.Background = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xFF, 0x8C, 0x00));
             recorder.RecordMouse = getMouse();
             recorder.RecordScroll = getScroll();
             recorder.RecordKeyboard = getKeyboard();
             recorder.Start();
             setLastActionTime(DateTime.Now);
+            onStatusChanged?.Invoke("recording");
         }
 
         private void StopRecording()
         {
             IsRecording = false;
-            recordingButton.Content = "Recording";
-            recordingButton.ClearValue(Button.BackgroundProperty);
+            SetButtonText("Recording");
+            recordingButton.Background = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xC4, 0x2B, 0x1C));
             recorder.Stop();
+            onStatusChanged?.Invoke("ready");
         }
     }
 
@@ -70,10 +84,11 @@ namespace TrueReplayer.Services
         private readonly Button replayButton;
         private readonly DispatcherQueue dispatcherQueue;
         private readonly Action updateButtonStates;
+        private readonly Action<string>? onStatusChanged;
 
         public bool IsReplaying { get; private set; }
 
-        public ReplayService(ObservableCollection<ActionItem> actions, Button replayButton, DispatcherQueue dispatcherQueue, Action updateButtonStates, DataGrid actionsGrid)
+        public ReplayService(ObservableCollection<ActionItem> actions, Button replayButton, DispatcherQueue dispatcherQueue, Action updateButtonStates, DataGrid actionsGrid, Action<string>? onStatusChanged = null)
         {
             this.actions = actions;
             this.replayer = new ActionReplayer(actions, dispatcherQueue);
@@ -81,6 +96,7 @@ namespace TrueReplayer.Services
             this.dispatcherQueue = dispatcherQueue;
             this.updateButtonStates = updateButtonStates;
             this.actionsGrid = actionsGrid;
+            this.onStatusChanged = onStatusChanged;
 
             replayer.OnActionExecuting += (action) =>
             {
@@ -100,15 +116,27 @@ namespace TrueReplayer.Services
                 StopReplay();
         }
 
+        private void SetButtonText(string text)
+        {
+            if (replayButton.Content is StackPanel sp)
+            {
+                var tb = sp.Children.OfType<TextBlock>().FirstOrDefault();
+                if (tb != null) { tb.Text = text; return; }
+            }
+            replayButton.Content = text;
+        }
+
         private void StartReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText)
         {
             IsReplaying = true;
-            replayButton.Content = "Stop";
-            replayButton.Background = new SolidColorBrush(Colors.Orange);
+            SetButtonText("Stop");
+            replayButton.Background = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xFF, 0x8C, 0x00));
 
             int loopCount = loopEnabled && int.TryParse(loopCountText, out int count) && count >= 0 ? count : 1;
             int loopInterval = intervalEnabled && int.TryParse(intervalText, out int interval) && interval >= 0 ? interval : 0;
             replayer.SetLoopOptions(loopCount, loopInterval);
+
+            onStatusChanged?.Invoke("replaying");
 
             _ = replayer.StartAsync().ContinueWith(_ =>
             {
@@ -124,9 +152,10 @@ namespace TrueReplayer.Services
         private void ResetReplayState()
         {
             IsReplaying = false;
-            replayButton.Content = "Replay";
-            replayButton.ClearValue(Button.BackgroundProperty);
+            SetButtonText("Replay");
+            replayButton.Background = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x0E, 0x7A, 0x0D));
             updateButtonStates();
+            onStatusChanged?.Invoke("ready");
         }
     }
 

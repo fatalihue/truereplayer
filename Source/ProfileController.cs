@@ -436,54 +436,8 @@ namespace TrueReplayer.Controllers
 
         public void UpdateProfileColors(string? activeProfileName)
         {
-            if (window.ProfilesListBox?.Items == null)
-                return;
-
-            foreach (var item in window.ProfilesListBox.Items)
-            {
-                var container = window.ProfilesListBox.ContainerFromItem(item) as ListViewItem;
-                if (container == null)
-                    continue;
-
-                var contentPresenter = FindVisualChild<ContentPresenter>(container);
-                if (contentPresenter == null)
-                    continue;
-
-                var stackPanel = FindVisualChild<StackPanel>(contentPresenter);
-                if (stackPanel == null)
-                    continue;
-
-                var textBlocks = stackPanel.Children.OfType<TextBlock>().ToArray();
-                if (textBlocks.Length < 2)
-                    continue;
-
-                var nameTextBlock = textBlocks[0];
-                var hotkeyTextBlock = textBlocks[1];
-
-                bool isActive = activeProfileName != null && item is ProfileEntry entry && entry.Name == activeProfileName;
-
-                nameTextBlock.Foreground = new SolidColorBrush(isActive ? Colors.LimeGreen : Colors.Gray);
-                hotkeyTextBlock.Foreground = new SolidColorBrush(Colors.Yellow);
-
-                container.Background = new SolidColorBrush(Colors.Transparent);
-            }
-        }
-
-        private T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
-        {
-            if (parent == null) return null;
-
-            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
-            {
-                var child = VisualTreeHelper.GetChild(parent, i);
-                if (child is T foundChild)
-                    return foundChild;
-
-                var foundDescendant = FindVisualChild<T>(child);
-                if (foundDescendant != null)
-                    return foundDescendant;
-            }
-            return null;
+            foreach (var entry in ProfileEntries)
+                entry.IsActive = (activeProfileName != null && entry.Name == activeProfileName);
         }
 
         #endregion

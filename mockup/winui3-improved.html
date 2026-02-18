@@ -1,0 +1,1419 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TrueReplayer — WinUI 3 Improved Mockup</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Segoe+UI+Variable:wght@300;400;500;600;700&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            /* Fluent Design Dark Theme - cores reais do WinUI 3 */
+            --mica-bg: #202020;
+            --layer-bg: #2d2d2d;
+            --card-bg: #323232;
+            --card-bg-hover: #3a3a3a;
+            --card-bg-selected: #0078d4;
+            --smoke-bg: #1a1a1a;
+            --acrylic-bg: rgba(32, 32, 32, 0.85);
+            --accent: #60cdff;
+            --accent-solid: #0078d4;
+            --accent-hover: #429ce3;
+            --accent-subtle: rgba(96, 205, 255, 0.08);
+            --accent-subtle-hover: rgba(96, 205, 255, 0.15);
+            --text-primary: #ffffff;
+            --text-secondary: #c5c5c5;
+            --text-tertiary: #9a9a9a;
+            --text-disabled: #5c5c5c;
+            --border-card: rgba(255, 255, 255, 0.06);
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-default: rgba(255, 255, 255, 0.1);
+            --border-strong: rgba(255, 255, 255, 0.15);
+            --divider: rgba(255, 255, 255, 0.08);
+            --red: #ff6b6b;
+            --red-bg: rgba(255, 107, 107, 0.1);
+            --green: #6bcb77;
+            --green-bg: rgba(107, 203, 119, 0.1);
+            --yellow: #ffd93d;
+            --yellow-bg: rgba(255, 217, 61, 0.08);
+            --purple: #a78bfa;
+            --purple-bg: rgba(167, 139, 250, 0.1);
+            --blue-bg: rgba(96, 205, 255, 0.1);
+            --shadow-card: 0 2px 4px rgba(0, 0, 0, 0.14), 0 0 2px rgba(0, 0, 0, 0.12);
+            --shadow-flyout: 0 8px 32px rgba(0, 0, 0, 0.35);
+            --radius-sm: 4px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+        }
+
+        body {
+            font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+            background: var(--mica-bg);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            font-size: 14px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
+
+        /* ===== TITLE BAR (Mica style) ===== */
+        .titlebar {
+            display: flex;
+            align-items: center;
+            height: 48px;
+            background: var(--smoke-bg);
+            padding: 0 16px;
+            user-select: none;
+            border-bottom: 1px solid var(--border-subtle);
+            gap: 12px;
+            flex-shrink: 0;
+        }
+
+        .titlebar-icon {
+            width: 18px;
+            height: 18px;
+            background: var(--accent-solid);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .titlebar-text {
+            font-size: 12px;
+            font-weight: 400;
+            color: var(--text-secondary);
+        }
+
+        .titlebar-status {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-badge {
+            font-size: 11px;
+            padding: 3px 10px;
+            border-radius: 99px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .status-badge.ready {
+            background: var(--green-bg);
+            color: var(--green);
+            border: 1px solid rgba(107, 203, 119, 0.2);
+        }
+
+        .status-badge.recording {
+            background: var(--red-bg);
+            color: var(--red);
+            border: 1px solid rgba(255, 107, 107, 0.2);
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .status-dot.pulse {
+            animation: pulse 1.4s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .window-controls {
+            display: flex;
+            margin-left: 16px;
+        }
+
+        .window-controls button {
+            width: 46px;
+            height: 32px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.1s;
+        }
+
+        .window-controls button:hover { background: rgba(255,255,255,0.06); }
+        .window-controls button.close:hover { background: #c42b1c; color: #fff; }
+
+        /* ===== MAIN LAYOUT ===== */
+        .main {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            padding: 8px;
+            gap: 8px;
+        }
+
+        /* ===== SIDEBAR (Profiles) ===== */
+        .sidebar {
+            width: 230px;
+            min-width: 230px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        /* Card component - estilo Fluent */
+        .card {
+            background: var(--layer-bg);
+            border: 1px solid var(--border-card);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px 10px;
+        }
+
+        .card-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .card-action-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: var(--radius-sm);
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: all 0.1s;
+        }
+
+        .card-action-btn:hover {
+            background: rgba(255,255,255,0.06);
+        }
+
+        /* Profile search */
+        .profile-search {
+            padding: 0 10px 8px;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 7px 10px 7px 32px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-default);
+            background: var(--smoke-bg);
+            color: var(--text-primary);
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.15s;
+            font-family: inherit;
+        }
+
+        .search-input::placeholder { color: var(--text-disabled); }
+        .search-input:focus { border-color: var(--accent-solid); border-bottom: 2px solid var(--accent-solid); }
+
+        .search-wrapper {
+            position: relative;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-disabled);
+            font-size: 12px;
+        }
+
+        /* Profile list */
+        .profile-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 6px 8px;
+        }
+
+        .profile-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 9px 12px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: background 0.1s;
+            margin-bottom: 1px;
+        }
+
+        .profile-item:hover { background: rgba(255,255,255,0.04); }
+
+        .profile-item.active {
+            background: var(--accent-subtle);
+        }
+
+        .profile-item.active::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 25%;
+            height: 50%;
+            width: 3px;
+            border-radius: 0 3px 3px 0;
+            background: var(--accent-solid);
+        }
+
+        .profile-item {
+            position: relative;
+        }
+
+        .profile-name {
+            font-size: 13px;
+            font-weight: 400;
+            color: var(--text-primary);
+        }
+
+        .profile-item.active .profile-name {
+            color: var(--accent);
+            font-weight: 500;
+        }
+
+        .profile-hotkey {
+            font-size: 11px;
+            padding: 1px 6px;
+            border-radius: var(--radius-sm);
+            background: var(--yellow-bg);
+            color: var(--yellow);
+            font-family: 'Consolas', 'Cascadia Code', monospace;
+            border: 1px solid rgba(255, 217, 61, 0.15);
+        }
+
+        /* ===== CENTER CONTENT ===== */
+        .content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        /* Toolbar / Action bar */
+        .toolbar-card {
+            background: var(--layer-bg);
+            border: 1px solid var(--border-card);
+            border-radius: var(--radius-lg);
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+
+        .toolbar-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .toolbar-profile-name {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .toolbar-count {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            background: var(--smoke-bg);
+            padding: 2px 10px;
+            border-radius: 99px;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .toolbar-buttons {
+            display: flex;
+            gap: 4px;
+        }
+
+        /* Botões Fluent */
+        .btn-fluent {
+            padding: 6px 14px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-default);
+            background: var(--card-bg);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-weight: 400;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.1s;
+            font-family: inherit;
+        }
+
+        .btn-fluent:hover {
+            background: var(--card-bg-hover);
+            border-color: var(--border-strong);
+        }
+
+        .btn-fluent:active {
+            background: rgba(255,255,255,0.04);
+            transform: scale(0.98);
+        }
+
+        .btn-fluent-accent {
+            background: var(--accent-solid);
+            border-color: var(--accent-solid);
+            color: #fff;
+        }
+
+        .btn-fluent-accent:hover {
+            background: var(--accent-hover);
+            border-color: var(--accent-hover);
+        }
+
+        .btn-icon-only {
+            padding: 6px 8px;
+        }
+
+        /* DataGrid Card */
+        .datagrid-card {
+            background: var(--layer-bg);
+            border: 1px solid var(--border-card);
+            border-radius: var(--radius-lg);
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .datagrid-scroll {
+            flex: 1;
+            overflow: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+
+        thead th {
+            text-align: left;
+            padding: 10px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-tertiary);
+            background: var(--layer-bg);
+            border-bottom: 1px solid var(--divider);
+        }
+
+        thead th:first-child { padding-left: 18px; }
+
+        tbody tr {
+            transition: background 0.08s;
+            border-bottom: 1px solid rgba(255,255,255,0.02);
+        }
+
+        tbody tr:nth-child(even) {
+            background: rgba(255,255,255,0.015);
+        }
+
+        tbody tr:hover {
+            background: rgba(255,255,255,0.04);
+        }
+
+        tbody tr.insertion-row {
+            background: var(--yellow-bg);
+            border-left: 3px solid var(--yellow);
+        }
+
+        tbody tr.selected-row {
+            background: var(--accent-subtle);
+        }
+
+        tbody td {
+            padding: 8px 14px;
+            font-size: 13px;
+            vertical-align: middle;
+        }
+
+        tbody td:first-child { padding-left: 18px; }
+
+        .row-num {
+            font-size: 11px;
+            color: var(--text-disabled);
+            font-family: 'Consolas', monospace;
+            width: 32px;
+        }
+
+        /* Action type pills */
+        .action-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 2px 8px;
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .action-pill.mouse {
+            background: var(--purple-bg);
+            color: var(--purple);
+        }
+
+        .action-pill.key {
+            background: var(--blue-bg);
+            color: var(--accent);
+        }
+
+        .action-pill.scroll {
+            background: var(--green-bg);
+            color: var(--green);
+        }
+
+        .action-pill .pill-icon {
+            font-size: 11px;
+        }
+
+        .key-badge {
+            font-family: 'Consolas', 'Cascadia Code', monospace;
+            font-size: 12px;
+            padding: 1px 7px;
+            border-radius: 3px;
+            background: var(--smoke-bg);
+            border: 1px solid var(--border-default);
+            color: var(--text-primary);
+        }
+
+        .coord-val {
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .delay-val {
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            color: var(--yellow);
+        }
+
+        .comment-text {
+            font-size: 12px;
+            color: var(--text-tertiary);
+        }
+
+        /* ===== BOTTOM ACTION BAR ===== */
+        .action-bar {
+            background: var(--layer-bg);
+            border: 1px solid var(--border-card);
+            border-radius: var(--radius-lg);
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+
+        .action-bar-left {
+            display: flex;
+            gap: 6px;
+        }
+
+        .action-bar-right {
+            display: flex;
+            gap: 6px;
+        }
+
+        /* Botão de gravação */
+        .btn-record {
+            padding: 8px 20px;
+            border-radius: var(--radius-sm);
+            border: none;
+            background: #c42b1c;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.1s;
+            font-family: inherit;
+        }
+
+        .btn-record:hover {
+            background: #d43324;
+        }
+
+        .btn-record:active {
+            background: #b02518;
+            transform: scale(0.98);
+        }
+
+        .rec-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #fff;
+        }
+
+        .btn-record.active {
+            background: #c42b1c;
+            animation: rec-glow 1.5s infinite;
+        }
+
+        .btn-record.active .rec-indicator {
+            animation: pulse 1.2s infinite;
+        }
+
+        @keyframes rec-glow {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(196, 43, 28, 0); }
+            50% { box-shadow: 0 0 0 4px rgba(196, 43, 28, 0.25); }
+        }
+
+        /* Botão de replay */
+        .btn-replay {
+            padding: 8px 20px;
+            border-radius: var(--radius-sm);
+            border: none;
+            background: #0e7a0d;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.1s;
+            font-family: inherit;
+        }
+
+        .btn-replay:hover { background: #0f8b0f; }
+        .btn-replay:active { background: #0c6c0c; transform: scale(0.98); }
+
+        .play-icon {
+            width: 0;
+            height: 0;
+            border-left: 8px solid #fff;
+            border-top: 5px solid transparent;
+            border-bottom: 5px solid transparent;
+        }
+
+        /* ===== RIGHT SETTINGS PANEL ===== */
+        .settings-panel {
+            width: 250px;
+            min-width: 250px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            overflow-y: auto;
+        }
+
+        .settings-card {
+            background: var(--layer-bg);
+            border: 1px solid var(--border-card);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+        }
+
+        /* Expander header */
+        .expander-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        .expander-header:hover { background: rgba(255,255,255,0.03); }
+
+        .expander-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .expander-title .icon {
+            font-size: 14px;
+            color: var(--text-tertiary);
+        }
+
+        .expander-chevron {
+            font-size: 10px;
+            color: var(--text-disabled);
+            transition: transform 0.2s;
+        }
+
+        .expander-header.open .expander-chevron {
+            transform: rotate(180deg);
+        }
+
+        .expander-body {
+            padding: 0 16px 14px;
+        }
+
+        .expander-body.collapsed {
+            display: none;
+        }
+
+        /* Setting rows */
+        .setting-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 0;
+        }
+
+        .setting-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        /* Toggle switch - estilo WinUI 3 */
+        .toggle-switch {
+            position: relative;
+            width: 40px;
+            height: 20px;
+            border-radius: 10px;
+            background: var(--smoke-bg);
+            border: 1px solid var(--border-strong);
+            cursor: pointer;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+            transition: all 0.2s;
+        }
+
+        .toggle-switch.on {
+            background: var(--accent-solid);
+            border-color: var(--accent-solid);
+        }
+
+        .toggle-switch.on::after {
+            transform: translateX(20px);
+            background: #fff;
+        }
+
+        /* Input WinUI 3 */
+        .input-fluent {
+            width: 64px;
+            padding: 4px 8px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-default);
+            border-bottom: 2px solid var(--border-strong);
+            background: var(--smoke-bg);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-family: 'Consolas', monospace;
+            text-align: right;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        .input-fluent:focus {
+            border-bottom-color: var(--accent-solid);
+        }
+
+        .setting-input-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .input-unit {
+            font-size: 11px;
+            color: var(--text-disabled);
+        }
+
+        /* Hotkey display WinUI 3 */
+        .hotkey-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 7px 12px;
+            border-radius: var(--radius-sm);
+            background: var(--smoke-bg);
+            border: 1px solid var(--border-subtle);
+            margin-bottom: 6px;
+            cursor: pointer;
+            transition: border-color 0.15s;
+        }
+
+        .hotkey-row:hover { border-color: var(--border-strong); }
+        .hotkey-row:last-child { margin-bottom: 0; }
+
+        .hotkey-name {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .hotkey-key {
+            font-family: 'Consolas', 'Cascadia Code', monospace;
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: var(--radius-sm);
+            background: var(--card-bg);
+            color: var(--accent);
+            border: 1px solid var(--border-default);
+        }
+
+        /* Divider */
+        .setting-divider {
+            height: 1px;
+            background: var(--divider);
+            margin: 6px 0;
+        }
+
+        /* ===== STATUS BAR ===== */
+        .statusbar {
+            height: 26px;
+            background: var(--smoke-bg);
+            border-top: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            font-size: 11px;
+            color: var(--text-disabled);
+            gap: 16px;
+            flex-shrink: 0;
+        }
+
+        .statusbar-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .statusbar-separator {
+            width: 1px;
+            height: 12px;
+            background: var(--border-subtle);
+        }
+
+        .statusbar-right {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        /* ===== INFO BAR (WinUI 3 InfoBar component) ===== */
+        .infobar {
+            padding: 8px 16px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            margin: 0 16px 4px 18px;
+        }
+
+        .infobar.info {
+            background: var(--accent-subtle);
+            border: 1px solid rgba(96, 205, 255, 0.15);
+            color: var(--accent);
+        }
+
+        .infobar-icon { font-size: 16px; }
+        .infobar-close {
+            margin-left: auto;
+            background: none;
+            border: none;
+            color: var(--text-tertiary);
+            cursor: pointer;
+            font-size: 12px;
+            padding: 4px;
+        }
+
+        /* ===== CONTEXT MENU FLYOUT (demonstração) ===== */
+        .context-menu {
+            position: absolute;
+            top: 140px;
+            left: 60px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-md);
+            padding: 4px;
+            box-shadow: var(--shadow-flyout);
+            z-index: 100;
+            min-width: 200px;
+            display: none;
+        }
+
+        .context-menu.show { display: block; }
+
+        .ctx-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: background 0.08s;
+        }
+
+        .ctx-item:hover { background: rgba(255,255,255,0.06); }
+
+        .ctx-icon {
+            width: 18px;
+            text-align: center;
+            font-size: 13px;
+        }
+
+        .ctx-shortcut {
+            margin-left: auto;
+            font-size: 11px;
+            color: var(--text-disabled);
+        }
+
+        .ctx-divider {
+            height: 1px;
+            background: var(--divider);
+            margin: 4px 8px;
+        }
+
+        /* ===== TOOLTIP LABELS ===== */
+        .improvement-label {
+            position: absolute;
+            padding: 4px 10px;
+            border-radius: 99px;
+            background: rgba(96, 205, 255, 0.12);
+            border: 1px dashed rgba(96, 205, 255, 0.3);
+            color: var(--accent);
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            pointer-events: none;
+            white-space: nowrap;
+            z-index: 50;
+        }
+
+        /* Annotations */
+        .annotation-container {
+            position: relative;
+        }
+
+        .note-badge {
+            position: absolute;
+            font-size: 9px;
+            padding: 2px 7px;
+            border-radius: 99px;
+            background: rgba(96, 205, 255, 0.1);
+            border: 1px dashed rgba(96, 205, 255, 0.25);
+            color: var(--accent);
+            font-weight: 600;
+            pointer-events: none;
+            white-space: nowrap;
+            z-index: 50;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ====== TITLE BAR ====== -->
+    <div class="titlebar">
+        <div class="titlebar-icon">T</div>
+        <span class="titlebar-text">TrueReplayer</span>
+
+        <div class="titlebar-status">
+            <div class="status-badge ready">
+                <div class="status-dot"></div>
+                Pronto
+            </div>
+        </div>
+
+        <div class="window-controls">
+            <button>─</button>
+            <button>□</button>
+            <button class="close">✕</button>
+        </div>
+    </div>
+
+    <!-- ====== MAIN CONTENT ====== -->
+    <div class="main">
+
+        <!-- ===== LEFT: Profiles ===== -->
+        <div class="sidebar">
+            <div class="card" style="flex:1; display:flex; flex-direction:column;">
+                <div class="card-header">
+                    <span class="card-title">Perfis</span>
+                    <button class="card-action-btn" title="Novo perfil">+</button>
+                </div>
+                <div class="profile-search">
+                    <div class="search-wrapper">
+                        <span class="search-icon">🔍</span>
+                        <input type="text" class="search-input" placeholder="Buscar perfis...">
+                    </div>
+                </div>
+                <div class="profile-list">
+                    <div class="profile-item active">
+                        <span class="profile-name">Auto Login</span>
+                        <span class="profile-hotkey">F2</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-name">Farm Route</span>
+                        <span class="profile-hotkey">F3</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-name">Inventory Sort</span>
+                        <span class="profile-hotkey">F4</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-name">PvP Combo</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-name">Build Macro</span>
+                        <span class="profile-hotkey">F6</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-name">Daily Tasks</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-name">Quick Save</span>
+                        <span class="profile-hotkey">F8</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== CENTER: Actions DataGrid ===== -->
+        <div class="content">
+            <!-- Toolbar -->
+            <div class="toolbar-card">
+                <div class="toolbar-left">
+                    <span class="toolbar-profile-name">Auto Login</span>
+                    <span class="toolbar-count">12 ações</span>
+                </div>
+                <div class="toolbar-buttons">
+                    <button class="btn-fluent btn-icon-only" title="Adicionar ação">➕</button>
+                    <button class="btn-fluent btn-icon-only" title="Copiar ações">📋</button>
+                    <button class="btn-fluent btn-icon-only" title="Limpar tudo">🗑</button>
+                </div>
+            </div>
+
+            <!-- DataGrid -->
+            <div class="datagrid-card">
+                <div class="datagrid-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width:40px">#</th>
+                                <th style="width:145px">Action</th>
+                                <th style="width:80px">Key</th>
+                                <th style="width:65px">X</th>
+                                <th style="width:65px">Y</th>
+                                <th style="width:80px">Delay</th>
+                                <th>Comment</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="row-num">1</td>
+                                <td><span class="action-pill mouse"><span class="pill-icon">🖱</span>LeftClickDown</span></td>
+                                <td></td>
+                                <td><span class="coord-val">520</span></td>
+                                <td><span class="coord-val">340</span></td>
+                                <td><span class="delay-val">0</span></td>
+                                <td><span class="comment-text">Campo usuário</span></td>
+                            </tr>
+                            <tr>
+                                <td class="row-num">2</td>
+                                <td><span class="action-pill mouse"><span class="pill-icon">🖱</span>LeftClickUp</span></td>
+                                <td></td>
+                                <td><span class="coord-val">520</span></td>
+                                <td><span class="coord-val">340</span></td>
+                                <td><span class="delay-val">52</span></td>
+                                <td></td>
+                            </tr>
+                            <tr>
+                                <td class="row-num">3</td>
+                                <td><span class="action-pill key"><span class="pill-icon">⌨</span>KeyDown</span></td>
+                                <td><span class="key-badge">A</span></td>
+                                <td></td>
+                                <td></td>
+                                <td><span class="delay-val">320</span></td>
+                                <td><span class="comment-text">Digita login</span></td>
+                            </tr>
+                            <tr>
+                                <td class="row-num">4</td>
+                                <td><span class="action-pill key"><span class="pill-icon">⌨</span>KeyUp</span></td>
+                                <td><span class="key-badge">A</span></td>
+                                <td></td>
+                                <td></td>
+                                <td><span class="delay-val">45</span></td>
+                                <td></td>
+                            </tr>
+                            <tr>
+                                <td class="row-num">5</td>
+                                <td><span class="action-pill key"><span class="pill-icon">⌨</span>KeyDown</span></td>
+                                <td><span class="key-badge">D</span></td>
+                                <td></td>
+                                <td></td>
+                                <td><span class="delay-val">112</span></td>
+                                <td></td>
+                            </tr>
+                            <tr>
+                                <td class="row-num">6</td>
+                                <td><span class="action-pill key"><span class="pill-icon">⌨</span>KeyUp</span></td>
+                                <td><span class="key-badge">D</span></td>
+                                <td></td>
+                                <td></td>
+                                <td><span class="delay-val">38</span></td>
+                                <td></td>
+                            </tr>
+                            <tr>
+                                <td class="row-num">7</td>
+                                <td><span class="action-pill key"><span class="pill-icon">⌨</span>KeyDown</span></td>
+                                <td><span class="key-badge">Tab</span></td>
+                                <td></td>
+                                <td></td>
+                                <td><span class="delay-val">200</span></td>
+                                <td><span class="comment-text">→ Campo senha</span></td>
+                            </tr>
+                            <tr>
+                                <td class="row-num">8</td>
+                                <td><span class="action-pill key"><span class="pill-icon">⌨</span>KeyUp</span></td>
+                                <td><span class="key-badge">Tab</span></td>
+                                <td></td>
+                                <td></td>
+                                <td><span class="delay-val">50</span></td>
+                                <td></td>
+                            </tr>
+                            <tr class="insertion-row">
+                                <td class="row-num">9</td>
+                                <td><span class="action-pill mouse"><span class="pill-icon">🖱</span>LeftClickDown</span></td>
+                                <td></td>
+                                <td><span class="coord-val">520</span></td>
+                                <td><span class="coord-val">420</span></td>
+                                <td><span class="delay-val">500</span></td>
+                                <td><span class="comment-text" style="color:var(--yellow)">⮕ Inserção</span></td>
+                            </tr>
+                            <tr>
+                                <td class="row-num">10</td>
+                                <td><span class="action-pill mouse"><span class="pill-icon">🖱</span>LeftClickUp</span></td>
+                                <td></td>
+                                <td><span class="coord-val">520</span></td>
+                                <td><span class="coord-val">420</span></td>
+                                <td><span class="delay-val">48</span></td>
+                                <td></td>
+                            </tr>
+                            <tr>
+                                <td class="row-num">11</td>
+                                <td><span class="action-pill key"><span class="pill-icon">⌨</span>KeyDown</span></td>
+                                <td><span class="key-badge">Enter</span></td>
+                                <td></td>
+                                <td></td>
+                                <td><span class="delay-val">300</span></td>
+                                <td><span class="comment-text">Confirma login</span></td>
+                            </tr>
+                            <tr>
+                                <td class="row-num">12</td>
+                                <td><span class="action-pill key"><span class="pill-icon">⌨</span>KeyUp</span></td>
+                                <td><span class="key-badge">Enter</span></td>
+                                <td></td>
+                                <td></td>
+                                <td><span class="delay-val">42</span></td>
+                                <td></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Bottom Action Bar -->
+            <div class="action-bar">
+                <div class="action-bar-left">
+                    <button class="btn-record" id="recBtn">
+                        <div class="rec-indicator"></div>
+                        Recording
+                    </button>
+                    <button class="btn-replay">
+                        <div class="play-icon"></div>
+                        Replay
+                    </button>
+                </div>
+                <div class="action-bar-right">
+                    <button class="btn-fluent">💾 Save</button>
+                    <button class="btn-fluent">📂 Load</button>
+                    <button class="btn-fluent" style="color:var(--text-tertiary);">⟲ Reset</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== RIGHT: Settings ===== -->
+        <div class="settings-panel">
+
+            <!-- Execução -->
+            <div class="settings-card">
+                <div class="expander-header open" onclick="toggleExpander(this)">
+                    <div class="expander-title">
+                        <span class="icon">⏱</span>
+                        Execução
+                    </div>
+                    <span class="expander-chevron">▾</span>
+                </div>
+                <div class="expander-body">
+                    <div class="setting-row">
+                        <span class="setting-label">Fixed Delay</span>
+                        <div class="setting-input-group">
+                            <input type="text" class="input-fluent" value="100">
+                            <span class="input-unit">ms</span>
+                            <div class="toggle-switch on" onclick="this.classList.toggle('on')"></div>
+                        </div>
+                    </div>
+                    <div class="setting-divider"></div>
+                    <div class="setting-row">
+                        <span class="setting-label">Loop Count</span>
+                        <div class="setting-input-group">
+                            <input type="text" class="input-fluent" value="1">
+                            <span class="input-unit">x</span>
+                            <div class="toggle-switch" onclick="this.classList.toggle('on')"></div>
+                        </div>
+                    </div>
+                    <div class="setting-divider"></div>
+                    <div class="setting-row">
+                        <span class="setting-label">Loop Delay</span>
+                        <div class="setting-input-group">
+                            <input type="text" class="input-fluent" value="1000">
+                            <span class="input-unit">ms</span>
+                            <div class="toggle-switch" onclick="this.classList.toggle('on')"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Gravação -->
+            <div class="settings-card">
+                <div class="expander-header open" onclick="toggleExpander(this)">
+                    <div class="expander-title">
+                        <span class="icon">🎙</span>
+                        Gravação
+                    </div>
+                    <span class="expander-chevron">▾</span>
+                </div>
+                <div class="expander-body">
+                    <div class="setting-row">
+                        <span class="setting-label">Mouse Clicks</span>
+                        <div class="toggle-switch on" onclick="this.classList.toggle('on')"></div>
+                    </div>
+                    <div class="setting-row">
+                        <span class="setting-label">Mouse Scroll</span>
+                        <div class="toggle-switch on" onclick="this.classList.toggle('on')"></div>
+                    </div>
+                    <div class="setting-row">
+                        <span class="setting-label">Keyboard</span>
+                        <div class="toggle-switch on" onclick="this.classList.toggle('on')"></div>
+                    </div>
+                    <div class="setting-row">
+                        <span class="setting-label">Profile Keys</span>
+                        <div class="toggle-switch" onclick="this.classList.toggle('on')"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Atalhos -->
+            <div class="settings-card">
+                <div class="expander-header open" onclick="toggleExpander(this)">
+                    <div class="expander-title">
+                        <span class="icon">⚡</span>
+                        Hotkeys
+                    </div>
+                    <span class="expander-chevron">▾</span>
+                </div>
+                <div class="expander-body">
+                    <div class="hotkey-row">
+                        <span class="hotkey-name">Recording</span>
+                        <span class="hotkey-key">F9</span>
+                    </div>
+                    <div class="hotkey-row">
+                        <span class="hotkey-name">Replay</span>
+                        <span class="hotkey-key">F10</span>
+                    </div>
+                    <div class="hotkey-row">
+                        <span class="hotkey-name">Profile Keys</span>
+                        <span class="hotkey-key">F11</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Janela -->
+            <div class="settings-card">
+                <div class="expander-header open" onclick="toggleExpander(this)">
+                    <div class="expander-title">
+                        <span class="icon">🖥</span>
+                        Janela
+                    </div>
+                    <span class="expander-chevron">▾</span>
+                </div>
+                <div class="expander-body">
+                    <div class="setting-row">
+                        <span class="setting-label">Always On Top</span>
+                        <div class="toggle-switch on" onclick="this.classList.toggle('on')"></div>
+                    </div>
+                    <div class="setting-row">
+                        <span class="setting-label">System Tray</span>
+                        <div class="toggle-switch" onclick="this.classList.toggle('on')"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ====== STATUS BAR ====== -->
+    <div class="statusbar">
+        <div class="statusbar-item">📂 C:\Users\...\Profiles</div>
+        <div class="statusbar-separator"></div>
+        <div class="statusbar-item">Perfil: Auto Login</div>
+        <div class="statusbar-right">
+            <div class="statusbar-item">12 ações</div>
+            <div class="statusbar-separator"></div>
+            <div class="statusbar-item">v1.0.0</div>
+        </div>
+    </div>
+
+    <!-- Context menu demo (hidden by default) -->
+    <div class="context-menu" id="contextMenu">
+        <div class="ctx-item">
+            <span class="ctx-icon" style="color:#6bcb77">📄</span>
+            New Profile
+            <span class="ctx-shortcut">Ctrl+N</span>
+        </div>
+        <div class="ctx-divider"></div>
+        <div class="ctx-item">
+            <span class="ctx-icon">✏️</span>
+            Rename
+            <span class="ctx-shortcut">F2</span>
+        </div>
+        <div class="ctx-item">
+            <span class="ctx-icon">📂</span>
+            Open Directory
+        </div>
+        <div class="ctx-divider"></div>
+        <div class="ctx-item">
+            <span class="ctx-icon" style="color:var(--accent)">🔑</span>
+            Assign Hotkey
+        </div>
+        <div class="ctx-item">
+            <span class="ctx-icon" style="color:var(--red)">🚫</span>
+            Remove Hotkey
+        </div>
+        <div class="ctx-divider"></div>
+        <div class="ctx-item" style="color:var(--red)">
+            <span class="ctx-icon">🗑</span>
+            Delete Profile
+            <span class="ctx-shortcut">Del</span>
+        </div>
+    </div>
+
+    <script>
+        // Toggle expander sections
+        function toggleExpander(header) {
+            header.classList.toggle('open');
+            const body = header.nextElementSibling;
+            body.classList.toggle('collapsed');
+        }
+
+        // Profile selection
+        document.querySelectorAll('.profile-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                document.querySelectorAll('.profile-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+            });
+
+            // Right-click context menu
+            item.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const menu = document.getElementById('contextMenu');
+                menu.style.left = e.clientX + 'px';
+                menu.style.top = e.clientY + 'px';
+                menu.classList.add('show');
+            });
+        });
+
+        // Close context menu
+        document.addEventListener('click', () => {
+            document.getElementById('contextMenu').classList.remove('show');
+        });
+
+        // Record button toggle
+        const recBtn = document.getElementById('recBtn');
+        const statusBadge = document.querySelector('.status-badge');
+        recBtn.addEventListener('click', () => {
+            recBtn.classList.toggle('active');
+            if (recBtn.classList.contains('active')) {
+                statusBadge.className = 'status-badge recording';
+                statusBadge.innerHTML = '<div class="status-dot pulse"></div> Gravando';
+            } else {
+                statusBadge.className = 'status-badge ready';
+                statusBadge.innerHTML = '<div class="status-dot"></div> Pronto';
+            }
+        });
+
+        // Row selection
+        document.querySelectorAll('tbody tr').forEach(row => {
+            row.addEventListener('click', () => {
+                document.querySelectorAll('tbody tr').forEach(r => r.classList.remove('selected-row'));
+                row.classList.add('selected-row');
+            });
+        });
+    </script>
+</body>
+</html>

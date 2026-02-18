@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Media;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -82,7 +83,8 @@ namespace TrueReplayer
                 () => RecordMouseSwitch.IsOn,
                 () => RecordScrollSwitch.IsOn,
                 () => RecordKeyboardSwitch.IsOn,
-                time => mainController.SetLastActionTime(time)
+                time => mainController.SetLastActionTime(time),
+                status => UpdateStatusBadge(status)
             );
 
             replayService = new ReplayService(
@@ -90,7 +92,8 @@ namespace TrueReplayer
                 ReplayButton,
                 DispatcherQueue,
                 () => mainController.UpdateButtonStates(),
-                ActionsDataGrid
+                ActionsDataGrid,
+                status => UpdateStatusBadge(status)
             );
 
             mainController = new MainController(
@@ -137,6 +140,15 @@ namespace TrueReplayer
 
             mainController.UpdateButtonStates();
 
+            Actions.CollectionChanged += (s, e) =>
+            {
+                int count = Actions.Count;
+                ToolbarActionCount.Text = $"{count} action{(count != 1 ? "s" : "")}";
+                StatusBarActionCount.Text = $"{count} action{(count != 1 ? "s" : "")}";
+                for (int i = 0; i < Actions.Count; i++)
+                    Actions[i].RowNumber = i + 1;
+            };
+
             profileController = new ProfileController(this);
             ProfilesListBox.ItemsSource = profileController.ProfileEntries;
             this.Closed += (_, _) => profileController.Dispose();
@@ -150,8 +162,10 @@ namespace TrueReplayer
                 {
                     UserProfile.Current = defaultProfile;
                     UISettingsManager.ApplyToUI(this, defaultProfile);
-                    TrayIconService.UpdateTrayIcon(); // Atualiza o ícone ao carregar perfil
+                    TrayIconService.UpdateTrayIcon();
                 }
+
+                UpdateStatusBar(null, Actions.Count);
 
                 var hotkeys = await profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(hotkeys);
@@ -297,7 +311,9 @@ namespace TrueReplayer
                                 profile.LoopInterval.ToString());
 
                             profileController.UpdateProfileColors(profileName);
-                            TrayIconService.UpdateTrayIcon(); // Atualiza o ícone ao carregar perfil
+                            UpdateToolbar(profileName, Actions.Count);
+                            UpdateStatusBar(profileName, Actions.Count);
+                            TrayIconService.UpdateTrayIcon();
                         }
                     }
                 });
@@ -411,7 +427,9 @@ namespace TrueReplayer
 
             UISettingsManager.ApplyToUI(this, UserProfile.Current);
             profileController.UpdateProfileColors(null);
-            TrayIconService.UpdateTrayIcon(); // Atualiza o ícone ao redefinir perfil
+            UpdateToolbar("No Profile", Actions.Count);
+            UpdateStatusBar(null, Actions.Count);
+            TrayIconService.UpdateTrayIcon();
         }
 
         private async void ProfilesListBox_ItemClick(object sender, ItemClickEventArgs e)
@@ -419,6 +437,8 @@ namespace TrueReplayer
             if (e.ClickedItem is ProfileEntry selectedProfile)
             {
                 await profileController.HandleProfileItemClick(selectedProfile.Name);
+                UpdateToolbar(selectedProfile.Name, Actions.Count);
+                UpdateStatusBar(selectedProfile.Name, Actions.Count);
             }
         }
 
@@ -646,6 +666,72 @@ namespace TrueReplayer
 
                 var map = await profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(map);
+            }
+        }
+
+        private void UpdateStatusBadge(string state)
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                switch (state)
+                {
+                    case "recording":
+                        StatusBadge.Background = new SolidColorBrush(ColorHelper.FromArgb(0x1A, 0xFF, 0x6B, 0x6B));
+                        StatusBadge.BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(0x33, 0xFF, 0x6B, 0x6B));
+                        StatusDot.Fill = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xFF, 0x6B, 0x6B));
+                        StatusText.Text = "Recording";
+                        StatusText.Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xFF, 0x6B, 0x6B));
+                        break;
+                    case "replaying":
+                        StatusBadge.Background = new SolidColorBrush(ColorHelper.FromArgb(0x1A, 0x60, 0xCD, 0xFF));
+                        StatusBadge.BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(0x33, 0x60, 0xCD, 0xFF));
+                        StatusDot.Fill = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x60, 0xCD, 0xFF));
+                        StatusText.Text = "Replaying";
+                        StatusText.Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x60, 0xCD, 0xFF));
+                        break;
+                    default: // "ready"
+                        StatusBadge.Background = new SolidColorBrush(ColorHelper.FromArgb(0x1A, 0x6B, 0xCB, 0x77));
+                        StatusBadge.BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(0x33, 0x6B, 0xCB, 0x77));
+                        StatusDot.Fill = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x6B, 0xCB, 0x77));
+                        StatusText.Text = "Ready";
+                        StatusText.Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0x6B, 0xCB, 0x77));
+                        break;
+                }
+            });
+        }
+
+        public void UpdateToolbar(string name, int count)
+        {
+            ToolbarProfileName.Text = name;
+            ToolbarActionCount.Text = $"{count} action{(count != 1 ? "s" : "")}";
+        }
+
+        public void UpdateStatusBar(string? profile, int count)
+        {
+            string profileDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "TrueReplayer", "Profiles");
+            StatusBarDirectory.Text = profileDir;
+            StatusBarProfile.Text = profile ?? "No Profile";
+            StatusBarActionCount.Text = $"{count} action{(count != 1 ? "s" : "")}";
+        }
+
+        private void ProfileSearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+        {
+            if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
+            {
+                string query = sender.Text.Trim();
+                if (string.IsNullOrEmpty(query))
+                {
+                    ProfilesListBox.ItemsSource = profileController.ProfileEntries;
+                }
+                else
+                {
+                    var filtered = profileController.ProfileEntries
+                        .Where(p => p.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    ProfilesListBox.ItemsSource = filtered;
+                }
             }
         }
 

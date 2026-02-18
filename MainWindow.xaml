@@ -9,231 +9,799 @@
         xmlns:models="using:TrueReplayer.Models"
         mc:Ignorable="d">
 
-    <!-- Fundo principal da interface -->
-    <Grid Background="#2b2b2b">
+    <Grid Background="{StaticResource MicaBackgroundBrush}" RequestedTheme="Dark">
         <Grid.Resources>
             <converters:NonNegativeIntConverter x:Key="NonNegativeIntConverter" />
             <converters:InsertionHighlightConverter x:Key="InsertionHighlightConverter" />
+            <converters:ActionTypeToBrushConverter x:Key="ActionTypeToBrushConverter" />
+            <converters:ActionTypeToIconConverter x:Key="ActionTypeToIconConverter" />
+            <converters:StringToVisibilityConverter x:Key="StringToVisibilityConverter" />
+            <converters:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+            <converters:ActiveProfileBrushConverter x:Key="ActiveProfileBrushConverter" />
+            <converters:ActiveProfileFontWeightConverter x:Key="ActiveProfileFontWeightConverter" />
+
+            <!-- ToggleSwitch blue accent overrides (ON state) -->
+            <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#0078D4" />
+            <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#1a86d8" />
+            <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#006cbd" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="#0078D4" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="#1a86d8" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="#006cbd" />
+            <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="White" />
+            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="White" />
+            <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="White" />
+
+            <!-- ToggleSwitch darker OFF state (smoke-bg #1a1a1a) -->
+            <SolidColorBrush x:Key="ToggleSwitchFillOff" Color="#1a1a1a" />
+            <SolidColorBrush x:Key="ToggleSwitchFillOffPointerOver" Color="#252525" />
+            <SolidColorBrush x:Key="ToggleSwitchFillOffPressed" Color="#161616" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOff" Color="#3a3a3a" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOffPointerOver" Color="#444444" />
+            <SolidColorBrush x:Key="ToggleSwitchStrokeOffPressed" Color="#333333" />
+
+            <!-- DataGrid column header background overrides (match card #2d2d2d) -->
+            <SolidColorBrush x:Key="DataGridColumnHeaderBackgroundBrush" Color="#2d2d2d" />
+            <Color x:Key="DataGridColumnHeaderBackgroundColor">#2d2d2d</Color>
+            <Color x:Key="DataGridColumnHeaderHoveredBackgroundColor">#353535</Color>
+            <Color x:Key="DataGridColumnHeaderPressedBackgroundColor">#2a2a2a</Color>
+            <SolidColorBrush x:Key="DataGridColumnHeaderForegroundBrush" Color="#9A9A9A" />
+
+            <!-- TextBox darker background for settings -->
+            <SolidColorBrush x:Key="TextControlBackground" Color="#1a1a1a" />
+            <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#222222" />
+            <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#1a1a1a" />
+            <SolidColorBrush x:Key="TextControlBorderBrush" Color="#3a3a3a" />
+            <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#4a4a4a" />
+            <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#0078D4" />
         </Grid.Resources>
 
-        <!-- Layout principal com colunas e linhas -->
-        <Grid HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Padding="5" RowSpacing="4" ColumnSpacing="2" RequestedTheme="Dark">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="26" />
+        </Grid.RowDefinitions>
+
+        <!-- ==================== ROW 0: TITLE BAR ==================== -->
+        <Grid Grid.Row="0" Background="{StaticResource SmokeBackgroundBrush}"
+              BorderBrush="{StaticResource SubtleBorderBrush}" BorderThickness="0,0,0,1"
+              Padding="16,0">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1.86*" />
-                <ColumnDefinition Width="6*" />
-                <ColumnDefinition Width="1.86*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
 
-            <!-- Título da aplicação -->
-            <TextBlock Text="🎮 TrueReplayer" FontSize="24" FontWeight="SemiBold" Foreground="#6e6e6e" Grid.ColumnSpan="3" />
-
-            <!-- Lista de perfis -->
-            <ListView x:Name="ProfilesListBox"
-                      x:FieldModifier="public"
-                      Grid.Row="1"
-                      Grid.Column="0"
-                      Margin="0,0,8,0"
-                      Background="#2b2b2b"
-                      BorderBrush="#3e3e3e"
-                      BorderThickness="1"
-                      SelectionMode="Single"
-                      IsItemClickEnabled="True"
-                      ItemClick="ProfilesListBox_ItemClick"
-                      RightTapped="ProfilesListBox_RightTapped">
-
-                <!-- Menu de contexto para gerenciamento de perfis -->
-                <ListView.ContextFlyout>
-                    <MenuFlyout>
-                        <MenuFlyoutItem Text="New Profile" Click="CreateNewProfile_Click">
-                            <MenuFlyoutItem.Icon>
-                                <FontIcon Glyph="" Foreground="LimeGreen" />
-                            </MenuFlyoutItem.Icon>
-                        </MenuFlyoutItem>
-                        <MenuFlyoutItem Text="Delete" Click="DeleteProfile_Click">
-                            <MenuFlyoutItem.Icon>
-                                <FontIcon Glyph="" Foreground="Red" />
-                            </MenuFlyoutItem.Icon>
-                        </MenuFlyoutItem>
-                        <MenuFlyoutItem Text="Directory" Click="OpenProfileFolder_Click">
-                            <MenuFlyoutItem.Icon>
-                                <FontIcon Glyph="" Foreground="Yellow" />
-                            </MenuFlyoutItem.Icon>
-                        </MenuFlyoutItem>
-                        <MenuFlyoutItem Text="Rename" Click="RenameProfile_Click">
-                            <MenuFlyoutItem.Icon>
-                                <FontIcon Glyph="" Foreground="LimeGreen" />
-                            </MenuFlyoutItem.Icon>
-                        </MenuFlyoutItem>
-                        <MenuFlyoutItem Text="Assign Profile Key" Click="AssignProfileHotkey_Click">
-                            <MenuFlyoutItem.Icon>
-                                <FontIcon Glyph="" Foreground="LightBlue" />
-                            </MenuFlyoutItem.Icon>
-                        </MenuFlyoutItem>
-                        <MenuFlyoutItem Text="Remove Profile Key" Click="RemoveProfileHotkey_Click">
-                            <MenuFlyoutItem.Icon>
-                                <FontIcon Glyph="" Foreground="Red" />
-                            </MenuFlyoutItem.Icon>
-                        </MenuFlyoutItem>
-                    </MenuFlyout>
-                </ListView.ContextFlyout>
-
-                <!-- Estilo dos itens da lista de perfis -->
-                <ListView.ItemContainerStyle>
-                    <Style TargetType="ListViewItem">
-                        <Setter Property="Background" Value="Transparent" />
-                        <Setter Property="Padding" Value="0" />
-                        <Setter Property="Margin" Value="0" />
-                        <Setter Property="MinHeight" Value="22" />
-                        <Setter Property="Template">
-                            <Setter.Value>
-                                <ControlTemplate TargetType="ListViewItem">
-                                    <ContentPresenter />
-                                </ControlTemplate>
-                            </Setter.Value>
-                        </Setter>
-                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                    </Style>
-                </ListView.ItemContainerStyle>
-
-                <!-- Modelo de dados para exibição de perfis -->
-                <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="models:ProfileEntry">
-                        <StackPanel Orientation="Horizontal" Padding="2" Margin="0">
-                            <TextBlock Text="{x:Bind Name}" Margin="0,-4,4,-4" VerticalAlignment="Center" Foreground="Gray" FontSize="14" />
-                            <TextBlock Text="{x:Bind Hotkey}" Margin="0,-4,0,-4" VerticalAlignment="Center" Foreground="Yellow" FontSize="14" />
-                        </StackPanel>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
-
-            <!-- Tabela de ações -->
-            <controls:DataGrid x:Name="ActionsDataGrid"
-                               SelectionMode="Extended"
-                               Grid.Row="1" Grid.Column="1"
-                               AutoGenerateColumns="False"
-                               ItemsSource="{x:Bind Actions, Mode=OneWay}"
-                               CanUserSortColumns="False"
-                               CanUserReorderColumns="False"
-                               HeadersVisibility="All"
-                               GridLinesVisibility="Vertical"
-                               BorderThickness="1"
-                               BorderBrush="#3e3e3e"
-                               RowBackground="#2b2b2b"
-                               AlternatingRowBackground="#333333"
-                               Foreground="White"
-                               Margin="-8,0,0,0"
-                               Background="#2b2b2b">
-
-                <!-- Estilo das linhas da tabela -->
-                <controls:DataGrid.RowStyle>
-                    <Style TargetType="controls:DataGridRow">
-                        <Setter Property="Background"
-                                Value="{Binding ShouldHighlight, Converter={StaticResource InsertionHighlightConverter}}" />
-                    </Style>
-                </controls:DataGrid.RowStyle>
-
-                <!-- Colunas da tabela de ações -->
-                <controls:DataGrid.Columns>
-                    <controls:DataGridComboBoxColumn Header="Action" Width="140" Binding="{Binding ActionType}" ItemsSource="{x:Bind ActionTypes}" />
-                    <controls:DataGridTemplateColumn Header="Key" Width="90">
-                        <controls:DataGridTemplateColumn.CellTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding DisplayKey}" Foreground="White"
-                                           VerticalAlignment="Center" HorizontalAlignment="Stretch"
-                                           TextAlignment="Left" Padding="8,0" />
-                            </DataTemplate>
-                        </controls:DataGridTemplateColumn.CellTemplate>
-                        <controls:DataGridTemplateColumn.CellEditingTemplate>
-                            <DataTemplate>
-                                <TextBox PreviewKeyDown="KeyEditTextBox_PreviewKeyDown"
-                                         Text="{Binding DisplayKey, Mode=OneWay}"
-                                         Background="#1e1e1e" Foreground="White"
-                                         HorizontalContentAlignment="Left"
-                                         VerticalContentAlignment="Center"
-                                         Padding="8,0" />
-                            </DataTemplate>
-                        </controls:DataGridTemplateColumn.CellEditingTemplate>
-                    </controls:DataGridTemplateColumn>
-                    <controls:DataGridTextColumn Header="X" Binding="{Binding X}" Width="65" />
-                    <controls:DataGridTextColumn Header="Y" Binding="{Binding Y}" Width="65" />
-                    <controls:DataGridTextColumn Header="Delay" Binding="{Binding Delay, Converter={StaticResource NonNegativeIntConverter}}" Width="Auto" />
-                    <controls:DataGridTextColumn Header="Comment" Binding="{Binding Comment}" Width="Auto" />
-                </controls:DataGrid.Columns>
-            </controls:DataGrid>
-
-            <!-- Painel de configurações -->
-            <Border Grid.Row="1" Grid.Column="2" Background="#2b2b2b" BorderBrush="#3e3e3e" BorderThickness="1" Padding="1">
-                <ScrollViewer VerticalScrollBarVisibility="Visible">
-                    <StackPanel x:Name="ConfigPanel" Padding="0" Spacing="2">
-
-                        <!-- Configurações gerais -->
-                        <StackPanel Spacing="1">
-                            <TextBlock Text="⚙️ Settings" FontSize="15" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,0" />
-                            <StackPanel Spacing="0">
-                                <ToggleSwitch x:Name="UseCustomDelaySwitch" x:FieldModifier="public" Foreground="White" IsOn="True" OnContent="Fixed Delay (ms)" OffContent="Fixed Delay (ms)" Margin="0,0,0,-5" Padding="0" FontSize="14" />
-                                <TextBox x:Name="CustomDelayTextBox" x:FieldModifier="public" Text="100" GotFocus="TextBox_SelectAll" Margin="0,0,0,0" Padding="5" FontSize="14" />
-                            </StackPanel>
-                            <StackPanel Spacing="0">
-                                <ToggleSwitch x:Name="EnableLoopSwitch" x:FieldModifier="public" Foreground="White" IsOn="False" OnContent="Loop Count" OffContent="Loop Count" Margin="0,0,0,-5" Padding="0" FontSize="14" />
-                                <TextBox x:Name="LoopCountTextBox" x:FieldModifier="public" Text="1" GotFocus="TextBox_SelectAll" Margin="0,0,0,0" Padding="5" FontSize="14" />
-                            </StackPanel>
-                            <StackPanel Spacing="0">
-                                <ToggleSwitch x:Name="LoopIntervalSwitch" x:FieldModifier="public" Foreground="White" IsOn="False" OnContent="Loop Delay (ms)" OffContent="Loop Delay (ms)" Margin="0,0,0,-5" Padding="0" FontSize="14" />
-                                <TextBox x:Name="LoopIntervalTextBox" x:FieldModifier="public" Text="1000" GotFocus="TextBox_SelectAll" Margin="0,0,0,2" Padding="5" FontSize="14" />
-                            </StackPanel>
-                        </StackPanel>
-
-                        <!-- Configurações de ações -->
-                        <StackPanel Spacing="0">
-                            <ToggleSwitch x:Name="ProfileKeySwitch" x:FieldModifier="public" IsOn="True" Foreground="White" OnContent="Profile Keys" OffContent="Profile Keys" Margin="0,0,0,-10" Padding="0" FontSize="14" />
-                            <ToggleSwitch x:Name="RecordMouseSwitch" x:FieldModifier="public" IsOn="True" Foreground="White" OnContent="Mouse Clicks" OffContent="Mouse Clicks" Margin="0,0,0,-10" Padding="0" FontSize="14" />
-                            <ToggleSwitch x:Name="RecordScrollSwitch" x:FieldModifier="public" IsOn="True" Foreground="White" OnContent="Mouse Scroll" OffContent="Mouse Scroll" Margin="0,0,0,-10" Padding="0" FontSize="14" />
-                            <ToggleSwitch x:Name="RecordKeyboardSwitch" x:FieldModifier="public" IsOn="True" Foreground="White" OnContent="Keyboard" OffContent="Keyboard" Margin="0,0,0,-10" Padding="0" FontSize="14" />
-                            <ToggleSwitch x:Name="AlwaysOnTopSwitch" x:FieldModifier="public" IsOn="False" Toggled="AlwaysOnTopSwitch_Toggled" Foreground="White" OnContent="Always On Top" OffContent="Always On Top" Margin="0,0,0,-10" Padding="0" FontSize="14" />
-                            <ToggleSwitch x:Name="MinimizeToTraySwitch" x:FieldModifier="public" IsOn="False" Foreground="White" OnContent="System Tray" OffContent="System Tray" Margin="0,0,0,-10" Padding="0" FontSize="14" />
-                        </StackPanel>
-
-                        <!-- Configurações de teclas de atalho -->
-                        <Rectangle Height="1" Fill="Gray" Opacity="0.3" Margin="0,10,0,3" />
-                        <StackPanel Spacing="1">
-                            <TextBlock Text="⚡ Hotkeys" FontSize="14" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,2" />
-                            <StackPanel Spacing="1">
-                                <TextBlock Text="Start Recording" Foreground="White" Margin="0,2,0,0" />
-                                <TextBox x:Name="ToggleRecordingTextBox" x:FieldModifier="public" Width="Auto" IsReadOnly="True" />
-                            </StackPanel>
-                            <StackPanel Spacing="1">
-                                <TextBlock Text="Start Replay" Foreground="White" Margin="0,5,0,0" Padding="0"/>
-                                <TextBox x:Name="ToggleReplayTextBox" x:FieldModifier="public" Width="Auto" IsReadOnly="True" />
-                            </StackPanel>
-                            <StackPanel Spacing="1">
-                                <TextBlock Text="Toggle Profile Keys" Foreground="White" Margin="0,5,0,0" Padding="0"/>
-                                <TextBox x:Name="ToggleProfileKeyTextBox" x:FieldModifier="public" Width="Auto" IsReadOnly="True" />
-                            </StackPanel>
-                        </StackPanel>
-
-                    </StackPanel>
-                </ScrollViewer>
+            <Border Grid.Column="0" Width="18" Height="18" CornerRadius="4"
+                    Background="{StaticResource AccentSolidBrush}"
+                    VerticalAlignment="Center" Margin="0,0,12,0">
+                <TextBlock Text="T" FontSize="10" FontWeight="Bold"
+                           Foreground="White" HorizontalAlignment="Center"
+                           VerticalAlignment="Center" />
             </Border>
 
-            <!-- Botões de ação -->
-            <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Left" Margin="-1,0,0,0" Spacing="0">
-                <Button x:Name="RecordingButton" Content="Recording" Width="156" Margin="1" Click="RecordingButton_Click" Padding="1,8" CornerRadius="5" />
-                <Button x:Name="ReplayButton" Content="Replay" Width="90" Margin="1" Click="ReplayButton_Click" Padding="1,8" CornerRadius="5" />
-                <Button x:Name="SaveButton" Content="Save" Width="90" Margin="1" Click="SaveButton_Click" Padding="1,8" CornerRadius="5" />
-                <Button x:Name="LoadButton" Content="Load" Width="90" Margin="1" Click="LoadButton_Click" Padding="1,8" CornerRadius="5" />
-                <Button x:Name="CopyButton" Content="Copy" Width="90" Margin="1" Click="CopyButton_Click" Padding="1,8" CornerRadius="5" />
-                <Button x:Name="ClearButton" Content="Clear" Width="90" Margin="1" Click="ClearButton_Click" Padding="1,8" CornerRadius="5" />
-            </StackPanel>
+            <TextBlock Grid.Column="1" Text="TrueReplayer" FontSize="12"
+                       Foreground="{StaticResource TextSecondaryBrush}"
+                       VerticalAlignment="Center" />
 
-            <!-- Botão de redefinição -->
-            <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,-1,0" Spacing="0">
-                <Button x:Name="ResetButton" Content="Reset Settings" Width="164" Margin="1" Click="ResetButton_Click" Padding="1,8" CornerRadius="5" />
-            </StackPanel>
+            <Border x:Name="StatusBadge" Grid.Column="3"
+                    Background="{StaticResource StatusReadyBackgroundBrush}"
+                    BorderBrush="{StaticResource StatusReadyBorderBrush}"
+                    BorderThickness="1" CornerRadius="10"
+                    Padding="10,4"
+                    VerticalAlignment="Center"
+                    Margin="0,0,140,0">
+                <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                    <Ellipse x:Name="StatusDot" Width="6" Height="6"
+                             Fill="{StaticResource StatusReadyForegroundBrush}" />
+                    <TextBlock x:Name="StatusText" Text="Ready" FontSize="11"
+                               FontWeight="Medium"
+                               Foreground="{StaticResource StatusReadyForegroundBrush}" />
+                </StackPanel>
+            </Border>
         </Grid>
+
+        <!-- ==================== ROW 1: MAIN CONTENT ==================== -->
+        <Grid Grid.Row="1" Padding="8" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="230" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="250" />
+            </Grid.ColumnDefinitions>
+
+            <!-- ========== COLUMN 0: PROFILES CARD ========== -->
+            <Border Grid.Column="0"
+                    Background="{StaticResource LayerBackgroundBrush}"
+                    BorderBrush="{StaticResource CardBorderBrush}"
+                    BorderThickness="1" CornerRadius="{StaticResource CardCornerRadius}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Padding="16,14,16,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="PROFILES" FontSize="12" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextTertiaryBrush}"
+                                   CharacterSpacing="50" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Content="&#xE710;"
+                                FontFamily="Segoe Fluent Icons" FontSize="14"
+                                Click="CreateNewProfile_Click"
+                                Background="Transparent" BorderThickness="0"
+                                Padding="4" Width="28" Height="28" CornerRadius="4" />
+                    </Grid>
+
+                    <AutoSuggestBox x:Name="ProfileSearchBox" Grid.Row="1"
+                                    PlaceholderText="Search profiles..."
+                                    QueryIcon="Find" Margin="10,0,10,8"
+                                    TextChanged="ProfileSearchBox_TextChanged" />
+
+                    <ListView x:Name="ProfilesListBox"
+                              x:FieldModifier="public"
+                              Grid.Row="2"
+                              Background="Transparent"
+                              BorderThickness="0"
+                              SelectionMode="Single"
+                              IsItemClickEnabled="True"
+                              ItemClick="ProfilesListBox_ItemClick"
+                              RightTapped="ProfilesListBox_RightTapped"
+                              Padding="6,0,6,8">
+
+                        <ListView.ContextFlyout>
+                            <MenuFlyout>
+                                <MenuFlyoutItem Text="New Profile" Click="CreateNewProfile_Click">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE8A5;" Foreground="#6BCB77" />
+                                    </MenuFlyoutItem.Icon>
+                                    <MenuFlyoutItem.KeyboardAcceleratorTextOverride>Ctrl+N</MenuFlyoutItem.KeyboardAcceleratorTextOverride>
+                                </MenuFlyoutItem>
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Text="Rename" Click="RenameProfile_Click">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE8AC;" />
+                                    </MenuFlyoutItem.Icon>
+                                    <MenuFlyoutItem.KeyboardAcceleratorTextOverride>F2</MenuFlyoutItem.KeyboardAcceleratorTextOverride>
+                                </MenuFlyoutItem>
+                                <MenuFlyoutItem Text="Open Directory" Click="OpenProfileFolder_Click">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE838;" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Text="Assign Hotkey" Click="AssignProfileHotkey_Click">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE765;" Foreground="#60CDFF" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                                <MenuFlyoutItem Text="Remove Hotkey" Click="RemoveProfileHotkey_Click">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE711;" Foreground="#FF6B6B" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Text="Delete Profile" Click="DeleteProfile_Click" Foreground="#FF6B6B">
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE74D;" Foreground="#FF6B6B" />
+                                    </MenuFlyoutItem.Icon>
+                                    <MenuFlyoutItem.KeyboardAcceleratorTextOverride>Del</MenuFlyoutItem.KeyboardAcceleratorTextOverride>
+                                </MenuFlyoutItem>
+                            </MenuFlyout>
+                        </ListView.ContextFlyout>
+
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Margin" Value="0,1,0,0" />
+                                <Setter Property="MinHeight" Value="0" />
+                                <Setter Property="CornerRadius" Value="4" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Padding="10,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="3" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <!-- Blue accent indicator bar -->
+                                    <Border Grid.Column="0" CornerRadius="2"
+                                            Margin="-10,0,6,0" Width="3"
+                                            Background="{StaticResource AccentSolidBrush}"
+                                            Visibility="{Binding IsActive, Converter={StaticResource BoolToVisibilityConverter}}" />
+
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding Name}"
+                                               FontSize="13"
+                                               Foreground="{Binding IsActive, Converter={StaticResource ActiveProfileBrushConverter}}"
+                                               FontWeight="{Binding IsActive, Converter={StaticResource ActiveProfileFontWeightConverter}}"
+                                               VerticalAlignment="Center" />
+
+                                    <Border Grid.Column="2"
+                                            Background="{StaticResource HotkeyBadgeBackgroundBrush}"
+                                            BorderBrush="{StaticResource HotkeyBadgeBorderBrush}"
+                                            BorderThickness="1" CornerRadius="4"
+                                            Padding="6,1" Margin="4,0,0,0"
+                                            Visibility="{Binding Hotkey, Converter={StaticResource StringToVisibilityConverter}}">
+                                        <TextBlock Text="{Binding Hotkey}" FontSize="11"
+                                                   FontFamily="Consolas"
+                                                   Foreground="{StaticResource HotkeyBadgeForegroundBrush}" />
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+            </Border>
+
+            <!-- ========== COLUMN 1: CENTER CONTENT ========== -->
+            <Grid Grid.Column="1" RowSpacing="6">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- TOOLBAR CARD -->
+                <Border Grid.Row="0"
+                        Background="{StaticResource LayerBackgroundBrush}"
+                        BorderBrush="{StaticResource CardBorderBrush}"
+                        BorderThickness="1" CornerRadius="{StaticResource CardCornerRadius}"
+                        Padding="16,10">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                            <TextBlock x:Name="ToolbarProfileName" Text="No Profile"
+                                       FontSize="16" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextPrimaryBrush}" />
+                            <Border Background="{StaticResource SmokeBackgroundBrush}"
+                                    BorderBrush="{StaticResource SubtleBorderBrush}"
+                                    BorderThickness="1" CornerRadius="10"
+                                    Padding="10,3"
+                                    VerticalAlignment="Center">
+                                <TextBlock x:Name="ToolbarActionCount" Text="0 actions"
+                                           FontSize="12" VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextTertiaryBrush}" />
+                            </Border>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                            <Button x:Name="CopyButton" Content="&#xE8C8;"
+                                    FontFamily="Segoe Fluent Icons" FontSize="14"
+                                    Click="CopyButton_Click" CornerRadius="4"
+                                    Padding="8,6" ToolTipService.ToolTip="Copy Actions" />
+                            <Button x:Name="ClearButton" Content="&#xE74D;"
+                                    FontFamily="Segoe Fluent Icons" FontSize="14"
+                                    Click="ClearButton_Click" CornerRadius="4"
+                                    Padding="8,6" ToolTipService.ToolTip="Clear All" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- DATAGRID CARD -->
+                <Border Grid.Row="1"
+                        Background="{StaticResource LayerBackgroundBrush}"
+                        BorderBrush="{StaticResource CardBorderBrush}"
+                        BorderThickness="1" CornerRadius="{StaticResource CardCornerRadius}">
+                    <controls:DataGrid x:Name="ActionsDataGrid"
+                                       SelectionMode="Extended"
+                                       AutoGenerateColumns="False"
+                                       ItemsSource="{x:Bind Actions, Mode=OneWay}"
+                                       CanUserSortColumns="False"
+                                       CanUserReorderColumns="False"
+                                       HeadersVisibility="Column"
+                                       GridLinesVisibility="None"
+                                       BorderThickness="0"
+                                       RowBackground="#2d2d2d"
+                                       AlternatingRowBackground="#303030"
+                                       Foreground="White"
+                                       Background="Transparent"
+                                       Margin="0"
+                                       ColumnHeaderHeight="36"
+                                       RowHeight="36">
+
+                        <controls:DataGrid.ColumnHeaderStyle>
+                            <Style TargetType="controlsPrimitives:DataGridColumnHeader"
+                                   xmlns:controlsPrimitives="using:CommunityToolkit.WinUI.UI.Controls.Primitives">
+                                <Setter Property="Background" Value="Transparent" />
+                                <Setter Property="Foreground" Value="#9A9A9A" />
+                                <Setter Property="FontSize" Value="12" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                                <Setter Property="Padding" Value="14,0" />
+                                <Setter Property="BorderBrush" Value="#14FFFFFF" />
+                                <Setter Property="BorderThickness" Value="0,0,0,1" />
+                                <Setter Property="SeparatorVisibility" Value="Collapsed" />
+                            </Style>
+                        </controls:DataGrid.ColumnHeaderStyle>
+
+                        <controls:DataGrid.RowStyle>
+                            <Style TargetType="controls:DataGridRow">
+                                <Setter Property="Background"
+                                        Value="{Binding ShouldHighlight, Converter={StaticResource InsertionHighlightConverter}}" />
+                            </Style>
+                        </controls:DataGrid.RowStyle>
+
+                        <controls:DataGrid.Columns>
+                            <!-- Row number column -->
+                            <controls:DataGridTemplateColumn Header="#" Width="45" IsReadOnly="True">
+                                <controls:DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding RowNumber}" FontSize="11"
+                                                   FontFamily="Consolas"
+                                                   Foreground="#5C5C5C"
+                                                   VerticalAlignment="Center" Padding="18,0,0,0" />
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellTemplate>
+                            </controls:DataGridTemplateColumn>
+
+                            <!-- Action column with colored pills -->
+                            <controls:DataGridTemplateColumn Header="Action" Width="155">
+                                <controls:DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{Binding ActionType, Converter={StaticResource ActionTypeToBrushConverter}, ConverterParameter=background}"
+                                                CornerRadius="4" Padding="8,3" Margin="4,2"
+                                                HorizontalAlignment="Left">
+                                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                                <FontIcon Glyph="{Binding ActionType, Converter={StaticResource ActionTypeToIconConverter}}"
+                                                          FontSize="11"
+                                                          Foreground="{Binding ActionType, Converter={StaticResource ActionTypeToBrushConverter}, ConverterParameter=foreground}" />
+                                                <TextBlock Text="{Binding ActionType}" FontSize="12"
+                                                           FontWeight="Medium"
+                                                           Foreground="{Binding ActionType, Converter={StaticResource ActionTypeToBrushConverter}, ConverterParameter=foreground}"
+                                                           VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellTemplate>
+                                <controls:DataGridTemplateColumn.CellEditingTemplate>
+                                    <DataTemplate>
+                                        <ComboBox SelectedItem="{Binding ActionType, Mode=TwoWay}"
+                                                  HorizontalAlignment="Stretch" />
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellEditingTemplate>
+                            </controls:DataGridTemplateColumn>
+
+                            <!-- Key column with badge style -->
+                            <controls:DataGridTemplateColumn Header="Key" Width="90">
+                                <controls:DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Border Background="#1a1a1a" CornerRadius="4"
+                                                Padding="8,2" Margin="2,3"
+                                                HorizontalAlignment="Left"
+                                                Visibility="{Binding DisplayKey, Converter={StaticResource StringToVisibilityConverter}}">
+                                            <TextBlock Text="{Binding DisplayKey}" Foreground="White"
+                                                       FontFamily="Consolas" FontSize="12"
+                                                       VerticalAlignment="Center" />
+                                        </Border>
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellTemplate>
+                                <controls:DataGridTemplateColumn.CellEditingTemplate>
+                                    <DataTemplate>
+                                        <TextBox PreviewKeyDown="KeyEditTextBox_PreviewKeyDown"
+                                                 Text="{Binding DisplayKey, Mode=OneWay}"
+                                                 Background="#1a1a1a" Foreground="White"
+                                                 HorizontalContentAlignment="Left"
+                                                 VerticalContentAlignment="Center"
+                                                 Padding="8,0" />
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellEditingTemplate>
+                            </controls:DataGridTemplateColumn>
+
+                            <!-- X column -->
+                            <controls:DataGridTemplateColumn Header="X" Width="65">
+                                <controls:DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding X}" FontSize="12" FontFamily="Consolas"
+                                                   Foreground="#C5C5C5"
+                                                   VerticalAlignment="Center" Padding="8,0" />
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellTemplate>
+                                <controls:DataGridTemplateColumn.CellEditingTemplate>
+                                    <DataTemplate>
+                                        <TextBox Text="{Binding X, Mode=TwoWay}" Background="#1a1a1a" Foreground="White"
+                                                 Padding="8,0" VerticalContentAlignment="Center" />
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellEditingTemplate>
+                            </controls:DataGridTemplateColumn>
+
+                            <!-- Y column -->
+                            <controls:DataGridTemplateColumn Header="Y" Width="65">
+                                <controls:DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Y}" FontSize="12" FontFamily="Consolas"
+                                                   Foreground="#C5C5C5"
+                                                   VerticalAlignment="Center" Padding="8,0" />
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellTemplate>
+                                <controls:DataGridTemplateColumn.CellEditingTemplate>
+                                    <DataTemplate>
+                                        <TextBox Text="{Binding Y, Mode=TwoWay}" Background="#1a1a1a" Foreground="White"
+                                                 Padding="8,0" VerticalContentAlignment="Center" />
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellEditingTemplate>
+                            </controls:DataGridTemplateColumn>
+
+                            <!-- Delay column with golden color -->
+                            <controls:DataGridTemplateColumn Header="Delay" Width="85">
+                                <controls:DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Delay, Converter={StaticResource NonNegativeIntConverter}}"
+                                                   FontSize="12" FontFamily="Consolas"
+                                                   Foreground="#FFD93D" FontWeight="Medium"
+                                                   VerticalAlignment="Center" Padding="8,0" />
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellTemplate>
+                                <controls:DataGridTemplateColumn.CellEditingTemplate>
+                                    <DataTemplate>
+                                        <TextBox Text="{Binding Delay, Mode=TwoWay, Converter={StaticResource NonNegativeIntConverter}}"
+                                                 Background="#1a1a1a" Foreground="#FFD93D"
+                                                 Padding="8,0" VerticalContentAlignment="Center" />
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellEditingTemplate>
+                            </controls:DataGridTemplateColumn>
+
+                            <!-- Comment column with muted color -->
+                            <controls:DataGridTemplateColumn Header="Comment" Width="*">
+                                <controls:DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Comment}" FontSize="12"
+                                                   Foreground="#9A9A9A"
+                                                   VerticalAlignment="Center" Padding="8,0"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellTemplate>
+                                <controls:DataGridTemplateColumn.CellEditingTemplate>
+                                    <DataTemplate>
+                                        <TextBox Text="{Binding Comment, Mode=TwoWay}"
+                                                 Background="#1a1a1a" Foreground="White"
+                                                 Padding="8,0" VerticalContentAlignment="Center" />
+                                    </DataTemplate>
+                                </controls:DataGridTemplateColumn.CellEditingTemplate>
+                            </controls:DataGridTemplateColumn>
+                        </controls:DataGrid.Columns>
+                    </controls:DataGrid>
+                </Border>
+
+                <!-- ACTION BAR CARD -->
+                <Border Grid.Row="2"
+                        Background="{StaticResource LayerBackgroundBrush}"
+                        BorderBrush="{StaticResource CardBorderBrush}"
+                        BorderThickness="1" CornerRadius="{StaticResource CardCornerRadius}"
+                        Padding="16,10">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button x:Name="RecordingButton" Click="RecordingButton_Click"
+                                    Background="{StaticResource RecordingRedBrush}"
+                                    Foreground="White" CornerRadius="4"
+                                    Padding="20,8" FontSize="13">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Ellipse x:Name="RecordingIndicator" Width="8" Height="8" Fill="White" />
+                                    <TextBlock x:Name="RecordingButtonText" Text="Recording" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Button>
+
+                            <Button x:Name="ReplayButton" Click="ReplayButton_Click"
+                                    Background="{StaticResource ReplayGreenBrush}"
+                                    Foreground="White" CornerRadius="4"
+                                    Padding="20,8" FontSize="13">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE768;" FontSize="12" Foreground="White" />
+                                    <TextBlock x:Name="ReplayButtonText" Text="Replay" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                            <Button x:Name="SaveButton" Click="SaveButton_Click" CornerRadius="4" Padding="14,6">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE105;" FontSize="14" />
+                                    <TextBlock Text="Save" FontSize="13" />
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="LoadButton" Click="LoadButton_Click" CornerRadius="4" Padding="14,6">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE8B7;" FontSize="14" />
+                                    <TextBlock Text="Load" FontSize="13" />
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="ResetButton" Click="ResetButton_Click" CornerRadius="4" Padding="14,6"
+                                    Foreground="{StaticResource TextTertiaryBrush}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE149;" FontSize="14" />
+                                    <TextBlock Text="Reset" FontSize="13" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- ========== COLUMN 2: SETTINGS PANEL ========== -->
+            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="ConfigPanel" Spacing="6">
+
+                    <!-- EXPANDER: Execution -->
+                    <Border Background="{StaticResource LayerBackgroundBrush}"
+                            BorderBrush="{StaticResource CardBorderBrush}"
+                            BorderThickness="1" CornerRadius="{StaticResource CardCornerRadius}">
+                        <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                  IsExpanded="True" Background="Transparent" Padding="0">
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE121;" FontSize="14" Foreground="#FFD93D" />
+                                    <TextBlock Text="Execution" FontSize="13" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Expander.Header>
+                            <Expander.Content>
+                                <StackPanel Spacing="8" Padding="0,4,0,8">
+                                    <!-- Fixed Delay -->
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Fixed Delay" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                            <TextBox x:Name="CustomDelayTextBox" x:FieldModifier="public"
+                                                     Text="100" Width="64" Height="32" GotFocus="TextBox_SelectAll"
+                                                     Padding="6,0" FontSize="13" FontFamily="Consolas" TextAlignment="Right"
+                                                     VerticalContentAlignment="Center" CornerRadius="6" />
+                                            <TextBlock Text="ms" FontSize="11" Foreground="{StaticResource TextDisabledBrush}" VerticalAlignment="Center" />
+                                            <ToggleSwitch x:Name="UseCustomDelaySwitch" x:FieldModifier="public"
+                                                          IsOn="True" MinWidth="0" MinHeight="0"
+                                                          OnContent="" OffContent="" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <Rectangle Height="1" Fill="{StaticResource DividerBrush}" />
+                                    <!-- Loop Count -->
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Loop Count" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                            <TextBox x:Name="LoopCountTextBox" x:FieldModifier="public"
+                                                     Text="1" Width="64" Height="32" GotFocus="TextBox_SelectAll"
+                                                     Padding="6,0" FontSize="13" FontFamily="Consolas" TextAlignment="Right"
+                                                     VerticalContentAlignment="Center" CornerRadius="6" />
+                                            <TextBlock Text="x" FontSize="11" Foreground="{StaticResource TextDisabledBrush}" VerticalAlignment="Center" />
+                                            <ToggleSwitch x:Name="EnableLoopSwitch" x:FieldModifier="public"
+                                                          IsOn="False" MinWidth="0" MinHeight="0"
+                                                          OnContent="" OffContent="" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <Rectangle Height="1" Fill="{StaticResource DividerBrush}" />
+                                    <!-- Loop Delay -->
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Loop Delay" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                            <TextBox x:Name="LoopIntervalTextBox" x:FieldModifier="public"
+                                                     Text="1000" Width="64" Height="32" GotFocus="TextBox_SelectAll"
+                                                     Padding="6,0" FontSize="13" FontFamily="Consolas" TextAlignment="Right"
+                                                     VerticalContentAlignment="Center" CornerRadius="6" />
+                                            <TextBlock Text="ms" FontSize="11" Foreground="{StaticResource TextDisabledBrush}" VerticalAlignment="Center" />
+                                            <ToggleSwitch x:Name="LoopIntervalSwitch" x:FieldModifier="public"
+                                                          IsOn="False" MinWidth="0" MinHeight="0"
+                                                          OnContent="" OffContent="" />
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Expander.Content>
+                        </Expander>
+                    </Border>
+
+                    <!-- EXPANDER: Recording -->
+                    <Border Background="{StaticResource LayerBackgroundBrush}"
+                            BorderBrush="{StaticResource CardBorderBrush}"
+                            BorderThickness="1" CornerRadius="{StaticResource CardCornerRadius}">
+                        <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                  IsExpanded="True" Background="Transparent" Padding="0">
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE720;" FontSize="14" Foreground="#FF6B6B" />
+                                    <TextBlock Text="Recording" FontSize="13" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Expander.Header>
+                            <Expander.Content>
+                                <StackPanel Spacing="6" Padding="0,4,0,8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="Mouse Clicks" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="RecordMouseSwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" />
+                                    </Grid>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="Mouse Scroll" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="RecordScrollSwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" />
+                                    </Grid>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="Keyboard" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="RecordKeyboardSwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" />
+                                    </Grid>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="Profile Keys" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="ProfileKeySwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" />
+                                    </Grid>
+                                </StackPanel>
+                            </Expander.Content>
+                        </Expander>
+                    </Border>
+
+                    <!-- EXPANDER: Hotkeys -->
+                    <Border Background="{StaticResource LayerBackgroundBrush}"
+                            BorderBrush="{StaticResource CardBorderBrush}"
+                            BorderThickness="1" CornerRadius="{StaticResource CardCornerRadius}">
+                        <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                  IsExpanded="True" Background="Transparent" Padding="0">
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE945;" FontSize="14" Foreground="#60CDFF" />
+                                    <TextBlock Text="Hotkeys" FontSize="13" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Expander.Header>
+                            <Expander.Content>
+                                <StackPanel Spacing="6" Padding="0,4,0,8">
+                                    <Border Background="{StaticResource SmokeBackgroundBrush}"
+                                            BorderBrush="{StaticResource SubtleBorderBrush}"
+                                            BorderThickness="1" CornerRadius="4" Padding="12,7">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Recording" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
+                                            <TextBox x:Name="ToggleRecordingTextBox" x:FieldModifier="public"
+                                                     Grid.Column="1" IsReadOnly="True" Width="80"
+                                                     TextAlignment="Center" FontFamily="Consolas" FontSize="12"
+                                                     Background="#1a1a1a"
+                                                     BorderBrush="#3a3a3a"
+                                                     Foreground="{StaticResource AccentBrush}"
+                                                     Padding="8,0" Height="30" VerticalContentAlignment="Center"
+                                                     CornerRadius="6" />
+                                        </Grid>
+                                    </Border>
+                                    <Border Background="{StaticResource SmokeBackgroundBrush}"
+                                            BorderBrush="{StaticResource SubtleBorderBrush}"
+                                            BorderThickness="1" CornerRadius="4" Padding="12,7">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Replay" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
+                                            <TextBox x:Name="ToggleReplayTextBox" x:FieldModifier="public"
+                                                     Grid.Column="1" IsReadOnly="True" Width="80"
+                                                     TextAlignment="Center" FontFamily="Consolas" FontSize="12"
+                                                     Background="#1a1a1a"
+                                                     BorderBrush="#3a3a3a"
+                                                     Foreground="{StaticResource AccentBrush}"
+                                                     Padding="8,0" Height="30" VerticalContentAlignment="Center"
+                                                     CornerRadius="6" />
+                                        </Grid>
+                                    </Border>
+                                    <Border Background="{StaticResource SmokeBackgroundBrush}"
+                                            BorderBrush="{StaticResource SubtleBorderBrush}"
+                                            BorderThickness="1" CornerRadius="4" Padding="12,7">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Profile Keys" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
+                                            <TextBox x:Name="ToggleProfileKeyTextBox" x:FieldModifier="public"
+                                                     Grid.Column="1" IsReadOnly="True" Width="80"
+                                                     TextAlignment="Center" FontFamily="Consolas" FontSize="12"
+                                                     Background="#1a1a1a"
+                                                     BorderBrush="#3a3a3a"
+                                                     Foreground="{StaticResource AccentBrush}"
+                                                     Padding="8,0" Height="30" VerticalContentAlignment="Center"
+                                                     CornerRadius="6" />
+                                        </Grid>
+                                    </Border>
+                                </StackPanel>
+                            </Expander.Content>
+                        </Expander>
+                    </Border>
+
+                    <!-- EXPANDER: Window -->
+                    <Border Background="{StaticResource LayerBackgroundBrush}"
+                            BorderBrush="{StaticResource CardBorderBrush}"
+                            BorderThickness="1" CornerRadius="{StaticResource CardCornerRadius}">
+                        <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                  IsExpanded="True" Background="Transparent" Padding="0">
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE737;" FontSize="14" Foreground="#9A9A9A" />
+                                    <TextBlock Text="Window" FontSize="13" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Expander.Header>
+                            <Expander.Content>
+                                <StackPanel Spacing="6" Padding="0,4,0,8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="Always On Top" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="AlwaysOnTopSwitch" x:FieldModifier="public" Grid.Column="1"
+                                                      IsOn="False" Toggled="AlwaysOnTopSwitch_Toggled" MinWidth="0" MinHeight="0"
+                                                      OnContent="" OffContent="" />
+                                    </Grid>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="System Tray" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="MinimizeToTraySwitch" x:FieldModifier="public" Grid.Column="1"
+                                                      IsOn="False" MinWidth="0" MinHeight="0"
+                                                      OnContent="" OffContent="" />
+                                    </Grid>
+                                </StackPanel>
+                            </Expander.Content>
+                        </Expander>
+                    </Border>
+
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- ==================== ROW 2: STATUS BAR ==================== -->
+        <Border Grid.Row="2" Background="{StaticResource SmokeBackgroundBrush}"
+                BorderBrush="{StaticResource SubtleBorderBrush}" BorderThickness="0,1,0,0">
+            <Grid Padding="16,0" VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock x:Name="StatusBarDirectory" Grid.Column="0"
+                           Text="Profiles" FontSize="11"
+                           Foreground="{StaticResource TextDisabledBrush}"
+                           VerticalAlignment="Center" />
+
+                <Rectangle Grid.Column="1" Width="1" Height="12"
+                           Fill="{StaticResource SubtleBorderBrush}" Margin="12,0" />
+
+                <TextBlock x:Name="StatusBarProfile" Grid.Column="2"
+                           Text="No profile" FontSize="11"
+                           Foreground="{StaticResource TextDisabledBrush}"
+                           VerticalAlignment="Center" />
+
+                <TextBlock x:Name="StatusBarActionCount" Grid.Column="4"
+                           Text="0 actions" FontSize="11"
+                           Foreground="{StaticResource TextDisabledBrush}"
+                           VerticalAlignment="Center" />
+
+                <Rectangle Grid.Column="5" Width="1" Height="12"
+                           Fill="{StaticResource SubtleBorderBrush}" Margin="12,0" />
+
+                <TextBlock Grid.Column="6" Text="v1.0.0" FontSize="11"
+                           Foreground="{StaticResource TextDisabledBrush}"
+                           VerticalAlignment="Center" />
+            </Grid>
+        </Border>
     </Grid>
 </Window>

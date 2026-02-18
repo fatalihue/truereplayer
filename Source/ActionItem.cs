@@ -13,6 +13,14 @@ namespace TrueReplayer.Models
         public int Delay { get; set; }
         public string Comment { get; set; }
 
+        private int _rowNumber;
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int RowNumber
+        {
+            get => _rowNumber;
+            set { _rowNumber = value; OnPropertyChanged(nameof(RowNumber)); }
+        }
+
         private bool _isInsertionPoint;
         public bool IsInsertionPoint
         {
