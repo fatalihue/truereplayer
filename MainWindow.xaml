@@ -318,7 +318,10 @@
                                 <Setter Property="Foreground" Value="#9A9A9A" />
                                 <Setter Property="FontSize" Value="12" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
-                                <Setter Property="Padding" Value="14,0" />
+                                <!-- Header text position: Left, Top, Right, Bottom -->
+                                <Setter Property="Padding" Value="7,0,-20,0" />
+                                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                                <Setter Property="VerticalContentAlignment" Value="Center" />
                                 <Setter Property="BorderBrush" Value="#14FFFFFF" />
                                 <Setter Property="BorderThickness" Value="0,0,0,1" />
                                 <Setter Property="SeparatorVisibility" Value="Collapsed" />
@@ -334,19 +337,19 @@
 
                         <controls:DataGrid.Columns>
                             <!-- Row number column -->
-                            <controls:DataGridTemplateColumn Header="#" Width="45" IsReadOnly="True">
+                            <controls:DataGridTemplateColumn Header="#" Width="35" MinWidth="35" IsReadOnly="True">
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding RowNumber}" FontSize="11"
                                                    FontFamily="Consolas"
                                                    Foreground="#5C5C5C"
-                                                   VerticalAlignment="Center" Padding="18,0,0,0" />
+                                                   VerticalAlignment="Center" Padding="12,0,0,0" />
                                     </DataTemplate>
                                 </controls:DataGridTemplateColumn.CellTemplate>
                             </controls:DataGridTemplateColumn>
 
                             <!-- Action column with colored pills -->
-                            <controls:DataGridTemplateColumn Header="Action" Width="155">
+                            <controls:DataGridTemplateColumn Header="Action" Width="155" MinWidth="155">
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <Border Background="{Binding ActionType, Converter={StaticResource ActionTypeToBrushConverter}, ConverterParameter=background}"
@@ -373,11 +376,11 @@
                             </controls:DataGridTemplateColumn>
 
                             <!-- Key column with badge style -->
-                            <controls:DataGridTemplateColumn Header="Key" Width="90">
+                            <controls:DataGridTemplateColumn Header="Key" Width="90" MinWidth="90">
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <Border Background="#1a1a1a" CornerRadius="4"
-                                                Padding="8,2" Margin="2,3"
+                                                Padding="8,2" Margin="5,3"
                                                 HorizontalAlignment="Left"
                                                 Visibility="{Binding DisplayKey, Converter={StaticResource StringToVisibilityConverter}}">
                                             <TextBlock Text="{Binding DisplayKey}" Foreground="White"
@@ -399,7 +402,7 @@
                             </controls:DataGridTemplateColumn>
 
                             <!-- X column -->
-                            <controls:DataGridTemplateColumn Header="X" Width="65">
+                            <controls:DataGridTemplateColumn Header="X" Width="65" MinWidth="65">
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding X}" FontSize="12" FontFamily="Consolas"
@@ -416,7 +419,7 @@
                             </controls:DataGridTemplateColumn>
 
                             <!-- Y column -->
-                            <controls:DataGridTemplateColumn Header="Y" Width="65">
+                            <controls:DataGridTemplateColumn Header="Y" Width="65" MinWidth="65">
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding Y}" FontSize="12" FontFamily="Consolas"
@@ -433,13 +436,13 @@
                             </controls:DataGridTemplateColumn>
 
                             <!-- Delay column with golden color -->
-                            <controls:DataGridTemplateColumn Header="Delay" Width="85">
+                            <controls:DataGridTemplateColumn Header="Delay" Width="85" MinWidth="85">
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding Delay, Converter={StaticResource NonNegativeIntConverter}}"
                                                    FontSize="12" FontFamily="Consolas"
                                                    Foreground="#FFD93D" FontWeight="Medium"
-                                                   VerticalAlignment="Center" Padding="8,0" />
+                                                   VerticalAlignment="Center" Padding="10,0" />
                                     </DataTemplate>
                                 </controls:DataGridTemplateColumn.CellTemplate>
                                 <controls:DataGridTemplateColumn.CellEditingTemplate>
@@ -452,12 +455,12 @@
                             </controls:DataGridTemplateColumn>
 
                             <!-- Comment column with muted color -->
-                            <controls:DataGridTemplateColumn Header="Comment" Width="*">
+                            <controls:DataGridTemplateColumn Header="Comment" Width="*" MinWidth="85">
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding Comment}" FontSize="12"
                                                    Foreground="#9A9A9A"
-                                                   VerticalAlignment="Center" Padding="8,0"
+                                                   VerticalAlignment="Center" Padding="9,0"
                                                    TextTrimming="CharacterEllipsis" />
                                     </DataTemplate>
                                 </controls:DataGridTemplateColumn.CellTemplate>
@@ -549,9 +552,9 @@
                                 </StackPanel>
                             </Expander.Header>
                             <Expander.Content>
-                                <StackPanel Spacing="8" Padding="0,4,0,8">
+                                <StackPanel Spacing="0" Padding="0,0,0,12">
                                     <!-- Fixed Delay -->
-                                    <Grid>
+                                    <Grid Padding="0,6">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -559,18 +562,18 @@
                                         <TextBlock Text="Fixed Delay" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                             <TextBox x:Name="CustomDelayTextBox" x:FieldModifier="public"
-                                                     Text="100" Width="64" Height="32" GotFocus="TextBox_SelectAll"
-                                                     Padding="6,0" FontSize="13" FontFamily="Consolas" TextAlignment="Right"
-                                                     VerticalContentAlignment="Center" CornerRadius="6" />
+                                                     Text="100" Width="64" Height="24" GotFocus="TextBox_SelectAll"
+                                                     Padding="8,4" FontSize="13" FontFamily="Consolas" TextAlignment="Right"
+                                                     VerticalContentAlignment="Center" CornerRadius="4" />
                                             <TextBlock Text="ms" FontSize="11" Foreground="{StaticResource TextDisabledBrush}" VerticalAlignment="Center" />
                                             <ToggleSwitch x:Name="UseCustomDelaySwitch" x:FieldModifier="public"
                                                           IsOn="True" MinWidth="0" MinHeight="0"
-                                                          OnContent="" OffContent="" />
+                                                          OnContent="" OffContent="" VerticalAlignment="Center" />
                                         </StackPanel>
                                     </Grid>
-                                    <Rectangle Height="1" Fill="{StaticResource DividerBrush}" />
+                                    <Rectangle Height="1" Fill="{StaticResource DividerBrush}" Margin="0,5" />
                                     <!-- Loop Count -->
-                                    <Grid>
+                                    <Grid Padding="0,6">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -578,18 +581,18 @@
                                         <TextBlock Text="Loop Count" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                             <TextBox x:Name="LoopCountTextBox" x:FieldModifier="public"
-                                                     Text="1" Width="64" Height="32" GotFocus="TextBox_SelectAll"
-                                                     Padding="6,0" FontSize="13" FontFamily="Consolas" TextAlignment="Right"
-                                                     VerticalContentAlignment="Center" CornerRadius="6" />
+                                                     Text="1" Width="64" Height="24" GotFocus="TextBox_SelectAll"
+                                                     Padding="8,4" FontSize="13" FontFamily="Consolas" TextAlignment="Right"
+                                                     VerticalContentAlignment="Center" CornerRadius="4" />
                                             <TextBlock Text="x" FontSize="11" Foreground="{StaticResource TextDisabledBrush}" VerticalAlignment="Center" />
                                             <ToggleSwitch x:Name="EnableLoopSwitch" x:FieldModifier="public"
                                                           IsOn="False" MinWidth="0" MinHeight="0"
-                                                          OnContent="" OffContent="" />
+                                                          OnContent="" OffContent="" VerticalAlignment="Center" />
                                         </StackPanel>
                                     </Grid>
-                                    <Rectangle Height="1" Fill="{StaticResource DividerBrush}" />
+                                    <Rectangle Height="1" Fill="{StaticResource DividerBrush}" Margin="0,5" />
                                     <!-- Loop Delay -->
-                                    <Grid>
+                                    <Grid Padding="0,6">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -597,13 +600,13 @@
                                         <TextBlock Text="Loop Delay" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                             <TextBox x:Name="LoopIntervalTextBox" x:FieldModifier="public"
-                                                     Text="1000" Width="64" Height="32" GotFocus="TextBox_SelectAll"
-                                                     Padding="6,0" FontSize="13" FontFamily="Consolas" TextAlignment="Right"
-                                                     VerticalContentAlignment="Center" CornerRadius="6" />
+                                                     Text="1000" Width="64" Height="24" GotFocus="TextBox_SelectAll"
+                                                     Padding="8,4" FontSize="13" FontFamily="Consolas" TextAlignment="Right"
+                                                     VerticalContentAlignment="Center" CornerRadius="4" />
                                             <TextBlock Text="ms" FontSize="11" Foreground="{StaticResource TextDisabledBrush}" VerticalAlignment="Center" />
                                             <ToggleSwitch x:Name="LoopIntervalSwitch" x:FieldModifier="public"
                                                           IsOn="False" MinWidth="0" MinHeight="0"
-                                                          OnContent="" OffContent="" />
+                                                          OnContent="" OffContent="" VerticalAlignment="Center" />
                                         </StackPanel>
                                     </Grid>
                                 </StackPanel>
@@ -624,26 +627,26 @@
                                 </StackPanel>
                             </Expander.Header>
                             <Expander.Content>
-                                <StackPanel Spacing="6" Padding="0,4,0,8">
-                                    <Grid>
+                                <StackPanel Spacing="0" Padding="0,0,0,12">
+                                    <Grid Padding="0,6">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="Mouse Clicks" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
-                                        <ToggleSwitch x:Name="RecordMouseSwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" />
+                                        <ToggleSwitch x:Name="RecordMouseSwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" VerticalAlignment="Center" />
                                     </Grid>
-                                    <Grid>
+                                    <Grid Padding="0,6">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="Mouse Scroll" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
-                                        <ToggleSwitch x:Name="RecordScrollSwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" />
+                                        <ToggleSwitch x:Name="RecordScrollSwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" VerticalAlignment="Center" />
                                     </Grid>
-                                    <Grid>
+                                    <Grid Padding="0,6">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="Keyboard" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
-                                        <ToggleSwitch x:Name="RecordKeyboardSwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" />
+                                        <ToggleSwitch x:Name="RecordKeyboardSwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" VerticalAlignment="Center" />
                                     </Grid>
-                                    <Grid>
+                                    <Grid Padding="0,6">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="Profile Keys" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
-                                        <ToggleSwitch x:Name="ProfileKeySwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" />
+                                        <ToggleSwitch x:Name="ProfileKeySwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" VerticalAlignment="Center" />
                                     </Grid>
                                 </StackPanel>
                             </Expander.Content>
@@ -663,7 +666,15 @@
                                 </StackPanel>
                             </Expander.Header>
                             <Expander.Content>
-                                <StackPanel Spacing="6" Padding="0,4,0,8">
+                                <StackPanel Spacing="6" Padding="0,0,0,12">
+                                    <StackPanel.Resources>
+                                        <SolidColorBrush x:Key="TextControlBackground" Color="#323232" />
+                                        <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#3a3a3a" />
+                                        <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#323232" />
+                                        <SolidColorBrush x:Key="TextControlBorderBrush" Color="#1AFFFFFF" />
+                                        <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#26FFFFFF" />
+                                        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#0078D4" />
+                                    </StackPanel.Resources>
                                     <Border Background="{StaticResource SmokeBackgroundBrush}"
                                             BorderBrush="{StaticResource SubtleBorderBrush}"
                                             BorderThickness="1" CornerRadius="4" Padding="12,7">
@@ -676,11 +687,9 @@
                                             <TextBox x:Name="ToggleRecordingTextBox" x:FieldModifier="public"
                                                      Grid.Column="1" IsReadOnly="True" Width="80"
                                                      TextAlignment="Center" FontFamily="Consolas" FontSize="12"
-                                                     Background="#1a1a1a"
-                                                     BorderBrush="#3a3a3a"
                                                      Foreground="{StaticResource AccentBrush}"
-                                                     Padding="8,0" Height="30" VerticalContentAlignment="Center"
-                                                     CornerRadius="6" />
+                                                     Padding="8,3" Height="24" VerticalContentAlignment="Center"
+                                                     CornerRadius="4" />
                                         </Grid>
                                     </Border>
                                     <Border Background="{StaticResource SmokeBackgroundBrush}"
@@ -695,11 +704,9 @@
                                             <TextBox x:Name="ToggleReplayTextBox" x:FieldModifier="public"
                                                      Grid.Column="1" IsReadOnly="True" Width="80"
                                                      TextAlignment="Center" FontFamily="Consolas" FontSize="12"
-                                                     Background="#1a1a1a"
-                                                     BorderBrush="#3a3a3a"
                                                      Foreground="{StaticResource AccentBrush}"
-                                                     Padding="8,0" Height="30" VerticalContentAlignment="Center"
-                                                     CornerRadius="6" />
+                                                     Padding="8,3" Height="24" VerticalContentAlignment="Center"
+                                                     CornerRadius="4" />
                                         </Grid>
                                     </Border>
                                     <Border Background="{StaticResource SmokeBackgroundBrush}"
@@ -714,11 +721,9 @@
                                             <TextBox x:Name="ToggleProfileKeyTextBox" x:FieldModifier="public"
                                                      Grid.Column="1" IsReadOnly="True" Width="80"
                                                      TextAlignment="Center" FontFamily="Consolas" FontSize="12"
-                                                     Background="#1a1a1a"
-                                                     BorderBrush="#3a3a3a"
                                                      Foreground="{StaticResource AccentBrush}"
-                                                     Padding="8,0" Height="30" VerticalContentAlignment="Center"
-                                                     CornerRadius="6" />
+                                                     Padding="8,3" Height="24" VerticalContentAlignment="Center"
+                                                     CornerRadius="4" />
                                         </Grid>
                                     </Border>
                                 </StackPanel>
@@ -739,20 +744,20 @@
                                 </StackPanel>
                             </Expander.Header>
                             <Expander.Content>
-                                <StackPanel Spacing="6" Padding="0,4,0,8">
-                                    <Grid>
+                                <StackPanel Spacing="0" Padding="0,0,0,12">
+                                    <Grid Padding="0,6">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="Always On Top" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="AlwaysOnTopSwitch" x:FieldModifier="public" Grid.Column="1"
                                                       IsOn="False" Toggled="AlwaysOnTopSwitch_Toggled" MinWidth="0" MinHeight="0"
-                                                      OnContent="" OffContent="" />
+                                                      OnContent="" OffContent="" VerticalAlignment="Center" />
                                     </Grid>
-                                    <Grid>
+                                    <Grid Padding="0,6">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="System Tray" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="MinimizeToTraySwitch" x:FieldModifier="public" Grid.Column="1"
                                                       IsOn="False" MinWidth="0" MinHeight="0"
-                                                      OnContent="" OffContent="" />
+                                                      OnContent="" OffContent="" VerticalAlignment="Center" />
                                     </Grid>
                                 </StackPanel>
                             </Expander.Content>
