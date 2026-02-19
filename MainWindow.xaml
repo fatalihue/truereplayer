@@ -413,7 +413,7 @@
                                                  Background="#1a1a1a" Foreground="White"
                                                  HorizontalContentAlignment="Left"
                                                  VerticalContentAlignment="Center"
-                                                 Padding="8,0" />
+                                                 Padding="8,5" />
                                     </DataTemplate>
                                 </controls:DataGridTemplateColumn.CellEditingTemplate>
                             </controls:DataGridTemplateColumn>
@@ -430,7 +430,7 @@
                                 <controls:DataGridTemplateColumn.CellEditingTemplate>
                                     <DataTemplate>
                                         <TextBox Text="{Binding X, Mode=TwoWay}" Background="#1a1a1a" Foreground="White"
-                                                 Padding="8,0" VerticalContentAlignment="Center" />
+                                                 Padding="8,5" VerticalContentAlignment="Center" />
                                     </DataTemplate>
                                 </controls:DataGridTemplateColumn.CellEditingTemplate>
                             </controls:DataGridTemplateColumn>
@@ -447,7 +447,7 @@
                                 <controls:DataGridTemplateColumn.CellEditingTemplate>
                                     <DataTemplate>
                                         <TextBox Text="{Binding Y, Mode=TwoWay}" Background="#1a1a1a" Foreground="White"
-                                                 Padding="8,0" VerticalContentAlignment="Center" />
+                                                 Padding="8,5" VerticalContentAlignment="Center" />
                                     </DataTemplate>
                                 </controls:DataGridTemplateColumn.CellEditingTemplate>
                             </controls:DataGridTemplateColumn>
@@ -466,13 +466,13 @@
                                     <DataTemplate>
                                         <TextBox Text="{Binding Delay, Mode=TwoWay, Converter={StaticResource NonNegativeIntConverter}}"
                                                  Background="#1a1a1a" Foreground="#FFD93D"
-                                                 Padding="8,0" VerticalContentAlignment="Center" />
+                                                 Padding="8,5" VerticalContentAlignment="Center" />
                                     </DataTemplate>
                                 </controls:DataGridTemplateColumn.CellEditingTemplate>
                             </controls:DataGridTemplateColumn>
 
-                            <!-- Comment column with muted color -->
-                            <controls:DataGridTemplateColumn Header="Comment" Width="*" MinWidth="85">
+                            <!-- Notes column with muted color -->
+                            <controls:DataGridTemplateColumn Header="Notes" Width="*" MinWidth="85">
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding Comment}" FontSize="12"
@@ -485,7 +485,7 @@
                                     <DataTemplate>
                                         <TextBox Text="{Binding Comment, Mode=TwoWay}"
                                                  Background="#1a1a1a" Foreground="White"
-                                                 Padding="8,0" VerticalContentAlignment="Center" />
+                                                 Padding="8,5" VerticalContentAlignment="Center" />
                                     </DataTemplate>
                                 </controls:DataGridTemplateColumn.CellEditingTemplate>
                             </controls:DataGridTemplateColumn>

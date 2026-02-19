@@ -69,6 +69,12 @@
             <SolidColorBrush x:Key="HotkeyBadgeForegroundBrush" Color="#FFD93D" />
             <SolidColorBrush x:Key="HotkeyBadgeBorderBrush" Color="#26FFD93D" />
 
+            <!-- DataGrid cell focus border (softer than default white) -->
+            <SolidColorBrush x:Key="DataGridCellFocusVisualPrimaryBrush" Color="#40FFFFFF" />
+            <SolidColorBrush x:Key="DataGridCellFocusVisualSecondaryBrush" Color="Transparent" />
+            <SolidColorBrush x:Key="SystemControlFocusVisualPrimaryBrush" Color="#40FFFFFF" />
+            <SolidColorBrush x:Key="SystemControlFocusVisualSecondaryBrush" Color="Transparent" />
+
             <!-- Thinner scrollbars (default is 12) -->
             <x:Double x:Key="ScrollBarSize">6</x:Double>
 
