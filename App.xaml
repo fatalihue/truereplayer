@@ -70,7 +70,7 @@
             <SolidColorBrush x:Key="HotkeyBadgeBorderBrush" Color="#26FFD93D" />
 
             <!-- Corner radii -->
-            <CornerRadius x:Key="CardCornerRadius">12</CornerRadius>
+            <CornerRadius x:Key="CardCornerRadius">6</CornerRadius>
             <CornerRadius x:Key="SmallCornerRadius">4</CornerRadius>
             <CornerRadius x:Key="MediumCornerRadius">8</CornerRadius>
 

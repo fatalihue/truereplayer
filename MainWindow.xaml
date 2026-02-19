@@ -366,7 +366,7 @@
                             </controls:DataGridTemplateColumn>
 
                             <!-- Action column with colored pills -->
-                            <controls:DataGridTemplateColumn Header="Action" Width="155" MinWidth="155">
+                            <controls:DataGridTemplateColumn Header="Action" Width="140" MinWidth="140">
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <Border Background="{Binding ActionType, Converter={StaticResource ActionTypeToBrushConverter}, ConverterParameter=background}"
@@ -393,7 +393,7 @@
                             </controls:DataGridTemplateColumn>
 
                             <!-- Key column with badge style -->
-                            <controls:DataGridTemplateColumn Header="Key" Width="90" MinWidth="90">
+                            <controls:DataGridTemplateColumn Header="Key" Width="100" MinWidth="100">
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <Border Background="#1a1a1a" CornerRadius="4"
@@ -453,7 +453,7 @@
                             </controls:DataGridTemplateColumn>
 
                             <!-- Delay column with golden color -->
-                            <controls:DataGridTemplateColumn Header="Delay" Width="85" MinWidth="85">
+                            <controls:DataGridTemplateColumn Header="Delay" Width="70" MinWidth="70">
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding Delay, Converter={StaticResource NonNegativeIntConverter}}"
@@ -554,12 +554,12 @@
 
             <!-- ========== COLUMN 2: SETTINGS PANEL ========== -->
             <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
-                <StackPanel x:Name="ConfigPanel" Spacing="6">
+                <StackPanel x:Name="ConfigPanel" Spacing="4">
 
                     <!-- EXPANDER: Execution -->
                     <Border Background="{StaticResource LayerBackgroundBrush}"
                             BorderBrush="{StaticResource CardBorderBrush}"
-                            BorderThickness="1" CornerRadius="{StaticResource CardCornerRadius}">
+                            BorderThickness="0" CornerRadius="{StaticResource CardCornerRadius}">
                         <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                                   IsExpanded="True" Background="Transparent" Padding="0">
                             <Expander.Header>
@@ -569,7 +569,7 @@
                                 </StackPanel>
                             </Expander.Header>
                             <Expander.Content>
-                                <StackPanel Spacing="0" Padding="4,0,0,12">
+                                <StackPanel Spacing="0" Padding="4,4,0,4">
                                     <!-- Fixed Delay -->
                                     <Grid Padding="0,0">
                                         <Grid.ColumnDefinitions>
@@ -577,18 +577,17 @@
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="Fixed Delay" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                                             <TextBox x:Name="CustomDelayTextBox" x:FieldModifier="public"
-                                                     Text="100" Width="64" Height="24" GotFocus="TextBox_SelectAll"
-                                                     Padding="8,4" FontSize="13" FontFamily="Consolas" TextAlignment="Right"
+                                                     Text="100" Width="64" Height="10" GotFocus="TextBox_SelectAll"
+                                                     Padding="8,8" FontSize="13" FontFamily="Consolas" TextAlignment="Left"
                                                      VerticalContentAlignment="Center" CornerRadius="4" />
-                                            <TextBlock Text="ms" FontSize="11" Foreground="{StaticResource TextDisabledBrush}" VerticalAlignment="Center" />
+                                            <TextBlock Text="ms" FontSize="11" Foreground="{StaticResource TextDisabledBrush}" VerticalAlignment="Center" Width="16" />
                                             <ToggleSwitch x:Name="UseCustomDelaySwitch" x:FieldModifier="public"
                                                           IsOn="True" MinWidth="0" MinHeight="0"
                                                           OnContent="" OffContent="" VerticalAlignment="Center" />
                                         </StackPanel>
                                     </Grid>
-                                    <Rectangle Height="1" Fill="{StaticResource DividerBrush}" Margin="0,5" />
                                     <!-- Loop Count -->
                                     <Grid Padding="0,0">
                                         <Grid.ColumnDefinitions>
@@ -596,18 +595,17 @@
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="Loop Count" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                                             <TextBox x:Name="LoopCountTextBox" x:FieldModifier="public"
-                                                     Text="1" Width="64" Height="24" GotFocus="TextBox_SelectAll"
-                                                     Padding="8,4" FontSize="13" FontFamily="Consolas" TextAlignment="Right"
+                                                     Text="1" Width="64" Height="10" GotFocus="TextBox_SelectAll"
+                                                     Padding="8,8" FontSize="13" FontFamily="Consolas" TextAlignment="Left"
                                                      VerticalContentAlignment="Center" CornerRadius="4" />
-                                            <TextBlock Text="x" FontSize="11" Foreground="{StaticResource TextDisabledBrush}" VerticalAlignment="Center" />
+                                            <TextBlock Text="x" FontSize="11" Foreground="{StaticResource TextDisabledBrush}" VerticalAlignment="Center" Width="16" />
                                             <ToggleSwitch x:Name="EnableLoopSwitch" x:FieldModifier="public"
                                                           IsOn="False" MinWidth="0" MinHeight="0"
                                                           OnContent="" OffContent="" VerticalAlignment="Center" />
                                         </StackPanel>
                                     </Grid>
-                                    <Rectangle Height="1" Fill="{StaticResource DividerBrush}" Margin="0,5" />
                                     <!-- Loop Delay -->
                                     <Grid Padding="0,0">
                                         <Grid.ColumnDefinitions>
@@ -615,12 +613,12 @@
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="Loop Delay" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                                             <TextBox x:Name="LoopIntervalTextBox" x:FieldModifier="public"
-                                                     Text="1000" Width="64" Height="24" GotFocus="TextBox_SelectAll"
-                                                     Padding="8,4" FontSize="13" FontFamily="Consolas" TextAlignment="Right"
+                                                     Text="1000" Width="64" Height="10" GotFocus="TextBox_SelectAll"
+                                                     Padding="8,8" FontSize="13" FontFamily="Consolas" TextAlignment="Left"
                                                      VerticalContentAlignment="Center" CornerRadius="4" />
-                                            <TextBlock Text="ms" FontSize="11" Foreground="{StaticResource TextDisabledBrush}" VerticalAlignment="Center" />
+                                            <TextBlock Text="ms" FontSize="11" Foreground="{StaticResource TextDisabledBrush}" VerticalAlignment="Center" Width="16" />
                                             <ToggleSwitch x:Name="LoopIntervalSwitch" x:FieldModifier="public"
                                                           IsOn="False" MinWidth="0" MinHeight="0"
                                                           OnContent="" OffContent="" VerticalAlignment="Center" />
@@ -634,7 +632,7 @@
                     <!-- EXPANDER: Recording -->
                     <Border Background="{StaticResource LayerBackgroundBrush}"
                             BorderBrush="{StaticResource CardBorderBrush}"
-                            BorderThickness="1" CornerRadius="{StaticResource CardCornerRadius}">
+                            BorderThickness="0" CornerRadius="{StaticResource CardCornerRadius}">
                         <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                                   IsExpanded="True" Background="Transparent" Padding="0">
                             <Expander.Header>
@@ -673,7 +671,7 @@
                     <!-- EXPANDER: Hotkeys -->
                     <Border Background="{StaticResource LayerBackgroundBrush}"
                             BorderBrush="{StaticResource CardBorderBrush}"
-                            BorderThickness="1" CornerRadius="{StaticResource CardCornerRadius}">
+                            BorderThickness="0" CornerRadius="{StaticResource CardCornerRadius}">
                         <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                                   IsExpanded="True" Background="Transparent" Padding="0">
                             <Expander.Header>
@@ -683,7 +681,7 @@
                                 </StackPanel>
                             </Expander.Header>
                             <Expander.Content>
-                                <StackPanel Spacing="6" Padding="0,0,0,12">
+                                <StackPanel Spacing="6" Padding="2,4,0,4">
                                     <StackPanel.Resources>
                                         <SolidColorBrush x:Key="TextControlBackground" Color="#323232" />
                                         <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#3a3a3a" />
@@ -694,7 +692,7 @@
                                     </StackPanel.Resources>
                                     <Border Background="{StaticResource SmokeBackgroundBrush}"
                                             BorderBrush="{StaticResource SubtleBorderBrush}"
-                                            BorderThickness="1" CornerRadius="4" Padding="12,7">
+                                            BorderThickness="1" CornerRadius="4" Padding="12,5">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -705,13 +703,13 @@
                                                      Grid.Column="1" IsReadOnly="True" Width="80"
                                                      TextAlignment="Center" FontFamily="Consolas" FontSize="12"
                                                      Foreground="{StaticResource AccentBrush}"
-                                                     Padding="8,3" Height="24" VerticalContentAlignment="Center"
+                                                     Padding="8,8" Height="15" VerticalContentAlignment="Center"
                                                      CornerRadius="4" />
                                         </Grid>
                                     </Border>
                                     <Border Background="{StaticResource SmokeBackgroundBrush}"
                                             BorderBrush="{StaticResource SubtleBorderBrush}"
-                                            BorderThickness="1" CornerRadius="4" Padding="12,7">
+                                            BorderThickness="1" CornerRadius="4" Padding="12,5">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -722,13 +720,13 @@
                                                      Grid.Column="1" IsReadOnly="True" Width="80"
                                                      TextAlignment="Center" FontFamily="Consolas" FontSize="12"
                                                      Foreground="{StaticResource AccentBrush}"
-                                                     Padding="8,3" Height="24" VerticalContentAlignment="Center"
+                                                     Padding="8,8" Height="15" VerticalContentAlignment="Center"
                                                      CornerRadius="4" />
                                         </Grid>
                                     </Border>
                                     <Border Background="{StaticResource SmokeBackgroundBrush}"
                                             BorderBrush="{StaticResource SubtleBorderBrush}"
-                                            BorderThickness="1" CornerRadius="4" Padding="12,7">
+                                            BorderThickness="1" CornerRadius="4" Padding="12,5">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -739,7 +737,7 @@
                                                      Grid.Column="1" IsReadOnly="True" Width="80"
                                                      TextAlignment="Center" FontFamily="Consolas" FontSize="12"
                                                      Foreground="{StaticResource AccentBrush}"
-                                                     Padding="8,3" Height="24" VerticalContentAlignment="Center"
+                                                     Padding="8,8" Height="15" VerticalContentAlignment="Center"
                                                      CornerRadius="4" />
                                         </Grid>
                                     </Border>
@@ -751,7 +749,7 @@
                     <!-- EXPANDER: Window -->
                     <Border Background="{StaticResource LayerBackgroundBrush}"
                             BorderBrush="{StaticResource CardBorderBrush}"
-                            BorderThickness="1" CornerRadius="{StaticResource CardCornerRadius}">
+                            BorderThickness="0" CornerRadius="{StaticResource CardCornerRadius}">
                         <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                                   IsExpanded="True" Background="Transparent" Padding="0">
                             <Expander.Header>
