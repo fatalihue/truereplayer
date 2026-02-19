@@ -53,6 +53,7 @@
             <SolidColorBrush x:Key="TextControlBorderBrush" Color="#3a3a3a" />
             <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#4a4a4a" />
             <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#0078D4" />
+
         </Grid.Resources>
 
         <Grid.RowDefinitions>
@@ -338,6 +339,22 @@
                         <controls:DataGrid.Columns>
                             <!-- Row number column -->
                             <controls:DataGridTemplateColumn Header="#" Width="35" MinWidth="35" IsReadOnly="True">
+                                <controls:DataGridTemplateColumn.HeaderStyle>
+                                    <Style TargetType="controlsPrimitives:DataGridColumnHeader"
+                                           xmlns:controlsPrimitives="using:CommunityToolkit.WinUI.UI.Controls.Primitives">
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Setter Property="Foreground" Value="#9A9A9A" />
+                                        <Setter Property="FontSize" Value="12" />
+                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                        <!-- # header: Left, Top, Right, Bottom -->
+                                        <Setter Property="Padding" Value="12,0,-20,0" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Left" />
+                                        <Setter Property="VerticalContentAlignment" Value="Center" />
+                                        <Setter Property="BorderBrush" Value="#14FFFFFF" />
+                                        <Setter Property="BorderThickness" Value="0,0,0,1" />
+                                        <Setter Property="SeparatorVisibility" Value="Collapsed" />
+                                    </Style>
+                                </controls:DataGridTemplateColumn.HeaderStyle>
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding RowNumber}" FontSize="11"
@@ -552,9 +569,9 @@
                                 </StackPanel>
                             </Expander.Header>
                             <Expander.Content>
-                                <StackPanel Spacing="0" Padding="0,0,0,12">
+                                <StackPanel Spacing="0" Padding="4,0,0,12">
                                     <!-- Fixed Delay -->
-                                    <Grid Padding="0,6">
+                                    <Grid Padding="0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -573,7 +590,7 @@
                                     </Grid>
                                     <Rectangle Height="1" Fill="{StaticResource DividerBrush}" Margin="0,5" />
                                     <!-- Loop Count -->
-                                    <Grid Padding="0,6">
+                                    <Grid Padding="0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -592,7 +609,7 @@
                                     </Grid>
                                     <Rectangle Height="1" Fill="{StaticResource DividerBrush}" Margin="0,5" />
                                     <!-- Loop Delay -->
-                                    <Grid Padding="0,6">
+                                    <Grid Padding="0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -627,23 +644,23 @@
                                 </StackPanel>
                             </Expander.Header>
                             <Expander.Content>
-                                <StackPanel Spacing="0" Padding="0,0,0,12">
-                                    <Grid Padding="0,6">
+                                <StackPanel Spacing="0" Padding="4,0,0,4">
+                                    <Grid Padding="0,0">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="Mouse Clicks" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="RecordMouseSwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" VerticalAlignment="Center" />
                                     </Grid>
-                                    <Grid Padding="0,6">
+                                    <Grid Padding="0,0">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="Mouse Scroll" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="RecordScrollSwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" VerticalAlignment="Center" />
                                     </Grid>
-                                    <Grid Padding="0,6">
+                                    <Grid Padding="0,0">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="Keyboard" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="RecordKeyboardSwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" VerticalAlignment="Center" />
                                     </Grid>
-                                    <Grid Padding="0,6">
+                                    <Grid Padding="0,0">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="Profile Keys" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="ProfileKeySwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" VerticalAlignment="Center" />
@@ -744,15 +761,15 @@
                                 </StackPanel>
                             </Expander.Header>
                             <Expander.Content>
-                                <StackPanel Spacing="0" Padding="0,0,0,12">
-                                    <Grid Padding="0,6">
+                                <StackPanel Spacing="0" Padding="4,0,0,4">
+                                    <Grid Padding="0,0">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="Always On Top" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="AlwaysOnTopSwitch" x:FieldModifier="public" Grid.Column="1"
                                                       IsOn="False" Toggled="AlwaysOnTopSwitch_Toggled" MinWidth="0" MinHeight="0"
                                                       OnContent="" OffContent="" VerticalAlignment="Center" />
                                     </Grid>
-                                    <Grid Padding="0,6">
+                                    <Grid Padding="0,0">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="System Tray" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="MinimizeToTraySwitch" x:FieldModifier="public" Grid.Column="1"
