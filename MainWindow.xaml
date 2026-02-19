@@ -397,7 +397,7 @@
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <Border Background="#1a1a1a" CornerRadius="4"
-                                                Padding="8,2" Margin="5,3"
+                                                Padding="8,2" Margin="5,6"
                                                 HorizontalAlignment="Left"
                                                 Visibility="{Binding DisplayKey, Converter={StaticResource StringToVisibilityConverter}}">
                                             <TextBlock Text="{Binding DisplayKey}" Foreground="White"
@@ -553,7 +553,7 @@
             </Grid>
 
             <!-- ========== COLUMN 2: SETTINGS PANEL ========== -->
-            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+            <ScrollViewer x:Name="SettingsScrollViewer" Grid.Column="2" VerticalScrollBarVisibility="Auto">
                 <StackPanel x:Name="ConfigPanel" Spacing="4">
 
                     <!-- EXPANDER: Execution -->
@@ -571,7 +571,7 @@
                             <Expander.Content>
                                 <StackPanel Spacing="0" Padding="4,4,0,4">
                                     <!-- Fixed Delay -->
-                                    <Grid Padding="0,0">
+                                    <Grid Padding="0,-2">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -589,7 +589,7 @@
                                         </StackPanel>
                                     </Grid>
                                     <!-- Loop Count -->
-                                    <Grid Padding="0,0">
+                                    <Grid Padding="0,-2">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -607,7 +607,7 @@
                                         </StackPanel>
                                     </Grid>
                                     <!-- Loop Delay -->
-                                    <Grid Padding="0,0">
+                                    <Grid Padding="0,-2">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -643,22 +643,22 @@
                             </Expander.Header>
                             <Expander.Content>
                                 <StackPanel Spacing="0" Padding="4,0,0,4">
-                                    <Grid Padding="0,0">
+                                    <Grid Padding="0,-2">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="Mouse Clicks" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="RecordMouseSwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" VerticalAlignment="Center" />
                                     </Grid>
-                                    <Grid Padding="0,0">
+                                    <Grid Padding="0,-2">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="Mouse Scroll" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="RecordScrollSwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" VerticalAlignment="Center" />
                                     </Grid>
-                                    <Grid Padding="0,0">
+                                    <Grid Padding="0,-2">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="Keyboard" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="RecordKeyboardSwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" VerticalAlignment="Center" />
                                     </Grid>
-                                    <Grid Padding="0,0">
+                                    <Grid Padding="0,-2">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="Profile Keys" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="ProfileKeySwitch" x:FieldModifier="public" Grid.Column="1" IsOn="True" MinWidth="0" MinHeight="0" OnContent="" OffContent="" VerticalAlignment="Center" />
@@ -681,66 +681,37 @@
                                 </StackPanel>
                             </Expander.Header>
                             <Expander.Content>
-                                <StackPanel Spacing="6" Padding="2,4,0,4">
-                                    <StackPanel.Resources>
-                                        <SolidColorBrush x:Key="TextControlBackground" Color="#323232" />
-                                        <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#3a3a3a" />
-                                        <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#323232" />
-                                        <SolidColorBrush x:Key="TextControlBorderBrush" Color="#1AFFFFFF" />
-                                        <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#26FFFFFF" />
-                                        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#0078D4" />
-                                    </StackPanel.Resources>
-                                    <Border Background="{StaticResource SmokeBackgroundBrush}"
-                                            BorderBrush="{StaticResource SubtleBorderBrush}"
-                                            BorderThickness="1" CornerRadius="4" Padding="12,5">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Recording" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
-                                            <TextBox x:Name="ToggleRecordingTextBox" x:FieldModifier="public"
-                                                     Grid.Column="1" IsReadOnly="True" Width="80"
-                                                     TextAlignment="Center" FontFamily="Consolas" FontSize="12"
-                                                     Foreground="{StaticResource AccentBrush}"
-                                                     Padding="8,8" Height="15" VerticalContentAlignment="Center"
-                                                     CornerRadius="4" />
-                                        </Grid>
-                                    </Border>
-                                    <Border Background="{StaticResource SmokeBackgroundBrush}"
-                                            BorderBrush="{StaticResource SubtleBorderBrush}"
-                                            BorderThickness="1" CornerRadius="4" Padding="12,5">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Replay" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
-                                            <TextBox x:Name="ToggleReplayTextBox" x:FieldModifier="public"
-                                                     Grid.Column="1" IsReadOnly="True" Width="80"
-                                                     TextAlignment="Center" FontFamily="Consolas" FontSize="12"
-                                                     Foreground="{StaticResource AccentBrush}"
-                                                     Padding="8,8" Height="15" VerticalContentAlignment="Center"
-                                                     CornerRadius="4" />
-                                        </Grid>
-                                    </Border>
-                                    <Border Background="{StaticResource SmokeBackgroundBrush}"
-                                            BorderBrush="{StaticResource SubtleBorderBrush}"
-                                            BorderThickness="1" CornerRadius="4" Padding="12,5">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Profile Keys" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
-                                            <TextBox x:Name="ToggleProfileKeyTextBox" x:FieldModifier="public"
-                                                     Grid.Column="1" IsReadOnly="True" Width="80"
-                                                     TextAlignment="Center" FontFamily="Consolas" FontSize="12"
-                                                     Foreground="{StaticResource AccentBrush}"
-                                                     Padding="8,8" Height="15" VerticalContentAlignment="Center"
-                                                     CornerRadius="4" />
-                                        </Grid>
-                                    </Border>
+                                <StackPanel Spacing="0" Padding="4,4,4,4">
+                                    <Grid Padding="0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="Recording" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
+                                        <TextBox x:Name="ToggleRecordingTextBox" x:FieldModifier="public"
+                                                 Grid.Column="1" IsReadOnly="True" Width="110"
+                                                 TextAlignment="Center" FontFamily="Consolas" FontSize="12"
+                                                 Foreground="{StaticResource AccentBrush}"
+                                                 Padding="8,8" Height="10" VerticalContentAlignment="Center"
+                                                 CornerRadius="4" />
+                                    </Grid>
+                                    <Grid Padding="0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="Replay" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
+                                        <TextBox x:Name="ToggleReplayTextBox" x:FieldModifier="public"
+                                                 Grid.Column="1" IsReadOnly="True" Width="110"
+                                                 TextAlignment="Center" FontFamily="Consolas" FontSize="12"
+                                                 Foreground="{StaticResource AccentBrush}"
+                                                 Padding="8,8" Height="10" VerticalContentAlignment="Center"
+                                                 CornerRadius="4" />
+                                    </Grid>
+                                    <Grid Padding="0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="Profile Keys" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
+                                        <TextBox x:Name="ToggleProfileKeyTextBox" x:FieldModifier="public"
+                                                 Grid.Column="1" IsReadOnly="True" Width="110"
+                                                 TextAlignment="Center" FontFamily="Consolas" FontSize="12"
+                                                 Foreground="{StaticResource AccentBrush}"
+                                                 Padding="8,8" Height="10" VerticalContentAlignment="Center"
+                                                 CornerRadius="4" />
+                                    </Grid>
                                 </StackPanel>
                             </Expander.Content>
                         </Expander>
@@ -760,14 +731,14 @@
                             </Expander.Header>
                             <Expander.Content>
                                 <StackPanel Spacing="0" Padding="4,0,0,4">
-                                    <Grid Padding="0,0">
+                                    <Grid Padding="0,-2">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="Always On Top" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="AlwaysOnTopSwitch" x:FieldModifier="public" Grid.Column="1"
                                                       IsOn="False" Toggled="AlwaysOnTopSwitch_Toggled" MinWidth="0" MinHeight="0"
                                                       OnContent="" OffContent="" VerticalAlignment="Center" />
                                     </Grid>
-                                    <Grid Padding="0,0">
+                                    <Grid Padding="0,-2">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="System Tray" Foreground="{StaticResource TextSecondaryBrush}" FontSize="13" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="MinimizeToTraySwitch" x:FieldModifier="public" Grid.Column="1"

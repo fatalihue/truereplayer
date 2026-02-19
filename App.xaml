@@ -69,6 +69,9 @@
             <SolidColorBrush x:Key="HotkeyBadgeForegroundBrush" Color="#FFD93D" />
             <SolidColorBrush x:Key="HotkeyBadgeBorderBrush" Color="#26FFD93D" />
 
+            <!-- Thinner scrollbars (default is 12) -->
+            <x:Double x:Key="ScrollBarSize">6</x:Double>
+
             <!-- Corner radii -->
             <CornerRadius x:Key="CardCornerRadius">6</CornerRadius>
             <CornerRadius x:Key="SmallCornerRadius">4</CornerRadius>
