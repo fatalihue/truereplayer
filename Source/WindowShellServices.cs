@@ -186,7 +186,7 @@ namespace TrueReplayer.Services
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             var windowId = Win32Interop.GetWindowIdFromWindow(hwnd);
             var appWindow = AppWindow.GetFromWindowId(windowId);
-            appWindow.Resize(new Windows.Graphics.SizeInt32(1090, 620));
+            appWindow.Resize(new Windows.Graphics.SizeInt32(1180, 750));
             CustomizeTitleBar(appWindow);
             CenterWindow(appWindow, windowId);
         }
@@ -263,8 +263,8 @@ namespace TrueReplayer.Services
             if (msg == WM_GETMINMAXINFO)
             {
                 MINMAXINFO mmi = Marshal.PtrToStructure<MINMAXINFO>(lParam)!;
-                mmi.ptMinTrackSize.x = 1090;
-                mmi.ptMinTrackSize.y = 620;
+                mmi.ptMinTrackSize.x = 1180;
+                mmi.ptMinTrackSize.y = 750;
                 Marshal.StructureToPtr(mmi, lParam, true);
                 return IntPtr.Zero;
             }
