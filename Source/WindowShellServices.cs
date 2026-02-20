@@ -285,7 +285,7 @@ namespace TrueReplayer.Services
             {
                 int command = wParam.ToInt32() & 0xFFF0;
 
-                if (command == SC_MINIMIZE && ((MainWindow)window).MinimizeToTraySwitch.IsOn)
+                if (command == SC_MINIMIZE && ((MainWindow)window).IsMinimizeToTrayEnabled())
                 {
                     TrayIconService.Initialize((MainWindow)window, hwnd);
                     TrayIconService.ShowMinimizeBalloon();

@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+@theme {
+  /* Backgrounds */
+  --color-bg-base: #0c1220;
+  --color-bg-surface: #131b2e;
+  --color-bg-card: #1a2338;
+  --color-bg-elevated: #212b42;
+  --color-bg-input: #0e1628;
+
+  /* Borders */
+  --color-border-subtle: rgba(255, 255, 255, 0.06);
+  --color-border-default: rgba(255, 255, 255, 0.1);
+  --color-border-strong: rgba(255, 255, 255, 0.15);
+
+  /* Text */
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #c5c5c5;
+  --color-text-tertiary: #7a8599;
+  --color-text-disabled: #4a5568;
+
+  /* Accent */
+  --color-accent: #60cdff;
+  --color-accent-solid: #0078d4;
+  --color-accent-hover: #7dd6ff;
+
+  /* Semantic */
+  --color-recording: #ff6b6b;
+  --color-recording-bg: rgba(255, 107, 107, 0.1);
+  --color-replay: #6bcb77;
+  --color-replay-bg: rgba(107, 203, 119, 0.1);
+
+  /* Action type pills */
+  --color-action-mouse-fg: #a78bfa;
+  --color-action-mouse-bg: rgba(167, 139, 250, 0.1);
+  --color-action-key-fg: #60cdff;
+  --color-action-key-bg: rgba(96, 205, 255, 0.1);
+  --color-action-scroll-fg: #6bcb77;
+  --color-action-scroll-bg: rgba(107, 203, 119, 0.1);
+
+  /* Hotkey badge */
+  --color-hotkey-fg: #ffd93d;
+  --color-hotkey-bg: rgba(255, 217, 61, 0.08);
+  --color-hotkey-border: rgba(255, 217, 61, 0.15);
+
+  /* Delay */
+  --color-delay: #ffd93d;
+
+  /* Fonts */
+  --font-mono: 'Consolas', 'Courier New', monospace;
+}
+
+/* Global resets */
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--color-bg-base);
+  color: var(--color-text-primary);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Title bar drag region */
+.drag-region {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}

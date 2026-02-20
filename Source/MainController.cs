@@ -1,7 +1,5 @@
 ﻿using System;
 using System.Collections.ObjectModel;
-using CommunityToolkit.WinUI.UI.Controls;
-using Microsoft.UI.Xaml.Controls;
 using TrueReplayer.Models;
 using TrueReplayer.Services;
 
@@ -15,11 +13,8 @@ namespace TrueReplayer.Controllers
         private readonly ActionRecorder recorder;
         private readonly RecordingService recordingService;
         private readonly ReplayService replayService;
-        private readonly Button recordingButton;
-        private readonly Button replayButton;
-        private readonly TextBox delayTextBox;
-        private readonly ToggleSwitch customDelaySwitch;
-        private readonly DataGrid actionsGrid;
+        private readonly Func<int> getDelayFunc;
+        private readonly Action? onButtonStatesChanged;
 
         private DateTime lastActionTime;
 
@@ -28,21 +23,15 @@ namespace TrueReplayer.Controllers
             ActionRecorder recorder,
             RecordingService recordingService,
             ReplayService replayService,
-            Button recordingButton,
-            Button replayButton,
-            TextBox delayTextBox,
-            ToggleSwitch customDelaySwitch,
-            DataGrid actionsGrid)
+            Func<int> getDelay,
+            Action? onButtonStatesChanged = null)
         {
             this.actions = actions;
             this.recorder = recorder;
             this.recordingService = recordingService;
             this.replayService = replayService;
-            this.recordingButton = recordingButton;
-            this.replayButton = replayButton;
-            this.delayTextBox = delayTextBox;
-            this.customDelaySwitch = customDelaySwitch;
-            this.actionsGrid = actionsGrid;
+            this.getDelayFunc = getDelay;
+            this.onButtonStatesChanged = onButtonStatesChanged;
 
             Instance = this;
         }
@@ -79,8 +68,7 @@ namespace TrueReplayer.Controllers
 
         public void UpdateButtonStates()
         {
-            recordingButton.IsEnabled = true;
-            replayButton.IsEnabled = actions.Count > 0;
+            onButtonStatesChanged?.Invoke();
         }
 
         public void SetLastActionTime(DateTime time)
@@ -88,18 +76,11 @@ namespace TrueReplayer.Controllers
             lastActionTime = time;
         }
 
-        public int GetDelay()
-        {
-            return customDelaySwitch.IsOn && int.TryParse(delayTextBox.Text, out int delay) ? delay : 100;
-        }
+        public int GetDelay() => getDelayFunc();
 
         public void ScrollToLastAction()
         {
-            if (actions.Count > 0)
-            {
-                var lastAction = actions[^1];
-                actionsGrid.ScrollIntoView(lastAction, null);
-            }
+            // Handled by bridge — React auto-scrolls on actions:updated
         }
 
         private string? hotkeyJustPressed;

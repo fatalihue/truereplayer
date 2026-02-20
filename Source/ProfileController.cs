@@ -9,7 +9,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using System.Collections.ObjectModel;
-using TrueReplayer.Managers;
 using TrueReplayer.Models;
 using TrueReplayer.Services;
 using WinForms = System.Windows.Forms;
@@ -53,7 +52,8 @@ namespace TrueReplayer.Controllers
 
             if (dialog.ShowDialog() == WinForms.DialogResult.OK)
             {
-                var profile = UISettingsManager.CreateFromUI(window);
+                var profile = UserProfile.Current;
+                profile.Actions = window.Actions;
                 profile.LastProfileDirectory = Path.GetDirectoryName(dialog.FileName)!;
 
                 try
@@ -94,8 +94,8 @@ namespace TrueReplayer.Controllers
                 if (profile != null)
                 {
                     UserProfile.Current = profile;
-                    UISettingsManager.ApplyToUI(window, profile);
                     UserProfile.Current.LastProfileDirectory = Path.GetDirectoryName(path)!;
+                    // Bridge will call ApplyProfile when it receives the loaded profile
                 }
             }
         }
@@ -142,8 +142,6 @@ namespace TrueReplayer.Controllers
         public void ResetProfile()
         {
             UserProfile.Current = UserProfile.Default;
-            UISettingsManager.ApplyToUI(window, UserProfile.Default);
-
             UpdateProfileColors(null);
         }
 
@@ -199,13 +197,9 @@ namespace TrueReplayer.Controllers
             if (suppressWatcher)
                 suppressWatcherRefresh = true;
 
-            window.ProfilesListBox.ItemsSource = null;
-
             LoadProfileList();
 
             UpdateProfileColors(selectedProfileName);
-
-            window.ProfilesListBox.ItemsSource = ProfileEntries;
         }
 
         private void SetupProfileWatcher()
@@ -270,10 +264,10 @@ namespace TrueReplayer.Controllers
                 if (profile != null)
                 {
                     UserProfile.Current = profile;
-                    UISettingsManager.ApplyToUI(window, profile);
                     selectedProfileName = selectedProfile;
                     UpdateProfileColors(selectedProfileName);
-                    TrayIconService.UpdateTrayIcon(); // Atualiza o ícone ao carregar perfil
+                    TrayIconService.UpdateTrayIcon();
+                    // Bridge handles pushing the profile state to React
                 }
             }
         }
@@ -282,13 +276,14 @@ namespace TrueReplayer.Controllers
         {
             if (ProfileEntries.Any(p => p.Name == profile))
             {
-                window.ProfilesListBox.SelectedItem = ProfileEntries.First(p => p.Name == profile);
+                selectedProfileName = profile;
             }
         }
 
         public async Task DeleteSelectedProfileAsync()
         {
-            if (window.ProfilesListBox.SelectedItem is ProfileEntry selectedProfile)
+            var selectedProfile = ProfileEntries.FirstOrDefault(p => p.Name == selectedProfileName);
+            if (selectedProfile != null)
             {
                 var confirmResult = WinForms.MessageBox.Show($"Delete profile '{selectedProfile.Name}'?", "Confirm Delete", WinForms.MessageBoxButtons.YesNo, WinForms.MessageBoxIcon.Warning);
                 if (confirmResult == WinForms.DialogResult.Yes)
@@ -310,7 +305,8 @@ namespace TrueReplayer.Controllers
 
         public void OpenSelectedProfileFolder()
         {
-            if (window.ProfilesListBox.SelectedItem is ProfileEntry selectedProfile)
+            var selectedProfile = ProfileEntries.FirstOrDefault(p => p.Name == selectedProfileName);
+            if (selectedProfile != null)
             {
                 string? folderPath = Path.GetDirectoryName(selectedProfile.FilePath);
 
@@ -335,7 +331,8 @@ namespace TrueReplayer.Controllers
 
         public async Task RenameSelectedProfileAsync()
         {
-            if (window.ProfilesListBox.SelectedItem is ProfileEntry selectedProfile)
+            var selectedProfile = ProfileEntries.FirstOrDefault(p => p.Name == selectedProfileName);
+            if (selectedProfile != null)
             {
                 string? folderPath = Path.GetDirectoryName(selectedProfile.FilePath);
 
