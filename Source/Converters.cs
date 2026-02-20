@@ -84,8 +84,10 @@ namespace TrueReplayer.Converters
 
             if (actionType.Contains("Click", StringComparison.OrdinalIgnoreCase))
                 return "\uE962";
-            if (actionType.Contains("Scroll", StringComparison.OrdinalIgnoreCase))
+            if (actionType.Equals("ScrollUp", StringComparison.OrdinalIgnoreCase))
                 return "\uE74A";
+            if (actionType.Equals("ScrollDown", StringComparison.OrdinalIgnoreCase))
+                return "\uE74B";
             if (actionType.StartsWith("Key", StringComparison.OrdinalIgnoreCase))
                 return "\uE765";
 

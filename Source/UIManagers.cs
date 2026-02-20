@@ -307,10 +307,12 @@ namespace TrueReplayer.Managers
             if (sender is not TextBox textBox) return;
             string newText = textBox.Text;
 
-            if (string.IsNullOrWhiteSpace(newText) || !newText.All(char.IsDigit) ||
-                !int.TryParse(newText, out int delay) || delay < 0)
+            if (string.IsNullOrEmpty(newText)) return;
+
+            if (!newText.All(char.IsDigit))
             {
-                textBox.Text = "100";
+                string validText = new string(newText.Where(char.IsDigit).ToArray());
+                textBox.Text = validText;
                 textBox.SelectionStart = textBox.Text.Length;
             }
         }
@@ -353,10 +355,13 @@ namespace TrueReplayer.Managers
         {
             if (sender is not TextBox textBox) return;
             string newText = textBox.Text;
-            if (string.IsNullOrEmpty(newText) || !newText.All(char.IsDigit))
+
+            if (string.IsNullOrEmpty(newText)) return;
+
+            if (!newText.All(char.IsDigit))
             {
                 string validText = new string(newText.Where(char.IsDigit).ToArray());
-                textBox.Text = string.IsNullOrEmpty(validText) ? "0" : validText;
+                textBox.Text = validText;
                 textBox.SelectionStart = textBox.Text.Length;
             }
         }
@@ -381,10 +386,13 @@ namespace TrueReplayer.Managers
         {
             if (sender is not TextBox textBox) return;
             string newText = textBox.Text;
-            if (string.IsNullOrEmpty(newText) || !newText.All(char.IsDigit))
+
+            if (string.IsNullOrEmpty(newText)) return;
+
+            if (!newText.All(char.IsDigit))
             {
                 string validText = new string(newText.Where(char.IsDigit).ToArray());
-                textBox.Text = string.IsNullOrEmpty(validText) ? "1000" : validText;
+                textBox.Text = validText;
                 textBox.SelectionStart = textBox.Text.Length;
             }
         }

@@ -145,7 +145,7 @@ namespace TrueReplayer.Controllers
         {
             UserProfile.Current = UserProfile.Default;
             UISettingsManager.ApplyToUI(window, UserProfile.Default);
-            WindowAppearanceService.Configure(window);
+
             UpdateProfileColors(null);
         }
 

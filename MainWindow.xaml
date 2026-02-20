@@ -422,7 +422,7 @@
                             <controls:DataGridTemplateColumn Header="X" Width="65" MinWidth="65">
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
-                                        <TextBlock Text="{Binding X}" FontSize="12" FontFamily="Consolas"
+                                        <TextBlock Text="{Binding DisplayX}" FontSize="12" FontFamily="Consolas"
                                                    Foreground="#C5C5C5"
                                                    VerticalAlignment="Center" Padding="8,0" />
                                     </DataTemplate>
@@ -439,7 +439,7 @@
                             <controls:DataGridTemplateColumn Header="Y" Width="65" MinWidth="65">
                                 <controls:DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
-                                        <TextBlock Text="{Binding Y}" FontSize="12" FontFamily="Consolas"
+                                        <TextBlock Text="{Binding DisplayY}" FontSize="12" FontFamily="Consolas"
                                                    Foreground="#C5C5C5"
                                                    VerticalAlignment="Center" Padding="8,0" />
                                     </DataTemplate>

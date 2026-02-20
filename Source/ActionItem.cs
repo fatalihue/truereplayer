@@ -63,6 +63,16 @@ namespace TrueReplayer.Models
             {"NumAdd", "Num+"}, {"NumSubtract", "Num-"}
         };
 
+        private static readonly HashSet<string> NoCoordinateActionTypes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "KeyDown", "KeyUp", "ScrollUp", "ScrollDown"
+        };
+
+        private bool HideCoordinates => NoCoordinateActionTypes.Contains(ActionType ?? "");
+
+        public string DisplayX => HideCoordinates ? "" : X.ToString();
+        public string DisplayY => HideCoordinates ? "" : Y.ToString();
+
         public string DisplayKey
         {
             get
