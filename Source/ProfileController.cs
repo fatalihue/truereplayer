@@ -22,7 +22,6 @@ namespace TrueReplayer.Controllers
         private FileSystemWatcher? profileWatcher;
         private CancellationTokenSource? debounceCts;
         private bool _disposed;
-        private List<string> profileFilePaths = new();
         private bool suppressWatcherRefresh = false;
         private string? selectedProfileName;
 
@@ -48,7 +47,7 @@ namespace TrueReplayer.Controllers
             var dialog = new WinForms.SaveFileDialog
             {
                 Filter = "JSON file (*.json)|*.json",
-                FileName = "profile.json",
+                FileName = "profile",
                 InitialDirectory = profileDir
             };
 
@@ -109,24 +108,23 @@ namespace TrueReplayer.Controllers
                 return null;
             }
 
-            int index = ProfileEntries.ToList().FindIndex(p => p.Name == profileName);
-            if (index < 0 || index >= profileFilePaths.Count)
+            var entry = ProfileEntries.FirstOrDefault(p => p.Name == profileName);
+            if (entry == null)
             {
-                System.Diagnostics.Debug.WriteLine($"Perfil '{profileName}' não encontrado ou índice inválido ({index}) em LoadProfileByNameAsync.");
+                System.Diagnostics.Debug.WriteLine($"Perfil '{profileName}' não encontrado em LoadProfileByNameAsync.");
                 return null;
             }
 
-            string filePath = profileFilePaths[index];
-            if (!File.Exists(filePath))
+            if (!File.Exists(entry.FilePath))
             {
-                System.Diagnostics.Debug.WriteLine($"Arquivo do perfil '{filePath}' não existe.");
+                System.Diagnostics.Debug.WriteLine($"Arquivo do perfil '{entry.FilePath}' não existe.");
                 return null;
             }
 
-            var profile = await SettingsManager.LoadProfileAsync(filePath);
+            var profile = await SettingsManager.LoadProfileAsync(entry.FilePath);
             if (profile == null)
             {
-                System.Diagnostics.Debug.WriteLine($"Falha ao carregar o perfil '{profileName}' do arquivo '{filePath}'.");
+                System.Diagnostics.Debug.WriteLine($"Falha ao carregar o perfil '{profileName}' do arquivo '{entry.FilePath}'.");
             }
 
             return profile;
@@ -134,10 +132,10 @@ namespace TrueReplayer.Controllers
 
         public async Task SaveProfileByNameAsync(string profileName, UserProfile profile)
         {
-            int index = ProfileEntries.ToList().FindIndex(p => p.Name == profileName);
-            if (index >= 0 && index < profileFilePaths.Count)
+            var entry = ProfileEntries.FirstOrDefault(p => p.Name == profileName);
+            if (entry != null)
             {
-                await SettingsManager.SaveProfileAsync(profileFilePaths[index], profile);
+                await SettingsManager.SaveProfileAsync(entry.FilePath, profile);
             }
         }
 
@@ -165,7 +163,6 @@ namespace TrueReplayer.Controllers
             var files = Directory.GetFiles(profileDir, "*.json").ToList();
 
             ProfileEntries.Clear();
-            profileFilePaths.Clear();
 
             foreach (var file in files)
             {
@@ -178,9 +175,9 @@ namespace TrueReplayer.Controllers
                         ProfileEntries.Add(new ProfileEntry
                         {
                             Name = name,
+                            FilePath = file,
                             Hotkey = profile.CustomHotkey
                         });
-                        profileFilePaths.Add(file);
                     }
                     else
                     {
@@ -193,7 +190,7 @@ namespace TrueReplayer.Controllers
                 }
             }
 
-            var map = await GetProfileHotkeys();
+            var map = GetProfileHotkeys();
             InputHookManager.RegisterProfileHotkeys(map);
         }
 
@@ -265,11 +262,10 @@ namespace TrueReplayer.Controllers
 
         public async Task HandleProfileItemClick(string selectedProfile)
         {
-            int index = ProfileEntries.ToList().FindIndex(p => p.Name == selectedProfile);
-            if (index >= 0 && index < profileFilePaths.Count)
+            var entry = ProfileEntries.FirstOrDefault(p => p.Name == selectedProfile);
+            if (entry != null)
             {
-                string path = profileFilePaths[index];
-                var profile = await SettingsManager.LoadProfileAsync(path);
+                var profile = await SettingsManager.LoadProfileAsync(entry.FilePath);
 
                 if (profile != null)
                 {
@@ -294,25 +290,19 @@ namespace TrueReplayer.Controllers
         {
             if (window.ProfilesListBox.SelectedItem is ProfileEntry selectedProfile)
             {
-                int index = ProfileEntries.ToList().FindIndex(p => p.Name == selectedProfile.Name);
-                if (index >= 0 && index < profileFilePaths.Count)
+                var confirmResult = WinForms.MessageBox.Show($"Delete profile '{selectedProfile.Name}'?", "Confirm Delete", WinForms.MessageBoxButtons.YesNo, WinForms.MessageBoxIcon.Warning);
+                if (confirmResult == WinForms.DialogResult.Yes)
                 {
-                    string filePath = profileFilePaths[index];
-
-                    var confirmResult = WinForms.MessageBox.Show($"Delete profile '{selectedProfile.Name}'?", "Confirm Delete", WinForms.MessageBoxButtons.YesNo, WinForms.MessageBoxIcon.Warning);
-                    if (confirmResult == WinForms.DialogResult.Yes)
+                    try
                     {
-                        try
-                        {
-                            if (File.Exists(filePath))
-                                File.Delete(filePath);
+                        if (File.Exists(selectedProfile.FilePath))
+                            File.Delete(selectedProfile.FilePath);
 
-                            RefreshProfileList(true);
-                        }
-                        catch (Exception ex)
-                        {
-                            WinForms.MessageBox.Show($"Error deleting profile:\n{ex.Message}", "Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
-                        }
+                        RefreshProfileList(true);
+                    }
+                    catch (Exception ex)
+                    {
+                        WinForms.MessageBox.Show($"Error deleting profile:\n{ex.Message}", "Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
                     }
                 }
             }
@@ -322,27 +312,22 @@ namespace TrueReplayer.Controllers
         {
             if (window.ProfilesListBox.SelectedItem is ProfileEntry selectedProfile)
             {
-                int index = ProfileEntries.ToList().FindIndex(p => p.Name == selectedProfile.Name);
-                if (index >= 0 && index < profileFilePaths.Count)
-                {
-                    string filePath = profileFilePaths[index];
-                    string? folderPath = Path.GetDirectoryName(filePath);
+                string? folderPath = Path.GetDirectoryName(selectedProfile.FilePath);
 
-                    if (folderPath != null && Directory.Exists(folderPath))
+                if (folderPath != null && Directory.Exists(folderPath))
+                {
+                    try
                     {
-                        try
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo()
                         {
-                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo()
-                            {
-                                FileName = folderPath,
-                                UseShellExecute = true,
-                                Verb = "open"
-                            });
-                        }
-                        catch (Exception ex)
-                        {
-                            WinForms.MessageBox.Show($"Error opening folder:\n{ex.Message}", "Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
-                        }
+                            FileName = folderPath,
+                            UseShellExecute = true,
+                            Verb = "open"
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        WinForms.MessageBox.Show($"Error opening folder:\n{ex.Message}", "Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
                     }
                 }
             }
@@ -352,39 +337,34 @@ namespace TrueReplayer.Controllers
         {
             if (window.ProfilesListBox.SelectedItem is ProfileEntry selectedProfile)
             {
-                int index = ProfileEntries.ToList().FindIndex(p => p.Name == selectedProfile.Name);
-                if (index >= 0 && index < profileFilePaths.Count)
+                string? folderPath = Path.GetDirectoryName(selectedProfile.FilePath);
+
+                if (folderPath != null)
                 {
-                    string oldFilePath = profileFilePaths[index];
-                    string? folderPath = Path.GetDirectoryName(oldFilePath);
+                    string? newName = await ShowRenameDialogAsync(selectedProfile.Name);
 
-                    if (folderPath != null)
+                    if (!string.IsNullOrWhiteSpace(newName))
                     {
-                        string? newName = await ShowRenameDialogAsync(selectedProfile.Name);
+                        if (!newName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                            newName += ".json";
 
-                        if (!string.IsNullOrWhiteSpace(newName))
+                        string newFilePath = Path.Combine(folderPath, newName);
+
+                        try
                         {
-                            if (!newName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
-                                newName += ".json";
-
-                            string newFilePath = Path.Combine(folderPath, newName);
-
-                            try
+                            if (File.Exists(newFilePath))
                             {
-                                if (File.Exists(newFilePath))
-                                {
-                                    WinForms.MessageBox.Show($"A profile named '{newName}' already exists.", "Rename Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Warning);
-                                }
-                                else
-                                {
-                                    File.Move(oldFilePath, newFilePath);
-                                    RefreshProfileList(true);
-                                }
+                                WinForms.MessageBox.Show($"A profile named '{newName}' already exists.", "Rename Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Warning);
                             }
-                            catch (Exception ex)
+                            else
                             {
-                                WinForms.MessageBox.Show($"Error renaming profile:\n{ex.Message}", "Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
+                                File.Move(selectedProfile.FilePath, newFilePath);
+                                RefreshProfileList(true);
                             }
+                        }
+                        catch (Exception ex)
+                        {
+                            WinForms.MessageBox.Show($"Error renaming profile:\n{ex.Message}", "Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
                         }
                     }
                 }
@@ -444,19 +424,14 @@ namespace TrueReplayer.Controllers
 
         #region Profile Hotkey Management
 
-        public async Task<Dictionary<string, string>> GetProfileHotkeys()
+        public Dictionary<string, string> GetProfileHotkeys()
         {
             var hotkeys = new Dictionary<string, string>();
 
-            for (int i = 0; i < profileFilePaths.Count; i++)
+            foreach (var entry in ProfileEntries)
             {
-                var profile = await SettingsManager.LoadProfileAsync(profileFilePaths[i]);
-
-                if (profile?.CustomHotkey != null)
-                {
-                    var name = Path.GetFileNameWithoutExtension(profileFilePaths[i]);
-                    hotkeys[name] = profile.CustomHotkey;
-                }
+                if (!string.IsNullOrEmpty(entry.Hotkey))
+                    hotkeys[entry.Name] = entry.Hotkey;
             }
 
             return hotkeys;

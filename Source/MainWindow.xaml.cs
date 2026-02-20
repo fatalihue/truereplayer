@@ -167,7 +167,7 @@ namespace TrueReplayer
 
                 UpdateStatusBar(null, Actions.Count);
 
-                var hotkeys = await profileController.GetProfileHotkeys();
+                var hotkeys = profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(hotkeys);
             });
 
@@ -633,7 +633,7 @@ namespace TrueReplayer
                     await profileController.SaveProfileByNameAsync(selectedProfile, profile);
 
                     profileController.RefreshProfileList(true);
-                    var map = await profileController.GetProfileHotkeys();
+                    var map = profileController.GetProfileHotkeys();
                     InputHookManager.RegisterProfileHotkeys(map);
 
                     dialog.Hide();
@@ -664,7 +664,7 @@ namespace TrueReplayer
 
                 profileController.RefreshProfileList(true);
 
-                var map = await profileController.GetProfileHotkeys();
+                var map = profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(map);
             }
         }

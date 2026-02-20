@@ -69,6 +69,7 @@ namespace TrueReplayer.Models
     public class ProfileEntry : INotifyPropertyChanged
     {
         public string Name { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
         public string? Hotkey { get; set; }
         public string Display => string.IsNullOrEmpty(Hotkey) ? Name : $"{Name} ({Hotkey})";
 

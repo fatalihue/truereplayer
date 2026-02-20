@@ -13,7 +13,7 @@ namespace TrueReplayer.Services
         {
             if (actions == null || actions.Count == 0) return;
 
-            var headers = new[] { "Action", "Key", "X", "Y", "Delay", "Comment" };
+            var headers = new[] { "Action", "Key", "X", "Y", "Delay", "Notes" };
             var rows = actions.Select(a => new[]
             {
                 a.ActionType ?? "",
