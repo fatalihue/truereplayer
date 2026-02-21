@@ -15,6 +15,7 @@
 		<Nullable>enable</Nullable>
 		<WindowsPackagedType>None</WindowsPackagedType>
 		<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -69,6 +70,23 @@
     <Copy SourceFiles="@(FrontendFiles)"
           DestinationFiles="@(FrontendFiles->'$(OutDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyFrontendDistPublish" AfterTargets="Publish" Condition="Exists('frontend\dist')">
+    <ItemGroup>
+      <FrontendFilesPublish Include="frontend\dist\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(FrontendFilesPublish)"
+          DestinationFiles="@(FrontendFilesPublish->'$(PublishDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+  <!-- Remove WinUI/WinAppSDK locale folders (keep only en-us, wwwroot, Microsoft.UI.Xaml) -->
+  <Target Name="CleanLocalesFolders" AfterTargets="CopyFrontendDistPublish">
+    <ItemGroup>
+      <AllPublishDirs Include="$([System.IO.Directory]::GetDirectories('$(PublishDir)'))" />
+      <KeepDirs Include="$(PublishDir)en-us;$(PublishDir)wwwroot;$(PublishDir)Microsoft.UI.Xaml" />
+      <RemoveDirs Include="@(AllPublishDirs)" Exclude="@(KeepDirs)" />
+    </ItemGroup>
+    <RemoveDir Directories="@(RemoveDirs)" />
   </Target>
   <ItemGroup>
     <None Update="TrueReplayer.ico">
