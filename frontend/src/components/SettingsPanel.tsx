@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
+import { useSelectionRef } from '../state/SelectionContext';
 import { Toggle } from './common/Toggle';
 
 function Section({ icon: Icon, iconColor, title, children, defaultOpen = true }: {
@@ -44,15 +45,18 @@ function SettingRow({ label, children }: { label: string; children: React.ReactN
 }
 
 // Text input with local state — commits on blur/Enter, syncs from props on external changes
-function SettingInput({ value: propValue, onCommit, width = 'w-16', suffix, mono = true }: {
+// onEnter fires only on Enter key (not blur) — used to auto-enable toggles and apply bulk changes
+function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-16', suffix, mono = true }: {
   value: string;
   onCommit: (v: string) => void;
+  onEnter?: (v: string) => void;
   width?: string;
   suffix?: string;
   mono?: boolean;
 }) {
   const [localValue, setLocalValue] = useState(propValue);
   const isFocused = useRef(false);
+  const committedByEnter = useRef(false);
 
   // Sync from props when not focused (e.g., profile loaded from C#)
   useEffect(() => {
@@ -71,12 +75,20 @@ function SettingInput({ value: propValue, onCommit, width = 'w-16', suffix, mono
         type="text"
         value={localValue}
         onChange={(e) => setLocalValue(e.target.value)}
-        onFocus={(e) => { isFocused.current = true; e.target.select(); }}
-        onBlur={() => { isFocused.current = false; commit(); }}
+        onFocus={(e) => { isFocused.current = true; committedByEnter.current = false; e.target.select(); }}
+        onBlur={() => {
+          isFocused.current = false;
+          if (!committedByEnter.current) {
+            commit();
+          }
+          committedByEnter.current = false;
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
+            committedByEnter.current = true;
             commit();
+            onEnter?.(localValue);
             (e.target as HTMLInputElement).blur();
           }
         }}
@@ -154,6 +166,7 @@ function HotkeyInput({ value, settingKey, onChange }: {
 export function SettingsPanel() {
   const { settings } = useAppState();
   const { send } = useBridge();
+  const selectionRef = useSelectionRef();
 
   const changeSetting = (key: string, value: string | boolean | number) => {
     send({ type: 'settings:change', payload: { key, value } });
@@ -171,6 +184,20 @@ export function SettingsPanel() {
           <SettingInput
             value={settings.customDelay}
             onCommit={(v) => changeSetting('customDelay', v)}
+            onEnter={(v) => {
+              // Auto-enable the toggle
+              if (!settings.useCustomDelay) {
+                changeSetting('useCustomDelay', true);
+              }
+              // Apply delay to selected actions in the DataGrid
+              const indices = selectionRef.current;
+              if (indices.size > 0) {
+                const delay = parseInt(v, 10);
+                if (!isNaN(delay)) {
+                  send({ type: 'actions:bulkUpdateDelay', payload: { indices: [...indices], delay } });
+                }
+              }
+            }}
             suffix="ms"
           />
           <Toggle isOn={settings.useCustomDelay} onChange={(v) => changeSetting('useCustomDelay', v)} />
@@ -179,6 +206,11 @@ export function SettingsPanel() {
           <SettingInput
             value={settings.loopCount}
             onCommit={(v) => changeSetting('loopCount', v)}
+            onEnter={() => {
+              if (!settings.enableLoop) {
+                changeSetting('enableLoop', true);
+              }
+            }}
             suffix="x"
           />
           <Toggle isOn={settings.enableLoop} onChange={(v) => changeSetting('enableLoop', v)} />
@@ -187,6 +219,11 @@ export function SettingsPanel() {
           <SettingInput
             value={settings.loopInterval}
             onCommit={(v) => changeSetting('loopInterval', v)}
+            onEnter={() => {
+              if (!settings.loopIntervalEnabled) {
+                changeSetting('loopIntervalEnabled', true);
+              }
+            }}
             suffix="ms"
           />
           <Toggle isOn={settings.loopIntervalEnabled} onChange={(v) => changeSetting('loopIntervalEnabled', v)} />

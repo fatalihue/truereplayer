@@ -1,5 +1,6 @@
 import { BridgeProvider } from './bridge/BridgeContext';
 import { AppStateProvider } from './state/AppStateContext';
+import { SelectionProvider } from './state/SelectionContext';
 import { ThemeProvider } from './state/ThemeContext';
 import { TitleBar } from './components/TitleBar';
 import { ProfilePanel } from './components/ProfilePanel';
@@ -14,6 +15,7 @@ export default function App() {
     <ThemeProvider>
       <BridgeProvider>
         <AppStateProvider>
+          <SelectionProvider>
           <div className="h-full flex flex-col bg-bg-base">
             {/* Title Bar */}
             <TitleBar />
@@ -37,6 +39,7 @@ export default function App() {
             {/* Status Bar */}
             <StatusBar />
           </div>
+          </SelectionProvider>
         </AppStateProvider>
       </BridgeProvider>
     </ThemeProvider>

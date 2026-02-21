@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
+import { useSelectionRef } from '../state/SelectionContext';
 import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors } from '../utils/displayUtils';
 
 function ActionIcon({ actionType }: { actionType: string }) {
@@ -21,6 +22,7 @@ interface EditingCell {
 export function ActionTable() {
   const { actions, highlightedActionIndex } = useAppState();
   const { send } = useBridge();
+  const selectionRef = useSelectionRef();
   const scrollRef = useRef<HTMLDivElement>(null);
   const highlightedRowRef = useRef<HTMLTableRowElement>(null);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
@@ -28,6 +30,12 @@ export function ActionTable() {
   const [editValue, setEditValue] = useState('');
   const editInputRef = useRef<HTMLInputElement>(null);
   const lastClickedIndex = useRef<number | null>(null);
+  const prevActionsLength = useRef(actions.length);
+
+  // Sync selection to shared ref so SettingsPanel can read it imperatively
+  useEffect(() => {
+    selectionRef.current = selectedIndices;
+  }, [selectedIndices, selectionRef]);
 
   // Auto-scroll to highlighted row during replay
   useEffect(() => {
@@ -35,6 +43,14 @@ export function ActionTable() {
       highlightedRowRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
   }, [highlightedActionIndex]);
+
+  // Auto-scroll to bottom when new actions are added (during recording)
+  useEffect(() => {
+    if (actions.length > prevActionsLength.current && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+    prevActionsLength.current = actions.length;
+  }, [actions.length]);
 
   // Focus edit input when entering edit mode
   useEffect(() => {

@@ -101,5 +101,6 @@ export type OutgoingMessage =
   | { type: 'profile:load'; payload: Record<string, never> }
   | { type: 'profile:reset'; payload: Record<string, never> }
   | { type: 'settings:change'; payload: { key: string; value: string | boolean | number } }
+  | { type: 'actions:bulkUpdateDelay'; payload: { indices: number[]; delay: number } }
   | { type: 'window:alwaysOnTop'; payload: { enabled: boolean } }
   | { type: 'window:minimizeToTray'; payload: { enabled: boolean } };

@@ -110,6 +110,7 @@ namespace TrueReplayer
                     case "actions:copy": HandleActionsCopy(); break;
                     case "actions:edit": HandleActionsEdit(payload); break;
                     case "actions:delete": HandleActionsDelete(payload); break;
+                    case "actions:bulkUpdateDelay": HandleBulkUpdateDelay(payload); break;
                     case "profile:click": HandleProfileClick(payload); break;
                     case "profile:create": HandleProfileCreate(payload); break;
                     case "profile:rename": HandleProfileRename(payload); break;
@@ -419,6 +420,23 @@ namespace TrueReplayer
             }
 
             mainController.UpdateButtonStates();
+        }
+
+        private void HandleBulkUpdateDelay(JsonElement payload)
+        {
+            var indices = payload.GetProperty("indices").EnumerateArray()
+                .Select(e => e.GetInt32())
+                .ToList();
+            int delay = payload.GetProperty("delay").GetInt32();
+            delay = Math.Max(0, delay);
+
+            foreach (var idx in indices)
+            {
+                if (idx >= 0 && idx < actions.Count)
+                    actions[idx].Delay = delay;
+            }
+
+            PushActionsUpdate();
         }
 
         private async void HandleProfileClick(JsonElement payload)
