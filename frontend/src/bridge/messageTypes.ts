@@ -84,7 +84,7 @@ export type IncomingMessage =
 
 export type OutgoingMessage =
   | { type: 'ui:ready'; payload: Record<string, never> }
-  | { type: 'recording:toggle'; payload: Record<string, never> }
+  | { type: 'recording:toggle'; payload: { insertIndex?: number } }
   | { type: 'replay:toggle'; payload: { loopEnabled: boolean; loopCount: string; intervalEnabled: boolean; intervalText: string } }
   | { type: 'actions:clear'; payload: Record<string, never> }
   | { type: 'actions:copy'; payload: Record<string, never> }
@@ -102,5 +102,6 @@ export type OutgoingMessage =
   | { type: 'profile:reset'; payload: Record<string, never> }
   | { type: 'settings:change'; payload: { key: string; value: string | boolean | number } }
   | { type: 'actions:bulkUpdateDelay'; payload: { indices: number[]; delay: number } }
+  | { type: 'selection:changed'; payload: { indices: number[] } }
   | { type: 'window:alwaysOnTop'; payload: { enabled: boolean } }
   | { type: 'window:minimizeToTray'; payload: { enabled: boolean } };

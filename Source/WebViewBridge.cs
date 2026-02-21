@@ -44,6 +44,9 @@ namespace TrueReplayer
         public bool RecordKeyboard { get; set; } = true;
         public bool ProfileKeyEnabled { get; set; } = true;
 
+        // Selection state (synced from React)
+        public int? SelectedInsertIndex { get; private set; }
+
         // Toolbar/StatusBar state
         public string CurrentProfileName { get; set; } = "No Profile";
 
@@ -104,7 +107,7 @@ namespace TrueReplayer
                 switch (type)
                 {
                     case "ui:ready": HandleUIReady(); break;
-                    case "recording:toggle": HandleRecordingToggle(); break;
+                    case "recording:toggle": HandleRecordingToggle(payload); break;
                     case "replay:toggle": HandleReplayToggle(payload); break;
                     case "actions:clear": HandleActionsClear(); break;
                     case "actions:copy": HandleActionsCopy(); break;
@@ -121,6 +124,7 @@ namespace TrueReplayer
                     case "profile:save": HandleProfileSave(); break;
                     case "profile:load": HandleProfileLoad(); break;
                     case "profile:reset": HandleProfileReset(); break;
+                    case "selection:changed": HandleSelectionChanged(payload); break;
                     case "settings:change": HandleSettingsChange(payload); break;
                     case "window:alwaysOnTop": HandleAlwaysOnTop(payload); break;
                     case "window:minimizeToTray": HandleMinimizeToTray(payload); break;
@@ -358,8 +362,31 @@ namespace TrueReplayer
             });
         }
 
-        private void HandleRecordingToggle()
+        private void HandleSelectionChanged(JsonElement payload)
         {
+            if (payload.TryGetProperty("indices", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                int? min = null;
+                foreach (var el in arr.EnumerateArray())
+                {
+                    int val = el.GetInt32();
+                    if (min == null || val < min) min = val;
+                }
+                SelectedInsertIndex = min;
+            }
+            else
+            {
+                SelectedInsertIndex = null;
+            }
+        }
+
+        private void HandleRecordingToggle(JsonElement payload)
+        {
+            int? insertIndex = null;
+            if (payload.TryGetProperty("insertIndex", out var idxEl) && idxEl.ValueKind == JsonValueKind.Number)
+                insertIndex = idxEl.GetInt32();
+
+            mainController.EnableInsertMode(insertIndex);
             mainController.ToggleRecording();
         }
 

@@ -200,7 +200,7 @@ namespace TrueReplayer
                             action.IsVisuallyDeselected = false;
                         }
 
-                        mainController.EnableInsertMode(null);
+                        mainController.EnableInsertMode(bridge?.SelectedInsertIndex);
                         mainController.SetLastHotkeyPressed(key);
                         mainController.ToggleRecording();
                     }

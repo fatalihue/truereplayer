@@ -20,7 +20,7 @@ interface EditingCell {
 }
 
 export function ActionTable() {
-  const { actions, highlightedActionIndex } = useAppState();
+  const { actions, highlightedActionIndex, buttonStates } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -31,11 +31,21 @@ export function ActionTable() {
   const editInputRef = useRef<HTMLInputElement>(null);
   const lastClickedIndex = useRef<number | null>(null);
   const prevActionsLength = useRef(actions.length);
+  const wasRecording = useRef(false);
 
-  // Sync selection to shared ref so SettingsPanel can read it imperatively
+  // Clear selection when recording stops so next recording appends normally
+  useEffect(() => {
+    if (wasRecording.current && !buttonStates.recordingActive) {
+      setSelectedIndices(new Set());
+    }
+    wasRecording.current = buttonStates.recordingActive;
+  }, [buttonStates.recordingActive]);
+
+  // Sync selection to shared ref and push to C# bridge
   useEffect(() => {
     selectionRef.current = selectedIndices;
-  }, [selectedIndices, selectionRef]);
+    send({ type: 'selection:changed', payload: { indices: Array.from(selectedIndices) } });
+  }, [selectedIndices, selectionRef, send]);
 
   // Auto-scroll to highlighted row during replay
   useEffect(() => {
@@ -44,13 +54,17 @@ export function ActionTable() {
     }
   }, [highlightedActionIndex]);
 
-  // Auto-scroll to bottom when new actions are added (during recording)
+  // Auto-scroll when new actions are added during recording
+  // In append mode (no selection): scroll to bottom
+  // In insert mode (has selection): keep viewport stable
   useEffect(() => {
     if (actions.length > prevActionsLength.current && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      if (selectionRef.current.size === 0) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
     }
     prevActionsLength.current = actions.length;
-  }, [actions.length]);
+  }, [actions.length, selectionRef]);
 
   // Focus edit input when entering edit mode
   useEffect(() => {

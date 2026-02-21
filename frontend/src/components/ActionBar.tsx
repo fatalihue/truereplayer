@@ -1,10 +1,12 @@
 import { Circle, Play, Save, FolderOpen, RotateCcw } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
+import { useSelectionRef } from '../state/SelectionContext';
 
 export function ActionBar() {
   const { buttonStates, settings } = useAppState();
   const { send } = useBridge();
+  const selectionRef = useSelectionRef();
 
   const handleReplay = () => {
     send({
@@ -23,7 +25,11 @@ export function ActionBar() {
       {/* Left: Record + Replay */}
       <div className="flex items-center gap-2">
         <button
-          onClick={() => send({ type: 'recording:toggle', payload: {} })}
+          onClick={() => {
+            const sel = selectionRef.current;
+            const insertIndex = sel.size > 0 ? Math.min(...sel) : undefined;
+            send({ type: 'recording:toggle', payload: { insertIndex } });
+          }}
           disabled={!buttonStates.recordEnabled}
           className={`flex items-center gap-2 px-5 py-2 rounded text-[13px] font-semibold text-white transition-colors ${
             buttonStates.recordingActive
