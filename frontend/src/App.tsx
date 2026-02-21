@@ -1,5 +1,6 @@
 import { BridgeProvider } from './bridge/BridgeContext';
 import { AppStateProvider } from './state/AppStateContext';
+import { ThemeProvider } from './state/ThemeContext';
 import { TitleBar } from './components/TitleBar';
 import { ProfilePanel } from './components/ProfilePanel';
 import { Toolbar } from './components/Toolbar';
@@ -10,32 +11,34 @@ import { StatusBar } from './components/StatusBar';
 
 export default function App() {
   return (
-    <BridgeProvider>
-      <AppStateProvider>
-        <div className="h-full flex flex-col bg-bg-base">
-          {/* Title Bar */}
-          <TitleBar />
+    <ThemeProvider>
+      <BridgeProvider>
+        <AppStateProvider>
+          <div className="h-full flex flex-col bg-bg-base">
+            {/* Title Bar */}
+            <TitleBar />
 
-          {/* Main Content: 3-column layout */}
-          <div className="flex-1 flex gap-2 p-2 min-h-0">
-            {/* Left: Profiles */}
-            <ProfilePanel />
+            {/* Main Content: 3-column layout */}
+            <div className="flex-1 flex gap-2 p-2 min-h-0">
+              {/* Left: Profiles */}
+              <ProfilePanel />
 
-            {/* Center: Toolbar + Table + Action Bar */}
-            <div className="flex-1 flex flex-col gap-1.5 min-w-0">
-              <Toolbar />
-              <ActionTable />
-              <ActionBar />
+              {/* Center: Toolbar + Table + Action Bar */}
+              <div className="flex-1 flex flex-col gap-1.5 min-w-0">
+                <Toolbar />
+                <ActionTable />
+                <ActionBar />
+              </div>
+
+              {/* Right: Settings */}
+              <SettingsPanel />
             </div>
 
-            {/* Right: Settings */}
-            <SettingsPanel />
+            {/* Status Bar */}
+            <StatusBar />
           </div>
-
-          {/* Status Bar */}
-          <StatusBar />
-        </div>
-      </AppStateProvider>
-    </BridgeProvider>
+        </AppStateProvider>
+      </BridgeProvider>
+    </ThemeProvider>
   );
 }

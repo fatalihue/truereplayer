@@ -61,10 +61,15 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.250310001" />
   </ItemGroup>
 
-  <!-- Copy React build output to binary output directory -->
-  <ItemGroup>
-    <Content Include="frontend\dist\**" CopyToOutputDirectory="PreserveNewest" LinkBase="wwwroot" Condition="Exists('frontend\dist')" />
-  </ItemGroup>
+  <!-- Copy React build output to wwwroot in binary output directory -->
+  <Target Name="CopyFrontendDist" AfterTargets="Build" Condition="Exists('frontend\dist')">
+    <ItemGroup>
+      <FrontendFiles Include="frontend\dist\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(FrontendFiles)"
+          DestinationFiles="@(FrontendFiles->'$(OutDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
   <ItemGroup>
     <None Update="TrueReplayer.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

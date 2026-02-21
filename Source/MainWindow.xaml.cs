@@ -107,11 +107,18 @@ namespace TrueReplayer
             // Set dark background to avoid white flash
             WebView.DefaultBackgroundColor = Windows.UI.Color.FromArgb(255, 12, 18, 32);
 
+            // Clear WebView2 cache to avoid stale CSS/JS from previous sessions
+            await WebView.CoreWebView2.Profile.ClearBrowsingDataAsync();
+
 #if DEBUG
             WebView.CoreWebView2.Navigate("http://localhost:5173");
 #else
-            string htmlPath = Path.Combine(AppContext.BaseDirectory, "wwwroot", "index.html");
-            WebView.CoreWebView2.Navigate($"file:///{htmlPath.Replace('\\', '/')}");
+            // Use virtual host mapping instead of file:// to avoid CORS issues with CSS/JS
+            string wwwrootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+            WebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                "app.local", wwwrootPath,
+                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+            WebView.CoreWebView2.Navigate("https://app.local/index.html");
 #endif
 
             bridge = new WebViewBridge(
