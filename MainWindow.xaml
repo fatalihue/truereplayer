@@ -6,7 +6,7 @@
         xmlns:controls="using:Microsoft.UI.Xaml.Controls"
         mc:Ignorable="d">
 
-    <Grid Background="#0c1220">
-        <WebView2 x:Name="WebView" />
+    <Grid Background="#0a0a0a">
+        <WebView2 x:Name="WebView" Opacity="0" DefaultBackgroundColor="#0A0A0A" />
     </Grid>
 </Window>

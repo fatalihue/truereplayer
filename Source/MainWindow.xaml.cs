@@ -104,23 +104,8 @@ namespace TrueReplayer
         {
             await WebView.EnsureCoreWebView2Async();
 
-            // Set dark background to avoid white flash
-            WebView.DefaultBackgroundColor = Windows.UI.Color.FromArgb(255, 12, 18, 32);
-
-            // Clear WebView2 cache to avoid stale CSS/JS from previous sessions
-            await WebView.CoreWebView2.Profile.ClearBrowsingDataAsync();
-
-#if DEBUG
-            WebView.CoreWebView2.Navigate("http://localhost:5173");
-#else
-            // Use virtual host mapping instead of file:// to avoid CORS issues with CSS/JS
-            string wwwrootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot");
-            WebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
-                "app.local", wwwrootPath,
-                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
-            WebView.CoreWebView2.Navigate("https://app.local/index.html");
-#endif
-
+            // Create bridge and register message handler BEFORE navigation
+            // to ensure no messages from React are missed
             bridge = new WebViewBridge(
                 WebView.CoreWebView2,
                 Actions,
@@ -136,10 +121,30 @@ namespace TrueReplayer
                 bridge.HandleMessage(e.WebMessageAsJson);
             };
 
+            // Reveal WebView only after page is fully loaded to prevent color flash
+            WebView.CoreWebView2.NavigationCompleted += (s, e) =>
+            {
+                WebView.Opacity = 1;
+            };
+
+#if DEBUG
+            WebView.CoreWebView2.Navigate("http://localhost:5173");
+#else
+            // Enable DevTools in release for diagnostics (F12)
+            WebView.CoreWebView2.Settings.AreDevToolsEnabled = true;
+
+            // Use virtual host mapping instead of file:// to avoid CORS issues with CSS/JS
+            string wwwrootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+            WebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                "app.local", wwwrootPath,
+                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+            WebView.CoreWebView2.Navigate("https://app.local/index.html");
+#endif
+
             // Load initial data
             DispatcherQueue.TryEnqueue(async () =>
             {
-                profileController.RefreshProfileList(true);
+                await profileController.RefreshProfileListAsync(true);
 
                 var defaultProfile = await SettingsManager.LoadProfileAsync();
                 if (defaultProfile != null)

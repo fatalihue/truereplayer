@@ -444,10 +444,16 @@ namespace TrueReplayer
             string name = payload.GetProperty("name").GetString() ?? "";
             if (string.IsNullOrEmpty(name)) return;
 
-            await profileController.HandleProfileItemClick(name);
-            CurrentProfileName = name;
-            PushToolbarUpdate();
-            PushStatusBarUpdate();
+            var profile = await profileController.LoadProfileByNameAsync(name);
+            if (profile != null)
+            {
+                UserProfile.Current = profile;
+                CurrentProfileName = name;
+                ApplyProfile(profile);
+                profileController.UpdateProfileColors(name);
+                PushProfilesUpdate();
+                TrayIconService.UpdateTrayIcon();
+            }
         }
 
         private async void HandleProfileCreate(JsonElement payload)
@@ -470,11 +476,11 @@ namespace TrueReplayer
 
             var profile = UserProfile.Default;
             await SettingsManager.SaveProfileAsync(fullPath, profile);
-            profileController.RefreshProfileList(true);
+            await profileController.RefreshProfileListAsync(true);
             PushProfilesUpdate();
         }
 
-        private void HandleProfileRename(JsonElement payload)
+        private async void HandleProfileRename(JsonElement payload)
         {
             string oldName = payload.GetProperty("oldName").GetString() ?? "";
             string newName = payload.GetProperty("newName").GetString() ?? "";
@@ -496,7 +502,7 @@ namespace TrueReplayer
                 File.Move(entry.FilePath, newFilePath);
                 if (CurrentProfileName == oldName)
                     CurrentProfileName = Path.GetFileNameWithoutExtension(newFileName);
-                profileController.RefreshProfileList(true);
+                await profileController.RefreshProfileListAsync(true);
                 PushProfilesUpdate();
                 PushToolbarUpdate();
                 PushStatusBarUpdate();
@@ -507,7 +513,7 @@ namespace TrueReplayer
             }
         }
 
-        private void HandleProfileDelete(JsonElement payload)
+        private async void HandleProfileDelete(JsonElement payload)
         {
             string name = payload.GetProperty("name").GetString() ?? "";
             if (string.IsNullOrEmpty(name)) return;
@@ -523,7 +529,7 @@ namespace TrueReplayer
                 if (CurrentProfileName == name)
                     CurrentProfileName = "No Profile";
 
-                profileController.RefreshProfileList(true);
+                await profileController.RefreshProfileListAsync(true);
                 PushProfilesUpdate();
                 PushToolbarUpdate();
                 PushStatusBarUpdate();
@@ -545,7 +551,7 @@ namespace TrueReplayer
             {
                 profile.CustomHotkey = hotkey;
                 await profileController.SaveProfileByNameAsync(name, profile);
-                profileController.RefreshProfileList(true);
+                await profileController.RefreshProfileListAsync(true);
                 var map = profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(map);
                 PushProfilesUpdate();
@@ -562,7 +568,7 @@ namespace TrueReplayer
             {
                 profile.CustomHotkey = null;
                 await profileController.SaveProfileByNameAsync(name, profile);
-                profileController.RefreshProfileList(true);
+                await profileController.RefreshProfileListAsync(true);
                 var map = profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(map);
                 PushProfilesUpdate();
@@ -596,11 +602,20 @@ namespace TrueReplayer
         private async void HandleProfileSave()
         {
             await profileController.SaveProfileAsync();
+            PushProfilesUpdate();
         }
 
         private async void HandleProfileLoad()
         {
-            await profileController.LoadProfileAsync();
+            string? loadedPath = await profileController.LoadProfileAsync();
+            if (loadedPath == null) return;
+
+            string name = Path.GetFileNameWithoutExtension(loadedPath);
+            CurrentProfileName = name;
+            ApplyProfile(UserProfile.Current);
+            profileController.UpdateProfileColors(name);
+            PushProfilesUpdate();
+            TrayIconService.UpdateTrayIcon();
         }
 
         private void HandleProfileReset()

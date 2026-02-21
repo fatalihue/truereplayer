@@ -16,8 +16,12 @@ export function ProfilePanel() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showRenameDialog, setShowRenameDialog] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  const [showHotkeyDialog, setShowHotkeyDialog] = useState<string | null>(null);
+  const [hotkeyCapture, setHotkeyCapture] = useState('...');
   const [dialogValue, setDialogValue] = useState('');
   const dialogInputRef = useRef<HTMLInputElement>(null);
+  const hotkeyInputRef = useRef<HTMLInputElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
   const filtered = searchQuery
@@ -44,6 +48,13 @@ export function ProfilePanel() {
     }
   }, [showCreateDialog, showRenameDialog]);
 
+  // Focus hotkey input when dialog opens
+  useEffect(() => {
+    if (showHotkeyDialog && hotkeyInputRef.current) {
+      hotkeyInputRef.current.focus();
+    }
+  }, [showHotkeyDialog]);
+
   const handleContextMenu = useCallback((e: React.MouseEvent, name: string) => {
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY, profileName: name });
@@ -63,9 +74,14 @@ export function ProfilePanel() {
 
   const handleDelete = (name: string) => {
     setContextMenu(null);
-    if (confirm(`Delete profile '${name}'?`)) {
-      send({ type: 'profile:delete', payload: { name } });
+    setShowDeleteConfirm(name);
+  };
+
+  const confirmDelete = () => {
+    if (showDeleteConfirm) {
+      send({ type: 'profile:delete', payload: { name: showDeleteConfirm } });
     }
+    setShowDeleteConfirm(null);
   };
 
   const handleOpenFolder = (name: string) => {
@@ -73,9 +89,50 @@ export function ProfilePanel() {
     send({ type: 'profile:openFolder', payload: { name } });
   };
 
+  const handleAssignHotkey = (name: string) => {
+    setContextMenu(null);
+    setHotkeyCapture('...');
+    setShowHotkeyDialog(name);
+  };
+
   const handleRemoveHotkey = (name: string) => {
     setContextMenu(null);
     send({ type: 'profile:removeHotkey', payload: { name } });
+  };
+
+  const handleHotkeyCapture = (e: React.KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const modifiers: string[] = [];
+    if (e.ctrlKey) modifiers.push('Ctrl');
+    if (e.altKey) modifiers.push('Alt');
+    if (e.shiftKey) modifiers.push('Shift');
+
+    const modifierKeys = new Set(['Control', 'Alt', 'Shift', 'Meta']);
+    if (modifierKeys.has(e.key)) {
+      setHotkeyCapture(modifiers.join('+') || '...');
+      return;
+    }
+
+    let mainKey = e.key;
+    if (mainKey === ' ') mainKey = 'Space';
+    else if (mainKey.length === 1) mainKey = mainKey.toUpperCase();
+    else if (mainKey === 'ArrowUp') mainKey = 'Up';
+    else if (mainKey === 'ArrowDown') mainKey = 'Down';
+    else if (mainKey === 'ArrowLeft') mainKey = 'Left';
+    else if (mainKey === 'ArrowRight') mainKey = 'Right';
+
+    if (!modifiers.includes(mainKey)) modifiers.push(mainKey);
+    const combo = modifiers.join('+');
+    setHotkeyCapture(combo);
+  };
+
+  const confirmHotkey = () => {
+    if (showHotkeyDialog && hotkeyCapture && hotkeyCapture !== '...') {
+      send({ type: 'profile:assignHotkey', payload: { name: showHotkeyDialog, hotkey: hotkeyCapture } });
+    }
+    setShowHotkeyDialog(null);
   };
 
   const confirmCreate = () => {
@@ -193,21 +250,20 @@ export function ProfilePanel() {
             <FolderOpen size={13} className="text-text-tertiary" />
             Open Folder
           </button>
-          {profile?.hotkey ? (
+          <button
+            onClick={() => handleAssignHotkey(contextMenu.profileName)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Key size={13} className="text-text-tertiary" />
+            {profile?.hotkey ? 'Change Hotkey' : 'Assign Hotkey'}
+          </button>
+          {profile?.hotkey && (
             <button
               onClick={() => handleRemoveHotkey(contextMenu.profileName)}
               className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
             >
               <KeyRound size={13} className="text-text-tertiary" />
               Remove Hotkey
-            </button>
-          ) : (
-            <button
-              onClick={() => { setContextMenu(null); /* TODO: hotkey assign dialog */ }}
-              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-            >
-              <Key size={13} className="text-text-tertiary" />
-              Assign Hotkey
             </button>
           )}
           <div className="my-1 border-t border-border-subtle" />
@@ -279,6 +335,67 @@ export function ProfilePanel() {
                 className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors"
               >
                 Rename
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirm Dialog */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-[340px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
+            <h3 className="text-sm font-semibold text-text-primary mb-3">Delete Profile</h3>
+            <p className="text-sm text-text-secondary">
+              Delete profile <span className="text-text-primary font-medium">'{showDeleteConfirm}'</span>?
+            </p>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setShowDeleteConfirm(null)}
+                className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-4 py-1.5 text-xs text-white bg-recording hover:bg-recording/80 rounded transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Assign Hotkey Dialog */}
+      {showHotkeyDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-[340px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
+            <h3 className="text-sm font-semibold text-text-primary mb-3">Assign Hotkey</h3>
+            <p className="text-xs text-text-secondary mb-3">
+              Press a key combination for <span className="text-text-primary font-medium">'{showHotkeyDialog}'</span>
+            </p>
+            <input
+              ref={hotkeyInputRef}
+              type="text"
+              readOnly
+              value={hotkeyCapture}
+              onKeyDown={handleHotkeyCapture}
+              className="w-full h-9 px-3 text-sm font-mono text-accent bg-bg-input border border-accent-solid rounded text-center outline-none"
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setShowHotkeyDialog(null)}
+                className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmHotkey}
+                disabled={hotkeyCapture === '...'}
+                className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
+              >
+                Assign
               </button>
             </div>
           </div>

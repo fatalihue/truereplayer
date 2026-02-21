@@ -64,7 +64,7 @@ namespace TrueReplayer.Controllers
                     }
 
                     await SettingsManager.SaveProfileAsync(dialog.FileName, profile);
-                    RefreshProfileList(true);
+                    await RefreshProfileListAsync(true);
                 }
                 catch (Exception ex)
                 {
@@ -73,7 +73,7 @@ namespace TrueReplayer.Controllers
             }
         }
 
-        public async Task LoadProfileAsync()
+        public async Task<string?> LoadProfileAsync()
         {
             string profileDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
@@ -95,9 +95,11 @@ namespace TrueReplayer.Controllers
                 {
                     UserProfile.Current = profile;
                     UserProfile.Current.LastProfileDirectory = Path.GetDirectoryName(path)!;
-                    // Bridge will call ApplyProfile when it receives the loaded profile
+                    return path;
                 }
             }
+
+            return null;
         }
 
         public async Task<UserProfile?> LoadProfileByNameAsync(string profileName)
@@ -149,7 +151,7 @@ namespace TrueReplayer.Controllers
 
         #region Profile List Management
 
-        private async void LoadProfileList()
+        private async Task LoadProfileListAsync()
         {
             string profileDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
@@ -177,10 +179,6 @@ namespace TrueReplayer.Controllers
                             Hotkey = profile.CustomHotkey
                         });
                     }
-                    else
-                    {
-                        System.Diagnostics.Debug.WriteLine($"Falha ao carregar perfil: {file}");
-                    }
                 }
                 catch (Exception ex)
                 {
@@ -192,14 +190,19 @@ namespace TrueReplayer.Controllers
             InputHookManager.RegisterProfileHotkeys(map);
         }
 
-        public void RefreshProfileList(bool suppressWatcher = false)
+        public async Task RefreshProfileListAsync(bool suppressWatcher = false)
         {
             if (suppressWatcher)
                 suppressWatcherRefresh = true;
 
-            LoadProfileList();
+            await LoadProfileListAsync();
 
             UpdateProfileColors(selectedProfileName);
+        }
+
+        public void RefreshProfileList(bool suppressWatcher = false)
+        {
+            _ = RefreshProfileListAsync(suppressWatcher);
         }
 
         private void SetupProfileWatcher()
@@ -293,7 +296,7 @@ namespace TrueReplayer.Controllers
                         if (File.Exists(selectedProfile.FilePath))
                             File.Delete(selectedProfile.FilePath);
 
-                        RefreshProfileList(true);
+                        await RefreshProfileListAsync(true);
                     }
                     catch (Exception ex)
                     {
@@ -356,7 +359,7 @@ namespace TrueReplayer.Controllers
                             else
                             {
                                 File.Move(selectedProfile.FilePath, newFilePath);
-                                RefreshProfileList(true);
+                                await RefreshProfileListAsync(true);
                             }
                         }
                         catch (Exception ex)

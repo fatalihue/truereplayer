@@ -1,12 +1,12 @@
 @import "tailwindcss";
 
 @theme {
-  /* Backgrounds */
-  --color-bg-base: #0c1220;
-  --color-bg-surface: #131b2e;
-  --color-bg-card: #1a2338;
-  --color-bg-elevated: #212b42;
-  --color-bg-input: #0e1628;
+  /* Backgrounds — defaults match Carbon theme */
+  --color-bg-base: #121212;
+  --color-bg-surface: #1a1a1a;
+  --color-bg-card: #222222;
+  --color-bg-elevated: #2a2a2a;
+  --color-bg-input: #0e0e0e;
 
   /* Borders */
   --color-border-subtle: rgba(255, 255, 255, 0.06);
@@ -14,15 +14,15 @@
   --color-border-strong: rgba(255, 255, 255, 0.15);
 
   /* Text */
-  --color-text-primary: #ffffff;
-  --color-text-secondary: #c5c5c5;
-  --color-text-tertiary: #7a8599;
-  --color-text-disabled: #4a5568;
+  --color-text-primary: #e0e0e0;
+  --color-text-secondary: #a0a0a0;
+  --color-text-tertiary: #707070;
+  --color-text-disabled: #484848;
 
   /* Accent */
-  --color-accent: #60cdff;
-  --color-accent-solid: #0078d4;
-  --color-accent-hover: #7dd6ff;
+  --color-accent: #90caf9;
+  --color-accent-solid: #42a5f5;
+  --color-accent-hover: #bbdefb;
 
   /* Semantic */
   --color-recording: #ff6b6b;
