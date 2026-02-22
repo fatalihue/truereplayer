@@ -11,7 +11,7 @@ export function Toolbar() {
 
   return (
     <>
-      <div className="flex items-center justify-between px-4 py-2.5 bg-bg-surface border border-border-subtle rounded-md">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-bg-surface border border-border-subtle rounded-ui">
         {/* Left: profile name + action count */}
         <div className="flex items-center gap-3">
           <span className="text-base font-semibold text-text-primary">{toolbar.profileName}</span>

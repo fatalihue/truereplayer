@@ -166,7 +166,7 @@ export function ProfilePanel() {
 
   return (
     <>
-      <div className="flex flex-col w-[230px] bg-bg-surface border border-border-subtle rounded-md overflow-hidden shrink-0">
+      <div className="flex flex-col w-[230px] bg-bg-surface border border-border-subtle rounded-ui overflow-hidden shrink-0">
         {/* Header */}
         <div className="flex items-center justify-between px-3 pt-3 pb-2">
           <span className="text-xs font-semibold text-text-tertiary tracking-wider">PROFILES</span>
@@ -210,7 +210,7 @@ export function ProfilePanel() {
               )}
 
               <span
-                className={`text-[13px] flex-1 min-w-0 truncate ${
+                className={`text-ui flex-1 min-w-0 truncate ${
                   p.isActive
                     ? 'text-accent font-semibold'
                     : 'text-text-primary'

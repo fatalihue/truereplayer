@@ -162,12 +162,12 @@ export function ActionTable() {
 
   return (
     <div
-      className="flex-1 bg-bg-surface border border-border-subtle rounded-md overflow-hidden flex flex-col outline-none"
+      className="flex-1 bg-bg-surface border border-border-subtle rounded-ui overflow-hidden flex flex-col outline-none"
       tabIndex={0}
       onKeyDown={handleKeyDown}
     >
       {/* Header */}
-      <div className="grid grid-cols-[35px_140px_100px_65px_65px_70px_1fr] items-center h-9 px-1 border-b border-border-subtle shrink-0">
+      <div className="grid grid-cols-[35px_140px_100px_65px_65px_70px_1fr] items-center h-row px-1 border-b border-border-subtle shrink-0">
         <span className="text-xs font-semibold text-text-tertiary pl-3">#</span>
         <span className="text-xs font-semibold text-text-tertiary pl-1">Action</span>
         <span className="text-xs font-semibold text-text-tertiary pl-1">Key</span>
@@ -195,7 +195,7 @@ export function ActionTable() {
                   key={idx}
                   ref={isHighlighted ? highlightedRowRef : undefined}
                   onClick={(e) => handleRowClick(idx, e)}
-                  className={`h-9 border-b border-border-subtle transition-colors cursor-default ${
+                  className={`h-row border-b border-border-subtle transition-colors cursor-default ${
                     isHighlighted
                       ? 'bg-[rgba(218,165,32,0.15)]'
                       : isSelected

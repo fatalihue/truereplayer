@@ -48,6 +48,11 @@
 
   /* Fonts */
   --font-mono: 'Consolas', 'Courier New', monospace;
+
+  /* UI Settings (overridden at runtime by ThemeContext) */
+  --ui-font-size: 13px;
+  --ui-border-radius: 6px;
+  --ui-row-height: 36px;
 }
 
 /* Global resets */
@@ -95,4 +100,17 @@ html, body, #root {
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.25);
+}
+
+/* Theme-driven utility classes */
+@utility text-ui {
+  font-size: var(--ui-font-size);
+}
+
+@utility rounded-ui {
+  border-radius: var(--ui-border-radius);
+}
+
+@utility h-row {
+  height: var(--ui-row-height);
 }

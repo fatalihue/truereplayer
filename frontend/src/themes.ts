@@ -16,12 +16,45 @@ export interface ThemeColors {
   'accent-hover': string;
 }
 
+export const THEME_COLOR_KEYS: (keyof ThemeColors)[] = [
+  'bg-base', 'bg-surface', 'bg-card', 'bg-elevated', 'bg-input',
+  'border-subtle', 'border-default', 'border-strong',
+  'text-primary', 'text-secondary', 'text-tertiary', 'text-disabled',
+  'accent', 'accent-solid', 'accent-hover',
+];
+
 export interface ThemePreset {
   id: string;
   name: string;
   colors: ThemeColors;
   /** 4 preview swatches shown in the theme card */
   preview: [string, string, string, string];
+}
+
+export interface ThemeUISettings {
+  fontSize: number;
+  borderRadius: number;
+  rowHeight: number;
+}
+
+export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
+  fontSize: 13,
+  borderRadius: 6,
+  rowHeight: 36,
+};
+
+export interface ThemeConfig {
+  version: 1;
+  baseThemeId: string;
+  colorOverrides: Partial<ThemeColors>;
+  uiSettings: ThemeUISettings;
+}
+
+export interface ExportedTheme {
+  name: string;
+  version: 1;
+  colors: ThemeColors;
+  uiSettings: ThemeUISettings;
 }
 
 export const themes: ThemePreset[] = [
@@ -209,10 +242,156 @@ export function getThemeById(id: string): ThemePreset | undefined {
   return themes.find(t => t.id === id);
 }
 
-/** Apply theme colors as CSS custom properties on :root */
-export function applyTheme(theme: ThemePreset) {
+// ── Color Math Helpers ──
+
+function hexToRGB(hex: string): { r: number; g: number; b: number } {
+  const h = hex.replace('#', '');
+  return {
+    r: parseInt(h.substring(0, 2), 16),
+    g: parseInt(h.substring(2, 4), 16),
+    b: parseInt(h.substring(4, 6), 16),
+  };
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  return '#' + [r, g, b].map(v => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
+}
+
+export function hexToHSL(hex: string): { h: number; s: number; l: number } {
+  const { r, g, b } = hexToRGB(hex);
+  const rf = r / 255, gf = g / 255, bf = b / 255;
+  const max = Math.max(rf, gf, bf), min = Math.min(rf, gf, bf);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l: l * 100 };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  if (max === rf) h = ((gf - bf) / d + (gf < bf ? 6 : 0)) / 6;
+  else if (max === gf) h = ((bf - rf) / d + 2) / 6;
+  else h = ((rf - gf) / d + 4) / 6;
+  return { h: h * 360, s: s * 100, l: l * 100 };
+}
+
+export function hslToHex(h: number, s: number, l: number): string {
+  const sf = s / 100, lf = l / 100;
+  const c = (1 - Math.abs(2 * lf - 1)) * sf;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = lf - c / 2;
+  let rf = 0, gf = 0, bf = 0;
+  if (h < 60) { rf = c; gf = x; }
+  else if (h < 120) { rf = x; gf = c; }
+  else if (h < 180) { gf = c; bf = x; }
+  else if (h < 240) { gf = x; bf = c; }
+  else if (h < 300) { rf = x; bf = c; }
+  else { rf = c; bf = x; }
+  return rgbToHex((rf + m) * 255, (gf + m) * 255, (bf + m) * 255);
+}
+
+/** Convert any color string to hex (handles rgba() and hex) */
+export function toHex(color: string): string {
+  if (color.startsWith('#')) return color.length === 7 ? color : color;
+  const m = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (m) return rgbToHex(+m[1], +m[2], +m[3]);
+  return '#000000';
+}
+
+/** Rebuild rgba() string preserving alpha from original */
+export function withOriginalAlpha(newHex: string, originalColor: string): string {
+  if (!originalColor.startsWith('rgba')) return newHex;
+  const m = originalColor.match(/rgba?\([^,]+,[^,]+,[^,]+,\s*([^)]+)\)/);
+  const alpha = m ? m[1].trim() : '1';
+  const { r, g, b } = hexToRGB(newHex);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// ── Accent Derivation ──
+
+export function deriveAccentVariants(accentHex: string): Pick<ThemeColors, 'accent' | 'accent-solid' | 'accent-hover'> {
+  const { h, s, l } = hexToHSL(accentHex);
+  return {
+    accent: accentHex,
+    'accent-solid': hslToHex(h, Math.min(s + 10, 100), Math.max(l - 20, 10)),
+    'accent-hover': hslToHex(h, Math.max(s - 5, 0), Math.min(l + 15, 90)),
+  };
+}
+
+// ── Theme Config Persistence ──
+
+const STORAGE_KEY = 'truereplay-theme';
+
+export function loadThemeConfig(): ThemeConfig {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return makeDefaultConfig();
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.version === 1 && parsed.baseThemeId) {
+      return parsed as ThemeConfig;
+    }
+  } catch {
+    // Not JSON — old format (plain theme ID string)
+    if (getThemeById(raw)) {
+      return { version: 1, baseThemeId: raw, colorOverrides: {}, uiSettings: { ...DEFAULT_UI_SETTINGS } };
+    }
+  }
+
+  return makeDefaultConfig();
+}
+
+export function saveThemeConfig(config: ThemeConfig): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+}
+
+export function makeDefaultConfig(): ThemeConfig {
+  return { version: 1, baseThemeId: DEFAULT_THEME_ID, colorOverrides: {}, uiSettings: { ...DEFAULT_UI_SETTINGS } };
+}
+
+// ── Theme Resolution ──
+
+export function resolveThemeColors(config: ThemeConfig): ThemeColors {
+  const base = getThemeById(config.baseThemeId) ?? themes[0];
+  return { ...base.colors, ...config.colorOverrides };
+}
+
+export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISettings) {
   const root = document.documentElement;
-  for (const [key, value] of Object.entries(theme.colors)) {
+  for (const [key, value] of Object.entries(colors)) {
     root.style.setProperty(`--color-${key}`, value);
   }
+  root.style.setProperty('--ui-font-size', `${uiSettings.fontSize}px`);
+  root.style.setProperty('--ui-border-radius', `${uiSettings.borderRadius}px`);
+  root.style.setProperty('--ui-row-height', `${uiSettings.rowHeight}px`);
+}
+
+// ── Import/Export ──
+
+export function validateExportedTheme(data: unknown): data is ExportedTheme {
+  if (!data || typeof data !== 'object') return false;
+  const d = data as Record<string, unknown>;
+  if (d.version !== 1 || typeof d.name !== 'string') return false;
+  if (!d.colors || typeof d.colors !== 'object') return false;
+  const colors = d.colors as Record<string, unknown>;
+  for (const key of THEME_COLOR_KEYS) {
+    if (typeof colors[key] !== 'string') return false;
+  }
+  if (!d.uiSettings || typeof d.uiSettings !== 'object') return false;
+  const ui = d.uiSettings as Record<string, unknown>;
+  if (typeof ui.fontSize !== 'number' || typeof ui.borderRadius !== 'number' || typeof ui.rowHeight !== 'number') return false;
+  return true;
+}
+
+export function findClosestPreset(colors: ThemeColors): string {
+  let bestId = DEFAULT_THEME_ID;
+  let bestMatches = 0;
+  for (const preset of themes) {
+    let matches = 0;
+    for (const key of THEME_COLOR_KEYS) {
+      if (preset.colors[key] === colors[key]) matches++;
+    }
+    if (matches > bestMatches) {
+      bestMatches = matches;
+      bestId = preset.id;
+    }
+  }
+  return bestId;
 }

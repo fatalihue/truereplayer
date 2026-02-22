@@ -7,7 +7,7 @@
     <script>
       // Apply saved theme instantly before React loads to prevent color flash
       (function() {
-        var themes = {
+        var presets = {
           midnight: { 'bg-base':'#0c1220','bg-surface':'#131b2e','bg-card':'#1a2338','bg-elevated':'#212b42','bg-input':'#0e1628','border-subtle':'rgba(255,255,255,0.06)','border-default':'rgba(255,255,255,0.1)','border-strong':'rgba(255,255,255,0.15)','text-primary':'#ffffff','text-secondary':'#c5c5c5','text-tertiary':'#7a8599','text-disabled':'#4a5568','accent':'#60cdff','accent-solid':'#0078d4','accent-hover':'#7dd6ff' },
           carbon: { 'bg-base':'#121212','bg-surface':'#1a1a1a','bg-card':'#222222','bg-elevated':'#2a2a2a','bg-input':'#0e0e0e','border-subtle':'rgba(255,255,255,0.06)','border-default':'rgba(255,255,255,0.1)','border-strong':'rgba(255,255,255,0.15)','text-primary':'#e0e0e0','text-secondary':'#a0a0a0','text-tertiary':'#707070','text-disabled':'#484848','accent':'#90caf9','accent-solid':'#42a5f5','accent-hover':'#bbdefb' },
           amethyst: { 'bg-base':'#150e24','bg-surface':'#1e1533','bg-card':'#271d40','bg-elevated':'#30264d','bg-input':'#120b20','border-subtle':'rgba(200,180,255,0.06)','border-default':'rgba(200,180,255,0.1)','border-strong':'rgba(200,180,255,0.15)','text-primary':'#f0eaff','text-secondary':'#c5b8e0','text-tertiary':'#8a7aaa','text-disabled':'#554a6a','accent':'#c084fc','accent-solid':'#9333ea','accent-hover':'#d8b4fe' },
@@ -19,10 +19,32 @@
         };
         var saved = null;
         try { saved = localStorage.getItem('truereplay-theme'); } catch(e) {}
-        var colors = saved && themes[saved] ? themes[saved] : themes['carbon'];
+        var colors = presets['carbon'];
+        var ui = { fontSize: 13, borderRadius: 6, rowHeight: 36 };
+        if (saved) {
+          try {
+            var cfg = JSON.parse(saved);
+            if (cfg && cfg.version === 1 && cfg.baseThemeId && presets[cfg.baseThemeId]) {
+              colors = {};
+              var base = presets[cfg.baseThemeId];
+              for (var k in base) colors[k] = base[k];
+              if (cfg.colorOverrides) { for (var k in cfg.colorOverrides) colors[k] = cfg.colorOverrides[k]; }
+              if (cfg.uiSettings) {
+                if (typeof cfg.uiSettings.fontSize === 'number') ui.fontSize = cfg.uiSettings.fontSize;
+                if (typeof cfg.uiSettings.borderRadius === 'number') ui.borderRadius = cfg.uiSettings.borderRadius;
+                if (typeof cfg.uiSettings.rowHeight === 'number') ui.rowHeight = cfg.uiSettings.rowHeight;
+              }
+            }
+          } catch(e) {
+            // Old format: plain theme ID string
+            if (presets[saved]) colors = presets[saved];
+          }
+        }
         var s = document.documentElement.style;
         for (var k in colors) s.setProperty('--color-' + k, colors[k]);
-        // Set background directly on <html> — document.body doesn't exist yet in <head>
+        s.setProperty('--ui-font-size', ui.fontSize + 'px');
+        s.setProperty('--ui-border-radius', ui.borderRadius + 'px');
+        s.setProperty('--ui-row-height', ui.rowHeight + 'px');
         s.background = colors['bg-base'];
       })();
     </script>

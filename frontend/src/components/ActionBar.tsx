@@ -21,7 +21,7 @@ export function ActionBar() {
   };
 
   return (
-    <div className="flex items-center justify-between px-4 py-2.5 bg-bg-surface border border-border-subtle rounded-md">
+    <div className="flex items-center justify-between px-4 py-2.5 bg-bg-surface border border-border-subtle rounded-ui">
       {/* Left: Record + Replay */}
       <div className="flex items-center gap-2">
         <button
@@ -31,7 +31,7 @@ export function ActionBar() {
             send({ type: 'recording:toggle', payload: { insertIndex } });
           }}
           disabled={!buttonStates.recordEnabled}
-          className={`flex items-center gap-2 px-5 py-2 rounded text-[13px] font-semibold text-white transition-colors ${
+          className={`flex items-center gap-2 px-5 py-2 rounded text-ui font-semibold text-white transition-colors ${
             buttonStates.recordingActive
               ? 'bg-recording hover:bg-recording/80'
               : 'bg-recording hover:bg-recording/80'
@@ -44,7 +44,7 @@ export function ActionBar() {
         <button
           onClick={handleReplay}
           disabled={!buttonStates.replayEnabled}
-          className={`flex items-center gap-2 px-5 py-2 rounded text-[13px] font-semibold text-white transition-colors ${
+          className={`flex items-center gap-2 px-5 py-2 rounded text-ui font-semibold text-white transition-colors ${
             buttonStates.replayActive
               ? 'bg-accent-solid hover:bg-accent-solid/80'
               : 'bg-replay hover:bg-replay/80'
@@ -59,21 +59,21 @@ export function ActionBar() {
       <div className="flex items-center gap-2">
         <button
           onClick={() => send({ type: 'profile:save', payload: {} })}
-          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded text-[13px] text-text-primary bg-bg-elevated hover:bg-bg-card border border-border-subtle transition-colors"
+          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded text-ui text-text-primary bg-bg-elevated hover:bg-bg-card border border-border-subtle transition-colors"
         >
           <Save size={14} />
           Save
         </button>
         <button
           onClick={() => send({ type: 'profile:load', payload: {} })}
-          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded text-[13px] text-text-primary bg-bg-elevated hover:bg-bg-card border border-border-subtle transition-colors"
+          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded text-ui text-text-primary bg-bg-elevated hover:bg-bg-card border border-border-subtle transition-colors"
         >
           <FolderOpen size={14} />
           Load
         </button>
         <button
           onClick={() => send({ type: 'profile:reset', payload: {} })}
-          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded text-[13px] text-text-tertiary bg-bg-elevated hover:bg-bg-card border border-border-subtle transition-colors"
+          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded text-ui text-text-tertiary bg-bg-elevated hover:bg-bg-card border border-border-subtle transition-colors"
         >
           <RotateCcw size={14} />
           Reset

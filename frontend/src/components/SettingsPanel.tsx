@@ -15,13 +15,13 @@ function Section({ icon: Icon, iconColor, title, children, defaultOpen = true }:
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
-    <div className="bg-bg-surface border border-border-subtle rounded-md overflow-hidden">
+    <div className="bg-bg-surface border border-border-subtle rounded-ui overflow-hidden">
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-bg-card transition-colors"
       >
         <Icon size={14} style={{ color: iconColor }} />
-        <span className="text-[13px] font-semibold text-text-primary flex-1 text-left">{title}</span>
+        <span className="text-ui font-semibold text-text-primary flex-1 text-left">{title}</span>
         {isOpen ? <ChevronDown size={14} className="text-text-tertiary" /> : <ChevronRight size={14} className="text-text-tertiary" />}
       </button>
       {isOpen && (
@@ -36,7 +36,7 @@ function Section({ icon: Icon, iconColor, title, children, defaultOpen = true }:
 function SettingRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between py-1">
-      <span className="text-[13px] text-text-secondary">{label}</span>
+      <span className="text-ui text-text-secondary">{label}</span>
       <div className="flex items-center gap-2.5">
         {children}
       </div>
@@ -92,7 +92,7 @@ function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-16', suf
             (e.target as HTMLInputElement).blur();
           }
         }}
-        className={`${width} h-7 px-2 text-[13px] text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid ${mono ? 'font-mono' : ''}`}
+        className={`${width} h-7 px-2 text-ui text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid ${mono ? 'font-mono' : ''}`}
       />
       {suffix && <span className="text-[11px] text-text-disabled w-4">{suffix}</span>}
     </>
