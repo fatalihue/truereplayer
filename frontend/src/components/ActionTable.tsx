@@ -144,6 +144,11 @@ export function ActionTable() {
       e.preventDefault();
       setSelectedIndices(new Set(actions.map((_, i) => i)));
     }
+
+    if (e.key === 'Escape' && selectedIndices.size > 0) {
+      e.preventDefault();
+      setSelectedIndices(new Set());
+    }
   }, [editingCell, selectedIndices, send, actions]);
 
   // Handle edit input key events
@@ -197,7 +202,7 @@ export function ActionTable() {
                   onClick={(e) => handleRowClick(idx, e)}
                   className={`h-row border-b border-border-subtle transition-colors cursor-default ${
                     isHighlighted
-                      ? 'bg-[rgba(218,165,32,0.15)]'
+                      ? 'bg-[rgba(218,185,80,0.08)]'
                       : isSelected
                         ? 'bg-[rgba(96,205,255,0.08)]'
                         : idx % 2 === 0
