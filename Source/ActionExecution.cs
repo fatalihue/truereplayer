@@ -439,6 +439,46 @@ namespace TrueReplayer.Services
         {
             if (string.IsNullOrEmpty(text)) return;
 
+            // Resolve {clipboard} placeholder by reading current clipboard content
+            var tcsRead = new TaskCompletionSource<string?>();
+            if (text.Contains("{clipboard}", StringComparison.OrdinalIgnoreCase))
+            {
+                dispatcherQueue.TryEnqueue(async () =>
+                {
+                    try
+                    {
+                        var content = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
+                        if (content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
+                        {
+                            var clipText = await content.GetTextAsync();
+                            tcsRead.SetResult(clipText);
+                        }
+                        else
+                        {
+                            tcsRead.SetResult("");
+                        }
+                    }
+                    catch
+                    {
+                        tcsRead.SetResult("");
+                    }
+                });
+
+                var clipboardValue = await tcsRead.Task;
+                text = text.Replace("{clipboard}", clipboardValue ?? "", StringComparison.OrdinalIgnoreCase);
+            }
+
+            // Resolve {datetime} before {date}/{time} to avoid partial matches
+            var now = DateTime.Now;
+            if (text.Contains("{datetime}", StringComparison.OrdinalIgnoreCase))
+                text = text.Replace("{datetime}", now.ToString("dd/MM/yyyy HH:mm:ss"), StringComparison.OrdinalIgnoreCase);
+            if (text.Contains("{date}", StringComparison.OrdinalIgnoreCase))
+                text = text.Replace("{date}", now.ToString("dd/MM/yyyy"), StringComparison.OrdinalIgnoreCase);
+            if (text.Contains("{time}", StringComparison.OrdinalIgnoreCase))
+                text = text.Replace("{time}", now.ToString("HH:mm:ss"), StringComparison.OrdinalIgnoreCase);
+
+            if (string.IsNullOrEmpty(text) || token.IsCancellationRequested) return;
+
             // Set clipboard on UI thread
             var tcs = new TaskCompletionSource<bool>();
             dispatcherQueue.TryEnqueue(() =>
