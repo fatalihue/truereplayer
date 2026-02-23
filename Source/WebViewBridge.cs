@@ -200,6 +200,7 @@ namespace TrueReplayer
                     recordingHotkey = profile.RecordingHotkey,
                     replayHotkey = profile.ReplayHotkey,
                     profileKeyToggleHotkey = profile.ProfileKeyToggleHotkey,
+                    foregroundHotkey = profile.ForegroundHotkey,
                     alwaysOnTop = profile.AlwaysOnTop,
                     minimizeToTray = profile.MinimizeToTray
                 }
@@ -710,6 +711,9 @@ namespace TrueReplayer
                     break;
                 case "profileKeyToggleHotkey":
                     UserProfile.Current.ProfileKeyToggleHotkey = valueElement.GetString() ?? "Ctrl+Shift+K";
+                    break;
+                case "foregroundHotkey":
+                    UserProfile.Current.ForegroundHotkey = valueElement.GetString() ?? "Ctrl+Shift+L";
                     break;
             }
 

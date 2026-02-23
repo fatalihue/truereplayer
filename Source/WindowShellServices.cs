@@ -186,7 +186,7 @@ namespace TrueReplayer.Services
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             var windowId = Win32Interop.GetWindowIdFromWindow(hwnd);
             var appWindow = AppWindow.GetFromWindowId(windowId);
-            appWindow.Resize(new Windows.Graphics.SizeInt32(1180, 740));
+            appWindow.Resize(new Windows.Graphics.SizeInt32(1180, 780));
             CustomizeTitleBar(appWindow);
             CenterWindow(appWindow, windowId);
         }
@@ -264,7 +264,7 @@ namespace TrueReplayer.Services
             {
                 MINMAXINFO mmi = Marshal.PtrToStructure<MINMAXINFO>(lParam)!;
                 mmi.ptMinTrackSize.x = 1180;
-                mmi.ptMinTrackSize.y = 740;
+                mmi.ptMinTrackSize.y = 780;
                 Marshal.StructureToPtr(mmi, lParam, true);
                 return IntPtr.Zero;
             }
@@ -298,6 +298,12 @@ namespace TrueReplayer.Services
             }
 
             return HwndHookManager.CallOriginalWndProc(hwnd, msg, wParam, lParam);
+        }
+
+        public void BringToForeground()
+        {
+            ShowWindow(hwnd, SW_RESTORE);
+            SetForegroundWindow(hwnd);
         }
 
         public void UpdateAlwaysOnTop(bool isAlwaysOnTop)

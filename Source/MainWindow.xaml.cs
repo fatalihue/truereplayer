@@ -183,6 +183,12 @@ namespace TrueReplayer
                         return;
                     }
 
+                    if (key == UserProfile.Current.ForegroundHotkey)
+                    {
+                        windowEventManager?.BringToForeground();
+                        return;
+                    }
+
                     if (key.StartsWith("PROFILE::") &&
                         (!UserProfile.Current.ProfileKeyEnabled || mainController.IsRecording() || mainController.IsReplayInProgress()))
                     {

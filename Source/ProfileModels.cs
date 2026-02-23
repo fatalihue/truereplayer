@@ -19,6 +19,9 @@ namespace TrueReplayer.Models
         [JsonIgnore]
         public string ProfileKeyToggleHotkey { get; set; } = "Ctrl+Shift+K";
 
+        [JsonIgnore]
+        public string ForegroundHotkey { get; set; } = "Ctrl+Shift+L";
+
         public bool RecordMouse { get; set; } = true;
         public bool RecordScroll { get; set; } = true;
         public bool RecordKeyboard { get; set; } = true;
@@ -50,6 +53,7 @@ namespace TrueReplayer.Models
             RecordingHotkey = "F9",
             ReplayHotkey = "F10",
             ProfileKeyToggleHotkey = "Ctrl+Shift+K",
+            ForegroundHotkey = "Ctrl+Shift+L",
             RecordMouse = true,
             RecordScroll = true,
             RecordKeyboard = true,

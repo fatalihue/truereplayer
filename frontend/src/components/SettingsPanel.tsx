@@ -269,6 +269,13 @@ export function SettingsPanel() {
             onChange={changeHotkey}
           />
         </SettingRow>
+        <SettingRow label="Foreground">
+          <HotkeyInput
+            value={settings.foregroundHotkey}
+            settingKey="foregroundHotkey"
+            onChange={changeHotkey}
+          />
+        </SettingRow>
       </Section>
 
       {/* Window */}

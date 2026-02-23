@@ -17,6 +17,7 @@ const defaultSettings = {
   recordingHotkey: 'F9',
   replayHotkey: 'F10',
   profileKeyToggleHotkey: 'Ctrl+Shift+K',
+  foregroundHotkey: 'Ctrl+Shift+L',
   alwaysOnTop: false,
   minimizeToTray: false,
 };

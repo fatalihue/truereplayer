@@ -33,6 +33,7 @@ export interface SettingsState {
   recordingHotkey: string;
   replayHotkey: string;
   profileKeyToggleHotkey: string;
+  foregroundHotkey: string;
   alwaysOnTop: boolean;
   minimizeToTray: boolean;
 }

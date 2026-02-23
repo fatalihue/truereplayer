@@ -190,6 +190,12 @@ namespace TrueReplayer
                         return (IntPtr)1;
                     }
 
+                    if (key == UserProfile.Current.ForegroundHotkey)
+                    {
+                        OnHotkeyPressed?.Invoke(key);
+                        return (IntPtr)1;
+                    }
+
                     if (!IsReplayingAction && UserProfile.Current.ProfileKeyEnabled && isProfileKey && MainController.Instance != null && !MainController.Instance.IsRecording())
                     {
                         var profileName = ProfileHotkeys.FirstOrDefault(p => p.Value == key).Key;
