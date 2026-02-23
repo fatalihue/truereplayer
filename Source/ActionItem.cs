@@ -65,7 +65,7 @@ namespace TrueReplayer.Models
 
         private static readonly HashSet<string> NoCoordinateActionTypes = new(StringComparer.OrdinalIgnoreCase)
         {
-            "KeyDown", "KeyUp", "ScrollUp", "ScrollDown"
+            "KeyDown", "KeyUp", "ScrollUp", "ScrollDown", "SendText"
         };
 
         private bool HideCoordinates => NoCoordinateActionTypes.Contains(ActionType ?? "");
@@ -78,6 +78,8 @@ namespace TrueReplayer.Models
             get
             {
                 if (string.IsNullOrEmpty(Key)) return "";
+
+                if (ActionType == "SendText") return Key;
 
                 if (Key.StartsWith("D") && Key.Length == 2 && char.IsDigit(Key[1]))
                     return Key[1].ToString();

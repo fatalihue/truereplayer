@@ -1,12 +1,15 @@
-import { Circle, Play, Save, FolderOpen, RotateCcw } from 'lucide-react';
+import { useState } from 'react';
+import { Circle, Play, Save, FolderOpen, RotateCcw, Type } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
+import { SendTextDialog } from './SendTextDialog';
 
 export function ActionBar() {
   const { buttonStates, settings } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
+  const [showSendTextDialog, setShowSendTextDialog] = useState(false);
 
   const handleReplay = () => {
     send({
@@ -53,6 +56,15 @@ export function ActionBar() {
           <Play size={12} fill="white" />
           {buttonStates.replayButtonText}
         </button>
+
+        <button
+          onClick={() => setShowSendTextDialog(true)}
+          disabled={buttonStates.recordingActive || buttonStates.replayActive}
+          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded text-ui text-text-primary bg-bg-elevated hover:bg-bg-card border border-border-subtle transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Type size={14} />
+          Send Text
+        </button>
       </div>
 
       {/* Right: Save, Load, Reset */}
@@ -79,6 +91,19 @@ export function ActionBar() {
           Reset
         </button>
       </div>
+
+      {showSendTextDialog && (
+        <SendTextDialog
+          mode="add"
+          onConfirm={(text) => {
+            const sel = selectionRef.current;
+            const insertIndex = sel.size > 0 ? Math.min(...sel) : undefined;
+            send({ type: 'actions:addSendText', payload: { text, insertIndex } });
+            setShowSendTextDialog(false);
+          }}
+          onClose={() => setShowSendTextDialog(false)}
+        />
+      )}
     </div>
   );
 }

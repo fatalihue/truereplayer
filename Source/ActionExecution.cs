@@ -329,6 +329,7 @@ namespace TrueReplayer.Services
                                 case "MiddleClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEUP); break;
                                 case "ScrollUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_WHEEL, 120); break;
                                 case "ScrollDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_WHEEL, -120); break;
+                                case "SendText": await SimulateClipboardPaste(action.Key, token); break;
                             }
                         }
                         finally
@@ -432,6 +433,57 @@ namespace TrueReplayer.Services
             };
 
             NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
+        }
+
+        private async Task SimulateClipboardPaste(string text, CancellationToken token)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+
+            // Set clipboard on UI thread
+            var tcs = new TaskCompletionSource<bool>();
+            dispatcherQueue.TryEnqueue(() =>
+            {
+                try
+                {
+                    var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage();
+                    dataPackage.SetText(text);
+                    Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+                    tcs.SetResult(true);
+                }
+                catch
+                {
+                    tcs.SetResult(false);
+                }
+            });
+
+            if (!await tcs.Task || token.IsCancellationRequested) return;
+
+            await Task.Delay(50, token);
+
+            // Simulate Ctrl+V
+            ushort vkCtrl = 0x11; // VK_CONTROL
+            ushort vkV = 0x56;    // VK_V
+            ushort scanCtrl = (ushort)NativeMethods.MapVirtualKey(vkCtrl, 0);
+            ushort scanV = (ushort)NativeMethods.MapVirtualKey(vkV, 0);
+
+            var inputs = new NativeMethods.INPUT[]
+            {
+                new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = vkCtrl, wScan = scanCtrl, dwFlags = NativeMethods.KEYEVENTF_SCANCODE } } },
+                new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = vkV, wScan = scanV, dwFlags = NativeMethods.KEYEVENTF_SCANCODE } } },
+                new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = vkV, wScan = scanV, dwFlags = NativeMethods.KEYEVENTF_KEYUP | NativeMethods.KEYEVENTF_SCANCODE } } },
+                new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = vkCtrl, wScan = scanCtrl, dwFlags = NativeMethods.KEYEVENTF_KEYUP | NativeMethods.KEYEVENTF_SCANCODE } } },
+            };
+
+            NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
+
+            await Task.Delay(50, token);
+
+            // Clear clipboard on UI thread
+            dispatcherQueue.TryEnqueue(() =>
+            {
+                try { Windows.ApplicationModel.DataTransfer.Clipboard.Clear(); }
+                catch { }
+            });
         }
 
         private void SimulateKey(string key, bool isDown)

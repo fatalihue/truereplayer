@@ -113,6 +113,8 @@ namespace TrueReplayer
                     case "actions:copy": HandleActionsCopy(); break;
                     case "actions:edit": HandleActionsEdit(payload); break;
                     case "actions:delete": HandleActionsDelete(payload); break;
+                    case "actions:addSendText": HandleAddSendText(payload); break;
+                    case "actions:editSendText": HandleEditSendText(payload); break;
                     case "actions:bulkUpdateDelay": HandleBulkUpdateDelay(payload); break;
                     case "profile:click": HandleProfileClick(payload); break;
                     case "profile:create": HandleProfileCreate(payload); break;
@@ -464,6 +466,42 @@ namespace TrueReplayer
                     actions[idx].Delay = delay;
             }
 
+            PushActionsUpdate();
+        }
+
+        private void HandleAddSendText(JsonElement payload)
+        {
+            string text = payload.GetProperty("text").GetString() ?? "";
+            if (string.IsNullOrEmpty(text)) return;
+
+            int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
+            var action = new ActionItem { ActionType = "SendText", Key = text, Delay = delay };
+
+            if (payload.TryGetProperty("insertIndex", out var idxEl) && idxEl.ValueKind == JsonValueKind.Number)
+            {
+                int idx = idxEl.GetInt32();
+                if (idx >= 0 && idx <= actions.Count)
+                    actions.Insert(idx, action);
+                else
+                    actions.Add(action);
+            }
+            else
+            {
+                actions.Add(action);
+            }
+
+            mainController.UpdateButtonStates();
+        }
+
+        private void HandleEditSendText(JsonElement payload)
+        {
+            int index = payload.GetProperty("index").GetInt32();
+            string text = payload.GetProperty("text").GetString() ?? "";
+
+            if (index < 0 || index >= actions.Count) return;
+            if (actions[index].ActionType != "SendText") return;
+
+            actions[index].Key = text;
             PushActionsUpdate();
         }
 

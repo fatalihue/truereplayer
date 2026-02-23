@@ -1,9 +1,10 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors } from '../utils/displayUtils';
+import { SendTextDialog } from './SendTextDialog';
 
 function ActionIcon({ actionType }: { actionType: string }) {
   const size = 12;
@@ -11,6 +12,7 @@ function ActionIcon({ actionType }: { actionType: string }) {
   if (actionType === 'ScrollUp') return <ArrowUp size={size} />;
   if (actionType === 'ScrollDown') return <ArrowDown size={size} />;
   if (actionType.startsWith('Key')) return <Keyboard size={size} />;
+  if (actionType === 'SendText') return <Type size={size} />;
   return <Zap size={size} />;
 }
 
@@ -32,6 +34,7 @@ export function ActionTable() {
   const lastClickedIndex = useRef<number | null>(null);
   const prevActionsLength = useRef(actions.length);
   const wasRecording = useRef(false);
+  const [sendTextEdit, setSendTextEdit] = useState<{ index: number; text: string } | null>(null);
 
   // Clear selection when recording stops so next recording appends normally
   useEffect(() => {
@@ -229,7 +232,15 @@ export function ActionTable() {
                   {/* Key */}
                   <td className="w-[100px] pl-1">
                     {displayKey && (
-                      <span className="inline-block px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input">
+                      <span
+                        className={`inline-block px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input max-w-[92px] truncate ${action.actionType === 'SendText' ? 'cursor-text hover:text-accent-light' : ''}`}
+                        title={action.actionType === 'SendText' ? action.key : undefined}
+                        onDoubleClick={() => {
+                          if (action.actionType === 'SendText') {
+                            setSendTextEdit({ index: idx, text: action.key });
+                          }
+                        }}
+                      >
                         {displayKey}
                       </span>
                     )}
@@ -335,6 +346,18 @@ export function ActionTable() {
           </div>
         )}
       </div>
+
+      {sendTextEdit && (
+        <SendTextDialog
+          mode="edit"
+          initialText={sendTextEdit.text}
+          onConfirm={(text) => {
+            send({ type: 'actions:editSendText', payload: { index: sendTextEdit.index, text } });
+            setSendTextEdit(null);
+          }}
+          onClose={() => setSendTextEdit(null)}
+        />
+      )}
     </div>
   );
 }
