@@ -49,6 +49,8 @@ namespace TrueReplayer
 
         // Toolbar/StatusBar state
         public string CurrentProfileName { get; set; } = "No Profile";
+        public string? CurrentProfilePath { get; set; }
+        public bool HasUnsavedChanges { get; set; }
 
         public WebViewBridge(
             CoreWebView2 webView,
@@ -130,6 +132,8 @@ namespace TrueReplayer
                     case "settings:change": HandleSettingsChange(payload); break;
                     case "window:alwaysOnTop": HandleAlwaysOnTop(payload); break;
                     case "window:minimizeToTray": HandleMinimizeToTray(payload); break;
+                    case "ui:modalOpen": InputHookManager.SuppressAllHotkeys = true; break;
+                    case "ui:modalClose": InputHookManager.SuppressAllHotkeys = false; break;
                     default:
                         System.Diagnostics.Debug.WriteLine($"[Bridge] Unknown message type: {type}");
                         break;
@@ -406,6 +410,7 @@ namespace TrueReplayer
         private void HandleActionsClear()
         {
             actions.Clear();
+            HasUnsavedChanges = false;
             mainController.UpdateButtonStates();
         }
 
@@ -433,6 +438,7 @@ namespace TrueReplayer
                 case "comment": action.Comment = value; break;
             }
 
+            HasUnsavedChanges = true;
             PushActionsUpdate();
         }
 
@@ -449,6 +455,7 @@ namespace TrueReplayer
                     actions.RemoveAt(idx);
             }
 
+            HasUnsavedChanges = true;
             mainController.UpdateButtonStates();
         }
 
@@ -466,6 +473,7 @@ namespace TrueReplayer
                     actions[idx].Delay = delay;
             }
 
+            HasUnsavedChanges = true;
             PushActionsUpdate();
         }
 
@@ -490,6 +498,7 @@ namespace TrueReplayer
                 actions.Add(action);
             }
 
+            HasUnsavedChanges = true;
             mainController.UpdateButtonStates();
         }
 
@@ -502,6 +511,7 @@ namespace TrueReplayer
             if (actions[index].ActionType != "SendText") return;
 
             actions[index].Key = text;
+            HasUnsavedChanges = true;
             PushActionsUpdate();
         }
 
@@ -513,8 +523,11 @@ namespace TrueReplayer
             var profile = await profileController.LoadProfileByNameAsync(name);
             if (profile != null)
             {
+                var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
                 UserProfile.Current = profile;
                 CurrentProfileName = name;
+                CurrentProfilePath = entry?.FilePath;
+                HasUnsavedChanges = false;
                 ApplyProfile(profile);
                 profileController.UpdateProfileColors(name);
                 PushProfilesUpdate();
@@ -567,7 +580,10 @@ namespace TrueReplayer
             {
                 File.Move(entry.FilePath, newFilePath);
                 if (CurrentProfileName == oldName)
+                {
                     CurrentProfileName = Path.GetFileNameWithoutExtension(newFileName);
+                    CurrentProfilePath = newFilePath;
+                }
                 await profileController.RefreshProfileListAsync(true);
                 PushProfilesUpdate();
                 PushToolbarUpdate();
@@ -593,7 +609,10 @@ namespace TrueReplayer
                     File.Delete(entry.FilePath);
 
                 if (CurrentProfileName == name)
+                {
                     CurrentProfileName = "No Profile";
+                    CurrentProfilePath = null;
+                }
 
                 await profileController.RefreshProfileListAsync(true);
                 PushProfilesUpdate();
@@ -667,7 +686,29 @@ namespace TrueReplayer
 
         private async void HandleProfileSave()
         {
-            await profileController.SaveProfileAsync();
+            if (CurrentProfilePath != null)
+            {
+                var choice = await profileController.ShowSaveOverwriteDialogAsync(CurrentProfileName);
+                if (choice == SaveDialogResult.Overwrite)
+                {
+                    var profile = CreateProfileFromState();
+                    profile.CustomHotkey = UserProfile.Current.CustomHotkey;
+                    await SettingsManager.SaveProfileAsync(CurrentProfilePath, profile);
+                    UserProfile.Current = profile;
+                    HasUnsavedChanges = false;
+                }
+                else if (choice == SaveDialogResult.SaveAsNew)
+                {
+                    await profileController.SaveProfileAsync();
+                    HasUnsavedChanges = false;
+                }
+                // Cancel = do nothing
+            }
+            else
+            {
+                await profileController.SaveProfileAsync();
+                HasUnsavedChanges = false;
+            }
             PushProfilesUpdate();
         }
 
@@ -678,6 +719,8 @@ namespace TrueReplayer
 
             string name = Path.GetFileNameWithoutExtension(loadedPath);
             CurrentProfileName = name;
+            CurrentProfilePath = loadedPath;
+            HasUnsavedChanges = false;
             ApplyProfile(UserProfile.Current);
             profileController.UpdateProfileColors(name);
             PushProfilesUpdate();
@@ -696,6 +739,8 @@ namespace TrueReplayer
             ApplyProfile(UserProfile.Current);
             profileController.UpdateProfileColors(null);
             CurrentProfileName = "No Profile";
+            CurrentProfilePath = null;
+            HasUnsavedChanges = false;
             PushProfilesUpdate();
             PushToolbarUpdate();
             PushStatusBarUpdate();
@@ -790,6 +835,9 @@ namespace TrueReplayer
         {
             for (int i = 0; i < actions.Count; i++)
                 actions[i].RowNumber = i + 1;
+
+            if (e.Action == NotifyCollectionChangedAction.Add)
+                HasUnsavedChanges = true;
 
             PushActionsUpdate();
         }

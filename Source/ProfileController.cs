@@ -15,6 +15,8 @@ using WinForms = System.Windows.Forms;
 
 namespace TrueReplayer.Controllers
 {
+    public enum SaveDialogResult { Overwrite, SaveAsNew, Cancel }
+
     public class ProfileController : IDisposable
     {
         private readonly MainWindow window;
@@ -22,7 +24,6 @@ namespace TrueReplayer.Controllers
         private CancellationTokenSource? debounceCts;
         private bool _disposed;
         private bool suppressWatcherRefresh = false;
-        private string? selectedProfileName;
 
         public ObservableCollection<ProfileEntry> ProfileEntries { get; } = new();
 
@@ -220,8 +221,6 @@ namespace TrueReplayer.Controllers
                 suppressWatcherRefresh = true;
 
             await LoadProfileListAsync();
-
-            UpdateProfileColors(selectedProfileName);
         }
 
         public void RefreshProfileList(bool suppressWatcher = false)
@@ -281,161 +280,80 @@ namespace TrueReplayer.Controllers
 
         #region Profile UI Interactions
 
-        public async Task HandleProfileItemClick(string selectedProfile)
+        public async Task<SaveDialogResult> ShowSaveOverwriteDialogAsync(string profileName)
         {
-            var entry = ProfileEntries.FirstOrDefault(p => p.Name == selectedProfile);
-            if (entry != null)
+            var messageBlock = new TextBlock
             {
-                var profile = await SettingsManager.LoadProfileAsync(entry.FilePath);
-
-                if (profile != null)
-                {
-                    UserProfile.Current = profile;
-                    selectedProfileName = selectedProfile;
-                    UpdateProfileColors(selectedProfileName);
-                    TrayIconService.UpdateTrayIcon();
-                    // Bridge handles pushing the profile state to React
-                }
-            }
-        }
-
-        public void HandleProfileRightTapped(string profile)
-        {
-            if (ProfileEntries.Any(p => p.Name == profile))
-            {
-                selectedProfileName = profile;
-            }
-        }
-
-        public async Task DeleteSelectedProfileAsync()
-        {
-            var selectedProfile = ProfileEntries.FirstOrDefault(p => p.Name == selectedProfileName);
-            if (selectedProfile != null)
-            {
-                var confirmResult = WinForms.MessageBox.Show($"Delete profile '{selectedProfile.Name}'?", "Confirm Delete", WinForms.MessageBoxButtons.YesNo, WinForms.MessageBoxIcon.Warning);
-                if (confirmResult == WinForms.DialogResult.Yes)
-                {
-                    try
-                    {
-                        if (File.Exists(selectedProfile.FilePath))
-                            File.Delete(selectedProfile.FilePath);
-
-                        await RefreshProfileListAsync(true);
-                    }
-                    catch (Exception ex)
-                    {
-                        WinForms.MessageBox.Show($"Error deleting profile:\n{ex.Message}", "Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
-                    }
-                }
-            }
-        }
-
-        public void OpenSelectedProfileFolder()
-        {
-            var selectedProfile = ProfileEntries.FirstOrDefault(p => p.Name == selectedProfileName);
-            if (selectedProfile != null)
-            {
-                string? folderPath = Path.GetDirectoryName(selectedProfile.FilePath);
-
-                if (folderPath != null && Directory.Exists(folderPath))
-                {
-                    try
-                    {
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo()
-                        {
-                            FileName = folderPath,
-                            UseShellExecute = true,
-                            Verb = "open"
-                        });
-                    }
-                    catch (Exception ex)
-                    {
-                        WinForms.MessageBox.Show($"Error opening folder:\n{ex.Message}", "Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
-                    }
-                }
-            }
-        }
-
-        public async Task RenameSelectedProfileAsync()
-        {
-            var selectedProfile = ProfileEntries.FirstOrDefault(p => p.Name == selectedProfileName);
-            if (selectedProfile != null)
-            {
-                string? folderPath = Path.GetDirectoryName(selectedProfile.FilePath);
-
-                if (folderPath != null)
-                {
-                    string? newName = await ShowRenameDialogAsync(selectedProfile.Name);
-
-                    if (!string.IsNullOrWhiteSpace(newName))
-                    {
-                        if (!newName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
-                            newName += ".json";
-
-                        string newFilePath = Path.Combine(folderPath, newName);
-
-                        try
-                        {
-                            if (File.Exists(newFilePath))
-                            {
-                                WinForms.MessageBox.Show($"A profile named '{newName}' already exists.", "Rename Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Warning);
-                            }
-                            else
-                            {
-                                File.Move(selectedProfile.FilePath, newFilePath);
-                                await RefreshProfileListAsync(true);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            WinForms.MessageBox.Show($"Error renaming profile:\n{ex.Message}", "Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
-                        }
-                    }
-                }
-            }
-        }
-
-        private async Task<string?> ShowRenameDialogAsync(string currentName)
-        {
-            var inputTextBox = new TextBox
-            {
-                PlaceholderText = "New profile name...",
-                Text = currentName,
-                Margin = new Thickness(0, 10, 0, 0),
-                Background = new SolidColorBrush(Colors.DimGray),
+                Text = $"Profile \"{profileName}\" is already loaded.",
                 Foreground = new SolidColorBrush(Colors.White),
-                BorderBrush = new SolidColorBrush(Colors.Gray)
+                TextWrapping = TextWrapping.Wrap
             };
 
             var dialog = new ContentDialog
             {
-                Title = "Rename Profile",
+                Title = "Save Profile",
                 XamlRoot = window.Content.XamlRoot,
                 RequestedTheme = ElementTheme.Dark,
-                PrimaryButtonText = "Rename",
+                PrimaryButtonText = "Overwrite",
+                SecondaryButtonText = "Save as New",
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Primary,
                 Background = new SolidColorBrush(ColorHelper.FromArgb(255, 43, 43, 43)),
                 Foreground = new SolidColorBrush(Colors.White),
                 CornerRadius = new CornerRadius(8),
-                Content = inputTextBox
+                Content = messageBlock
             };
 
-            dialog.Loaded += (_, _) =>
+            InputHookManager.SuppressAllHotkeys = true;
+            try
             {
-                inputTextBox.Focus(FocusState.Programmatic);
-                inputTextBox.SelectAll();
-            };
-
-            var result = await dialog.ShowAsync();
-
-            if (result == ContentDialogResult.Primary)
-            {
-                string newName = inputTextBox.Text.Trim();
-                return string.IsNullOrEmpty(newName) ? null : newName;
+                var result = await dialog.ShowAsync();
+                return result switch
+                {
+                    ContentDialogResult.Primary => SaveDialogResult.Overwrite,
+                    ContentDialogResult.Secondary => SaveDialogResult.SaveAsNew,
+                    _ => SaveDialogResult.Cancel
+                };
             }
+            finally
+            {
+                InputHookManager.SuppressAllHotkeys = false;
+            }
+        }
 
-            return null;
+        public async Task<ContentDialogResult> ShowUnsavedChangesDialogAsync()
+        {
+            var messageBlock = new TextBlock
+            {
+                Text = "You have unsaved actions. Save before closing?",
+                Foreground = new SolidColorBrush(Colors.White),
+                TextWrapping = TextWrapping.Wrap
+            };
+
+            var dialog = new ContentDialog
+            {
+                Title = "Unsaved Changes",
+                XamlRoot = window.Content.XamlRoot,
+                RequestedTheme = ElementTheme.Dark,
+                PrimaryButtonText = "Save",
+                SecondaryButtonText = "Discard",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Primary,
+                Background = new SolidColorBrush(ColorHelper.FromArgb(255, 43, 43, 43)),
+                Foreground = new SolidColorBrush(Colors.White),
+                CornerRadius = new CornerRadius(8),
+                Content = messageBlock
+            };
+
+            InputHookManager.SuppressAllHotkeys = true;
+            try
+            {
+                return await dialog.ShowAsync();
+            }
+            finally
+            {
+                InputHookManager.SuppressAllHotkeys = false;
+            }
         }
 
         public void UpdateProfileColors(string? activeProfileName)

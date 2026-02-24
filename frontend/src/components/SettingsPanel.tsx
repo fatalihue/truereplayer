@@ -100,10 +100,11 @@ function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-16', suf
 }
 
 // Hotkey capture input — captures key combos on keydown
-function HotkeyInput({ value, settingKey, onChange }: {
+function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
   value: string;
   settingKey: string;
   onChange: (key: string, hotkey: string) => void;
+  onFocusChange?: (focused: boolean) => void;
 }) {
   const [localValue, setLocalValue] = useState(value);
   const [isFocused, setIsFocused] = useState(false);
@@ -160,8 +161,8 @@ function HotkeyInput({ value, settingKey, onChange }: {
       type="text"
       readOnly
       value={isFocused ? (localValue || '...') : localValue}
-      onFocus={() => { setIsFocused(true); setLocalValue('...'); }}
-      onBlur={() => { setIsFocused(false); setLocalValue(value); }}
+      onFocus={() => { setIsFocused(true); setLocalValue('...'); onFocusChange?.(true); }}
+      onBlur={() => { setIsFocused(false); setLocalValue(value); onFocusChange?.(false); }}
       onKeyDown={handleKeyDown}
       className={`w-[110px] h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer ${
         isFocused
@@ -177,6 +178,7 @@ export function SettingsPanel() {
   const { settings } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
+  const hotkeyFocusCount = useRef(0);
 
   const changeSetting = (key: string, value: string | boolean | number) => {
     send({ type: 'settings:change', payload: { key, value } });
@@ -184,6 +186,20 @@ export function SettingsPanel() {
 
   const changeHotkey = (settingKey: string, hotkey: string) => {
     send({ type: 'settings:change', payload: { key: settingKey, value: hotkey } });
+  };
+
+  const handleHotkeyFocusChange = (focused: boolean) => {
+    if (focused) {
+      hotkeyFocusCount.current++;
+      if (hotkeyFocusCount.current === 1) {
+        send({ type: 'ui:modalOpen', payload: {} });
+      }
+    } else {
+      hotkeyFocusCount.current = Math.max(0, hotkeyFocusCount.current - 1);
+      if (hotkeyFocusCount.current === 0) {
+        send({ type: 'ui:modalClose', payload: {} });
+      }
+    }
   };
 
   return (
@@ -263,6 +279,7 @@ export function SettingsPanel() {
             value={settings.recordingHotkey}
             settingKey="recordingHotkey"
             onChange={changeHotkey}
+            onFocusChange={handleHotkeyFocusChange}
           />
         </SettingRow>
         <SettingRow label="Replay">
@@ -270,6 +287,7 @@ export function SettingsPanel() {
             value={settings.replayHotkey}
             settingKey="replayHotkey"
             onChange={changeHotkey}
+            onFocusChange={handleHotkeyFocusChange}
           />
         </SettingRow>
         <SettingRow label="Profile Keys">
@@ -277,6 +295,7 @@ export function SettingsPanel() {
             value={settings.profileKeyToggleHotkey}
             settingKey="profileKeyToggleHotkey"
             onChange={changeHotkey}
+            onFocusChange={handleHotkeyFocusChange}
           />
         </SettingRow>
         <SettingRow label="Foreground">
@@ -284,6 +303,7 @@ export function SettingsPanel() {
             value={settings.foregroundHotkey}
             settingKey="foregroundHotkey"
             onChange={changeHotkey}
+            onFocusChange={handleHotkeyFocusChange}
           />
         </SettingRow>
       </Section>

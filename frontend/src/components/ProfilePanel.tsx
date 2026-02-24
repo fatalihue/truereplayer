@@ -55,6 +55,15 @@ export function ProfilePanel() {
     }
   }, [showHotkeyDialog]);
 
+  // Suppress hotkeys while any dialog is open
+  const anyDialogOpen = showCreateDialog || showRenameDialog !== null || showDeleteConfirm !== null || showHotkeyDialog !== null;
+  useEffect(() => {
+    if (anyDialogOpen) {
+      send({ type: 'ui:modalOpen', payload: {} });
+      return () => { send({ type: 'ui:modalClose', payload: {} }); };
+    }
+  }, [anyDialogOpen, send]);
+
   const handleContextMenu = useCallback((e: React.MouseEvent, name: string) => {
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY, profileName: name });

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -125,7 +126,10 @@ namespace TrueReplayer.Services
             }
         }
 
-        public static void ShowContextMenu()
+        /// Callback invoked when user clicks "Sair" from the tray. Should return true if exit is allowed.
+        public static Func<Task<bool>>? OnTrayExitRequested { get; set; }
+
+        public static async void ShowContextMenu()
         {
             IntPtr hMenu = CreatePopupMenu();
             AppendMenu(hMenu, MF_STRING, 1, "Restaurar");
@@ -139,6 +143,13 @@ namespace TrueReplayer.Services
             if (cmd == 1) ShowWindow(hwnd, 9);
             else if (cmd == 2)
             {
+                if (OnTrayExitRequested != null)
+                {
+                    ShowWindow(hwnd, 9); // Restore window so dialog is visible
+                    bool canExit = await OnTrayExitRequested();
+                    if (!canExit) return;
+                }
+
                 RemoveTrayIcon();
                 Microsoft.UI.Xaml.Application.Current.Exit();
             }
@@ -230,6 +241,12 @@ namespace TrueReplayer.Services
     {
         private readonly Window window;
         private readonly IntPtr hwnd;
+        private readonly AppWindow appWindow;
+        private bool closingConfirmed;
+
+        /// Callback that returns true if close should proceed (no unsaved changes or user confirmed).
+        /// Set from MainWindow after bridge is initialized.
+        public Func<Task<bool>>? OnCloseRequested { get; set; }
 
         private const int WM_USER = 0x0400;
         private const int WM_LBUTTONDBLCLK = 0x0203;
@@ -248,8 +265,27 @@ namespace TrueReplayer.Services
         {
             this.window = window;
             hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
-            // Register the closing event handler
+
+            var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+            appWindow = AppWindow.GetFromWindowId(windowId);
+            appWindow.Closing += OnAppWindowClosing;
+
             window.Closed += Window_Closed;
+        }
+
+        private async void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+        {
+            if (closingConfirmed || OnCloseRequested == null)
+                return;
+
+            args.Cancel = true;
+
+            bool canClose = await OnCloseRequested();
+            if (canClose)
+            {
+                closingConfirmed = true;
+                appWindow.Destroy();
+            }
         }
 
         private void Window_Closed(object sender, WindowEventArgs args)

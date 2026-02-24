@@ -1,8 +1,11 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using System;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using TrueReplayer.Controllers;
 using TrueReplayer.Interop;
 using TrueReplayer.Models;
@@ -121,6 +124,10 @@ namespace TrueReplayer
                 bridge.HandleMessage(e.WebMessageAsJson);
             };
 
+            // Wire up unsaved changes guard for window close and tray exit
+            windowEventManager.OnCloseRequested = HandleCloseGuardAsync;
+            TrayIconService.OnTrayExitRequested = HandleCloseGuardAsync;
+
             // Reveal WebView only after page is fully loaded to prevent color flash
             WebView.CoreWebView2.NavigationCompleted += (s, e) =>
             {
@@ -160,6 +167,34 @@ namespace TrueReplayer
                 var hotkeys = profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(hotkeys);
             });
+        }
+
+        private async Task<bool> HandleCloseGuardAsync()
+        {
+            if (bridge == null || !bridge.HasUnsavedChanges || Actions.Count == 0)
+                return true;
+
+            var result = await profileController.ShowUnsavedChangesDialogAsync();
+
+            if (result == ContentDialogResult.Primary) // Save
+            {
+                if (bridge.CurrentProfilePath != null)
+                {
+                    var profile = bridge.CreateProfileFromState();
+                    profile.CustomHotkey = UserProfile.Current.CustomHotkey;
+                    await SettingsManager.SaveProfileAsync(bridge.CurrentProfilePath, profile);
+                }
+                else
+                {
+                    await profileController.SaveProfileAsync();
+                }
+                return true;
+            }
+
+            if (result == ContentDialogResult.Secondary) // Discard
+                return true;
+
+            return false; // Cancel
         }
 
         private void SetupInputHooks()
@@ -229,10 +264,13 @@ namespace TrueReplayer
 
                         if (profile != null)
                         {
+                            var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == profileName);
                             mainController.SetLastHotkeyPressed(key);
                             UserProfile.Current = profile;
                             bridge?.ApplyProfile(profile);
                             bridge!.CurrentProfileName = profileName;
+                            bridge!.CurrentProfilePath = entry?.FilePath;
+                            bridge!.HasUnsavedChanges = false;
 
                             mainController.ToggleReplay(
                                 profile.EnableLoop,

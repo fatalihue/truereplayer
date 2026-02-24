@@ -107,4 +107,6 @@ export type OutgoingMessage =
   | { type: 'actions:bulkUpdateDelay'; payload: { indices: number[]; delay: number } }
   | { type: 'selection:changed'; payload: { indices: number[] } }
   | { type: 'window:alwaysOnTop'; payload: { enabled: boolean } }
-  | { type: 'window:minimizeToTray'; payload: { enabled: boolean } };
+  | { type: 'window:minimizeToTray'; payload: { enabled: boolean } }
+  | { type: 'ui:modalOpen'; payload: Record<string, never> }
+  | { type: 'ui:modalClose'; payload: Record<string, never> };

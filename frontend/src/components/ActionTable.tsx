@@ -36,6 +36,15 @@ export function ActionTable() {
   const wasRecording = useRef(false);
   const [sendTextEdit, setSendTextEdit] = useState<{ index: number; text: string } | null>(null);
 
+  // Suppress hotkeys while SendText edit dialog or inline key editing is active
+  const modalActive = sendTextEdit !== null || editingCell !== null;
+  useEffect(() => {
+    if (modalActive) {
+      send({ type: 'ui:modalOpen', payload: {} });
+      return () => { send({ type: 'ui:modalClose', payload: {} }); };
+    }
+  }, [modalActive, send]);
+
   // Clear selection when recording stops so next recording appends normally
   useEffect(() => {
     if (wasRecording.current && !buttonStates.recordingActive) {

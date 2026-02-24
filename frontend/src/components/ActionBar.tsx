@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Circle, Play, Save, FolderOpen, RotateCcw, Type } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -10,6 +10,14 @@ export function ActionBar() {
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
   const [showSendTextDialog, setShowSendTextDialog] = useState(false);
+
+  // Suppress hotkeys while SendText dialog is open
+  useEffect(() => {
+    if (showSendTextDialog) {
+      send({ type: 'ui:modalOpen', payload: {} });
+      return () => { send({ type: 'ui:modalClose', payload: {} }); };
+    }
+  }, [showSendTextDialog, send]);
 
   const handleReplay = () => {
     send({

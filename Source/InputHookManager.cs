@@ -31,6 +31,10 @@ namespace TrueReplayer
 
         public static bool IgnoreProfileHotkeys { get; set; } = false;
 
+        /// When true, suppresses ALL hotkey matching and key/mouse event recording.
+        /// Used when a UI dialog/modal is active (SendText, Rename, Hotkey Capture, ContentDialogs).
+        public static bool SuppressAllHotkeys { get; set; } = false;
+
         public static void Start()
         {
             if (_mouseHookId == IntPtr.Zero)
@@ -61,7 +65,7 @@ namespace TrueReplayer
 
         private static IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0)
+            if (nCode >= 0 && !SuppressAllHotkeys)
             {
                 var hookStruct = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
                 string? button = null;
@@ -137,6 +141,11 @@ namespace TrueReplayer
         {
             if (nCode >= 0)
             {
+                if (SuppressAllHotkeys)
+                {
+                    return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
+                }
+
                 if (IgnoreProfileHotkeys)
                 {
                     return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
