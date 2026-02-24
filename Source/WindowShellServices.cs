@@ -22,7 +22,11 @@ namespace TrueReplayer.Services
         private const uint NIF_MESSAGE = 0x01;
         private const uint NIF_ICON = 0x02;
         private const uint NIF_TIP = 0x04;
+        private const uint NIF_STATE = 0x08;
         private const uint NIF_INFO = 0x10;
+
+        // NotifyIcon state
+        private const uint NIS_HIDDEN = 0x01;
 
         // Balloon icon flags
         private const uint NIIF_INFO = 0x01;
@@ -111,6 +115,13 @@ namespace TrueReplayer.Services
         {
             if (isInitialized)
             {
+                // Hide the icon first so Windows removes it from the tray immediately
+                // (without this, the ghost icon lingers until mouse hover)
+                notifyIcon.uFlags |= NIF_STATE;
+                notifyIcon.dwState = NIS_HIDDEN;
+                notifyIcon.dwStateMask = NIS_HIDDEN;
+                Shell_NotifyIcon(NIM_MODIFY, ref notifyIcon);
+
                 Shell_NotifyIcon(NIM_DELETE, ref notifyIcon);
                 ReleaseCurrentIcon();
                 isInitialized = false;
@@ -284,6 +295,7 @@ namespace TrueReplayer.Services
             if (canClose)
             {
                 closingConfirmed = true;
+                TrayIconService.RemoveTrayIcon();
                 appWindow.Destroy();
             }
         }
