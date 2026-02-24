@@ -42,7 +42,7 @@ export function getActionTypeColors(actionType: string) {
   if (actionType.startsWith('Key'))
     return { bg: 'var(--color-action-key-bg)', fg: 'var(--color-action-key-fg)' };
   if (actionType === 'SendText')
-    return { bg: 'rgba(147, 112, 219, 0.15)', fg: '#b49cdf' };
+    return { bg: 'rgba(251, 191, 36, 0.10)', fg: '#fbbf24' };
   return { bg: 'transparent', fg: 'var(--color-text-tertiary)' };
 }
 

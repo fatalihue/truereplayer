@@ -479,7 +479,113 @@ namespace TrueReplayer.Services
 
             if (string.IsNullOrEmpty(text) || token.IsCancellationRequested) return;
 
-            // Set clipboard on UI thread
+            // Parse text into segments: plain text + special key placeholders
+            var segments = ParseSendTextSegments(text);
+
+            foreach (var segment in segments)
+            {
+                if (token.IsCancellationRequested) break;
+
+                if (segment.VkCode.HasValue)
+                {
+                    // Special key: simulate key down + up
+                    SimulateKeyPress(segment.VkCode.Value);
+                    await Task.Delay(30, token);
+                }
+                else if (!string.IsNullOrEmpty(segment.Text))
+                {
+                    // Text: paste via clipboard
+                    await PasteTextViaClipboard(segment.Text, token);
+                }
+            }
+
+            // Clear clipboard on UI thread
+            dispatcherQueue.TryEnqueue(() =>
+            {
+                try { Windows.ApplicationModel.DataTransfer.Clipboard.Clear(); }
+                catch { }
+            });
+        }
+
+        private static readonly Dictionary<string, ushort> SpecialKeyPlaceholders = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["{enter}"] = 0x0D,      // VK_RETURN
+            ["{tab}"] = 0x09,        // VK_TAB
+            ["{backspace}"] = 0x08,  // VK_BACK
+        };
+
+        private struct SendTextSegment
+        {
+            public string? Text;
+            public ushort? VkCode;
+        }
+
+        private static List<SendTextSegment> ParseSendTextSegments(string text)
+        {
+            var segments = new List<SendTextSegment>();
+            int i = 0;
+
+            while (i < text.Length)
+            {
+                if (text[i] == '{')
+                {
+                    // Try to match a special key placeholder
+                    bool matched = false;
+                    foreach (var kv in SpecialKeyPlaceholders)
+                    {
+                        if (i + kv.Key.Length <= text.Length &&
+                            text.Substring(i, kv.Key.Length).Equals(kv.Key, StringComparison.OrdinalIgnoreCase))
+                        {
+                            segments.Add(new SendTextSegment { VkCode = kv.Value });
+                            i += kv.Key.Length;
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if (!matched)
+                    {
+                        // Not a placeholder, treat '{' as regular text
+                        AppendTextChar(segments, text[i]);
+                        i++;
+                    }
+                }
+                else
+                {
+                    AppendTextChar(segments, text[i]);
+                    i++;
+                }
+            }
+
+            return segments;
+        }
+
+        private static void AppendTextChar(List<SendTextSegment> segments, char c)
+        {
+            if (segments.Count > 0 && segments[^1].Text != null)
+            {
+                var last = segments[^1];
+                last.Text += c;
+                segments[^1] = last;
+            }
+            else
+            {
+                segments.Add(new SendTextSegment { Text = c.ToString() });
+            }
+        }
+
+        private void SimulateKeyPress(ushort vk)
+        {
+            ushort scan = (ushort)NativeMethods.MapVirtualKey(vk, 0);
+            var inputs = new NativeMethods.INPUT[]
+            {
+                new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = vk, wScan = scan, dwFlags = NativeMethods.KEYEVENTF_SCANCODE } } },
+                new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = vk, wScan = scan, dwFlags = NativeMethods.KEYEVENTF_KEYUP | NativeMethods.KEYEVENTF_SCANCODE } } },
+            };
+            NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
+        }
+
+        private async Task PasteTextViaClipboard(string text, CancellationToken token)
+        {
             var tcs = new TaskCompletionSource<bool>();
             dispatcherQueue.TryEnqueue(() =>
             {
@@ -500,9 +606,8 @@ namespace TrueReplayer.Services
 
             await Task.Delay(50, token);
 
-            // Simulate Ctrl+V
-            ushort vkCtrl = 0x11; // VK_CONTROL
-            ushort vkV = 0x56;    // VK_V
+            ushort vkCtrl = 0x11;
+            ushort vkV = 0x56;
             ushort scanCtrl = (ushort)NativeMethods.MapVirtualKey(vkCtrl, 0);
             ushort scanV = (ushort)NativeMethods.MapVirtualKey(vkV, 0);
 
@@ -515,15 +620,7 @@ namespace TrueReplayer.Services
             };
 
             NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
-
             await Task.Delay(50, token);
-
-            // Clear clipboard on UI thread
-            dispatcherQueue.TryEnqueue(() =>
-            {
-                try { Windows.ApplicationModel.DataTransfer.Clipboard.Clear(); }
-                catch { }
-            });
         }
 
         private void SimulateKey(string key, bool isDown)

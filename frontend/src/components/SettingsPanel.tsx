@@ -128,9 +128,19 @@ function HotkeyInput({ value, settingKey, onChange }: {
       return;
     }
 
-    // Map key names
+    // Map key names — use e.code to distinguish numpad from main keyboard
     let mainKey = e.key;
-    if (mainKey === ' ') mainKey = 'Space';
+    if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter') {
+      const numpadMap: Record<string, string> = {
+        Numpad0: 'Num0', Numpad1: 'Num1', Numpad2: 'Num2', Numpad3: 'Num3',
+        Numpad4: 'Num4', Numpad5: 'Num5', Numpad6: 'Num6', Numpad7: 'Num7',
+        Numpad8: 'Num8', Numpad9: 'Num9',
+        NumpadMultiply: 'NumMultiply', NumpadDivide: 'NumDivide',
+        NumpadAdd: 'NumAdd', NumpadSubtract: 'NumSubtract',
+        NumpadDecimal: 'NumDecimal',
+      };
+      mainKey = numpadMap[e.code] ?? e.code;
+    } else if (mainKey === ' ') mainKey = 'Space';
     else if (mainKey.length === 1) mainKey = mainKey.toUpperCase();
     else if (mainKey === 'ArrowUp') mainKey = 'Up';
     else if (mainKey === 'ArrowDown') mainKey = 'Down';

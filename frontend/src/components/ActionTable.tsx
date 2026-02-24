@@ -18,7 +18,7 @@ function ActionIcon({ actionType }: { actionType: string }) {
 
 interface EditingCell {
   index: number;
-  field: 'delay' | 'comment' | 'x' | 'y';
+  field: 'delay' | 'comment' | 'x' | 'y' | 'key';
 }
 
 export function ActionTable() {
@@ -165,6 +165,77 @@ export function ActionTable() {
     }
   }, [commitEdit, cancelEdit]);
 
+  // Key capture for editing the Key column — captures the pressed key name (like recording)
+  const handleKeyCaptureKeyDown = useCallback((e: React.KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.key === 'Escape') { cancelEdit(); return; }
+
+    // Map the pressed key to the internal key name used by C# KeyUtils
+    let keyName: string;
+    const numpadMap: Record<string, string> = {
+      Numpad0: 'Num0', Numpad1: 'Num1', Numpad2: 'Num2', Numpad3: 'Num3',
+      Numpad4: 'Num4', Numpad5: 'Num5', Numpad6: 'Num6', Numpad7: 'Num7',
+      Numpad8: 'Num8', Numpad9: 'Num9',
+      NumpadMultiply: 'NumMultiply', NumpadDivide: 'NumDivide',
+      NumpadAdd: 'NumAdd', NumpadSubtract: 'NumSubtract',
+      NumpadDecimal: 'NumDecimal',
+    };
+
+    if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter') {
+      keyName = numpadMap[e.code] ?? e.code;
+    } else if (e.key === ' ') keyName = 'Space';
+    else if (e.key === 'Enter') keyName = 'Return';
+    else if (e.key === 'Backspace') keyName = 'Back';
+    else if (e.key === 'ArrowUp') keyName = 'Up';
+    else if (e.key === 'ArrowDown') keyName = 'Down';
+    else if (e.key === 'ArrowLeft') keyName = 'Left';
+    else if (e.key === 'ArrowRight') keyName = 'Right';
+    else if (e.key === 'Control') keyName = e.code === 'ControlRight' ? '163' : '162';
+    else if (e.key === 'Shift') keyName = e.code === 'ShiftRight' ? '161' : '160';
+    else if (e.key === 'Alt') keyName = e.code === 'AltRight' ? '165' : '164';
+    else if (e.key === 'Tab') keyName = 'Tab';
+    else if (e.key === 'CapsLock') keyName = 'Capital';
+    else if (e.key === 'Delete') keyName = 'Delete';
+    else if (e.key === 'Insert') keyName = 'Insert';
+    else if (e.key === 'Home') keyName = 'Home';
+    else if (e.key === 'End') keyName = 'End';
+    else if (e.key === 'PageUp') keyName = 'Prior';
+    else if (e.key === 'PageDown') keyName = 'Next';
+    else if (e.key === 'F1') keyName = 'F1';
+    else if (e.key.startsWith('F') && e.key.length <= 3 && !isNaN(Number(e.key.slice(1)))) keyName = e.key;
+    else if (e.key === 'Meta') return; // Ignore Win key
+    else if (e.key.length === 1) {
+      // Single character: letters → uppercase, digits → "D" prefix for top-row
+      const c = e.key.toUpperCase();
+      if (/\d/.test(c)) keyName = `D${c}`;
+      else if (/[A-Z]/.test(c)) keyName = c;
+      else {
+        // Symbol keys — map by e.code
+        const symbolMap: Record<string, string> = {
+          Backquote: 'Oem3', Minus: 'OemMinus', Equal: 'OemPlus',
+          BracketLeft: 'Oem4', BracketRight: 'Oem6', Backslash: 'Oem5',
+          Semicolon: 'Oem1', Quote: 'Oem7', Comma: 'OemComma',
+          Period: 'OemPeriod', Slash: 'Oem2',
+        };
+        keyName = symbolMap[e.code] ?? c;
+      }
+    } else {
+      return; // Unknown key, ignore
+    }
+
+    setEditValue(keyName);
+    // Auto-commit after capture
+    if (editingCell) {
+      send({
+        type: 'actions:edit',
+        payload: { index: editingCell.index, field: editingCell.field, value: keyName },
+      });
+      setEditingCell(null);
+    }
+  }, [cancelEdit, editingCell, send]);
+
   const isMouseAction = (actionType: string) =>
     actionType.includes('Click') || actionType.includes('Middle');
 
@@ -231,19 +302,36 @@ export function ActionTable() {
 
                   {/* Key */}
                   <td className="w-[100px] pl-1">
-                    {displayKey && (
+                    {editingCell?.index === idx && editingCell.field === 'key' ? (
+                      <input
+                        ref={editInputRef}
+                        type="text"
+                        value=""
+                        readOnly
+                        placeholder="Press a key..."
+                        onKeyDown={handleKeyCaptureKeyDown}
+                        onBlur={cancelEdit}
+                        className="w-[92px] h-6 px-1 text-xs font-mono text-accent-light bg-bg-input border border-accent-solid rounded outline-none placeholder:text-accent-light/50 animate-pulse"
+                      />
+                    ) : displayKey ? (
                       <span
-                        className={`inline-block px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input max-w-[92px] truncate ${action.actionType === 'SendText' ? 'cursor-text hover:text-accent-light' : ''}`}
+                        className={`inline-block px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input max-w-[92px] truncate ${
+                          action.actionType === 'SendText' || action.actionType.startsWith('Key')
+                            ? 'cursor-text hover:text-accent-light'
+                            : ''
+                        }`}
                         title={action.actionType === 'SendText' ? action.key : undefined}
                         onDoubleClick={() => {
                           if (action.actionType === 'SendText') {
                             setSendTextEdit({ index: idx, text: action.key });
+                          } else if (action.actionType.startsWith('Key')) {
+                            startEdit(idx, 'key', action.key);
                           }
                         }}
                       >
                         {displayKey}
                       </span>
-                    )}
+                    ) : null}
                   </td>
 
                   {/* X */}

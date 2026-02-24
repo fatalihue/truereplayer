@@ -38,10 +38,10 @@
   --color-action-scroll-fg: #6bcb77;
   --color-action-scroll-bg: rgba(107, 203, 119, 0.1);
 
-  /* Hotkey badge */
-  --color-hotkey-fg: #ffd93d;
-  --color-hotkey-bg: rgba(255, 217, 61, 0.08);
-  --color-hotkey-border: rgba(255, 217, 61, 0.15);
+  /* Hotkey badge — follows accent color */
+  --color-hotkey-fg: var(--color-accent);
+  --color-hotkey-bg: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  --color-hotkey-border: color-mix(in srgb, var(--color-accent) 20%, transparent);
 
   /* Delay */
   --color-delay: #ffd93d;

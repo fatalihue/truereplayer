@@ -31,10 +31,13 @@ function saveSnippets(snippets: Snippet[]) {
   localStorage.setItem(SNIPPETS_KEY, JSON.stringify(snippets));
 }
 
-const TIME_VARIABLES = [
-  { label: '{date}', desc: 'Current date (23/02/2026)' },
-  { label: '{time}', desc: 'Current time (14:30:05)' },
-  { label: '{datetime}', desc: 'Date + time (23/02/2026 14:30:05)' },
+const VARIABLES = [
+  { label: '{date}', desc: 'Current date (23/02/2026)', group: 'time' },
+  { label: '{time}', desc: 'Current time (14:30:05)', group: 'time' },
+  { label: '{datetime}', desc: 'Date + time (23/02/2026 14:30:05)', group: 'time' },
+  { label: '{enter}', desc: 'Press Enter key', group: 'keys' },
+  { label: '{tab}', desc: 'Press Tab key', group: 'keys' },
+  { label: '{backspace}', desc: 'Press Backspace key', group: 'keys' },
 ] as const;
 
 export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: SendTextDialogProps) {
@@ -175,7 +178,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div
-        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[460px] h-[75vh] max-h-[700px] flex flex-col"
+        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[520px] h-[75vh] max-h-[700px] flex flex-col"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
@@ -196,7 +199,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
             onClick={saveCursorPos}
             onKeyUp={saveCursorPos}
             placeholder="Type the text to send..."
-            rows={5}
+            rows={7}
             className="w-full px-3 py-2 text-sm text-text-primary bg-bg-input border border-border-subtle rounded resize-y outline-none focus:border-accent-solid placeholder:text-text-disabled"
           />
 
@@ -237,8 +240,25 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
               </button>
 
               {showTimeVars && (
-                <div className="absolute left-0 top-full mt-1 z-10 w-[260px] bg-bg-elevated border border-border-subtle rounded-lg shadow-xl overflow-hidden">
-                  {TIME_VARIABLES.map((v) => (
+                <div className="absolute left-0 top-full mt-1 z-10 w-[280px] bg-bg-elevated border border-border-subtle rounded-lg shadow-xl overflow-hidden">
+                  <div className="px-3 py-1.5 text-[10px] font-semibold text-text-disabled uppercase tracking-wide border-b border-border-subtle">
+                    Date / Time
+                  </div>
+                  {VARIABLES.filter(v => v.group === 'time').map((v) => (
+                    <button
+                      key={v.label}
+                      type="button"
+                      onClick={() => handleTimeVarInsert(v.label)}
+                      className="flex items-center justify-between w-full px-3 py-2 text-left hover:bg-bg-card transition-colors"
+                    >
+                      <code className="text-xs font-mono text-accent-light">{v.label}</code>
+                      <span className="text-[11px] text-text-tertiary">{v.desc}</span>
+                    </button>
+                  ))}
+                  <div className="px-3 py-1.5 text-[10px] font-semibold text-text-disabled uppercase tracking-wide border-y border-border-subtle">
+                    Special Keys
+                  </div>
+                  {VARIABLES.filter(v => v.group === 'keys').map((v) => (
                     <button
                       key={v.label}
                       type="button"
@@ -381,6 +401,9 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
               <code className="ml-1 px-1 py-0.5 rounded bg-bg-input text-text-secondary">{'{date}'}</code>
               <code className="ml-1 px-1 py-0.5 rounded bg-bg-input text-text-secondary">{'{time}'}</code>
               <code className="ml-1 px-1 py-0.5 rounded bg-bg-input text-text-secondary">{'{datetime}'}</code>
+              <code className="ml-1 px-1 py-0.5 rounded bg-bg-input text-text-secondary">{'{enter}'}</code>
+              <code className="ml-1 px-1 py-0.5 rounded bg-bg-input text-text-secondary">{'{tab}'}</code>
+              <code className="ml-1 px-1 py-0.5 rounded bg-bg-input text-text-secondary">{'{backspace}'}</code>
             </p>
             <p className="text-[11px] text-text-disabled">
               Ctrl+Enter to confirm

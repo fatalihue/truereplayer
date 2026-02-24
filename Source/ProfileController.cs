@@ -32,6 +32,31 @@ namespace TrueReplayer.Controllers
             SetupProfileWatcher();
         }
 
+        /// Run a WinForms file dialog on a dedicated STA thread so the UI thread stays responsive.
+        private static Task<string?> ShowFileDialogAsync(WinForms.FileDialog dialog)
+        {
+            var tcs = new TaskCompletionSource<string?>();
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    tcs.SetResult(dialog.ShowDialog() == WinForms.DialogResult.OK ? dialog.FileName : null);
+                }
+                catch
+                {
+                    tcs.SetResult(null);
+                }
+                finally
+                {
+                    dialog.Dispose();
+                }
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.IsBackground = true;
+            thread.Start();
+            return tcs.Task;
+        }
+
         #region Profile CRUD Operations
 
         public async Task SaveProfileAsync()
@@ -43,27 +68,27 @@ namespace TrueReplayer.Controllers
 
             Directory.CreateDirectory(profileDir);
 
-            var dialog = new WinForms.SaveFileDialog
+            var fileName = await ShowFileDialogAsync(new WinForms.SaveFileDialog
             {
                 Filter = "JSON file (*.json)|*.json",
                 FileName = "profile",
                 InitialDirectory = profileDir
-            };
+            });
 
-            if (dialog.ShowDialog() == WinForms.DialogResult.OK)
+            if (fileName != null)
             {
                 var profile = UserProfile.Current;
                 profile.Actions = window.Actions;
-                profile.LastProfileDirectory = Path.GetDirectoryName(dialog.FileName)!;
+                profile.LastProfileDirectory = Path.GetDirectoryName(fileName)!;
 
                 try
                 {
-                    if (File.Exists(dialog.FileName))
+                    if (File.Exists(fileName))
                     {
-                        File.Delete(dialog.FileName);
+                        File.Delete(fileName);
                     }
 
-                    await SettingsManager.SaveProfileAsync(dialog.FileName, profile);
+                    await SettingsManager.SaveProfileAsync(fileName, profile);
                     await RefreshProfileListAsync(true);
                 }
                 catch (Exception ex)
@@ -80,15 +105,14 @@ namespace TrueReplayer.Controllers
                 "TrueReplayer", "Profiles"
             );
 
-            var dialog = new WinForms.OpenFileDialog
+            var path = await ShowFileDialogAsync(new WinForms.OpenFileDialog
             {
                 Filter = "JSON file (*.json)|*.json",
                 InitialDirectory = profileDir
-            };
+            });
 
-            if (dialog.ShowDialog() == WinForms.DialogResult.OK)
+            if (path != null)
             {
-                string path = dialog.FileName;
                 var profile = await SettingsManager.LoadProfileAsync(path);
 
                 if (profile != null)
