@@ -394,18 +394,8 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
           )}
 
           {/* Hints */}
-          <div className="mt-2 space-y-1">
+          <div className="mt-2">
             <p className="text-[11px] text-text-tertiary">
-              Placeholders resolved at replay:
-              <code className="ml-1 px-1 py-0.5 rounded bg-bg-input text-text-secondary">{'{clipboard}'}</code>
-              <code className="ml-1 px-1 py-0.5 rounded bg-bg-input text-text-secondary">{'{date}'}</code>
-              <code className="ml-1 px-1 py-0.5 rounded bg-bg-input text-text-secondary">{'{time}'}</code>
-              <code className="ml-1 px-1 py-0.5 rounded bg-bg-input text-text-secondary">{'{datetime}'}</code>
-              <code className="ml-1 px-1 py-0.5 rounded bg-bg-input text-text-secondary">{'{enter}'}</code>
-              <code className="ml-1 px-1 py-0.5 rounded bg-bg-input text-text-secondary">{'{tab}'}</code>
-              <code className="ml-1 px-1 py-0.5 rounded bg-bg-input text-text-secondary">{'{backspace}'}</code>
-            </p>
-            <p className="text-[11px] text-text-disabled">
               Ctrl+Enter to confirm
             </p>
           </div>
