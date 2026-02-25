@@ -119,6 +119,7 @@ namespace TrueReplayer.Controllers
                 if (profile != null)
                 {
                     UserProfile.Current = profile;
+                    AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
                     UserProfile.Current.LastProfileDirectory = Path.GetDirectoryName(path)!;
                     return path;
                 }
@@ -169,6 +170,7 @@ namespace TrueReplayer.Controllers
         public void ResetProfile()
         {
             UserProfile.Current = UserProfile.Default;
+            AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
             UpdateProfileColors(null);
         }
 

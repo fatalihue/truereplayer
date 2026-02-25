@@ -9,6 +9,7 @@ import { ActionTable } from './components/ActionTable';
 import { ActionBar } from './components/ActionBar';
 import { SettingsPanel } from './components/SettingsPanel';
 import { StatusBar } from './components/StatusBar';
+import { Toast } from './components/Toast';
 
 export default function App() {
   return (
@@ -38,6 +39,7 @@ export default function App() {
 
             {/* Status Bar */}
             <StatusBar />
+            <Toast />
           </div>
           </SelectionProvider>
         </AppStateProvider>

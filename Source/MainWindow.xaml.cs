@@ -33,9 +33,7 @@ namespace TrueReplayer
             this.InitializeComponent();
             this.Title = "TrueReplayer";
 
-            var appSettings = AppSettingsManager.Load();
-            UserProfile.Current.AlwaysOnTop = appSettings.AlwaysOnTop;
-            UserProfile.Current.MinimizeToTray = appSettings.MinimizeToTray;
+            AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
 
             hwnd = WindowNative.GetWindowHandle(this);
 
@@ -157,6 +155,7 @@ namespace TrueReplayer
                 if (defaultProfile != null)
                 {
                     UserProfile.Current = defaultProfile;
+                    AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
                     bridge.ApplyProfile(defaultProfile);
                     TrayIconService.UpdateTrayIcon();
                 }
@@ -267,16 +266,17 @@ namespace TrueReplayer
                             var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == profileName);
                             mainController.SetLastHotkeyPressed(key);
                             UserProfile.Current = profile;
+                            AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
                             bridge?.ApplyProfile(profile);
                             bridge!.CurrentProfileName = profileName;
                             bridge!.CurrentProfilePath = entry?.FilePath;
                             bridge!.HasUnsavedChanges = false;
 
                             mainController.ToggleReplay(
-                                profile.EnableLoop,
-                                profile.LoopCount.ToString(),
-                                profile.LoopIntervalEnabled,
-                                profile.LoopInterval.ToString());
+                                bridge.EnableLoop,
+                                bridge.LoopCount,
+                                bridge.LoopIntervalEnabled,
+                                bridge.LoopInterval);
 
                             profileController.UpdateProfileColors(profileName);
                             bridge.PushProfilesUpdate();

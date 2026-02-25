@@ -1,6 +1,7 @@
 using Microsoft.UI.Dispatching;
 using Microsoft.Web.WebView2.Core;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.IO;
@@ -73,6 +74,19 @@ namespace TrueReplayer
 
             // Watch for actions collection changes
             actions.CollectionChanged += OnActionsChanged;
+
+            // Seed bridge state from saved global settings
+            var saved = AppSettingsManager.Load();
+            CustomDelay = saved.CustomDelay.ToString();
+            UseCustomDelay = saved.UseCustomDelay;
+            LoopCount = saved.LoopCount.ToString();
+            EnableLoop = saved.EnableLoop;
+            LoopInterval = saved.LoopInterval.ToString();
+            LoopIntervalEnabled = saved.LoopIntervalEnabled;
+            RecordMouse = saved.RecordMouse;
+            RecordScroll = saved.RecordScroll;
+            RecordKeyboard = saved.RecordKeyboard;
+            ProfileKeyEnabled = saved.ProfileKeyEnabled;
         }
 
         // ── Send message to React ──
@@ -262,18 +276,6 @@ namespace TrueReplayer
             foreach (var action in profile.Actions)
                 actions.Add(action);
 
-            CustomDelay = profile.CustomDelay.ToString();
-            UseCustomDelay = profile.UseCustomDelay;
-            LoopCount = profile.LoopCount.ToString();
-            EnableLoop = profile.EnableLoop;
-            LoopInterval = profile.LoopInterval.ToString();
-            LoopIntervalEnabled = profile.LoopIntervalEnabled;
-            RecordMouse = profile.RecordMouse;
-            RecordScroll = profile.RecordScroll;
-            RecordKeyboard = profile.RecordKeyboard;
-            ProfileKeyEnabled = profile.ProfileKeyEnabled;
-
-            PushSettingsLoaded();
             PushActionsUpdate();
             PushButtonStates();
         }
@@ -283,22 +285,8 @@ namespace TrueReplayer
             return new UserProfile
             {
                 Actions = actions,
-                RecordingHotkey = UserProfile.Current.RecordingHotkey,
-                ReplayHotkey = UserProfile.Current.ReplayHotkey,
-                ProfileKeyToggleHotkey = UserProfile.Current.ProfileKeyToggleHotkey,
-                RecordMouse = RecordMouse,
-                RecordScroll = RecordScroll,
-                RecordKeyboard = RecordKeyboard,
-                UseCustomDelay = UseCustomDelay,
-                CustomDelay = int.TryParse(CustomDelay, out var d) ? d : 100,
-                EnableLoop = EnableLoop,
-                LoopCount = int.TryParse(LoopCount, out var c) ? c : 0,
-                LoopIntervalEnabled = LoopIntervalEnabled,
-                LoopInterval = int.TryParse(LoopInterval, out var li) ? li : 1000,
-                ProfileKeyEnabled = ProfileKeyEnabled,
                 CustomHotkey = UserProfile.Current.CustomHotkey,
-                AlwaysOnTop = UserProfile.Current.AlwaysOnTop,
-                MinimizeToTray = UserProfile.Current.MinimizeToTray
+                LastProfileDirectory = UserProfile.Current.LastProfileDirectory,
             };
         }
 
@@ -347,6 +335,7 @@ namespace TrueReplayer
                     recordingHotkey = profile.RecordingHotkey,
                     replayHotkey = profile.ReplayHotkey,
                     profileKeyToggleHotkey = profile.ProfileKeyToggleHotkey,
+                    foregroundHotkey = profile.ForegroundHotkey,
                     alwaysOnTop = profile.AlwaysOnTop,
                     minimizeToTray = profile.MinimizeToTray
                 },
@@ -525,6 +514,7 @@ namespace TrueReplayer
             {
                 var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
                 UserProfile.Current = profile;
+                AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
                 CurrentProfileName = name;
                 CurrentProfilePath = entry?.FilePath;
                 HasUnsavedChanges = false;
@@ -631,6 +621,13 @@ namespace TrueReplayer
             string hotkey = payload.GetProperty("hotkey").GetString() ?? "";
             if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(hotkey)) return;
 
+            var conflict = GetHotkeyConflict(hotkey, excludeSettingKey: null, excludeProfileName: name);
+            if (conflict != null)
+            {
+                SendMessage("alert:show", new { message = $"\"{hotkey}\" is already used by {conflict}." });
+                return;
+            }
+
             var profile = await profileController.LoadProfileByNameAsync(name);
             if (profile != null)
             {
@@ -695,6 +692,7 @@ namespace TrueReplayer
                     profile.CustomHotkey = UserProfile.Current.CustomHotkey;
                     await SettingsManager.SaveProfileAsync(CurrentProfilePath, profile);
                     UserProfile.Current = profile;
+                    AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
                     HasUnsavedChanges = false;
                 }
                 else if (choice == SaveDialogResult.SaveAsNew)
@@ -727,30 +725,160 @@ namespace TrueReplayer
             TrayIconService.UpdateTrayIcon();
         }
 
-        private void HandleProfileReset()
+        private async void HandleProfileReset()
         {
-            bool keepAlwaysOnTop = UserProfile.Current.AlwaysOnTop;
-            bool keepMinimizeToTray = UserProfile.Current.MinimizeToTray;
+            var messageBlock = new Microsoft.UI.Xaml.Controls.TextBlock
+            {
+                Text = "This will reset all settings to their default values and clear all actions.",
+                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
+                TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap
+            };
+
+            var dialog = new Microsoft.UI.Xaml.Controls.ContentDialog
+            {
+                Title = "Reset Settings",
+                XamlRoot = window.Content.XamlRoot,
+                RequestedTheme = Microsoft.UI.Xaml.ElementTheme.Dark,
+                PrimaryButtonText = "Reset",
+                CloseButtonText = "Cancel",
+                DefaultButton = Microsoft.UI.Xaml.Controls.ContentDialogButton.Close,
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(255, 43, 43, 43)),
+                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
+                CornerRadius = new Microsoft.UI.Xaml.CornerRadius(8),
+                Content = messageBlock
+            };
+
+            InputHookManager.SuppressAllHotkeys = true;
+            try
+            {
+                var result = await dialog.ShowAsync();
+                if (result != Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary)
+                    return;
+            }
+            finally
+            {
+                InputHookManager.SuppressAllHotkeys = false;
+            }
+
+            // Reset ALL global settings to defaults and save
+            var defaults = new AppSettingsManager.AppSettings();
+            AppSettingsManager.Save(defaults);
 
             profileController.ResetProfile();
-            UserProfile.Current.AlwaysOnTop = keepAlwaysOnTop;
-            UserProfile.Current.MinimizeToTray = keepMinimizeToTray;
+
+            // Sync bridge state from defaults
+            CustomDelay = defaults.CustomDelay.ToString();
+            UseCustomDelay = defaults.UseCustomDelay;
+            LoopCount = defaults.LoopCount.ToString();
+            EnableLoop = defaults.EnableLoop;
+            LoopInterval = defaults.LoopInterval.ToString();
+            LoopIntervalEnabled = defaults.LoopIntervalEnabled;
+            RecordMouse = defaults.RecordMouse;
+            RecordScroll = defaults.RecordScroll;
+            RecordKeyboard = defaults.RecordKeyboard;
+            ProfileKeyEnabled = defaults.ProfileKeyEnabled;
+
+            // Reset window settings
+            UserProfile.Current.AlwaysOnTop = defaults.AlwaysOnTop;
+            UserProfile.Current.MinimizeToTray = defaults.MinimizeToTray;
+            window.UpdateAlwaysOnTop(defaults.AlwaysOnTop);
 
             ApplyProfile(UserProfile.Current);
             profileController.UpdateProfileColors(null);
             CurrentProfileName = "No Profile";
             CurrentProfilePath = null;
             HasUnsavedChanges = false;
+            PushSettingsLoaded();
             PushProfilesUpdate();
             PushToolbarUpdate();
             PushStatusBarUpdate();
             TrayIconService.UpdateTrayIcon();
         }
 
+        private void SaveGlobalSettings()
+        {
+            var s = new AppSettingsManager.AppSettings
+            {
+                AlwaysOnTop = UserProfile.Current.AlwaysOnTop,
+                MinimizeToTray = UserProfile.Current.MinimizeToTray,
+                UseCustomDelay = UseCustomDelay,
+                CustomDelay = int.TryParse(CustomDelay, out var d) ? d : 100,
+                EnableLoop = EnableLoop,
+                LoopCount = int.TryParse(LoopCount, out var c) ? c : 0,
+                LoopIntervalEnabled = LoopIntervalEnabled,
+                LoopInterval = int.TryParse(LoopInterval, out var li) ? li : 1000,
+                RecordMouse = RecordMouse,
+                RecordScroll = RecordScroll,
+                RecordKeyboard = RecordKeyboard,
+                RecordingHotkey = UserProfile.Current.RecordingHotkey,
+                ReplayHotkey = UserProfile.Current.ReplayHotkey,
+                ProfileKeyToggleHotkey = UserProfile.Current.ProfileKeyToggleHotkey,
+                ForegroundHotkey = UserProfile.Current.ForegroundHotkey,
+                ProfileKeyEnabled = ProfileKeyEnabled,
+            };
+            AppSettingsManager.Save(s);
+        }
+
+        private static readonly HashSet<string> HotkeySettingKeys = new()
+        {
+            "recordingHotkey", "replayHotkey", "profileKeyToggleHotkey", "foregroundHotkey"
+        };
+
+        private static readonly Dictionary<string, string> HotkeyDisplayNames = new()
+        {
+            ["recordingHotkey"] = "Recording",
+            ["replayHotkey"] = "Replay",
+            ["profileKeyToggleHotkey"] = "Profile Key Toggle",
+            ["foregroundHotkey"] = "Foreground",
+        };
+
+        private string? GetHotkeyConflict(string hotkey, string? excludeSettingKey, string? excludeProfileName = null)
+        {
+            if (string.IsNullOrEmpty(hotkey)) return null;
+
+            var globalHotkeys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["recordingHotkey"] = UserProfile.Current.RecordingHotkey,
+                ["replayHotkey"] = UserProfile.Current.ReplayHotkey,
+                ["profileKeyToggleHotkey"] = UserProfile.Current.ProfileKeyToggleHotkey,
+                ["foregroundHotkey"] = UserProfile.Current.ForegroundHotkey,
+            };
+
+            foreach (var kv in globalHotkeys)
+            {
+                if (kv.Key == excludeSettingKey) continue;
+                if (string.Equals(kv.Value, hotkey, StringComparison.OrdinalIgnoreCase))
+                    return HotkeyDisplayNames.GetValueOrDefault(kv.Key, kv.Key);
+            }
+
+            foreach (var entry in profileController.ProfileEntries)
+            {
+                if (entry.Name == excludeProfileName) continue;
+                if (string.Equals(entry.Hotkey, hotkey, StringComparison.OrdinalIgnoreCase))
+                    return $"Profile \"{entry.Name}\"";
+            }
+
+            return null;
+        }
+
         private void HandleSettingsChange(JsonElement payload)
         {
             string key = payload.GetProperty("key").GetString() ?? "";
             var valueElement = payload.GetProperty("value");
+
+            // Validate hotkey uniqueness before applying
+            if (HotkeySettingKeys.Contains(key))
+            {
+                string newHotkey = valueElement.GetString() ?? "";
+                var conflict = GetHotkeyConflict(newHotkey, excludeSettingKey: key);
+                if (conflict != null)
+                {
+                    SendMessage("alert:show", new { message = $"\"{newHotkey}\" is already used by {conflict}." });
+                    PushSettingsLoaded(); // revert UI to current value
+                    return;
+                }
+            }
 
             switch (key)
             {
@@ -800,6 +928,8 @@ namespace TrueReplayer
                     break;
             }
 
+            SaveGlobalSettings();
+
             // Echo updated settings back to React so controlled components update
             PushSettingsLoaded();
         }
@@ -809,11 +939,7 @@ namespace TrueReplayer
             bool enabled = payload.GetProperty("enabled").GetBoolean();
             UserProfile.Current.AlwaysOnTop = enabled;
             window.UpdateAlwaysOnTop(enabled);
-
-            var settings = AppSettingsManager.Load();
-            settings.AlwaysOnTop = enabled;
-            AppSettingsManager.Save(settings);
-
+            SaveGlobalSettings();
             PushSettingsLoaded();
         }
 
@@ -821,11 +947,7 @@ namespace TrueReplayer
         {
             bool enabled = payload.GetProperty("enabled").GetBoolean();
             UserProfile.Current.MinimizeToTray = enabled;
-
-            var settings = AppSettingsManager.Load();
-            settings.MinimizeToTray = enabled;
-            AppSettingsManager.Save(settings);
-
+            SaveGlobalSettings();
             PushSettingsLoaded();
         }
 

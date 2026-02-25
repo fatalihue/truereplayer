@@ -11,7 +11,7 @@ interface ContextMenuState {
 
 export function ProfilePanel() {
   const { profiles } = useAppState();
-  const { send } = useBridge();
+  const { send, subscribe } = useBridge();
   const [searchQuery, setSearchQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -151,9 +151,19 @@ export function ProfilePanel() {
   const confirmHotkey = () => {
     if (showHotkeyDialog && hotkeyCapture && hotkeyCapture !== '...') {
       send({ type: 'profile:assignHotkey', payload: { name: showHotkeyDialog, hotkey: hotkeyCapture } });
+      // Don't close dialog here — wait for profiles:updated (success) or alert:show (conflict)
     }
-    setShowHotkeyDialog(null);
   };
+
+  // Auto-close hotkey dialog when profile list updates (means hotkey was saved successfully)
+  useEffect(() => {
+    if (!showHotkeyDialog) return;
+    return subscribe((msg) => {
+      if (msg.type === 'profiles:updated') {
+        setShowHotkeyDialog(null);
+      }
+    });
+  }, [showHotkeyDialog, subscribe]);
 
   const confirmCreate = () => {
     const name = dialogValue.trim();

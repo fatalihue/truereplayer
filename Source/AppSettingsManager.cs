@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Text.Json;
+using TrueReplayer.Models;
 
 namespace TrueReplayer.Services
 {
@@ -10,8 +11,26 @@ namespace TrueReplayer.Services
 
         public class AppSettings
         {
+            // Window
             public bool AlwaysOnTop { get; set; } = false;
             public bool MinimizeToTray { get; set; } = false;
+            // Execution
+            public bool UseCustomDelay { get; set; } = true;
+            public int CustomDelay { get; set; } = 100;
+            public bool EnableLoop { get; set; } = false;
+            public int LoopCount { get; set; } = 0;
+            public bool LoopIntervalEnabled { get; set; } = false;
+            public int LoopInterval { get; set; } = 1000;
+            // Recording
+            public bool RecordMouse { get; set; } = true;
+            public bool RecordScroll { get; set; } = true;
+            public bool RecordKeyboard { get; set; } = true;
+            // Hotkeys
+            public string RecordingHotkey { get; set; } = "F9";
+            public string ReplayHotkey { get; set; } = "F10";
+            public string ProfileKeyToggleHotkey { get; set; } = "Ctrl+Shift+K";
+            public string ForegroundHotkey { get; set; } = "Ctrl+Shift+L";
+            public bool ProfileKeyEnabled { get; set; } = true;
         }
 
         public static void Save(AppSettings settings)
@@ -44,6 +63,27 @@ namespace TrueReplayer.Services
                 System.Diagnostics.Debug.WriteLine($"Erro ao carregar appsettings: {ex.Message}");
                 return new AppSettings();
             }
+        }
+
+        public static void ApplyGlobalSettings(UserProfile profile)
+        {
+            var s = Load();
+            profile.AlwaysOnTop = s.AlwaysOnTop;
+            profile.MinimizeToTray = s.MinimizeToTray;
+            profile.RecordMouse = s.RecordMouse;
+            profile.RecordScroll = s.RecordScroll;
+            profile.RecordKeyboard = s.RecordKeyboard;
+            profile.UseCustomDelay = s.UseCustomDelay;
+            profile.CustomDelay = s.CustomDelay;
+            profile.EnableLoop = s.EnableLoop;
+            profile.LoopCount = s.LoopCount;
+            profile.LoopIntervalEnabled = s.LoopIntervalEnabled;
+            profile.LoopInterval = s.LoopInterval;
+            profile.RecordingHotkey = s.RecordingHotkey;
+            profile.ReplayHotkey = s.ReplayHotkey;
+            profile.ProfileKeyToggleHotkey = s.ProfileKeyToggleHotkey;
+            profile.ForegroundHotkey = s.ForegroundHotkey;
+            profile.ProfileKeyEnabled = s.ProfileKeyEnabled;
         }
 
         private static string GetPath()

@@ -22,16 +22,25 @@ namespace TrueReplayer.Models
         [JsonIgnore]
         public string ForegroundHotkey { get; set; } = "Ctrl+Shift+L";
 
+        [JsonIgnore]
         public bool RecordMouse { get; set; } = true;
+        [JsonIgnore]
         public bool RecordScroll { get; set; } = true;
+        [JsonIgnore]
         public bool RecordKeyboard { get; set; } = true;
 
+        [JsonIgnore]
         public bool UseCustomDelay { get; set; } = true;
+        [JsonIgnore]
         public int CustomDelay { get; set; } = 100;
 
+        [JsonIgnore]
         public bool EnableLoop { get; set; } = false;
+        [JsonIgnore]
         public int LoopCount { get; set; } = 0;
+        [JsonIgnore]
         public bool LoopIntervalEnabled { get; set; } = false;
+        [JsonIgnore]
         public int LoopInterval { get; set; } = 1000;
 
         [JsonIgnore]

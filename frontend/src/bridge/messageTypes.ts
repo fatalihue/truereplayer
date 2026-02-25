@@ -79,7 +79,8 @@ export type IncomingMessage =
   | { type: 'settings:loaded'; payload: { settings: SettingsState } }
   | { type: 'button:states'; payload: ButtonStates }
   | { type: 'toolbar:updated'; payload: { profileName: string; actionCount: number } }
-  | { type: 'statusbar:updated'; payload: { directory: string; profileName: string | null; actionCount: number } };
+  | { type: 'statusbar:updated'; payload: { directory: string; profileName: string | null; actionCount: number } }
+  | { type: 'alert:show'; payload: { message: string } };
 
 // ── Messages JS → C# ──
 
