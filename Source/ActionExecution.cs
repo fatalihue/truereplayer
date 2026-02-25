@@ -413,26 +413,58 @@ namespace TrueReplayer.Services
 
         private void SimulateMouse(int x, int y, uint mouseEvent, int mouseData = 0)
         {
+            int vx = NativeMethods.GetSystemMetrics(76); // SM_XVIRTUALSCREEN
+            int vy = NativeMethods.GetSystemMetrics(77); // SM_YVIRTUALSCREEN
+            int vw = NativeMethods.GetSystemMetrics(78); // SM_CXVIRTUALSCREEN
+            int vh = NativeMethods.GetSystemMetrics(79); // SM_CYVIRTUALSCREEN
+
+            int absoluteX = (int)(((double)(x - vx) * 65535) / (vw - 1));
+            int absoluteY = (int)(((double)(y - vy) * 65535) / (vh - 1));
+
+            uint posFlags = NativeMethods.MOUSEEVENTF_MOVE
+                | NativeMethods.MOUSEEVENTF_ABSOLUTE
+                | NativeMethods.MOUSEEVENTF_VIRTUALDESK;
+
+            int inputSize = Marshal.SizeOf(typeof(NativeMethods.INPUT));
+
+            // Step 1: SetCursorPos (for apps using GetCursorPos)
             NativeMethods.SetCursorPos(x, y);
 
-            var input = new NativeMethods.INPUT
+            // Step 2: SendInput MOVE (for apps using Raw Input)
+            var moveInput = new NativeMethods.INPUT
             {
                 type = NativeMethods.INPUT_MOUSE,
                 U = new NativeMethods.InputUnion
                 {
                     mi = new NativeMethods.MOUSEINPUT
                     {
-                        dx = 0,
-                        dy = 0,
-                        mouseData = (uint)mouseData,
-                        dwFlags = mouseEvent,
-                        time = 0,
-                        dwExtraInfo = IntPtr.Zero
+                        dx = absoluteX,
+                        dy = absoluteY,
+                        dwFlags = posFlags,
                     }
                 }
             };
+            NativeMethods.SendInput(1, new[] { moveInput }, inputSize);
 
-            NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
+            // Step 3: Wait for the target app to process the move (~1 frame)
+            Thread.Sleep(10);
+
+            // Step 4: Fire button/scroll with position embedded in the event
+            var clickInput = new NativeMethods.INPUT
+            {
+                type = NativeMethods.INPUT_MOUSE,
+                U = new NativeMethods.InputUnion
+                {
+                    mi = new NativeMethods.MOUSEINPUT
+                    {
+                        dx = absoluteX,
+                        dy = absoluteY,
+                        mouseData = (uint)mouseData,
+                        dwFlags = mouseEvent | posFlags,
+                    }
+                }
+            };
+            NativeMethods.SendInput(1, new[] { clickInput }, inputSize);
         }
 
         private async Task SimulateClipboardPaste(string text, CancellationToken token)

@@ -17,6 +17,7 @@ namespace TrueReplayer.Interop
         public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
         public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
         public const uint MOUSEEVENTF_WHEEL = 0x0800;
+        public const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
 
         public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
         public const uint KEYEVENTF_KEYUP = 0x0002;
@@ -120,6 +121,9 @@ namespace TrueReplayer.Interop
 
         [DllImport("user32.dll")]
         public static extern short GetAsyncKeyState(int vKey);
+
+        [DllImport("user32.dll")]
+        public static extern int GetSystemMetrics(int nIndex);
 
         public static IntPtr SetMouseHook(LowLevelMouseProc proc)
         {
