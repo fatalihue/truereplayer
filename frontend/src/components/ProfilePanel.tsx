@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Plus, Search, Pencil, Trash2, FolderOpen, Key, KeyRound } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, FolderOpen, Key, KeyRound, Crosshair } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 
@@ -19,6 +19,11 @@ export function ProfilePanel() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showHotkeyDialog, setShowHotkeyDialog] = useState<string | null>(null);
   const [hotkeyCapture, setHotkeyCapture] = useState('...');
+  const [showWindowTargetDialog, setShowWindowTargetDialog] = useState<string | null>(null);
+  const [targetProcessName, setTargetProcessName] = useState('');
+  const [targetWindowTitle, setTargetWindowTitle] = useState('');
+  const [titleMatchMode, setTitleMatchMode] = useState<'contains' | 'regex'>('contains');
+  const [detectCountdown, setDetectCountdown] = useState<number | null>(null);
   const [dialogValue, setDialogValue] = useState('');
   const dialogInputRef = useRef<HTMLInputElement>(null);
   const hotkeyInputRef = useRef<HTMLInputElement>(null);
@@ -56,7 +61,7 @@ export function ProfilePanel() {
   }, [showHotkeyDialog]);
 
   // Suppress hotkeys while any dialog is open
-  const anyDialogOpen = showCreateDialog || showRenameDialog !== null || showDeleteConfirm !== null || showHotkeyDialog !== null;
+  const anyDialogOpen = showCreateDialog || showRenameDialog !== null || showDeleteConfirm !== null || showHotkeyDialog !== null || showWindowTargetDialog !== null;
   useEffect(() => {
     if (anyDialogOpen) {
       send({ type: 'ui:modalOpen', payload: {} });
@@ -107,6 +112,39 @@ export function ProfilePanel() {
   const handleRemoveHotkey = (name: string) => {
     setContextMenu(null);
     send({ type: 'profile:removeHotkey', payload: { name } });
+  };
+
+  const handleSetWindowTarget = (name: string) => {
+    setContextMenu(null);
+    setTargetProcessName('');
+    setTargetWindowTitle('');
+    setTitleMatchMode('contains');
+    setDetectCountdown(null);
+    setShowWindowTargetDialog(name);
+  };
+
+  const handleRemoveWindowTarget = (name: string) => {
+    setContextMenu(null);
+    send({ type: 'profile:removeWindowTarget', payload: { name } });
+  };
+
+  const handleDetectWindow = () => {
+    send({ type: 'profile:detectWindow', payload: {} });
+    setDetectCountdown(3);
+  };
+
+  const confirmWindowTarget = () => {
+    if (showWindowTargetDialog && (targetProcessName.trim() || targetWindowTitle.trim())) {
+      send({
+        type: 'profile:setWindowTarget',
+        payload: {
+          name: showWindowTargetDialog,
+          processName: targetProcessName.trim(),
+          windowTitle: targetWindowTitle.trim(),
+          titleMatchMode
+        }
+      });
+    }
   };
 
   const handleHotkeyCapture = (e: React.KeyboardEvent) => {
@@ -164,6 +202,29 @@ export function ProfilePanel() {
       }
     });
   }, [showHotkeyDialog, subscribe]);
+
+  // Window target detect countdown
+  useEffect(() => {
+    if (detectCountdown === null || detectCountdown <= 0) return;
+    const timer = setTimeout(() => setDetectCountdown(detectCountdown - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [detectCountdown]);
+
+  // Subscribe to window target detection result and auto-close on success
+  useEffect(() => {
+    if (!showWindowTargetDialog) return;
+    return subscribe((msg) => {
+      if (msg.type === 'profiles:updated') {
+        setShowWindowTargetDialog(null);
+      }
+      if (msg.type === 'windowTarget:detected') {
+        const p = msg.payload as { processName: string; windowTitle: string };
+        setTargetProcessName(p.processName);
+        setTargetWindowTitle(p.windowTitle);
+        setDetectCountdown(null);
+      }
+    });
+  }, [showWindowTargetDialog, subscribe]);
 
   const confirmCreate = () => {
     const name = dialogValue.trim();
@@ -249,6 +310,12 @@ export function ProfilePanel() {
                 {p.name}
               </span>
 
+              {p.hasWindowTarget && (
+                <span title="Window target set">
+                  <Crosshair size={11} className="shrink-0 text-text-tertiary" />
+                </span>
+              )}
+
               {p.hotkey && (
                 <span className="shrink-0 px-1.5 py-0.5 rounded text-[11px] font-mono bg-hotkey-bg border border-hotkey-border text-hotkey-fg">
                   {p.hotkey}
@@ -294,6 +361,22 @@ export function ProfilePanel() {
             >
               <KeyRound size={13} className="text-text-tertiary" />
               Remove Hotkey
+            </button>
+          )}
+          <button
+            onClick={() => handleSetWindowTarget(contextMenu.profileName)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Crosshair size={13} className="text-text-tertiary" />
+            {profile?.hasWindowTarget ? 'Edit Target Window' : 'Set Target Window'}
+          </button>
+          {profile?.hasWindowTarget && (
+            <button
+              onClick={() => handleRemoveWindowTarget(contextMenu.profileName)}
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+            >
+              <Crosshair size={13} className="text-text-tertiary" />
+              Remove Target Window
             </button>
           )}
           <div className="my-1 border-t border-border-subtle" />
@@ -426,6 +509,92 @@ export function ProfilePanel() {
                 className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
               >
                 Assign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Window Target Dialog */}
+      {showWindowTargetDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-[380px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
+            <h3 className="text-sm font-semibold text-text-primary mb-3">Set Target Window</h3>
+            <p className="text-xs text-text-secondary mb-4">
+              Profile hotkey for <span className="text-text-primary font-medium">'{showWindowTargetDialog}'</span> will only fire when the target window is in focus.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-text-tertiary mb-1">Process Name</label>
+                <input
+                  type="text"
+                  value={targetProcessName}
+                  onChange={(e) => setTargetProcessName(e.target.value)}
+                  placeholder="e.g. chrome.exe"
+                  className="w-full h-8 px-3 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-text-tertiary mb-1">
+                  Window Title
+                  {titleMatchMode === 'contains' ? ' (partial match)' : ' (regex)'}
+                </label>
+                <input
+                  type="text"
+                  value={targetWindowTitle}
+                  onChange={(e) => setTargetWindowTitle(e.target.value)}
+                  placeholder={titleMatchMode === 'contains' ? 'e.g. Notepad' : 'e.g. (Crisp|Zendesk)'}
+                  className="w-full h-8 px-3 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                />
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <button
+                    onClick={() => setTitleMatchMode('contains')}
+                    className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
+                      titleMatchMode === 'contains'
+                        ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
+                        : 'bg-transparent border-border-default text-text-tertiary hover:text-text-secondary'
+                    }`}
+                  >
+                    Contains
+                  </button>
+                  <button
+                    onClick={() => setTitleMatchMode('regex')}
+                    className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
+                      titleMatchMode === 'regex'
+                        ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
+                        : 'bg-transparent border-border-default text-text-tertiary hover:text-text-secondary'
+                    }`}
+                  >
+                    Regex
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={handleDetectWindow}
+              disabled={detectCountdown !== null && detectCountdown > 0}
+              className="mt-3 w-full h-8 text-xs text-accent border border-accent-solid/40 rounded hover:bg-accent-solid/10 transition-colors disabled:opacity-50"
+            >
+              {detectCountdown !== null && detectCountdown > 0
+                ? `Detecting in ${detectCountdown}s... Switch to target window now`
+                : 'Detect from Foreground Window (3s delay)'}
+            </button>
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setShowWindowTargetDialog(null)}
+                className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmWindowTarget}
+                disabled={!targetProcessName.trim() && !targetWindowTitle.trim()}
+                className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
+              >
+                Set Target
               </button>
             </div>
           </div>

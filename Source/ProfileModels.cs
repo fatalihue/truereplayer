@@ -53,6 +53,7 @@ namespace TrueReplayer.Models
         public string? LastProfileDirectory { get; set; }
 
         public string? CustomHotkey { get; set; }
+        public WindowTarget? TargetWindow { get; set; }
 
         [JsonIgnore]
         public bool ProfileKeyEnabled { get; set; } = true;
@@ -79,11 +80,19 @@ namespace TrueReplayer.Models
         };
     }
 
+    public class WindowTarget
+    {
+        public string? ProcessName { get; set; }
+        public string? WindowTitle { get; set; }
+        public string TitleMatchMode { get; set; } = "contains";  // "contains" | "regex"
+    }
+
     public class ProfileEntry : INotifyPropertyChanged
     {
         public string Name { get; set; } = string.Empty;
         public string FilePath { get; set; } = string.Empty;
         public string? Hotkey { get; set; }
+        public bool HasWindowTarget { get; set; }
         public string Display => string.IsNullOrEmpty(Hotkey) ? Name : $"{Name} ({Hotkey})";
 
         private bool _isActive;

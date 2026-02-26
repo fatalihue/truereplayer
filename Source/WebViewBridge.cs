@@ -138,6 +138,9 @@ namespace TrueReplayer
                     case "profile:delete": HandleProfileDelete(payload); break;
                     case "profile:assignHotkey": HandleProfileAssignHotkey(payload); break;
                     case "profile:removeHotkey": HandleProfileRemoveHotkey(payload); break;
+                    case "profile:setWindowTarget": HandleProfileSetWindowTarget(payload); break;
+                    case "profile:removeWindowTarget": HandleProfileRemoveWindowTarget(payload); break;
+                    case "profile:detectWindow": HandleProfileDetectWindow(); break;
                     case "profile:openFolder": HandleProfileOpenFolder(payload); break;
                     case "profile:save": HandleProfileSave(); break;
                     case "profile:load": HandleProfileLoad(); break;
@@ -194,7 +197,8 @@ namespace TrueReplayer
                 name = p.Name,
                 filePath = p.FilePath,
                 hotkey = p.Hotkey,
-                isActive = p.IsActive
+                isActive = p.IsActive,
+                hasWindowTarget = p.HasWindowTarget
             }).ToArray();
 
             SendMessage("profiles:updated", new { profiles, activeProfile = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName });
@@ -286,6 +290,7 @@ namespace TrueReplayer
             {
                 Actions = actions,
                 CustomHotkey = UserProfile.Current.CustomHotkey,
+                TargetWindow = UserProfile.Current.TargetWindow,
                 LastProfileDirectory = UserProfile.Current.LastProfileDirectory,
             };
         }
@@ -317,7 +322,8 @@ namespace TrueReplayer
                     name = p.Name,
                     filePath = p.FilePath,
                     hotkey = p.Hotkey,
-                    isActive = p.IsActive
+                    isActive = p.IsActive,
+                    hasWindowTarget = p.HasWindowTarget
                 }).ToArray(),
                 activeProfile = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName,
                 settings = new
@@ -655,6 +661,118 @@ namespace TrueReplayer
                 InputHookManager.RegisterProfileHotkeys(map);
                 PushProfilesUpdate();
             }
+        }
+
+        private async void HandleProfileSetWindowTarget(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            string processName = payload.GetProperty("processName").GetString() ?? "";
+            string windowTitle = payload.GetProperty("windowTitle").GetString() ?? "";
+            string titleMatchMode = payload.TryGetProperty("titleMatchMode", out var tmProp)
+                ? tmProp.GetString() ?? "contains"
+                : "contains";
+            if (string.IsNullOrEmpty(name)) return;
+
+            if (string.IsNullOrWhiteSpace(processName) && string.IsNullOrWhiteSpace(windowTitle))
+            {
+                SendMessage("alert:show", new { message = "Please specify at least a process name or window title." });
+                return;
+            }
+
+            if (titleMatchMode == "regex" && !string.IsNullOrWhiteSpace(windowTitle))
+            {
+                try
+                {
+                    _ = new System.Text.RegularExpressions.Regex(windowTitle.Trim());
+                }
+                catch
+                {
+                    SendMessage("alert:show", new { message = "Invalid regex pattern. Please check the syntax." });
+                    return;
+                }
+            }
+
+            var profile = await profileController.LoadProfileByNameAsync(name);
+            if (profile != null)
+            {
+                profile.TargetWindow = new WindowTarget
+                {
+                    ProcessName = string.IsNullOrWhiteSpace(processName) ? null : processName.Trim(),
+                    WindowTitle = string.IsNullOrWhiteSpace(windowTitle) ? null : windowTitle.Trim(),
+                    TitleMatchMode = titleMatchMode
+                };
+                await profileController.SaveProfileByNameAsync(name, profile);
+                await profileController.RefreshProfileListAsync(true);
+                InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
+                PushProfilesUpdate();
+            }
+        }
+
+        private async void HandleProfileRemoveWindowTarget(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            if (string.IsNullOrEmpty(name)) return;
+
+            var profile = await profileController.LoadProfileByNameAsync(name);
+            if (profile != null)
+            {
+                profile.TargetWindow = null;
+                await profileController.SaveProfileByNameAsync(name, profile);
+                await profileController.RefreshProfileListAsync(true);
+                InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
+                PushProfilesUpdate();
+            }
+        }
+
+        private void HandleProfileDetectWindow()
+        {
+            Task.Run(async () =>
+            {
+                await Task.Delay(3000);
+
+                IntPtr hwnd = NativeMethods.GetForegroundWindow();
+                if (hwnd == IntPtr.Zero)
+                {
+                    dispatcherQueue.TryEnqueue(() =>
+                    {
+                        SendMessage("windowTarget:detected", new { processName = "", windowTitle = "" });
+                    });
+                    return;
+                }
+
+                var titleBuffer = new System.Text.StringBuilder(512);
+                NativeMethods.GetWindowText(hwnd, titleBuffer, titleBuffer.Capacity);
+                string windowTitle = titleBuffer.ToString();
+
+                string processName = "";
+                NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+                IntPtr hProcess = NativeMethods.OpenProcess(
+                    NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+
+                if (hProcess != IntPtr.Zero)
+                {
+                    try
+                    {
+                        var nameBuffer = new System.Text.StringBuilder(512);
+                        uint len = NativeMethods.GetProcessImageFileName(
+                            hProcess, nameBuffer, (uint)nameBuffer.Capacity);
+                        if (len > 0)
+                        {
+                            string fullPath = nameBuffer.ToString();
+                            processName = fullPath.Substring(fullPath.LastIndexOf('\\') + 1);
+                        }
+                    }
+                    finally
+                    {
+                        NativeMethods.CloseHandle(hProcess);
+                    }
+                }
+
+                dispatcherQueue.TryEnqueue(() =>
+                {
+                    SendMessage("windowTarget:detected", new { processName, windowTitle });
+                });
+            });
         }
 
         private void HandleProfileOpenFolder(JsonElement payload)

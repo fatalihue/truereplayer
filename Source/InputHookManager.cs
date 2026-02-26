@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
 using TrueReplayer.Controllers;
 using TrueReplayer.Helpers;
 using TrueReplayer.Interop;
@@ -24,6 +26,7 @@ namespace TrueReplayer
         private static DateTime? lastAltRightPressTime = null;
 
         public static Dictionary<string, string> ProfileHotkeys = new();
+        public static Dictionary<string, WindowTarget> ProfileWindowTargets = new();
 
         public static bool IsReplayingAction { get; set; } = false;
 
@@ -61,6 +64,109 @@ namespace TrueReplayer
         public static void RegisterProfileHotkeys(Dictionary<string, string> profileHotkeys)
         {
             ProfileHotkeys = profileHotkeys;
+        }
+
+        private static Dictionary<string, Regex?> _compiledTitleRegexes = new();
+
+        public static void RegisterProfileWindowTargets(Dictionary<string, WindowTarget> targets)
+        {
+            ProfileWindowTargets = targets;
+
+            var regexes = new Dictionary<string, Regex?>();
+            foreach (var (name, target) in targets)
+            {
+                if (target.TitleMatchMode == "regex" && !string.IsNullOrEmpty(target.WindowTitle))
+                {
+                    try
+                    {
+                        regexes[name] = new Regex(target.WindowTitle,
+                            RegexOptions.IgnoreCase | RegexOptions.Compiled,
+                            TimeSpan.FromMilliseconds(5));
+                    }
+                    catch
+                    {
+                        regexes[name] = null;
+                    }
+                }
+            }
+            _compiledTitleRegexes = regexes;
+        }
+
+        private static readonly StringBuilder _windowTextBuffer = new(512);
+        private static readonly StringBuilder _processNameBuffer = new(512);
+
+        private static bool IsForegroundWindowMatch(string profileName)
+        {
+            if (!ProfileWindowTargets.TryGetValue(profileName, out var target))
+                return true;
+
+            IntPtr hwnd = NativeMethods.GetForegroundWindow();
+            if (hwnd == IntPtr.Zero)
+                return false;
+
+            if (!string.IsNullOrEmpty(target.WindowTitle))
+            {
+                _windowTextBuffer.Clear();
+                NativeMethods.GetWindowText(hwnd, _windowTextBuffer, _windowTextBuffer.Capacity);
+                string title = _windowTextBuffer.ToString();
+
+                if (target.TitleMatchMode == "regex")
+                {
+                    if (_compiledTitleRegexes.TryGetValue(profileName, out var regex) && regex != null)
+                    {
+                        try
+                        {
+                            if (!regex.IsMatch(title))
+                                return false;
+                        }
+                        catch (RegexMatchTimeoutException)
+                        {
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+                else
+                {
+                    if (title.IndexOf(target.WindowTitle, StringComparison.OrdinalIgnoreCase) < 0)
+                        return false;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(target.ProcessName))
+            {
+                NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+                IntPtr hProcess = NativeMethods.OpenProcess(
+                    NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+
+                if (hProcess == IntPtr.Zero)
+                    return false;
+
+                try
+                {
+                    _processNameBuffer.Clear();
+                    uint len = NativeMethods.GetProcessImageFileName(
+                        hProcess, _processNameBuffer, (uint)_processNameBuffer.Capacity);
+
+                    if (len == 0)
+                        return false;
+
+                    string fullPath = _processNameBuffer.ToString();
+                    string fileName = fullPath.Substring(fullPath.LastIndexOf('\\') + 1);
+
+                    if (!fileName.Equals(target.ProcessName, StringComparison.OrdinalIgnoreCase))
+                        return false;
+                }
+                finally
+                {
+                    NativeMethods.CloseHandle(hProcess);
+                }
+            }
+
+            return true;
         }
 
         private static IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
@@ -208,6 +314,12 @@ namespace TrueReplayer
                     if (!IsReplayingAction && UserProfile.Current.ProfileKeyEnabled && isProfileKey && MainController.Instance != null && !MainController.Instance.IsRecording())
                     {
                         var profileName = ProfileHotkeys.FirstOrDefault(p => p.Value == key).Key;
+
+                        if (profileName != null && !IsForegroundWindowMatch(profileName))
+                        {
+                            return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
+                        }
+
                         LastTriggerHotkey = key;
                         OnHotkeyPressed?.Invoke($"PROFILE::{profileName}");
                         return (IntPtr)1;

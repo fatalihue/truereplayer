@@ -26,6 +26,7 @@ namespace TrueReplayer.Controllers
         private bool suppressWatcherRefresh = false;
 
         public ObservableCollection<ProfileEntry> ProfileEntries { get; } = new();
+        private Dictionary<string, WindowTarget> _cachedWindowTargets = new();
 
         public ProfileController(MainWindow window)
         {
@@ -190,6 +191,7 @@ namespace TrueReplayer.Controllers
             var files = Directory.GetFiles(profileDir, "*.json").ToList();
 
             ProfileEntries.Clear();
+            _cachedWindowTargets.Clear();
 
             foreach (var file in files)
             {
@@ -199,12 +201,20 @@ namespace TrueReplayer.Controllers
                     var profile = await SettingsManager.LoadProfileAsync(file);
                     if (profile != null)
                     {
+                        bool hasTarget = profile.TargetWindow != null
+                            && (!string.IsNullOrEmpty(profile.TargetWindow.ProcessName)
+                                || !string.IsNullOrEmpty(profile.TargetWindow.WindowTitle));
+
                         ProfileEntries.Add(new ProfileEntry
                         {
                             Name = name,
                             FilePath = file,
-                            Hotkey = profile.CustomHotkey
+                            Hotkey = profile.CustomHotkey,
+                            HasWindowTarget = hasTarget
                         });
+
+                        if (hasTarget)
+                            _cachedWindowTargets[name] = profile.TargetWindow!;
                     }
                 }
                 catch (Exception ex)
@@ -215,6 +225,7 @@ namespace TrueReplayer.Controllers
 
             var map = GetProfileHotkeys();
             InputHookManager.RegisterProfileHotkeys(map);
+            InputHookManager.RegisterProfileWindowTargets(_cachedWindowTargets);
         }
 
         public async Task RefreshProfileListAsync(bool suppressWatcher = false)
@@ -379,6 +390,11 @@ namespace TrueReplayer.Controllers
             }
 
             return hotkeys;
+        }
+
+        public Dictionary<string, WindowTarget> GetProfileWindowTargets()
+        {
+            return new Dictionary<string, WindowTarget>(_cachedWindowTargets);
         }
 
         #endregion

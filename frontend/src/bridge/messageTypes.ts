@@ -17,6 +17,7 @@ export interface ProfileEntry {
   filePath: string;
   hotkey: string | null;
   isActive: boolean;
+  hasWindowTarget: boolean;
 }
 
 export interface SettingsState {
@@ -80,7 +81,8 @@ export type IncomingMessage =
   | { type: 'button:states'; payload: ButtonStates }
   | { type: 'toolbar:updated'; payload: { profileName: string; actionCount: number } }
   | { type: 'statusbar:updated'; payload: { directory: string; profileName: string | null; actionCount: number } }
-  | { type: 'alert:show'; payload: { message: string } };
+  | { type: 'alert:show'; payload: { message: string } }
+  | { type: 'windowTarget:detected'; payload: { processName: string; windowTitle: string } };
 
 // ── Messages JS → C# ──
 
@@ -98,6 +100,9 @@ export type OutgoingMessage =
   | { type: 'profile:delete'; payload: { name: string } }
   | { type: 'profile:assignHotkey'; payload: { name: string; hotkey: string } }
   | { type: 'profile:removeHotkey'; payload: { name: string } }
+  | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string } }
+  | { type: 'profile:removeWindowTarget'; payload: { name: string } }
+  | { type: 'profile:detectWindow'; payload: Record<string, never> }
   | { type: 'profile:openFolder'; payload: { name: string } }
   | { type: 'profile:save'; payload: Record<string, never> }
   | { type: 'profile:load'; payload: Record<string, never> }

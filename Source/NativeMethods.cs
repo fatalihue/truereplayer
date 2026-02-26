@@ -125,6 +125,26 @@ namespace TrueReplayer.Interop
         [DllImport("user32.dll")]
         public static extern int GetSystemMetrics(int nIndex);
 
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+
+        [DllImport("user32.dll")]
+        public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("kernel32.dll")]
+        public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
+
+        [DllImport("psapi.dll", CharSet = CharSet.Unicode)]
+        public static extern uint GetProcessImageFileName(IntPtr hProcess, System.Text.StringBuilder lpImageFileName, uint nSize);
+
+        [DllImport("kernel32.dll")]
+        public static extern bool CloseHandle(IntPtr hObject);
+
+        public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
         public static IntPtr SetMouseHook(LowLevelMouseProc proc)
         {
             using var curProcess = System.Diagnostics.Process.GetCurrentProcess();
