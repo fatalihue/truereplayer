@@ -304,6 +304,7 @@ namespace TrueReplayer.Services
         {
             InputHookManager.Stop();
             TrayIconService.RemoveTrayIcon();
+            Microsoft.UI.Xaml.Application.Current.Exit();
         }
 
         public IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam)
