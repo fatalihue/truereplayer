@@ -1,4 +1,6 @@
-﻿using System.Collections.ObjectModel;
+﻿using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Text.Json.Serialization;
 
@@ -110,5 +112,21 @@ namespace TrueReplayer.Models
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;
+    }
+
+    public class ProfileExportEntry
+    {
+        public string Name { get; set; } = string.Empty;
+        public string? CustomHotkey { get; set; }
+        public WindowTarget? TargetWindow { get; set; }
+        public string BatchDelay { get; set; } = "Delay (ms)";
+        public ObservableCollection<ActionItem> Actions { get; set; } = new();
+    }
+
+    public class ProfileExportEnvelope
+    {
+        public int Version { get; set; } = 1;
+        public string ExportedAt { get; set; } = DateTime.UtcNow.ToString("o");
+        public List<ProfileExportEntry> Profiles { get; set; } = new();
     }
 }

@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.UI;
@@ -16,6 +18,7 @@ using WinForms = System.Windows.Forms;
 namespace TrueReplayer.Controllers
 {
     public enum SaveDialogResult { Overwrite, SaveAsNew, Cancel }
+    public enum ImportConflictResult { Overwrite, Rename, Skip }
 
     public class ProfileController : IDisposable
     {
@@ -395,6 +398,171 @@ namespace TrueReplayer.Controllers
         public Dictionary<string, WindowTarget> GetProfileWindowTargets()
         {
             return new Dictionary<string, WindowTarget>(_cachedWindowTargets);
+        }
+
+        #endregion
+
+        #region Profile Export/Import
+
+        public async Task<bool> ExportProfilesAsync(List<string> profileNames)
+        {
+            var envelope = new ProfileExportEnvelope();
+
+            foreach (var name in profileNames)
+            {
+                var profile = await LoadProfileByNameAsync(name);
+                if (profile == null) continue;
+
+                envelope.Profiles.Add(new ProfileExportEntry
+                {
+                    Name = name,
+                    CustomHotkey = profile.CustomHotkey,
+                    TargetWindow = profile.TargetWindow,
+                    BatchDelay = profile.BatchDelay,
+                    Actions = profile.Actions
+                });
+            }
+
+            if (envelope.Profiles.Count == 0) return false;
+
+            var defaultName = envelope.Profiles.Count == 1
+                ? envelope.Profiles[0].Name
+                : "profiles";
+
+            var fileName = await ShowFileDialogAsync(new WinForms.SaveFileDialog
+            {
+                Filter = "TrueReplayer Profile (*.trprofile)|*.trprofile",
+                FileName = defaultName,
+                DefaultExt = "trprofile"
+            });
+
+            if (fileName == null) return false;
+
+            var options = new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+            };
+
+            var json = JsonSerializer.Serialize(envelope, options);
+            await File.WriteAllTextAsync(fileName, json);
+            return true;
+        }
+
+        public async Task<(int imported, int skipped, bool cancelled)> ImportProfilesAsync()
+        {
+            var fileName = await ShowFileDialogAsync(new WinForms.OpenFileDialog
+            {
+                Filter = "TrueReplayer Profile (*.trprofile)|*.trprofile",
+                DefaultExt = "trprofile"
+            });
+
+            if (fileName == null) return (0, 0, true);
+
+            var json = await File.ReadAllTextAsync(fileName);
+            var options = new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+            };
+
+            var envelope = JsonSerializer.Deserialize<ProfileExportEnvelope>(json, options);
+            if (envelope?.Profiles == null || envelope.Profiles.Count == 0)
+                return (0, 0, false);
+
+            string profileDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "TrueReplayer", "Profiles");
+            Directory.CreateDirectory(profileDir);
+
+            int imported = 0;
+            int skipped = 0;
+
+            foreach (var entry in envelope.Profiles)
+            {
+                string targetPath = Path.Combine(profileDir, entry.Name + ".json");
+                string finalName = entry.Name;
+
+                if (File.Exists(targetPath))
+                {
+                    var resolution = await ShowImportConflictDialogAsync(entry.Name);
+
+                    if (resolution == ImportConflictResult.Skip)
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    if (resolution == ImportConflictResult.Rename)
+                    {
+                        int counter = 2;
+                        do
+                        {
+                            finalName = $"{entry.Name} ({counter})";
+                            targetPath = Path.Combine(profileDir, finalName + ".json");
+                            counter++;
+                        } while (File.Exists(targetPath));
+                    }
+                }
+
+                var profile = new UserProfile
+                {
+                    Actions = entry.Actions ?? new ObservableCollection<ActionItem>(),
+                    CustomHotkey = entry.CustomHotkey,
+                    TargetWindow = entry.TargetWindow,
+                    BatchDelay = entry.BatchDelay ?? "Delay (ms)"
+                };
+
+                await SettingsManager.SaveProfileAsync(targetPath, profile);
+                imported++;
+            }
+
+            if (imported > 0)
+                await RefreshProfileListAsync(true);
+
+            return (imported, skipped, false);
+        }
+
+        public async Task<ImportConflictResult> ShowImportConflictDialogAsync(string profileName)
+        {
+            var messageBlock = new TextBlock
+            {
+                Text = $"A profile named \"{profileName}\" already exists. What would you like to do?",
+                Foreground = new SolidColorBrush(Colors.White),
+                TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap
+            };
+
+            var dialog = new ContentDialog
+            {
+                Title = "Import Conflict",
+                XamlRoot = window.Content.XamlRoot,
+                RequestedTheme = ElementTheme.Dark,
+                PrimaryButtonText = "Overwrite",
+                SecondaryButtonText = "Rename",
+                CloseButtonText = "Skip",
+                DefaultButton = ContentDialogButton.Secondary,
+                Background = new SolidColorBrush(ColorHelper.FromArgb(255, 43, 43, 43)),
+                Foreground = new SolidColorBrush(Colors.White),
+                CornerRadius = new CornerRadius(8),
+                Content = messageBlock
+            };
+
+            InputHookManager.SuppressAllHotkeys = true;
+            try
+            {
+                var result = await dialog.ShowAsync();
+                return result switch
+                {
+                    ContentDialogResult.Primary => ImportConflictResult.Overwrite,
+                    ContentDialogResult.Secondary => ImportConflictResult.Rename,
+                    _ => ImportConflictResult.Skip
+                };
+            }
+            finally
+            {
+                InputHookManager.SuppressAllHotkeys = false;
+            }
         }
 
         #endregion

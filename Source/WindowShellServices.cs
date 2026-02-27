@@ -137,14 +137,14 @@ namespace TrueReplayer.Services
             }
         }
 
-        /// Callback invoked when user clicks "Sair" from the tray. Should return true if exit is allowed.
+        /// Callback invoked when user clicks "Exit" from the tray. Should return true if exit is allowed.
         public static Func<Task<bool>>? OnTrayExitRequested { get; set; }
 
         public static async void ShowContextMenu()
         {
             IntPtr hMenu = CreatePopupMenu();
-            AppendMenu(hMenu, MF_STRING, 1, "Restaurar");
-            AppendMenu(hMenu, MF_STRING, 2, "Sair");
+            AppendMenu(hMenu, MF_STRING, 1, "Restore");
+            AppendMenu(hMenu, MF_STRING, 2, "Exit");
 
             GetCursorPos(out NativeMethods.POINT pt);
             SetForegroundWindow(hwnd);

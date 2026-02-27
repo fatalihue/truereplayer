@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Plus, Search, Pencil, Trash2, FolderOpen, Key, KeyRound, Crosshair } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, FolderOpen, Key, KeyRound, Crosshair, Upload, Download } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 
@@ -24,6 +24,8 @@ export function ProfilePanel() {
   const [targetWindowTitle, setTargetWindowTitle] = useState('');
   const [titleMatchMode, setTitleMatchMode] = useState<'contains' | 'regex'>('contains');
   const [detectCountdown, setDetectCountdown] = useState<number | null>(null);
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [exportSelection, setExportSelection] = useState<Record<string, boolean>>({});
   const [dialogValue, setDialogValue] = useState('');
   const dialogInputRef = useRef<HTMLInputElement>(null);
   const hotkeyInputRef = useRef<HTMLInputElement>(null);
@@ -61,13 +63,48 @@ export function ProfilePanel() {
   }, [showHotkeyDialog]);
 
   // Suppress hotkeys while any dialog is open
-  const anyDialogOpen = showCreateDialog || showRenameDialog !== null || showDeleteConfirm !== null || showHotkeyDialog !== null || showWindowTargetDialog !== null;
+  const anyDialogOpen = showCreateDialog || showRenameDialog !== null || showDeleteConfirm !== null || showHotkeyDialog !== null || showWindowTargetDialog !== null || showExportDialog;
   useEffect(() => {
     if (anyDialogOpen) {
       send({ type: 'ui:modalOpen', payload: {} });
       return () => { send({ type: 'ui:modalClose', payload: {} }); };
     }
   }, [anyDialogOpen, send]);
+
+  const handleExportClick = () => {
+    if (profiles.length === 0) return;
+    const selection: Record<string, boolean> = {};
+    profiles.forEach(p => { selection[p.name] = true; });
+    setExportSelection(selection);
+    setShowExportDialog(true);
+  };
+
+  const handleImportClick = () => {
+    send({ type: 'profile:import', payload: {} });
+  };
+
+  const allExportSelected = profiles.length > 0 && profiles.every(p => exportSelection[p.name]);
+
+  const toggleExportSelectAll = () => {
+    const newVal = !allExportSelected;
+    const updated: Record<string, boolean> = {};
+    profiles.forEach(p => { updated[p.name] = newVal; });
+    setExportSelection(updated);
+  };
+
+  const toggleExportProfile = (name: string) => {
+    setExportSelection(prev => ({ ...prev, [name]: !prev[name] }));
+  };
+
+  const confirmExport = () => {
+    const selectedNames = Object.entries(exportSelection)
+      .filter(([, checked]) => checked)
+      .map(([name]) => name);
+    if (selectedNames.length > 0) {
+      send({ type: 'profile:export', payload: { names: selectedNames } });
+    }
+    setShowExportDialog(false);
+  };
 
   const handleContextMenu = useCallback((e: React.MouseEvent, name: string) => {
     e.preventDefault();
@@ -261,12 +298,29 @@ export function ProfilePanel() {
         {/* Header */}
         <div className="flex items-center justify-between px-3 pt-3 pb-2">
           <span className="text-xs font-semibold text-text-tertiary tracking-wider">PROFILES</span>
-          <button
-            onClick={handleCreate}
-            className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-          >
-            <Plus size={14} />
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={handleExportClick}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+              title="Export Profiles"
+            >
+              <Upload size={14} />
+            </button>
+            <button
+              onClick={handleImportClick}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+              title="Import Profiles"
+            >
+              <Download size={14} />
+            </button>
+            <button
+              onClick={handleCreate}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+              title="Create Profile"
+            >
+              <Plus size={14} />
+            </button>
+          </div>
         </div>
 
         {/* Search */}
@@ -509,6 +563,59 @@ export function ProfilePanel() {
                 className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
               >
                 Assign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Profiles Dialog */}
+      {showExportDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-[340px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
+            <h3 className="text-sm font-semibold text-text-primary mb-3">Export Profiles</h3>
+            <p className="text-xs text-text-secondary mb-3">Select profiles to export:</p>
+
+            <label className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-elevated cursor-pointer border-b border-border-subtle mb-1">
+              <input
+                type="checkbox"
+                checked={allExportSelected}
+                onChange={toggleExportSelectAll}
+                className="accent-[#0078D4]"
+              />
+              <span className="text-xs font-medium text-text-secondary">Select All</span>
+            </label>
+
+            <div className="max-h-[200px] overflow-y-auto">
+              {profiles.map(p => (
+                <label
+                  key={p.name}
+                  className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-elevated cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!exportSelection[p.name]}
+                    onChange={() => toggleExportProfile(p.name)}
+                    className="accent-[#0078D4]"
+                  />
+                  <span className="text-xs text-text-primary truncate">{p.name}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setShowExportDialog(false)}
+                className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmExport}
+                disabled={!Object.values(exportSelection).some(v => v)}
+                className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
+              >
+                Export
               </button>
             </div>
           </div>

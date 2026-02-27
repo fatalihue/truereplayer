@@ -142,6 +142,8 @@ namespace TrueReplayer
                     case "profile:removeWindowTarget": HandleProfileRemoveWindowTarget(payload); break;
                     case "profile:detectWindow": HandleProfileDetectWindow(); break;
                     case "profile:openFolder": HandleProfileOpenFolder(payload); break;
+                    case "profile:export": HandleProfileExport(payload); break;
+                    case "profile:import": HandleProfileImport(); break;
                     case "profile:save": HandleProfileSave(); break;
                     case "profile:load": HandleProfileLoad(); break;
                     case "profile:reset": HandleProfileReset(); break;
@@ -796,6 +798,55 @@ namespace TrueReplayer
                     });
                 }
                 catch { }
+            }
+        }
+
+        private async void HandleProfileExport(JsonElement payload)
+        {
+            var names = payload.GetProperty("names").EnumerateArray()
+                .Select(e => e.GetString() ?? "")
+                .Where(n => !string.IsNullOrEmpty(n))
+                .ToList();
+
+            if (names.Count == 0) return;
+
+            try
+            {
+                bool success = await profileController.ExportProfilesAsync(names);
+                if (success)
+                    SendMessage("alert:show", new { message = $"Exported {names.Count} profile(s) successfully." });
+            }
+            catch (Exception ex)
+            {
+                SendMessage("alert:show", new { message = $"Export failed: {ex.Message}" });
+            }
+        }
+
+        private async void HandleProfileImport()
+        {
+            try
+            {
+                var (imported, skipped, cancelled) = await profileController.ImportProfilesAsync();
+
+                if (cancelled && imported == 0)
+                    return;
+
+                if (imported > 0)
+                {
+                    PushProfilesUpdate();
+                    string msg = $"Imported {imported} profile(s).";
+                    if (skipped > 0)
+                        msg += $" {skipped} skipped.";
+                    SendMessage("alert:show", new { message = msg });
+                }
+                else if (skipped > 0)
+                {
+                    SendMessage("alert:show", new { message = $"All {skipped} profile(s) were skipped." });
+                }
+            }
+            catch (Exception ex)
+            {
+                SendMessage("alert:show", new { message = $"Import failed: {ex.Message}" });
             }
         }
 

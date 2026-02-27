@@ -114,5 +114,7 @@ export type OutgoingMessage =
   | { type: 'selection:changed'; payload: { indices: number[] } }
   | { type: 'window:alwaysOnTop'; payload: { enabled: boolean } }
   | { type: 'window:minimizeToTray'; payload: { enabled: boolean } }
+  | { type: 'profile:export'; payload: { names: string[] } }
+  | { type: 'profile:import'; payload: Record<string, never> }
   | { type: 'ui:modalOpen'; payload: Record<string, never> }
   | { type: 'ui:modalClose'; payload: Record<string, never> };

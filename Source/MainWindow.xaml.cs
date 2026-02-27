@@ -135,8 +135,8 @@ namespace TrueReplayer
 #if DEBUG
             WebView.CoreWebView2.Navigate("http://localhost:5173");
 #else
-            // Enable DevTools in release for diagnostics (F12)
-            WebView.CoreWebView2.Settings.AreDevToolsEnabled = true;
+            WebView.CoreWebView2.Settings.AreDevToolsEnabled = false;
+            WebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
 
             // Use virtual host mapping instead of file:// to avoid CORS issues with CSS/JS
             string wwwrootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot");
