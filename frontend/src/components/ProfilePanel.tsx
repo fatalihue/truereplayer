@@ -422,10 +422,10 @@ export function ProfilePanel() {
 
               {p.hotstring && (
                 <span
-                  className="shrink-0 px-1.5 py-0.5 rounded text-[11px] font-mono bg-hotkey-bg border border-hotkey-border text-accent"
-                  title={p.hotstringInstant ? 'Hotstring (instant)' : 'Hotstring'}
+                  className="shrink-0 px-1.5 py-0.5 rounded text-[11px] font-mono bg-hotkey-bg border border-hotkey-border text-accent-hover"
+                  title={p.hotstringInstant ? 'Hotstring (instant)' : 'Hotstring (terminator)'}
                 >
-                  {p.hotstring}
+                  {p.hotstringInstant ? '⚡' : '↵'}{p.hotstring}
                 </span>
               )}
             </button>

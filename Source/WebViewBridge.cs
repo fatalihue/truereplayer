@@ -328,6 +328,8 @@ namespace TrueReplayer
                     name = p.Name,
                     filePath = p.FilePath,
                     hotkey = p.Hotkey,
+                    hotstring = p.Hotstring,
+                    hotstringInstant = p.HotstringInstant,
                     isActive = p.IsActive,
                     hasWindowTarget = p.HasWindowTarget
                 }).ToArray(),
