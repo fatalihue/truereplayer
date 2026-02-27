@@ -55,6 +55,7 @@ namespace TrueReplayer.Models
         public string? LastProfileDirectory { get; set; }
 
         public string? CustomHotkey { get; set; }
+        public HotstringConfig? CustomHotstring { get; set; }
         public WindowTarget? TargetWindow { get; set; }
 
         [JsonIgnore]
@@ -78,7 +79,8 @@ namespace TrueReplayer.Models
             ProfileKeyEnabled = true,
             Actions = new ObservableCollection<ActionItem>(),
             BatchDelay = "Delay (ms)",
-            CustomHotkey = null
+            CustomHotkey = null,
+            CustomHotstring = null
         };
     }
 
@@ -89,11 +91,19 @@ namespace TrueReplayer.Models
         public string TitleMatchMode { get; set; } = "contains";  // "contains" | "regex"
     }
 
+    public class HotstringConfig
+    {
+        public string Sequence { get; set; } = string.Empty;
+        public bool Instant { get; set; } = false;  // false = needs Enter/Space/Tab terminator
+    }
+
     public class ProfileEntry : INotifyPropertyChanged
     {
         public string Name { get; set; } = string.Empty;
         public string FilePath { get; set; } = string.Empty;
         public string? Hotkey { get; set; }
+        public string? Hotstring { get; set; }
+        public bool HotstringInstant { get; set; }
         public bool HasWindowTarget { get; set; }
         public string Display => string.IsNullOrEmpty(Hotkey) ? Name : $"{Name} ({Hotkey})";
 
@@ -118,6 +128,7 @@ namespace TrueReplayer.Models
     {
         public string Name { get; set; } = string.Empty;
         public string? CustomHotkey { get; set; }
+        public HotstringConfig? CustomHotstring { get; set; }
         public WindowTarget? TargetWindow { get; set; }
         public string BatchDelay { get; set; } = "Delay (ms)";
         public ObservableCollection<ActionItem> Actions { get; set; } = new();

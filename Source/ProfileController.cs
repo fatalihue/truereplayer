@@ -213,6 +213,8 @@ namespace TrueReplayer.Controllers
                             Name = name,
                             FilePath = file,
                             Hotkey = profile.CustomHotkey,
+                            Hotstring = profile.CustomHotstring?.Sequence,
+                            HotstringInstant = profile.CustomHotstring?.Instant ?? false,
                             HasWindowTarget = hasTarget
                         });
 
@@ -229,6 +231,8 @@ namespace TrueReplayer.Controllers
             var map = GetProfileHotkeys();
             InputHookManager.RegisterProfileHotkeys(map);
             InputHookManager.RegisterProfileWindowTargets(_cachedWindowTargets);
+            var hotstringMap = GetProfileHotstrings();
+            InputHookManager.RegisterProfileHotstrings(hotstringMap);
         }
 
         public async Task RefreshProfileListAsync(bool suppressWatcher = false)
@@ -395,6 +399,25 @@ namespace TrueReplayer.Controllers
             return hotkeys;
         }
 
+        public Dictionary<string, HotstringConfig> GetProfileHotstrings()
+        {
+            var hotstrings = new Dictionary<string, HotstringConfig>();
+
+            foreach (var entry in ProfileEntries)
+            {
+                if (!string.IsNullOrEmpty(entry.Hotstring))
+                {
+                    hotstrings[entry.Name] = new HotstringConfig
+                    {
+                        Sequence = entry.Hotstring.ToLowerInvariant(),
+                        Instant = entry.HotstringInstant
+                    };
+                }
+            }
+
+            return hotstrings;
+        }
+
         public Dictionary<string, WindowTarget> GetProfileWindowTargets()
         {
             return new Dictionary<string, WindowTarget>(_cachedWindowTargets);
@@ -417,6 +440,7 @@ namespace TrueReplayer.Controllers
                 {
                     Name = name,
                     CustomHotkey = profile.CustomHotkey,
+                    CustomHotstring = profile.CustomHotstring,
                     TargetWindow = profile.TargetWindow,
                     BatchDelay = profile.BatchDelay,
                     Actions = profile.Actions
@@ -510,6 +534,7 @@ namespace TrueReplayer.Controllers
                 {
                     Actions = entry.Actions ?? new ObservableCollection<ActionItem>(),
                     CustomHotkey = entry.CustomHotkey,
+                    CustomHotstring = entry.CustomHotstring,
                     TargetWindow = entry.TargetWindow,
                     BatchDelay = entry.BatchDelay ?? "Delay (ms)"
                 };

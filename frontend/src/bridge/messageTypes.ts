@@ -16,6 +16,8 @@ export interface ProfileEntry {
   name: string;
   filePath: string;
   hotkey: string | null;
+  hotstring: string | null;
+  hotstringInstant: boolean;
   isActive: boolean;
   hasWindowTarget: boolean;
 }
@@ -100,6 +102,8 @@ export type OutgoingMessage =
   | { type: 'profile:delete'; payload: { name: string } }
   | { type: 'profile:assignHotkey'; payload: { name: string; hotkey: string } }
   | { type: 'profile:removeHotkey'; payload: { name: string } }
+  | { type: 'profile:assignHotstring'; payload: { name: string; sequence: string; instant: boolean } }
+  | { type: 'profile:removeHotstring'; payload: { name: string } }
   | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string } }
   | { type: 'profile:removeWindowTarget'; payload: { name: string } }
   | { type: 'profile:detectWindow'; payload: Record<string, never> }

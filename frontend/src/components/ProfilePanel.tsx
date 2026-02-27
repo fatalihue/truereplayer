@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Plus, Search, Pencil, Trash2, FolderOpen, Key, KeyRound, Crosshair, Upload, Download } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, FolderOpen, Key, KeyRound, Crosshair, Upload, Download, Type } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 
@@ -19,6 +19,9 @@ export function ProfilePanel() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showHotkeyDialog, setShowHotkeyDialog] = useState<string | null>(null);
   const [hotkeyCapture, setHotkeyCapture] = useState('...');
+  const [showHotstringDialog, setShowHotstringDialog] = useState<string | null>(null);
+  const [hotstringValue, setHotstringValue] = useState('');
+  const [hotstringInstant, setHotstringInstant] = useState(false);
   const [showWindowTargetDialog, setShowWindowTargetDialog] = useState<string | null>(null);
   const [targetProcessName, setTargetProcessName] = useState('');
   const [targetWindowTitle, setTargetWindowTitle] = useState('');
@@ -29,6 +32,7 @@ export function ProfilePanel() {
   const [dialogValue, setDialogValue] = useState('');
   const dialogInputRef = useRef<HTMLInputElement>(null);
   const hotkeyInputRef = useRef<HTMLInputElement>(null);
+  const hotstringInputRef = useRef<HTMLInputElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
   const filtered = searchQuery
@@ -62,8 +66,15 @@ export function ProfilePanel() {
     }
   }, [showHotkeyDialog]);
 
+  // Focus hotstring input when dialog opens
+  useEffect(() => {
+    if (showHotstringDialog && hotstringInputRef.current) {
+      hotstringInputRef.current.focus();
+    }
+  }, [showHotstringDialog]);
+
   // Suppress hotkeys while any dialog is open
-  const anyDialogOpen = showCreateDialog || showRenameDialog !== null || showDeleteConfirm !== null || showHotkeyDialog !== null || showWindowTargetDialog !== null || showExportDialog;
+  const anyDialogOpen = showCreateDialog || showRenameDialog !== null || showDeleteConfirm !== null || showHotkeyDialog !== null || showHotstringDialog !== null || showWindowTargetDialog !== null || showExportDialog;
   useEffect(() => {
     if (anyDialogOpen) {
       send({ type: 'ui:modalOpen', payload: {} });
@@ -149,6 +160,29 @@ export function ProfilePanel() {
   const handleRemoveHotkey = (name: string) => {
     setContextMenu(null);
     send({ type: 'profile:removeHotkey', payload: { name } });
+  };
+
+  const handleAssignHotstring = (name: string) => {
+    setContextMenu(null);
+    const existing = profiles.find(p => p.name === name);
+    setHotstringValue(existing?.hotstring ?? '');
+    setHotstringInstant(existing?.hotstringInstant ?? false);
+    setShowHotstringDialog(name);
+  };
+
+  const handleRemoveHotstring = (name: string) => {
+    setContextMenu(null);
+    send({ type: 'profile:removeHotstring', payload: { name } });
+  };
+
+  const confirmHotstring = () => {
+    const seq = hotstringValue.trim().toLowerCase();
+    if (showHotstringDialog && seq.length >= 2) {
+      send({
+        type: 'profile:assignHotstring',
+        payload: { name: showHotstringDialog, sequence: seq, instant: hotstringInstant }
+      });
+    }
   };
 
   const handleSetWindowTarget = (name: string) => {
@@ -239,6 +273,16 @@ export function ProfilePanel() {
       }
     });
   }, [showHotkeyDialog, subscribe]);
+
+  // Auto-close hotstring dialog when profile list updates
+  useEffect(() => {
+    if (!showHotstringDialog) return;
+    return subscribe((msg) => {
+      if (msg.type === 'profiles:updated') {
+        setShowHotstringDialog(null);
+      }
+    });
+  }, [showHotstringDialog, subscribe]);
 
   // Window target detect countdown
   useEffect(() => {
@@ -375,6 +419,15 @@ export function ProfilePanel() {
                   {p.hotkey}
                 </span>
               )}
+
+              {p.hotstring && (
+                <span
+                  className="shrink-0 px-1.5 py-0.5 rounded text-[11px] font-mono bg-hotkey-bg border border-hotkey-border text-accent"
+                  title={p.hotstringInstant ? 'Hotstring (instant)' : 'Hotstring'}
+                >
+                  {p.hotstring}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -415,6 +468,22 @@ export function ProfilePanel() {
             >
               <KeyRound size={13} className="text-text-tertiary" />
               Remove Hotkey
+            </button>
+          )}
+          <button
+            onClick={() => handleAssignHotstring(contextMenu.profileName)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Type size={13} className="text-text-tertiary" />
+            {profile?.hotstring ? 'Edit Hotstring' : 'Assign Hotstring'}
+          </button>
+          {profile?.hotstring && (
+            <button
+              onClick={() => handleRemoveHotstring(contextMenu.profileName)}
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+            >
+              <Type size={13} className="text-text-tertiary" />
+              Remove Hotstring
             </button>
           )}
           <button
@@ -560,6 +629,61 @@ export function ProfilePanel() {
               <button
                 onClick={confirmHotkey}
                 disabled={hotkeyCapture === '...'}
+                className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
+              >
+                Assign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Assign Hotstring Dialog */}
+      {showHotstringDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-[340px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
+            <h3 className="text-sm font-semibold text-text-primary mb-3">Assign Hotstring</h3>
+            <p className="text-xs text-text-secondary mb-3">
+              Type a character sequence for <span className="text-text-primary font-medium">'{showHotstringDialog}'</span>
+            </p>
+            <input
+              ref={hotstringInputRef}
+              type="text"
+              value={hotstringValue}
+              onChange={(e) => setHotstringValue(e.target.value.replace(/[^a-zA-Z0-9\-./,;=]/g, ''))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); confirmHotstring(); }
+                else if (e.key === 'Escape') { e.preventDefault(); setShowHotstringDialog(null); }
+              }}
+              placeholder="e.g. id, /id, -addr, sig..."
+              maxLength={32}
+              className="w-full h-9 px-3 text-sm font-mono text-accent bg-bg-input border border-accent-solid rounded outline-none"
+            />
+            <p className="text-[11px] text-text-tertiary mt-1.5">
+              Min 2 characters, letters and numbers only.
+            </p>
+
+            <label className="flex items-center gap-2 mt-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={hotstringInstant}
+                onChange={(e) => setHotstringInstant(e.target.checked)}
+                className="accent-[#0078D4]"
+              />
+              <span className="text-xs text-text-secondary">Instant trigger</span>
+              <span className="text-[11px] text-text-tertiary">(no Enter/Space/Tab needed)</span>
+            </label>
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setShowHotstringDialog(null)}
+                className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmHotstring}
+                disabled={hotstringValue.trim().length < 2}
                 className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
               >
                 Assign

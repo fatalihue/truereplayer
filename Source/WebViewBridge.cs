@@ -138,6 +138,8 @@ namespace TrueReplayer
                     case "profile:delete": HandleProfileDelete(payload); break;
                     case "profile:assignHotkey": HandleProfileAssignHotkey(payload); break;
                     case "profile:removeHotkey": HandleProfileRemoveHotkey(payload); break;
+                    case "profile:assignHotstring": HandleProfileAssignHotstring(payload); break;
+                    case "profile:removeHotstring": HandleProfileRemoveHotstring(payload); break;
                     case "profile:setWindowTarget": HandleProfileSetWindowTarget(payload); break;
                     case "profile:removeWindowTarget": HandleProfileRemoveWindowTarget(payload); break;
                     case "profile:detectWindow": HandleProfileDetectWindow(); break;
@@ -199,6 +201,8 @@ namespace TrueReplayer
                 name = p.Name,
                 filePath = p.FilePath,
                 hotkey = p.Hotkey,
+                hotstring = p.Hotstring,
+                hotstringInstant = p.HotstringInstant,
                 isActive = p.IsActive,
                 hasWindowTarget = p.HasWindowTarget
             }).ToArray();
@@ -663,6 +667,71 @@ namespace TrueReplayer
                 InputHookManager.RegisterProfileHotkeys(map);
                 PushProfilesUpdate();
             }
+        }
+
+        private async void HandleProfileAssignHotstring(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            string sequence = payload.GetProperty("sequence").GetString() ?? "";
+            bool instant = payload.TryGetProperty("instant", out var instantProp) && instantProp.GetBoolean();
+
+            if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(sequence)) return;
+
+            sequence = sequence.ToLowerInvariant().Trim();
+            if (sequence.Length < 2 || !System.Text.RegularExpressions.Regex.IsMatch(sequence, @"^[a-z0-9\-./,;=]+$"))
+            {
+                SendMessage("alert:show", new { message = "Hotstring must be at least 2 characters (a-z, 0-9, - . / , ; =)." });
+                return;
+            }
+
+            var conflict = GetHotstringConflict(sequence, excludeProfileName: name);
+            if (conflict != null)
+            {
+                SendMessage("alert:show", new { message = $"Hotstring \"{sequence}\" is already used by {conflict}." });
+                return;
+            }
+
+            var profile = await profileController.LoadProfileByNameAsync(name);
+            if (profile != null)
+            {
+                profile.CustomHotstring = new Models.HotstringConfig { Sequence = sequence, Instant = instant };
+                await profileController.SaveProfileByNameAsync(name, profile);
+                await profileController.RefreshProfileListAsync(true);
+                var hotstringMap = profileController.GetProfileHotstrings();
+                InputHookManager.RegisterProfileHotstrings(hotstringMap);
+                PushProfilesUpdate();
+            }
+        }
+
+        private async void HandleProfileRemoveHotstring(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            if (string.IsNullOrEmpty(name)) return;
+
+            var profile = await profileController.LoadProfileByNameAsync(name);
+            if (profile != null)
+            {
+                profile.CustomHotstring = null;
+                await profileController.SaveProfileByNameAsync(name, profile);
+                await profileController.RefreshProfileListAsync(true);
+                var hotstringMap = profileController.GetProfileHotstrings();
+                InputHookManager.RegisterProfileHotstrings(hotstringMap);
+                PushProfilesUpdate();
+            }
+        }
+
+        private string? GetHotstringConflict(string sequence, string? excludeProfileName)
+        {
+            if (string.IsNullOrEmpty(sequence)) return null;
+
+            foreach (var entry in profileController.ProfileEntries)
+            {
+                if (entry.Name == excludeProfileName) continue;
+                if (string.Equals(entry.Hotstring, sequence, StringComparison.OrdinalIgnoreCase))
+                    return $"Profile \"{entry.Name}\"";
+            }
+
+            return null;
         }
 
         private async void HandleProfileSetWindowTarget(JsonElement payload)

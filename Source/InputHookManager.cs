@@ -27,6 +27,12 @@ namespace TrueReplayer
 
         public static Dictionary<string, string> ProfileHotkeys = new();
         public static Dictionary<string, WindowTarget> ProfileWindowTargets = new();
+        public static Dictionary<string, HotstringConfig> ProfileHotstrings = new();
+
+        // Hotstring character buffer (accessed only from hook thread)
+        private static readonly char[] _hotstringBuffer = new char[64];
+        private static int _hotstringBufferLen = 0;
+        private static readonly HashSet<int> _terminatorVkCodes = new() { 0x0D, 0x20, 0x09 }; // Enter, Space, Tab
 
         public static bool IsReplayingAction { get; set; } = false;
 
@@ -64,6 +70,12 @@ namespace TrueReplayer
         public static void RegisterProfileHotkeys(Dictionary<string, string> profileHotkeys)
         {
             ProfileHotkeys = profileHotkeys;
+        }
+
+        public static void RegisterProfileHotstrings(Dictionary<string, HotstringConfig> hotstrings)
+        {
+            ProfileHotstrings = hotstrings;
+            _hotstringBufferLen = 0;
         }
 
         private static Dictionary<string, Regex?> _compiledTitleRegexes = new();
@@ -169,6 +181,105 @@ namespace TrueReplayer
             return true;
         }
 
+        #region Hotstring Helpers
+
+        private static char? VkCodeToChar(int vkCode)
+        {
+            if (vkCode >= 0x41 && vkCode <= 0x5A) return (char)('a' + (vkCode - 0x41)); // A-Z → a-z
+            if (vkCode >= 0x30 && vkCode <= 0x39) return (char)('0' + (vkCode - 0x30)); // 0-9
+            return vkCode switch
+            {
+                0xBD => '-',  // OEM_MINUS
+                0xBE => '.',  // OEM_PERIOD
+                0xBF => '/',  // OEM_2
+                0xBC => ',',  // OEM_COMMA
+                0xBA => ';',  // OEM_1
+                0xBB => '=',  // OEM_PLUS (unshifted)
+                _ => null
+            };
+        }
+
+        private static void HotstringBufferAppend(char c)
+        {
+            if (_hotstringBufferLen >= _hotstringBuffer.Length)
+            {
+                int half = _hotstringBuffer.Length / 2;
+                Array.Copy(_hotstringBuffer, half, _hotstringBuffer, 0, _hotstringBufferLen - half);
+                _hotstringBufferLen -= half;
+            }
+            _hotstringBuffer[_hotstringBufferLen++] = c;
+        }
+
+        private static void HotstringBufferClear()
+        {
+            _hotstringBufferLen = 0;
+        }
+
+        private static string? CheckHotstringMatch(bool isTerminator)
+        {
+            if (_hotstringBufferLen == 0 || ProfileHotstrings.Count == 0)
+                return null;
+
+            var bufferSpan = new ReadOnlySpan<char>(_hotstringBuffer, 0, _hotstringBufferLen);
+            string? bestMatch = null;
+            int bestLen = 0;
+
+            foreach (var (profileName, config) in ProfileHotstrings)
+            {
+                var seq = config.Sequence;
+                if (seq.Length == 0 || seq.Length > _hotstringBufferLen)
+                    continue;
+
+                if (!config.Instant && !isTerminator)
+                    continue;
+
+                var tail = bufferSpan.Slice(_hotstringBufferLen - seq.Length);
+                if (tail.SequenceEqual(seq.AsSpan()))
+                {
+                    if (seq.Length > bestLen)
+                    {
+                        bestLen = seq.Length;
+                        bestMatch = profileName;
+                    }
+                }
+            }
+
+            return bestMatch;
+        }
+
+        private static void EraseCharacters(int count)
+        {
+            if (count <= 0) return;
+
+            bool wasReplaying = IsReplayingAction;
+            IsReplayingAction = true;
+
+            try
+            {
+                int inputSize = Marshal.SizeOf(typeof(NativeMethods.INPUT));
+                ushort vkBack = 0x08;
+                ushort scanBack = (ushort)NativeMethods.MapVirtualKey(vkBack, 0);
+
+                for (int i = 0; i < count; i++)
+                {
+                    var inputs = new NativeMethods.INPUT[]
+                    {
+                        new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion {
+                            ki = new NativeMethods.KEYBDINPUT { wVk = vkBack, wScan = scanBack, dwFlags = NativeMethods.KEYEVENTF_SCANCODE } } },
+                        new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion {
+                            ki = new NativeMethods.KEYBDINPUT { wVk = vkBack, wScan = scanBack, dwFlags = NativeMethods.KEYEVENTF_KEYUP | NativeMethods.KEYEVENTF_SCANCODE } } },
+                    };
+                    NativeMethods.SendInput((uint)inputs.Length, inputs, inputSize);
+                }
+            }
+            finally
+            {
+                IsReplayingAction = wasReplaying;
+            }
+        }
+
+        #endregion
+
         private static IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
             if (nCode >= 0 && !SuppressAllHotkeys)
@@ -200,6 +311,9 @@ namespace TrueReplayer
 
                 if (button != null)
                 {
+                    if ((int)wParam != NativeMethods.WM_MOUSEWHEEL)
+                        _hotstringBufferLen = 0;
+
                     OnMouseEvent?.Invoke(button, hookStruct.pt.x, hookStruct.pt.y, isDown, scrollDelta);
                 }
             }
@@ -323,6 +437,69 @@ namespace TrueReplayer
                         LastTriggerHotkey = key;
                         OnHotkeyPressed?.Invoke($"PROFILE::{profileName}");
                         return (IntPtr)1;
+                    }
+
+                    // ── Hotstring buffer management ──
+                    if (!IsReplayingAction && UserProfile.Current.ProfileKeyEnabled &&
+                        ProfileHotstrings.Count > 0 &&
+                        MainController.Instance != null && !MainController.Instance.IsRecording())
+                    {
+                        if (vkCode == 0x08) // Backspace: pop last char
+                        {
+                            if (_hotstringBufferLen > 0)
+                                _hotstringBufferLen--;
+                        }
+                        else if (vkCode == 0x1B  // Escape
+                              || vkCode == 0x11 || vkCode == 0xA2 || vkCode == 0xA3  // Ctrl
+                              || vkCode == 0x12 || vkCode == 0xA4 || vkCode == 0xA5) // Alt
+                        {
+                            HotstringBufferClear();
+                        }
+                        else if (_terminatorVkCodes.Contains(vkCode)) // Enter, Space, Tab
+                        {
+                            var matchedProfile = CheckHotstringMatch(isTerminator: true);
+                            if (matchedProfile != null && IsForegroundWindowMatch(matchedProfile))
+                            {
+                                var config = ProfileHotstrings[matchedProfile];
+                                int backspaceCount = config.Sequence.Length; // erase typed chars
+                                HotstringBufferClear();
+                                EraseCharacters(backspaceCount);
+
+                                LastTriggerHotkey = $"HOTSTRING::{matchedProfile}";
+                                OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
+                                return (IntPtr)1; // swallow the terminator key
+                            }
+                            else
+                            {
+                                HotstringBufferClear(); // terminator without match resets buffer
+                            }
+                        }
+                        else
+                        {
+                            char? ch = VkCodeToChar(vkCode);
+                            if (ch.HasValue)
+                            {
+                                HotstringBufferAppend(ch.Value);
+
+                                var matchedProfile = CheckHotstringMatch(isTerminator: false);
+                                if (matchedProfile != null && IsForegroundWindowMatch(matchedProfile))
+                                {
+                                    var config = ProfileHotstrings[matchedProfile];
+                                    int backspaceCount = config.Sequence.Length - 1; // previous chars (current key swallowed)
+                                    HotstringBufferClear();
+                                    if (backspaceCount > 0)
+                                        EraseCharacters(backspaceCount);
+
+                                    LastTriggerHotkey = $"HOTSTRING::{matchedProfile}";
+                                    OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
+                                    return (IntPtr)1; // swallow current key
+                                }
+                            }
+                            else if (vkCode != 0x10 && vkCode != 0xA0 && vkCode != 0xA1) // not Shift
+                            {
+                                HotstringBufferClear(); // non-character key clears buffer
+                            }
+                        }
                     }
                 }
 
