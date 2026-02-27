@@ -295,16 +295,21 @@ namespace TrueReplayer.Services
             if (canClose)
             {
                 closingConfirmed = true;
-                TrayIconService.RemoveTrayIcon();
-                appWindow.Destroy();
+                ForceExit();
             }
         }
 
         private void Window_Closed(object sender, WindowEventArgs args)
         {
+            ForceExit();
+        }
+
+        private void ForceExit()
+        {
             InputHookManager.Stop();
             TrayIconService.RemoveTrayIcon();
             Microsoft.UI.Xaml.Application.Current.Exit();
+            Environment.Exit(0);
         }
 
         public IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam)
