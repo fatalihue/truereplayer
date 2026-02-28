@@ -10,7 +10,7 @@ interface ContextMenuState {
 }
 
 export function ProfilePanel() {
-  const { profiles, activeProfile } = useAppState();
+  const { profiles } = useAppState();
   const { send, subscribe } = useBridge();
   const [searchQuery, setSearchQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -40,18 +40,6 @@ export function ProfilePanel() {
     : profiles;
 
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
-
-  // Deselect active profile on Esc
-  useEffect(() => {
-    if (!activeProfile) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !showCreateDialog && !showRenameDialog && !showDeleteConfirm && !showHotkeyDialog && !showHotstringDialog && !showWindowTargetDialog && !showExportDialog) {
-        send({ type: 'profile:click', payload: { name: activeProfile } });
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [activeProfile, send, showCreateDialog, showRenameDialog, showDeleteConfirm, showHotkeyDialog, showHotstringDialog, showWindowTargetDialog, showExportDialog]);
 
   // Close context menu on click outside
   useEffect(() => {
