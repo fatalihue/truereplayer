@@ -10,7 +10,7 @@ interface ContextMenuState {
 }
 
 export function ProfilePanel() {
-  const { profiles } = useAppState();
+  const { profiles, activeProfile } = useAppState();
   const { send, subscribe } = useBridge();
   const [searchQuery, setSearchQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -39,17 +39,63 @@ export function ProfilePanel() {
     ? profiles.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()))
     : profiles;
 
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Deselect active profile on Esc
+  useEffect(() => {
+    if (!activeProfile) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !showCreateDialog && !showRenameDialog && !showDeleteConfirm && !showHotkeyDialog && !showHotstringDialog && !showWindowTargetDialog && !showExportDialog) {
+        send({ type: 'profile:click', payload: { name: activeProfile } });
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [activeProfile, send, showCreateDialog, showRenameDialog, showDeleteConfirm, showHotkeyDialog, showHotstringDialog, showWindowTargetDialog, showExportDialog]);
+
   // Close context menu on click outside
   useEffect(() => {
     if (!contextMenu) return;
     const handleClick = (e: MouseEvent) => {
       if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
         setContextMenu(null);
+        setMenuPos(null);
       }
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [contextMenu]);
+
+  // Adjust context menu position to stay within viewport
+  // Renders off-screen first to measure full (unclipped) size, then repositions
+  useEffect(() => {
+    if (!contextMenu) { setMenuPos(null); return; }
+    // Place off-screen so the menu renders at full size without being clipped
+    setMenuPos({ x: -9999, y: -9999 });
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (!contextMenu || !menuPos) return;
+    // Skip the measurement pass (off-screen render)
+    if (menuPos.x === -9999) {
+      requestAnimationFrame(() => {
+        const el = contextMenuRef.current;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        let x = contextMenu.x;
+        let y = contextMenu.y;
+        // If menu would overflow bottom, move it up
+        if (y + rect.height > window.innerHeight - 8) {
+          y = Math.max(8, contextMenu.y - rect.height);
+        }
+        // If menu would overflow right, move it left
+        if (x + rect.width > window.innerWidth - 8) {
+          x = Math.max(8, window.innerWidth - rect.width - 8);
+        }
+        setMenuPos({ x, y });
+      });
+    }
+  }, [contextMenu, menuPos]);
 
   // Focus dialog input when opened
   useEffect(() => {
@@ -386,9 +432,9 @@ export function ProfilePanel() {
           {filtered.map((p) => (
             <button
               key={p.name}
-              onClick={() => send({ type: 'profile:click', payload: { name: p.name } })}
+              onClick={(e) => { send({ type: 'profile:click', payload: { name: p.name } }); (e.target as HTMLElement).blur(); }}
               onContextMenu={(e) => handleContextMenu(e, p.name)}
-              className={`w-full flex items-center gap-2 px-2.5 py-2 rounded text-left transition-colors mb-0.5 ${
+              className={`w-full flex items-center gap-2 px-2.5 py-2 rounded text-left transition-colors mb-0.5 outline-none ${
                 p.isActive
                   ? 'bg-bg-elevated'
                   : 'hover:bg-bg-card'
@@ -434,11 +480,11 @@ export function ProfilePanel() {
       </div>
 
       {/* Context Menu */}
-      {contextMenu && (
+      {contextMenu && menuPos && (
         <div
           ref={contextMenuRef}
           className="fixed z-50 min-w-[180px] py-1 bg-bg-card border border-border-default rounded-md shadow-lg"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
+          style={{ left: menuPos.x, top: menuPos.y }}
         >
           <button
             onClick={() => handleRename(contextMenu.profileName)}

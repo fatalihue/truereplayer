@@ -523,6 +523,23 @@ namespace TrueReplayer
             string name = payload.GetProperty("name").GetString() ?? "";
             if (string.IsNullOrEmpty(name)) return;
 
+            // Deselect if clicking the already-active profile
+            if (CurrentProfileName == name)
+            {
+                CurrentProfileName = "No Profile";
+                CurrentProfilePath = null;
+                HasUnsavedChanges = false;
+                actions.Clear();
+                profileController.UpdateProfileColors(null);
+                PushProfilesUpdate();
+                PushActionsUpdate();
+                PushButtonStates();
+                PushToolbarUpdate();
+                PushStatusBarUpdate();
+                TrayIconService.UpdateTrayIcon();
+                return;
+            }
+
             var profile = await profileController.LoadProfileByNameAsync(name);
             if (profile != null)
             {
