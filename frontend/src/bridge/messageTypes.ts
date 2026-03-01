@@ -115,6 +115,7 @@ export type OutgoingMessage =
   | { type: 'actions:addSendText'; payload: { text: string; insertIndex?: number } }
   | { type: 'actions:editSendText'; payload: { index: number; text: string } }
   | { type: 'actions:bulkUpdateDelay'; payload: { indices: number[]; delay: number } }
+  | { type: 'actions:reorder'; payload: { indices: number[]; targetIndex: number } }
   | { type: 'selection:changed'; payload: { indices: number[] } }
   | { type: 'window:alwaysOnTop'; payload: { enabled: boolean } }
   | { type: 'window:minimizeToTray'; payload: { enabled: boolean } }

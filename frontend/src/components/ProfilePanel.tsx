@@ -689,12 +689,12 @@ export function ProfilePanel() {
                 if (e.key === 'Enter') { e.preventDefault(); confirmHotstring(); }
                 else if (e.key === 'Escape') { e.preventDefault(); setShowHotstringDialog(null); }
               }}
-              placeholder="e.g. id, /id, -addr, sig..."
+              placeholder="example: id /id -ad .sg ,de =ds ;mk"
               maxLength={32}
               className="w-full h-9 px-3 text-sm font-mono text-accent bg-bg-input border border-accent-solid rounded outline-none"
             />
             <p className="text-[11px] text-text-tertiary mt-1.5">
-              Min 2 characters, letters and numbers only.
+              Min 2 characters.
             </p>
 
             <label className="flex items-center gap-2 mt-3 cursor-pointer">

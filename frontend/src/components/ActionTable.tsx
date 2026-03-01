@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, GripVertical } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -35,6 +35,8 @@ export function ActionTable() {
   const prevActionsLength = useRef(actions.length);
   const wasRecording = useRef(false);
   const [sendTextEdit, setSendTextEdit] = useState<{ index: number; text: string } | null>(null);
+  const [dragIndices, setDragIndices] = useState<number[] | null>(null);
+  const [dropTarget, setDropTarget] = useState<number | null>(null);
 
   // Suppress hotkeys while SendText edit dialog or inline key editing is active
   const modalActive = sendTextEdit !== null || editingCell !== null;
@@ -245,6 +247,69 @@ export function ActionTable() {
     }
   }, [cancelEdit, editingCell, send]);
 
+  // Drag & drop via mouse events (HTML5 drag API doesn't work in WebView2)
+  const isDraggable = !buttonStates.recordingActive && !buttonStates.replayActive && !editingCell;
+  const dragState = useRef<{ indices: number[]; started: boolean } | null>(null);
+  const dropTargetRef = useRef<number | null>(null);
+  const tbodyRef = useRef<HTMLTableSectionElement>(null);
+
+  const handleGripMouseDown = useCallback((idx: number, e: React.MouseEvent) => {
+    if (!isDraggable) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // If grip row is part of selection, drag all selected; otherwise drag only this one
+    const indices = selectedIndices.has(idx)
+      ? Array.from(selectedIndices).sort((a, b) => a - b)
+      : [idx];
+    dragState.current = { indices, started: true };
+    dropTargetRef.current = null;
+    setDragIndices(indices);
+  }, [isDraggable, selectedIndices]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragState.current?.started || !tbodyRef.current) return;
+      // Find which row the cursor is over
+      const rows = tbodyRef.current.querySelectorAll('tr');
+      let target: number | null = null;
+      for (let i = 0; i < rows.length; i++) {
+        const rect = rows[i].getBoundingClientRect();
+        if (e.clientY < rect.top + rect.height / 2) {
+          target = i;
+          break;
+        }
+        if (i === rows.length - 1) {
+          target = i + 1;
+        }
+      }
+      dropTargetRef.current = target;
+      setDropTarget(target);
+    };
+
+    const handleMouseUp = () => {
+      if (!dragState.current?.started) return;
+      const indices = dragState.current.indices;
+      const target = dropTargetRef.current;
+
+      if (target !== null && indices.length > 0) {
+        send({ type: 'actions:reorder', payload: { indices, targetIndex: target } });
+        setSelectedIndices(new Set());
+      }
+
+      dragState.current = null;
+      dropTargetRef.current = null;
+      setDragIndices(null);
+      setDropTarget(null);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [send]);
+
   const isMouseAction = (actionType: string) =>
     actionType.includes('Click') || actionType.includes('Middle');
 
@@ -255,7 +320,7 @@ export function ActionTable() {
       onKeyDown={handleKeyDown}
     >
       {/* Header */}
-      <div className="grid grid-cols-[35px_140px_100px_65px_65px_70px_1fr] items-center h-row px-1 border-b border-border-subtle shrink-0">
+      <div className="grid grid-cols-[50px_140px_100px_65px_65px_70px_1fr] items-center h-row px-1 border-b border-border-subtle shrink-0">
         <span className="text-xs font-semibold text-text-tertiary pl-3">#</span>
         <span className="text-xs font-semibold text-text-tertiary pl-1">Action</span>
         <span className="text-xs font-semibold text-text-tertiary pl-1">Key</span>
@@ -268,7 +333,7 @@ export function ActionTable() {
       {/* Body */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <table className="w-full">
-          <tbody>
+          <tbody ref={tbodyRef}>
             {actions.map((action, idx) => {
               const colors = getActionTypeColors(action.actionType);
               const isHighlighted = highlightedActionIndex === idx;
@@ -278,12 +343,18 @@ export function ActionTable() {
               const displayY = getDisplayY(action);
               const canEditXY = isMouseAction(action.actionType);
 
+              const isDragged = dragIndices?.includes(idx) ?? false;
+              const showDropBefore = dropTarget === idx && !isDragged;
+              const showDropAfter = dropTarget === idx + 1 && !isDragged && !(dragIndices?.includes(idx + 1));
+
               return (
                 <tr
                   key={idx}
                   ref={isHighlighted ? highlightedRowRef : undefined}
                   onClick={(e) => handleRowClick(idx, e)}
-                  className={`h-row border-b border-border-subtle transition-colors cursor-default ${
+                  className={`h-row border-b border-border-subtle transition-colors cursor-default relative ${
+                    isDragged ? 'opacity-40' : ''
+                  } ${
                     isHighlighted
                       ? 'bg-[rgba(218,185,80,0.08)]'
                       : isSelected
@@ -293,9 +364,24 @@ export function ActionTable() {
                           : 'bg-[rgba(255,255,255,0.02)]'
                   } hover:bg-bg-elevated`}
                 >
-                  {/* Row number */}
-                  <td className="w-[35px] pl-3">
-                    <span className="text-[11px] font-mono text-text-disabled">{action.rowNumber}</span>
+                  {/* Drop indicator lines */}
+                  {showDropBefore && (
+                    <td colSpan={7} className="absolute top-0 left-0 right-0 h-0 p-0 border-0">
+                      <div className="absolute top-[-1px] left-2 right-2 h-[2px] bg-accent-solid rounded-full" />
+                    </td>
+                  )}
+                  {showDropAfter && (
+                    <td colSpan={7} className="absolute bottom-0 left-0 right-0 h-0 p-0 border-0">
+                      <div className="absolute bottom-[-1px] left-2 right-2 h-[2px] bg-accent-solid rounded-full" />
+                    </td>
+                  )}
+
+                  {/* Row number + grip */}
+                  <td className="w-[50px] pl-1">
+                    <div className="flex items-center gap-0.5 leading-none">
+                      <GripVertical size={11} onMouseDown={(e) => handleGripMouseDown(idx, e)} className={`shrink-0 text-text-disabled translate-y-[0.5px] ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''}`} />
+                      <span className="text-[11px] font-mono text-text-disabled leading-none">{action.rowNumber}</span>
+                    </div>
                   </td>
 
                   {/* Action type pill */}

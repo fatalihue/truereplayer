@@ -132,6 +132,7 @@ namespace TrueReplayer
                     case "actions:addSendText": HandleAddSendText(payload); break;
                     case "actions:editSendText": HandleEditSendText(payload); break;
                     case "actions:bulkUpdateDelay": HandleBulkUpdateDelay(payload); break;
+                    case "actions:reorder": HandleActionsReorder(payload); break;
                     case "profile:click": HandleProfileClick(payload); break;
                     case "profile:create": HandleProfileCreate(payload); break;
                     case "profile:rename": HandleProfileRename(payload); break;
@@ -475,6 +476,52 @@ namespace TrueReplayer
                 if (idx >= 0 && idx < actions.Count)
                     actions[idx].Delay = delay;
             }
+
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+        }
+
+        private void HandleActionsReorder(JsonElement payload)
+        {
+            var indices = payload.GetProperty("indices").EnumerateArray()
+                .Select(e => e.GetInt32())
+                .OrderBy(i => i)
+                .ToList();
+            int targetIndex = payload.GetProperty("targetIndex").GetInt32();
+
+            if (indices.Count == 0) return;
+
+            // Validate all indices
+            var validIndices = indices.Where(i => i >= 0 && i < actions.Count).ToList();
+            if (validIndices.Count == 0) return;
+
+            // Suppress CollectionChanged during batch reorder
+            actions.CollectionChanged -= OnActionsChanged;
+            try
+            {
+                // Extract the items to move (preserving their relative order)
+                var itemsToMove = validIndices.Select(i => actions[i]).ToList();
+
+                // Remove from end to start to preserve indices during removal
+                foreach (var idx in validIndices.OrderByDescending(i => i))
+                    actions.RemoveAt(idx);
+
+                // Adjust target: for each removed item that was before targetIndex, shift down by 1
+                int adjustedTarget = targetIndex - validIndices.Count(i => i < targetIndex);
+                adjustedTarget = Math.Max(0, Math.Min(adjustedTarget, actions.Count));
+
+                // Insert all items at the target position
+                for (int i = 0; i < itemsToMove.Count; i++)
+                    actions.Insert(adjustedTarget + i, itemsToMove[i]);
+            }
+            finally
+            {
+                actions.CollectionChanged += OnActionsChanged;
+            }
+
+            // Recalculate row numbers and push single update
+            for (int i = 0; i < actions.Count; i++)
+                actions[i].RowNumber = i + 1;
 
             HasUnsavedChanges = true;
             PushActionsUpdate();
