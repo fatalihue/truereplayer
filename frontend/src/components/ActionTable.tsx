@@ -33,6 +33,7 @@ export function ActionTable() {
   const editInputRef = useRef<HTMLInputElement>(null);
   const lastClickedIndex = useRef<number | null>(null);
   const prevActionsLength = useRef(actions.length);
+  const prevActionsRef = useRef(actions);
   const wasRecording = useRef(false);
   const [sendTextEdit, setSendTextEdit] = useState<{ index: number; text: string } | null>(null);
   const [dragIndices, setDragIndices] = useState<number[] | null>(null);
@@ -79,6 +80,14 @@ export function ActionTable() {
     }
     prevActionsLength.current = actions.length;
   }, [actions.length, selectionRef]);
+
+  // Scroll to top when actions list is replaced (e.g. profile switch)
+  useEffect(() => {
+    if (actions !== prevActionsRef.current && scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
+    }
+    prevActionsRef.current = actions;
+  }, [actions]);
 
   // Focus edit input when entering edit mode
   useEffect(() => {
