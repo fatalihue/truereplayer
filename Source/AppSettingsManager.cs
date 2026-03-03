@@ -26,10 +26,10 @@ namespace TrueReplayer.Services
             public bool RecordScroll { get; set; } = true;
             public bool RecordKeyboard { get; set; } = true;
             // Hotkeys
-            public string RecordingHotkey { get; set; } = "F9";
-            public string ReplayHotkey { get; set; } = "F10";
-            public string ProfileKeyToggleHotkey { get; set; } = "Ctrl+Shift+K";
-            public string ForegroundHotkey { get; set; } = "Ctrl+Shift+L";
+            public string RecordingHotkey { get; set; } = "Ctrl+PageUp";
+            public string ReplayHotkey { get; set; } = "Ctrl+PageDown";
+            public string ProfileKeyToggleHotkey { get; set; } = "Pause";
+            public string ForegroundHotkey { get; set; } = "Ctrl+Insert";
             public bool ProfileKeyEnabled { get; set; } = true;
         }
 

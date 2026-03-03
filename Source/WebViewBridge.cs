@@ -1219,16 +1219,16 @@ namespace TrueReplayer
                     TrayIconService.UpdateTrayIcon();
                     break;
                 case "recordingHotkey":
-                    UserProfile.Current.RecordingHotkey = valueElement.GetString() ?? "F9";
+                    UserProfile.Current.RecordingHotkey = valueElement.GetString() ?? "Ctrl+PageUp";
                     break;
                 case "replayHotkey":
-                    UserProfile.Current.ReplayHotkey = valueElement.GetString() ?? "F10";
+                    UserProfile.Current.ReplayHotkey = valueElement.GetString() ?? "Ctrl+PageDown";
                     break;
                 case "profileKeyToggleHotkey":
-                    UserProfile.Current.ProfileKeyToggleHotkey = valueElement.GetString() ?? "Ctrl+Shift+K";
+                    UserProfile.Current.ProfileKeyToggleHotkey = valueElement.GetString() ?? "Pause";
                     break;
                 case "foregroundHotkey":
-                    UserProfile.Current.ForegroundHotkey = valueElement.GetString() ?? "Ctrl+Shift+L";
+                    UserProfile.Current.ForegroundHotkey = valueElement.GetString() ?? "Ctrl+Insert";
                     break;
             }
 

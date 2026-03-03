@@ -13,16 +13,16 @@ namespace TrueReplayer.Models
         public ObservableCollection<ActionItem> Actions { get; set; } = new();
 
         [JsonIgnore]
-        public string RecordingHotkey { get; set; } = "F9";
+        public string RecordingHotkey { get; set; } = "Ctrl+PageUp";
 
         [JsonIgnore]
-        public string ReplayHotkey { get; set; } = "F10";
+        public string ReplayHotkey { get; set; } = "Ctrl+PageDown";
 
         [JsonIgnore]
-        public string ProfileKeyToggleHotkey { get; set; } = "Ctrl+Shift+K";
+        public string ProfileKeyToggleHotkey { get; set; } = "Pause";
 
         [JsonIgnore]
-        public string ForegroundHotkey { get; set; } = "Ctrl+Shift+L";
+        public string ForegroundHotkey { get; set; } = "Ctrl+Insert";
 
         [JsonIgnore]
         public bool RecordMouse { get; set; } = true;
@@ -63,10 +63,10 @@ namespace TrueReplayer.Models
 
         public static UserProfile Default => new UserProfile
         {
-            RecordingHotkey = "F9",
-            ReplayHotkey = "F10",
-            ProfileKeyToggleHotkey = "Ctrl+Shift+K",
-            ForegroundHotkey = "Ctrl+Shift+L",
+            RecordingHotkey = "Ctrl+PageUp",
+            ReplayHotkey = "Ctrl+PageDown",
+            ProfileKeyToggleHotkey = "Pause",
+            ForegroundHotkey = "Ctrl+Insert",
             RecordMouse = true,
             RecordScroll = true,
             RecordKeyboard = true,
