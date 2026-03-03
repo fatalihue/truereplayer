@@ -32,9 +32,9 @@ function saveSnippets(snippets: Snippet[]) {
 }
 
 const VARIABLES = [
-  { label: '{date}', desc: 'Current date (23/02/2026)', group: 'time' },
-  { label: '{time}', desc: 'Current time (14:30:05)', group: 'time' },
-  { label: '{datetime}', desc: 'Date + time (23/02/2026 14:30:05)', group: 'time' },
+  { label: '{date}', desc: 'Current date (dd/mm/aaaa)', group: 'time' },
+  { label: '{time}', desc: 'Current time (hh:mm:ss)', group: 'time' },
+  { label: '{datetime}', desc: 'Date+time (dd/mm/aaaa hh:mm:ss)', group: 'time' },
   { label: '{enter}', desc: 'Press Enter key', group: 'keys' },
   { label: '{tab}', desc: 'Press Tab key', group: 'keys' },
   { label: '{backspace}', desc: 'Press Backspace key', group: 'keys' },
@@ -178,7 +178,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div
-        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[520px] h-[75vh] max-h-[700px] flex flex-col"
+        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[520px] h-[90vh] max-h-[700px] flex flex-col"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
@@ -199,7 +199,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
             onClick={saveCursorPos}
             onKeyUp={saveCursorPos}
             placeholder="Type the text to send..."
-            rows={7}
+            rows={8}
             className="w-full px-3 py-2 text-sm text-text-primary bg-bg-input border border-border-subtle rounded resize-y outline-none focus:border-accent-solid placeholder:text-text-disabled"
           />
 
