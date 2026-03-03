@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, GripVertical } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, GripVertical, Copy, Trash2, ChevronRight, Plus } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -39,8 +40,20 @@ export function ActionTable() {
   const [dragIndices, setDragIndices] = useState<number[] | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null);
 
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number } | null>(null);
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [activeSubmenu, setActiveSubmenu] = useState<'above' | 'below' | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const submenuRef = useRef<HTMLDivElement>(null);
+  const aboveButtonRef = useRef<HTMLButtonElement>(null);
+  const belowButtonRef = useRef<HTMLButtonElement>(null);
+  const submenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [sendTextInsert, setSendTextInsert] = useState<{ insertIndex: number } | null>(null);
+  const contextMenuEnabled = !buttonStates.recordingActive && !buttonStates.replayActive;
+
   // Suppress hotkeys while SendText edit dialog or inline key editing is active
-  const modalActive = sendTextEdit !== null || editingCell !== null;
+  const modalActive = sendTextEdit !== null || editingCell !== null || contextMenu !== null || sendTextInsert !== null;
   useEffect(() => {
     if (modalActive) {
       send({ type: 'ui:modalOpen', payload: {} });
@@ -105,6 +118,49 @@ export function ActionTable() {
       return valid.size === prev.size ? prev : valid;
     });
   }, [actions.length]);
+
+  // Close context menu on click outside
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClick = (e: MouseEvent) => {
+      if (
+        contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node) &&
+        (!submenuRef.current || !submenuRef.current.contains(e.target as Node))
+      ) {
+        setContextMenu(null);
+        setMenuPos(null);
+        setActiveSubmenu(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [contextMenu]);
+
+  // Two-pass context menu positioning (same pattern as ProfilePanel)
+  useEffect(() => {
+    if (!contextMenu) { setMenuPos(null); return; }
+    setMenuPos({ x: -9999, y: -9999 });
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (!contextMenu || !menuPos) return;
+    if (menuPos.x === -9999) {
+      requestAnimationFrame(() => {
+        const el = contextMenuRef.current;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        let x = contextMenu.x;
+        let y = contextMenu.y;
+        if (y + rect.height > window.innerHeight - 8) {
+          y = Math.max(8, contextMenu.y - rect.height);
+        }
+        if (x + rect.width > window.innerWidth - 8) {
+          x = Math.max(8, window.innerWidth - rect.width - 8);
+        }
+        setMenuPos({ x, y });
+      });
+    }
+  }, [contextMenu, menuPos]);
 
   // Handle row click with selection logic
   const handleRowClick = useCallback((idx: number, e: React.MouseEvent) => {
@@ -322,6 +378,79 @@ export function ActionTable() {
   const isMouseAction = (actionType: string) =>
     actionType.includes('Click') || actionType.includes('Middle');
 
+  // Context menu: right-click on a row
+  const handleRowContextMenu = useCallback((idx: number, e: React.MouseEvent) => {
+    if (!contextMenuEnabled) return;
+    e.preventDefault();
+    // If right-clicked row is not in selection, select only it
+    if (!selectedIndices.has(idx)) {
+      setSelectedIndices(new Set([idx]));
+      lastClickedIndex.current = idx;
+    }
+    setActiveSubmenu(null);
+    setContextMenu({ x: e.clientX, y: e.clientY, rowIndex: idx });
+  }, [contextMenuEnabled, selectedIndices]);
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+    setMenuPos(null);
+    setActiveSubmenu(null);
+    if (submenuCloseTimer.current) { clearTimeout(submenuCloseTimer.current); submenuCloseTimer.current = null; }
+  }, []);
+
+  // Delayed submenu close — gives time to move cursor across the gap
+  const scheduleSubmenuClose = useCallback(() => {
+    submenuCloseTimer.current = setTimeout(() => { setActiveSubmenu(null); }, 150);
+  }, []);
+
+  const cancelSubmenuClose = useCallback(() => {
+    if (submenuCloseTimer.current) { clearTimeout(submenuCloseTimer.current); submenuCloseTimer.current = null; }
+  }, []);
+
+  const handleInsertAction = useCallback((actionType: string, direction: 'above' | 'below') => {
+    if (!contextMenu) return;
+    const insertIndex = direction === 'above' ? contextMenu.rowIndex : contextMenu.rowIndex + 1;
+    send({ type: 'actions:insertAction', payload: { actionType, insertIndex } });
+    closeContextMenu();
+  }, [contextMenu, send, closeContextMenu]);
+
+  const handleInsertSendText = useCallback((direction: 'above' | 'below') => {
+    if (!contextMenu) return;
+    const insertIndex = direction === 'above' ? contextMenu.rowIndex : contextMenu.rowIndex + 1;
+    closeContextMenu();
+    setSendTextInsert({ insertIndex });
+  }, [contextMenu, closeContextMenu]);
+
+  const handleDuplicate = useCallback(() => {
+    if (!contextMenu) return;
+    const indices = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
+      ? Array.from(selectedIndices)
+      : [contextMenu.rowIndex];
+    send({ type: 'actions:duplicate', payload: { indices } });
+    closeContextMenu();
+  }, [contextMenu, selectedIndices, send, closeContextMenu]);
+
+  const handleContextDelete = useCallback(() => {
+    if (!contextMenu) return;
+    const indices = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
+      ? Array.from(selectedIndices)
+      : [contextMenu.rowIndex];
+    send({ type: 'actions:delete', payload: { indices } });
+    setSelectedIndices(new Set());
+    closeContextMenu();
+  }, [contextMenu, selectedIndices, send, closeContextMenu]);
+
+  // Submenu items definition
+  const submenuItems = [
+    { type: 'LeftClick', label: 'Left Click', icon: Mouse },
+    { type: 'RightClick', label: 'Right Click', icon: Mouse },
+    { type: 'MiddleClick', label: 'Middle Click', icon: Mouse },
+    { type: 'KeyPress', label: 'Key Press', icon: Keyboard },
+    { type: 'ScrollUp', label: 'Scroll Up', icon: ArrowUp },
+    { type: 'ScrollDown', label: 'Scroll Down', icon: ArrowDown },
+    { type: 'SendText', label: 'Send Text', icon: Type },
+  ] as const;
+
   return (
     <div
       className="flex-1 bg-bg-surface border border-border-subtle rounded-ui overflow-hidden flex flex-col outline-none"
@@ -361,6 +490,7 @@ export function ActionTable() {
                   key={idx}
                   ref={isHighlighted ? highlightedRowRef : undefined}
                   onClick={(e) => handleRowClick(idx, e)}
+                  onContextMenu={(e) => handleRowContextMenu(idx, e)}
                   className={`h-row border-b border-border-subtle transition-colors cursor-default relative ${
                     isDragged ? 'opacity-40' : ''
                   } ${
@@ -419,7 +549,7 @@ export function ActionTable() {
                       />
                     ) : displayKey ? (
                       <span
-                        className={`inline-block px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input max-w-[92px] truncate ${
+                        className={`inline-block align-middle px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input max-w-[92px] truncate ${
                           action.actionType === 'SendText' || action.actionType.startsWith('Key')
                             ? 'cursor-text hover:text-accent-light'
                             : ''
@@ -549,6 +679,116 @@ export function ActionTable() {
           }}
           onClose={() => setSendTextEdit(null)}
         />
+      )}
+
+      {sendTextInsert && (
+        <SendTextDialog
+          mode="add"
+          onConfirm={(text) => {
+            send({ type: 'actions:addSendText', payload: { text, insertIndex: sendTextInsert.insertIndex } });
+            setSendTextInsert(null);
+          }}
+          onClose={() => setSendTextInsert(null)}
+        />
+      )}
+
+      {/* Context Menu — rendered via portal to escape overflow:hidden */}
+      {contextMenu && menuPos && createPortal(
+        <div
+          ref={contextMenuRef}
+          className="fixed z-50 min-w-[180px] py-1 bg-bg-card border border-border-default rounded-md shadow-lg"
+          style={{ left: menuPos.x, top: menuPos.y }}
+        >
+          {/* Insert Above */}
+          <button
+            ref={aboveButtonRef}
+            onMouseEnter={() => { cancelSubmenuClose(); setActiveSubmenu('above'); }}
+            className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <span className="flex items-center gap-2.5">
+              <Plus size={13} className="text-text-tertiary" />
+              Insert Above
+            </span>
+            <ChevronRight size={12} className="text-text-disabled" />
+          </button>
+
+          {/* Insert Below */}
+          <button
+            ref={belowButtonRef}
+            onMouseEnter={() => { cancelSubmenuClose(); setActiveSubmenu('below'); }}
+            className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <span className="flex items-center gap-2.5">
+              <Plus size={13} className="text-text-tertiary" />
+              Insert Below
+            </span>
+            <ChevronRight size={12} className="text-text-disabled" />
+          </button>
+
+          <div className="my-1 border-t border-border-subtle" />
+
+          {/* Duplicate */}
+          <button
+            onMouseEnter={() => setActiveSubmenu(null)}
+            onClick={handleDuplicate}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Copy size={13} className="text-text-tertiary" />
+            Duplicate
+          </button>
+
+          {/* Delete */}
+          <button
+            onMouseEnter={() => setActiveSubmenu(null)}
+            onClick={handleContextDelete}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-recording hover:bg-bg-elevated transition-colors"
+          >
+            <Trash2 size={13} />
+            Delete
+          </button>
+
+          {/* Submenu */}
+          {activeSubmenu && (() => {
+            const parentEl = activeSubmenu === 'above' ? aboveButtonRef.current : belowButtonRef.current;
+            if (!parentEl) return null;
+            const parentRect = parentEl.getBoundingClientRect();
+            const menuRight = parentRect.right + 4;
+            const fitsRight = menuRight + 170 < window.innerWidth - 8;
+            const subX = fitsRight ? menuRight : parentRect.left - 170 - 4;
+            const subY = Math.min(parentRect.top, window.innerHeight - 280);
+
+            return (
+              <div
+                ref={submenuRef}
+                className="fixed z-[60] min-w-[170px] py-1 bg-bg-card border border-border-default rounded-md shadow-lg"
+                style={{ left: subX, top: subY }}
+                onMouseEnter={cancelSubmenuClose}
+                onMouseLeave={scheduleSubmenuClose}
+              >
+                {submenuItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.type}
+                      onClick={() => {
+                        if (item.type === 'SendText') {
+                          handleInsertSendText(activeSubmenu);
+                        } else {
+                          handleInsertAction(item.type, activeSubmenu);
+                        }
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                    >
+                      <Icon size={13} className="text-text-tertiary" />
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>,
+        document.body
       )}
     </div>
   );

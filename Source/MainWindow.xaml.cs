@@ -117,6 +117,8 @@ namespace TrueReplayer
                 DispatcherQueue,
                 this);
 
+            WebView.CoreWebView2.Settings.IsZoomControlEnabled = false;
+
             WebView.CoreWebView2.WebMessageReceived += (s, e) =>
             {
                 bridge.HandleMessage(e.WebMessageAsJson);
@@ -133,6 +135,7 @@ namespace TrueReplayer
             };
 
 #if DEBUG
+            WebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
             WebView.CoreWebView2.Navigate("http://localhost:5173");
 #else
             WebView.CoreWebView2.Settings.AreDevToolsEnabled = false;
@@ -298,6 +301,13 @@ namespace TrueReplayer
             {
                 if (isDown && key == "Escape")
                 {
+                    // If in capture mode, cancel it and discard partial actions
+                    if (mainController.IsCaptureMode())
+                    {
+                        mainController.CancelCaptureMode();
+                        return;
+                    }
+
                     mainController.CancelInsertMode();
                     foreach (var action in Actions)
                     {

@@ -57,14 +57,30 @@ namespace TrueReplayer.Services
             onStatusChanged?.Invoke("recording");
         }
 
-        private void StopRecording()
+        public void StopRecording()
         {
+            if (!IsRecording) return;
             IsRecording = false;
             onButtonStateChanged?.Invoke("Recording", false);
             recorder.Stop();
             onStatusChanged?.Invoke("ready");
         }
+
+        public void StartCaptureRecording(CaptureType captureType)
+        {
+            if (IsRecording) StopRecording();
+            IsRecording = true;
+            onButtonStateChanged?.Invoke("Pause", true);
+            recorder.RecordMouse = captureType == CaptureType.Mouse;
+            recorder.RecordScroll = captureType == CaptureType.Scroll;
+            recorder.RecordKeyboard = captureType == CaptureType.Keyboard;
+            recorder.Start();
+            setLastActionTime(DateTime.Now);
+            onStatusChanged?.Invoke("recording");
+        }
     }
+
+    public enum CaptureType { None, Mouse, Keyboard, Scroll }
 
     public class ReplayService
     {
@@ -155,9 +171,19 @@ namespace TrueReplayer.Services
         private bool _isRecording;
         private DateTime? _lastActionTime;
 
+        // Capture mode state
+        private CaptureType _captureType = CaptureType.None;
+        private int _captureActionCount;
+        private int _captureTargetCount;
+        private bool _captureKeyWasPressed;
+        private int _captureStartIndex;
+        private string? _captureMouseButton;
+        private Action? _onCaptureComplete;
+
         public bool RecordMouse { get; set; } = true;
         public bool RecordScroll { get; set; } = true;
         public bool RecordKeyboard { get; set; } = true;
+        public bool IsCaptureMode => _captureType != CaptureType.None;
 
         public ActionRecorder(
             ObservableCollection<ActionItem> actions,
@@ -186,9 +212,65 @@ namespace TrueReplayer.Services
             insertIndex = null;
             _lastActionTime = null;
             foreach (var action in _actions) action.IsInsertionPoint = false;
+            ClearCapture();
         }
 
         public bool IsRecording => _isRecording;
+
+        public void StartCapture(CaptureType type, Action onComplete, string? mouseButton = null)
+        {
+            _captureType = type;
+            _captureActionCount = 0;
+            _captureKeyWasPressed = false;
+            _captureStartIndex = insertIndex ?? _actions.Count;
+            _captureMouseButton = mouseButton;
+            _onCaptureComplete = onComplete;
+            _captureTargetCount = type switch
+            {
+                CaptureType.Mouse => 2,
+                CaptureType.Scroll => 1,
+                _ => 0
+            };
+        }
+
+        public void ClearCapture()
+        {
+            _captureType = CaptureType.None;
+            _captureActionCount = 0;
+            _captureTargetCount = 0;
+            _captureKeyWasPressed = false;
+            _captureStartIndex = 0;
+            _captureMouseButton = null;
+            _onCaptureComplete = null;
+        }
+
+        public void DiscardCapturedActions()
+        {
+            if (_captureActionCount > 0 && _captureStartIndex >= 0)
+            {
+                int removeCount = Math.Min(_captureActionCount, _actions.Count - _captureStartIndex);
+                for (int i = 0; i < removeCount; i++)
+                {
+                    if (_captureStartIndex < _actions.Count)
+                        _actions.RemoveAt(_captureStartIndex);
+                }
+            }
+        }
+
+        private void CheckCaptureCompletion()
+        {
+            if (_captureType == CaptureType.None) return;
+
+            bool complete = _captureType switch
+            {
+                CaptureType.Mouse or CaptureType.Scroll => _captureActionCount >= _captureTargetCount,
+                CaptureType.Keyboard => _captureKeyWasPressed && _pressedKeys.Count == 0,
+                _ => false
+            };
+
+            if (complete)
+                _onCaptureComplete?.Invoke();
+        }
 
         private int GetDelayForNewAction()
         {
@@ -224,17 +306,23 @@ namespace TrueReplayer.Services
             {
                 AddAction(new ActionItem { ActionType = actionType, Key = key, Delay = delay });
                 _pressedKeys.Add(key);
+                if (_captureType == CaptureType.Keyboard)
+                    _captureKeyWasPressed = true;
             }
             else if (!isDown)
             {
-                AddAction(new ActionItem { ActionType = actionType, Key = key, Delay = delay });
+                // Remove before AddAction so CheckCaptureCompletion sees _pressedKeys.Count == 0
                 _pressedKeys.Remove(key);
+                AddAction(new ActionItem { ActionType = actionType, Key = key, Delay = delay });
             }
         }
 
         public void RecordMouseAction(string button, int x, int y, bool isDown, int scrollDelta = 0)
         {
             if (!_isRecording) return;
+            // In capture mode, only accept the specific mouse button
+            if (_captureType == CaptureType.Mouse && _captureMouseButton != null && button != _captureMouseButton)
+                return;
             string actionType = button switch
             {
                 "Left" => isDown ? "LeftClickDown" : "LeftClickUp",
@@ -264,6 +352,12 @@ namespace TrueReplayer.Services
             }
 
             _onActionAdded?.Invoke();
+
+            if (_captureType != CaptureType.None)
+            {
+                _captureActionCount++;
+                CheckCaptureCompletion();
+            }
         }
     }
 

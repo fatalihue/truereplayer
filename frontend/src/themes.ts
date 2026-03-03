@@ -35,12 +35,14 @@ export interface ThemeUISettings {
   fontSize: number;
   borderRadius: number;
   rowHeight: number;
+  zoom: number;
 }
 
 export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   fontSize: 13,
   borderRadius: 6,
   rowHeight: 36,
+  zoom: 100,
 };
 
 export interface ThemeConfig {
@@ -493,6 +495,7 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   root.style.setProperty('--ui-font-size', `${uiSettings.fontSize}px`);
   root.style.setProperty('--ui-border-radius', `${uiSettings.borderRadius}px`);
   root.style.setProperty('--ui-row-height', `${uiSettings.rowHeight}px`);
+  root.style.setProperty('zoom', `${uiSettings.zoom / 100}`);
 }
 
 // ── Import/Export ──
@@ -509,6 +512,7 @@ export function validateExportedTheme(data: unknown): data is ExportedTheme {
   if (!d.uiSettings || typeof d.uiSettings !== 'object') return false;
   const ui = d.uiSettings as Record<string, unknown>;
   if (typeof ui.fontSize !== 'number' || typeof ui.borderRadius !== 'number' || typeof ui.rowHeight !== 'number') return false;
+  if (ui.zoom !== undefined && typeof ui.zoom !== 'number') return false;
   return true;
 }
 

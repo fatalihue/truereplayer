@@ -41,6 +41,13 @@ namespace TrueReplayer.Controllers
             if (replayService.IsReplaying)
                 replayService.ToggleReplay(false, "1", false, "0");
 
+            // If in capture mode, cancel it (discard partial actions)
+            if (recordingService.IsRecording && recorder.IsCaptureMode)
+            {
+                CancelCaptureMode();
+                return;
+            }
+
             recordingService.ToggleRecording();
         }
 
@@ -60,6 +67,31 @@ namespace TrueReplayer.Controllers
         public void EnableInsertMode(int? index)
         {
             recorder.SetInsertIndex(index);
+        }
+
+        public bool IsCaptureMode() => recorder.IsCaptureMode;
+
+        public void StartCaptureMode(int insertIndex, CaptureType captureType, string? mouseButton, Action? onComplete)
+        {
+            if (replayService.IsReplaying)
+                replayService.ToggleReplay(false, "1", false, "0");
+            if (recordingService.IsRecording)
+                recordingService.StopRecording();
+
+            recorder.SetInsertIndex(insertIndex);
+            recorder.StartCapture(captureType, () =>
+            {
+                recordingService.StopRecording();
+                onComplete?.Invoke();
+            }, mouseButton);
+            recordingService.StartCaptureRecording(captureType);
+        }
+
+        public void CancelCaptureMode()
+        {
+            if (!recorder.IsCaptureMode) return;
+            recorder.DiscardCapturedActions();
+            recordingService.StopRecording();
         }
 
         public bool IsRecording() => recordingService.IsRecording;
