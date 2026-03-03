@@ -444,13 +444,22 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                 unit="px"
                 onChange={(v) => setUISetting('rowHeight', v)}
               />
+              <SliderSetting
+                label="Zoom"
+                value={config.uiSettings.zoom}
+                min={50}
+                max={200}
+                unit="%"
+                onChange={(v) => setUISetting('zoom', v)}
+              />
               <div className="pt-3">
                 <button
                   onClick={resetUISettings}
                   disabled={
                     config.uiSettings.fontSize === DEFAULT_UI_SETTINGS.fontSize &&
                     config.uiSettings.borderRadius === DEFAULT_UI_SETTINGS.borderRadius &&
-                    config.uiSettings.rowHeight === DEFAULT_UI_SETTINGS.rowHeight
+                    config.uiSettings.rowHeight === DEFAULT_UI_SETTINGS.rowHeight &&
+                    config.uiSettings.zoom === DEFAULT_UI_SETTINGS.zoom
                   }
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-card border border-border-subtle transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >

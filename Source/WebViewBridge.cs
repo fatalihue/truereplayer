@@ -133,6 +133,8 @@ namespace TrueReplayer
                     case "actions:editSendText": HandleEditSendText(payload); break;
                     case "actions:bulkUpdateDelay": HandleBulkUpdateDelay(payload); break;
                     case "actions:reorder": HandleActionsReorder(payload); break;
+                    case "actions:insertAction": HandleInsertAction(payload); break;
+                    case "actions:duplicate": HandleDuplicateActions(payload); break;
                     case "profile:click": HandleProfileClick(payload); break;
                     case "profile:create": HandleProfileCreate(payload); break;
                     case "profile:rename": HandleProfileRename(payload); break;
@@ -604,6 +606,96 @@ namespace TrueReplayer
             actions[index].Key = text;
             HasUnsavedChanges = true;
             PushActionsUpdate();
+        }
+
+        private void HandleInsertAction(JsonElement payload)
+        {
+            string actionType = payload.GetProperty("actionType").GetString() ?? "";
+            int insertIndex = payload.GetProperty("insertIndex").GetInt32();
+            if (string.IsNullOrEmpty(actionType)) return;
+
+            insertIndex = Math.Max(0, Math.Min(insertIndex, actions.Count));
+
+            // Scroll: insert directly (no capture needed)
+            if (actionType == "ScrollUp" || actionType == "ScrollDown")
+            {
+                int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
+                actions.Insert(insertIndex, new ActionItem { ActionType = actionType, Delay = delay, Comment = "" });
+                for (int i = 0; i < actions.Count; i++)
+                    actions[i].RowNumber = i + 1;
+                HasUnsavedChanges = true;
+                PushActionsUpdate();
+                mainController.UpdateButtonStates();
+                return;
+            }
+
+            CaptureType captureType;
+            string? mouseButton = null;
+
+            if (actionType == "LeftClick" || actionType == "RightClick" || actionType == "MiddleClick")
+            {
+                captureType = CaptureType.Mouse;
+                mouseButton = actionType.Replace("Click", "");
+            }
+            else if (actionType == "KeyPress")
+            {
+                captureType = CaptureType.Keyboard;
+            }
+            else
+            {
+                return;
+            }
+
+            mainController.StartCaptureMode(insertIndex, captureType, mouseButton, () =>
+            {
+                HasUnsavedChanges = true;
+                mainController.UpdateButtonStates();
+            });
+        }
+
+        private void HandleDuplicateActions(JsonElement payload)
+        {
+            var indices = payload.GetProperty("indices").EnumerateArray()
+                .Select(e => e.GetInt32())
+                .OrderBy(i => i)
+                .ToList();
+
+            if (indices.Count == 0) return;
+
+            var validIndices = indices.Where(i => i >= 0 && i < actions.Count).ToList();
+            if (validIndices.Count == 0) return;
+
+            actions.CollectionChanged -= OnActionsChanged;
+            try
+            {
+                int insertPos = validIndices.Last() + 1;
+                foreach (var idx in validIndices)
+                {
+                    var original = actions[idx];
+                    var clone = new ActionItem
+                    {
+                        ActionType = original.ActionType,
+                        Key = original.Key,
+                        X = original.X,
+                        Y = original.Y,
+                        Delay = original.Delay,
+                        Comment = original.Comment
+                    };
+                    actions.Insert(insertPos, clone);
+                    insertPos++;
+                }
+            }
+            finally
+            {
+                actions.CollectionChanged += OnActionsChanged;
+            }
+
+            for (int i = 0; i < actions.Count; i++)
+                actions[i].RowNumber = i + 1;
+
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+            mainController.UpdateButtonStates();
         }
 
         private async void HandleProfileClick(JsonElement payload)
