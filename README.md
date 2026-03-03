@@ -118,10 +118,10 @@ Extract the `.zip` and run `TrueReplayer.exe` — no installation needed.
 
 | Action | Default Key |
 |--------|-------------|
-| Start/Stop Recording | `F9` |
-| Start/Stop Replay | `F10` |
-| Toggle Profile Keys | `Ctrl+Shift+K` |
-| Bring to Foreground | `Ctrl+Shift+L` |
+| Start/Stop Recording | `Ctrl+PageUp` |
+| Start/Stop Replay | `Ctrl+PageDown` |
+| Toggle Profile Keys | `Pause` |
+| Bring to Foreground | `Ctrl+Insert` |
 
 All hotkeys can be changed in the **Hotkeys** section of the settings panel.
 
