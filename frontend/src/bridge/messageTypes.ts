@@ -84,7 +84,11 @@ export type IncomingMessage =
   | { type: 'toolbar:updated'; payload: { profileName: string; actionCount: number } }
   | { type: 'statusbar:updated'; payload: { directory: string; profileName: string | null; actionCount: number } }
   | { type: 'alert:show'; payload: { message: string } }
-  | { type: 'windowTarget:detected'; payload: { processName: string; windowTitle: string } };
+  | { type: 'windowTarget:detected'; payload: { processName: string; windowTitle: string } }
+  | { type: 'update:available'; payload: { version: string; currentVersion: string } }
+  | { type: 'update:progress'; payload: { percent: number } }
+  | { type: 'update:ready'; payload: Record<string, never> }
+  | { type: 'update:error'; payload: { message: string } };
 
 // ── Messages JS → C# ──
 
@@ -122,4 +126,6 @@ export type OutgoingMessage =
   | { type: 'profile:export'; payload: { names: string[] } }
   | { type: 'profile:import'; payload: Record<string, never> }
   | { type: 'ui:modalOpen'; payload: Record<string, never> }
-  | { type: 'ui:modalClose'; payload: Record<string, never> };
+  | { type: 'ui:modalClose'; payload: Record<string, never> }
+  | { type: 'update:apply'; payload: Record<string, never> }
+  | { type: 'update:dismiss'; payload: Record<string, never> };

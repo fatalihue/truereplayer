@@ -11,7 +11,7 @@ export function StatusBar() {
       <div className="flex-1" />
       <span className="text-[11px] text-text-disabled">{statusBar.actionCount} actions</span>
       <div className="w-px h-3 bg-border-subtle mx-3" />
-      <span className="text-[11px] text-text-disabled">v1.2.0</span>
+      <span className="text-[11px] text-text-disabled">v1.3.1</span>
     </div>
   );
 }

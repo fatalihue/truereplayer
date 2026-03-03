@@ -156,6 +156,8 @@ namespace TrueReplayer
                     case "window:minimizeToTray": HandleMinimizeToTray(payload); break;
                     case "ui:modalOpen": InputHookManager.SuppressAllHotkeys = true; break;
                     case "ui:modalClose": InputHookManager.SuppressAllHotkeys = false; break;
+                    case "update:apply": _ = HandleUpdateApply(); break;
+                    case "update:dismiss": break;
                     default:
                         System.Diagnostics.Debug.WriteLine($"[Bridge] Unknown message type: {type}");
                         break;
@@ -371,6 +373,45 @@ namespace TrueReplayer
                     replayButtonText = "Replay"
                 }
             });
+
+            // Check for updates in the background after UI is ready
+            _ = CheckForUpdateAsync();
+        }
+
+        private async Task CheckForUpdateAsync()
+        {
+            var newVersion = await UpdateService.CheckForUpdateAsync();
+            if (newVersion != null)
+            {
+                SendMessage("update:available", new
+                {
+                    version = newVersion,
+                    currentVersion = UpdateService.CurrentVersion ?? "unknown"
+                });
+            }
+        }
+
+        private async Task HandleUpdateApply()
+        {
+            SendMessage("update:progress", new { percent = 0 });
+
+            var success = await UpdateService.DownloadUpdateAsync(progress =>
+            {
+                dispatcherQueue.TryEnqueue(() =>
+                {
+                    SendMessage("update:progress", new { percent = progress });
+                });
+            });
+
+            if (success)
+            {
+                SendMessage("update:ready", new { });
+                UpdateService.ApplyAndRestart();
+            }
+            else
+            {
+                SendMessage("update:error", new { message = "Download failed" });
+            }
         }
 
         private void HandleSelectionChanged(JsonElement payload)

@@ -10,6 +10,7 @@ import { ActionBar } from './components/ActionBar';
 import { SettingsPanel } from './components/SettingsPanel';
 import { StatusBar } from './components/StatusBar';
 import { Toast } from './components/Toast';
+import { UpdateBanner } from './components/UpdateBanner';
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
           <div className="h-full flex flex-col bg-bg-base">
             {/* Title Bar */}
             <TitleBar />
+            <UpdateBanner />
 
             {/* Main Content: 3-column layout */}
             <div className="flex-1 flex gap-2 p-2 min-h-0">
