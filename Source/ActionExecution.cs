@@ -471,33 +471,34 @@ namespace TrueReplayer.Services
         {
             if (string.IsNullOrEmpty(text)) return;
 
-            // Resolve {clipboard} placeholder by reading current clipboard content
-            var tcsRead = new TaskCompletionSource<string?>();
+            // Save original clipboard content so we can restore it after pasting
+            var tcsBackup = new TaskCompletionSource<string?>();
+            dispatcherQueue.TryEnqueue(async () =>
+            {
+                try
+                {
+                    var content = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
+                    if (content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
+                    {
+                        var clipText = await content.GetTextAsync();
+                        tcsBackup.SetResult(clipText);
+                    }
+                    else
+                    {
+                        tcsBackup.SetResult(null);
+                    }
+                }
+                catch
+                {
+                    tcsBackup.SetResult(null);
+                }
+            });
+            var originalClipboard = await tcsBackup.Task;
+
+            // Resolve {clipboard} placeholder using the saved clipboard content
             if (text.Contains("{clipboard}", StringComparison.OrdinalIgnoreCase))
             {
-                dispatcherQueue.TryEnqueue(async () =>
-                {
-                    try
-                    {
-                        var content = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
-                        if (content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
-                        {
-                            var clipText = await content.GetTextAsync();
-                            tcsRead.SetResult(clipText);
-                        }
-                        else
-                        {
-                            tcsRead.SetResult("");
-                        }
-                    }
-                    catch
-                    {
-                        tcsRead.SetResult("");
-                    }
-                });
-
-                var clipboardValue = await tcsRead.Task;
-                text = text.Replace("{clipboard}", clipboardValue ?? "", StringComparison.OrdinalIgnoreCase);
+                text = text.Replace("{clipboard}", originalClipboard ?? "", StringComparison.OrdinalIgnoreCase);
             }
 
             // Resolve {datetime} before {date}/{time} to avoid partial matches
@@ -531,10 +532,22 @@ namespace TrueReplayer.Services
                 }
             }
 
-            // Clear clipboard on UI thread
+            // Restore original clipboard content on UI thread
             dispatcherQueue.TryEnqueue(() =>
             {
-                try { Windows.ApplicationModel.DataTransfer.Clipboard.Clear(); }
+                try
+                {
+                    if (originalClipboard != null)
+                    {
+                        var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage();
+                        dataPackage.SetText(originalClipboard);
+                        Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+                    }
+                    else
+                    {
+                        Windows.ApplicationModel.DataTransfer.Clipboard.Clear();
+                    }
+                }
                 catch { }
             });
         }
