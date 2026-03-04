@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.Win32;
 using TrueReplayer;
 using TrueReplayer.Interop;
 using TrueReplayer.Models;
@@ -42,7 +43,12 @@ namespace TrueReplayer.Services
 
         // Menu constants
         private const uint MF_STRING = 0x0000;
+        private const uint MF_CHECKED = 0x0008;
+        private const uint MF_SEPARATOR = 0x0800;
         private const uint TPM_RETURNCMD = 0x0100;
+
+        private const string StartupRegistryKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        private const string StartupValueName = "TrueReplayer";
 
         private static IntPtr hwnd;
         private static NotifyIconData notifyIcon;
@@ -140,10 +146,37 @@ namespace TrueReplayer.Services
         /// Callback invoked when user clicks "Exit" from the tray. Should return true if exit is allowed.
         public static Func<Task<bool>>? OnTrayExitRequested { get; set; }
 
+        public static bool IsRunOnStartup()
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(StartupRegistryKey, false);
+            return key?.GetValue(StartupValueName) != null;
+        }
+
+        public static void SetRunOnStartup(bool enable)
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(StartupRegistryKey, true);
+            if (key == null) return;
+
+            if (enable)
+                key.SetValue(StartupValueName, $"\"{Environment.ProcessPath}\"");
+            else
+                key.DeleteValue(StartupValueName, false);
+
+            // Persist to appsettings
+            var settings = AppSettingsManager.Load();
+            settings.RunOnStartup = enable;
+            AppSettingsManager.Save(settings);
+        }
+
         public static async void ShowContextMenu()
         {
+            bool isStartup = IsRunOnStartup();
+
             IntPtr hMenu = CreatePopupMenu();
             AppendMenu(hMenu, MF_STRING, 1, "Restore");
+            AppendMenu(hMenu, MF_SEPARATOR, 0, null);
+            AppendMenu(hMenu, MF_STRING | (isStartup ? MF_CHECKED : 0), 3, "Run on Startup");
+            AppendMenu(hMenu, MF_SEPARATOR, 0, null);
             AppendMenu(hMenu, MF_STRING, 2, "Exit");
 
             GetCursorPos(out NativeMethods.POINT pt);
@@ -152,6 +185,7 @@ namespace TrueReplayer.Services
             DestroyMenu(hMenu);
 
             if (cmd == 1) ShowWindow(hwnd, 9);
+            else if (cmd == 3) SetRunOnStartup(!isStartup);
             else if (cmd == 2)
             {
                 if (OnTrayExitRequested != null)
@@ -189,7 +223,7 @@ namespace TrueReplayer.Services
         [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool GetCursorPos(out NativeMethods.POINT lpPoint);
         [DllImport("user32.dll")] private static extern IntPtr CreatePopupMenu();
-        [DllImport("user32.dll")] private static extern bool AppendMenu(IntPtr hMenu, uint uFlags, uint uIDNewItem, string lpNewItem);
+        [DllImport("user32.dll")] private static extern bool AppendMenu(IntPtr hMenu, uint uFlags, uint uIDNewItem, string? lpNewItem);
         [DllImport("user32.dll")]
         private static extern int
 
