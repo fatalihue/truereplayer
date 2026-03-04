@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, GripVertical, Copy, Trash2, ChevronRight, Plus } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Copy, Trash2, ChevronRight, Plus } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -23,7 +23,7 @@ interface EditingCell {
 }
 
 export function ActionTable() {
-  const { actions, highlightedActionIndex, buttonStates } = useAppState();
+  const { actions, highlightedActionIndex, buttonStates, activeProfile } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -34,7 +34,7 @@ export function ActionTable() {
   const editInputRef = useRef<HTMLInputElement>(null);
   const lastClickedIndex = useRef<number | null>(null);
   const prevActionsLength = useRef(actions.length);
-  const prevActionsRef = useRef(actions);
+  const prevProfileRef = useRef(activeProfile);
   const wasRecording = useRef(false);
   const [sendTextEdit, setSendTextEdit] = useState<{ index: number; text: string } | null>(null);
   const [dragIndices, setDragIndices] = useState<number[] | null>(null);
@@ -94,13 +94,13 @@ export function ActionTable() {
     prevActionsLength.current = actions.length;
   }, [actions.length, selectionRef]);
 
-  // Scroll to top when actions list is replaced (e.g. profile switch)
+  // Scroll to top only on profile switch (not on edits or manual additions)
   useEffect(() => {
-    if (actions !== prevActionsRef.current && scrollRef.current) {
+    if (activeProfile !== prevProfileRef.current && scrollRef.current) {
       scrollRef.current.scrollTop = 0;
     }
-    prevActionsRef.current = actions;
-  }, [actions]);
+    prevProfileRef.current = activeProfile;
+  }, [activeProfile]);
 
   // Focus edit input when entering edit mode
   useEffect(() => {
@@ -165,6 +165,7 @@ export function ActionTable() {
   // Handle row click with selection logic
   const handleRowClick = useCallback((idx: number, e: React.MouseEvent) => {
     if (editingCell) return;
+    if (dragOccurred.current) { dragOccurred.current = false; return; }
 
     setSelectedIndices(prev => {
       if (e.ctrlKey || e.metaKey) {
@@ -314,26 +315,37 @@ export function ActionTable() {
 
   // Drag & drop via mouse events (HTML5 drag API doesn't work in WebView2)
   const isDraggable = !buttonStates.recordingActive && !buttonStates.replayActive && !editingCell;
-  const dragState = useRef<{ indices: number[]; started: boolean } | null>(null);
+  const dragState = useRef<{ indices: number[]; startX: number; startY: number; started: boolean } | null>(null);
+  const dragOccurred = useRef(false);
   const dropTargetRef = useRef<number | null>(null);
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
+  const DRAG_THRESHOLD = 5;
 
-  const handleGripMouseDown = useCallback((idx: number, e: React.MouseEvent) => {
-    if (!isDraggable) return;
-    e.preventDefault();
-    e.stopPropagation();
-    // If grip row is part of selection, drag all selected; otherwise drag only this one
+  const handleRowMouseDown = useCallback((idx: number, e: React.MouseEvent) => {
+    if (!isDraggable || e.button !== 0) return;
+    // Don't initiate drag from input elements (inline editing)
+    if ((e.target as HTMLElement).tagName === 'INPUT') return;
     const indices = selectedIndices.has(idx)
       ? Array.from(selectedIndices).sort((a, b) => a - b)
       : [idx];
-    dragState.current = { indices, started: true };
+    dragState.current = { indices, startX: e.clientX, startY: e.clientY, started: false };
     dropTargetRef.current = null;
-    setDragIndices(indices);
+    dragOccurred.current = false;
   }, [isDraggable, selectedIndices]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (!dragState.current?.started || !tbodyRef.current) return;
+      if (!dragState.current || !tbodyRef.current) return;
+      // Check threshold before starting drag
+      if (!dragState.current.started) {
+        const dx = e.clientX - dragState.current.startX;
+        const dy = e.clientY - dragState.current.startY;
+        if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+        dragState.current.started = true;
+        dragOccurred.current = true;
+        setDragIndices(dragState.current.indices);
+      }
+      e.preventDefault(); // Prevent text selection while dragging
       // Find which row the cursor is over
       const rows = tbodyRef.current.querySelectorAll('tr');
       let target: number | null = null;
@@ -352,19 +364,22 @@ export function ActionTable() {
     };
 
     const handleMouseUp = () => {
-      if (!dragState.current?.started) return;
-      const indices = dragState.current.indices;
-      const target = dropTargetRef.current;
+      if (!dragState.current) return;
+      if (dragState.current.started) {
+        const indices = dragState.current.indices;
+        const target = dropTargetRef.current;
 
-      if (target !== null && indices.length > 0) {
-        send({ type: 'actions:reorder', payload: { indices, targetIndex: target } });
-        setSelectedIndices(new Set());
+        if (target !== null && indices.length > 0) {
+          send({ type: 'actions:reorder', payload: { indices, targetIndex: target } });
+          setSelectedIndices(new Set());
+        }
+
+        setDragIndices(null);
+        setDropTarget(null);
       }
 
       dragState.current = null;
       dropTargetRef.current = null;
-      setDragIndices(null);
-      setDropTarget(null);
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -458,19 +473,28 @@ export function ActionTable() {
       onKeyDown={handleKeyDown}
     >
       {/* Header */}
-      <div className="grid grid-cols-[50px_140px_100px_65px_65px_70px_1fr] items-center h-row px-1 border-b border-border-subtle shrink-0">
+      <div className="grid grid-cols-[50px_140px_100px_65px_65px_70px_1fr] items-center h-row border-b border-border-subtle shrink-0">
         <span className="text-xs font-semibold text-text-tertiary pl-3">#</span>
         <span className="text-xs font-semibold text-text-tertiary pl-1">Action</span>
         <span className="text-xs font-semibold text-text-tertiary pl-1">Key</span>
-        <span className="text-xs font-semibold text-text-tertiary pl-1">X</span>
-        <span className="text-xs font-semibold text-text-tertiary pl-1">Y</span>
-        <span className="text-xs font-semibold text-text-tertiary pl-1">Delay</span>
-        <span className="text-xs font-semibold text-text-tertiary pl-1">Notes</span>
+        <span className="text-xs font-semibold text-text-tertiary pl-2">X</span>
+        <span className="text-xs font-semibold text-text-tertiary pl-2">Y</span>
+        <span className="text-xs font-semibold text-text-tertiary pl-2">Delay</span>
+        <span className="text-xs font-semibold text-text-tertiary pl-2 pr-2">Notes</span>
       </div>
 
       {/* Body */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        <table className="w-full">
+        <table className="w-full table-fixed">
+          <colgroup>
+            <col style={{ width: 50 }} />
+            <col style={{ width: 140 }} />
+            <col style={{ width: 100 }} />
+            <col style={{ width: 65 }} />
+            <col style={{ width: 65 }} />
+            <col style={{ width: 70 }} />
+            <col />
+          </colgroup>
           <tbody ref={tbodyRef}>
             {actions.map((action, idx) => {
               const colors = getActionTypeColors(action.actionType);
@@ -489,6 +513,7 @@ export function ActionTable() {
                 <tr
                   key={idx}
                   ref={isHighlighted ? highlightedRowRef : undefined}
+                  onMouseDown={(e) => handleRowMouseDown(idx, e)}
                   onClick={(e) => handleRowClick(idx, e)}
                   onContextMenu={(e) => handleRowContextMenu(idx, e)}
                   className={`h-row border-b border-border-subtle transition-colors cursor-default relative ${
@@ -515,16 +540,13 @@ export function ActionTable() {
                     </td>
                   )}
 
-                  {/* Row number + grip */}
-                  <td className="w-[50px] pl-1">
-                    <div className="flex items-center gap-0.5 leading-none">
-                      <GripVertical size={11} onMouseDown={(e) => handleGripMouseDown(idx, e)} className={`shrink-0 text-text-disabled translate-y-[0.5px] ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''}`} />
-                      <span className="text-[11px] font-mono text-text-disabled leading-none">{action.rowNumber}</span>
-                    </div>
+                  {/* Row number */}
+                  <td className="pl-3">
+                    <span className="inline-block text-[11px] font-mono text-text-disabled leading-none translate-y-[-2px]">{action.rowNumber}</span>
                   </td>
 
                   {/* Action type pill */}
-                  <td className="w-[140px] pl-1">
+                  <td className="pl-1">
                     <span
                       className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium"
                       style={{ background: colors.bg, color: colors.fg }}
@@ -535,7 +557,7 @@ export function ActionTable() {
                   </td>
 
                   {/* Key */}
-                  <td className="w-[100px] pl-1">
+                  <td className="pl-1">
                     {editingCell?.index === idx && editingCell.field === 'key' ? (
                       <input
                         ref={editInputRef}
@@ -549,7 +571,7 @@ export function ActionTable() {
                       />
                     ) : displayKey ? (
                       <span
-                        className={`inline-block align-middle px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input max-w-[92px] truncate ${
+                        className={`inline-flex items-center translate-y-[-2px] px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input max-w-[92px] truncate ${
                           action.actionType === 'SendText' || action.actionType.startsWith('Key')
                             ? 'cursor-text hover:text-accent-light'
                             : ''
@@ -569,7 +591,7 @@ export function ActionTable() {
                   </td>
 
                   {/* X */}
-                  <td className="w-[65px] pl-2">
+                  <td className="pl-2">
                     {editingCell?.index === idx && editingCell.field === 'x' ? (
                       <input
                         ref={editInputRef}
@@ -591,7 +613,7 @@ export function ActionTable() {
                   </td>
 
                   {/* Y */}
-                  <td className="w-[65px] pl-2">
+                  <td className="pl-2">
                     {editingCell?.index === idx && editingCell.field === 'y' ? (
                       <input
                         ref={editInputRef}
@@ -613,7 +635,7 @@ export function ActionTable() {
                   </td>
 
                   {/* Delay */}
-                  <td className="w-[70px] pl-2">
+                  <td className="pl-2">
                     {editingCell?.index === idx && editingCell.field === 'delay' ? (
                       <input
                         ref={editInputRef}

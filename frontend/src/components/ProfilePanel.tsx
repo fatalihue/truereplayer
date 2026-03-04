@@ -421,6 +421,7 @@ export function ProfilePanel() {
             <button
               key={p.name}
               onClick={(e) => { send({ type: 'profile:click', payload: { name: p.name } }); (e.target as HTMLElement).blur(); }}
+              onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') e.preventDefault(); }}
               onContextMenu={(e) => handleContextMenu(e, p.name)}
               className={`w-full flex items-center gap-2 px-2.5 py-2 rounded text-left transition-colors mb-0.5 outline-none ${
                 p.isActive
