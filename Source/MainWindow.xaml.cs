@@ -128,10 +128,32 @@ namespace TrueReplayer
             windowEventManager.OnCloseRequested = HandleCloseGuardAsync;
             TrayIconService.OnTrayExitRequested = HandleCloseGuardAsync;
 
-            // Reveal WebView only after page is fully loaded to prevent color flash
+            // Recover from WebView2 renderer crashes by reloading the page
+            WebView.CoreWebView2.ProcessFailed += (s, e) =>
+            {
+                System.Diagnostics.Debug.WriteLine($"[WebView2] ProcessFailed: {e.ProcessFailedKind}");
+                if (e.ProcessFailedKind == Microsoft.Web.WebView2.Core.CoreWebView2ProcessFailedKind.RenderProcessExited ||
+                    e.ProcessFailedKind == Microsoft.Web.WebView2.Core.CoreWebView2ProcessFailedKind.RenderProcessUnresponsive)
+                {
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        try { WebView.CoreWebView2.Reload(); }
+                        catch { }
+                    });
+                }
+            };
+
+            // Reveal WebView and push state after page load (covers initial load + crash recovery)
             WebView.CoreWebView2.NavigationCompleted += (s, e) =>
             {
                 WebView.Opacity = 1;
+                if (e.IsSuccess && bridge != null)
+                {
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        bridge.PushFullState();
+                    });
+                }
             };
 
 #if DEBUG

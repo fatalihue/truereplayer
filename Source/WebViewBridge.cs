@@ -278,6 +278,15 @@ namespace TrueReplayer
             });
         }
 
+        public void PushFullState()
+        {
+            PushActionsUpdate();
+            PushProfilesUpdate();
+            PushSettingsLoaded();
+            PushButtonStates();
+            PushStatusBarUpdate();
+        }
+
         public void PushActionHighlight(int index)
         {
             SendMessage("actions:highlight", new { index });
