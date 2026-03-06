@@ -336,7 +336,10 @@ namespace TrueReplayer.Services
 
             int delay = GetDelayForNewAction();
 
-            AddAction(new ActionItem { ActionType = actionType, X = x, Y = y, Delay = delay });
+            if (button == "Scroll")
+                AddAction(new ActionItem { ActionType = actionType, Delay = delay });
+            else
+                AddAction(new ActionItem { ActionType = actionType, X = x, Y = y, Delay = delay });
         }
 
         private void AddAction(ActionItem action)
@@ -421,8 +424,8 @@ namespace TrueReplayer.Services
                                 case "RightClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTUP); break;
                                 case "MiddleClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN); break;
                                 case "MiddleClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEUP); break;
-                                case "ScrollUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_WHEEL, 120); break;
-                                case "ScrollDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_WHEEL, -120); break;
+                                case "ScrollUp": SimulateScroll(120); break;
+                                case "ScrollDown": SimulateScroll(-120); break;
                                 case "SendText": await SimulateClipboardPaste(action.Key, token); break;
                             }
                         }
@@ -503,6 +506,24 @@ namespace TrueReplayer.Services
             SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_LEFTUP);
             SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_RIGHTUP);
             SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_MIDDLEUP);
+        }
+
+        private void SimulateScroll(int delta)
+        {
+            int inputSize = Marshal.SizeOf(typeof(NativeMethods.INPUT));
+            var scrollInput = new NativeMethods.INPUT
+            {
+                type = NativeMethods.INPUT_MOUSE,
+                U = new NativeMethods.InputUnion
+                {
+                    mi = new NativeMethods.MOUSEINPUT
+                    {
+                        mouseData = (uint)delta,
+                        dwFlags = NativeMethods.MOUSEEVENTF_WHEEL,
+                    }
+                }
+            };
+            NativeMethods.SendInput(1, new[] { scrollInput }, inputSize);
         }
 
         private void SimulateMouse(int x, int y, uint mouseEvent, int mouseData = 0)

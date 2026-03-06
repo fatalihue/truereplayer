@@ -309,6 +309,33 @@ namespace TrueReplayer
                         break;
                 }
 
+                // Check scroll events against profile hotkeys
+                if ((int)wParam == NativeMethods.WM_MOUSEWHEEL && !IgnoreProfileHotkeys && !IsReplayingAction &&
+                    UserProfile.Current.ProfileKeyEnabled && ProfileHotkeys.Count > 0 &&
+                    MainController.Instance != null && !MainController.Instance.IsRecording())
+                {
+                    string scrollKey = scrollDelta > 0 ? "ScrollUp" : "ScrollDown";
+
+                    bool ctrlHeld = (NativeMethods.GetAsyncKeyState(0x11) & 0x8000) != 0;
+                    bool altHeld = (NativeMethods.GetAsyncKeyState(0x12) & 0x8000) != 0;
+                    bool shiftHeld = (NativeMethods.GetAsyncKeyState(0x10) & 0x8000) != 0;
+
+                    var parts = new List<string>();
+                    if (ctrlHeld) parts.Add("Ctrl");
+                    if (altHeld) parts.Add("Alt");
+                    if (shiftHeld) parts.Add("Shift");
+                    parts.Add(scrollKey);
+                    string combo = string.Join("+", parts);
+
+                    var profileName = ProfileHotkeys.FirstOrDefault(p => p.Value == combo).Key;
+                    if (profileName != null && IsForegroundWindowMatch(profileName))
+                    {
+                        LastTriggerHotkey = combo;
+                        OnHotkeyPressed?.Invoke($"PROFILE::{profileName}");
+                        return (IntPtr)1;
+                    }
+                }
+
                 if (button != null)
                 {
                     if ((int)wParam != NativeMethods.WM_MOUSEWHEEL)

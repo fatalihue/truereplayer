@@ -138,6 +138,7 @@ namespace TrueReplayer
                     case "profile:click": HandleProfileClick(payload); break;
                     case "profile:create": HandleProfileCreate(payload); break;
                     case "profile:rename": HandleProfileRename(payload); break;
+                    case "profile:duplicate": HandleProfileDuplicate(payload); break;
                     case "profile:delete": HandleProfileDelete(payload); break;
                     case "profile:assignHotkey": HandleProfileAssignHotkey(payload); break;
                     case "profile:removeHotkey": HandleProfileRemoveHotkey(payload); break;
@@ -765,6 +766,31 @@ namespace TrueReplayer
 
             var profile = UserProfile.Default;
             await SettingsManager.SaveProfileAsync(fullPath, profile);
+            await profileController.RefreshProfileListAsync(true);
+            PushProfilesUpdate();
+        }
+
+        private async void HandleProfileDuplicate(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            if (string.IsNullOrEmpty(name)) return;
+
+            var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
+            if (entry == null || !File.Exists(entry.FilePath)) return;
+
+            string dir = Path.GetDirectoryName(entry.FilePath)!;
+            string copyName = $"{name} - Copy";
+            string copyPath = Path.Combine(dir, copyName + ".json");
+
+            int counter = 2;
+            while (File.Exists(copyPath))
+            {
+                copyName = $"{name} - Copy ({counter})";
+                copyPath = Path.Combine(dir, copyName + ".json");
+                counter++;
+            }
+
+            File.Copy(entry.FilePath, copyPath);
             await profileController.RefreshProfileListAsync(true);
             PushProfilesUpdate();
         }

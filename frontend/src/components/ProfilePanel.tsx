@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Plus, Search, Pencil, Trash2, FolderOpen, Key, Crosshair, Upload, Download, Type } from 'lucide-react';
+import { Plus, Search, Pencil, Copy, Trash2, FolderOpen, Key, Crosshair, Upload, Download, Type } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 
@@ -168,6 +168,11 @@ export function ProfilePanel() {
     setShowRenameDialog(name);
   };
 
+  const handleDuplicate = (name: string) => {
+    setContextMenu(null);
+    send({ type: 'profile:duplicate', payload: { name } });
+  };
+
   const handleDelete = (name: string) => {
     setContextMenu(null);
     setShowDeleteConfirm(name);
@@ -289,6 +294,16 @@ export function ProfilePanel() {
     if (!modifiers.includes(mainKey)) modifiers.push(mainKey);
     const combo = modifiers.join('+');
     setHotkeyCapture(combo);
+  };
+
+  const handleHotkeyWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const modifiers: string[] = [];
+    if (e.ctrlKey) modifiers.push('Ctrl');
+    if (e.altKey) modifiers.push('Alt');
+    if (e.shiftKey) modifiers.push('Shift');
+    modifiers.push(e.deltaY < 0 ? 'ScrollUp' : 'ScrollDown');
+    setHotkeyCapture(modifiers.join('+'));
   };
 
   const confirmHotkey = () => {
@@ -483,6 +498,13 @@ export function ProfilePanel() {
             Rename
           </button>
           <button
+            onClick={() => handleDuplicate(contextMenu.profileName)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Copy size={13} className="text-text-tertiary" />
+            Duplicate
+          </button>
+          <button
             onClick={() => handleOpenFolder(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
@@ -625,6 +647,7 @@ export function ProfilePanel() {
               readOnly
               value={hotkeyCapture}
               onKeyDown={handleHotkeyCapture}
+              onWheel={handleHotkeyWheel}
               className="w-full h-9 px-3 text-sm font-mono text-accent bg-bg-input border border-accent-solid rounded text-center outline-none"
             />
             <div className="flex items-center mt-4">
