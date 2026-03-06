@@ -1053,17 +1053,11 @@ namespace TrueReplayer
             var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
             if (entry == null) return;
 
-            string? folderPath = Path.GetDirectoryName(entry.FilePath);
-            if (folderPath != null && Directory.Exists(folderPath))
+            if (File.Exists(entry.FilePath))
             {
                 try
                 {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo()
-                    {
-                        FileName = folderPath,
-                        UseShellExecute = true,
-                        Verb = "open"
-                    });
+                    System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{entry.FilePath}\"");
                 }
                 catch { }
             }

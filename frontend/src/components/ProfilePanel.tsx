@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Plus, Search, Pencil, Trash2, FolderOpen, Key, KeyRound, Crosshair, Upload, Download, Type } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, FolderOpen, Key, Crosshair, Upload, Download, Type } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 
@@ -496,15 +496,6 @@ export function ProfilePanel() {
             <Key size={13} className="text-text-tertiary" />
             {profile?.hotkey ? 'Change Hotkey' : 'Assign Hotkey'}
           </button>
-          {profile?.hotkey && (
-            <button
-              onClick={() => handleRemoveHotkey(contextMenu.profileName)}
-              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-            >
-              <KeyRound size={13} className="text-text-tertiary" />
-              Remove Hotkey
-            </button>
-          )}
           <button
             onClick={() => handleAssignHotstring(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
@@ -512,15 +503,6 @@ export function ProfilePanel() {
             <Type size={13} className="text-text-tertiary" />
             {profile?.hotstring ? 'Edit Hotstring' : 'Assign Hotstring'}
           </button>
-          {profile?.hotstring && (
-            <button
-              onClick={() => handleRemoveHotstring(contextMenu.profileName)}
-              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-            >
-              <Type size={13} className="text-text-tertiary" />
-              Remove Hotstring
-            </button>
-          )}
           <button
             onClick={() => handleSetWindowTarget(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
@@ -528,15 +510,6 @@ export function ProfilePanel() {
             <Crosshair size={13} className="text-text-tertiary" />
             {profile?.hasWindowTarget ? 'Edit Target Window' : 'Set Target Window'}
           </button>
-          {profile?.hasWindowTarget && (
-            <button
-              onClick={() => handleRemoveWindowTarget(contextMenu.profileName)}
-              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-            >
-              <Crosshair size={13} className="text-text-tertiary" />
-              Remove Target Window
-            </button>
-          )}
           <div className="my-1 border-t border-border-subtle" />
           <button
             onClick={() => handleDelete(contextMenu.profileName)}
@@ -654,20 +627,31 @@ export function ProfilePanel() {
               onKeyDown={handleHotkeyCapture}
               className="w-full h-9 px-3 text-sm font-mono text-accent bg-bg-input border border-accent-solid rounded text-center outline-none"
             />
-            <div className="flex justify-end gap-2 mt-4">
-              <button
-                onClick={() => setShowHotkeyDialog(null)}
-                className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmHotkey}
-                disabled={hotkeyCapture === '...'}
-                className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
-              >
-                Assign
-              </button>
+            <div className="flex items-center mt-4">
+              {profiles.find(p => p.name === showHotkeyDialog)?.hotkey && (
+                <button
+                  onClick={() => { handleRemoveHotkey(showHotkeyDialog!); setShowHotkeyDialog(null); }}
+                  className="px-4 py-1.5 text-xs text-recording hover:text-recording/80 bg-bg-elevated rounded transition-colors"
+                >
+                  Remove
+                </button>
+              )}
+              <div className="flex-1" />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowHotkeyDialog(null)}
+                  className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmHotkey}
+                  disabled={hotkeyCapture === '...'}
+                  className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
+                >
+                  Assign
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -709,20 +693,31 @@ export function ProfilePanel() {
               <span className="text-[11px] text-text-tertiary">(no Enter/Space/Tab needed)</span>
             </label>
 
-            <div className="flex justify-end gap-2 mt-4">
-              <button
-                onClick={() => setShowHotstringDialog(null)}
-                className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmHotstring}
-                disabled={hotstringValue.trim().length < 2}
-                className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
-              >
-                Assign
-              </button>
+            <div className="flex items-center mt-4">
+              {profiles.find(p => p.name === showHotstringDialog)?.hotstring && (
+                <button
+                  onClick={() => { handleRemoveHotstring(showHotstringDialog!); setShowHotstringDialog(null); }}
+                  className="px-4 py-1.5 text-xs text-recording hover:text-recording/80 bg-bg-elevated rounded transition-colors"
+                >
+                  Remove
+                </button>
+              )}
+              <div className="flex-1" />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowHotstringDialog(null)}
+                  className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmHotstring}
+                  disabled={hotstringValue.trim().length < 2}
+                  className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
+                >
+                  Assign
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -848,20 +843,31 @@ export function ProfilePanel() {
                 : 'Detect from Foreground Window (3s delay)'}
             </button>
 
-            <div className="flex justify-end gap-2 mt-4">
-              <button
-                onClick={() => setShowWindowTargetDialog(null)}
-                className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmWindowTarget}
-                disabled={!targetProcessName.trim() && !targetWindowTitle.trim()}
-                className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
-              >
-                Set Target
-              </button>
+            <div className="flex items-center mt-4">
+              {profiles.find(p => p.name === showWindowTargetDialog)?.hasWindowTarget && (
+                <button
+                  onClick={() => { handleRemoveWindowTarget(showWindowTargetDialog!); setShowWindowTargetDialog(null); }}
+                  className="px-4 py-1.5 text-xs text-recording hover:text-recording/80 bg-bg-elevated rounded transition-colors"
+                >
+                  Remove
+                </button>
+              )}
+              <div className="flex-1" />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowWindowTargetDialog(null)}
+                  className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmWindowTarget}
+                  disabled={!targetProcessName.trim() && !targetWindowTitle.trim()}
+                  className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
+                >
+                  Set Target
+                </button>
+              </div>
             </div>
           </div>
         </div>
