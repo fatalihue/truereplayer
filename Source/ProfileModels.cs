@@ -57,6 +57,7 @@ namespace TrueReplayer.Models
         public string? CustomHotkey { get; set; }
         public HotstringConfig? CustomHotstring { get; set; }
         public WindowTarget? TargetWindow { get; set; }
+        public bool IsDisabled { get; set; }
 
         [JsonIgnore]
         public bool ProfileKeyEnabled { get; set; } = true;
@@ -105,6 +106,7 @@ namespace TrueReplayer.Models
         public string? Hotstring { get; set; }
         public bool HotstringInstant { get; set; }
         public bool HasWindowTarget { get; set; }
+        public bool IsDisabled { get; set; }
         public string Display => string.IsNullOrEmpty(Hotkey) ? Name : $"{Name} ({Hotkey})";
 
         private bool _isActive;

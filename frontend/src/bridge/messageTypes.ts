@@ -20,6 +20,7 @@ export interface ProfileEntry {
   hotstringInstant: boolean;
   isActive: boolean;
   hasWindowTarget: boolean;
+  isDisabled: boolean;
 }
 
 export interface SettingsState {
@@ -104,6 +105,7 @@ export type OutgoingMessage =
   | { type: 'profile:create'; payload: { name: string } }
   | { type: 'profile:rename'; payload: { oldName: string; newName: string } }
   | { type: 'profile:duplicate'; payload: { name: string } }
+  | { type: 'profile:toggleDisable'; payload: { name: string } }
   | { type: 'profile:delete'; payload: { name: string } }
   | { type: 'profile:assignHotkey'; payload: { name: string; hotkey: string } }
   | { type: 'profile:removeHotkey'; payload: { name: string } }

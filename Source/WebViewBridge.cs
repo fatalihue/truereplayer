@@ -139,6 +139,7 @@ namespace TrueReplayer
                     case "profile:create": HandleProfileCreate(payload); break;
                     case "profile:rename": HandleProfileRename(payload); break;
                     case "profile:duplicate": HandleProfileDuplicate(payload); break;
+                    case "profile:toggleDisable": HandleProfileToggleDisable(payload); break;
                     case "profile:delete": HandleProfileDelete(payload); break;
                     case "profile:assignHotkey": HandleProfileAssignHotkey(payload); break;
                     case "profile:removeHotkey": HandleProfileRemoveHotkey(payload); break;
@@ -210,7 +211,8 @@ namespace TrueReplayer
                 hotstring = p.Hotstring,
                 hotstringInstant = p.HotstringInstant,
                 isActive = p.IsActive,
-                hasWindowTarget = p.HasWindowTarget
+                hasWindowTarget = p.HasWindowTarget,
+                isDisabled = p.IsDisabled
             }).ToArray();
 
             SendMessage("profiles:updated", new { profiles, activeProfile = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName });
@@ -768,6 +770,30 @@ namespace TrueReplayer
             await SettingsManager.SaveProfileAsync(fullPath, profile);
             await profileController.RefreshProfileListAsync(true);
             PushProfilesUpdate();
+        }
+
+        private async void HandleProfileToggleDisable(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            if (string.IsNullOrEmpty(name)) return;
+
+            var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
+            if (entry == null || !File.Exists(entry.FilePath)) return;
+
+            var profile = await SettingsManager.LoadProfileAsync(entry.FilePath);
+            if (profile == null) return;
+
+            profile.IsDisabled = !profile.IsDisabled;
+            await SettingsManager.SaveProfileAsync(entry.FilePath, profile);
+
+            entry.IsDisabled = profile.IsDisabled;
+            PushProfilesUpdate();
+
+            // Re-register hotkeys so disabled profiles are excluded
+            var hotkeys = profileController.GetProfileHotkeys();
+            InputHookManager.RegisterProfileHotkeys(hotkeys);
+            var hotstrings = profileController.GetProfileHotstrings();
+            InputHookManager.RegisterProfileHotstrings(hotstrings);
         }
 
         private async void HandleProfileDuplicate(JsonElement payload)

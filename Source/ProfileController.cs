@@ -215,7 +215,8 @@ namespace TrueReplayer.Controllers
                             Hotkey = profile.CustomHotkey,
                             Hotstring = profile.CustomHotstring?.Sequence,
                             HotstringInstant = profile.CustomHotstring?.Instant ?? false,
-                            HasWindowTarget = hasTarget
+                            HasWindowTarget = hasTarget,
+                            IsDisabled = profile.IsDisabled
                         });
 
                         if (hasTarget)
@@ -392,7 +393,7 @@ namespace TrueReplayer.Controllers
 
             foreach (var entry in ProfileEntries)
             {
-                if (!string.IsNullOrEmpty(entry.Hotkey))
+                if (!string.IsNullOrEmpty(entry.Hotkey) && !entry.IsDisabled)
                     hotkeys[entry.Name] = entry.Hotkey;
             }
 
@@ -405,7 +406,7 @@ namespace TrueReplayer.Controllers
 
             foreach (var entry in ProfileEntries)
             {
-                if (!string.IsNullOrEmpty(entry.Hotstring))
+                if (!string.IsNullOrEmpty(entry.Hotstring) && !entry.IsDisabled)
                 {
                     hotstrings[entry.Name] = new HotstringConfig
                     {

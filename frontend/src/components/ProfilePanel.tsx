@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Plus, Search, Pencil, Copy, Trash2, FolderOpen, Key, Crosshair, Upload, Download, Type } from 'lucide-react';
+import { Plus, Search, Pencil, Copy, Trash2, FolderOpen, Key, Crosshair, Upload, Download, Type, Ban } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 
@@ -171,6 +171,11 @@ export function ProfilePanel() {
   const handleDuplicate = (name: string) => {
     setContextMenu(null);
     send({ type: 'profile:duplicate', payload: { name } });
+  };
+
+  const handleToggleDisable = (name: string) => {
+    setContextMenu(null);
+    send({ type: 'profile:toggleDisable', payload: { name } });
   };
 
   const handleDelete = (name: string) => {
@@ -438,7 +443,7 @@ export function ProfilePanel() {
               onClick={(e) => { send({ type: 'profile:click', payload: { name: p.name } }); (e.target as HTMLElement).blur(); }}
               onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') e.preventDefault(); }}
               onContextMenu={(e) => handleContextMenu(e, p.name)}
-              className={`w-full flex items-center gap-2 px-2.5 py-2 rounded text-left transition-colors mb-0.5 outline-none ${
+              className={`w-full flex items-center gap-2 px-2.5 py-2 rounded text-left transition-colors mb-0.5 outline-none ${p.isDisabled ? 'opacity-40 ' : ''}${
                 p.isActive
                   ? 'bg-bg-elevated'
                   : 'hover:bg-bg-card'
@@ -491,6 +496,13 @@ export function ProfilePanel() {
           style={{ left: menuPos.x, top: menuPos.y }}
         >
           <button
+            onClick={() => handleToggleDisable(contextMenu.profileName)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Ban size={13} className="text-text-tertiary" />
+            {profile?.isDisabled ? 'Enable' : 'Disable'}
+          </button>
+          <button
             onClick={() => handleRename(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
@@ -511,6 +523,7 @@ export function ProfilePanel() {
             <FolderOpen size={13} className="text-text-tertiary" />
             Open Folder
           </button>
+          <div className="my-1 border-t border-border-subtle" />
           <button
             onClick={() => handleAssignHotkey(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
