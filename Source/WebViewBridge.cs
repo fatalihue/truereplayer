@@ -348,7 +348,8 @@ namespace TrueReplayer
                     hotstring = p.Hotstring,
                     hotstringInstant = p.HotstringInstant,
                     isActive = p.IsActive,
-                    hasWindowTarget = p.HasWindowTarget
+                    hasWindowTarget = p.HasWindowTarget,
+                    isDisabled = p.IsDisabled
                 }).ToArray(),
                 activeProfile = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName,
                 settings = new
