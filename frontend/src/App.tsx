@@ -59,7 +59,7 @@ export default function App() {
             <UpdateBanner />
 
             {/* Main Content: 3-column layout */}
-            <div className="flex-1 flex gap-2 p-2 min-h-0">
+            <div className="flex-1 flex gap-1 p-2 min-h-0">
               {/* Left: Profiles */}
               <ProfilePanel
                 collapsed={sidebarCollapsed}

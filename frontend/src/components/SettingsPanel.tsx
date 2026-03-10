@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, Crosshair, Download } from 'lucide-react';
+import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -200,7 +200,7 @@ export function SettingsPanel() {
   return (
     <div className="w-[250px] flex flex-col shrink-0 overflow-hidden">
       {/* Tab Bar */}
-      <div className="flex gap-1 p-1.5 border-b border-border-subtle shrink-0">
+      <div className="flex gap-1 px-1.5 py-2.5 border-b border-border-subtle shrink-0">
         <button
           onClick={() => setActiveTab('profile')}
           className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
@@ -293,19 +293,7 @@ export function SettingsPanel() {
               </SettingRow>
             </Section>
 
-            {/* Target Window */}
-            <Section icon={Crosshair} iconColor="#a78bfa" title="Target Window" defaultOpen={false}>
-              <div className="py-2 px-2.5 bg-bg-input border border-border-subtle rounded text-xs text-text-tertiary text-center">
-                No target window set
-              </div>
-              <button
-                onClick={() => send({ type: 'profile:detectWindow', payload: {} })}
-                className="w-full flex items-center justify-center gap-1.5 mt-1.5 h-7 rounded text-xs text-text-secondary bg-bg-elevated border border-border-default hover:bg-bg-card hover:text-text-primary transition-colors"
-              >
-                <Crosshair size={12} />
-                Detect Window
-              </button>
-            </Section>
+
           </>
         ) : (
           <>
