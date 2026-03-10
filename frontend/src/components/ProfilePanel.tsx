@@ -162,11 +162,17 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setContextMenu({ x: e.clientX, y: e.clientY, profileName: name });
   }, []);
 
-  const handleCreate = () => {
+  const handleCreate = useCallback(() => {
     setContextMenu(null);
     setDialogValue('');
     setShowCreateDialog(true);
-  };
+  }, []);
+
+  // Listen for command palette trigger
+  useEffect(() => {
+    window.addEventListener('cmd:newprofile', handleCreate);
+    return () => window.removeEventListener('cmd:newprofile', handleCreate);
+  }, [handleCreate]);
 
   const handleRename = (name: string) => {
     setContextMenu(null);
@@ -429,7 +435,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         ) : (
           <>
         {/* Header */}
-        <div className="flex items-center justify-between px-3 pt-3 pb-2">
+        <div className="flex items-center justify-between px-3 pt-2 pb-1">
           <span className="text-xs font-semibold text-text-tertiary tracking-wider">PROFILES</span>
           <div className="flex items-center gap-0.5">
             <button
@@ -464,7 +470,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         </div>
 
         {/* Search */}
-        <div className="px-3 pb-2">
+        <div className="px-3 pb-1.5">
           <div className="flex items-center gap-2 px-2.5 py-1.5 bg-bg-input border border-border-default rounded">
             <Search size={13} className="text-text-disabled shrink-0" />
             <input
@@ -478,14 +484,14 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         </div>
 
         {/* Profile List */}
-        <div className="flex-1 overflow-y-auto px-1.5 pb-2">
+        <div className="flex-1 overflow-y-auto px-1.5 pb-1">
           {filtered.map((p) => (
             <button
               key={p.name}
               onClick={(e) => { send({ type: 'profile:click', payload: { name: p.name } }); (e.target as HTMLElement).blur(); }}
               onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') e.preventDefault(); }}
               onContextMenu={(e) => handleContextMenu(e, p.name)}
-              className={`w-full flex items-center gap-2 px-2.5 py-2 rounded text-left transition-colors mb-0.5 outline-none ${p.isDisabled ? 'opacity-40 ' : ''}${
+              className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-left transition-colors outline-none ${p.isDisabled ? 'opacity-40 ' : ''}${
                 p.isActive
                   ? 'bg-bg-elevated'
                   : 'hover:bg-bg-card'

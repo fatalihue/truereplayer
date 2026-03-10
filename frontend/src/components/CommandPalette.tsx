@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Search, Circle, Play, Type, Save, FolderOpen, RotateCcw, Plus,
-  ArrowRightToLine, Timer, Palette, Zap
+  Search, Circle, Play, Square, Type, Save, FolderOpen, RotateCcw, Plus,
+  Copy, Trash2, PinOff, Pin, Crosshair, Download, Upload,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -29,7 +29,7 @@ interface CommandGroup {
 }
 
 export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
-  const { profiles, activeProfile, settings } = useAppState();
+  const { profiles, activeProfile, settings, buttonStates } = useAppState();
   const { send } = useBridge();
   const [query, setQuery] = useState('');
   const [focusedIndex, setFocusedIndex] = useState(0);
@@ -47,94 +47,123 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   }, [isOpen, send]);
 
   // Build command groups
-  const groups: CommandGroup[] = useMemo(() => [
-    {
-      id: 'actions',
-      title: 'ACTIONS',
-      items: [
-        {
-          id: 'record', label: 'Start Recording',
-          icon: <Circle size={14} className="text-recording" />,
-          shortcut: settings.recordingHotkey,
-          onAction: () => { send({ type: 'recording:toggle', payload: {} }); onClose(); },
-        },
-        {
-          id: 'replay', label: 'Start Replay',
-          icon: <Play size={14} className="text-replay" />,
-          shortcut: settings.replayHotkey,
-          onAction: () => {
-            send({
-              type: 'replay:toggle',
-              payload: {
-                loopEnabled: settings.enableLoop,
-                loopCount: settings.loopCount,
-                intervalEnabled: settings.loopIntervalEnabled,
-                intervalText: settings.loopInterval,
-              },
-            });
-            onClose();
+  const groups: CommandGroup[] = useMemo(() => {
+    const isRecording = buttonStates.recordingActive;
+    const isReplaying = buttonStates.replayActive;
+
+    return [
+      {
+        id: 'actions',
+        title: 'ACTIONS',
+        items: [
+          {
+            id: 'record',
+            label: isRecording ? 'Stop Recording' : 'Start Recording',
+            icon: isRecording
+              ? <Square size={14} className="text-recording" />
+              : <Circle size={14} className="text-recording" />,
+            shortcut: settings.recordingHotkey,
+            onAction: () => { send({ type: 'recording:toggle', payload: {} }); onClose(); },
           },
-        },
-        {
-          id: 'sendtext', label: 'Send Text',
-          icon: <Type size={14} className="text-text-secondary" />,
-          onAction: () => { onClose(); },
-        },
-        {
-          id: 'save', label: 'Save Profile', shortcut: 'Ctrl+S',
-          icon: <Save size={14} className="text-text-secondary" />,
-          onAction: () => { send({ type: 'profile:save', payload: {} }); onClose(); },
-        },
-        {
-          id: 'load', label: 'Load Profile',
-          icon: <FolderOpen size={14} className="text-text-secondary" />,
-          onAction: () => { send({ type: 'profile:load', payload: {} }); onClose(); },
-        },
-        {
-          id: 'reset', label: 'Reset Profile',
-          icon: <RotateCcw size={14} className="text-text-secondary" />,
-          onAction: () => { send({ type: 'profile:reset', payload: {} }); onClose(); },
-        },
-        {
-          id: 'newprofile', label: 'New Profile',
-          icon: <Plus size={14} className="text-text-secondary" />,
-          onAction: () => { onClose(); },
-        },
-      ],
-    },
-    {
-      id: 'profiles',
-      title: 'SWITCH PROFILE',
-      items: profiles.map(p => ({
-        id: `profile-${p.name}`,
-        label: p.name,
-        icon: <ArrowRightToLine size={14} className={p.isActive ? 'text-accent' : 'text-text-secondary'} />,
-        badge: p.isActive ? 'active' : undefined,
-        onAction: () => { send({ type: 'profile:click', payload: { name: p.name } }); onClose(); },
-      })),
-    },
-    {
-      id: 'settings',
-      title: 'SETTINGS',
-      items: [
-        {
-          id: 'fixeddelay', label: 'Set Fixed Delay...',
-          icon: <Timer size={14} className="text-text-secondary" />,
-          onAction: () => { onClose(); },
-        },
-        {
-          id: 'theme', label: 'Open Theme Editor',
-          icon: <Palette size={14} className="text-text-secondary" />,
-          onAction: () => { onClose(); },
-        },
-        {
-          id: 'hotkeys', label: 'Configure Hotkeys',
-          icon: <Zap size={14} className="text-text-secondary" />,
-          onAction: () => { onClose(); },
-        },
-      ],
-    },
-  ], [profiles, activeProfile, settings, send, onClose]);
+          {
+            id: 'replay',
+            label: isReplaying ? 'Stop Replay' : 'Start Replay',
+            icon: isReplaying
+              ? <Square size={14} className="text-replay" />
+              : <Play size={14} className="text-replay" />,
+            shortcut: settings.replayHotkey,
+            onAction: () => {
+              send({
+                type: 'replay:toggle',
+                payload: {
+                  loopEnabled: settings.enableLoop,
+                  loopCount: settings.loopCount,
+                  intervalEnabled: settings.loopIntervalEnabled,
+                  intervalText: settings.loopInterval,
+                },
+              });
+              onClose();
+            },
+          },
+          {
+            id: 'sendtext', label: 'Insert Send Text',
+            icon: <Type size={14} className="text-text-secondary" />,
+            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:sendtext')); },
+          },
+          {
+            id: 'save', label: 'Save Profile', shortcut: 'Ctrl+S',
+            icon: <Save size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'profile:save', payload: {} }); onClose(); },
+          },
+          {
+            id: 'load', label: 'Load Profile',
+            icon: <FolderOpen size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'profile:load', payload: {} }); onClose(); },
+          },
+          {
+            id: 'reset', label: 'Reset Profile',
+            icon: <RotateCcw size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'profile:reset', payload: {} }); onClose(); },
+          },
+          {
+            id: 'copyactions', label: 'Copy Selected Actions',
+            icon: <Copy size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:copy', payload: {} }); onClose(); },
+          },
+          {
+            id: 'clearactions', label: 'Clear All Actions',
+            icon: <Trash2 size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:clear', payload: {} }); onClose(); },
+          },
+        ],
+      },
+      {
+        id: 'profiles',
+        title: 'PROFILES',
+        items: [
+          {
+            id: 'newprofile', label: 'New Profile',
+            icon: <Plus size={14} className="text-text-secondary" />,
+            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:newprofile')); },
+          },
+          ...(activeProfile ? [{
+            id: 'duplicateprofile', label: 'Duplicate Profile',
+            icon: <Copy size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'profile:duplicate', payload: { name: activeProfile } }); onClose(); },
+          }] : []),
+          {
+            id: 'importprofiles', label: 'Import Profiles',
+            icon: <Download size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'profile:import', payload: {} }); onClose(); },
+          },
+          {
+            id: 'exportprofiles', label: 'Export Profiles',
+            icon: <Upload size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'profile:export', payload: { names: profiles.map(p => p.name) } }); onClose(); },
+          },
+        ],
+      },
+      {
+        id: 'window',
+        title: 'WINDOW',
+        items: [
+          {
+            id: 'alwaysontop',
+            label: settings.alwaysOnTop ? 'Disable Always On Top' : 'Enable Always On Top',
+            icon: settings.alwaysOnTop
+              ? <PinOff size={14} className="text-text-secondary" />
+              : <Pin size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'window:alwaysOnTop', payload: { enabled: !settings.alwaysOnTop } }); onClose(); },
+          },
+          {
+            id: 'detectwindow', label: 'Detect Target Window',
+            icon: <Crosshair size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'profile:detectWindow', payload: {} }); onClose(); },
+          },
+        ],
+      },
+    ];
+  }, [profiles, activeProfile, settings, buttonStates, send, onClose]);
 
   // Filter
   const filteredGroups = useMemo(() => {

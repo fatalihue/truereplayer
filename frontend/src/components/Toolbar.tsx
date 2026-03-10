@@ -46,6 +46,13 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
     }
   }, [showSendTextDialog, send]);
 
+  // Listen for command palette trigger
+  useEffect(() => {
+    const handler = () => setShowSendTextDialog(true);
+    window.addEventListener('cmd:sendtext', handler);
+    return () => window.removeEventListener('cmd:sendtext', handler);
+  }, []);
+
   // Close dropdown on outside click
   useEffect(() => {
     if (!showColDropdown) return;
