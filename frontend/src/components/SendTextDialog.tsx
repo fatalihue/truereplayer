@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Smile, Clock, BookmarkPlus, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Smile, Clock, BookmarkPlus, Trash2 } from 'lucide-react';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import type { EmojiClickData } from 'emoji-picker-react';
 
@@ -131,34 +131,21 @@ function renderHighlightedText(text: string): React.ReactNode[] {
   return parts;
 }
 
+type PanelType = 'emoji' | 'variables' | 'snippets';
+
 export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: SendTextDialogProps) {
   const [text, setText] = useState(initialText);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [showVarsDropdown, setShowVarsDropdown] = useState(false);
-  const [showSnippets, setShowSnippets] = useState(false);
+  const [activePanel, setActivePanel] = useState<PanelType | null>(null);
   const [snippets, setSnippets] = useState<Snippet[]>(loadSnippets);
   const [snippetName, setSnippetName] = useState('');
   const [savingSnippet, setSavingSnippet] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
   const cursorPosRef = useRef<number>(initialText.length);
-  const varsDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
-
-  // Close vars dropdown on outside click
-  useEffect(() => {
-    if (!showVarsDropdown) return;
-    const handler = (e: MouseEvent) => {
-      if (varsDropdownRef.current && !varsDropdownRef.current.contains(e.target as Node)) {
-        setShowVarsDropdown(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showVarsDropdown]);
 
   // Sync highlight scroll with textarea
   const syncScroll = useCallback(() => {
@@ -174,32 +161,25 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
   }, []);
 
   const insertAtCursor = useCallback((insertText: string) => {
-    const pos = cursorPosRef.current;
-    const before = text.slice(0, pos);
-    const after = text.slice(pos);
-    const newText = before + insertText + after;
-    setText(newText);
+    const ta = textareaRef.current;
+    if (!ta) return;
 
-    const newPos = pos + insertText.length;
-    cursorPosRef.current = newPos;
+    ta.focus();
+    ta.selectionStart = cursorPosRef.current;
+    ta.selectionEnd = cursorPosRef.current;
 
-    requestAnimationFrame(() => {
-      if (textareaRef.current) {
-        textareaRef.current.focus();
-        textareaRef.current.selectionStart = newPos;
-        textareaRef.current.selectionEnd = newPos;
-      }
-    });
-  }, [text]);
+    // execCommand integrates with the browser's native undo/redo stack
+    document.execCommand('insertText', false, insertText);
+
+    cursorPosRef.current = ta.selectionStart;
+  }, []);
 
   const handleEmojiClick = useCallback((emojiData: EmojiClickData) => {
     insertAtCursor(emojiData.emoji);
-    setShowEmojiPicker(false);
   }, [insertAtCursor]);
 
   const handleVarInsert = useCallback((variable: string) => {
     insertAtCursor(variable);
-    setShowVarsDropdown(false);
   }, [insertAtCursor]);
 
   const handleSaveSnippet = useCallback(() => {
@@ -225,27 +205,26 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
     saveSnippets(updated);
   }, [snippets]);
 
-  // Insert snippet at cursor position (instead of replacing all text)
   const handleInsertSnippet = useCallback((snippetText: string) => {
     insertAtCursor(snippetText);
   }, [insertAtCursor]);
 
   const handleConfirm = () => {
     const trimmed = text.trim();
-    if (trimmed) {
-      onConfirm(trimmed);
-    }
+    if (trimmed) onConfirm(trimmed);
+  };
+
+  const togglePanel = (panel: PanelType) => {
+    setActivePanel(prev => prev === panel ? null : panel);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       e.preventDefault();
-      if (showEmojiPicker) {
-        setShowEmojiPicker(false);
-      } else if (showVarsDropdown) {
-        setShowVarsDropdown(false);
-      } else if (savingSnippet) {
+      if (savingSnippet) {
         setSavingSnippet(false);
+      } else if (activePanel) {
+        setActivePanel(null);
       } else {
         onClose();
       }
@@ -256,11 +235,11 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
     }
   };
 
-  const toolbarBtnClass = (active: boolean) =>
-    `flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded border transition-colors ${
+  const tabBtnClass = (active: boolean) =>
+    `flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded transition-colors ${
       active
-        ? 'text-accent-solid bg-accent-solid/10 border-accent-solid/30'
-        : 'text-text-secondary bg-bg-card hover:bg-bg-surface border-border-subtle hover:text-text-primary'
+        ? 'text-accent-solid bg-accent-solid/10'
+        : 'text-text-tertiary hover:text-text-primary hover:bg-bg-card'
     }`;
 
   return (
@@ -269,80 +248,91 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
       onKeyDown={(e) => e.stopPropagation()}
     >
       <div
-        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[700px] h-[90vh] max-h-[700px] flex flex-col"
+        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[950px] max-w-[95vw] h-[90vh] max-h-[750px] flex flex-col"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
-        {/* Header */}
-        <div className="px-4 py-3 border-b border-border-subtle shrink-0">
+        {/* Header with tool tabs */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle shrink-0">
           <h3 className="text-sm font-semibold text-text-primary">
             {mode === 'add' ? 'Insert Send Text' : 'Edit Send Text'}
           </h3>
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => togglePanel('emoji')} className={tabBtnClass(activePanel === 'emoji')} title="Emoji">
+              <Smile size={14} /> Emoji
+            </button>
+            <button type="button" onClick={() => togglePanel('variables')} className={tabBtnClass(activePanel === 'variables')} title="Variables">
+              <Clock size={14} /> Variables
+            </button>
+            <button type="button" onClick={() => togglePanel('snippets')} className={tabBtnClass(activePanel === 'snippets')} title="Snippets">
+              <BookmarkPlus size={14} /> Snippets
+            </button>
+          </div>
         </div>
 
-        {/* Scrollable body */}
-        <div className="px-4 py-3 overflow-y-auto flex-1 min-h-0">
-          {/* Textarea with syntax highlighting overlay */}
-          <div className="relative w-full rounded border border-border-subtle focus-within:border-accent-solid bg-bg-input">
-            {/* Highlight layer (behind textarea) */}
-            <div
-              ref={highlightRef}
-              className="absolute inset-0 px-3 py-2 text-sm leading-[1.5] whitespace-pre-wrap break-words overflow-hidden pointer-events-none select-none"
-              aria-hidden="true"
-            >
-              {renderHighlightedText(text)}
-            </div>
-            {/* Textarea (on top, transparent text, visible caret) */}
-            <textarea
-              ref={textareaRef}
-              value={text}
-              onChange={(e) => { setText(e.target.value); saveCursorPos(); }}
-              onSelect={saveCursorPos}
-              onClick={saveCursorPos}
-              onKeyUp={saveCursorPos}
-              onScroll={syncScroll}
-              placeholder="Type the text to send..."
-              rows={8}
-              spellCheck={false}
-              autoCorrect="off"
-              autoCapitalize="off"
-              className="relative w-full px-3 py-2 text-sm leading-[1.5] bg-transparent text-transparent selection:text-transparent selection:bg-accent-solid/30 resize-y outline-none placeholder:text-text-disabled"
-              style={{ caretColor: 'var(--color-text-primary, #e0e0e0)' }}
-            />
-          </div>
-
-          {/* Character count */}
-          <div className="flex justify-end mt-1">
-            <span className="text-[10px] text-text-disabled">{text.length} chars</span>
-          </div>
-
-          {/* Toolbar */}
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            {/* Emoji */}
-            <button
-              type="button"
-              onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowVarsDropdown(false); }}
-              className={toolbarBtnClass(showEmojiPicker)}
-              title="Insert emoji"
-            >
-              <Smile size={14} />
-              Emoji
-            </button>
-
-            {/* Variables dropdown */}
-            <div className="relative" ref={varsDropdownRef}>
-              <button
-                type="button"
-                onClick={() => { setShowVarsDropdown(!showVarsDropdown); setShowEmojiPicker(false); }}
-                className={toolbarBtnClass(showVarsDropdown)}
-                title="Insert variable"
+        {/* Body: textarea + optional side panel */}
+        <div className="flex flex-1 min-h-0">
+          {/* Left: textarea with syntax highlighting */}
+          <div className="flex-1 min-w-0 p-4 flex flex-col">
+            <div className="relative flex-1 min-h-0 rounded border border-border-subtle focus-within:border-accent-solid bg-bg-input">
+              {/* Highlight layer */}
+              <div
+                ref={highlightRef}
+                className="absolute inset-0 px-3 py-2 text-sm leading-[1.5] whitespace-pre-wrap break-words overflow-hidden pointer-events-none select-none"
+                aria-hidden="true"
               >
-                <Clock size={14} />
-                Variables
-              </button>
+                {renderHighlightedText(text)}
+              </div>
+              {/* Textarea */}
+              <textarea
+                ref={textareaRef}
+                value={text}
+                onChange={(e) => { setText(e.target.value); saveCursorPos(); }}
+                onSelect={saveCursorPos}
+                onClick={saveCursorPos}
+                onKeyUp={saveCursorPos}
+                onScroll={syncScroll}
+                placeholder="Type the text to send..."
+                spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
+                className="relative w-full h-full px-3 py-2 text-sm leading-[1.5] bg-transparent text-transparent selection:text-transparent selection:bg-accent-solid/30 resize-none outline-none placeholder:text-text-disabled"
+                style={{ caretColor: 'var(--color-text-primary, #e0e0e0)' }}
+              />
+            </div>
+          </div>
 
-              {showVarsDropdown && (
-                <div className="absolute left-0 top-full mt-1 z-10 w-[320px] bg-bg-elevated border border-border-subtle rounded-lg shadow-xl overflow-hidden">
+          {/* Right: collapsible side panel */}
+          {activePanel && (
+            <div className="w-[300px] shrink-0 border-l border-border-subtle flex flex-col">
+              {/* ── Emoji Panel ── */}
+              {activePanel === 'emoji' && (
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <EmojiPicker
+                    onEmojiClick={handleEmojiClick}
+                    theme={Theme.DARK}
+                    width="100%"
+                    height="100%"
+                    searchPlaceholder="Search emoji..."
+                    previewConfig={{ showPreview: false }}
+                    skinTonesDisabled
+                    style={{
+                      '--epr-bg-color': '#2a2a2a',
+                      '--epr-category-label-bg-color': '#2a2a2a',
+                      '--epr-hover-bg-color': '#353535',
+                      '--epr-search-input-bg-color': '#0e0e0e',
+                      '--epr-search-border-color': 'rgba(255, 255, 255, 0.06)',
+                      '--epr-text-color': '#e0e0e0',
+                      '--epr-category-icon-active-color': '#42a5f5',
+                      '--epr-highlight-color': '#42a5f5',
+                    } as React.CSSProperties}
+                  />
+                </div>
+              )}
+
+              {/* ── Variables Panel ── */}
+              {activePanel === 'variables' && (
+                <div className="flex-1 min-h-0 overflow-y-auto">
                   {VARIABLE_GROUPS.map((group) => (
                     <div key={group.label}>
                       <div className="px-3 py-1.5 text-[10px] font-semibold text-text-tertiary uppercase tracking-wide border-b border-border-subtle">
@@ -369,152 +359,116 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                   </div>
                 </div>
               )}
-            </div>
 
-            {/* Snippets toggle */}
-            <button
-              type="button"
-              onClick={() => setShowSnippets(!showSnippets)}
-              className={toolbarBtnClass(showSnippets)}
-              title="Saved text snippets"
-            >
-              <BookmarkPlus size={14} />
-              Snippets
-              {showSnippets ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-            </button>
-          </div>
-
-          {/* Emoji Picker */}
-          {showEmojiPicker && (
-            <div className="mt-2 rounded-lg overflow-hidden border border-border-subtle">
-              <EmojiPicker
-                onEmojiClick={handleEmojiClick}
-                theme={Theme.DARK}
-                width="100%"
-                height={300}
-                searchPlaceholder="Search emoji..."
-                previewConfig={{ showPreview: false }}
-                skinTonesDisabled
-                style={{
-                  '--epr-bg-color': '#2a2a2a',
-                  '--epr-category-label-bg-color': '#2a2a2a',
-                  '--epr-hover-bg-color': '#353535',
-                  '--epr-search-input-bg-color': '#0e0e0e',
-                  '--epr-search-border-color': 'rgba(255, 255, 255, 0.06)',
-                  '--epr-text-color': '#e0e0e0',
-                  '--epr-category-icon-active-color': '#42a5f5',
-                  '--epr-highlight-color': '#42a5f5',
-                } as React.CSSProperties}
-              />
-            </div>
-          )}
-
-          {/* Snippets Panel */}
-          {showSnippets && (
-            <div className="mt-2 border border-border-subtle rounded-lg overflow-hidden">
-              {/* Save current as snippet */}
-              <div className="px-3 py-2 bg-bg-card border-b border-border-subtle">
-                {savingSnippet ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={snippetName}
-                      onChange={(e) => setSnippetName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') { e.preventDefault(); handleSaveSnippet(); }
-                        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setSavingSnippet(false); }
-                      }}
-                      placeholder="Snippet name..."
-                      autoFocus
-                      className="flex-1 h-7 px-2 text-xs text-text-primary bg-bg-input border border-border-subtle rounded outline-none focus:border-accent-solid placeholder:text-text-disabled"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleSaveSnippet}
-                      disabled={!snippetName.trim() || !text.trim()}
-                      className="px-3 py-1 text-[11px] font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Save
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSavingSnippet(false)}
-                      className="px-2 py-1 text-[11px] text-text-tertiary hover:text-text-primary transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setSavingSnippet(true)}
-                    disabled={!text.trim()}
-                    className="text-[11px] font-medium text-accent-light hover:text-accent-solid transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    + Save current text as snippet
-                  </button>
-                )}
-              </div>
-
-              {/* Snippet list */}
-              <div className="max-h-[150px] overflow-y-auto">
-                {snippets.length === 0 ? (
-                  <div className="px-3 py-4 text-center text-[11px] text-text-disabled">
-                    No saved snippets yet
-                  </div>
-                ) : (
-                  snippets.map((s) => (
-                    <div
-                      key={s.id}
-                      className="flex items-center gap-2 px-3 py-2 hover:bg-bg-card transition-colors group border-b border-border-subtle last:border-b-0"
-                    >
+              {/* ── Snippets Panel ── */}
+              {activePanel === 'snippets' && (
+                <div className="flex-1 min-h-0 flex flex-col">
+                  {/* Save current as snippet */}
+                  <div className="px-3 py-2 bg-bg-card border-b border-border-subtle shrink-0">
+                    {savingSnippet ? (
+                      <div className="flex flex-col gap-2">
+                        <input
+                          type="text"
+                          value={snippetName}
+                          onChange={(e) => setSnippetName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') { e.preventDefault(); handleSaveSnippet(); }
+                            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setSavingSnippet(false); }
+                          }}
+                          placeholder="Snippet name..."
+                          autoFocus
+                          className="h-7 px-2 text-xs text-text-primary bg-bg-input border border-border-subtle rounded outline-none focus:border-accent-solid placeholder:text-text-disabled"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleSaveSnippet}
+                            disabled={!snippetName.trim() || !text.trim()}
+                            className="px-3 py-1 text-[11px] font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSavingSnippet(false)}
+                            className="px-2 py-1 text-[11px] text-text-tertiary hover:text-text-primary transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
                       <button
                         type="button"
-                        onClick={() => handleInsertSnippet(s.text)}
-                        className="flex-1 text-left min-w-0"
-                        title="Insert at cursor"
+                        onClick={() => setSavingSnippet(true)}
+                        disabled={!text.trim()}
+                        className="text-[11px] font-medium text-accent-light hover:text-accent-solid transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       >
-                        <div className="text-xs font-medium text-text-primary truncate">{s.name}</div>
-                        <div className="text-[11px] text-text-tertiary truncate mt-0.5">{s.text}</div>
+                        + Save current text as snippet
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteSnippet(s.id)}
-                        className="shrink-0 p-1 text-text-disabled hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
-                        title="Delete snippet"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
+                    )}
+                  </div>
+
+                  {/* Snippet list */}
+                  <div className="flex-1 overflow-y-auto">
+                    {snippets.length === 0 ? (
+                      <div className="px-3 py-4 text-center text-[11px] text-text-disabled">
+                        No saved snippets yet
+                      </div>
+                    ) : (
+                      snippets.map((s) => (
+                        <div
+                          key={s.id}
+                          className="flex items-center gap-2 px-3 py-2 hover:bg-bg-card transition-colors group border-b border-border-subtle last:border-b-0"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleInsertSnippet(s.text)}
+                            className="flex-1 text-left min-w-0"
+                            title="Insert at cursor"
+                          >
+                            <div className="text-xs font-medium text-text-primary truncate">{s.name}</div>
+                            <div className="text-[11px] text-text-tertiary truncate mt-0.5">{s.text}</div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSnippet(s.id)}
+                            className="shrink-0 p-1 text-text-disabled hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                            title="Delete snippet"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
-
-          {/* Hints */}
-          <div className="mt-2">
-            <p className="text-[11px] text-text-tertiary">
-              Ctrl+Enter to confirm
-            </p>
-          </div>
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-subtle shrink-0">
-          <button
-            onClick={onClose}
-            className="px-4 py-1.5 text-xs font-medium text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle rounded transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={!text.trim()}
-            className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Confirm
-          </button>
+        <div className="flex items-center justify-between px-4 py-3 border-t border-border-subtle shrink-0">
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] text-text-tertiary">{text.length} chars</span>
+            <span className="text-[11px] text-text-tertiary">Ctrl+Enter to confirm</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-1.5 text-xs font-medium text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle rounded transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={!text.trim()}
+              className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Confirm
+            </button>
+          </div>
         </div>
       </div>
     </div>

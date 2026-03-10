@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
 
@@ -15,8 +15,8 @@ const actionTypes = [
   { value: 'MiddleClick', label: 'Mid Click' },
   { value: 'KeyDown', label: 'KeyDown' },
   { value: 'KeyUp', label: 'KeyUp' },
-  { value: 'ScrollUp', label: 'Scroll ↑' },
-  { value: 'ScrollDown', label: 'Scroll ↓' },
+  { value: 'ScrollUp', label: 'ScrollUp ↑' },
+  { value: 'ScrollDown', label: 'ScrollDown ↓' },
   { value: 'SendText', label: 'Text' },
 ];
 
@@ -126,16 +126,16 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
         style={{ animation: 'slide-in-right 0.2s ease-out', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-4 border-b border-border-subtle">
+        <div className="flex items-center gap-3 px-4 py-4 border-b border-border-subtle">
+          <button onClick={onClose} className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" title="Close panel">
+            <ArrowLeft size={16} />
+          </button>
           <div>
             <div className="text-sm font-semibold text-text-primary">Edit Action</div>
             <div className="text-[11px] text-text-tertiary mt-0.5">
               Action #{(actionIndex ?? 0) + 1} — {actionType}
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors">
-            <X size={14} />
-          </button>
         </div>
 
         {/* Body */}
