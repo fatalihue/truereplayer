@@ -1,11 +1,14 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Copy, Trash2, ChevronRight, Plus } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Copy, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
+import { useToast } from '../state/ToastContext';
 import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors } from '../utils/displayUtils';
 import { SendTextDialog } from './SendTextDialog';
+import { BulkActionBar } from './BulkActionBar';
+import type { ColumnVisibility } from './Toolbar';
 
 function ActionIcon({ actionType }: { actionType: string }) {
   const size = 12;
@@ -22,7 +25,12 @@ interface EditingCell {
   field: 'delay' | 'comment' | 'x' | 'y' | 'key';
 }
 
-export function ActionTable() {
+interface ActionTableProps {
+  columnVisibility: ColumnVisibility;
+  onOpenSheet?: (index: number) => void;
+}
+
+export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps) {
   const { actions, highlightedActionIndex, buttonStates, activeProfile } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
@@ -50,7 +58,21 @@ export function ActionTable() {
   const belowButtonRef = useRef<HTMLButtonElement>(null);
   const submenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sendTextInsert, setSendTextInsert] = useState<{ insertIndex: number } | null>(null);
+  const { showToast } = useToast();
   const contextMenuEnabled = !buttonStates.recordingActive && !buttonStates.replayActive;
+
+  // Row action button handler (opens context menu at button position)
+  const handleRowActionClick = useCallback((idx: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!contextMenuEnabled) return;
+    if (!selectedIndices.has(idx)) {
+      setSelectedIndices(new Set([idx]));
+      lastClickedIndex.current = idx;
+    }
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setActiveSubmenu(null);
+    setContextMenu({ x: rect.left, y: rect.bottom + 4, rowIndex: idx });
+  }, [contextMenuEnabled, selectedIndices]);
 
   // Suppress hotkeys while SendText edit dialog or inline key editing is active
   const modalActive = sendTextEdit !== null || editingCell !== null || contextMenu !== null || sendTextInsert !== null;
@@ -118,6 +140,17 @@ export function ActionTable() {
       return valid.size === prev.size ? prev : valid;
     });
   }, [actions.length]);
+
+  // Listen for external selection updates (e.g. Move Up/Down from Toolbar)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const indices = (e as CustomEvent).detail as number[];
+      setSelectedIndices(new Set(indices));
+      lastClickedIndex.current = indices[0] ?? null;
+    };
+    window.addEventListener('selection:set', handler);
+    return () => window.removeEventListener('selection:set', handler);
+  }, []);
 
   // Close context menu on click outside
   useEffect(() => {
@@ -212,7 +245,7 @@ export function ActionTable() {
 
   // Handle keyboard on the table container
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (editingCell) return;
+    if (editingCell || sendTextEdit || sendTextInsert) return;
 
     if (e.key === 'Delete' && selectedIndices.size > 0) {
       e.preventDefault();
@@ -229,7 +262,7 @@ export function ActionTable() {
       e.preventDefault();
       setSelectedIndices(new Set());
     }
-  }, [editingCell, selectedIndices, send, actions]);
+  }, [editingCell, sendTextEdit, sendTextInsert, selectedIndices, send, actions]);
 
   // Handle edit input key events
   const handleEditKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -473,27 +506,56 @@ export function ActionTable() {
       onKeyDown={handleKeyDown}
     >
       {/* Header */}
-      <div className="grid grid-cols-[50px_140px_100px_65px_65px_70px_1fr] items-center h-row border-b border-border-subtle shrink-0">
+      <div
+        className="grid items-center h-row border-b border-border-subtle shrink-0"
+        style={{ gridTemplateColumns: [
+          '28px', '50px',
+          ...(columnVisibility.action ? ['140px'] : []),
+          ...(columnVisibility.key ? ['100px'] : []),
+          ...(columnVisibility.x ? ['65px'] : []),
+          ...(columnVisibility.y ? ['65px'] : []),
+          ...(columnVisibility.delay ? ['70px'] : []),
+          ...(columnVisibility.notes ? ['1fr'] : []),
+          '36px',
+        ].join(' ') }}
+      >
+        <span className="flex items-center justify-center">
+          <input
+            type="checkbox"
+            checked={actions.length > 0 && selectedIndices.size === actions.length}
+            onChange={(e) => {
+              if (e.target.checked) {
+                setSelectedIndices(new Set(actions.map((_, i) => i)));
+              } else {
+                setSelectedIndices(new Set());
+              }
+            }}
+            className="checkbox-subtle"
+          />
+        </span>
         <span className="text-xs font-semibold text-text-tertiary pl-3">#</span>
-        <span className="text-xs font-semibold text-text-tertiary pl-1">Action</span>
-        <span className="text-xs font-semibold text-text-tertiary pl-1">Key</span>
-        <span className="text-xs font-semibold text-text-tertiary pl-2">X</span>
-        <span className="text-xs font-semibold text-text-tertiary pl-2">Y</span>
-        <span className="text-xs font-semibold text-text-tertiary pl-2">Delay</span>
-        <span className="text-xs font-semibold text-text-tertiary pl-2 pr-2">Notes</span>
+        {columnVisibility.action && <span className="text-xs font-semibold text-text-tertiary pl-1">Action</span>}
+        {columnVisibility.key && <span className="text-xs font-semibold text-text-tertiary pl-1">Key</span>}
+        {columnVisibility.x && <span className="text-xs font-semibold text-text-tertiary pl-2">X</span>}
+        {columnVisibility.y && <span className="text-xs font-semibold text-text-tertiary pl-2">Y</span>}
+        {columnVisibility.delay && <span className="text-xs font-semibold text-text-tertiary pl-2">Delay</span>}
+        {columnVisibility.notes && <span className="text-xs font-semibold text-text-tertiary pl-2 pr-2">Notes</span>}
+        <span />
       </div>
 
       {/* Body */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <table className="w-full table-fixed">
           <colgroup>
+            <col style={{ width: 28 }} />
             <col style={{ width: 50 }} />
-            <col style={{ width: 140 }} />
-            <col style={{ width: 100 }} />
-            <col style={{ width: 65 }} />
-            <col style={{ width: 65 }} />
-            <col style={{ width: 70 }} />
-            <col />
+            {columnVisibility.action && <col style={{ width: 140 }} />}
+            {columnVisibility.key && <col style={{ width: 100 }} />}
+            {columnVisibility.x && <col style={{ width: 65 }} />}
+            {columnVisibility.y && <col style={{ width: 65 }} />}
+            {columnVisibility.delay && <col style={{ width: 70 }} />}
+            {columnVisibility.notes && <col />}
+            <col style={{ width: 36 }} />
           </colgroup>
           <tbody ref={tbodyRef}>
             {actions.map((action, idx) => {
@@ -516,11 +578,11 @@ export function ActionTable() {
                   onMouseDown={(e) => handleRowMouseDown(idx, e)}
                   onClick={(e) => handleRowClick(idx, e)}
                   onContextMenu={(e) => handleRowContextMenu(idx, e)}
-                  className={`h-row border-b border-border-subtle transition-colors cursor-default relative ${
+                  className={`group h-row border-b border-border-subtle transition-colors cursor-default relative ${
                     isDragged ? 'opacity-40' : ''
                   } ${
                     isHighlighted
-                      ? 'bg-[rgba(218,185,80,0.08)]'
+                      ? 'bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)]'
                       : isSelected
                         ? 'bg-[rgba(96,205,255,0.08)]'
                         : idx % 2 === 0
@@ -530,15 +592,36 @@ export function ActionTable() {
                 >
                   {/* Drop indicator lines */}
                   {showDropBefore && (
-                    <td colSpan={7} className="absolute top-0 left-0 right-0 h-0 p-0 border-0">
+                    <td colSpan={99} className="absolute top-0 left-0 right-0 h-0 p-0 border-0">
                       <div className="absolute top-[-1px] left-2 right-2 h-[2px] bg-accent-solid rounded-full" />
                     </td>
                   )}
                   {showDropAfter && (
-                    <td colSpan={7} className="absolute bottom-0 left-0 right-0 h-0 p-0 border-0">
+                    <td colSpan={99} className="absolute bottom-0 left-0 right-0 h-0 p-0 border-0">
                       <div className="absolute bottom-[-1px] left-2 right-2 h-[2px] bg-accent-solid rounded-full" />
                     </td>
                   )}
+
+                  {/* Checkbox */}
+                  <td className="w-7">
+                    <div className="flex items-center justify-center">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          setSelectedIndices(prev => {
+                            const next = new Set(prev);
+                            if (next.has(idx)) next.delete(idx);
+                            else next.add(idx);
+                            return next;
+                          });
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="checkbox-subtle"
+                      />
+                    </div>
+                  </td>
 
                   {/* Row number */}
                   <td className="pl-3">
@@ -546,6 +629,7 @@ export function ActionTable() {
                   </td>
 
                   {/* Action type pill */}
+                  {columnVisibility.action && (
                   <td className="pl-1">
                     <span
                       className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium"
@@ -555,8 +639,10 @@ export function ActionTable() {
                       {action.actionType}
                     </span>
                   </td>
+                  )}
 
                   {/* Key */}
+                  {columnVisibility.key && (
                   <td className="pl-1">
                     {editingCell?.index === idx && editingCell.field === 'key' ? (
                       <input
@@ -589,8 +675,10 @@ export function ActionTable() {
                       </span>
                     ) : null}
                   </td>
+                  )}
 
                   {/* X */}
+                  {columnVisibility.x && (
                   <td className="pl-2">
                     {editingCell?.index === idx && editingCell.field === 'x' ? (
                       <input
@@ -611,8 +699,10 @@ export function ActionTable() {
                       </span>
                     )}
                   </td>
+                  )}
 
                   {/* Y */}
+                  {columnVisibility.y && (
                   <td className="pl-2">
                     {editingCell?.index === idx && editingCell.field === 'y' ? (
                       <input
@@ -633,8 +723,10 @@ export function ActionTable() {
                       </span>
                     )}
                   </td>
+                  )}
 
                   {/* Delay */}
+                  {columnVisibility.delay && (
                   <td className="pl-2">
                     {editingCell?.index === idx && editingCell.field === 'delay' ? (
                       <input
@@ -655,8 +747,10 @@ export function ActionTable() {
                       </span>
                     )}
                   </td>
+                  )}
 
                   {/* Notes */}
+                  {columnVisibility.notes && (
                   <td className="pl-2 pr-2">
                     {editingCell?.index === idx && editingCell.field === 'comment' ? (
                       <input
@@ -676,6 +770,17 @@ export function ActionTable() {
                         {action.comment || '\u00A0'}
                       </span>
                     )}
+                  </td>
+                  )}
+
+                  {/* Row action */}
+                  <td className="w-9">
+                    <button
+                      onClick={(e) => handleRowActionClick(idx, e)}
+                      className="w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-100 text-text-tertiary hover:text-text-primary transition-opacity"
+                    >
+                      <MoreHorizontal size={14} />
+                    </button>
                   </td>
                 </tr>
               );
@@ -714,6 +819,28 @@ export function ActionTable() {
         />
       )}
 
+      {/* Bulk Action Bar — inline at bottom */}
+      {selectedIndices.size > 0 && !buttonStates.recordingActive && !buttonStates.replayActive && (
+        <BulkActionBar
+          selectedCount={selectedIndices.size}
+          selectedIndices={selectedIndices}
+          onClearSelection={() => setSelectedIndices(new Set())}
+          onDelete={() => {
+            send({ type: 'actions:delete', payload: { indices: Array.from(selectedIndices) } });
+            showToast(`Deleted ${selectedIndices.size} action(s)`, 'success');
+            setSelectedIndices(new Set());
+          }}
+          onDuplicate={() => {
+            send({ type: 'actions:duplicate', payload: { indices: Array.from(selectedIndices) } });
+            showToast(`Duplicated ${selectedIndices.size} action(s)`, 'success');
+          }}
+          onSetDelay={(delay) => {
+            send({ type: 'actions:bulkUpdateDelay', payload: { indices: Array.from(selectedIndices), delay } });
+            showToast(`Set delay to ${delay}ms for ${selectedIndices.size} action(s)`, 'success');
+          }}
+        />
+      )}
+
       {/* Context Menu — rendered via portal to escape overflow:hidden */}
       {contextMenu && menuPos && createPortal(
         <div
@@ -749,6 +876,24 @@ export function ActionTable() {
 
           <div className="my-1 border-t border-border-subtle" />
 
+          {/* Edit — SendText rows open SendTextDialog; others open sheet panel */}
+          <button
+            onMouseEnter={() => setActiveSubmenu(null)}
+            onClick={() => {
+              const rowAction = actions[contextMenu.rowIndex];
+              if (rowAction?.actionType === 'SendText') {
+                setSendTextEdit({ index: contextMenu.rowIndex, text: rowAction.key });
+              } else {
+                onOpenSheet?.(contextMenu.rowIndex);
+              }
+              closeContextMenu();
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Pencil size={13} className="text-text-tertiary" />
+            Edit
+          </button>
+
           {/* Duplicate */}
           <button
             onMouseEnter={() => setActiveSubmenu(null)}
@@ -763,10 +908,13 @@ export function ActionTable() {
           <button
             onMouseEnter={() => setActiveSubmenu(null)}
             onClick={handleContextDelete}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-recording hover:bg-bg-elevated transition-colors"
+            className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-recording hover:bg-bg-elevated transition-colors"
           >
-            <Trash2 size={13} />
-            Delete
+            <span className="flex items-center gap-2.5">
+              <Trash2 size={13} />
+              Delete
+            </span>
+            <span className="text-[10px] text-text-disabled font-mono">Del</span>
           </button>
 
           {/* Submenu */}

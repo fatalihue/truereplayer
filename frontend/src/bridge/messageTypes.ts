@@ -40,6 +40,8 @@ export interface SettingsState {
   foregroundHotkey: string;
   alwaysOnTop: boolean;
   minimizeToTray: boolean;
+  runOnStartup: boolean;
+  startMinimized: boolean;
 }
 
 export interface ButtonStates {
@@ -128,9 +130,12 @@ export type OutgoingMessage =
   | { type: 'selection:changed'; payload: { indices: number[] } }
   | { type: 'window:alwaysOnTop'; payload: { enabled: boolean } }
   | { type: 'window:minimizeToTray'; payload: { enabled: boolean } }
+  | { type: 'window:runOnStartup'; payload: { enabled: boolean } }
+  | { type: 'window:startMinimized'; payload: { enabled: boolean } }
   | { type: 'profile:export'; payload: { names: string[] } }
   | { type: 'profile:import'; payload: Record<string, never> }
   | { type: 'ui:modalOpen'; payload: Record<string, never> }
   | { type: 'ui:modalClose'; payload: Record<string, never> }
   | { type: 'update:apply'; payload: Record<string, never> }
-  | { type: 'update:dismiss'; payload: Record<string, never> };
+  | { type: 'update:dismiss'; payload: Record<string, never> }
+  | { type: 'theme:colors'; payload: { bgSurface: string; bgCard: string; textPrimary: string; textSecondary: string; accentSolid: string; borderSubtle: string } };

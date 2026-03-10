@@ -13,8 +13,9 @@ namespace TrueReplayer.Services
         {
             // Window
             public bool AlwaysOnTop { get; set; } = false;
-            public bool MinimizeToTray { get; set; } = false;
+            public bool MinimizeToTray { get; set; } = true;
             public bool RunOnStartup { get; set; } = false;
+            public bool StartMinimized { get; set; } = false;
             // Execution
             public bool UseCustomDelay { get; set; } = true;
             public int CustomDelay { get; set; } = 100;
@@ -71,6 +72,7 @@ namespace TrueReplayer.Services
             var s = Load();
             profile.AlwaysOnTop = s.AlwaysOnTop;
             profile.MinimizeToTray = s.MinimizeToTray;
+            profile.StartMinimized = s.StartMinimized;
             profile.RecordMouse = s.RecordMouse;
             profile.RecordScroll = s.RecordScroll;
             profile.RecordKeyboard = s.RecordKeyboard;

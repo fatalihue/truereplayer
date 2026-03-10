@@ -1,56 +1,54 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useBridge } from '../bridge/BridgeContext';
+import { CheckCircle2, XCircle, Info } from 'lucide-react';
+import { useToast, type ToastType } from '../state/ToastContext';
+
+const iconMap: Record<ToastType, { Icon: React.ElementType; color: string }> = {
+  success: { Icon: CheckCircle2, color: 'var(--color-replay)' },
+  error:   { Icon: XCircle,      color: 'var(--color-recording)' },
+  info:    { Icon: Info,          color: 'var(--color-accent)' },
+};
 
 export function Toast() {
-  const { subscribe } = useBridge();
-  const [message, setMessage] = useState<string | null>(null);
-  const [visible, setVisible] = useState(false);
+  const { toasts } = useToast();
 
-  const show = useCallback((text: string) => {
-    setMessage(text);
-    setVisible(true);
-  }, []);
-
-  // Auto-dismiss after 3s
-  useEffect(() => {
-    if (!visible) return;
-    const timer = setTimeout(() => setVisible(false), 3000);
-    return () => clearTimeout(timer);
-  }, [visible, message]);
-
-  // Subscribe to alert:show messages
-  useEffect(() => {
-    return subscribe((msg) => {
-      if (msg.type === 'alert:show') {
-        show(msg.payload.message);
-      }
-    });
-  }, [subscribe, show]);
-
-  if (!visible || !message) return null;
+  if (toasts.length === 0) return null;
 
   return (
     <div
       style={{
         position: 'fixed',
-        bottom: 32,
-        left: '50%',
-        transform: 'translateX(-50%)',
+        bottom: 40,
+        right: 16,
         zIndex: 9999,
-        background: '#2a2a2a',
-        border: '1px solid rgba(255, 107, 107, 0.3)',
-        borderRadius: 8,
-        padding: '10px 18px',
-        color: '#ff6b6b',
-        fontSize: 13,
-        fontWeight: 500,
-        boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-        animation: 'toast-in 0.2s ease-out',
-        maxWidth: '80%',
-        textAlign: 'center' as const,
+        display: 'flex',
+        flexDirection: 'column-reverse',
+        gap: 8,
+        pointerEvents: 'none',
       }}
     >
-      {message}
+      {toasts.map((toast) => {
+        const { Icon, color } = iconMap[toast.type];
+        return (
+          <div
+            key={toast.id}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '10px 14px',
+              background: 'var(--color-bg-card)',
+              border: '1px solid var(--color-border-default)',
+              borderRadius: 'var(--ui-border-radius)',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+              maxWidth: 320,
+              animation: 'toast-in 0.2s ease-out',
+              pointerEvents: 'auto',
+            }}
+          >
+            <Icon size={14} style={{ color, flexShrink: 0 }} />
+            <span className="text-ui text-text-primary">{toast.message}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Plus, Search, Pencil, Copy, Trash2, FolderOpen, Key, Crosshair, Upload, Download, Type, Ban } from 'lucide-react';
+import { Plus, Search, Pencil, Copy, Trash2, FolderOpen, Key, Crosshair, Upload, Download, Type, Ban, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
+import { KbdTag } from './common/KbdTag';
 
 interface ContextMenuState {
   x: number;
@@ -9,7 +10,12 @@ interface ContextMenuState {
   profileName: string;
 }
 
-export function ProfilePanel() {
+interface ProfilePanelProps {
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+}
+
+export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePanelProps) {
   const { profiles } = useAppState();
   const { send, subscribe } = useBridge();
   const [searchQuery, setSearchQuery] = useState('');
@@ -392,11 +398,47 @@ export function ProfilePanel() {
 
   return (
     <>
-      <div className="flex flex-col w-[230px] bg-bg-surface border border-border-subtle rounded-ui overflow-hidden shrink-0">
+      <div className={`flex flex-col bg-bg-surface border border-border-subtle rounded-ui overflow-hidden shrink-0 transition-[width] duration-200 ${collapsed ? 'w-12' : 'w-[230px]'}`}>
+        {collapsed ? (
+          <>
+            <div className="flex items-center justify-center pt-3 pb-2">
+              <button
+                onClick={onToggleCollapse}
+                className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+                title="Expand sidebar"
+              >
+                <PanelLeftOpen size={14} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto flex flex-col items-center gap-1 px-1 pb-2">
+              {filtered.map((p) => (
+                <button
+                  key={p.name}
+                  onClick={(e) => { send({ type: 'profile:click', payload: { name: p.name } }); (e.target as HTMLElement).blur(); }}
+                  onContextMenu={(e) => handleContextMenu(e, p.name)}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold transition-colors ${
+                    p.isActive ? 'bg-accent-solid text-white' : 'bg-bg-elevated text-text-secondary hover:bg-bg-card'
+                  } ${p.isDisabled ? 'opacity-40' : ''}`}
+                  title={p.name}
+                >
+                  {p.name.charAt(0).toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
         {/* Header */}
         <div className="flex items-center justify-between px-3 pt-3 pb-2">
           <span className="text-xs font-semibold text-text-tertiary tracking-wider">PROFILES</span>
           <div className="flex items-center gap-0.5">
+            <button
+              onClick={onToggleCollapse}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+              title="Collapse sidebar"
+            >
+              <PanelLeftClose size={14} />
+            </button>
             <button
               onClick={handleExportClick}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
@@ -470,8 +512,8 @@ export function ProfilePanel() {
               )}
 
               {p.hotkey && (
-                <span className="shrink-0 px-1.5 py-0.5 rounded text-[11px] font-mono bg-hotkey-bg border border-hotkey-border text-hotkey-fg">
-                  {p.hotkey}
+                <span className="shrink-0">
+                  <KbdTag combo={p.hotkey} />
                 </span>
               )}
 
@@ -486,6 +528,8 @@ export function ProfilePanel() {
             </button>
           ))}
         </div>
+          </>
+        )}
       </div>
 
       {/* Context Menu */}

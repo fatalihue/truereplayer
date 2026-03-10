@@ -1,3 +1,4 @@
+import { Search } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 
 const statusConfig = {
@@ -6,7 +7,11 @@ const statusConfig = {
   replaying: { dot: 'bg-accent',    text: 'Replaying', bg: 'bg-[rgba(96,205,255,0.1)]', border: 'border-accent/20' },
 };
 
-export function TitleBar() {
+interface TitleBarProps {
+  onOpenCommandPalette?: () => void;
+}
+
+export function TitleBar({ onOpenCommandPalette }: TitleBarProps) {
   const { status } = useAppState();
   const cfg = statusConfig[status];
 
@@ -23,9 +28,27 @@ export function TitleBar() {
       {/* Spacer */}
       <div className="flex-1" />
 
+      {/* Command Palette Trigger */}
+      {onOpenCommandPalette && (
+        <button
+          onClick={onOpenCommandPalette}
+          className="no-drag flex items-center gap-2 px-3 py-1 bg-bg-surface border border-border-subtle rounded-ui hover:border-border-default hover:bg-bg-elevated transition-colors cursor-pointer min-w-[260px]"
+        >
+          <Search size={13} className="text-text-disabled" />
+          <span className="text-xs text-text-disabled flex-1 text-left">Search profiles, actions, commands...</span>
+          <div className="flex gap-0.5">
+            <span className="kbd">Ctrl</span>
+            <span className="kbd">K</span>
+          </div>
+        </button>
+      )}
+
+      {/* Spacer */}
+      <div className="flex-1" />
+
       {/* Status badge */}
       <div className={`no-drag flex items-center gap-1.5 px-2.5 py-1 rounded-full ${cfg.bg} border ${cfg.border} mr-[140px]`}>
-        <div className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+        <div className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} style={{ animation: 'pulse-dot 2s ease-in-out infinite' }} />
         <span className="text-[11px] font-medium text-text-primary">{cfg.text}</span>
       </div>
     </div>

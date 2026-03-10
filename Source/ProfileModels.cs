@@ -49,7 +49,10 @@ namespace TrueReplayer.Models
         public bool AlwaysOnTop { get; set; } = false;
 
         [JsonIgnore]
-        public bool MinimizeToTray { get; set; } = false;
+        public bool MinimizeToTray { get; set; } = true;
+
+        [JsonIgnore]
+        public bool StartMinimized { get; set; } = false;
 
         public string BatchDelay { get; set; } = "Delay (ms)";
         public string? LastProfileDirectory { get; set; }
