@@ -95,7 +95,8 @@ export type IncomingMessage =
   | { type: 'update:available'; payload: { version: string; currentVersion: string } }
   | { type: 'update:progress'; payload: { percent: number } }
   | { type: 'update:ready'; payload: Record<string, never> }
-  | { type: 'update:error'; payload: { message: string } };
+  | { type: 'update:error'; payload: { message: string } }
+  | { type: 'update:none'; payload: { currentVersion: string } };
 
 // ── Messages JS → C# ──
 
@@ -140,6 +141,7 @@ export type OutgoingMessage =
   | { type: 'profile:import'; payload: Record<string, never> }
   | { type: 'ui:modalOpen'; payload: Record<string, never> }
   | { type: 'ui:modalClose'; payload: Record<string, never> }
+  | { type: 'update:check'; payload: Record<string, never> }
   | { type: 'update:apply'; payload: Record<string, never> }
   | { type: 'update:dismiss'; payload: Record<string, never> }
   | { type: 'theme:colors'; payload: { bgSurface: string; bgCard: string; textPrimary: string; textSecondary: string; accentSolid: string; borderSubtle: string } };

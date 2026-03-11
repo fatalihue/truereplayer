@@ -162,6 +162,7 @@ namespace TrueReplayer
                     case "window:startMinimized": HandleStartMinimized(payload); break;
                     case "ui:modalOpen": InputHookManager.SuppressAllHotkeys = true; break;
                     case "ui:modalClose": InputHookManager.SuppressAllHotkeys = false; break;
+                    case "update:check": _ = CheckForUpdateAsync(); break;
                     case "update:apply": _ = HandleUpdateApply(); break;
                     case "update:dismiss": break;
                     case "theme:colors": HandleThemeColors(payload); break;
@@ -408,14 +409,29 @@ namespace TrueReplayer
 
         private async Task CheckForUpdateAsync()
         {
-            var newVersion = await UpdateService.CheckForUpdateAsync();
-            if (newVersion != null)
+            try
             {
-                SendMessage("update:available", new
+                var newVersion = await UpdateService.CheckForUpdateAsync();
+                if (newVersion != null)
                 {
-                    version = newVersion,
-                    currentVersion = UpdateService.CurrentVersion ?? "unknown"
-                });
+                    SendMessage("update:available", new
+                    {
+                        version = newVersion,
+                        currentVersion = UpdateService.CurrentVersion ?? "unknown"
+                    });
+                }
+                else
+                {
+                    SendMessage("update:none", new
+                    {
+                        currentVersion = UpdateService.CurrentVersion ?? "unknown"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Update] Check failed: {ex.Message}");
+                SendMessage("update:error", new { message = "Failed to check for updates" });
             }
         }
 

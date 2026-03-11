@@ -170,10 +170,19 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
 
 export function SettingsPanel() {
   const { settings } = useAppState();
-  const { send } = useBridge();
+  const { send, subscribe } = useBridge();
   const selectionRef = useSelectionRef();
   const hotkeyFocusCount = useRef(0);
   const [activeTab, setActiveTab] = useState<'profile' | 'global'>('profile');
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'up-to-date' | 'error'>('idle');
+
+  useEffect(() => {
+    return subscribe((msg) => {
+      if (msg.type === 'update:available') setUpdateStatus('idle');
+      if (msg.type === 'update:none') setUpdateStatus('up-to-date');
+      if (msg.type === 'update:error') setUpdateStatus('error');
+    });
+  }, [subscribe]);
 
   const changeSetting = (key: string, value: string | boolean | number) => {
     send({ type: 'settings:change', payload: { key, value } });
@@ -367,9 +376,17 @@ export function SettingsPanel() {
                 <Toggle isOn={true} onChange={() => {}} />
               </SettingRow>
               <button
-                className="w-full flex items-center justify-center gap-1.5 mt-1 h-7 rounded text-xs text-text-secondary bg-bg-elevated border border-border-default hover:bg-bg-card hover:text-text-primary transition-colors"
+                onClick={() => {
+                  setUpdateStatus('checking');
+                  send({ type: 'update:check', payload: {} });
+                }}
+                disabled={updateStatus === 'checking'}
+                className="w-full flex items-center justify-center gap-1.5 mt-1 h-7 rounded text-xs text-text-secondary bg-bg-elevated border border-border-default hover:bg-bg-card hover:text-text-primary transition-colors disabled:opacity-50"
               >
-                Check for Updates
+                {updateStatus === 'checking' ? 'Checking...'
+                  : updateStatus === 'up-to-date' ? '✓ Up to date'
+                  : updateStatus === 'error' ? 'Check failed — Retry'
+                  : 'Check for Updates'}
               </button>
             </Section>
           </>
