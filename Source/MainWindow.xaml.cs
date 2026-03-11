@@ -127,6 +127,14 @@ namespace TrueReplayer
             // Wire up unsaved changes guard for window close and tray exit
             windowEventManager.OnCloseRequested = HandleCloseGuardAsync;
             TrayIconService.OnTrayExitRequested = HandleCloseGuardAsync;
+            TrayIconService.OnTraySettingChanged = () =>
+            {
+                DispatcherQueue.TryEnqueue(() => bridge.PushSettingsLoaded());
+            };
+            TrayIconService.OnAlwaysOnTopChanged = (enabled) =>
+            {
+                DispatcherQueue.TryEnqueue(() => windowEventManager.UpdateAlwaysOnTop(enabled));
+            };
 
             // Recover from WebView2 renderer crashes by reloading the page
             WebView.CoreWebView2.ProcessFailed += (s, e) =>

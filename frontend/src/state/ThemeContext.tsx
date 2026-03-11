@@ -52,10 +52,28 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const resolvedColors = useMemo(() => resolveThemeColors(config), [config]);
 
-  // Apply theme to DOM and persist whenever config changes
+  // Apply theme to DOM, persist, and notify C# bridge whenever config changes
   useEffect(() => {
     applyThemeConfig(resolvedColors, config.uiSettings);
     saveThemeConfig(config);
+
+    // Send theme colors to C# for native dialog styling
+    try {
+      const webview = (window as any).chrome?.webview;
+      if (webview) {
+        webview.postMessage({
+          type: 'theme:colors',
+          payload: {
+            bgSurface: resolvedColors['bg-surface'],
+            bgCard: resolvedColors['bg-card'],
+            textPrimary: resolvedColors['text-primary'],
+            textSecondary: resolvedColors['text-secondary'],
+            accentSolid: resolvedColors['accent-solid'],
+            borderSubtle: resolvedColors['border-subtle'],
+          },
+        });
+      }
+    } catch { /* WebView not available (dev mode) */ }
   }, [config, resolvedColors]);
 
   const selectPreset = useCallback((id: string) => {
@@ -140,7 +158,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       version: 1,
       baseThemeId: baseId,
       colorOverrides: overrides,
-      uiSettings: { ...theme.uiSettings },
+      uiSettings: { ...DEFAULT_UI_SETTINGS, ...theme.uiSettings },
     });
   }, []);
 

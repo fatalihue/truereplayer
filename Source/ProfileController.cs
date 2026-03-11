@@ -31,10 +31,45 @@ namespace TrueReplayer.Controllers
         public ObservableCollection<ProfileEntry> ProfileEntries { get; } = new();
         private Dictionary<string, WindowTarget> _cachedWindowTargets = new();
 
+        // Theme colors for native dialogs (sent from React frontend)
+        private SolidColorBrush? _dialogBackground;
+        private SolidColorBrush? _dialogForeground;
+        private SolidColorBrush? _dialogTextSecondary;
+
         public ProfileController(MainWindow window)
         {
             this.window = window;
             SetupProfileWatcher();
+        }
+
+        public void SetDialogThemeColors(string bgSurface, string bgCard, string textPrimary, string textSecondary, string? accentSolid, string? borderSubtle)
+        {
+            _dialogBackground = ParseHexBrush(bgCard) ?? ParseHexBrush(bgSurface);
+            _dialogForeground = ParseHexBrush(textPrimary);
+            _dialogTextSecondary = ParseHexBrush(textSecondary);
+        }
+
+        private static SolidColorBrush? ParseHexBrush(string? hex)
+        {
+            if (string.IsNullOrEmpty(hex) || hex[0] != '#') return null;
+            try
+            {
+                hex = hex.TrimStart('#');
+                byte a = 255;
+                byte r, g, b;
+                if (hex.Length == 8) { a = Convert.ToByte(hex[..2], 16); r = Convert.ToByte(hex[2..4], 16); g = Convert.ToByte(hex[4..6], 16); b = Convert.ToByte(hex[6..8], 16); }
+                else if (hex.Length == 6) { r = Convert.ToByte(hex[..2], 16); g = Convert.ToByte(hex[2..4], 16); b = Convert.ToByte(hex[4..6], 16); }
+                else return null;
+                return new SolidColorBrush(ColorHelper.FromArgb(a, r, g, b));
+            }
+            catch { return null; }
+        }
+
+        public void ApplyDialogTheme(ContentDialog dialog, TextBlock? messageBlock = null)
+        {
+            if (_dialogBackground != null) dialog.Background = _dialogBackground;
+            if (_dialogForeground != null) dialog.Foreground = _dialogForeground;
+            if (messageBlock != null && _dialogForeground != null) messageBlock.Foreground = _dialogForeground;
         }
 
         /// Run a WinForms file dialog on a dedicated STA thread so the UI thread stays responsive.
@@ -306,7 +341,6 @@ namespace TrueReplayer.Controllers
             var messageBlock = new TextBlock
             {
                 Text = $"Profile \"{profileName}\" is already loaded.",
-                Foreground = new SolidColorBrush(Colors.White),
                 TextWrapping = TextWrapping.Wrap
             };
 
@@ -319,11 +353,10 @@ namespace TrueReplayer.Controllers
                 SecondaryButtonText = "Save as New",
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Primary,
-                Background = new SolidColorBrush(ColorHelper.FromArgb(255, 43, 43, 43)),
-                Foreground = new SolidColorBrush(Colors.White),
                 CornerRadius = new CornerRadius(8),
                 Content = messageBlock
             };
+            ApplyDialogTheme(dialog, messageBlock);
 
             InputHookManager.SuppressAllHotkeys = true;
             try
@@ -347,7 +380,6 @@ namespace TrueReplayer.Controllers
             var messageBlock = new TextBlock
             {
                 Text = "You have unsaved actions. Save before closing?",
-                Foreground = new SolidColorBrush(Colors.White),
                 TextWrapping = TextWrapping.Wrap
             };
 
@@ -360,11 +392,10 @@ namespace TrueReplayer.Controllers
                 SecondaryButtonText = "Discard",
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Primary,
-                Background = new SolidColorBrush(ColorHelper.FromArgb(255, 43, 43, 43)),
-                Foreground = new SolidColorBrush(Colors.White),
                 CornerRadius = new CornerRadius(8),
                 Content = messageBlock
             };
+            ApplyDialogTheme(dialog, messageBlock);
 
             InputHookManager.SuppressAllHotkeys = true;
             try
@@ -555,7 +586,6 @@ namespace TrueReplayer.Controllers
             var messageBlock = new TextBlock
             {
                 Text = $"A profile named \"{profileName}\" already exists. What would you like to do?",
-                Foreground = new SolidColorBrush(Colors.White),
                 TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap
             };
 
@@ -568,11 +598,10 @@ namespace TrueReplayer.Controllers
                 SecondaryButtonText = "Rename",
                 CloseButtonText = "Skip",
                 DefaultButton = ContentDialogButton.Secondary,
-                Background = new SolidColorBrush(ColorHelper.FromArgb(255, 43, 43, 43)),
-                Foreground = new SolidColorBrush(Colors.White),
                 CornerRadius = new CornerRadius(8),
                 Content = messageBlock
             };
+            ApplyDialogTheme(dialog, messageBlock);
 
             InputHookManager.SuppressAllHotkeys = true;
             try

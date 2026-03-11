@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight } from 'lucide-react';
+import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -44,8 +44,6 @@ function SettingRow({ label, children }: { label: string; children: React.ReactN
   );
 }
 
-// Text input with local state — commits on blur/Enter, syncs from props on external changes
-// onEnter fires only on Enter key (not blur) — used to auto-enable toggles and apply bulk changes
 function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-16', suffix, mono = true }: {
   value: string;
   onCommit: (v: string) => void;
@@ -58,7 +56,6 @@ function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-16', suf
   const isFocused = useRef(false);
   const committedByEnter = useRef(false);
 
-  // Sync from props when not focused (e.g., profile loaded from C#)
   useEffect(() => {
     if (!isFocused.current) {
       setLocalValue(propValue);
@@ -99,7 +96,6 @@ function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-16', suf
   );
 }
 
-// Hotkey capture input — captures key combos on keydown
 function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
   value: string;
   settingKey: string;
@@ -122,14 +118,12 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
     if (e.altKey) modifiers.push('Alt');
     if (e.shiftKey) modifiers.push('Shift');
 
-    // Ignore modifier-only presses (show partial combo)
     const modifierKeys = new Set(['Control', 'Alt', 'Shift', 'Meta']);
     if (modifierKeys.has(e.key)) {
       setLocalValue(modifiers.join('+') || '...');
       return;
     }
 
-    // Map key names — use e.code to distinguish numpad from main keyboard
     let mainKey = e.key;
     if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter') {
       const numpadMap: Record<string, string> = {
@@ -179,6 +173,7 @@ export function SettingsPanel() {
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
   const hotkeyFocusCount = useRef(0);
+  const [activeTab, setActiveTab] = useState<'profile' | 'global'>('profile');
 
   const changeSetting = (key: string, value: string | boolean | number) => {
     send({ type: 'settings:change', payload: { key, value } });
@@ -203,126 +198,183 @@ export function SettingsPanel() {
   };
 
   return (
-    <div className="w-[250px] overflow-y-auto shrink-0 space-y-1">
-      {/* Execution */}
-      <Section icon={Timer} iconColor="#ffd93d" title="Execution">
-        <SettingRow label="Fixed Delay">
-          <SettingInput
-            value={settings.customDelay}
-            onCommit={(v) => changeSetting('customDelay', v)}
-            onEnter={(v) => {
-              // Auto-enable the toggle
-              if (!settings.useCustomDelay) {
-                changeSetting('useCustomDelay', true);
-              }
-              // Apply delay to selected actions in the DataGrid
-              const indices = selectionRef.current;
-              if (indices.size > 0) {
-                const delay = parseInt(v, 10);
-                if (!isNaN(delay)) {
-                  send({ type: 'actions:bulkUpdateDelay', payload: { indices: [...indices], delay } });
-                }
-              }
-            }}
-            suffix="ms"
-          />
-          <Toggle isOn={settings.useCustomDelay} onChange={(v) => changeSetting('useCustomDelay', v)} />
-        </SettingRow>
-        <SettingRow label="Loop Count">
-          <SettingInput
-            value={settings.loopCount}
-            onCommit={(v) => changeSetting('loopCount', v)}
-            onEnter={() => {
-              if (!settings.enableLoop) {
-                changeSetting('enableLoop', true);
-              }
-            }}
-            suffix="x"
-          />
-          <Toggle isOn={settings.enableLoop} onChange={(v) => changeSetting('enableLoop', v)} />
-        </SettingRow>
-        <SettingRow label="Loop Delay">
-          <SettingInput
-            value={settings.loopInterval}
-            onCommit={(v) => changeSetting('loopInterval', v)}
-            onEnter={() => {
-              if (!settings.loopIntervalEnabled) {
-                changeSetting('loopIntervalEnabled', true);
-              }
-            }}
-            suffix="ms"
-          />
-          <Toggle isOn={settings.loopIntervalEnabled} onChange={(v) => changeSetting('loopIntervalEnabled', v)} />
-        </SettingRow>
-      </Section>
+    <div className="w-[250px] flex flex-col shrink-0 overflow-hidden">
+      {/* Tab Bar */}
+      <div className="flex gap-1 px-1.5 py-2.5 border-b border-border-subtle shrink-0">
+        <button
+          onClick={() => setActiveTab('profile')}
+          className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+            activeTab === 'profile'
+              ? 'bg-bg-elevated text-text-primary'
+              : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-card'
+          }`}
+        >
+          Profile
+        </button>
+        <button
+          onClick={() => setActiveTab('global')}
+          className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+            activeTab === 'global'
+              ? 'bg-bg-elevated text-text-primary'
+              : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-card'
+          }`}
+        >
+          Global
+        </button>
+      </div>
 
-      {/* Recording */}
-      <Section icon={Mic} iconColor="#ff6b6b" title="Recording">
-        <SettingRow label="Mouse Clicks">
-          <Toggle isOn={settings.recordMouse} onChange={(v) => changeSetting('recordMouse', v)} />
-        </SettingRow>
-        <SettingRow label="Mouse Scroll">
-          <Toggle isOn={settings.recordScroll} onChange={(v) => changeSetting('recordScroll', v)} />
-        </SettingRow>
-        <SettingRow label="Keyboard">
-          <Toggle isOn={settings.recordKeyboard} onChange={(v) => changeSetting('recordKeyboard', v)} />
-        </SettingRow>
-        <SettingRow label="Profile Keys">
-          <Toggle isOn={settings.profileKeyEnabled} onChange={(v) => changeSetting('profileKeyEnabled', v)} />
-        </SettingRow>
-      </Section>
+      {/* Tab Content */}
+      <div className="flex-1 overflow-y-auto space-y-1 p-1">
+        {activeTab === 'profile' ? (
+          <>
+            {/* Execution */}
+            <Section icon={Timer} iconColor="#ffd93d" title="Execution">
+              <SettingRow label="Fixed Delay">
+                <SettingInput
+                  value={settings.customDelay}
+                  onCommit={(v) => changeSetting('customDelay', v)}
+                  onEnter={(v) => {
+                    if (!settings.useCustomDelay) {
+                      changeSetting('useCustomDelay', true);
+                    }
+                    const indices = selectionRef.current;
+                    if (indices.size > 0) {
+                      const delay = parseInt(v, 10);
+                      if (!isNaN(delay)) {
+                        send({ type: 'actions:bulkUpdateDelay', payload: { indices: [...indices], delay } });
+                      }
+                    }
+                  }}
+                  suffix="ms"
+                />
+                <Toggle isOn={settings.useCustomDelay} onChange={(v) => changeSetting('useCustomDelay', v)} />
+              </SettingRow>
+              <SettingRow label="Loop Count">
+                <SettingInput
+                  value={settings.loopCount}
+                  onCommit={(v) => changeSetting('loopCount', v)}
+                  onEnter={() => {
+                    if (!settings.enableLoop) {
+                      changeSetting('enableLoop', true);
+                    }
+                  }}
+                  suffix="x"
+                />
+                <Toggle isOn={settings.enableLoop} onChange={(v) => changeSetting('enableLoop', v)} />
+              </SettingRow>
+              <SettingRow label="Loop Delay">
+                <SettingInput
+                  value={settings.loopInterval}
+                  onCommit={(v) => changeSetting('loopInterval', v)}
+                  onEnter={() => {
+                    if (!settings.loopIntervalEnabled) {
+                      changeSetting('loopIntervalEnabled', true);
+                    }
+                  }}
+                  suffix="ms"
+                />
+                <Toggle isOn={settings.loopIntervalEnabled} onChange={(v) => changeSetting('loopIntervalEnabled', v)} />
+              </SettingRow>
+            </Section>
 
-      {/* Hotkeys */}
-      <Section icon={Zap} iconColor="#60cdff" title="Hotkeys">
-        <SettingRow label="Recording">
-          <HotkeyInput
-            value={settings.recordingHotkey}
-            settingKey="recordingHotkey"
-            onChange={changeHotkey}
-            onFocusChange={handleHotkeyFocusChange}
-          />
-        </SettingRow>
-        <SettingRow label="Replay">
-          <HotkeyInput
-            value={settings.replayHotkey}
-            settingKey="replayHotkey"
-            onChange={changeHotkey}
-            onFocusChange={handleHotkeyFocusChange}
-          />
-        </SettingRow>
-        <SettingRow label="Profile Keys">
-          <HotkeyInput
-            value={settings.profileKeyToggleHotkey}
-            settingKey="profileKeyToggleHotkey"
-            onChange={changeHotkey}
-            onFocusChange={handleHotkeyFocusChange}
-          />
-        </SettingRow>
-        <SettingRow label="Foreground">
-          <HotkeyInput
-            value={settings.foregroundHotkey}
-            settingKey="foregroundHotkey"
-            onChange={changeHotkey}
-            onFocusChange={handleHotkeyFocusChange}
-          />
-        </SettingRow>
-      </Section>
+            {/* Recording */}
+            <Section icon={Mic} iconColor="#ff6b6b" title="Recording">
+              <SettingRow label="Mouse Clicks">
+                <Toggle isOn={settings.recordMouse} onChange={(v) => changeSetting('recordMouse', v)} />
+              </SettingRow>
+              <SettingRow label="Mouse Scroll">
+                <Toggle isOn={settings.recordScroll} onChange={(v) => changeSetting('recordScroll', v)} />
+              </SettingRow>
+              <SettingRow label="Keyboard">
+                <Toggle isOn={settings.recordKeyboard} onChange={(v) => changeSetting('recordKeyboard', v)} />
+              </SettingRow>
+              <SettingRow label="Profile Keys">
+                <Toggle isOn={settings.profileKeyEnabled} onChange={(v) => changeSetting('profileKeyEnabled', v)} />
+              </SettingRow>
+            </Section>
 
-      {/* Window */}
-      <Section icon={Monitor} iconColor="#7a8599" title="Window" defaultOpen={true}>
-        <SettingRow label="Always On Top">
-          <Toggle
-            isOn={settings.alwaysOnTop}
-            onChange={(v) => send({ type: 'window:alwaysOnTop', payload: { enabled: v } })}
-          />
-        </SettingRow>
-        <SettingRow label="System Tray">
-          <Toggle
-            isOn={settings.minimizeToTray}
-            onChange={(v) => send({ type: 'window:minimizeToTray', payload: { enabled: v } })}
-          />
-        </SettingRow>
-      </Section>
+
+          </>
+        ) : (
+          <>
+            {/* Hotkeys */}
+            <Section icon={Zap} iconColor="#60cdff" title="Hotkeys">
+              <SettingRow label="Recording">
+                <HotkeyInput
+                  value={settings.recordingHotkey}
+                  settingKey="recordingHotkey"
+                  onChange={changeHotkey}
+                  onFocusChange={handleHotkeyFocusChange}
+                />
+              </SettingRow>
+              <SettingRow label="Replay">
+                <HotkeyInput
+                  value={settings.replayHotkey}
+                  settingKey="replayHotkey"
+                  onChange={changeHotkey}
+                  onFocusChange={handleHotkeyFocusChange}
+                />
+              </SettingRow>
+              <SettingRow label="Profile Keys">
+                <HotkeyInput
+                  value={settings.profileKeyToggleHotkey}
+                  settingKey="profileKeyToggleHotkey"
+                  onChange={changeHotkey}
+                  onFocusChange={handleHotkeyFocusChange}
+                />
+              </SettingRow>
+              <SettingRow label="Foreground">
+                <HotkeyInput
+                  value={settings.foregroundHotkey}
+                  settingKey="foregroundHotkey"
+                  onChange={changeHotkey}
+                  onFocusChange={handleHotkeyFocusChange}
+                />
+              </SettingRow>
+            </Section>
+
+            {/* Window */}
+            <Section icon={Monitor} iconColor="#7a8599" title="Window">
+              <SettingRow label="Always On Top">
+                <Toggle
+                  isOn={settings.alwaysOnTop}
+                  onChange={(v) => send({ type: 'window:alwaysOnTop', payload: { enabled: v } })}
+                />
+              </SettingRow>
+              <SettingRow label="System Tray">
+                <Toggle
+                  isOn={settings.minimizeToTray}
+                  onChange={(v) => send({ type: 'window:minimizeToTray', payload: { enabled: v } })}
+                />
+              </SettingRow>
+              <SettingRow label="Run on Startup">
+                <Toggle
+                  isOn={settings.runOnStartup}
+                  onChange={(v) => send({ type: 'window:runOnStartup', payload: { enabled: v } })}
+                />
+              </SettingRow>
+              <SettingRow label="Start Minimized">
+                <Toggle
+                  isOn={settings.startMinimized}
+                  onChange={(v) => send({ type: 'window:startMinimized', payload: { enabled: v } })}
+                />
+              </SettingRow>
+            </Section>
+
+            {/* Updates */}
+            <Section icon={Download} iconColor="#6bcb77" title="Updates" defaultOpen={false}>
+              <SettingRow label="Auto Check">
+                <Toggle isOn={true} onChange={() => {}} />
+              </SettingRow>
+              <button
+                className="w-full flex items-center justify-center gap-1.5 mt-1 h-7 rounded text-xs text-text-secondary bg-bg-elevated border border-border-default hover:bg-bg-card hover:text-text-primary transition-colors"
+              >
+                Check for Updates
+              </button>
+            </Section>
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -634,7 +634,12 @@ namespace TrueReplayer.Services
             {
                 if (token.IsCancellationRequested) break;
 
-                if (segment.VkCode.HasValue)
+                if (segment.DelayMs.HasValue)
+                {
+                    // Explicit delay: pause during replay
+                    await Task.Delay(segment.DelayMs.Value, token);
+                }
+                else if (segment.VkCode.HasValue)
                 {
                     // Special key: simulate key down + up
                     SimulateKeyPress(segment.VkCode.Value);
@@ -671,13 +676,25 @@ namespace TrueReplayer.Services
         {
             ["{enter}"] = 0x0D,      // VK_RETURN
             ["{tab}"] = 0x09,        // VK_TAB
+            ["{space}"] = 0x20,      // VK_SPACE
             ["{backspace}"] = 0x08,  // VK_BACK
+            ["{delete}"] = 0x2E,     // VK_DELETE
+            ["{escape}"] = 0x1B,     // VK_ESCAPE
+            ["{home}"] = 0x24,       // VK_HOME
+            ["{end}"] = 0x23,        // VK_END
+            ["{pageup}"] = 0x21,     // VK_PRIOR
+            ["{pagedown}"] = 0x22,   // VK_NEXT
+            ["{up}"] = 0x26,         // VK_UP
+            ["{down}"] = 0x28,       // VK_DOWN
+            ["{left}"] = 0x25,       // VK_LEFT
+            ["{right}"] = 0x27,      // VK_RIGHT
         };
 
         private struct SendTextSegment
         {
             public string? Text;
             public ushort? VkCode;
+            public int? DelayMs;
         }
 
         private static List<SendTextSegment> ParseSendTextSegments(string text)
@@ -689,25 +706,49 @@ namespace TrueReplayer.Services
             {
                 if (text[i] == '{')
                 {
-                    // Try to match a special key placeholder
-                    bool matched = false;
-                    foreach (var kv in SpecialKeyPlaceholders)
+                    // Find closing brace
+                    int closeBrace = text.IndexOf('}', i + 1);
+                    if (closeBrace == -1)
                     {
-                        if (i + kv.Key.Length <= text.Length &&
-                            text.Substring(i, kv.Key.Length).Equals(kv.Key, StringComparison.OrdinalIgnoreCase))
-                        {
-                            segments.Add(new SendTextSegment { VkCode = kv.Value });
-                            i += kv.Key.Length;
-                            matched = true;
-                            break;
-                        }
-                    }
-                    if (!matched)
-                    {
-                        // Not a placeholder, treat '{' as regular text
                         AppendTextChar(segments, text[i]);
                         i++;
+                        continue;
                     }
+
+                    string inner = text.Substring(i + 1, closeBrace - i - 1); // e.g. "enter", "enter:5", "delay:500"
+                    string name = inner;
+                    int repeatOrParam = 1;
+                    int colonIdx = inner.IndexOf(':');
+                    if (colonIdx >= 0)
+                    {
+                        name = inner.Substring(0, colonIdx);
+                        if (int.TryParse(inner.Substring(colonIdx + 1), out int n) && n > 0)
+                            repeatOrParam = n;
+                    }
+
+                    // {delay:N} — pause during replay
+                    if (name.Equals("delay", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int delayMs = colonIdx >= 0 ? Math.Min(repeatOrParam, 60000) : 500;
+                        segments.Add(new SendTextSegment { DelayMs = delayMs });
+                        i = closeBrace + 1;
+                        continue;
+                    }
+
+                    // {key} or {key:N} — special key with optional repeat
+                    string keyPlaceholder = "{" + name + "}";
+                    if (SpecialKeyPlaceholders.TryGetValue(keyPlaceholder, out ushort vk))
+                    {
+                        int count = colonIdx >= 0 ? Math.Min(repeatOrParam, 100) : 1;
+                        for (int r = 0; r < count; r++)
+                            segments.Add(new SendTextSegment { VkCode = vk });
+                        i = closeBrace + 1;
+                        continue;
+                    }
+
+                    // Unknown placeholder, treat '{' as regular text
+                    AppendTextChar(segments, text[i]);
+                    i++;
                 }
                 else
                 {
@@ -733,13 +774,27 @@ namespace TrueReplayer.Services
             }
         }
 
+        private static readonly HashSet<ushort> ExtendedVkCodes = new()
+        {
+            0x21, 0x22, 0x23, 0x24, // PgUp, PgDn, End, Home
+            0x25, 0x26, 0x27, 0x28, // Left, Up, Right, Down
+            0x2D, 0x2E              // Insert, Delete
+        };
+
         private void SimulateKeyPress(ushort vk)
         {
             ushort scan = (ushort)NativeMethods.MapVirtualKey(vk, 0);
+            bool isExtended = ExtendedVkCodes.Contains(vk);
+            bool isDirectional = vk >= 0x25 && vk <= 0x28;
+            uint downFlags = NativeMethods.KEYEVENTF_SCANCODE;
+            if (isExtended) downFlags |= NativeMethods.KEYEVENTF_EXTENDEDKEY;
+            uint upFlags = downFlags | NativeMethods.KEYEVENTF_KEYUP;
+            ushort effectiveVk = isDirectional ? (ushort)0 : vk;
+
             var inputs = new NativeMethods.INPUT[]
             {
-                new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = vk, wScan = scan, dwFlags = NativeMethods.KEYEVENTF_SCANCODE } } },
-                new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = vk, wScan = scan, dwFlags = NativeMethods.KEYEVENTF_KEYUP | NativeMethods.KEYEVENTF_SCANCODE } } },
+                new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = effectiveVk, wScan = scan, dwFlags = downFlags } } },
+                new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = effectiveVk, wScan = scan, dwFlags = upFlags } } },
             };
             NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
         }

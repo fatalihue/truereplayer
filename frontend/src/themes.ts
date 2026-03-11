@@ -36,13 +36,25 @@ export interface ThemeUISettings {
   borderRadius: number;
   rowHeight: number;
   zoom: number;
+  recordingColor: string;
+  replayColor: string;
+  actionMouseColor: string;
+  actionKeyColor: string;
+  actionScrollColor: string;
+  fontMono: string;
 }
 
 export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   fontSize: 13,
-  borderRadius: 6,
-  rowHeight: 36,
-  zoom: 100,
+  borderRadius: 3,
+  rowHeight: 34,
+  zoom: 95,
+  recordingColor: '#ff6b6b',
+  replayColor: '#6bcb77',
+  actionMouseColor: '#a78bfa',
+  actionKeyColor: '#60cdff',
+  actionScrollColor: '#6bcb77',
+  fontMono: 'Consolas',
 };
 
 export interface ThemeConfig {
@@ -231,9 +243,9 @@ export const themes: ThemePreset[] = [
       'text-secondary': '#b0bcc8',
       'text-tertiary': '#6a7a8a',
       'text-disabled': '#445060',
-      accent: '#94a3b8',
-      'accent-solid': '#64748b',
-      'accent-hover': '#cbd5e1',
+      accent: '#a8b8cc',
+      'accent-solid': '#7088a8',
+      'accent-hover': '#c8d5e4',
     },
   },
   {
@@ -252,7 +264,7 @@ export const themes: ThemePreset[] = [
       'text-primary': '#eceff4',
       'text-secondary': '#d8dee9',
       'text-tertiary': '#81a1c1',
-      'text-disabled': '#4c566a',
+      'text-disabled': '#5c6678',
       accent: '#88c0d0',
       'accent-solid': '#5e81ac',
       'accent-hover': '#8fbcbb',
@@ -272,7 +284,7 @@ export const themes: ThemePreset[] = [
       'border-default': 'rgba(189,147,249,0.1)',
       'border-strong': 'rgba(189,147,249,0.15)',
       'text-primary': '#f8f8f2',
-      'text-secondary': '#c0b8d0',
+      'text-secondary': '#c8c0d8',
       'text-tertiary': '#6272a4',
       'text-disabled': '#44475a',
       accent: '#bd93f9',
@@ -290,9 +302,9 @@ export const themes: ThemePreset[] = [
       'bg-card': '#30312b',
       'bg-elevated': '#3a3b35',
       'bg-input': '#191a17',
-      'border-subtle': 'rgba(249,226,175,0.06)',
-      'border-default': 'rgba(249,226,175,0.1)',
-      'border-strong': 'rgba(249,226,175,0.15)',
+      'border-subtle': 'rgba(200,200,180,0.06)',
+      'border-default': 'rgba(200,200,180,0.1)',
+      'border-strong': 'rgba(200,200,180,0.15)',
       'text-primary': '#f8f8f2',
       'text-secondary': '#c8c8b8',
       'text-tertiary': '#75715e',
@@ -359,10 +371,10 @@ export const themes: ThemePreset[] = [
       'border-subtle': 'rgba(0,255,100,0.06)',
       'border-default': 'rgba(0,255,100,0.1)',
       'border-strong': 'rgba(0,255,100,0.15)',
-      'text-primary': '#d0ffd0',
-      'text-secondary': '#90c890',
-      'text-tertiary': '#508850',
-      'text-disabled': '#305030',
+      'text-primary': '#e8ffe8',
+      'text-secondary': '#a0d8a0',
+      'text-tertiary': '#588858',
+      'text-disabled': '#385038',
       accent: '#00ff66',
       'accent-solid': '#00cc44',
       'accent-hover': '#66ff99',
@@ -460,7 +472,11 @@ export function loadThemeConfig(): ThemeConfig {
   try {
     const parsed = JSON.parse(raw);
     if (parsed && parsed.version === 1 && parsed.baseThemeId) {
-      return parsed as ThemeConfig;
+      // Merge UI settings with defaults for backwards compatibility (new fields)
+      return {
+        ...parsed,
+        uiSettings: { ...DEFAULT_UI_SETTINGS, ...parsed.uiSettings },
+      } as ThemeConfig;
     }
   } catch {
     // Not JSON — old format (plain theme ID string)
@@ -492,10 +508,25 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   for (const [key, value] of Object.entries(colors)) {
     root.style.setProperty(`--color-${key}`, value);
   }
+  // Layout
   root.style.setProperty('--ui-font-size', `${uiSettings.fontSize}px`);
   root.style.setProperty('--ui-border-radius', `${uiSettings.borderRadius}px`);
   root.style.setProperty('--ui-row-height', `${uiSettings.rowHeight}px`);
   root.style.setProperty('zoom', `${uiSettings.zoom / 100}`);
+  // Semantic colors + auto-derived backgrounds
+  root.style.setProperty('--color-recording', uiSettings.recordingColor);
+  root.style.setProperty('--color-recording-bg', `color-mix(in srgb, ${uiSettings.recordingColor} 10%, transparent)`);
+  root.style.setProperty('--color-replay', uiSettings.replayColor);
+  root.style.setProperty('--color-replay-bg', `color-mix(in srgb, ${uiSettings.replayColor} 10%, transparent)`);
+  // Action type pill colors + auto-derived backgrounds
+  root.style.setProperty('--color-action-mouse-fg', uiSettings.actionMouseColor);
+  root.style.setProperty('--color-action-mouse-bg', `color-mix(in srgb, ${uiSettings.actionMouseColor} 10%, transparent)`);
+  root.style.setProperty('--color-action-key-fg', uiSettings.actionKeyColor);
+  root.style.setProperty('--color-action-key-bg', `color-mix(in srgb, ${uiSettings.actionKeyColor} 10%, transparent)`);
+  root.style.setProperty('--color-action-scroll-fg', uiSettings.actionScrollColor);
+  root.style.setProperty('--color-action-scroll-bg', `color-mix(in srgb, ${uiSettings.actionScrollColor} 10%, transparent)`);
+  // Font
+  root.style.setProperty('--font-mono', `'${uiSettings.fontMono}', 'Courier New', monospace`);
 }
 
 // ── Import/Export ──

@@ -43,8 +43,8 @@
   --color-hotkey-bg: color-mix(in srgb, var(--color-accent) 8%, transparent);
   --color-hotkey-border: color-mix(in srgb, var(--color-accent) 20%, transparent);
 
-  /* Delay */
-  --color-delay: #ffd93d;
+  /* Delay — blends accent with warm amber so it adapts per theme */
+  --color-delay: color-mix(in srgb, var(--color-accent) 55%, #ffd93d);
 
   /* Fonts */
   --font-mono: 'Consolas', 'Courier New', monospace;
@@ -115,12 +115,125 @@ html, body, #root {
   height: var(--ui-row-height);
 }
 
+/* Animations */
 @keyframes toast-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
-  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
 
 @keyframes spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes bulk-bar-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes command-in {
+  from { opacity: 0; transform: scale(0.97) translateY(-8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Kbd tag utilities */
+@utility kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: 4px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+@utility kbd-accent {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+/* Subtle dark-themed checkbox */
+.checkbox-subtle {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--color-border-default);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.checkbox-subtle:hover {
+  border-color: var(--color-text-tertiary);
+}
+
+.checkbox-subtle:checked {
+  background: var(--color-accent-solid);
+  border-color: var(--color-accent-solid);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 12px;
+}
+
+/* Grip handle for drag rows */
+.grip-handle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px;
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.grip-handle .grip-row {
+  display: flex;
+  gap: 2px;
+}
+
+.grip-handle .grip-row::before,
+.grip-handle .grip-row::after {
+  content: '';
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--color-text-disabled);
+}
+
+/* Show grip on row hover via group */
+.group:hover .grip-handle,
+tr:hover .grip-handle {
+  opacity: 1;
 }

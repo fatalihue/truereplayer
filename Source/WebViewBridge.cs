@@ -158,10 +158,13 @@ namespace TrueReplayer
                     case "settings:change": HandleSettingsChange(payload); break;
                     case "window:alwaysOnTop": HandleAlwaysOnTop(payload); break;
                     case "window:minimizeToTray": HandleMinimizeToTray(payload); break;
+                    case "window:runOnStartup": HandleRunOnStartup(payload); break;
+                    case "window:startMinimized": HandleStartMinimized(payload); break;
                     case "ui:modalOpen": InputHookManager.SuppressAllHotkeys = true; break;
                     case "ui:modalClose": InputHookManager.SuppressAllHotkeys = false; break;
                     case "update:apply": _ = HandleUpdateApply(); break;
                     case "update:dismiss": break;
+                    case "theme:colors": HandleThemeColors(payload); break;
                     default:
                         System.Diagnostics.Debug.WriteLine($"[Bridge] Unknown message type: {type}");
                         break;
@@ -240,7 +243,9 @@ namespace TrueReplayer
                     profileKeyToggleHotkey = profile.ProfileKeyToggleHotkey,
                     foregroundHotkey = profile.ForegroundHotkey,
                     alwaysOnTop = profile.AlwaysOnTop,
-                    minimizeToTray = profile.MinimizeToTray
+                    minimizeToTray = profile.MinimizeToTray,
+                    runOnStartup = TrayIconService.IsRunOnStartup(),
+                    startMinimized = profile.StartMinimized
                 }
             });
         }
@@ -369,7 +374,9 @@ namespace TrueReplayer
                     profileKeyToggleHotkey = profile.ProfileKeyToggleHotkey,
                     foregroundHotkey = profile.ForegroundHotkey,
                     alwaysOnTop = profile.AlwaysOnTop,
-                    minimizeToTray = profile.MinimizeToTray
+                    minimizeToTray = profile.MinimizeToTray,
+                    runOnStartup = TrayIconService.IsRunOnStartup(),
+                    startMinimized = profile.StartMinimized
                 },
                 toolbar = new { profileName = CurrentProfileName, actionCount = actions.Count },
                 statusBar = new
@@ -426,6 +433,21 @@ namespace TrueReplayer
             else
             {
                 SendMessage("update:error", new { message = "Download failed" });
+            }
+        }
+
+        private void HandleThemeColors(JsonElement payload)
+        {
+            var bgSurface = payload.GetProperty("bgSurface").GetString();
+            var bgCard = payload.GetProperty("bgCard").GetString();
+            var textPrimary = payload.GetProperty("textPrimary").GetString();
+            var textSecondary = payload.GetProperty("textSecondary").GetString();
+            var accentSolid = payload.GetProperty("accentSolid").GetString();
+            var borderSubtle = payload.GetProperty("borderSubtle").GetString();
+
+            if (bgSurface != null && textPrimary != null)
+            {
+                profileController.SetDialogThemeColors(bgSurface, bgCard ?? bgSurface, textPrimary, textSecondary ?? textPrimary, accentSolid, borderSubtle);
             }
         }
 
@@ -1223,7 +1245,6 @@ namespace TrueReplayer
             var messageBlock = new Microsoft.UI.Xaml.Controls.TextBlock
             {
                 Text = "This will reset all settings to their default values and clear all actions.",
-                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
                 TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap
             };
 
@@ -1235,12 +1256,10 @@ namespace TrueReplayer
                 PrimaryButtonText = "Reset",
                 CloseButtonText = "Cancel",
                 DefaultButton = Microsoft.UI.Xaml.Controls.ContentDialogButton.Close,
-                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(
-                    Microsoft.UI.ColorHelper.FromArgb(255, 43, 43, 43)),
-                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.White),
                 CornerRadius = new Microsoft.UI.Xaml.CornerRadius(8),
                 Content = messageBlock
             };
+            profileController.ApplyDialogTheme(dialog, messageBlock);
 
             InputHookManager.SuppressAllHotkeys = true;
             try
@@ -1275,6 +1294,8 @@ namespace TrueReplayer
             // Reset window settings
             UserProfile.Current.AlwaysOnTop = defaults.AlwaysOnTop;
             UserProfile.Current.MinimizeToTray = defaults.MinimizeToTray;
+            UserProfile.Current.StartMinimized = defaults.StartMinimized;
+            TrayIconService.SetRunOnStartup(defaults.RunOnStartup);
             window.UpdateAlwaysOnTop(defaults.AlwaysOnTop);
 
             ApplyProfile(UserProfile.Current);
@@ -1295,6 +1316,8 @@ namespace TrueReplayer
             {
                 AlwaysOnTop = UserProfile.Current.AlwaysOnTop,
                 MinimizeToTray = UserProfile.Current.MinimizeToTray,
+                RunOnStartup = TrayIconService.IsRunOnStartup(),
+                StartMinimized = UserProfile.Current.StartMinimized,
                 UseCustomDelay = UseCustomDelay,
                 CustomDelay = int.TryParse(CustomDelay, out var d) ? d : 100,
                 EnableLoop = EnableLoop,
@@ -1440,6 +1463,21 @@ namespace TrueReplayer
         {
             bool enabled = payload.GetProperty("enabled").GetBoolean();
             UserProfile.Current.MinimizeToTray = enabled;
+            SaveGlobalSettings();
+            PushSettingsLoaded();
+        }
+
+        private void HandleRunOnStartup(JsonElement payload)
+        {
+            bool enabled = payload.GetProperty("enabled").GetBoolean();
+            TrayIconService.SetRunOnStartup(enabled);
+            PushSettingsLoaded();
+        }
+
+        private void HandleStartMinimized(JsonElement payload)
+        {
+            bool enabled = payload.GetProperty("enabled").GetBoolean();
+            UserProfile.Current.StartMinimized = enabled;
             SaveGlobalSettings();
             PushSettingsLoaded();
         }

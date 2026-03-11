@@ -19,7 +19,9 @@ const defaultSettings = {
   profileKeyToggleHotkey: 'Pause',
   foregroundHotkey: 'Ctrl+Insert',
   alwaysOnTop: false,
-  minimizeToTray: false,
+  minimizeToTray: true,
+  runOnStartup: false,
+  startMinimized: false,
 };
 
 const initialState: AppState = {

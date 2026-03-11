@@ -116,8 +116,15 @@ function SliderSetting({ label, value, min, max, unit, onChange }: {
   unit: string;
   onChange: (v: number) => void;
 }) {
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 1 : -1;
+    const next = Math.min(max, Math.max(min, value + delta));
+    if (next !== value) onChange(next);
+  };
+
   return (
-    <div className="flex items-center gap-3 py-2">
+    <div className="flex items-center gap-3 py-2" onWheel={handleWheel}>
       <span className="text-xs text-text-secondary w-[100px]">{label}</span>
       <input
         type="range"
@@ -141,6 +148,57 @@ function SliderSetting({ label, value, min, max, unit, onChange }: {
         />
         <span className="text-[11px] text-text-disabled w-5">{unit}</span>
       </div>
+    </div>
+  );
+}
+
+// ── Compact Color Picker for Appearance tab ──
+
+const MONO_FONTS = [
+  'Consolas',
+  'Cascadia Mono',
+  'Cascadia Code',
+  'Courier New',
+  'Lucida Console',
+];
+
+function AppearanceColorRow({ label, value, defaultValue, onChange }: {
+  label: string;
+  value: string;
+  defaultValue: string;
+  onChange: (v: string) => void;
+}) {
+  const isCustom = value !== defaultValue;
+  return (
+    <div className="flex items-center gap-2 py-1 group">
+      <div className="flex items-center gap-1.5 w-[100px]">
+        {isCustom && <div className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
+        <span className={`text-xs ${isCustom ? 'text-text-primary' : 'text-text-secondary'}`}>{label}</span>
+      </div>
+      <label className="relative w-7 h-7 rounded border border-border-default cursor-pointer shrink-0 overflow-hidden">
+        <div className="absolute inset-0" style={{ backgroundColor: value }} />
+        <input
+          type="color"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="absolute inset-0 opacity-0 cursor-pointer"
+        />
+      </label>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => {
+          if (/^#[0-9a-fA-F]{6}$/.test(e.target.value)) onChange(e.target.value);
+        }}
+        className="w-[80px] h-7 px-2 text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
+      />
+      <button
+        onClick={() => onChange(defaultValue)}
+        className={`p-1 rounded text-text-disabled hover:text-text-primary hover:bg-bg-elevated transition-colors ${isCustom ? 'visible' : 'invisible'}`}
+        title="Reset to default"
+      >
+        <RotateCcw size={12} />
+      </button>
     </div>
   );
 }
@@ -419,48 +477,117 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
 
           {/* ═══ Tab 3: Appearance ═══ */}
           {activeTab === 'appearance' && (
-            <div className="p-4 space-y-1">
-              <SliderSetting
-                label="Font Size"
-                value={config.uiSettings.fontSize}
-                min={10}
-                max={18}
-                unit="px"
-                onChange={(v) => setUISetting('fontSize', v)}
-              />
-              <SliderSetting
-                label="Border Radius"
-                value={config.uiSettings.borderRadius}
-                min={0}
-                max={16}
-                unit="px"
-                onChange={(v) => setUISetting('borderRadius', v)}
-              />
-              <SliderSetting
-                label="Row Height"
-                value={config.uiSettings.rowHeight}
-                min={28}
-                max={48}
-                unit="px"
-                onChange={(v) => setUISetting('rowHeight', v)}
-              />
-              <SliderSetting
-                label="Zoom"
-                value={config.uiSettings.zoom}
-                min={50}
-                max={200}
-                unit="%"
-                onChange={(v) => setUISetting('zoom', v)}
-              />
-              <div className="pt-3">
+            <div className="p-4 space-y-4">
+              {/* Layout */}
+              <div>
+                <div className="text-[11px] font-semibold text-text-disabled mb-1">LAYOUT</div>
+                <SliderSetting
+                  label="Font Size"
+                  value={config.uiSettings.fontSize}
+                  min={10}
+                  max={18}
+                  unit="px"
+                  onChange={(v) => setUISetting('fontSize', v)}
+                />
+                <SliderSetting
+                  label="Border Radius"
+                  value={config.uiSettings.borderRadius}
+                  min={0}
+                  max={16}
+                  unit="px"
+                  onChange={(v) => setUISetting('borderRadius', v)}
+                />
+                <SliderSetting
+                  label="Row Height"
+                  value={config.uiSettings.rowHeight}
+                  min={28}
+                  max={48}
+                  unit="px"
+                  onChange={(v) => setUISetting('rowHeight', v)}
+                />
+                <SliderSetting
+                  label="Zoom"
+                  value={config.uiSettings.zoom}
+                  min={50}
+                  max={200}
+                  unit="%"
+                  onChange={(v) => setUISetting('zoom', v)}
+                />
+              </div>
+
+              {/* Semantic Colors */}
+              <div>
+                <div className="text-[11px] font-semibold text-text-disabled mb-1">SEMANTIC COLORS</div>
+                <AppearanceColorRow
+                  label="Recording"
+                  value={config.uiSettings.recordingColor}
+                  defaultValue={DEFAULT_UI_SETTINGS.recordingColor}
+                  onChange={(v) => setUISetting('recordingColor', v)}
+                />
+                <AppearanceColorRow
+                  label="Replay"
+                  value={config.uiSettings.replayColor}
+                  defaultValue={DEFAULT_UI_SETTINGS.replayColor}
+                  onChange={(v) => setUISetting('replayColor', v)}
+                />
+              </div>
+
+              {/* Action Type Colors */}
+              <div>
+                <div className="text-[11px] font-semibold text-text-disabled mb-1">ACTION TYPES</div>
+                <AppearanceColorRow
+                  label="Mouse"
+                  value={config.uiSettings.actionMouseColor}
+                  defaultValue={DEFAULT_UI_SETTINGS.actionMouseColor}
+                  onChange={(v) => setUISetting('actionMouseColor', v)}
+                />
+                <AppearanceColorRow
+                  label="Key"
+                  value={config.uiSettings.actionKeyColor}
+                  defaultValue={DEFAULT_UI_SETTINGS.actionKeyColor}
+                  onChange={(v) => setUISetting('actionKeyColor', v)}
+                />
+                <AppearanceColorRow
+                  label="Scroll"
+                  value={config.uiSettings.actionScrollColor}
+                  defaultValue={DEFAULT_UI_SETTINGS.actionScrollColor}
+                  onChange={(v) => setUISetting('actionScrollColor', v)}
+                />
+              </div>
+
+              {/* Font */}
+              <div>
+                <div className="text-[11px] font-semibold text-text-disabled mb-1">FONT</div>
+                <div className="flex items-center gap-2 py-1">
+                  <span className="text-xs text-text-secondary w-[100px]">Monospace</span>
+                  <select
+                    value={MONO_FONTS.includes(config.uiSettings.fontMono) ? config.uiSettings.fontMono : '__custom'}
+                    onChange={(e) => {
+                      if (e.target.value !== '__custom') setUISetting('fontMono', e.target.value);
+                    }}
+                    className="flex-1 h-7 px-2 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid cursor-pointer"
+                  >
+                    {MONO_FONTS.map(f => (
+                      <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>
+                    ))}
+                    {!MONO_FONTS.includes(config.uiSettings.fontMono) && (
+                      <option value="__custom">{config.uiSettings.fontMono}</option>
+                    )}
+                  </select>
+                  <span
+                    className="text-xs font-mono text-text-tertiary truncate w-[80px] text-center"
+                    style={{ fontFamily: `'${config.uiSettings.fontMono}', monospace` }}
+                  >
+                    Abc 123
+                  </span>
+                </div>
+              </div>
+
+              {/* Reset */}
+              <div className="pt-1">
                 <button
                   onClick={resetUISettings}
-                  disabled={
-                    config.uiSettings.fontSize === DEFAULT_UI_SETTINGS.fontSize &&
-                    config.uiSettings.borderRadius === DEFAULT_UI_SETTINGS.borderRadius &&
-                    config.uiSettings.rowHeight === DEFAULT_UI_SETTINGS.rowHeight &&
-                    config.uiSettings.zoom === DEFAULT_UI_SETTINGS.zoom
-                  }
+                  disabled={JSON.stringify(config.uiSettings) === JSON.stringify(DEFAULT_UI_SETTINGS)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-card border border-border-subtle transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <RotateCcw size={12} />

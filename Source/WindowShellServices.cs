@@ -168,14 +168,26 @@ namespace TrueReplayer.Services
             AppSettingsManager.Save(settings);
         }
 
+        /// Callback invoked after tray menu toggles a setting, so bridge can push updated state to UI.
+        public static Action? OnTraySettingChanged { get; set; }
+
+        /// Callback to apply Always On Top window state from the tray menu.
+        public static Action<bool>? OnAlwaysOnTopChanged { get; set; }
+
         public static async void ShowContextMenu()
         {
+            bool isAlwaysOnTop = UserProfile.Current.AlwaysOnTop;
+            bool isMinimizeToTray = UserProfile.Current.MinimizeToTray;
             bool isStartup = IsRunOnStartup();
+            bool isStartMinimized = UserProfile.Current.StartMinimized;
 
             IntPtr hMenu = CreatePopupMenu();
             AppendMenu(hMenu, MF_STRING, 1, "Restore");
             AppendMenu(hMenu, MF_SEPARATOR, 0, null);
+            AppendMenu(hMenu, MF_STRING | (isAlwaysOnTop ? MF_CHECKED : 0), 5, "Always On Top");
+            AppendMenu(hMenu, MF_STRING | (isMinimizeToTray ? MF_CHECKED : 0), 6, "System Tray");
             AppendMenu(hMenu, MF_STRING | (isStartup ? MF_CHECKED : 0), 3, "Run on Startup");
+            AppendMenu(hMenu, MF_STRING | (isStartMinimized ? MF_CHECKED : 0), 4, "Start Minimized");
             AppendMenu(hMenu, MF_SEPARATOR, 0, null);
             AppendMenu(hMenu, MF_STRING, 2, "Exit");
 
@@ -185,7 +197,36 @@ namespace TrueReplayer.Services
             DestroyMenu(hMenu);
 
             if (cmd == 1) ShowWindow(hwnd, 9);
-            else if (cmd == 3) SetRunOnStartup(!isStartup);
+            else if (cmd == 5)
+            {
+                UserProfile.Current.AlwaysOnTop = !isAlwaysOnTop;
+                OnAlwaysOnTopChanged?.Invoke(UserProfile.Current.AlwaysOnTop);
+                var settings = AppSettingsManager.Load();
+                settings.AlwaysOnTop = UserProfile.Current.AlwaysOnTop;
+                AppSettingsManager.Save(settings);
+                OnTraySettingChanged?.Invoke();
+            }
+            else if (cmd == 6)
+            {
+                UserProfile.Current.MinimizeToTray = !isMinimizeToTray;
+                var settings = AppSettingsManager.Load();
+                settings.MinimizeToTray = UserProfile.Current.MinimizeToTray;
+                AppSettingsManager.Save(settings);
+                OnTraySettingChanged?.Invoke();
+            }
+            else if (cmd == 3)
+            {
+                SetRunOnStartup(!isStartup);
+                OnTraySettingChanged?.Invoke();
+            }
+            else if (cmd == 4)
+            {
+                UserProfile.Current.StartMinimized = !isStartMinimized;
+                var settings = AppSettingsManager.Load();
+                settings.StartMinimized = UserProfile.Current.StartMinimized;
+                AppSettingsManager.Save(settings);
+                OnTraySettingChanged?.Invoke();
+            }
             else if (cmd == 2)
             {
                 if (OnTrayExitRequested != null)
