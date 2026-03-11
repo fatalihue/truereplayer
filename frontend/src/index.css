@@ -43,8 +43,8 @@
   --color-hotkey-bg: color-mix(in srgb, var(--color-accent) 8%, transparent);
   --color-hotkey-border: color-mix(in srgb, var(--color-accent) 20%, transparent);
 
-  /* Delay */
-  --color-delay: #ffd93d;
+  /* Delay — blends accent with warm amber so it adapts per theme */
+  --color-delay: color-mix(in srgb, var(--color-accent) 55%, #ffd93d);
 
   /* Fonts */
   --font-mono: 'Consolas', 'Courier New', monospace;
