@@ -158,7 +158,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       version: 1,
       baseThemeId: baseId,
       colorOverrides: overrides,
-      uiSettings: { ...theme.uiSettings },
+      uiSettings: { ...DEFAULT_UI_SETTINGS, ...theme.uiSettings },
     });
   }, []);
 

@@ -36,6 +36,12 @@ export interface ThemeUISettings {
   borderRadius: number;
   rowHeight: number;
   zoom: number;
+  recordingColor: string;
+  replayColor: string;
+  actionMouseColor: string;
+  actionKeyColor: string;
+  actionScrollColor: string;
+  fontMono: string;
 }
 
 export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
@@ -43,6 +49,12 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   borderRadius: 3,
   rowHeight: 34,
   zoom: 95,
+  recordingColor: '#ff6b6b',
+  replayColor: '#6bcb77',
+  actionMouseColor: '#a78bfa',
+  actionKeyColor: '#60cdff',
+  actionScrollColor: '#6bcb77',
+  fontMono: 'Consolas',
 };
 
 export interface ThemeConfig {
@@ -460,7 +472,11 @@ export function loadThemeConfig(): ThemeConfig {
   try {
     const parsed = JSON.parse(raw);
     if (parsed && parsed.version === 1 && parsed.baseThemeId) {
-      return parsed as ThemeConfig;
+      // Merge UI settings with defaults for backwards compatibility (new fields)
+      return {
+        ...parsed,
+        uiSettings: { ...DEFAULT_UI_SETTINGS, ...parsed.uiSettings },
+      } as ThemeConfig;
     }
   } catch {
     // Not JSON — old format (plain theme ID string)
@@ -492,10 +508,25 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   for (const [key, value] of Object.entries(colors)) {
     root.style.setProperty(`--color-${key}`, value);
   }
+  // Layout
   root.style.setProperty('--ui-font-size', `${uiSettings.fontSize}px`);
   root.style.setProperty('--ui-border-radius', `${uiSettings.borderRadius}px`);
   root.style.setProperty('--ui-row-height', `${uiSettings.rowHeight}px`);
   root.style.setProperty('zoom', `${uiSettings.zoom / 100}`);
+  // Semantic colors + auto-derived backgrounds
+  root.style.setProperty('--color-recording', uiSettings.recordingColor);
+  root.style.setProperty('--color-recording-bg', `color-mix(in srgb, ${uiSettings.recordingColor} 10%, transparent)`);
+  root.style.setProperty('--color-replay', uiSettings.replayColor);
+  root.style.setProperty('--color-replay-bg', `color-mix(in srgb, ${uiSettings.replayColor} 10%, transparent)`);
+  // Action type pill colors + auto-derived backgrounds
+  root.style.setProperty('--color-action-mouse-fg', uiSettings.actionMouseColor);
+  root.style.setProperty('--color-action-mouse-bg', `color-mix(in srgb, ${uiSettings.actionMouseColor} 10%, transparent)`);
+  root.style.setProperty('--color-action-key-fg', uiSettings.actionKeyColor);
+  root.style.setProperty('--color-action-key-bg', `color-mix(in srgb, ${uiSettings.actionKeyColor} 10%, transparent)`);
+  root.style.setProperty('--color-action-scroll-fg', uiSettings.actionScrollColor);
+  root.style.setProperty('--color-action-scroll-bg', `color-mix(in srgb, ${uiSettings.actionScrollColor} 10%, transparent)`);
+  // Font
+  root.style.setProperty('--font-mono', `'${uiSettings.fontMono}', 'Courier New', monospace`);
 }
 
 // ── Import/Export ──
