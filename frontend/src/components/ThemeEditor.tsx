@@ -116,8 +116,15 @@ function SliderSetting({ label, value, min, max, unit, onChange }: {
   unit: string;
   onChange: (v: number) => void;
 }) {
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 1 : -1;
+    const next = Math.min(max, Math.max(min, value + delta));
+    if (next !== value) onChange(next);
+  };
+
   return (
-    <div className="flex items-center gap-3 py-2">
+    <div className="flex items-center gap-3 py-2" onWheel={handleWheel}>
       <span className="text-xs text-text-secondary w-[100px]">{label}</span>
       <input
         type="range"

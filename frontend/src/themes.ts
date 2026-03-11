@@ -40,9 +40,9 @@ export interface ThemeUISettings {
 
 export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   fontSize: 13,
-  borderRadius: 6,
-  rowHeight: 36,
-  zoom: 100,
+  borderRadius: 3,
+  rowHeight: 34,
+  zoom: 95,
 };
 
 export interface ThemeConfig {
