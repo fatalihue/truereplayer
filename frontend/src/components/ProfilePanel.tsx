@@ -32,7 +32,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [targetProcessName, setTargetProcessName] = useState('');
   const [targetWindowTitle, setTargetWindowTitle] = useState('');
   const [titleMatchMode, setTitleMatchMode] = useState<'contains' | 'regex'>('contains');
-  const [detectCountdown, setDetectCountdown] = useState<number | null>(null);
+  const [isDetecting, setIsDetecting] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportSelection, setExportSelection] = useState<Record<string, boolean>>({});
   const [dialogValue, setDialogValue] = useState('');
@@ -222,7 +222,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setContextMenu(null);
     const existing = profiles.find(p => p.name === name);
     setHotstringValue(existing?.hotstring ?? '');
-    setHotstringInstant(existing?.hotstringInstant ?? false);
+    setHotstringInstant(existing?.hotstring ? existing.hotstringInstant : true);
     setShowHotstringDialog(name);
   };
 
@@ -243,10 +243,11 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   const handleSetWindowTarget = (name: string) => {
     setContextMenu(null);
-    setTargetProcessName('');
-    setTargetWindowTitle('');
-    setTitleMatchMode('contains');
-    setDetectCountdown(null);
+    const existing = profiles.find(p => p.name === name);
+    setTargetProcessName(existing?.windowTargetProcessName ?? '');
+    setTargetWindowTitle(existing?.windowTargetWindowTitle ?? '');
+    setTitleMatchMode((existing?.windowTargetTitleMatchMode as 'contains' | 'regex') ?? 'contains');
+    setIsDetecting(false);
     setShowWindowTargetDialog(name);
   };
 
@@ -257,7 +258,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   const handleDetectWindow = () => {
     send({ type: 'profile:detectWindow', payload: {} });
-    setDetectCountdown(3);
   };
 
   const confirmWindowTarget = () => {
@@ -350,25 +350,23 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     });
   }, [showHotstringDialog, subscribe]);
 
-  // Window target detect countdown
-  useEffect(() => {
-    if (detectCountdown === null || detectCountdown <= 0) return;
-    const timer = setTimeout(() => setDetectCountdown(detectCountdown - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [detectCountdown]);
-
   // Subscribe to window target detection result and auto-close on success
   useEffect(() => {
     if (!showWindowTargetDialog) return;
     return subscribe((msg) => {
       if (msg.type === 'profiles:updated') {
         setShowWindowTargetDialog(null);
+        setIsDetecting(false);
       }
       if (msg.type === 'windowTarget:detected') {
         const p = msg.payload as { processName: string; windowTitle: string };
         setTargetProcessName(p.processName);
         setTargetWindowTitle(p.windowTitle);
-        setDetectCountdown(null);
+        setIsDetecting(false);
+      }
+      if (msg.type === 'windowTarget:detectState') {
+        const p = msg.payload as { detecting: boolean };
+        setIsDetecting(p.detecting);
       }
     });
   }, [showWindowTargetDialog, subscribe]);
@@ -921,18 +919,21 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
             <button
               onClick={handleDetectWindow}
-              disabled={detectCountdown !== null && detectCountdown > 0}
-              className="mt-3 w-full h-8 text-xs text-accent border border-accent-solid/40 rounded hover:bg-accent-solid/10 transition-colors disabled:opacity-50"
+              className={`mt-3 w-full h-8 text-xs border rounded transition-colors ${
+                isDetecting
+                  ? 'text-recording border-recording/40 bg-recording/10 hover:bg-recording/20'
+                  : 'text-accent border-accent-solid/40 hover:bg-accent-solid/10'
+              }`}
             >
-              {detectCountdown !== null && detectCountdown > 0
-                ? `Detecting in ${detectCountdown}s... Switch to target window now`
-                : 'Detect from Foreground Window (3s delay)'}
+              {isDetecting
+                ? 'Waiting for click... (click target window)'
+                : 'Detect Window (click on target)'}
             </button>
 
             <div className="flex items-center mt-4">
               {profiles.find(p => p.name === showWindowTargetDialog)?.hasWindowTarget && (
                 <button
-                  onClick={() => { handleRemoveWindowTarget(showWindowTargetDialog!); setShowWindowTargetDialog(null); }}
+                  onClick={() => { if (isDetecting) send({ type: 'profile:detectWindow', payload: {} }); handleRemoveWindowTarget(showWindowTargetDialog!); setShowWindowTargetDialog(null); setIsDetecting(false); }}
                   className="px-4 py-1.5 text-xs text-recording hover:text-recording/80 bg-bg-elevated rounded transition-colors"
                 >
                   Remove
@@ -941,7 +942,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               <div className="flex-1" />
               <div className="flex gap-2">
                 <button
-                  onClick={() => setShowWindowTargetDialog(null)}
+                  onClick={() => { if (isDetecting) send({ type: 'profile:detectWindow', payload: {} }); setShowWindowTargetDialog(null); setIsDetecting(false); }}
                   className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
                 >
                   Cancel

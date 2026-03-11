@@ -215,6 +215,9 @@ namespace TrueReplayer
                 hotstringInstant = p.HotstringInstant,
                 isActive = p.IsActive,
                 hasWindowTarget = p.HasWindowTarget,
+                windowTargetProcessName = p.WindowTargetProcessName,
+                windowTargetWindowTitle = p.WindowTargetWindowTitle,
+                windowTargetTitleMatchMode = p.WindowTargetTitleMatchMode,
                 isDisabled = p.IsDisabled
             }).ToArray();
 
@@ -354,6 +357,9 @@ namespace TrueReplayer
                     hotstringInstant = p.HotstringInstant,
                     isActive = p.IsActive,
                     hasWindowTarget = p.HasWindowTarget,
+                    windowTargetProcessName = p.WindowTargetProcessName,
+                    windowTargetWindowTitle = p.WindowTargetWindowTitle,
+                    windowTargetTitleMatchMode = p.WindowTargetTitleMatchMode,
                     isDisabled = p.IsDisabled
                 }).ToArray(),
                 activeProfile = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName,
@@ -1078,54 +1084,108 @@ namespace TrueReplayer
             }
         }
 
+        // Window detection state
+        private IntPtr _detectMouseHook = IntPtr.Zero;
+        private NativeMethods.LowLevelMouseProc? _detectMouseProc;
+        private bool _isDetectingWindow = false;
+
         private void HandleProfileDetectWindow()
         {
-            Task.Run(async () =>
+            if (_isDetectingWindow)
             {
-                await Task.Delay(3000);
+                // Already detecting — stop
+                StopWindowDetection();
+                return;
+            }
 
-                IntPtr hwnd = NativeMethods.GetForegroundWindow();
-                if (hwnd == IntPtr.Zero)
+            _isDetectingWindow = true;
+            SendMessage("windowTarget:detectState", new { detecting = true });
+
+            _detectMouseProc = DetectMouseHookCallback;
+            _detectMouseHook = NativeMethods.SetMouseHook(_detectMouseProc);
+        }
+
+        private IntPtr DetectMouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+        {
+            if (nCode >= 0 && wParam == (IntPtr)NativeMethods.WM_LBUTTONDOWN)
+            {
+                var hookStruct = System.Runtime.InteropServices.Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
+
+                // Get the top-level window at the click point
+                IntPtr childHwnd = NativeMethods.WindowFromPoint(hookStruct.pt);
+                IntPtr hwnd = childHwnd != IntPtr.Zero
+                    ? NativeMethods.GetAncestor(childHwnd, NativeMethods.GA_ROOT)
+                    : IntPtr.Zero;
+
+                // Ignore clicks on our own window
+                IntPtr ownHwnd = IntPtr.Zero;
+                dispatcherQueue.TryEnqueue(() => { }); // no-op; just need to check
+                try
                 {
-                    dispatcherQueue.TryEnqueue(() =>
-                    {
-                        SendMessage("windowTarget:detected", new { processName = "", windowTitle = "" });
-                    });
-                    return;
+                    ownHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
                 }
+                catch { }
 
-                var titleBuffer = new System.Text.StringBuilder(512);
-                NativeMethods.GetWindowText(hwnd, titleBuffer, titleBuffer.Capacity);
-                string windowTitle = titleBuffer.ToString();
-
-                string processName = "";
-                NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
-                IntPtr hProcess = NativeMethods.OpenProcess(
-                    NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-
-                if (hProcess != IntPtr.Zero)
+                if (hwnd != IntPtr.Zero && hwnd != ownHwnd)
                 {
-                    try
+                    // Extract window info
+                    var titleBuffer = new System.Text.StringBuilder(512);
+                    NativeMethods.GetWindowText(hwnd, titleBuffer, titleBuffer.Capacity);
+                    string windowTitle = titleBuffer.ToString();
+
+                    string processName = "";
+                    NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+                    IntPtr hProcess = NativeMethods.OpenProcess(
+                        NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+
+                    if (hProcess != IntPtr.Zero)
                     {
-                        var nameBuffer = new System.Text.StringBuilder(512);
-                        uint len = NativeMethods.GetProcessImageFileName(
-                            hProcess, nameBuffer, (uint)nameBuffer.Capacity);
-                        if (len > 0)
+                        try
                         {
-                            string fullPath = nameBuffer.ToString();
-                            processName = fullPath.Substring(fullPath.LastIndexOf('\\') + 1);
+                            var nameBuffer = new System.Text.StringBuilder(512);
+                            uint len = NativeMethods.GetProcessImageFileName(
+                                hProcess, nameBuffer, (uint)nameBuffer.Capacity);
+                            if (len > 0)
+                            {
+                                string fullPath = nameBuffer.ToString();
+                                processName = fullPath.Substring(fullPath.LastIndexOf('\\') + 1);
+                            }
+                        }
+                        finally
+                        {
+                            NativeMethods.CloseHandle(hProcess);
                         }
                     }
-                    finally
-                    {
-                        NativeMethods.CloseHandle(hProcess);
-                    }
-                }
 
-                dispatcherQueue.TryEnqueue(() =>
-                {
-                    SendMessage("windowTarget:detected", new { processName, windowTitle });
-                });
+                    // Stop detection and send result
+                    StopWindowDetection();
+
+                    dispatcherQueue.TryEnqueue(() =>
+                    {
+                        SendMessage("windowTarget:detected", new { processName, windowTitle });
+                    });
+
+                    // Swallow the click so the target app doesn't receive it
+                    return (IntPtr)1;
+                }
+            }
+
+            return NativeMethods.CallNextHookEx(_detectMouseHook, nCode, wParam, lParam);
+        }
+
+        private void StopWindowDetection()
+        {
+            _isDetectingWindow = false;
+            if (_detectMouseHook != IntPtr.Zero)
+            {
+                NativeMethods.UnhookWindowsHookEx(_detectMouseHook);
+                _detectMouseHook = IntPtr.Zero;
+            }
+            _detectMouseProc = null;
+
+            dispatcherQueue.TryEnqueue(() =>
+            {
+                SendMessage("windowTarget:detectState", new { detecting = false });
             });
         }
 

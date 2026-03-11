@@ -20,6 +20,9 @@ export interface ProfileEntry {
   hotstringInstant: boolean;
   isActive: boolean;
   hasWindowTarget: boolean;
+  windowTargetProcessName: string | null;
+  windowTargetWindowTitle: string | null;
+  windowTargetTitleMatchMode: string;
   isDisabled: boolean;
 }
 
@@ -88,6 +91,7 @@ export type IncomingMessage =
   | { type: 'statusbar:updated'; payload: { directory: string; profileName: string | null; actionCount: number } }
   | { type: 'alert:show'; payload: { message: string } }
   | { type: 'windowTarget:detected'; payload: { processName: string; windowTitle: string } }
+  | { type: 'windowTarget:detectState'; payload: { detecting: boolean } }
   | { type: 'update:available'; payload: { version: string; currentVersion: string } }
   | { type: 'update:progress'; payload: { percent: number } }
   | { type: 'update:ready'; payload: Record<string, never> }

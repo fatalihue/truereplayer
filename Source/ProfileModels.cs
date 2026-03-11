@@ -109,6 +109,9 @@ namespace TrueReplayer.Models
         public string? Hotstring { get; set; }
         public bool HotstringInstant { get; set; }
         public bool HasWindowTarget { get; set; }
+        public string? WindowTargetProcessName { get; set; }
+        public string? WindowTargetWindowTitle { get; set; }
+        public string WindowTargetTitleMatchMode { get; set; } = "contains";
         public bool IsDisabled { get; set; }
         public string Display => string.IsNullOrEmpty(Hotkey) ? Name : $"{Name} ({Hotkey})";
 

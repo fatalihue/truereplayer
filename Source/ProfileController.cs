@@ -251,6 +251,9 @@ namespace TrueReplayer.Controllers
                             Hotstring = profile.CustomHotstring?.Sequence,
                             HotstringInstant = profile.CustomHotstring?.Instant ?? false,
                             HasWindowTarget = hasTarget,
+                            WindowTargetProcessName = profile.TargetWindow?.ProcessName,
+                            WindowTargetWindowTitle = profile.TargetWindow?.WindowTitle,
+                            WindowTargetTitleMatchMode = profile.TargetWindow?.TitleMatchMode ?? "contains",
                             IsDisabled = profile.IsDisabled
                         });
 

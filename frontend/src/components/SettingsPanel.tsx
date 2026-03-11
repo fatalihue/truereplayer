@@ -353,7 +353,7 @@ export function SettingsPanel() {
                   onChange={(v) => send({ type: 'window:runOnStartup', payload: { enabled: v } })}
                 />
               </SettingRow>
-              <SettingRow label="Start Minimized">
+              <SettingRow label="Startup Minimized">
                 <Toggle
                   isOn={settings.startMinimized}
                   onChange={(v) => send({ type: 'window:startMinimized', payload: { enabled: v } })}

@@ -145,6 +145,14 @@ namespace TrueReplayer.Interop
 
         public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
 
+        [DllImport("user32.dll")]
+        public static extern IntPtr WindowFromPoint(POINT point);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+
+        public const uint GA_ROOT = 2;
+
         public static IntPtr SetMouseHook(LowLevelMouseProc proc)
         {
             using var curProcess = System.Diagnostics.Process.GetCurrentProcess();
