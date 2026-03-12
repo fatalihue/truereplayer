@@ -158,7 +158,7 @@ namespace TrueReplayer.Services
             if (key == null) return;
 
             if (enable)
-                key.SetValue(StartupValueName, $"\"{Environment.ProcessPath}\"");
+                key.SetValue(StartupValueName, $"\"{Environment.ProcessPath}\" --startup");
             else
                 key.DeleteValue(StartupValueName, false);
 
