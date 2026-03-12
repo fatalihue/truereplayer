@@ -7,7 +7,7 @@ namespace TrueReplayer.Services
 {
     public static class UpdateService
     {
-        private const string RepoUrl = "https://github.com/fatalihue/truereplayer";
+        private const string RepoUrl = "https://github.com/fatalihue/TrueReplayer-releases";
 
         private static readonly UpdateManager _manager = new(
             new GithubSource(RepoUrl, null, false));
