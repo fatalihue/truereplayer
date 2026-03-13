@@ -51,6 +51,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [showFolderColorPicker, setShowFolderColorPicker] = useState<string | null>(null);
   const [dragProfile, setDragProfile] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null); // folder name or '__ungrouped__'
+  const [dragFolder, setDragFolder] = useState<string | null>(null);
+  const [dropFolderIndex, setDropFolderIndex] = useState<number | null>(null);
   const dialogInputRef = useRef<HTMLInputElement>(null);
   const folderDialogInputRef = useRef<HTMLInputElement>(null);
   const hotkeyInputRef = useRef<HTMLInputElement>(null);
@@ -607,6 +609,67 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     };
   }, [dragProfile, dropTarget, send]);
 
+  // ── Folder Drag & Drop (reorder folders) ──
+  const folderDragStartPos = useRef<{ x: number; y: number } | null>(null);
+  const folderDragActive = useRef(false);
+
+  const handleFolderMouseDown = (e: React.MouseEvent, folderName: string) => {
+    if (e.button !== 0) return;
+    folderDragStartPos.current = { x: e.clientX, y: e.clientY };
+    folderDragActive.current = false;
+    setDragFolder(folderName);
+  };
+
+  useEffect(() => {
+    if (!dragFolder) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!folderDragStartPos.current) return;
+      const dx = e.clientX - folderDragStartPos.current.x;
+      const dy = e.clientY - folderDragStartPos.current.y;
+      if (!folderDragActive.current && Math.abs(dx) + Math.abs(dy) < 5) return;
+      folderDragActive.current = true;
+
+      // Hit-test folder positions to find drop index
+      const folders = profileOrder?.folders ?? [];
+      let bestIndex: number | null = null;
+      folderRefs.current.forEach((el, name) => {
+        const idx = folders.findIndex(f => f.name === name);
+        if (idx < 0 || name === dragFolder) return;
+        const rect = el.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+          bestIndex = e.clientY < midY ? idx : idx + 1;
+        }
+      });
+      setDropFolderIndex(bestIndex);
+    };
+
+    const handleMouseUp = () => {
+      if (folderDragActive.current && dragFolder && dropFolderIndex !== null) {
+        const folders = [...(profileOrder?.folders ?? [])];
+        const fromIdx = folders.findIndex(f => f.name === dragFolder);
+        if (fromIdx >= 0 && fromIdx !== dropFolderIndex && fromIdx !== dropFolderIndex - 1) {
+          const [moved] = folders.splice(fromIdx, 1);
+          const toIdx = dropFolderIndex > fromIdx ? dropFolderIndex - 1 : dropFolderIndex;
+          folders.splice(toIdx, 0, moved);
+          send({ type: 'profile:reorder', payload: { folders } });
+        }
+      }
+      folderDragStartPos.current = null;
+      folderDragActive.current = false;
+      setDragFolder(null);
+      setDropFolderIndex(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [dragFolder, dropFolderIndex, profileOrder, send]);
+
   const handleDialogKeyDown = (e: React.KeyboardEvent, onConfirm: () => void) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -782,30 +845,49 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               )}
 
               {/* Folder Sections */}
-              {folderSections.map(folder => {
+              {folderSections.map((folder, folderIdx) => {
                 const hasVisibleProfiles = folder.profiles.length > 0;
                 const isDragOver = dropTarget === folder.name && dragProfile !== null;
+                const isFolderDragging = dragFolder === folder.name && folderDragActive.current;
+                const showDropBefore = dragFolder && dropFolderIndex === folderIdx && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder);
+                const showDropAfter = dragFolder && dropFolderIndex === folderIdx + 1 && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder) && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder) + 1;
                 return (
-                  <div
-                    key={folder.name}
-                    ref={(el) => { if (el) folderRefs.current.set(folder.name, el); else folderRefs.current.delete(folder.name); }}
-                    className={`rounded transition-colors ${isDragOver ? 'bg-accent-solid/20 ring-2 ring-accent-solid/50' : ''}`}
-                  >
-                    <button
-                      className="w-full flex items-center gap-1.5 px-2 py-1.5 mt-1 rounded text-left hover:bg-bg-card transition-colors group"
-                      onClick={() => handleToggleFolderCollapse(folder.name)}
-                      onContextMenu={(e) => handleFolderContextMenu(e, folder.name)}
+                  <div key={folder.name}>
+                    {showDropBefore && (
+                      <div className="flex items-center gap-1 mx-1 my-1">
+                        <div className="w-1.5 h-1.5 rounded-full bg-accent-solid shrink-0" />
+                        <div className="flex-1 h-0.5 bg-accent-solid rounded-full shadow-[0_0_6px_rgba(96,205,255,0.5)]" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-accent-solid shrink-0" />
+                      </div>
+                    )}
+                    <div
+                      ref={(el) => { if (el) folderRefs.current.set(folder.name, el); else folderRefs.current.delete(folder.name); }}
+                      className={`rounded transition-colors ${isDragOver ? 'bg-accent-solid/20 ring-2 ring-accent-solid/50' : ''} ${isFolderDragging ? 'opacity-50' : ''}`}
                     >
-                      <span style={{ color: folder.color }} className="shrink-0">
-                        {folder.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-                      </span>
-                      <FolderOpen size={12} style={{ color: folder.color }} className="shrink-0" />
-                      <span className="text-xs font-medium text-text-secondary flex-1 truncate">{folder.name}</span>
-                      <span className="text-[10px] text-text-disabled">{folder.items.length}</span>
-                    </button>
-                    {!folder.collapsed && hasVisibleProfiles && (
-                      <div className="ml-3 pl-1.5" style={{ borderLeft: `2px solid ${folder.color}40` }}>
-                        {folder.profiles.map(renderProfileRow)}
+                      <div
+                        className="w-full flex items-center gap-1.5 px-2 py-1.5 mt-1 rounded text-left hover:bg-bg-card transition-colors group cursor-default select-none"
+                        onMouseDown={(e) => handleFolderMouseDown(e, folder.name)}
+                        onClick={() => { if (!folderDragActive.current) handleToggleFolderCollapse(folder.name); }}
+                        onContextMenu={(e) => handleFolderContextMenu(e, folder.name)}
+                      >
+                        <span style={{ color: folder.color }} className="shrink-0">
+                          {folder.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                        </span>
+                        <FolderOpen size={12} style={{ color: folder.color }} className="shrink-0" />
+                        <span className="text-xs font-medium text-text-secondary flex-1 truncate">{folder.name}</span>
+                        <span className="text-[10px] text-text-disabled">{folder.items.length}</span>
+                      </div>
+                      {!folder.collapsed && hasVisibleProfiles && (
+                        <div className="ml-3 pl-1.5" style={{ borderLeft: `2px solid ${folder.color}40` }}>
+                          {folder.profiles.map(renderProfileRow)}
+                        </div>
+                      )}
+                    </div>
+                    {showDropAfter && (
+                      <div className="flex items-center gap-1 mx-1 my-1">
+                        <div className="w-1.5 h-1.5 rounded-full bg-accent-solid shrink-0" />
+                        <div className="flex-1 h-0.5 bg-accent-solid rounded-full shadow-[0_0_6px_rgba(96,205,255,0.5)]" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-accent-solid shrink-0" />
                       </div>
                     )}
                   </div>
