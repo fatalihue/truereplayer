@@ -96,7 +96,7 @@ namespace TrueReplayer
             mainController.UpdateButtonStates();
 
             profileController = new ProfileController(this);
-            this.Closed += (_, _) => profileController.Dispose();
+            this.Closed += (_, _) => { bridge?.Dispose(); profileController.Dispose(); };
 
             InitializeWebView();
         }
@@ -215,12 +215,13 @@ namespace TrueReplayer
                     var profile = bridge.CreateProfileFromState();
                     profile.CustomHotkey = UserProfile.Current.CustomHotkey;
                     await SettingsManager.SaveProfileAsync(bridge.CurrentProfilePath, profile);
+                    return true;
                 }
                 else
                 {
-                    await profileController.SaveProfileAsync();
+                    bool saved = await profileController.SaveProfileAsync();
+                    return saved; // If user cancelled save dialog, don't close
                 }
-                return true;
             }
 
             if (result == ContentDialogResult.Secondary) // Discard
@@ -300,10 +301,11 @@ namespace TrueReplayer
                             mainController.SetLastHotkeyPressed(key);
                             UserProfile.Current = profile;
                             AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
-                            bridge?.ApplyProfile(profile);
-                            bridge!.CurrentProfileName = profileName;
-                            bridge!.CurrentProfilePath = entry?.FilePath;
-                            bridge!.HasUnsavedChanges = false;
+                            if (bridge == null) return;
+                            bridge.ApplyProfile(profile);
+                            bridge.CurrentProfileName = profileName;
+                            bridge.CurrentProfilePath = entry?.FilePath;
+                            bridge.HasUnsavedChanges = false;
 
                             mainController.ToggleReplay(
                                 bridge.EnableLoop,

@@ -40,7 +40,7 @@ namespace TrueReplayer.Services
             try
             {
                 var json = JsonSerializer.Serialize(settings, AppSettingsJsonContext.Default.AppSettings);
-                File.WriteAllText(GetPath(), json);
+                FileHelper.WriteAllTextAtomic(GetPath(), json);
             }
             catch (Exception ex)
             {

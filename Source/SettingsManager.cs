@@ -33,7 +33,7 @@ namespace TrueReplayer.Services
             };
 
             var json = JsonSerializer.Serialize(profile, options);
-            await File.WriteAllTextAsync(filePath, json);  // Salva o perfil no arquivo
+            await FileHelper.WriteAllTextAtomicAsync(filePath, json);
         }
 
         public static async Task<UserProfile?> LoadProfileAsync(string? filePath = null)

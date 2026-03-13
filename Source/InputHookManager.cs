@@ -25,9 +25,16 @@ namespace TrueReplayer
 
         private static DateTime? lastAltRightPressTime = null;
 
-        public static Dictionary<string, string> ProfileHotkeys = new();
-        public static Dictionary<string, WindowTarget> ProfileWindowTargets = new();
-        public static Dictionary<string, HotstringConfig> ProfileHotstrings = new();
+        public static volatile Dictionary<string, string> ProfileHotkeys = new();
+        public static volatile Dictionary<string, HotstringConfig> ProfileHotstrings = new();
+
+        // Window targets and compiled regexes are bundled together for atomic access
+        private sealed class WindowTargetSnapshot
+        {
+            public Dictionary<string, WindowTarget> Targets { get; init; } = new();
+            public Dictionary<string, Regex?> CompiledRegexes { get; init; } = new();
+        }
+        private static volatile WindowTargetSnapshot _windowTargets = new();
 
         // Hotstring character buffer (accessed only from hook thread)
         private static readonly char[] _hotstringBuffer = new char[64];
@@ -78,12 +85,8 @@ namespace TrueReplayer
             _hotstringBufferLen = 0;
         }
 
-        private static Dictionary<string, Regex?> _compiledTitleRegexes = new();
-
         public static void RegisterProfileWindowTargets(Dictionary<string, WindowTarget> targets)
         {
-            ProfileWindowTargets = targets;
-
             var regexes = new Dictionary<string, Regex?>();
             foreach (var (name, target) in targets)
             {
@@ -101,7 +104,8 @@ namespace TrueReplayer
                     }
                 }
             }
-            _compiledTitleRegexes = regexes;
+            // Assign both atomically as a single snapshot
+            _windowTargets = new WindowTargetSnapshot { Targets = targets, CompiledRegexes = regexes };
         }
 
         private static readonly StringBuilder _windowTextBuffer = new(512);
@@ -109,7 +113,9 @@ namespace TrueReplayer
 
         private static bool IsForegroundWindowMatch(string profileName)
         {
-            if (!ProfileWindowTargets.TryGetValue(profileName, out var target))
+            // Read snapshot once for consistent access
+            var wt = _windowTargets;
+            if (!wt.Targets.TryGetValue(profileName, out var target))
                 return true;
 
             IntPtr hwnd = NativeMethods.GetForegroundWindow();
@@ -124,7 +130,7 @@ namespace TrueReplayer
 
                 if (target.TitleMatchMode == "regex")
                 {
-                    if (_compiledTitleRegexes.TryGetValue(profileName, out var regex) && regex != null)
+                    if (wt.CompiledRegexes.TryGetValue(profileName, out var regex) && regex != null)
                     {
                         try
                         {

@@ -160,7 +160,7 @@ export type OutgoingMessage =
   | { type: 'window:minimizeToTray'; payload: { enabled: boolean } }
   | { type: 'window:runOnStartup'; payload: { enabled: boolean } }
   | { type: 'window:startMinimized'; payload: { enabled: boolean } }
-  | { type: 'profile:export'; payload: { names: string[] } }
+  | { type: 'profile:export'; payload: { names: string[]; includeOrganization?: boolean } }
   | { type: 'profile:import'; payload: Record<string, never> }
   | { type: 'ui:modalOpen'; payload: Record<string, never> }
   | { type: 'ui:modalClose'; payload: Record<string, never> }

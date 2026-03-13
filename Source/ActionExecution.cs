@@ -2,6 +2,7 @@ using Microsoft.UI.Dispatching;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -388,56 +389,70 @@ namespace TrueReplayer.Services
 
         public async Task StartAsync()
         {
-            _cts?.Dispose();
+            // Cancel any previous run and wait for it to finish before disposing
+            if (_cts != null)
+            {
+                _cts.Cancel();
+                // Give previous task a moment to observe cancellation
+                await Task.Delay(50);
+                _cts.Dispose();
+            }
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
             int iteration = 0;
             bool isInfinite = _loopCount == 0;
 
+            // Snapshot the actions list to avoid crashes from concurrent modifications
+            var snapshot = _actions.ToList();
+
             try
             {
                 await WaitForHotkeyReleaseAsync(token);
 
-                while (!token.IsCancellationRequested && (isInfinite || iteration < _loopCount))
+                // Run replay on a dedicated thread to avoid blocking the thread pool
+                await Task.Factory.StartNew(async () =>
                 {
-                    iteration++;
-
-                    for (int i = 0; i < _actions.Count; i++)
+                    while (!token.IsCancellationRequested && (isInfinite || iteration < _loopCount))
                     {
-                        if (token.IsCancellationRequested) break;
-                        var action = _actions[i];
-                        int safeDelay = Math.Max(0, action.Delay);
+                        iteration++;
 
-                        await Task.Delay(safeDelay, token);
-                        dispatcherQueue.TryEnqueue(() => OnActionExecuting?.Invoke(action));
-                        InputHookManager.IsReplayingAction = true;
-
-                        try
+                        for (int i = 0; i < snapshot.Count; i++)
                         {
-                            switch (action.ActionType)
+                            if (token.IsCancellationRequested) break;
+                            var action = snapshot[i];
+                            int safeDelay = Math.Max(0, action.Delay);
+
+                            await Task.Delay(safeDelay, token);
+                            dispatcherQueue.TryEnqueue(() => OnActionExecuting?.Invoke(action));
+                            InputHookManager.IsReplayingAction = true;
+
+                            try
                             {
-                                case "KeyDown": SimulateKey(action.Key, true); break;
-                                case "KeyUp": SimulateKey(action.Key, false); break;
-                                case "LeftClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN); break;
-                                case "LeftClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP); break;
-                                case "RightClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTDOWN); break;
-                                case "RightClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTUP); break;
-                                case "MiddleClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN); break;
-                                case "MiddleClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEUP); break;
-                                case "ScrollUp": SimulateScroll(120); break;
-                                case "ScrollDown": SimulateScroll(-120); break;
-                                case "SendText": await SimulateClipboardPaste(action.Key, token); break;
+                                switch (action.ActionType)
+                                {
+                                    case "KeyDown": SimulateKey(action.Key, true); break;
+                                    case "KeyUp": SimulateKey(action.Key, false); break;
+                                    case "LeftClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN); break;
+                                    case "LeftClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP); break;
+                                    case "RightClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTDOWN); break;
+                                    case "RightClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTUP); break;
+                                    case "MiddleClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN); break;
+                                    case "MiddleClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEUP); break;
+                                    case "ScrollUp": SimulateScroll(120); break;
+                                    case "ScrollDown": SimulateScroll(-120); break;
+                                    case "SendText": await SimulateClipboardPaste(action.Key, token); break;
+                                }
+                            }
+                            finally
+                            {
+                                InputHookManager.IsReplayingAction = false;
                             }
                         }
-                        finally
-                        {
-                            InputHookManager.IsReplayingAction = false;
-                        }
-                    }
 
-                    if (!token.IsCancellationRequested && (isInfinite || iteration < _loopCount) && _loopInterval > 0)
-                        await Task.Delay(_loopInterval, token);
-                }
+                        if (!token.IsCancellationRequested && (isInfinite || iteration < _loopCount) && _loopInterval > 0)
+                            await Task.Delay(_loopInterval, token);
+                    }
+                }, token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
             }
             catch (TaskCanceledException) { }
         }
@@ -494,9 +509,8 @@ namespace TrueReplayer.Services
 
         public void Stop()
         {
+            // Only cancel — disposal is handled by the next StartAsync() call
             _cts?.Cancel();
-            _cts?.Dispose();
-            _cts = null;
             ResetMouseState();
         }
 

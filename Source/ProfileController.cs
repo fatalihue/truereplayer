@@ -27,11 +27,12 @@ namespace TrueReplayer.Controllers
         private FileSystemWatcher? profileWatcher;
         private CancellationTokenSource? debounceCts;
         private bool _disposed;
-        private bool suppressWatcherRefresh = false;
+        private DateTime suppressWatcherUntil = DateTime.MinValue;
 
         public ObservableCollection<ProfileEntry> ProfileEntries { get; } = new();
         private Dictionary<string, WindowTarget> _cachedWindowTargets = new();
         private ProfileOrderData _profileOrder = new();
+        private readonly SemaphoreSlim _profileOrderLock = new(1, 1);
 
         private static readonly JsonSerializerOptions OrderJsonOptions = new()
         {
@@ -113,7 +114,7 @@ namespace TrueReplayer.Controllers
 
         #region Profile CRUD Operations
 
-        public async Task SaveProfileAsync()
+        public async Task<bool> SaveProfileAsync()
         {
             string profileDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
@@ -137,19 +138,16 @@ namespace TrueReplayer.Controllers
 
                 try
                 {
-                    if (File.Exists(fileName))
-                    {
-                        File.Delete(fileName);
-                    }
-
                     await SettingsManager.SaveProfileAsync(fileName, profile);
                     await RefreshProfileListAsync(true);
+                    return true;
                 }
                 catch (Exception ex)
                 {
                     WinForms.MessageBox.Show($"Error saving profile:\n{ex.Message}", "Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
                 }
             }
+            return false;
         }
 
         public async Task<string?> LoadProfileAsync()
@@ -240,7 +238,9 @@ namespace TrueReplayer.Controllers
 
             Directory.CreateDirectory(profileDir);
 
-            var files = Directory.GetFiles(profileDir, "*.json").ToList();
+            var files = Directory.GetFiles(profileDir, "*.json")
+                .Where(f => !string.Equals(Path.GetFileName(f), "profile-order.json", StringComparison.OrdinalIgnoreCase))
+                .ToList();
 
             ProfileEntries.Clear();
             _cachedWindowTargets.Clear();
@@ -293,7 +293,7 @@ namespace TrueReplayer.Controllers
         public async Task RefreshProfileListAsync(bool suppressWatcher = false)
         {
             if (suppressWatcher)
-                suppressWatcherRefresh = true;
+                suppressWatcherUntil = DateTime.UtcNow.AddSeconds(2);
 
             await LoadProfileListAsync();
         }
@@ -326,6 +326,10 @@ namespace TrueReplayer.Controllers
 
         private async void OnProfileFolderChanged(object sender, FileSystemEventArgs e)
         {
+            // Ignore profile-order.json changes — it's not a profile file
+            if (string.Equals(Path.GetFileName(e.FullPath), "profile-order.json", StringComparison.OrdinalIgnoreCase))
+                return;
+
             debounceCts?.Cancel();
             debounceCts?.Dispose();
 
@@ -339,11 +343,8 @@ namespace TrueReplayer.Controllers
                 {
                     window.DispatcherQueue.TryEnqueue(() =>
                     {
-                        if (suppressWatcherRefresh)
-                        {
-                            suppressWatcherRefresh = false;
+                        if (DateTime.UtcNow < suppressWatcherUntil)
                             return;
-                        }
                         RefreshProfileList();
                     });
                 }
@@ -816,15 +817,50 @@ namespace TrueReplayer.Controllers
 
         public async Task SaveProfileOrderAsync()
         {
+            await _profileOrderLock.WaitAsync();
             try
             {
                 var json = JsonSerializer.Serialize(_profileOrder, OrderJsonOptions);
-                await File.WriteAllTextAsync(ProfileOrderPath, json);
+                await Services.FileHelper.WriteAllTextAtomicAsync(ProfileOrderPath, json);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[ProfileController] SaveProfileOrder error: {ex.Message}");
             }
+            finally
+            {
+                _profileOrderLock.Release();
+            }
+        }
+
+        public async Task RemoveProfileFromOrderAsync(string name)
+        {
+            _profileOrder.Pinned.Remove(name);
+            _profileOrder.UngroupedOrder.Remove(name);
+            foreach (var folder in _profileOrder.Folders)
+                folder.Items.Remove(name);
+            // Remove empty folders? No — user may want to keep them
+            await SaveProfileOrderAsync();
+        }
+
+        public async Task RenameProfileInOrderAsync(string oldName, string newName)
+        {
+            // Update pinned
+            var pinnedIndex = _profileOrder.Pinned.IndexOf(oldName);
+            if (pinnedIndex >= 0) _profileOrder.Pinned[pinnedIndex] = newName;
+
+            // Update folders
+            foreach (var folder in _profileOrder.Folders)
+            {
+                var itemIndex = folder.Items.IndexOf(oldName);
+                if (itemIndex >= 0) folder.Items[itemIndex] = newName;
+            }
+
+            // Update ungrouped order
+            var ungroupedIndex = _profileOrder.UngroupedOrder.IndexOf(oldName);
+            if (ungroupedIndex >= 0) _profileOrder.UngroupedOrder[ungroupedIndex] = newName;
+
+            await SaveProfileOrderAsync();
         }
 
         public async Task PinProfileAsync(string name)
@@ -942,6 +978,8 @@ namespace TrueReplayer.Controllers
             debounceCts?.Cancel();
             debounceCts?.Dispose();
             debounceCts = null;
+
+            _profileOrderLock?.Dispose();
         }
     }
 }

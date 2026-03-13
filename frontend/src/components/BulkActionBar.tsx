@@ -59,9 +59,8 @@ export function BulkActionBar({
               value={delayValue}
               onChange={(e) => setDelayValue(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleSetDelay(); if (e.key === 'Escape') setShowDelayInput(false); }}
-              placeholder="ms"
               autoFocus
-              className="w-14 h-6 px-1.5 text-[11px] font-mono bg-bg-input border border-border-default rounded text-center text-text-primary outline-none focus:border-accent-solid"
+              className="w-20 h-6 px-2 text-[11px] font-mono bg-bg-input border border-border-default rounded text-center text-text-primary outline-none focus:border-accent-solid"
             />
             <button
               onClick={handleSetDelay}
@@ -83,7 +82,7 @@ export function BulkActionBar({
             title="Set delay for selected"
           >
             <Clock size={11} />
-            Delay
+            Delay (ms)
           </button>
         )}
 

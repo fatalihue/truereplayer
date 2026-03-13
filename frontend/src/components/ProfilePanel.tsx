@@ -951,7 +951,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               <ChevronRight size={11} className="ml-auto text-text-tertiary" />
             </button>
             {showMoveToFolderMenu === contextMenu.profileName && (
-              <div className="absolute left-full top-0 ml-1 min-w-[140px] py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
+              <div className="absolute left-full top-0 min-w-[140px] bg-transparent" style={{ paddingLeft: '4px' }}>
+              <div className="py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
                 {(profileOrder?.folders ?? []).map(f => (
                   <button
                     key={f.name}
@@ -978,6 +979,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 {(profileOrder?.folders ?? []).length === 0 && (
                   <span className="block px-3 py-1.5 text-xs text-text-disabled">No folders</span>
                 )}
+              </div>
               </div>
             )}
           </div>
@@ -1072,7 +1074,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               <ChevronRight size={11} className="ml-auto text-text-tertiary" />
             </button>
             {showFolderColorPicker === folderContextMenu.folderName && (
-              <div className="absolute left-full top-0 ml-1 p-2.5 bg-bg-card border border-border-default rounded-md shadow-lg z-[60] min-w-0">
+              <div className="absolute left-full top-0 min-w-0 bg-transparent" style={{ paddingLeft: '4px' }}>
+              <div className="p-2.5 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
                 <div className="flex flex-wrap gap-1.5" style={{ width: '156px' }}>
                   {FOLDER_COLORS.map(c => (
                     <button
@@ -1084,6 +1087,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                     />
                   ))}
                 </div>
+              </div>
               </div>
             )}
           </div>

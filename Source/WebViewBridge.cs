@@ -16,8 +16,9 @@ using TrueReplayer.Services;
 
 namespace TrueReplayer
 {
-    public class WebViewBridge
+    public class WebViewBridge : IDisposable
     {
+        private bool _disposed;
         private readonly CoreWebView2 webView;
         private readonly ObservableCollection<ActionItem> actions;
         private readonly MainController mainController;
@@ -343,8 +344,11 @@ namespace TrueReplayer
         {
             return new UserProfile
             {
-                Actions = actions,
+                Actions = new ObservableCollection<ActionItem>(actions),
                 CustomHotkey = UserProfile.Current.CustomHotkey,
+                CustomHotstring = UserProfile.Current.CustomHotstring,
+                IsDisabled = UserProfile.Current.IsDisabled,
+                BatchDelay = UserProfile.Current.BatchDelay,
                 TargetWindow = UserProfile.Current.TargetWindow,
                 LastProfileDirectory = UserProfile.Current.LastProfileDirectory,
             };
@@ -921,11 +925,13 @@ namespace TrueReplayer
             try
             {
                 File.Move(entry.FilePath, newFilePath);
+                var actualNewName = Path.GetFileNameWithoutExtension(newFileName);
                 if (CurrentProfileName == oldName)
                 {
-                    CurrentProfileName = Path.GetFileNameWithoutExtension(newFileName);
+                    CurrentProfileName = actualNewName;
                     CurrentProfilePath = newFilePath;
                 }
+                await profileController.RenameProfileInOrderAsync(oldName, actualNewName);
                 await profileController.RefreshProfileListAsync(true);
                 PushProfilesUpdate();
                 PushToolbarUpdate();
@@ -956,6 +962,7 @@ namespace TrueReplayer
                     CurrentProfilePath = null;
                 }
 
+                await profileController.RemoveProfileFromOrderAsync(name);
                 await profileController.RefreshProfileListAsync(true);
                 PushProfilesUpdate();
                 PushToolbarUpdate();
@@ -1419,15 +1426,15 @@ namespace TrueReplayer
                 }
                 else if (choice == SaveDialogResult.SaveAsNew)
                 {
-                    await profileController.SaveProfileAsync();
-                    HasUnsavedChanges = false;
+                    bool saved = await profileController.SaveProfileAsync();
+                    if (saved) HasUnsavedChanges = false;
                 }
                 // Cancel = do nothing
             }
             else
             {
-                await profileController.SaveProfileAsync();
-                HasUnsavedChanges = false;
+                bool saved = await profileController.SaveProfileAsync();
+                if (saved) HasUnsavedChanges = false;
             }
             PushProfilesUpdate();
         }
@@ -1700,6 +1707,13 @@ namespace TrueReplayer
                 HasUnsavedChanges = true;
 
             PushActionsUpdate();
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            actions.CollectionChanged -= OnActionsChanged;
         }
     }
 }
