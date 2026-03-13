@@ -1362,7 +1362,8 @@ namespace TrueReplayer
 
             try
             {
-                bool success = await profileController.ExportProfilesAsync(names);
+                bool includeOrganization = payload.TryGetProperty("includeOrganization", out var orgProp) && orgProp.GetBoolean();
+                bool success = await profileController.ExportProfilesAsync(names, includeOrganization);
                 if (success)
                     SendMessage("alert:show", new { message = $"Exported {names.Count} profile(s) successfully." });
             }
@@ -1376,7 +1377,7 @@ namespace TrueReplayer
         {
             try
             {
-                var (imported, skipped, cancelled) = await profileController.ImportProfilesAsync();
+                var (imported, skipped, cancelled, hasOrganization) = await profileController.ImportProfilesAsync();
 
                 if (cancelled && imported == 0)
                     return;
@@ -1387,6 +1388,8 @@ namespace TrueReplayer
                     string msg = $"Imported {imported} profile(s).";
                     if (skipped > 0)
                         msg += $" {skipped} skipped.";
+                    if (hasOrganization)
+                        msg += " Folder organization imported.";
                     SendMessage("alert:show", new { message = msg });
                 }
                 else if (skipped > 0)

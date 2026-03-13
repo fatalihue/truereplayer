@@ -159,10 +159,18 @@ namespace TrueReplayer.Models
         public ObservableCollection<ActionItem> Actions { get; set; } = new();
     }
 
+    public class ProfileExportOrganization
+    {
+        public List<string> Pinned { get; set; } = new();
+        public List<ProfileFolder> Folders { get; set; } = new();
+        public List<string> UngroupedOrder { get; set; } = new();
+    }
+
     public class ProfileExportEnvelope
     {
         public int Version { get; set; } = 1;
         public string ExportedAt { get; set; } = DateTime.UtcNow.ToString("o");
         public List<ProfileExportEntry> Profiles { get; set; } = new();
+        public ProfileExportOrganization? Organization { get; set; }
     }
 }

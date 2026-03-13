@@ -19,7 +19,7 @@ using WinForms = System.Windows.Forms;
 namespace TrueReplayer.Controllers
 {
     public enum SaveDialogResult { Overwrite, SaveAsNew, Cancel }
-    public enum ImportConflictResult { Overwrite, Rename, Skip }
+    public enum ImportConflictResult { Overwrite, Rename, Skip, OverwriteAll, SkipAll }
 
     public class ProfileController : IDisposable
     {
@@ -478,7 +478,7 @@ namespace TrueReplayer.Controllers
 
         #region Profile Export/Import
 
-        public async Task<bool> ExportProfilesAsync(List<string> profileNames)
+        public async Task<bool> ExportProfilesAsync(List<string> profileNames, bool includeOrganization = false)
         {
             var envelope = new ProfileExportEnvelope();
 
@@ -499,6 +499,25 @@ namespace TrueReplayer.Controllers
             }
 
             if (envelope.Profiles.Count == 0) return false;
+
+            if (includeOrganization)
+            {
+                var exportedNames = new HashSet<string>(envelope.Profiles.Select(p => p.Name));
+                envelope.Organization = new ProfileExportOrganization
+                {
+                    Pinned = _profileOrder.Pinned.Where(n => exportedNames.Contains(n)).ToList(),
+                    Folders = _profileOrder.Folders
+                        .Where(f => f.Items.Any(i => exportedNames.Contains(i)))
+                        .Select(f => new ProfileFolder
+                        {
+                            Name = f.Name,
+                            Color = f.Color,
+                            Collapsed = false,
+                            Items = f.Items.Where(i => exportedNames.Contains(i)).ToList()
+                        }).ToList(),
+                    UngroupedOrder = _profileOrder.UngroupedOrder.Where(n => exportedNames.Contains(n)).ToList()
+                };
+            }
 
             var defaultName = envelope.Profiles.Count == 1
                 ? envelope.Profiles[0].Name
@@ -525,7 +544,7 @@ namespace TrueReplayer.Controllers
             return true;
         }
 
-        public async Task<(int imported, int skipped, bool cancelled)> ImportProfilesAsync()
+        public async Task<(int imported, int skipped, bool cancelled, bool hasOrganization)> ImportProfilesAsync()
         {
             var fileName = await ShowFileDialogAsync(new WinForms.OpenFileDialog
             {
@@ -533,7 +552,7 @@ namespace TrueReplayer.Controllers
                 DefaultExt = "trprofile"
             });
 
-            if (fileName == null) return (0, 0, true);
+            if (fileName == null) return (0, 0, true, false);
 
             var json = await File.ReadAllTextAsync(fileName);
             var options = new JsonSerializerOptions
@@ -544,7 +563,9 @@ namespace TrueReplayer.Controllers
 
             var envelope = JsonSerializer.Deserialize<ProfileExportEnvelope>(json, options);
             if (envelope?.Profiles == null || envelope.Profiles.Count == 0)
-                return (0, 0, false);
+                return (0, 0, false, false);
+
+            bool hasOrganization = envelope.Organization != null;
 
             string profileDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
@@ -553,6 +574,7 @@ namespace TrueReplayer.Controllers
 
             int imported = 0;
             int skipped = 0;
+            ImportConflictResult? applyAllDecision = null;
 
             foreach (var entry in envelope.Profiles)
             {
@@ -561,7 +583,27 @@ namespace TrueReplayer.Controllers
 
                 if (File.Exists(targetPath))
                 {
-                    var resolution = await ShowImportConflictDialogAsync(entry.Name);
+                    ImportConflictResult resolution;
+
+                    if (applyAllDecision == ImportConflictResult.OverwriteAll)
+                        resolution = ImportConflictResult.Overwrite;
+                    else if (applyAllDecision == ImportConflictResult.SkipAll)
+                        resolution = ImportConflictResult.Skip;
+                    else
+                    {
+                        resolution = await ShowImportConflictDialogAsync(entry.Name);
+
+                        if (resolution == ImportConflictResult.OverwriteAll)
+                        {
+                            applyAllDecision = ImportConflictResult.OverwriteAll;
+                            resolution = ImportConflictResult.Overwrite;
+                        }
+                        else if (resolution == ImportConflictResult.SkipAll)
+                        {
+                            applyAllDecision = ImportConflictResult.SkipAll;
+                            resolution = ImportConflictResult.Skip;
+                        }
+                    }
 
                     if (resolution == ImportConflictResult.Skip)
                     {
@@ -597,16 +639,97 @@ namespace TrueReplayer.Controllers
             if (imported > 0)
                 await RefreshProfileListAsync(true);
 
-            return (imported, skipped, false);
+            // Merge organization if present
+            if (hasOrganization && imported > 0)
+                await MergeImportedOrganizationAsync(envelope.Organization!);
+
+            return (imported, skipped, false, hasOrganization);
+        }
+
+        private async Task MergeImportedOrganizationAsync(ProfileExportOrganization org)
+        {
+            // Merge pinned: add new pinned items that aren't already pinned
+            foreach (var name in org.Pinned)
+            {
+                if (!_profileOrder.Pinned.Contains(name))
+                    _profileOrder.Pinned.Add(name);
+            }
+
+            // Merge folders: add new folders, merge items into existing folders
+            foreach (var importedFolder in org.Folders)
+            {
+                var existingFolder = _profileOrder.Folders.FirstOrDefault(f => f.Name == importedFolder.Name);
+                if (existingFolder != null)
+                {
+                    // Merge items into existing folder
+                    foreach (var item in importedFolder.Items)
+                    {
+                        if (!existingFolder.Items.Contains(item))
+                            existingFolder.Items.Add(item);
+                    }
+                }
+                else
+                {
+                    // Add as new folder
+                    _profileOrder.Folders.Add(new ProfileFolder
+                    {
+                        Name = importedFolder.Name,
+                        Color = importedFolder.Color,
+                        Collapsed = false,
+                        Items = importedFolder.Items
+                    });
+                }
+
+                // Remove imported folder items from ungrouped
+                foreach (var item in importedFolder.Items)
+                    _profileOrder.UngroupedOrder.Remove(item);
+            }
+
+            await SaveProfileOrderAsync();
         }
 
         public async Task<ImportConflictResult> ShowImportConflictDialogAsync(string profileName)
         {
+            var resultTcs = new TaskCompletionSource<ImportConflictResult>();
+
             var messageBlock = new TextBlock
             {
-                Text = $"A profile named \"{profileName}\" already exists. What would you like to do?",
+                Text = $"A profile named \"{profileName}\" already exists.\nWhat would you like to do?",
                 TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap
             };
+
+            var overwriteAllBtn = new Button
+            {
+                Content = "Overwrite All",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Margin = new Thickness(0, 0, 4, 0)
+            };
+            var skipAllBtn = new Button
+            {
+                Content = "Skip All",
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Margin = new Thickness(4, 0, 0, 0)
+            };
+
+            var bulkPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Margin = new Thickness(0, 12, 0, 0)
+            };
+            overwriteAllBtn.Width = 130;
+            skipAllBtn.Width = 130;
+            bulkPanel.Children.Add(overwriteAllBtn);
+            bulkPanel.Children.Add(skipAllBtn);
+
+            var contentPanel = new StackPanel();
+            contentPanel.Children.Add(messageBlock);
+            contentPanel.Children.Add(bulkPanel);
+
+            ContentDialog? dialogRef = null;
+
+            overwriteAllBtn.Click += (s, e) => { resultTcs.TrySetResult(ImportConflictResult.OverwriteAll); dialogRef?.Hide(); };
+            skipAllBtn.Click += (s, e) => { resultTcs.TrySetResult(ImportConflictResult.SkipAll); dialogRef?.Hide(); };
 
             var dialog = new ContentDialog
             {
@@ -618,15 +741,19 @@ namespace TrueReplayer.Controllers
                 CloseButtonText = "Skip",
                 DefaultButton = ContentDialogButton.Secondary,
                 CornerRadius = new CornerRadius(8),
-                Content = messageBlock
+                Content = contentPanel
             };
+            dialogRef = dialog;
             ApplyDialogTheme(dialog, messageBlock);
 
             InputHookManager.SuppressAllHotkeys = true;
             try
             {
-                var result = await dialog.ShowAsync();
-                return result switch
+                var dialogResult = await dialog.ShowAsync();
+                if (resultTcs.Task.IsCompleted)
+                    return resultTcs.Task.Result;
+
+                return dialogResult switch
                 {
                     ContentDialogResult.Primary => ImportConflictResult.Overwrite,
                     ContentDialogResult.Secondary => ImportConflictResult.Rename,

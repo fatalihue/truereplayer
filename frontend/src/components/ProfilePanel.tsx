@@ -41,6 +41,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [isDetecting, setIsDetecting] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportSelection, setExportSelection] = useState<Record<string, boolean>>({});
+  const [exportIncludeOrg, setExportIncludeOrg] = useState(true);
   const [dialogValue, setDialogValue] = useState('');
   const [showCreateFolderDialog, setShowCreateFolderDialog] = useState(false);
   const [folderDialogName, setFolderDialogName] = useState('');
@@ -186,7 +187,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   }, [anyDialogOpen, send]);
 
   const handleExportClick = () => {
-    if (profiles.length === 0) return;
     const selection: Record<string, boolean> = {};
     profiles.forEach(p => { selection[p.name] = true; });
     setExportSelection(selection);
@@ -215,7 +215,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       .filter(([, checked]) => checked)
       .map(([name]) => name);
     if (selectedNames.length > 0) {
-      send({ type: 'profile:export', payload: { names: selectedNames } });
+      send({ type: 'profile:export', payload: { names: selectedNames, includeOrganization: exportIncludeOrg } });
     }
     setShowExportDialog(false);
   };
@@ -1335,7 +1335,18 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               ))}
             </div>
 
-            <div className="flex justify-between mt-4">
+            {/* Include folder organization checkbox */}
+            <label className="flex items-center gap-2 mt-3 px-2 py-1.5 rounded hover:bg-bg-elevated cursor-pointer border-t border-border-subtle pt-3">
+              <input
+                type="checkbox"
+                checked={exportIncludeOrg}
+                onChange={() => setExportIncludeOrg(prev => !prev)}
+                className="accent-[#0078D4]"
+              />
+              <span className="text-xs text-text-secondary">Include folder organization</span>
+            </label>
+
+            <div className="flex justify-between mt-3">
               <button
                 onClick={() => { handleImportClick(); setShowExportDialog(false); }}
                 className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
