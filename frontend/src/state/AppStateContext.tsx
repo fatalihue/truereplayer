@@ -30,6 +30,7 @@ const initialState: AppState = {
   highlightedActionIndex: null,
   profiles: [],
   activeProfile: null,
+  profileOrder: { pinned: [], folders: [], ungroupedOrder: [] },
   settings: defaultSettings,
   toolbar: { profileName: 'No Profile', actionCount: 0 },
   statusBar: { directory: 'Profiles', profileName: null, actionCount: 0 },
@@ -46,7 +47,7 @@ const initialState: AppState = {
 function appStateReducer(state: AppState, message: IncomingMessage): AppState {
   switch (message.type) {
     case 'state:init':
-      return { ...message.payload };
+      return { ...initialState, ...message.payload, profileOrder: message.payload.profileOrder ?? initialState.profileOrder };
     case 'status:changed':
       return { ...state, status: message.payload.status };
     case 'actions:updated':
@@ -54,7 +55,7 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
     case 'actions:highlight':
       return { ...state, highlightedActionIndex: message.payload.index };
     case 'profiles:updated':
-      return { ...state, profiles: message.payload.profiles, activeProfile: message.payload.activeProfile };
+      return { ...state, profiles: message.payload.profiles, activeProfile: message.payload.activeProfile, profileOrder: message.payload.profileOrder ?? state.profileOrder };
     case 'settings:loaded':
       return { ...state, settings: message.payload.settings };
     case 'button:states':

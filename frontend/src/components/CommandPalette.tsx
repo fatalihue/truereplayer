@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Search, Circle, Play, Square, Type, Save, FolderOpen, RotateCcw, Plus,
-  Copy, Trash2, PinOff, Pin, Crosshair, Download, Upload,
+  Copy, Trash2, PinOff, Pin, ArrowUpDown,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -133,12 +133,12 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           }] : []),
           {
             id: 'importprofiles', label: 'Import Profiles',
-            icon: <Download size={14} className="text-text-secondary" />,
+            icon: <ArrowUpDown size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:import', payload: {} }); onClose(); },
           },
           {
-            id: 'exportprofiles', label: 'Export Profiles',
-            icon: <Upload size={14} className="text-text-secondary" />,
+            id: 'exportall', label: 'Export All Profiles',
+            icon: <ArrowUpDown size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:export', payload: { names: profiles.map(p => p.name) } }); onClose(); },
           },
         ],
@@ -154,11 +154,6 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
               ? <PinOff size={14} className="text-text-secondary" />
               : <Pin size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'window:alwaysOnTop', payload: { enabled: !settings.alwaysOnTop } }); onClose(); },
-          },
-          {
-            id: 'detectwindow', label: 'Detect Target Window',
-            icon: <Crosshair size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'profile:detectWindow', payload: {} }); onClose(); },
           },
         ],
       },

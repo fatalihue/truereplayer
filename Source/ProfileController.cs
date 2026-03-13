@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using System.Threading;
 using System.Threading.Tasks;
@@ -30,6 +31,19 @@ namespace TrueReplayer.Controllers
 
         public ObservableCollection<ProfileEntry> ProfileEntries { get; } = new();
         private Dictionary<string, WindowTarget> _cachedWindowTargets = new();
+        private ProfileOrderData _profileOrder = new();
+
+        private static readonly JsonSerializerOptions OrderJsonOptions = new()
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+        };
+
+        private string ProfileOrderPath => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "TrueReplayer", "Profiles", "profile-order.json");
 
         // Theme colors for native dialogs (sent from React frontend)
         private SolidColorBrush? _dialogBackground;
@@ -272,6 +286,8 @@ namespace TrueReplayer.Controllers
             InputHookManager.RegisterProfileWindowTargets(_cachedWindowTargets);
             var hotstringMap = GetProfileHotstrings();
             InputHookManager.RegisterProfileHotstrings(hotstringMap);
+
+            await LoadProfileOrderAsync();
         }
 
         public async Task RefreshProfileListAsync(bool suppressWatcher = false)
@@ -621,6 +637,165 @@ namespace TrueReplayer.Controllers
             {
                 InputHookManager.SuppressAllHotkeys = false;
             }
+        }
+
+        #endregion
+
+        #region Profile Organization (Folders + Pin)
+
+        public ProfileOrderData GetProfileOrder() => _profileOrder;
+
+        private async Task LoadProfileOrderAsync()
+        {
+            try
+            {
+                if (File.Exists(ProfileOrderPath))
+                {
+                    var json = await File.ReadAllTextAsync(ProfileOrderPath);
+                    _profileOrder = JsonSerializer.Deserialize<ProfileOrderData>(json, OrderJsonOptions) ?? new ProfileOrderData();
+                }
+                else
+                {
+                    _profileOrder = new ProfileOrderData();
+                }
+            }
+            catch
+            {
+                _profileOrder = new ProfileOrderData();
+            }
+
+            // Clean stale references (profiles that no longer exist on disk)
+            var existingNames = ProfileEntries.Select(p => p.Name).ToHashSet();
+            _profileOrder.Pinned.RemoveAll(n => !existingNames.Contains(n));
+            foreach (var folder in _profileOrder.Folders)
+                folder.Items.RemoveAll(n => !existingNames.Contains(n));
+            _profileOrder.Folders.RemoveAll(f => f.Items.Count == 0 && string.IsNullOrEmpty(f.Name));
+            _profileOrder.UngroupedOrder.RemoveAll(n => !existingNames.Contains(n));
+
+            // Add any profiles not mentioned in order data to ungrouped
+            var allReferenced = new HashSet<string>(_profileOrder.Pinned);
+            foreach (var folder in _profileOrder.Folders)
+                foreach (var item in folder.Items)
+                    allReferenced.Add(item);
+            foreach (var item in _profileOrder.UngroupedOrder)
+                allReferenced.Add(item);
+
+            foreach (var entry in ProfileEntries)
+            {
+                if (!allReferenced.Contains(entry.Name))
+                    _profileOrder.UngroupedOrder.Add(entry.Name);
+            }
+        }
+
+        public async Task SaveProfileOrderAsync()
+        {
+            try
+            {
+                var json = JsonSerializer.Serialize(_profileOrder, OrderJsonOptions);
+                await File.WriteAllTextAsync(ProfileOrderPath, json);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ProfileController] SaveProfileOrder error: {ex.Message}");
+            }
+        }
+
+        public async Task PinProfileAsync(string name)
+        {
+            if (!_profileOrder.Pinned.Contains(name))
+                _profileOrder.Pinned.Add(name);
+            await SaveProfileOrderAsync();
+        }
+
+        public async Task UnpinProfileAsync(string name)
+        {
+            _profileOrder.Pinned.Remove(name);
+            await SaveProfileOrderAsync();
+        }
+
+        public async Task CreateFolderAsync(string folderName, string color)
+        {
+            if (_profileOrder.Folders.Any(f => f.Name == folderName))
+                return;
+            _profileOrder.Folders.Add(new ProfileFolder { Name = folderName, Color = color });
+            await SaveProfileOrderAsync();
+        }
+
+        public async Task RenameFolderAsync(string oldName, string newName)
+        {
+            var folder = _profileOrder.Folders.FirstOrDefault(f => f.Name == oldName);
+            if (folder != null)
+            {
+                folder.Name = newName;
+                await SaveProfileOrderAsync();
+            }
+        }
+
+        public async Task DeleteFolderAsync(string folderName)
+        {
+            var folder = _profileOrder.Folders.FirstOrDefault(f => f.Name == folderName);
+            if (folder != null)
+            {
+                // Move items back to ungrouped
+                foreach (var item in folder.Items)
+                {
+                    if (!_profileOrder.UngroupedOrder.Contains(item))
+                        _profileOrder.UngroupedOrder.Add(item);
+                }
+                _profileOrder.Folders.Remove(folder);
+                await SaveProfileOrderAsync();
+            }
+        }
+
+        public async Task SetFolderColorAsync(string folderName, string color)
+        {
+            var folder = _profileOrder.Folders.FirstOrDefault(f => f.Name == folderName);
+            if (folder != null)
+            {
+                folder.Color = color;
+                await SaveProfileOrderAsync();
+            }
+        }
+
+        public async Task ToggleFolderCollapseAsync(string folderName)
+        {
+            var folder = _profileOrder.Folders.FirstOrDefault(f => f.Name == folderName);
+            if (folder != null)
+            {
+                folder.Collapsed = !folder.Collapsed;
+                await SaveProfileOrderAsync();
+            }
+        }
+
+        public async Task MoveToFolderAsync(string profileName, string? folderName)
+        {
+            // Remove from current folder or ungrouped
+            foreach (var folder in _profileOrder.Folders)
+                folder.Items.Remove(profileName);
+            _profileOrder.UngroupedOrder.Remove(profileName);
+
+            if (folderName != null)
+            {
+                var targetFolder = _profileOrder.Folders.FirstOrDefault(f => f.Name == folderName);
+                if (targetFolder != null && !targetFolder.Items.Contains(profileName))
+                    targetFolder.Items.Add(profileName);
+            }
+            else
+            {
+                // Move to ungrouped
+                if (!_profileOrder.UngroupedOrder.Contains(profileName))
+                    _profileOrder.UngroupedOrder.Add(profileName);
+            }
+
+            await SaveProfileOrderAsync();
+        }
+
+        public async Task ReorderProfilesAsync(List<string>? pinned, List<ProfileFolder>? folders, List<string>? ungrouped)
+        {
+            if (pinned != null) _profileOrder.Pinned = pinned;
+            if (folders != null) _profileOrder.Folders = folders;
+            if (ungrouped != null) _profileOrder.UngroupedOrder = ungrouped;
+            await SaveProfileOrderAsync();
         }
 
         #endregion

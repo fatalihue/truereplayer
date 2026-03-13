@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Plus, Search, Pencil, Copy, Trash2, FolderOpen, Key, Crosshair, Upload, Download, Type, Ban, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Plus, Search, Pencil, Copy, Trash2, FolderOpen, Key, Crosshair, ArrowUpDown, Type, Ban, ChevronsLeft, ChevronsRight, Pin, PinOff, FolderPlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine } from 'lucide-react';
+import type { ProfileEntry } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { KbdTag } from './common/KbdTag';
@@ -15,8 +16,13 @@ interface ProfilePanelProps {
   onToggleCollapse?: () => void;
 }
 
+const FOLDER_COLORS = [
+  '#60CDFF', '#0E7A0D', '#C42B1C', '#FF8C00', '#B4009E',
+  '#8764B8', '#00B7C3', '#E74856', '#567C73', '#8E562E',
+];
+
 export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePanelProps) {
-  const { profiles } = useAppState();
+  const { profiles, profileOrder } = useAppState();
   const { send, subscribe } = useBridge();
   const [searchQuery, setSearchQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -36,12 +42,67 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportSelection, setExportSelection] = useState<Record<string, boolean>>({});
   const [dialogValue, setDialogValue] = useState('');
+  const [showCreateFolderDialog, setShowCreateFolderDialog] = useState(false);
+  const [folderDialogName, setFolderDialogName] = useState('');
+  const [folderDialogColor, setFolderDialogColor] = useState('#60CDFF');
+  const [showRenameFolderDialog, setShowRenameFolderDialog] = useState<string | null>(null);
+  const [showMoveToFolderMenu, setShowMoveToFolderMenu] = useState<string | null>(null);
+  const [folderContextMenu, setFolderContextMenu] = useState<{ x: number; y: number; folderName: string } | null>(null);
+  const [showFolderColorPicker, setShowFolderColorPicker] = useState<string | null>(null);
+  const [dragProfile, setDragProfile] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null); // folder name or '__ungrouped__'
   const dialogInputRef = useRef<HTMLInputElement>(null);
+  const folderDialogInputRef = useRef<HTMLInputElement>(null);
   const hotkeyInputRef = useRef<HTMLInputElement>(null);
   const hotstringInputRef = useRef<HTMLInputElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const folderMenuRef = useRef<HTMLDivElement>(null);
 
-  const filtered = searchQuery
+  // Build profile map for quick lookup
+  const profileMap = new Map<string, ProfileEntry>();
+  profiles.forEach(p => profileMap.set(p.name, p));
+
+  // Filter profiles by search
+  const matchesSearch = (name: string) =>
+    !searchQuery || name.toLowerCase().includes(searchQuery.toLowerCase());
+
+  // Build sectioned lists (alphabetically sorted)
+  const sortByName = (a: ProfileEntry, b: ProfileEntry) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+
+  const pinnedProfiles = (profileOrder?.pinned ?? [])
+    .filter(n => profileMap.has(n) && matchesSearch(n))
+    .map(n => profileMap.get(n)!)
+    .sort(sortByName);
+
+  const folderSections = (profileOrder?.folders ?? []).map(f => ({
+    ...f,
+    profiles: f.items
+      .filter(n => profileMap.has(n) && matchesSearch(n))
+      .map(n => profileMap.get(n)!)
+      .sort(sortByName)
+  }));
+
+  // Collect all profiles referenced in profileOrder sections
+  const allReferenced = new Set<string>([
+    ...(profileOrder?.pinned ?? []),
+    ...(profileOrder?.folders ?? []).flatMap(f => f.items),
+    ...(profileOrder?.ungroupedOrder ?? [])
+  ]);
+
+  // Include any profiles not in any section (handles race condition on startup)
+  const ungroupedNames = [
+    ...(profileOrder?.ungroupedOrder ?? []),
+    ...profiles.filter(p => !allReferenced.has(p.name)).map(p => p.name)
+  ];
+
+  const ungroupedProfiles = ungroupedNames
+    .filter(n => profileMap.has(n) && matchesSearch(n))
+    .map(n => profileMap.get(n)!)
+    .sort(sortByName);
+
+  // If searching, show flat filtered list instead of sections
+  const isSearching = searchQuery.length > 0;
+  const filtered = isSearching
     ? profiles.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()))
     : profiles;
 
@@ -114,7 +175,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   }, [showHotstringDialog]);
 
   // Suppress hotkeys while any dialog is open
-  const anyDialogOpen = showCreateDialog || showRenameDialog !== null || showDeleteConfirm !== null || showHotkeyDialog !== null || showHotstringDialog !== null || showWindowTargetDialog !== null || showExportDialog;
+  const anyDialogOpen = showCreateDialog || showRenameDialog !== null || showDeleteConfirm !== null || showHotkeyDialog !== null || showHotstringDialog !== null || showWindowTargetDialog !== null || showExportDialog || showCreateFolderDialog || showRenameFolderDialog !== null;
   useEffect(() => {
     if (anyDialogOpen) {
       send({ type: 'ui:modalOpen', payload: {} });
@@ -387,6 +448,165 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setShowRenameDialog(null);
   };
 
+  // ── Folder handlers ──
+  const handleCreateFolder = () => {
+    setFolderDialogName('');
+    setFolderDialogColor('#60CDFF');
+    setShowCreateFolderDialog(true);
+  };
+
+  const confirmCreateFolder = () => {
+    const name = folderDialogName.trim();
+    if (name) {
+      send({ type: 'profile:createFolder', payload: { name, color: folderDialogColor } });
+    }
+    setShowCreateFolderDialog(false);
+  };
+
+  const handleRenameFolder = (folderName: string) => {
+    setFolderContextMenu(null);
+    setFolderDialogName(folderName);
+    setShowRenameFolderDialog(folderName);
+  };
+
+  const confirmRenameFolder = () => {
+    const newName = folderDialogName.trim();
+    if (newName && showRenameFolderDialog && newName !== showRenameFolderDialog) {
+      send({ type: 'profile:renameFolder', payload: { oldName: showRenameFolderDialog, newName } });
+    }
+    setShowRenameFolderDialog(null);
+  };
+
+  const handleDeleteFolder = (folderName: string) => {
+    setFolderContextMenu(null);
+    send({ type: 'profile:deleteFolder', payload: { name: folderName } });
+  };
+
+  const handleSetFolderColor = (folderName: string, color: string) => {
+    send({ type: 'profile:setFolderColor', payload: { name: folderName, color } });
+    setShowFolderColorPicker(null);
+    setFolderContextMenu(null);
+  };
+
+  const handleToggleFolderCollapse = (folderName: string) => {
+    send({ type: 'profile:toggleFolderCollapse', payload: { name: folderName } });
+  };
+
+  const handlePinProfile = (name: string) => {
+    setContextMenu(null);
+    send({ type: 'profile:pin', payload: { name } });
+  };
+
+  const handleUnpinProfile = (name: string) => {
+    setContextMenu(null);
+    send({ type: 'profile:unpin', payload: { name } });
+  };
+
+  const handleMoveToFolder = (profileName: string, folderName: string | null) => {
+    setContextMenu(null);
+    setShowMoveToFolderMenu(null);
+    send({ type: 'profile:moveToFolder', payload: { profileName, folderName } });
+  };
+
+  const handleFolderContextMenu = (e: React.MouseEvent, folderName: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setFolderContextMenu({ x: e.clientX, y: e.clientY, folderName });
+  };
+
+  // Close folder context menu on click outside
+  useEffect(() => {
+    if (!folderContextMenu) return;
+    const handleClick = (e: MouseEvent) => {
+      if (folderMenuRef.current && !folderMenuRef.current.contains(e.target as Node)) {
+        setFolderContextMenu(null);
+        setShowFolderColorPicker(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [folderContextMenu]);
+
+  // Focus folder dialog input
+  useEffect(() => {
+    if ((showCreateFolderDialog || showRenameFolderDialog) && folderDialogInputRef.current) {
+      folderDialogInputRef.current.focus();
+      folderDialogInputRef.current.select();
+    }
+  }, [showCreateFolderDialog, showRenameFolderDialog]);
+
+  const isPinned = (name: string) => profileOrder?.pinned?.includes(name) ?? false;
+
+  const getProfileFolder = (name: string): string | null => {
+    for (const f of profileOrder?.folders ?? []) {
+      if (f.items.includes(name)) return f.name;
+    }
+    return null;
+  };
+
+  // ── Drag & Drop handlers (mouse-based, works in WebView2) ──
+  const dragStartPos = useRef<{ x: number; y: number } | null>(null);
+  const dragActive = useRef(false);
+  const folderRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const ungroupedRef = useRef<HTMLDivElement>(null);
+
+  const handleProfileMouseDown = (e: React.MouseEvent, profileName: string) => {
+    if (e.button !== 0) return; // left click only
+    dragStartPos.current = { x: e.clientX, y: e.clientY };
+    dragActive.current = false;
+    setDragProfile(profileName);
+  };
+
+  useEffect(() => {
+    if (!dragProfile) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragStartPos.current) return;
+      const dx = e.clientX - dragStartPos.current.x;
+      const dy = e.clientY - dragStartPos.current.y;
+      // Require 5px movement to start drag
+      if (!dragActive.current && Math.abs(dx) + Math.abs(dy) < 5) return;
+      dragActive.current = true;
+
+      // Hit-test which folder or ungrouped area the mouse is over
+      let foundTarget: string | null = null;
+      folderRefs.current.forEach((el, name) => {
+        const rect = el.getBoundingClientRect();
+        if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+          foundTarget = name;
+        }
+      });
+      if (!foundTarget && ungroupedRef.current) {
+        const rect = ungroupedRef.current.getBoundingClientRect();
+        if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+          foundTarget = '__ungrouped__';
+        }
+      }
+      setDropTarget(foundTarget);
+    };
+
+    const handleMouseUp = () => {
+      if (dragActive.current && dragProfile && dropTarget) {
+        const targetFolder = dropTarget === '__ungrouped__' ? null : dropTarget;
+        const currentFolder = getProfileFolder(dragProfile);
+        if (currentFolder !== targetFolder) {
+          send({ type: 'profile:moveToFolder', payload: { profileName: dragProfile, folderName: targetFolder } });
+        }
+      }
+      dragStartPos.current = null;
+      dragActive.current = false;
+      setDragProfile(null);
+      setDropTarget(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [dragProfile, dropTarget, send]);
+
   const handleDialogKeyDown = (e: React.KeyboardEvent, onConfirm: () => void) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -395,14 +615,79 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       e.preventDefault();
       setShowCreateDialog(false);
       setShowRenameDialog(null);
+      setShowCreateFolderDialog(false);
+      setShowRenameFolderDialog(null);
     }
   };
 
   const profile = contextMenu ? profiles.find(p => p.name === contextMenu.profileName) : null;
 
+  // ── Profile Row Renderer ──
+  const renderProfileRow = (p: ProfileEntry) => (
+    <div
+      key={p.name}
+      onMouseDown={(e) => handleProfileMouseDown(e, p.name)}
+      onClick={(e) => {
+        // Don't fire click if we were dragging
+        if (dragActive.current) { e.preventDefault(); return; }
+        send({ type: 'profile:click', payload: { name: p.name } }); (e.target as HTMLElement).blur();
+      }}
+      onContextMenu={(e) => handleContextMenu(e, p.name)}
+      className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-left transition-colors outline-none select-none ${
+        dragProfile === p.name && dragActive.current ? 'opacity-50 ' : ''
+      }${p.isDisabled ? 'opacity-40 ' : ''}${
+        p.isActive
+          ? 'bg-bg-elevated'
+          : 'hover:bg-bg-card'
+      }`}
+    >
+        {p.isActive && (
+          <div className="w-[3px] h-4 rounded-sm bg-accent-solid shrink-0" />
+        )}
+
+        <span
+          className={`text-ui flex-1 min-w-0 truncate ${
+            p.isActive
+              ? 'text-accent font-semibold'
+              : 'text-text-primary'
+          }`}
+        >
+          {p.name}
+        </span>
+
+        {p.hasWindowTarget && (
+          <span title="Window target set">
+            <Crosshair size={11} className="shrink-0 text-text-tertiary" />
+          </span>
+        )}
+
+        {p.hotkey && (
+          <span className="shrink-0">
+            <KbdTag combo={p.hotkey} />
+          </span>
+        )}
+
+        {p.hotstring && (
+          <span
+            className="shrink-0 px-1.5 py-0.5 rounded text-[11px] font-mono bg-hotkey-bg border border-hotkey-border text-accent-hover"
+            title={p.hotstringInstant ? 'Hotstring (instant)' : 'Hotstring (terminator)'}
+          >
+            {p.hotstringInstant ? '\u26A1' : '\u21B5'}{p.hotstring}
+          </span>
+        )}
+    </div>
+  );
+
+  // ── Section Header Renderer ──
+  const renderSectionLabel = (label: string) => (
+    <div className="px-2.5 pt-2 pb-0.5">
+      <span className="text-[10px] font-semibold text-text-disabled tracking-wider uppercase">{label}</span>
+    </div>
+  );
+
   return (
     <>
-      <div className={`flex flex-col bg-bg-surface border border-border-subtle rounded-ui overflow-hidden shrink-0 transition-[width] duration-200 ${collapsed ? 'w-12' : 'w-[230px]'}`}>
+      <div className={`flex flex-col bg-bg-surface border border-border-subtle rounded-ui overflow-hidden shrink-0 transition-[width] duration-200 ${collapsed ? 'w-12' : 'w-[260px]'}`}>
         {collapsed ? (
           <>
             <div className="flex items-center justify-center pt-3 pb-2">
@@ -411,7 +696,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
                 title="Expand sidebar"
               >
-                <PanelLeftOpen size={14} />
+                <ChevronsRight size={14} />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto flex flex-col items-center gap-1 px-1 pb-2">
@@ -441,21 +726,21 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
               title="Collapse sidebar"
             >
-              <PanelLeftClose size={14} />
+              <ChevronsLeft size={14} />
+            </button>
+            <button
+              onClick={handleCreateFolder}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+              title="New Folder"
+            >
+              <FolderPlus size={14} />
             </button>
             <button
               onClick={handleExportClick}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              title="Export Profiles"
+              title="Import / Export"
             >
-              <Upload size={14} />
-            </button>
-            <button
-              onClick={handleImportClick}
-              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              title="Import Profiles"
-            >
-              <Download size={14} />
+              <ArrowUpDown size={14} />
             </button>
             <button
               onClick={handleCreate}
@@ -481,56 +766,64 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           </div>
         </div>
 
-        {/* Profile List */}
+        {/* Profile List - Sectioned */}
         <div className="flex-1 overflow-y-auto px-1.5 pb-1">
-          {filtered.map((p) => (
-            <button
-              key={p.name}
-              onClick={(e) => { send({ type: 'profile:click', payload: { name: p.name } }); (e.target as HTMLElement).blur(); }}
-              onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') e.preventDefault(); }}
-              onContextMenu={(e) => handleContextMenu(e, p.name)}
-              className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-left transition-colors outline-none ${p.isDisabled ? 'opacity-40 ' : ''}${
-                p.isActive
-                  ? 'bg-bg-elevated'
-                  : 'hover:bg-bg-card'
-              }`}
-            >
-              {p.isActive && (
-                <div className="w-[3px] h-4 rounded-sm bg-accent-solid shrink-0 -ml-1" />
+          {isSearching ? (
+            // Flat search results
+            filtered.map(renderProfileRow)
+          ) : (
+            <>
+              {/* Pinned Section */}
+              {pinnedProfiles.length > 0 && (
+                <>
+                  {renderSectionLabel('Pinned')}
+                  {pinnedProfiles.map(renderProfileRow)}
+                </>
               )}
 
-              <span
-                className={`text-ui flex-1 min-w-0 truncate ${
-                  p.isActive
-                    ? 'text-accent font-semibold'
-                    : 'text-text-primary'
-                }`}
+              {/* Folder Sections */}
+              {folderSections.map(folder => {
+                const hasVisibleProfiles = folder.profiles.length > 0;
+                const isDragOver = dropTarget === folder.name && dragProfile !== null;
+                return (
+                  <div
+                    key={folder.name}
+                    ref={(el) => { if (el) folderRefs.current.set(folder.name, el); else folderRefs.current.delete(folder.name); }}
+                    className={`rounded transition-colors ${isDragOver ? 'bg-accent-solid/20 ring-2 ring-accent-solid/50' : ''}`}
+                  >
+                    <button
+                      className="w-full flex items-center gap-1.5 px-2 py-1.5 mt-1 rounded text-left hover:bg-bg-card transition-colors group"
+                      onClick={() => handleToggleFolderCollapse(folder.name)}
+                      onContextMenu={(e) => handleFolderContextMenu(e, folder.name)}
+                    >
+                      <span style={{ color: folder.color }} className="shrink-0">
+                        {folder.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                      </span>
+                      <FolderOpen size={12} style={{ color: folder.color }} className="shrink-0" />
+                      <span className="text-xs font-medium text-text-secondary flex-1 truncate">{folder.name}</span>
+                      <span className="text-[10px] text-text-disabled">{folder.items.length}</span>
+                    </button>
+                    {!folder.collapsed && hasVisibleProfiles && (
+                      <div className="ml-3 pl-1.5" style={{ borderLeft: `2px solid ${folder.color}40` }}>
+                        {folder.profiles.map(renderProfileRow)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Ungrouped Section */}
+              <div
+                ref={ungroupedRef}
+                className={`rounded transition-colors ${dropTarget === '__ungrouped__' && dragProfile ? 'bg-accent-solid/20 ring-2 ring-accent-solid/50' : ''}`}
               >
-                {p.name}
-              </span>
-
-              {p.hasWindowTarget && (
-                <span title="Window target set">
-                  <Crosshair size={11} className="shrink-0 text-text-tertiary" />
-                </span>
-              )}
-
-              {p.hotkey && (
-                <span className="shrink-0">
-                  <KbdTag combo={p.hotkey} />
-                </span>
-              )}
-
-              {p.hotstring && (
-                <span
-                  className="shrink-0 px-1.5 py-0.5 rounded text-[11px] font-mono bg-hotkey-bg border border-hotkey-border text-accent-hover"
-                  title={p.hotstringInstant ? 'Hotstring (instant)' : 'Hotstring (terminator)'}
-                >
-                  {p.hotstringInstant ? '⚡' : '↵'}{p.hotstring}
-                </span>
-              )}
-            </button>
-          ))}
+                {ungroupedProfiles.length > 0 && (profileOrder?.pinned?.length > 0 || profileOrder?.folders?.length > 0) && (
+                  renderSectionLabel('Ungrouped')
+                )}
+                {ungroupedProfiles.map(renderProfileRow)}
+              </div>
+            </>
+          )}
         </div>
           </>
         )}
@@ -543,6 +836,72 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           className="fixed z-50 min-w-[180px] py-1 bg-bg-card border border-border-default rounded-md shadow-lg"
           style={{ left: menuPos.x, top: menuPos.y }}
         >
+          {/* Pin / Unpin */}
+          {isPinned(contextMenu.profileName) ? (
+            <button
+              onClick={() => handleUnpinProfile(contextMenu.profileName)}
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+            >
+              <PinOff size={13} className="text-text-tertiary" />
+              Unpin
+            </button>
+          ) : (
+            <button
+              onClick={() => handlePinProfile(contextMenu.profileName)}
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+            >
+              <Pin size={13} className="text-text-tertiary" />
+              Pin to Top
+            </button>
+          )}
+
+          {/* Move to Folder */}
+          <div
+            className="relative"
+            onMouseEnter={() => setShowMoveToFolderMenu(contextMenu.profileName)}
+            onMouseLeave={() => setShowMoveToFolderMenu(null)}
+          >
+            <button
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+            >
+              <ArrowRightFromLine size={13} className="text-text-tertiary" />
+              Move to Folder
+              <ChevronRight size={11} className="ml-auto text-text-tertiary" />
+            </button>
+            {showMoveToFolderMenu === contextMenu.profileName && (
+              <div className="absolute left-full top-0 ml-1 min-w-[140px] py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
+                {(profileOrder?.folders ?? []).map(f => (
+                  <button
+                    key={f.name}
+                    onClick={() => handleMoveToFolder(contextMenu.profileName, f.name)}
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-bg-elevated transition-colors ${
+                      getProfileFolder(contextMenu.profileName) === f.name ? 'text-accent' : 'text-text-primary'
+                    }`}
+                  >
+                    <FolderOpen size={11} style={{ color: f.color }} />
+                    {f.name}
+                  </button>
+                ))}
+                {(profileOrder?.folders ?? []).length > 0 && getProfileFolder(contextMenu.profileName) && (
+                  <>
+                    <div className="my-1 border-t border-border-subtle" />
+                    <button
+                      onClick={() => handleMoveToFolder(contextMenu.profileName, null)}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                    >
+                      Remove from Folder
+                    </button>
+                  </>
+                )}
+                {(profileOrder?.folders ?? []).length === 0 && (
+                  <span className="block px-3 py-1.5 text-xs text-text-disabled">No folders</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="my-1 border-t border-border-subtle" />
+
           <button
             onClick={() => handleToggleDisable(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
@@ -600,6 +959,59 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           >
             <Trash2 size={13} />
             Delete
+          </button>
+        </div>
+      )}
+
+      {/* Folder Context Menu */}
+      {folderContextMenu && (
+        <div
+          ref={folderMenuRef}
+          className="fixed z-50 min-w-[160px] py-1 bg-bg-card border border-border-default rounded-md shadow-lg"
+          style={{ left: folderContextMenu.x, top: folderContextMenu.y }}
+        >
+          <button
+            onClick={() => handleRenameFolder(folderContextMenu.folderName)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Pencil size={13} className="text-text-tertiary" />
+            Rename Folder
+          </button>
+          <div
+            className="relative"
+            onMouseEnter={() => setShowFolderColorPicker(folderContextMenu.folderName)}
+            onMouseLeave={() => setShowFolderColorPicker(null)}
+          >
+            <button
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+            >
+              <Palette size={13} className="text-text-tertiary" />
+              Change Color
+              <ChevronRight size={11} className="ml-auto text-text-tertiary" />
+            </button>
+            {showFolderColorPicker === folderContextMenu.folderName && (
+              <div className="absolute left-full top-0 ml-1 p-2.5 bg-bg-card border border-border-default rounded-md shadow-lg z-[60] min-w-0">
+                <div className="flex flex-wrap gap-1.5" style={{ width: '156px' }}>
+                  {FOLDER_COLORS.map(c => (
+                    <button
+                      key={c}
+                      onClick={() => handleSetFolderColor(folderContextMenu.folderName, c)}
+                      className="w-[26px] h-[26px] rounded-full border-2 hover:scale-110 transition-transform"
+                      style={{ backgroundColor: c, borderColor: (profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName)?.color === c ? 'white' : 'transparent' }}
+                      title={c}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="my-1 border-t border-border-subtle" />
+          <button
+            onClick={() => handleDeleteFolder(folderContextMenu.folderName)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-recording hover:bg-bg-elevated transition-colors"
+          >
+            <Trash2 size={13} />
+            Delete Folder
           </button>
         </div>
       )}
@@ -811,7 +1223,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       {showExportDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="w-[340px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
-            <h3 className="text-sm font-semibold text-text-primary mb-3">Export Profiles</h3>
+            <h3 className="text-sm font-semibold text-text-primary mb-3">Import / Export</h3>
             <p className="text-xs text-text-secondary mb-3">Select profiles to export:</p>
 
             <label className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-elevated cursor-pointer border-b border-border-subtle mb-1">
@@ -841,19 +1253,109 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               ))}
             </div>
 
+            <div className="flex justify-between mt-4">
+              <button
+                onClick={() => { handleImportClick(); setShowExportDialog(false); }}
+                className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
+              >
+                Import
+              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowExportDialog(false)}
+                  className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmExport}
+                  disabled={!Object.values(exportSelection).some(v => v)}
+                  className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
+                >
+                  Export
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Folder Dialog */}
+      {showCreateFolderDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-[340px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
+            <h3 className="text-sm font-semibold text-text-primary mb-3">New Folder</h3>
+            <input
+              ref={folderDialogInputRef}
+              type="text"
+              value={folderDialogName}
+              onChange={(e) => setFolderDialogName(e.target.value)}
+              onKeyDown={(e) => handleDialogKeyDown(e, confirmCreateFolder)}
+              placeholder="Folder name..."
+              className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+            />
+            <div className="flex items-center gap-1.5 mt-3">
+              <span className="text-xs text-text-tertiary mr-1">Color:</span>
+              {FOLDER_COLORS.map(c => (
+                <button
+                  key={c}
+                  onClick={() => setFolderDialogColor(c)}
+                  className={`w-5 h-5 rounded-full border-2 transition-transform ${
+                    folderDialogColor === c ? 'border-white scale-110' : 'border-transparent hover:scale-105'
+                  }`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
             <div className="flex justify-end gap-2 mt-4">
               <button
-                onClick={() => setShowExportDialog(false)}
+                onClick={() => setShowCreateFolderDialog(false)}
                 className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
               >
                 Cancel
               </button>
               <button
-                onClick={confirmExport}
-                disabled={!Object.values(exportSelection).some(v => v)}
+                onClick={confirmCreateFolder}
+                disabled={!folderDialogName.trim()}
                 className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
               >
-                Export
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rename Folder Dialog */}
+      {showRenameFolderDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-[340px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
+            <h3 className="text-sm font-semibold text-text-primary mb-3">Rename Folder</h3>
+            <input
+              ref={folderDialogInputRef}
+              type="text"
+              value={folderDialogName}
+              onChange={(e) => setFolderDialogName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); confirmRenameFolder(); }
+                else if (e.key === 'Escape') { e.preventDefault(); setShowRenameFolderDialog(null); }
+              }}
+              placeholder="New folder name..."
+              className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setShowRenameFolderDialog(null)}
+                className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRenameFolder}
+                disabled={!folderDialogName.trim()}
+                className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
+              >
+                Rename
               </button>
             </div>
           </div>

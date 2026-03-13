@@ -149,6 +149,15 @@ namespace TrueReplayer
                     case "profile:removeWindowTarget": HandleProfileRemoveWindowTarget(payload); break;
                     case "profile:detectWindow": HandleProfileDetectWindow(); break;
                     case "profile:openFolder": HandleProfileOpenFolder(payload); break;
+                    case "profile:pin": HandleProfilePin(payload); break;
+                    case "profile:unpin": HandleProfileUnpin(payload); break;
+                    case "profile:createFolder": HandleCreateFolder(payload); break;
+                    case "profile:renameFolder": HandleRenameFolder(payload); break;
+                    case "profile:deleteFolder": HandleDeleteFolder(payload); break;
+                    case "profile:setFolderColor": HandleSetFolderColor(payload); break;
+                    case "profile:toggleFolderCollapse": HandleToggleFolderCollapse(payload); break;
+                    case "profile:moveToFolder": HandleMoveToFolder(payload); break;
+                    case "profile:reorder": HandleProfileReorder(payload); break;
                     case "profile:export": HandleProfileExport(payload); break;
                     case "profile:import": HandleProfileImport(); break;
                     case "profile:save": HandleProfileSave(); break;
@@ -222,7 +231,21 @@ namespace TrueReplayer
                 isDisabled = p.IsDisabled
             }).ToArray();
 
-            SendMessage("profiles:updated", new { profiles, activeProfile = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName });
+            var order = profileController.GetProfileOrder();
+            var profileOrder = new
+            {
+                pinned = order.Pinned,
+                folders = order.Folders.Select(f => new
+                {
+                    name = f.Name,
+                    color = f.Color,
+                    collapsed = f.Collapsed,
+                    items = f.Items
+                }).ToArray(),
+                ungroupedOrder = order.UngroupedOrder
+            };
+
+            SendMessage("profiles:updated", new { profiles, activeProfile = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName, profileOrder });
         }
 
         public void PushSettingsLoaded()
@@ -364,6 +387,18 @@ namespace TrueReplayer
                     isDisabled = p.IsDisabled
                 }).ToArray(),
                 activeProfile = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName,
+                profileOrder = new
+                {
+                    pinned = profileController.GetProfileOrder().Pinned,
+                    folders = profileController.GetProfileOrder().Folders.Select(f => new
+                    {
+                        name = f.Name,
+                        color = f.Color,
+                        collapsed = f.Collapsed,
+                        items = f.Items
+                    }).ToArray(),
+                    ungroupedOrder = profileController.GetProfileOrder().UngroupedOrder
+                },
                 settings = new
                 {
                     customDelay = CustomDelay,
@@ -1221,6 +1256,99 @@ namespace TrueReplayer
                 }
                 catch { }
             }
+        }
+
+        // ── Profile Organization Handlers ──
+
+        private async void HandleProfilePin(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            if (string.IsNullOrEmpty(name)) return;
+            await profileController.PinProfileAsync(name);
+            PushProfilesUpdate();
+        }
+
+        private async void HandleProfileUnpin(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            if (string.IsNullOrEmpty(name)) return;
+            await profileController.UnpinProfileAsync(name);
+            PushProfilesUpdate();
+        }
+
+        private async void HandleCreateFolder(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            string color = payload.TryGetProperty("color", out var colorProp)
+                ? colorProp.GetString() ?? "#60CDFF"
+                : "#60CDFF";
+            if (string.IsNullOrEmpty(name)) return;
+            await profileController.CreateFolderAsync(name, color);
+            PushProfilesUpdate();
+        }
+
+        private async void HandleRenameFolder(JsonElement payload)
+        {
+            string oldName = payload.GetProperty("oldName").GetString() ?? "";
+            string newName = payload.GetProperty("newName").GetString() ?? "";
+            if (string.IsNullOrEmpty(oldName) || string.IsNullOrEmpty(newName)) return;
+            await profileController.RenameFolderAsync(oldName, newName);
+            PushProfilesUpdate();
+        }
+
+        private async void HandleDeleteFolder(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            if (string.IsNullOrEmpty(name)) return;
+            await profileController.DeleteFolderAsync(name);
+            PushProfilesUpdate();
+        }
+
+        private async void HandleSetFolderColor(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            string color = payload.GetProperty("color").GetString() ?? "#60CDFF";
+            if (string.IsNullOrEmpty(name)) return;
+            await profileController.SetFolderColorAsync(name, color);
+            PushProfilesUpdate();
+        }
+
+        private async void HandleToggleFolderCollapse(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            if (string.IsNullOrEmpty(name)) return;
+            await profileController.ToggleFolderCollapseAsync(name);
+            PushProfilesUpdate();
+        }
+
+        private async void HandleMoveToFolder(JsonElement payload)
+        {
+            string profileName = payload.GetProperty("profileName").GetString() ?? "";
+            string? folderName = payload.TryGetProperty("folderName", out var fnProp) && fnProp.ValueKind != JsonValueKind.Null
+                ? fnProp.GetString()
+                : null;
+            if (string.IsNullOrEmpty(profileName)) return;
+            await profileController.MoveToFolderAsync(profileName, folderName);
+            PushProfilesUpdate();
+        }
+
+        private async void HandleProfileReorder(JsonElement payload)
+        {
+            List<string>? pinned = null;
+            List<ProfileFolder>? folders = null;
+            List<string>? ungrouped = null;
+
+            if (payload.TryGetProperty("pinned", out var pinnedProp))
+                pinned = JsonSerializer.Deserialize<List<string>>(pinnedProp.GetRawText());
+
+            if (payload.TryGetProperty("folders", out var foldersProp))
+                folders = JsonSerializer.Deserialize<List<ProfileFolder>>(foldersProp.GetRawText(), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+
+            if (payload.TryGetProperty("ungroupedOrder", out var ungroupedProp))
+                ungrouped = JsonSerializer.Deserialize<List<string>>(ungroupedProp.GetRawText());
+
+            await profileController.ReorderProfilesAsync(pinned, folders, ungrouped);
+            PushProfilesUpdate();
         }
 
         private async void HandleProfileExport(JsonElement payload)

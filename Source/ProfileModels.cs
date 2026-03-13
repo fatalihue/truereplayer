@@ -132,6 +132,23 @@ namespace TrueReplayer.Models
         public event PropertyChangedEventHandler? PropertyChanged;
     }
 
+    // ── Profile Organization (Folders + Pin) ──
+
+    public class ProfileFolder
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Color { get; set; } = "#60CDFF";
+        public bool Collapsed { get; set; } = false;
+        public List<string> Items { get; set; } = new();
+    }
+
+    public class ProfileOrderData
+    {
+        public List<string> Pinned { get; set; } = new();
+        public List<ProfileFolder> Folders { get; set; } = new();
+        public List<string> UngroupedOrder { get; set; } = new();
+    }
+
     public class ProfileExportEntry
     {
         public string Name { get; set; } = string.Empty;

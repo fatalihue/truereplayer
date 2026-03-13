@@ -26,6 +26,19 @@ export interface ProfileEntry {
   isDisabled: boolean;
 }
 
+export interface ProfileFolder {
+  name: string;
+  color: string;
+  collapsed: boolean;
+  items: string[];
+}
+
+export interface ProfileOrderData {
+  pinned: string[];
+  folders: ProfileFolder[];
+  ungroupedOrder: string[];
+}
+
 export interface SettingsState {
   customDelay: string;
   useCustomDelay: boolean;
@@ -64,6 +77,7 @@ export interface AppState {
   highlightedActionIndex: number | null;
   profiles: ProfileEntry[];
   activeProfile: string | null;
+  profileOrder: ProfileOrderData;
   settings: SettingsState;
   toolbar: {
     profileName: string;
@@ -84,7 +98,7 @@ export type IncomingMessage =
   | { type: 'status:changed'; payload: { status: AppState['status'] } }
   | { type: 'actions:updated'; payload: { actions: ActionItem[] } }
   | { type: 'actions:highlight'; payload: { index: number } }
-  | { type: 'profiles:updated'; payload: { profiles: ProfileEntry[]; activeProfile: string | null } }
+  | { type: 'profiles:updated'; payload: { profiles: ProfileEntry[]; activeProfile: string | null; profileOrder: ProfileOrderData } }
   | { type: 'settings:loaded'; payload: { settings: SettingsState } }
   | { type: 'button:states'; payload: ButtonStates }
   | { type: 'toolbar:updated'; payload: { profileName: string; actionCount: number } }
@@ -122,6 +136,15 @@ export type OutgoingMessage =
   | { type: 'profile:removeWindowTarget'; payload: { name: string } }
   | { type: 'profile:detectWindow'; payload: Record<string, never> }
   | { type: 'profile:openFolder'; payload: { name: string } }
+  | { type: 'profile:pin'; payload: { name: string } }
+  | { type: 'profile:unpin'; payload: { name: string } }
+  | { type: 'profile:createFolder'; payload: { name: string; color?: string } }
+  | { type: 'profile:renameFolder'; payload: { oldName: string; newName: string } }
+  | { type: 'profile:deleteFolder'; payload: { name: string } }
+  | { type: 'profile:setFolderColor'; payload: { name: string; color: string } }
+  | { type: 'profile:toggleFolderCollapse'; payload: { name: string } }
+  | { type: 'profile:moveToFolder'; payload: { profileName: string; folderName: string | null } }
+  | { type: 'profile:reorder'; payload: { pinned?: string[]; folders?: ProfileFolder[]; ungroupedOrder?: string[] } }
   | { type: 'profile:save'; payload: Record<string, never> }
   | { type: 'profile:load'; payload: Record<string, never> }
   | { type: 'profile:reset'; payload: Record<string, never> }

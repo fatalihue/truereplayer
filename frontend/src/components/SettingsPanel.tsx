@@ -33,9 +33,9 @@ function Section({ icon: Icon, iconColor, title, children, defaultOpen = true }:
   );
 }
 
-function SettingRow({ label, children }: { label: string; children: React.ReactNode }) {
+function SettingRow({ label, tooltip, children }: { label: string; tooltip?: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between py-1">
+    <div className="flex items-center justify-between py-1" title={tooltip}>
       <span className="text-ui text-text-secondary">{label}</span>
       <div className="flex items-center gap-2.5">
         {children}
@@ -44,7 +44,7 @@ function SettingRow({ label, children }: { label: string; children: React.ReactN
   );
 }
 
-function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-16', suffix, mono = true }: {
+function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-14', suffix, mono = true }: {
   value: string;
   onCommit: (v: string) => void;
   onEnter?: (v: string) => void;
@@ -207,9 +207,9 @@ export function SettingsPanel() {
   };
 
   return (
-    <div className="w-[250px] flex flex-col shrink-0 overflow-hidden">
+    <div className="w-[220px] flex flex-col shrink-0 overflow-hidden bg-bg-surface border border-border-subtle rounded-ui">
       {/* Tab Bar */}
-      <div className="flex gap-1 px-1.5 py-2.5 border-b border-border-subtle shrink-0">
+      <div className="flex gap-1 px-1.5 py-1.5 border-b border-border-subtle shrink-0">
         <button
           onClick={() => setActiveTab('profile')}
           className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
@@ -238,7 +238,7 @@ export function SettingsPanel() {
           <>
             {/* Execution */}
             <Section icon={Timer} iconColor="#ffd93d" title="Execution">
-              <SettingRow label="Fixed Delay">
+              <SettingRow label="Delay" tooltip="Fixed delay between actions (ms)">
                 <SettingInput
                   value={settings.customDelay}
                   onCommit={(v) => changeSetting('customDelay', v)}
@@ -254,11 +254,11 @@ export function SettingsPanel() {
                       }
                     }
                   }}
-                  suffix="ms"
+                  width="w-[72px]"
                 />
                 <Toggle isOn={settings.useCustomDelay} onChange={(v) => changeSetting('useCustomDelay', v)} />
               </SettingRow>
-              <SettingRow label="Loop Count">
+              <SettingRow label="Loops" tooltip="Number of times to repeat">
                 <SettingInput
                   value={settings.loopCount}
                   onCommit={(v) => changeSetting('loopCount', v)}
@@ -267,11 +267,11 @@ export function SettingsPanel() {
                       changeSetting('enableLoop', true);
                     }
                   }}
-                  suffix="x"
+                  width="w-[72px]"
                 />
                 <Toggle isOn={settings.enableLoop} onChange={(v) => changeSetting('enableLoop', v)} />
               </SettingRow>
-              <SettingRow label="Loop Delay">
+              <SettingRow label="Gap" tooltip="Delay between each loop (ms)">
                 <SettingInput
                   value={settings.loopInterval}
                   onCommit={(v) => changeSetting('loopInterval', v)}
@@ -280,7 +280,7 @@ export function SettingsPanel() {
                       changeSetting('loopIntervalEnabled', true);
                     }
                   }}
-                  suffix="ms"
+                  width="w-[72px]"
                 />
                 <Toggle isOn={settings.loopIntervalEnabled} onChange={(v) => changeSetting('loopIntervalEnabled', v)} />
               </SettingRow>
@@ -359,13 +359,19 @@ export function SettingsPanel() {
               <SettingRow label="Run on Startup">
                 <Toggle
                   isOn={settings.runOnStartup}
-                  onChange={(v) => send({ type: 'window:runOnStartup', payload: { enabled: v } })}
+                  onChange={(v) => {
+                    send({ type: 'window:runOnStartup', payload: { enabled: v } });
+                    if (!v && settings.startMinimized) {
+                      send({ type: 'window:startMinimized', payload: { enabled: false } });
+                    }
+                  }}
                 />
               </SettingRow>
               <SettingRow label="Startup Minimized">
                 <Toggle
                   isOn={settings.startMinimized}
                   onChange={(v) => send({ type: 'window:startMinimized', payload: { enabled: v } })}
+                  disabled={!settings.runOnStartup}
                 />
               </SettingRow>
             </Section>
