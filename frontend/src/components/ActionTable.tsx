@@ -97,10 +97,17 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     send({ type: 'selection:changed', payload: { indices: Array.from(selectedIndices) } });
   }, [selectedIndices, selectionRef, send]);
 
+  // Scroll to top when replay starts
+  useEffect(() => {
+    if (buttonStates.replayActive && scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
+    }
+  }, [buttonStates.replayActive]);
+
   // Auto-scroll to highlighted row during replay
   useEffect(() => {
     if (highlightedActionIndex !== null && highlightedRowRef.current) {
-      highlightedRowRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      highlightedRowRef.current.scrollIntoView({ block: 'center', behavior: 'auto' });
     }
   }, [highlightedActionIndex]);
 
