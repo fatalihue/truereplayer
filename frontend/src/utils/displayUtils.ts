@@ -13,8 +13,7 @@ const DISPLAY_KEY_MAP: Record<string, string> = {
   'NumMultiply': 'Num*', 'NumDivide': 'Num/',
   'NumAdd': 'Num+', 'NumSubtract': 'Num-',
   'Return': 'Enter', 'Back': 'Backspace',
-  'Capital': 'Caps Lock', 'Escape': 'ESC',
-  'Space': 'SPACEBAR', 'Tab': 'TAB',
+  'Capital': 'Caps Lock',
   'Next': 'Page Down', 'Prior': 'Page Up',
 };
 

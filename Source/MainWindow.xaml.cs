@@ -340,13 +340,17 @@ namespace TrueReplayer
                         return;
                     }
 
-                    mainController.CancelInsertMode();
-                    foreach (var action in Actions)
+                    if (mainController.IsInsertMode())
                     {
-                        action.IsInsertionPoint = false;
-                        action.IsVisuallyDeselected = true;
+                        mainController.CancelInsertMode();
+                        foreach (var action in Actions)
+                        {
+                            action.IsInsertionPoint = false;
+                            action.IsVisuallyDeselected = true;
+                        }
+                        return;
                     }
-                    return;
+                    // If not in any special mode, fall through to recording
                 }
 
                 if (!mainController.IsRecording()) return;

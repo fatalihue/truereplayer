@@ -199,6 +199,7 @@ namespace TrueReplayer.Services
         }
 
         public void SetInsertIndex(int? index) => insertIndex = (index >= 0 && index <= _actions.Count) ? index : null;
+        public bool IsInsertMode => insertIndex.HasValue;
 
         public void Start()
         {

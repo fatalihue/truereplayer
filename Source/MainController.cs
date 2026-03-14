@@ -70,6 +70,7 @@ namespace TrueReplayer.Controllers
         }
 
         public bool IsCaptureMode() => recorder.IsCaptureMode;
+        public bool IsInsertMode() => recorder.IsInsertMode;
 
         public void StartCaptureMode(int insertIndex, CaptureType captureType, string? mouseButton, Action? onComplete)
         {

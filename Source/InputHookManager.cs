@@ -193,16 +193,26 @@ namespace TrueReplayer
         {
             if (vkCode >= 0x41 && vkCode <= 0x5A) return (char)('a' + (vkCode - 0x41)); // A-Z → a-z
             if (vkCode >= 0x30 && vkCode <= 0x39) return (char)('0' + (vkCode - 0x30)); // 0-9
-            return vkCode switch
+
+            // Use MapVirtualKeyEx for OEM keys — safe inside keyboard hook
+            // (unlike ToUnicodeEx, does NOT destroy the OS dead key state)
+            try
             {
-                0xBD => '-',  // OEM_MINUS
-                0xBE => '.',  // OEM_PERIOD
-                0xBF => '/',  // OEM_2
-                0xBC => ',',  // OEM_COMMA
-                0xBA => ';',  // OEM_1
-                0xBB => '=',  // OEM_PLUS (unshifted)
-                _ => null
-            };
+                uint threadId = NativeMethods.GetWindowThreadProcessId(
+                    NativeMethods.GetForegroundWindow(), out _);
+                IntPtr hkl = NativeMethods.GetKeyboardLayout(threadId);
+
+                // MAPVK_VK_TO_CHAR = 2
+                uint mapped = NativeMethods.MapVirtualKeyEx((uint)vkCode, 2, hkl);
+                if (mapped == 0) return null;
+
+                char ch = char.ToLower((char)(mapped & 0x7FFFFFFF));
+                if (!char.IsControl(ch))
+                    return ch;
+            }
+            catch { }
+
+            return null;
         }
 
         private static void HotstringBufferAppend(char c)

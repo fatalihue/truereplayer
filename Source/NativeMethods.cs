@@ -153,6 +153,24 @@ namespace TrueReplayer.Interop
 
         public const uint GA_ROOT = 2;
 
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetKeyboardLayout(uint idThread);
+
+        [DllImport("user32.dll")]
+        public static extern int ToUnicodeEx(
+            uint wVirtKey, uint wScanCode, byte[] lpKeyState,
+            [Out, MarshalAs(UnmanagedType.LPWStr)] System.Text.StringBuilder pwszBuff,
+            int cchBuff, uint wFlags, IntPtr dwhkl);
+
+        [DllImport("user32.dll")]
+        public static extern short VkKeyScanEx(char ch, IntPtr dwhkl);
+
+        [DllImport("user32.dll")]
+        public static extern bool GetKeyboardState(byte[] lpKeyState);
+
+        [DllImport("user32.dll")]
+        public static extern uint MapVirtualKeyEx(uint uCode, uint uMapType, IntPtr dwhkl);
+
         public static IntPtr SetMouseHook(LowLevelMouseProc proc)
         {
             using var curProcess = System.Diagnostics.Process.GetCurrentProcess();
