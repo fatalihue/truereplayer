@@ -23,7 +23,6 @@ export function TitleBar({ onOpenCommandPalette }: TitleBarProps) {
           <span className="text-[10px] font-bold text-white">T</span>
         </div>
         <span className="text-xs text-text-secondary">TrueReplayer</span>
-          <span className="text-[10px] text-text-disabled">v1.7.2</span>
       </div>
 
       {/* Spacer */}
