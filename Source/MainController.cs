@@ -79,9 +79,14 @@ namespace TrueReplayer.Controllers
             if (recordingService.IsRecording)
                 recordingService.StopRecording();
 
+            // Swallow mouse clicks during capture so they don't reach the target app
+            if (captureType == CaptureType.Mouse)
+                InputHookManager.SuppressMouseClick = true;
+
             recorder.SetInsertIndex(insertIndex);
             recorder.StartCapture(captureType, () =>
             {
+                InputHookManager.SuppressMouseClick = false;
                 recordingService.StopRecording();
                 onComplete?.Invoke();
             }, mouseButton);
@@ -91,6 +96,7 @@ namespace TrueReplayer.Controllers
         public void CancelCaptureMode()
         {
             if (!recorder.IsCaptureMode) return;
+            InputHookManager.SuppressMouseClick = false;
             recorder.DiscardCapturedActions();
             recordingService.StopRecording();
         }

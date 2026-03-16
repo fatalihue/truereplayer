@@ -51,6 +51,10 @@ namespace TrueReplayer
         /// Used when a UI dialog/modal is active (SendText, Rename, Hotkey Capture, ContentDialogs).
         public static bool SuppressAllHotkeys { get; set; } = false;
 
+        /// When true, mouse click events (Down/Up) are swallowed (not passed to the target app).
+        /// Used during capture mode to capture coordinates without performing the actual click.
+        public static bool SuppressMouseClick { get; set; } = false;
+
         public static void Start()
         {
             if (_mouseHookId == IntPtr.Zero)
@@ -358,6 +362,10 @@ namespace TrueReplayer
                         _hotstringBufferLen = 0;
 
                     OnMouseEvent?.Invoke(button, hookStruct.pt.x, hookStruct.pt.y, isDown, scrollDelta);
+
+                    // In capture mode, swallow mouse clicks so they don't reach the target app
+                    if (SuppressMouseClick && button != "Scroll")
+                        return (IntPtr)1;
                 }
             }
 
