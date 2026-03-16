@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Smile, Clock, BookmarkPlus, Trash2 } from 'lucide-react';
+import { Smile, Clock, BookmarkPlus, Trash2, ChevronRight, ChevronLeft } from 'lucide-react';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import type { EmojiClickData } from 'emoji-picker-react';
 
@@ -135,7 +135,8 @@ type PanelType = 'emoji' | 'variables' | 'snippets';
 
 export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: SendTextDialogProps) {
   const [text, setText] = useState(initialText);
-  const [activePanel, setActivePanel] = useState<PanelType | null>(null);
+  const [activePanel, setActivePanel] = useState<PanelType | null>('emoji');
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [snippets, setSnippets] = useState<Snippet[]>(loadSnippets);
   const [snippetName, setSnippetName] = useState('');
   const [savingSnippet, setSavingSnippet] = useState(false);
@@ -214,8 +215,13 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
     if (trimmed) onConfirm(trimmed);
   };
 
-  const togglePanel = (panel: PanelType) => {
-    setActivePanel(prev => prev === panel ? null : panel);
+  const selectPanel = (panel: PanelType) => {
+    setActivePanel(panel);
+    setPanelCollapsed(false);
+  };
+
+  const toggleCollapse = () => {
+    setPanelCollapsed(prev => !prev);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -223,8 +229,8 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
       e.preventDefault();
       if (savingSnippet) {
         setSavingSnippet(false);
-      } else if (activePanel) {
-        setActivePanel(null);
+      } else if (!panelCollapsed) {
+        setPanelCollapsed(true);
       } else {
         onClose();
       }
@@ -258,14 +264,22 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
             {mode === 'add' ? 'Insert Send Text' : 'Edit Send Text'}
           </h3>
           <div className="flex items-center gap-1">
-            <button type="button" onClick={() => togglePanel('emoji')} className={tabBtnClass(activePanel === 'emoji')} title="Emoji">
+            <button type="button" onClick={() => selectPanel('emoji')} className={tabBtnClass(activePanel === 'emoji')} title="Emoji">
               <Smile size={14} /> Emoji
             </button>
-            <button type="button" onClick={() => togglePanel('variables')} className={tabBtnClass(activePanel === 'variables')} title="Variables">
+            <button type="button" onClick={() => selectPanel('variables')} className={tabBtnClass(activePanel === 'variables')} title="Variables">
               <Clock size={14} /> Variables
             </button>
-            <button type="button" onClick={() => togglePanel('snippets')} className={tabBtnClass(activePanel === 'snippets')} title="Snippets">
+            <button type="button" onClick={() => selectPanel('snippets')} className={tabBtnClass(activePanel === 'snippets')} title="Snippets">
               <BookmarkPlus size={14} /> Snippets
+            </button>
+            <button
+              type="button"
+              onClick={toggleCollapse}
+              className="ml-1 p-1.5 text-text-tertiary hover:text-text-primary hover:bg-bg-card rounded transition-colors"
+              title={panelCollapsed ? 'Show panel' : 'Hide panel'}
+            >
+              {panelCollapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
             </button>
           </div>
         </div>
@@ -303,7 +317,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
           </div>
 
           {/* Right: collapsible side panel */}
-          {activePanel && (
+          {activePanel && !panelCollapsed && (
             <div className="w-[300px] shrink-0 border-l border-border-subtle flex flex-col">
               {/* ── Emoji Panel ── */}
               {activePanel === 'emoji' && (
