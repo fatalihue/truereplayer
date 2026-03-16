@@ -53,10 +53,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [activeSubmenu, setActiveSubmenu] = useState<'above' | 'below' | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
-  const submenuRef = useRef<HTMLDivElement>(null);
-  const aboveButtonRef = useRef<HTMLButtonElement>(null);
-  const belowButtonRef = useRef<HTMLButtonElement>(null);
-  const submenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sendTextInsert, setSendTextInsert] = useState<{ insertIndex: number } | null>(null);
   const { showToast } = useToast();
   const contextMenuEnabled = !buttonStates.recordingActive && !buttonStates.replayActive;
@@ -164,8 +160,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     if (!contextMenu) return;
     const handleClick = (e: MouseEvent) => {
       if (
-        contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node) &&
-        (!submenuRef.current || !submenuRef.current.contains(e.target as Node))
+        contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)
       ) {
         setContextMenu(null);
         setMenuPos(null);
@@ -450,16 +445,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     setContextMenu(null);
     setMenuPos(null);
     setActiveSubmenu(null);
-    if (submenuCloseTimer.current) { clearTimeout(submenuCloseTimer.current); submenuCloseTimer.current = null; }
-  }, []);
-
-  // Delayed submenu close — gives time to move cursor across the gap
-  const scheduleSubmenuClose = useCallback(() => {
-    submenuCloseTimer.current = setTimeout(() => { setActiveSubmenu(null); }, 150);
-  }, []);
-
-  const cancelSubmenuClose = useCallback(() => {
-    if (submenuCloseTimer.current) { clearTimeout(submenuCloseTimer.current); submenuCloseTimer.current = null; }
   }, []);
 
   const handleInsertAction = useCallback((actionType: string, direction: 'above' | 'below') => {
@@ -856,30 +841,82 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           style={{ left: menuPos.x, top: menuPos.y }}
         >
           {/* Insert Above */}
-          <button
-            ref={aboveButtonRef}
-            onMouseEnter={() => { cancelSubmenuClose(); setActiveSubmenu('above'); }}
-            className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          <div
+            className="relative"
+            onMouseEnter={() => setActiveSubmenu('above')}
+            onMouseLeave={() => setActiveSubmenu(null)}
           >
-            <span className="flex items-center gap-2.5">
-              <Plus size={13} className="text-text-tertiary" />
-              Insert Above
-            </span>
-            <ChevronRight size={12} className="text-text-disabled" />
-          </button>
+            <button
+              className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+            >
+              <span className="flex items-center gap-2.5">
+                <Plus size={13} className="text-text-tertiary" />
+                Insert Above
+              </span>
+              <ChevronRight size={12} className="text-text-disabled" />
+            </button>
+            {activeSubmenu === 'above' && (
+              <div className="absolute left-full top-0 min-w-[170px] bg-transparent" style={{ paddingLeft: '4px' }}>
+                <div className="py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
+                  {submenuItems.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <button
+                        key={item.type}
+                        onClick={() => {
+                          if (item.type === 'SendText') handleInsertSendText('above');
+                          else handleInsertAction(item.type, 'above');
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                      >
+                        <Icon size={13} className="text-text-tertiary" />
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Insert Below */}
-          <button
-            ref={belowButtonRef}
-            onMouseEnter={() => { cancelSubmenuClose(); setActiveSubmenu('below'); }}
-            className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          <div
+            className="relative"
+            onMouseEnter={() => setActiveSubmenu('below')}
+            onMouseLeave={() => setActiveSubmenu(null)}
           >
-            <span className="flex items-center gap-2.5">
-              <Plus size={13} className="text-text-tertiary" />
-              Insert Below
-            </span>
-            <ChevronRight size={12} className="text-text-disabled" />
-          </button>
+            <button
+              className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+            >
+              <span className="flex items-center gap-2.5">
+                <Plus size={13} className="text-text-tertiary" />
+                Insert Below
+              </span>
+              <ChevronRight size={12} className="text-text-disabled" />
+            </button>
+            {activeSubmenu === 'below' && (
+              <div className="absolute left-full top-0 min-w-[170px] bg-transparent" style={{ paddingLeft: '4px' }}>
+                <div className="py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
+                  {submenuItems.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <button
+                        key={item.type}
+                        onClick={() => {
+                          if (item.type === 'SendText') handleInsertSendText('below');
+                          else handleInsertAction(item.type, 'below');
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                      >
+                        <Icon size={13} className="text-text-tertiary" />
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
 
           <div className="my-1 border-t border-border-subtle" />
 
@@ -924,46 +961,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             <span className="text-[10px] text-text-disabled font-mono">Del</span>
           </button>
 
-          {/* Submenu */}
-          {activeSubmenu && (() => {
-            const parentEl = activeSubmenu === 'above' ? aboveButtonRef.current : belowButtonRef.current;
-            if (!parentEl) return null;
-            const parentRect = parentEl.getBoundingClientRect();
-            const menuRight = parentRect.right + 4;
-            const fitsRight = menuRight + 170 < window.innerWidth - 8;
-            const subX = fitsRight ? menuRight : parentRect.left - 170 - 4;
-            const subY = Math.min(parentRect.top, window.innerHeight - 280);
-
-            return (
-              <div
-                ref={submenuRef}
-                className="fixed z-[60] min-w-[170px] py-1 bg-bg-card border border-border-default rounded-md shadow-lg"
-                style={{ left: subX, top: subY }}
-                onMouseEnter={cancelSubmenuClose}
-                onMouseLeave={scheduleSubmenuClose}
-              >
-                {submenuItems.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      key={item.type}
-                      onClick={() => {
-                        if (item.type === 'SendText') {
-                          handleInsertSendText(activeSubmenu);
-                        } else {
-                          handleInsertAction(item.type, activeSubmenu);
-                        }
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-                    >
-                      <Icon size={13} className="text-text-tertiary" />
-                      {item.label}
-                    </button>
-                  );
-                })}
-              </div>
-            );
-          })()}
         </div>,
         document.body
       )}
