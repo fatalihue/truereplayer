@@ -488,6 +488,21 @@ namespace TrueReplayer.Controllers
                 var profile = await LoadProfileByNameAsync(name);
                 if (profile == null) continue;
 
+                // Collect WaitImage reference images
+                Dictionary<string, string>? images = null;
+                foreach (var action in profile.Actions)
+                {
+                    if (action.ActionType == "WaitImage" && !string.IsNullOrEmpty(action.ImagePath))
+                    {
+                        var base64 = ImageStorageService.ReadAsBase64(name, action.ImagePath);
+                        if (base64 != null)
+                        {
+                            images ??= new Dictionary<string, string>();
+                            images[action.ImagePath] = base64;
+                        }
+                    }
+                }
+
                 envelope.Profiles.Add(new ProfileExportEntry
                 {
                     Name = name,
@@ -495,7 +510,8 @@ namespace TrueReplayer.Controllers
                     CustomHotstring = profile.CustomHotstring,
                     TargetWindow = profile.TargetWindow,
                     BatchDelay = profile.BatchDelay,
-                    Actions = profile.Actions
+                    Actions = profile.Actions,
+                    Images = images
                 });
             }
 
@@ -634,6 +650,16 @@ namespace TrueReplayer.Controllers
                 };
 
                 await SettingsManager.SaveProfileAsync(targetPath, profile);
+
+                // Restore embedded WaitImage reference images
+                if (entry.Images != null && entry.Images.Count > 0)
+                {
+                    foreach (var kvp in entry.Images)
+                    {
+                        ImageStorageService.SaveFromBase64(kvp.Value, finalName, kvp.Key);
+                    }
+                }
+
                 imported++;
             }
 

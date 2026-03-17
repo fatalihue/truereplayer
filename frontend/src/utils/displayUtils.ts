@@ -17,7 +17,7 @@ const DISPLAY_KEY_MAP: Record<string, string> = {
   'Next': 'Page Down', 'Prior': 'Page Up',
 };
 
-const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'SendText']);
+const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage']);
 
 export function getDisplayKey(key: string): string {
   if (!key) return '';
@@ -42,6 +42,8 @@ export function getActionTypeColors(actionType: string) {
     return { bg: 'var(--color-action-key-bg)', fg: 'var(--color-action-key-fg)' };
   if (actionType === 'SendText')
     return { bg: 'rgba(251, 191, 36, 0.10)', fg: '#fbbf24' };
+  if (actionType === 'WaitImage')
+    return { bg: 'rgba(232, 121, 249, 0.10)', fg: '#e879f9' };
   return { bg: 'transparent', fg: 'var(--color-text-tertiary)' };
 }
 
@@ -51,5 +53,6 @@ export function getActionTypeIcon(actionType: string): string {
   if (actionType === 'ScrollDown') return 'ArrowDown';
   if (actionType.startsWith('Key')) return 'Keyboard';
   if (actionType === 'SendText') return 'Type';
+  if (actionType === 'WaitImage') return 'ScanSearch';
   return 'Zap';
 }

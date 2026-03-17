@@ -122,6 +122,11 @@ namespace TrueReplayer.Services
             };
         }
 
+        public void SetProfileNameProvider(Func<string> getProfileName)
+        {
+            replayer.SetProfileNameProvider(getProfileName);
+        }
+
         public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText)
         {
             if (!IsReplaying && actions.Count > 0)
@@ -373,6 +378,7 @@ namespace TrueReplayer.Services
         private CancellationTokenSource? _cts;
         private int _loopCount = 0;
         private int _loopInterval = 0;
+        private Func<string>? _getProfileName;
 
         public event Action<ActionItem>? OnActionExecuting;
 
@@ -380,6 +386,11 @@ namespace TrueReplayer.Services
         {
             _actions = actions;
             this.dispatcherQueue = dispatcherQueue;
+        }
+
+        public void SetProfileNameProvider(Func<string> getProfileName)
+        {
+            _getProfileName = getProfileName;
         }
 
         public void SetLoopOptions(int loopCount, int loopInterval)
@@ -442,6 +453,7 @@ namespace TrueReplayer.Services
                                     case "ScrollUp": SimulateScroll(120); break;
                                     case "ScrollDown": SimulateScroll(-120); break;
                                     case "SendText": await SimulateClipboardPaste(action.Key, token); break;
+                                    case "WaitImage": await ExecuteWaitImage(action, token); break;
                                 }
                             }
                             finally
@@ -685,6 +697,34 @@ namespace TrueReplayer.Services
                 }
                 catch { }
             });
+        }
+
+        private async Task ExecuteWaitImage(ActionItem action, CancellationToken token)
+        {
+            if (string.IsNullOrEmpty(action.ImagePath)) return;
+
+            string profileName = _getProfileName?.Invoke() ?? "default";
+            var referenceImage = ImageStorageService.LoadReferenceImage(profileName, action.ImagePath);
+            if (referenceImage == null) return;
+
+            try
+            {
+                var matchResult = await ImageMatchingService.WaitForImageAsync(
+                    referenceImage,
+                    action.Confidence > 0 ? action.Confidence : 0.8,
+                    action.Timeout > 0 ? action.Timeout : 30000,
+                    token);
+
+                if (matchResult == null && !token.IsCancellationRequested)
+                {
+                    // Timeout: stop replay
+                    Stop();
+                }
+            }
+            finally
+            {
+                referenceImage.Dispose();
+            }
         }
 
         private static readonly Dictionary<string, ushort> SpecialKeyPlaceholders = new(StringComparer.OrdinalIgnoreCase)

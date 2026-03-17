@@ -1,0 +1,218 @@
+using System;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using TrueReplayer.Interop;
+
+namespace TrueReplayer.Services
+{
+    public class RegionSelectionResult
+    {
+        public Bitmap CroppedImage { get; set; } = null!;
+        public int ScreenX { get; set; }
+        public int ScreenY { get; set; }
+        public int Width { get; set; }
+        public int Height { get; set; }
+    }
+
+    public class ScreenOverlayForm : Form
+    {
+        private readonly Bitmap _screenshot;
+        private readonly TaskCompletionSource<RegionSelectionResult?> _tcs = new();
+
+        private Point _startPoint;
+        private Point _currentPoint;
+        private bool _isDragging;
+        private bool _hasSelection;
+
+        public ScreenOverlayForm(Bitmap screenshot)
+        {
+            _screenshot = screenshot;
+
+            // Virtual screen bounds (all monitors)
+            int vx = NativeMethods.GetSystemMetrics(76);
+            int vy = NativeMethods.GetSystemMetrics(77);
+            int vw = NativeMethods.GetSystemMetrics(78);
+            int vh = NativeMethods.GetSystemMetrics(79);
+
+            FormBorderStyle = FormBorderStyle.None;
+            StartPosition = FormStartPosition.Manual;
+            Location = new Point(vx, vy);
+            Size = new Size(vw, vh);
+            TopMost = true;
+            ShowInTaskbar = false;
+            DoubleBuffered = true;
+            Cursor = Cursors.Cross;
+            BackgroundImage = _screenshot;
+            BackgroundImageLayout = ImageLayout.None;
+
+            KeyPreview = true;
+            KeyDown += OnKeyDown;
+            MouseDown += OnMouseDown;
+            MouseMove += OnMouseMove;
+            MouseUp += OnMouseUp;
+        }
+
+        public Task<RegionSelectionResult?> GetSelectionAsync() => _tcs.Task;
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            var g = e.Graphics;
+
+            // Dark overlay on entire screen
+            using var overlay = new SolidBrush(Color.FromArgb(100, 0, 0, 0));
+            g.FillRectangle(overlay, ClientRectangle);
+
+            if (_isDragging || _hasSelection)
+            {
+                var rect = GetSelectionRect();
+                if (rect.Width > 0 && rect.Height > 0)
+                {
+                    // Draw the clear (un-tinted) region
+                    g.DrawImage(_screenshot, rect, rect, GraphicsUnit.Pixel);
+
+                    // Selection border
+                    using var pen = new Pen(Color.FromArgb(255, 96, 205, 255), 2f); // #60CDFF accent
+                    g.DrawRectangle(pen, rect);
+
+                    // Dimension label
+                    string label = $"{rect.Width} × {rect.Height}";
+                    using var font = new Font("Segoe UI", 11f, FontStyle.Regular);
+                    var labelSize = g.MeasureString(label, font);
+                    float labelX = rect.X + (rect.Width - labelSize.Width) / 2;
+                    float labelY = rect.Bottom + 6;
+
+                    // Ensure label stays on screen
+                    if (labelY + labelSize.Height > ClientRectangle.Height)
+                        labelY = rect.Top - labelSize.Height - 6;
+
+                    using var bgBrush = new SolidBrush(Color.FromArgb(200, 0, 0, 0));
+                    g.FillRectangle(bgBrush, labelX - 4, labelY - 2, labelSize.Width + 8, labelSize.Height + 4);
+                    using var textBrush = new SolidBrush(Color.White);
+                    g.DrawString(label, font, textBrush, labelX, labelY);
+                }
+            }
+
+            // Instruction text at top center
+            if (!_isDragging && !_hasSelection)
+            {
+                string hint = "Click and drag to select a region  •  ESC to cancel";
+                using var font = new Font("Segoe UI", 13f, FontStyle.Regular);
+                var size = g.MeasureString(hint, font);
+                float hx = (ClientRectangle.Width - size.Width) / 2;
+                float hy = 40;
+
+                using var bgBrush = new SolidBrush(Color.FromArgb(180, 0, 0, 0));
+                g.FillRoundedRectangle(bgBrush, hx - 12, hy - 6, size.Width + 24, size.Height + 12, 8);
+                using var textBrush = new SolidBrush(Color.White);
+                g.DrawString(hint, font, textBrush, hx, hy);
+            }
+        }
+
+        private Rectangle GetSelectionRect()
+        {
+            int x = Math.Min(_startPoint.X, _currentPoint.X);
+            int y = Math.Min(_startPoint.Y, _currentPoint.Y);
+            int w = Math.Abs(_currentPoint.X - _startPoint.X);
+            int h = Math.Abs(_currentPoint.Y - _startPoint.Y);
+            return new Rectangle(x, y, w, h);
+        }
+
+        private void OnKeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Escape)
+            {
+                _tcs.TrySetResult(null);
+                Close();
+            }
+        }
+
+        private void OnMouseDown(object? sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                _startPoint = e.Location;
+                _currentPoint = e.Location;
+                _isDragging = true;
+                _hasSelection = false;
+            }
+        }
+
+        private void OnMouseMove(object? sender, MouseEventArgs e)
+        {
+            if (_isDragging)
+            {
+                _currentPoint = e.Location;
+                Invalidate();
+            }
+        }
+
+        private void OnMouseUp(object? sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left && _isDragging)
+            {
+                _isDragging = false;
+                _currentPoint = e.Location;
+                _hasSelection = true;
+
+                var rect = GetSelectionRect();
+                if (rect.Width < 10 || rect.Height < 10)
+                {
+                    // Too small, reset
+                    _hasSelection = false;
+                    Invalidate();
+                    return;
+                }
+
+                // Crop the selected region from the original screenshot
+                var cropped = new Bitmap(rect.Width, rect.Height);
+                using (var g = Graphics.FromImage(cropped))
+                {
+                    g.DrawImage(_screenshot, 0, 0, rect, GraphicsUnit.Pixel);
+                }
+
+                // Account for virtual screen offset
+                int vx = NativeMethods.GetSystemMetrics(76);
+                int vy = NativeMethods.GetSystemMetrics(77);
+
+                var result = new RegionSelectionResult
+                {
+                    CroppedImage = cropped,
+                    ScreenX = rect.X + vx,
+                    ScreenY = rect.Y + vy,
+                    Width = rect.Width,
+                    Height = rect.Height
+                };
+
+                _tcs.TrySetResult(result);
+                Close();
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _screenshot?.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+    }
+
+    // Extension method for rounded rectangles
+    internal static class GraphicsExtensions
+    {
+        public static void FillRoundedRectangle(this Graphics g, Brush brush, float x, float y, float w, float h, float r)
+        {
+            using var path = new GraphicsPath();
+            path.AddArc(x, y, r * 2, r * 2, 180, 90);
+            path.AddArc(x + w - r * 2, y, r * 2, r * 2, 270, 90);
+            path.AddArc(x + w - r * 2, y + h - r * 2, r * 2, r * 2, 0, 90);
+            path.AddArc(x, y + h - r * 2, r * 2, r * 2, 90, 90);
+            path.CloseFigure();
+            g.FillPath(brush, path);
+        }
+    }
+}

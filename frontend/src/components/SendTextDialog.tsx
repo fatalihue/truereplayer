@@ -108,7 +108,7 @@ function renderHighlightedText(text: string): React.ReactNode[] {
         key={`v${match.index}`}
         className={
           isValid
-            ? 'text-accent-light bg-accent-solid/15 rounded-sm'
+            ? 'text-[#f0abfc] bg-[#d946ef]/15 rounded-sm px-[1px]'
             : 'text-text-primary'
         }
       >

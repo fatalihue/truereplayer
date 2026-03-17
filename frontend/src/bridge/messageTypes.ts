@@ -10,6 +10,10 @@ export interface ActionItem {
   rowNumber: number;
   isInsertionPoint: boolean;
   shouldHighlight: boolean;
+  imagePath: string;
+  timeout: number;
+  confidence: number;
+  imageBase64: string;
 }
 
 export interface ProfileEntry {
@@ -155,6 +159,7 @@ export type OutgoingMessage =
   | { type: 'actions:reorder'; payload: { indices: number[]; targetIndex: number } }
   | { type: 'actions:insertAction'; payload: { actionType: string; insertIndex: number } }
   | { type: 'actions:duplicate'; payload: { indices: number[] } }
+  | { type: 'waitimage:recapture'; payload: { index: number } }
   | { type: 'selection:changed'; payload: { indices: number[] } }
   | { type: 'window:alwaysOnTop'; payload: { enabled: boolean } }
   | { type: 'window:minimizeToTray'; payload: { enabled: boolean } }

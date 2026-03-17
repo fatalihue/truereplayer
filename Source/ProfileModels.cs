@@ -157,6 +157,10 @@ namespace TrueReplayer.Models
         public WindowTarget? TargetWindow { get; set; }
         public string BatchDelay { get; set; } = "Delay (ms)";
         public ObservableCollection<ActionItem> Actions { get; set; } = new();
+        /// <summary>
+        /// Embedded WaitImage reference images: filename → base64 PNG data.
+        /// </summary>
+        public Dictionary<string, string>? Images { get; set; }
     }
 
     public class ProfileExportOrganization

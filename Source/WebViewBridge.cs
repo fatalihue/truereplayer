@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 using System.Threading.Tasks;
 using TrueReplayer.Controllers;
 using TrueReplayer.Interop;
@@ -136,6 +137,7 @@ namespace TrueReplayer
                     case "actions:reorder": HandleActionsReorder(payload); break;
                     case "actions:insertAction": HandleInsertAction(payload); break;
                     case "actions:duplicate": HandleDuplicateActions(payload); break;
+                    case "waitimage:recapture": HandleWaitImageRecapture(payload); break;
                     case "profile:click": HandleProfileClick(payload); break;
                     case "profile:create": HandleProfileCreate(payload); break;
                     case "profile:rename": HandleProfileRename(payload); break;
@@ -197,6 +199,7 @@ namespace TrueReplayer
 
         public void PushActionsUpdate()
         {
+            string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
             var actionsList = actions.Select((a, i) => new
             {
                 actionType = a.ActionType,
@@ -207,7 +210,13 @@ namespace TrueReplayer
                 comment = a.Comment ?? "",
                 rowNumber = i + 1,
                 isInsertionPoint = a.IsInsertionPoint,
-                shouldHighlight = a.ShouldHighlight
+                shouldHighlight = a.ShouldHighlight,
+                imagePath = a.ImagePath ?? "",
+                timeout = a.Timeout,
+                confidence = a.Confidence,
+                imageBase64 = a.ActionType == "WaitImage" && !string.IsNullOrEmpty(a.ImagePath)
+                    ? ImageStorageService.ReadAsBase64(profileName, a.ImagePath) ?? ""
+                    : ""
             }).ToArray();
 
             SendMessage("actions:updated", new { actions = actionsList });
@@ -579,6 +588,8 @@ namespace TrueReplayer
                 case "y": if (int.TryParse(value, out int y)) action.Y = y; break;
                 case "delay": if (int.TryParse(value, out int delay)) action.Delay = Math.Max(0, delay); break;
                 case "comment": action.Comment = value; break;
+                case "timeout": if (int.TryParse(value, out int timeout)) action.Timeout = Math.Max(1000, timeout); break;
+                case "confidence": if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double conf)) action.Confidence = Math.Clamp(conf, 0.1, 1.0); break;
             }
 
             HasUnsavedChanges = true;
@@ -592,10 +603,16 @@ namespace TrueReplayer
                 .OrderByDescending(i => i)
                 .ToList();
 
+            string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
             foreach (var idx in indices)
             {
                 if (idx >= 0 && idx < actions.Count)
+                {
+                    var action = actions[idx];
+                    if (action.ActionType == "WaitImage" && !string.IsNullOrEmpty(action.ImagePath))
+                        ImageStorageService.DeleteReferenceImage(profileName, action.ImagePath);
                     actions.RemoveAt(idx);
+                }
             }
 
             HasUnsavedChanges = true;
@@ -725,6 +742,13 @@ namespace TrueReplayer
                 return;
             }
 
+            // WaitImage: capture screen region
+            if (actionType == "WaitImage")
+            {
+                _ = HandleInsertWaitImageAsync(insertIndex);
+                return;
+            }
+
             CaptureType captureType;
             string? mouseButton = null;
 
@@ -746,6 +770,139 @@ namespace TrueReplayer
             {
                 HasUnsavedChanges = true;
                 mainController.UpdateButtonStates();
+            });
+        }
+
+        private async Task HandleInsertWaitImageAsync(int insertIndex)
+        {
+            // Minimize main window to get a clean screenshot
+            var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
+            await Task.Delay(400); // Wait for minimize animation
+
+            System.Drawing.Bitmap screenshot;
+            try
+            {
+                screenshot = ScreenCaptureService.CaptureVirtualScreen();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[WaitImage] Screenshot failed: {ex.Message}");
+                NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
+                return;
+            }
+
+            RegionSelectionResult? selection = null;
+
+            // Run overlay on STA thread (WinForms requirement)
+            var thread = new Thread(() =>
+            {
+                System.Windows.Forms.Application.EnableVisualStyles();
+                using var overlay = new ScreenOverlayForm(screenshot);
+                overlay.ShowDialog();
+                selection = overlay.GetSelectionAsync().Result;
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            await Task.Run(() => thread.Join());
+
+            // Restore main window
+            dispatcherQueue.TryEnqueue(() =>
+            {
+                NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
+            });
+
+            if (selection == null) return; // Cancelled
+
+            // Save the cropped image
+            string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
+            string imagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, profileName);
+            selection.CroppedImage.Dispose();
+
+            // Insert the action
+            int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
+            dispatcherQueue.TryEnqueue(() =>
+            {
+                actions.Insert(insertIndex, new ActionItem
+                {
+                    ActionType = "WaitImage",
+                    ImagePath = imagePath,
+                    Timeout = 30000,
+                    Confidence = 0.8,
+                    Delay = delay,
+                    Key = "",
+                    Comment = ""
+                });
+                for (int i = 0; i < actions.Count; i++)
+                    actions[i].RowNumber = i + 1;
+                HasUnsavedChanges = true;
+                PushActionsUpdate();
+                mainController.UpdateButtonStates();
+            });
+        }
+
+        private void HandleWaitImageRecapture(JsonElement payload)
+        {
+            int index = payload.GetProperty("index").GetInt32();
+            if (index < 0 || index >= actions.Count || actions[index].ActionType != "WaitImage") return;
+            _ = HandleWaitImageRecaptureAsync(index);
+        }
+
+        private async Task HandleWaitImageRecaptureAsync(int index)
+        {
+            var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
+            await Task.Delay(400);
+
+            System.Drawing.Bitmap screenshot;
+            try
+            {
+                screenshot = ScreenCaptureService.CaptureVirtualScreen();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[WaitImage] Recapture screenshot failed: {ex.Message}");
+                NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
+                return;
+            }
+
+            RegionSelectionResult? selection = null;
+            var thread = new Thread(() =>
+            {
+                System.Windows.Forms.Application.EnableVisualStyles();
+                using var overlay = new ScreenOverlayForm(screenshot);
+                overlay.ShowDialog();
+                selection = overlay.GetSelectionAsync().Result;
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            await Task.Run(() => thread.Join());
+
+            dispatcherQueue.TryEnqueue(() =>
+            {
+                NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
+            });
+
+            if (selection == null) return;
+
+            // Delete old image
+            string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
+            var oldPath = actions[index].ImagePath;
+            if (!string.IsNullOrEmpty(oldPath))
+                ImageStorageService.DeleteReferenceImage(profileName, oldPath);
+
+            // Save new image
+            string newImagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, profileName);
+            selection.CroppedImage.Dispose();
+
+            dispatcherQueue.TryEnqueue(() =>
+            {
+                if (index < actions.Count)
+                {
+                    actions[index].ImagePath = newImagePath;
+                    HasUnsavedChanges = true;
+                    PushActionsUpdate();
+                }
             });
         }
 
@@ -775,7 +932,10 @@ namespace TrueReplayer
                         X = original.X,
                         Y = original.Y,
                         Delay = original.Delay,
-                        Comment = original.Comment
+                        Comment = original.Comment,
+                        ImagePath = original.ImagePath,
+                        Timeout = original.Timeout,
+                        Confidence = original.Confidence
                     };
                     actions.Insert(insertPos, clone);
                     insertPos++;

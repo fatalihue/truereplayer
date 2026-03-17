@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Copy, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Copy, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -17,6 +17,7 @@ function ActionIcon({ actionType }: { actionType: string }) {
   if (actionType === 'ScrollDown') return <ArrowDown size={size} />;
   if (actionType.startsWith('Key')) return <Keyboard size={size} />;
   if (actionType === 'SendText') return <Type size={size} />;
+  if (actionType === 'WaitImage') return <ScanSearch size={size} />;
   return <Zap size={size} />;
 }
 
@@ -52,6 +53,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number } | null>(null);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [activeSubmenu, setActiveSubmenu] = useState<'above' | 'below' | null>(null);
+  const [submenuFlip, setSubmenuFlip] = useState(false);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const [sendTextInsert, setSendTextInsert] = useState<{ insertIndex: number } | null>(null);
   const { showToast } = useToast();
@@ -192,6 +194,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         if (x + rect.width > window.innerWidth - 8) {
           x = Math.max(8, window.innerWidth - rect.width - 8);
         }
+        // Flip submenu to left if not enough space on the right for menu + submenu (~170px)
+        setSubmenuFlip(x + rect.width + 174 > window.innerWidth);
         setMenuPos({ x, y });
       });
     }
@@ -489,6 +493,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     { type: 'ScrollUp', label: 'Scroll Up', icon: ArrowUp },
     { type: 'ScrollDown', label: 'Scroll Down', icon: ArrowDown },
     { type: 'SendText', label: 'Send Text', icon: Type },
+    { type: 'WaitImage', label: 'Wait for Image', icon: ScanSearch },
   ] as const;
 
   return (
@@ -554,7 +559,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               const colors = getActionTypeColors(action.actionType);
               const isHighlighted = highlightedActionIndex === idx;
               const isSelected = selectedIndices.has(idx);
-              const displayKey = getDisplayKey(action.key);
+              const displayKey = action.actionType === 'WaitImage'
+                ? ''
+                : getDisplayKey(action.key);
               const displayX = getDisplayX(action);
               const displayY = getDisplayY(action);
               const canEditXY = isMouseAction(action.actionType);
@@ -628,7 +635,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       style={{ background: colors.bg, color: colors.fg }}
                     >
                       <ActionIcon actionType={action.actionType} />
-                      {action.actionType}
+                      {action.actionType === 'WaitImage' ? 'Wait Image' : action.actionType}
                     </span>
                   </td>
                   )}
@@ -728,11 +735,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         onChange={(e) => setEditValue(e.target.value)}
                         onKeyDown={handleEditKeyDown}
                         onBlur={commitEdit}
-                        className="w-16 h-6 px-1 text-xs font-mono text-delay bg-bg-input border border-accent-solid rounded outline-none"
+                        className="w-16 h-6 px-1 text-xs font-mono text-text-primary bg-bg-input border border-accent-solid rounded outline-none"
                       />
                     ) : (
                       <span
-                        className="text-xs font-mono font-medium text-delay cursor-text hover:text-delay/80"
+                        className="text-xs font-mono text-text-secondary cursor-text hover:text-text-primary"
                         onDoubleClick={() => startEdit(idx, 'delay', String(action.delay >= 0 ? action.delay : 0))}
                       >
                         {action.delay >= 0 ? action.delay : 0}
@@ -856,7 +863,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               <ChevronRight size={12} className="text-text-disabled" />
             </button>
             {activeSubmenu === 'above' && (
-              <div className="absolute left-full top-0 min-w-[170px] bg-transparent" style={{ paddingLeft: '4px' }}>
+              <div className={`absolute top-0 min-w-[170px] bg-transparent ${submenuFlip ? 'right-full' : 'left-full'}`} style={submenuFlip ? { paddingRight: '4px' } : { paddingLeft: '4px' }}>
                 <div className="py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
                   {submenuItems.map((item) => {
                     const Icon = item.icon;
@@ -895,7 +902,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               <ChevronRight size={12} className="text-text-disabled" />
             </button>
             {activeSubmenu === 'below' && (
-              <div className="absolute left-full top-0 min-w-[170px] bg-transparent" style={{ paddingLeft: '4px' }}>
+              <div className={`absolute top-0 min-w-[170px] bg-transparent ${submenuFlip ? 'right-full' : 'left-full'}`} style={submenuFlip ? { paddingRight: '4px' } : { paddingLeft: '4px' }}>
                 <div className="py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
                   {submenuItems.map((item) => {
                     const Icon = item.icon;

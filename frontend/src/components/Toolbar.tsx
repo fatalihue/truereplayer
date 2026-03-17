@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Copy, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ChevronUp, ChevronDown } from 'lucide-react';
+import { Copy, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ChevronUp, ChevronDown, ScanSearch } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -30,7 +30,7 @@ interface ToolbarProps {
 }
 
 export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarProps) {
-  const { toolbar, buttonStates } = useAppState();
+  const { toolbar, buttonStates, actions } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
   const [showThemeEditor, setShowThemeEditor] = useState(false);
@@ -164,6 +164,21 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             <Type size={14} />
           </button>
 
+          {/* Wait for Image */}
+          <button
+            tabIndex={-1}
+            onClick={() => {
+              const sel = selectionRef.current;
+              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+              send({ type: 'actions:insertAction', payload: { actionType: 'WaitImage', insertIndex } });
+            }}
+            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Wait for Image"
+          >
+            <ScanSearch size={14} />
+          </button>
+
           {/* Divider */}
           <div className="w-px h-4 bg-border-subtle mx-1" />
 
@@ -254,7 +269,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
           mode="add"
           onConfirm={(text) => {
             const sel = selectionRef.current;
-            const insertIndex = sel.size > 0 ? Math.min(...sel) : undefined;
+            const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : undefined;
             send({ type: 'actions:addSendText', payload: { text, insertIndex } });
             setShowSendTextDialog(false);
           }}

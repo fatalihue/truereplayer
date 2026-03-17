@@ -117,6 +117,8 @@ namespace TrueReplayer
                 DispatcherQueue,
                 this);
 
+            replayService.SetProfileNameProvider(() => bridge.CurrentProfileName != "No Profile" ? bridge.CurrentProfileName : "default");
+
             WebView.CoreWebView2.Settings.IsZoomControlEnabled = false;
 
             WebView.CoreWebView2.WebMessageReceived += (s, e) =>

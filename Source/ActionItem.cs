@@ -13,6 +13,11 @@ namespace TrueReplayer.Models
         public int Delay { get; set; }
         public string Comment { get; set; }
 
+        // WaitImage properties
+        public string? ImagePath { get; set; }
+        public int Timeout { get; set; } = 30000;
+        public double Confidence { get; set; } = 0.8;
+
         private int _rowNumber;
         [System.Text.Json.Serialization.JsonIgnore]
         public int RowNumber
@@ -65,7 +70,7 @@ namespace TrueReplayer.Models
 
         private static readonly HashSet<string> NoCoordinateActionTypes = new(StringComparer.OrdinalIgnoreCase)
         {
-            "KeyDown", "KeyUp", "ScrollUp", "ScrollDown", "SendText"
+            "KeyDown", "KeyUp", "ScrollUp", "ScrollDown", "SendText", "WaitImage"
         };
 
         private bool HideCoordinates => NoCoordinateActionTypes.Contains(ActionType ?? "");
@@ -80,6 +85,8 @@ namespace TrueReplayer.Models
                 if (string.IsNullOrEmpty(Key)) return "";
 
                 if (ActionType == "SendText") return Key;
+                if (ActionType == "WaitImage") return $"{Timeout / 1000}s";
+
 
                 if (Key.StartsWith("D") && Key.Length == 2 && char.IsDigit(Key[1]))
                     return Key[1].ToString();

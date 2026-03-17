@@ -171,6 +171,38 @@ namespace TrueReplayer.Interop
         [DllImport("user32.dll")]
         public static extern uint MapVirtualKeyEx(uint uCode, uint uMapType, IntPtr dwhkl);
 
+        // GDI screen capture
+        public const int SRCCOPY = 0x00CC0020;
+
+        [DllImport("gdi32.dll")]
+        public static extern IntPtr CreateDC(string lpszDriver, string? lpszDevice, string? lpszOutput, IntPtr lpInitData);
+
+        [DllImport("gdi32.dll")]
+        public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+
+        [DllImport("gdi32.dll")]
+        public static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int nWidth, int nHeight);
+
+        [DllImport("gdi32.dll")]
+        public static extern IntPtr SelectObject(IntPtr hdc, IntPtr hgdiobj);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool BitBlt(IntPtr hdcDest, int xDest, int yDest, int wDest, int hDest,
+            IntPtr hdcSrc, int xSrc, int ySrc, int dwRop);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool DeleteObject(IntPtr hObject);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool DeleteDC(IntPtr hdc);
+
+        // Window management
+        public const int SW_MINIMIZE = 6;
+        public const int SW_RESTORE = 9;
+
+        [DllImport("user32.dll")]
+        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
         public static IntPtr SetMouseHook(LowLevelMouseProc proc)
         {
             using var curProcess = System.Diagnostics.Process.GetCurrentProcess();
