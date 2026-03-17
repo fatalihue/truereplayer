@@ -44,8 +44,6 @@ namespace TrueReplayer.Services
             ShowInTaskbar = false;
             DoubleBuffered = true;
             Cursor = Cursors.Cross;
-            BackgroundImage = _screenshot;
-            BackgroundImageLayout = ImageLayout.None;
 
             KeyPreview = true;
             KeyDown += OnKeyDown;
@@ -60,6 +58,9 @@ namespace TrueReplayer.Services
         {
             base.OnPaint(e);
             var g = e.Graphics;
+
+            // Draw screenshot as background
+            g.DrawImage(_screenshot, 0, 0);
 
             // Dark overlay on entire screen
             using var overlay = new SolidBrush(Color.FromArgb(100, 0, 0, 0));

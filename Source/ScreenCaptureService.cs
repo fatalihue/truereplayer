@@ -18,20 +18,14 @@ namespace TrueReplayer.Services
             int w = NativeMethods.GetSystemMetrics(78);  // SM_CXVIRTUALSCREEN
             int h = NativeMethods.GetSystemMetrics(79);  // SM_CYVIRTUALSCREEN
 
-            var hdcScreen = NativeMethods.CreateDC("DISPLAY", null, null, IntPtr.Zero);
-            var hdcMem = NativeMethods.CreateCompatibleDC(hdcScreen);
-            var hBitmap = NativeMethods.CreateCompatibleBitmap(hdcScreen, w, h);
-            var hOld = NativeMethods.SelectObject(hdcMem, hBitmap);
-
-            NativeMethods.BitBlt(hdcMem, 0, 0, w, h, hdcScreen, x, y, NativeMethods.SRCCOPY);
-
-            NativeMethods.SelectObject(hdcMem, hOld);
-            var bitmap = Image.FromHbitmap(hBitmap);
-
-            NativeMethods.DeleteObject(hBitmap);
-            NativeMethods.DeleteDC(hdcMem);
-            NativeMethods.DeleteDC(hdcScreen);
-
+            // Use managed Bitmap + Graphics.CopyFromScreen to avoid GDI handle leaks.
+            // The previous approach (CreateDC/CreateCompatibleBitmap/Image.FromHbitmap)
+            // leaked GDI handles and could exhaust system resources, crashing explorer.exe.
+            var bitmap = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(bitmap))
+            {
+                g.CopyFromScreen(x, y, 0, 0, new System.Drawing.Size(w, h), CopyPixelOperation.SourceCopy);
+            }
             return bitmap;
         }
 
