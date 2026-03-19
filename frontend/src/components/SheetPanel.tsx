@@ -102,7 +102,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     if (actionType === 'BrowserType' && browserText !== (action.browserText || '')) {
       send({ type: 'actions:edit', payload: { index: actionIndex, field: 'browserText', value: browserText } });
     }
-    if (actionType === 'BrowserWaitElement') {
+    if (actionType === 'BrowserWaitElement' || actionType === 'BrowserClick') {
       const newTimeoutMs = Math.max(1, parseFloat(timeout) || 30) * 1000;
       if (newTimeoutMs !== (action.timeout || 30000)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(Math.round(newTimeoutMs)) } });
@@ -292,8 +292,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             </div>
             )}
 
-            {/* Timeout — only for BrowserWaitElement */}
-            {isBrowserWait && (
+            {/* Timeout — for BrowserClick and BrowserWaitElement */}
+            {(isBrowserWait || actionType === 'BrowserClick') && (
             <div className="w-1/2">
               <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
               <input

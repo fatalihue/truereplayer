@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.IO;
 using System.IO.Pipes;
 using System.Text;
@@ -10,17 +11,26 @@ namespace TrueReplayer.NativeHost;
 /// <summary>
 /// Relay between Chrome Native Messaging (stdin/stdout) and TrueReplayer (named pipe).
 /// Keeps retrying pipe connection so Chrome only needs to launch us once.
+/// Exits immediately when Chrome closes stdin (port disconnected or browser closed).
 /// </summary>
 class Program
 {
     private const string PipeName = "TrueReplayerBridge";
     private static readonly object StdoutLock = new();
+    private static readonly CancellationTokenSource GlobalCts = new();
+    private static readonly ConcurrentQueue<string> IncomingMessages = new();
+    private static readonly SemaphoreSlim MessageSignal = new(0);
 
     static async Task Main(string[] args)
     {
+        // Single stdin reader for the entire lifetime.
+        // Reads Chrome native messaging format and queues messages.
+        // When stdin closes (Chrome disconnected), cancels GlobalCts → process exits.
+        _ = Task.Run(() => ReadStdinLoop());
+
         try
         {
-            while (true)
+            while (!GlobalCts.Token.IsCancellationRequested)
             {
                 try
                 {
@@ -29,25 +39,92 @@ class Program
                 catch (OperationCanceledException) { }
                 catch { }
 
-                await Task.Delay(500).ConfigureAwait(false);
+                if (GlobalCts.Token.IsCancellationRequested) break;
+                await Task.Delay(500, GlobalCts.Token).ConfigureAwait(false);
             }
         }
         catch { }
     }
 
+    /// <summary>
+    /// Reads Chrome native messaging from stdin forever.
+    /// Queues messages for the active pipe session.
+    /// Cancels GlobalCts on EOF (Chrome closed).
+    /// </summary>
+    private static void ReadStdinLoop()
+    {
+        try
+        {
+            var stdin = Console.OpenStandardInput();
+            var lengthBuf = new byte[4];
+
+            while (!GlobalCts.Token.IsCancellationRequested)
+            {
+                int bytesRead = ReadExact(stdin, lengthBuf, 4);
+                if (bytesRead < 4) break; // EOF
+
+                int msgLength = BitConverter.ToInt32(lengthBuf, 0);
+                if (msgLength <= 0 || msgLength > 1024 * 1024) break;
+
+                var msgBuf = new byte[msgLength];
+                bytesRead = ReadExact(stdin, msgBuf, msgLength);
+                if (bytesRead < msgLength) break;
+
+                IncomingMessages.Enqueue(Encoding.UTF8.GetString(msgBuf));
+                MessageSignal.Release();
+            }
+        }
+        catch { }
+
+        GlobalCts.Cancel();
+    }
+
+    private static int ReadExact(Stream stream, byte[] buffer, int count)
+    {
+        int totalRead = 0;
+        while (totalRead < count)
+        {
+            int read = stream.Read(buffer, totalRead, count - totalRead);
+            if (read == 0) return totalRead;
+            totalRead += read;
+        }
+        return totalRead;
+    }
+
     private static async Task RunSessionAsync()
     {
         using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
-        await pipe.ConnectAsync(1500).ConfigureAwait(false);
+        await pipe.ConnectAsync(1500, GlobalCts.Token).ConfigureAwait(false);
 
         // Connected! Notify Chrome
         SendToStdout("{\"type\":\"bridge:connected\"}");
 
-        using var sessionCts = new CancellationTokenSource();
+        using var sessionCts = CancellationTokenSource.CreateLinkedTokenSource(GlobalCts.Token);
 
-        // Pipe→stdout relay: reads lines from pipe, forwards to Chrome.
-        // When TrueReplayer sends heartbeats, ReadLineAsync stays responsive
-        // and returns null promptly when pipe server closes.
+        // Queue→pipe relay: forwards queued Chrome messages to TrueReplayer pipe
+        var queueToPipe = Task.Run(async () =>
+        {
+            var writer = new StreamWriter(pipe, Encoding.UTF8) { AutoFlush = true };
+            while (!sessionCts.Token.IsCancellationRequested)
+            {
+                try
+                {
+                    await MessageSignal.WaitAsync(sessionCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) { break; }
+
+                while (IncomingMessages.TryDequeue(out var msg))
+                {
+                    try
+                    {
+                        await writer.WriteLineAsync(msg).ConfigureAwait(false);
+                    }
+                    catch { sessionCts.Cancel(); return; } // Pipe broken
+                }
+            }
+        });
+
+        // Pipe→stdout relay: reads lines from pipe, forwards to Chrome
         var pipeToStdout = Task.Run(async () =>
         {
             var reader = new StreamReader(pipe, Encoding.UTF8);
@@ -56,62 +133,22 @@ class Program
                 var line = await reader.ReadLineAsync().ConfigureAwait(false);
                 if (line == null) break; // EOF = pipe closed
 
-                // Skip heartbeat messages, forward everything else to Chrome
                 if (line.Contains("\"heartbeat\"")) continue;
                 SendToStdout(line);
             }
             sessionCts.Cancel();
         });
 
-        // Stdin→pipe relay: reads Chrome native messaging from stdin, forwards to pipe.
-        var stdinToPipe = Task.Run(async () =>
-        {
-            var stdin = Console.OpenStandardInput();
-            var writer = new StreamWriter(pipe, Encoding.UTF8) { AutoFlush = true };
-            var lengthBuf = new byte[4];
-
-            while (!sessionCts.Token.IsCancellationRequested)
-            {
-                int bytesRead = await ReadExactAsync(stdin, lengthBuf, 4, sessionCts.Token).ConfigureAwait(false);
-                if (bytesRead < 4) break;
-
-                int msgLength = BitConverter.ToInt32(lengthBuf, 0);
-                if (msgLength <= 0 || msgLength > 1024 * 1024) break;
-
-                var msgBuf = new byte[msgLength];
-                bytesRead = await ReadExactAsync(stdin, msgBuf, msgLength, sessionCts.Token).ConfigureAwait(false);
-                if (bytesRead < msgLength) break;
-
-                try
-                {
-                    await writer.WriteLineAsync(Encoding.UTF8.GetString(msgBuf)).ConfigureAwait(false);
-                }
-                catch { break; } // Pipe broken
-            }
-            sessionCts.Cancel();
-        });
-
-        // Wait for pipe relay to finish (stdin relay might hang — that's OK)
-        await pipeToStdout.ConfigureAwait(false);
+        // Wait for either relay to finish
+        await Task.WhenAny(pipeToStdout, queueToPipe).ConfigureAwait(false);
+        sessionCts.Cancel();
 
         // Notify Chrome of disconnection
         try { SendToStdout("{\"type\":\"bridge:disconnected\"}"); } catch { }
 
-        // Give stdin relay a moment to notice cancellation, then move on
-        try { await stdinToPipe.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
+        // Wait for tasks to wind down
+        try { await Task.WhenAll(pipeToStdout, queueToPipe).WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
         catch { }
-    }
-
-    private static async Task<int> ReadExactAsync(Stream stream, byte[] buffer, int count, CancellationToken token)
-    {
-        int totalRead = 0;
-        while (totalRead < count)
-        {
-            int read = await stream.ReadAsync(buffer, totalRead, count - totalRead, token).ConfigureAwait(false);
-            if (read == 0) return totalRead;
-            totalRead += read;
-        }
-        return totalRead;
     }
 
     private static void SendToStdout(string json)
