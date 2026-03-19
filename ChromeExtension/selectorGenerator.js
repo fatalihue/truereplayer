@@ -130,6 +130,8 @@ function getUniqueClassSelector(el) {
   const validClasses = Array.from(el.classList).filter(c =>
     !c.match(/^(hover|active|focus|selected|open|show|hidden|is-|has-|js-|u-)/i) &&
     !c.match(/^(hovered|bordered|transparent|semibold)/i) &&
+    !c.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i) && // UUID
+    !c.match(/^[a-zA-Z]+-[0-9a-f]{6,}$/i) && // hash suffixes (css-modules, obfuscated)
     c.length > 1 &&
     c.length < 60
   );

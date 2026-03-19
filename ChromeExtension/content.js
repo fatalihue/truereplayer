@@ -104,20 +104,61 @@
   function isVisible(el) {
     if (!el) return false;
     const style = window.getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    // Allow opacity:0 for form elements (sites overlay native selects with custom UI)
+    const formTags = new Set(['SELECT', 'INPUT', 'TEXTAREA']);
+    if (style.opacity === '0' && !formTags.has(el.tagName)) return false;
     const rect = el.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
   }
 
+  /**
+   * Find element by text content. Searches visible elements matching the text.
+   * Prefers smaller/more specific elements (buttons, links, spans, list items).
+   */
+  function findByText(text) {
+    const candidates = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+    while (walker.nextNode()) {
+      const el = walker.currentNode;
+      const elText = el.textContent?.trim();
+      if (!elText) continue;
+      // Exact match on direct text (not children's text)
+      const directText = Array.from(el.childNodes)
+        .filter(n => n.nodeType === Node.TEXT_NODE)
+        .map(n => n.textContent.trim())
+        .join(' ').trim();
+      if (directText === text || elText === text) {
+        if (isVisible(el)) candidates.push({ el, directMatch: directText === text, depth: getDepth(el) });
+      }
+    }
+    if (candidates.length === 0) return null;
+    // Prefer direct text match, then deepest element (most specific)
+    candidates.sort((a, b) => (b.directMatch - a.directMatch) || (b.depth - a.depth));
+    return candidates[0].el;
+  }
+
+  function getDepth(el) {
+    let d = 0;
+    let c = el;
+    while (c.parentElement) { d++; c = c.parentElement; }
+    return d;
+  }
+
   async function waitForElement(selector, timeout = 30000) {
-    const el = document.querySelector(selector);
-    if (el && isVisible(el)) return el;
+    const isTextSelector = selector.startsWith('text=');
+    const findFn = isTextSelector
+      ? () => findByText(selector.slice(5))
+      : () => { const el = document.querySelector(selector); return el && isVisible(el) ? el : null; };
+
+    const el = findFn();
+    if (el) return el;
 
     const startTime = Date.now();
     while (Date.now() - startTime < timeout) {
       await new Promise((r) => setTimeout(r, 150));
-      const found = document.querySelector(selector);
-      if (found && isVisible(found)) return found;
+      const found = findFn();
+      if (found) return found;
     }
     throw new Error(`Timeout waiting for element: ${selector}`);
   }
@@ -169,6 +210,10 @@
           el.dispatchEvent(new MouseEvent('mouseover', { ...opts, buttons: 0 }));
           await new Promise(r => setTimeout(r, 50));
 
+          // Snapshot state before click to detect if simulated events worked
+          const domBefore = document.body.innerHTML.length;
+          const rectBefore = el.getBoundingClientRect();
+
           el.focus();
           el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, pointerType: 'mouse' }));
           el.dispatchEvent(new MouseEvent('mousedown', opts));
@@ -176,6 +221,18 @@
           el.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerId: 1, pointerType: 'mouse', buttons: 0 }));
           el.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0 }));
           el.dispatchEvent(new MouseEvent('click', { ...opts, buttons: 0 }));
+
+          // Only use .click() fallback if simulated events had no visible effect
+          // (element still in DOM, same position, no DOM changes)
+          await new Promise(r => setTimeout(r, 100));
+          const stillInDom = document.body.contains(el);
+          const domAfter = document.body.innerHTML.length;
+          const domChanged = Math.abs(domAfter - domBefore) > 10;
+
+          if (stillInDom && !domChanged) {
+            // Simulated events didn't cause any visible change — try native click
+            el.click();
+          }
 
           return { success: true };
         }

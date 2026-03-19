@@ -955,6 +955,25 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             Edit
           </button>
 
+          {/* Copy Selector — only for Browser actions */}
+          {actions[contextMenu.rowIndex]?.actionType?.startsWith('Browser') && actions[contextMenu.rowIndex]?.key && (
+            <button
+              onMouseEnter={() => setActiveSubmenu(null)}
+              onClick={() => {
+                const selector = actions[contextMenu.rowIndex]?.key;
+                if (selector) {
+                  navigator.clipboard.writeText(selector);
+                  showToast('Selector copied', 'success');
+                }
+                closeContextMenu();
+              }}
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+            >
+              <Copy size={13} className="text-text-tertiary" />
+              Copy Selector
+            </button>
+          )}
+
           {/* Duplicate */}
           <button
             onMouseEnter={() => setActiveSubmenu(null)}

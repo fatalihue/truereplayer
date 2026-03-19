@@ -82,10 +82,10 @@ namespace TrueReplayer.Services
 
         private async Task ReadMessagesAsync(CancellationToken token)
         {
-            while (!token.IsCancellationRequested && _pipeServer?.IsConnected == true)
+            while (!token.IsCancellationRequested)
             {
                 var line = await _reader!.ReadLineAsync().ConfigureAwait(false);
-                if (line == null) break;
+                if (line == null) break; // EOF = pipe closed
 
                 try
                 {
