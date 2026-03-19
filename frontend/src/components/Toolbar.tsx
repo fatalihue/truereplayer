@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Copy, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ChevronUp, ChevronDown, ScanSearch, Globe } from 'lucide-react';
+import { Copy, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ChevronUp, ChevronDown, ScanSearch, Plus, Mouse, Keyboard, ArrowUp, ArrowDown, Globe } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -36,8 +36,10 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
   const [showThemeEditor, setShowThemeEditor] = useState(false);
   const [showColDropdown, setShowColDropdown] = useState(false);
   const [showSendTextDialog, setShowSendTextDialog] = useState(false);
+  const [showAddActions, setShowAddActions] = useState(false);
   const [showBrowserMenu, setShowBrowserMenu] = useState(false);
   const colDropdownRef = useRef<HTMLDivElement>(null);
+  const addActionsRef = useRef<HTMLDivElement>(null);
   const browserMenuRef = useRef<HTMLDivElement>(null);
 
   // Suppress hotkeys while SendText dialog is open
@@ -55,29 +57,23 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
     return () => window.removeEventListener('cmd:sendtext', handler);
   }, []);
 
-  // Close dropdown on outside click
+  // Close dropdowns on outside click
   useEffect(() => {
-    if (!showColDropdown) return;
+    if (!showColDropdown && !showAddActions && !showBrowserMenu) return;
     const handler = (e: MouseEvent) => {
-      if (colDropdownRef.current && !colDropdownRef.current.contains(e.target as Node)) {
+      if (showColDropdown && colDropdownRef.current && !colDropdownRef.current.contains(e.target as Node)) {
         setShowColDropdown(false);
       }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showColDropdown]);
-
-  // Close browser menu on outside click
-  useEffect(() => {
-    if (!showBrowserMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (browserMenuRef.current && !browserMenuRef.current.contains(e.target as Node)) {
+      if (showAddActions && addActionsRef.current && !addActionsRef.current.contains(e.target as Node)) {
+        setShowAddActions(false);
+      }
+      if (showBrowserMenu && browserMenuRef.current && !browserMenuRef.current.contains(e.target as Node)) {
         setShowBrowserMenu(false);
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [showBrowserMenu]);
+  }, [showColDropdown, showAddActions, showBrowserMenu]);
 
   const toggleColumn = (key: keyof ColumnVisibility) => {
     onColumnVisibilityChange({ ...columnVisibility, [key]: !columnVisibility[key] });
@@ -166,6 +162,63 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
 
           {/* Divider */}
           <div className="w-px h-4 bg-border-subtle mx-1" />
+
+          {/* Add Actions */}
+          <div className="relative" ref={addActionsRef}>
+            <button
+              tabIndex={-1}
+              onClick={() => setShowAddActions(prev => !prev)}
+              disabled={buttonStates.recordingActive || buttonStates.replayActive}
+              className={`p-1.5 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                showAddActions
+                  ? 'bg-bg-elevated text-accent'
+                  : 'hover:bg-bg-elevated text-text-tertiary hover:text-text-primary'
+              }`}
+              title="Add Actions"
+            >
+              <Plus size={14} />
+            </button>
+
+            {showAddActions && (
+              <div
+                className="absolute right-0 top-[calc(100%+4px)] min-w-[160px] p-1 bg-bg-card border border-border-default rounded-lg z-50"
+                style={{ animation: 'fade-in 0.12s ease-out', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
+              >
+                <div className="px-2.5 py-1.5 text-[11px] font-semibold text-text-tertiary">
+                  Add action
+                </div>
+                {([
+                  { type: 'LeftClick', label: 'Left Click', icon: Mouse },
+                  { type: 'RightClick', label: 'Right Click', icon: Mouse },
+                  { type: 'MiddleClick', label: 'Middle Click', icon: Mouse },
+                  { type: 'KeyPress', label: 'Key Press', icon: Keyboard },
+                  { type: 'ScrollUp', label: 'Scroll Up', icon: ArrowUp },
+                  { type: 'ScrollDown', label: 'Scroll Down', icon: ArrowDown },
+                  { type: 'SendText', label: 'Send Text', icon: Type },
+                  { type: 'WaitImage', label: 'Wait for Image', icon: ScanSearch },
+                ] as const).map(item => (
+                  <button
+                    key={item.type}
+                    onClick={() => {
+                      const sel = selectionRef.current;
+                      const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                      if (item.type === 'SendText') {
+                        setShowAddActions(false);
+                        setShowSendTextDialog(true);
+                      } else {
+                        send({ type: 'actions:insertAction', payload: { actionType: item.type, insertIndex } });
+                        setShowAddActions(false);
+                      }
+                    }}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
+                  >
+                    <item.icon size={12} className="shrink-0" />
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Send Text */}
           <button
