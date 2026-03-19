@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Copy, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ChevronUp, ChevronDown, ScanSearch } from 'lucide-react';
+import { Copy, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ChevronUp, ChevronDown, ScanSearch, Globe } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -36,7 +36,9 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
   const [showThemeEditor, setShowThemeEditor] = useState(false);
   const [showColDropdown, setShowColDropdown] = useState(false);
   const [showSendTextDialog, setShowSendTextDialog] = useState(false);
+  const [showBrowserMenu, setShowBrowserMenu] = useState(false);
   const colDropdownRef = useRef<HTMLDivElement>(null);
+  const browserMenuRef = useRef<HTMLDivElement>(null);
 
   // Suppress hotkeys while SendText dialog is open
   useEffect(() => {
@@ -64,6 +66,18 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [showColDropdown]);
+
+  // Close browser menu on outside click
+  useEffect(() => {
+    if (!showBrowserMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (browserMenuRef.current && !browserMenuRef.current.contains(e.target as Node)) {
+        setShowBrowserMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showBrowserMenu]);
 
   const toggleColumn = (key: keyof ColumnVisibility) => {
     onColumnVisibilityChange({ ...columnVisibility, [key]: !columnVisibility[key] });
@@ -178,6 +192,43 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
           >
             <ScanSearch size={14} />
           </button>
+
+          {/* Browser Actions */}
+          <div className="relative" ref={browserMenuRef}>
+            <button
+              tabIndex={-1}
+              onClick={() => setShowBrowserMenu(!showBrowserMenu)}
+              disabled={buttonStates.recordingActive || buttonStates.replayActive}
+              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Browser Actions"
+            >
+              <Globe size={14} />
+            </button>
+            {showBrowserMenu && (
+              <div className="absolute top-full left-0 mt-1 w-44 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1">
+                {([
+                  { type: 'BrowserClick', label: 'Browser Click' },
+                  { type: 'BrowserType', label: 'Browser Type' },
+                  { type: 'BrowserWaitElement', label: 'Browser Wait' },
+                  { type: 'BrowserNavigate', label: 'Navigate' },
+                ] as const).map((item) => (
+                  <button
+                    key={item.type}
+                    className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
+                    onClick={() => {
+                      const sel = selectionRef.current;
+                      const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                      send({ type: 'actions:addBrowserAction', payload: { actionType: item.type, selector: '', insertIndex } });
+                      setShowBrowserMenu(false);
+                    }}
+                  >
+                    <Globe size={12} className="text-[#60cdff]" />
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Divider */}
           <div className="w-px h-4 bg-border-subtle mx-1" />

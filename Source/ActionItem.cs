@@ -18,6 +18,13 @@ namespace TrueReplayer.Models
         public int Timeout { get; set; } = 30000;
         public double Confidence { get; set; } = 0.8;
 
+        // Browser action properties
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? BrowserText { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
+
         private int _rowNumber;
         [System.Text.Json.Serialization.JsonIgnore]
         public int RowNumber
@@ -70,7 +77,8 @@ namespace TrueReplayer.Models
 
         private static readonly HashSet<string> NoCoordinateActionTypes = new(StringComparer.OrdinalIgnoreCase)
         {
-            "KeyDown", "KeyUp", "ScrollUp", "ScrollDown", "SendText", "WaitImage"
+            "KeyDown", "KeyUp", "ScrollUp", "ScrollDown", "SendText", "WaitImage",
+            "BrowserClick", "BrowserType", "BrowserWaitElement", "BrowserNavigate"
         };
 
         private bool HideCoordinates => NoCoordinateActionTypes.Contains(ActionType ?? "");
@@ -86,6 +94,12 @@ namespace TrueReplayer.Models
 
                 if (ActionType == "SendText") return Key;
                 if (ActionType == "WaitImage") return $"{Timeout / 1000}s";
+                if (ActionType == "BrowserNavigate") return Key;
+                if (ActionType == "BrowserClick" || ActionType == "BrowserType" || ActionType == "BrowserWaitElement")
+                {
+                    var selector = Key.Length > 40 ? Key[..37] + "..." : Key;
+                    return selector;
+                }
 
 
                 if (Key.StartsWith("D") && Key.Length == 2 && char.IsDigit(Key[1]))

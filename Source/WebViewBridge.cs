@@ -55,6 +55,8 @@ namespace TrueReplayer
         public string? CurrentProfilePath { get; set; }
         public bool HasUnsavedChanges { get; set; }
 
+        private readonly BrowserBridgeService? browserBridge;
+
         public WebViewBridge(
             CoreWebView2 webView,
             ObservableCollection<ActionItem> actions,
@@ -63,7 +65,8 @@ namespace TrueReplayer
             RecordingService recordingService,
             ReplayService replayService,
             DispatcherQueue dispatcherQueue,
-            MainWindow window)
+            MainWindow window,
+            BrowserBridgeService? browserBridge = null)
         {
             this.webView = webView;
             this.actions = actions;
@@ -73,6 +76,45 @@ namespace TrueReplayer
             this.replayService = replayService;
             this.dispatcherQueue = dispatcherQueue;
             this.window = window;
+            this.browserBridge = browserBridge;
+
+            // Watch for browser extension events
+            if (browserBridge != null)
+            {
+                browserBridge.ConnectionChanged += (connected) =>
+                {
+                    dispatcherQueue.TryEnqueue(() => SendMessage("browser:status", new { connected }));
+                };
+                browserBridge.ElementClicked += (selector, description, url, tagName) =>
+                {
+                    dispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (!recordingService.IsRecording) return;
+
+                        // Remove native click events recorded in the last 500ms (duplicates of this browser click)
+                        var cutoff = DateTime.UtcNow.AddMilliseconds(-500);
+                        for (int i = actions.Count - 1; i >= 0 && i >= actions.Count - 4; i--)
+                        {
+                            var a = actions[i];
+                            if (a.ActionType is "LeftClickDown" or "LeftClickUp" or "RightClickDown" or "RightClickUp"
+                                && a.RecordedAt >= cutoff)
+                                actions.RemoveAt(i);
+                        }
+
+                        int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
+                        var action = new ActionItem
+                        {
+                            ActionType = "BrowserClick",
+                            Key = selector,
+                            Comment = description,
+                            Delay = delay
+                        };
+                        actions.Add(action);
+                        HasUnsavedChanges = true;
+                        mainController.UpdateButtonStates();
+                    });
+                };
+            }
 
             // Watch for actions collection changes
             actions.CollectionChanged += OnActionsChanged;
@@ -138,6 +180,8 @@ namespace TrueReplayer
                     case "actions:insertAction": HandleInsertAction(payload); break;
                     case "actions:duplicate": HandleDuplicateActions(payload); break;
                     case "waitimage:recapture": HandleWaitImageRecapture(payload); break;
+                    case "actions:addBrowserAction": HandleAddBrowserAction(payload); break;
+                    case "browser:toggleRecording": HandleBrowserToggleRecording(payload); break;
                     case "profile:click": HandleProfileClick(payload); break;
                     case "profile:create": HandleProfileCreate(payload); break;
                     case "profile:rename": HandleProfileRename(payload); break;
@@ -193,8 +237,17 @@ namespace TrueReplayer
 
         public void PushStatusChange(string status)
         {
+            if (status.StartsWith("error:"))
+            {
+                SendMessage("alert:show", new { message = status[6..] });
+                status = "ready";
+            }
+
             SendMessage("status:changed", new { status });
             PushButtonStates();
+
+            // Sync browser extension: recording on when status is "recording", off otherwise
+            browserBridge?.SetRecordingMode(status == "recording");
         }
 
         public void PushActionsUpdate()
@@ -216,7 +269,8 @@ namespace TrueReplayer
                 confidence = a.Confidence,
                 imageBase64 = a.ActionType == "WaitImage" && !string.IsNullOrEmpty(a.ImagePath)
                     ? ImageStorageService.ReadAsBase64(profileName, a.ImagePath) ?? ""
-                    : ""
+                    : "",
+                browserText = a.BrowserText ?? ""
             }).ToArray();
 
             SendMessage("actions:updated", new { actions = actionsList });
@@ -590,6 +644,7 @@ namespace TrueReplayer
                 case "comment": action.Comment = value; break;
                 case "timeout": if (int.TryParse(value, out int timeout)) action.Timeout = Math.Max(1000, timeout); break;
                 case "confidence": if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double conf)) action.Confidence = Math.Clamp(conf, 0.1, 1.0); break;
+                case "browserText": action.BrowserText = value; break;
             }
 
             HasUnsavedChanges = true;
@@ -746,6 +801,23 @@ namespace TrueReplayer
             if (actionType == "WaitImage")
             {
                 _ = HandleInsertWaitImageAsync(insertIndex);
+                return;
+            }
+
+            // Browser actions: insert directly
+            if (actionType.StartsWith("Browser"))
+            {
+                int delay = int.TryParse(CustomDelay, out var bd) ? bd : 100;
+                actions.Insert(insertIndex, new ActionItem
+                {
+                    ActionType = actionType,
+                    Key = "",
+                    Delay = delay,
+                    Timeout = actionType == "BrowserWaitElement" ? 30000 : 0
+                });
+                HasUnsavedChanges = true;
+                PushActionsUpdate();
+                mainController.UpdateButtonStates();
                 return;
             }
 
@@ -952,6 +1024,36 @@ namespace TrueReplayer
             HasUnsavedChanges = true;
             PushActionsUpdate();
             mainController.UpdateButtonStates();
+        }
+
+        private void HandleAddBrowserAction(JsonElement payload)
+        {
+            string actionType = payload.GetProperty("actionType").GetString() ?? "";
+            string selector = payload.TryGetProperty("selector", out var selEl) ? selEl.GetString() ?? "" : "";
+            string? browserText = payload.TryGetProperty("browserText", out var textEl) ? textEl.GetString() : null;
+            int insertIndex = payload.TryGetProperty("insertIndex", out var idxEl) ? idxEl.GetInt32() : actions.Count;
+            int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
+
+            var action = new ActionItem
+            {
+                ActionType = actionType,
+                Key = selector,
+                BrowserText = browserText,
+                Delay = delay,
+                Timeout = actionType == "BrowserWaitElement" ? 30000 : 0
+            };
+
+            insertIndex = Math.Max(0, Math.Min(insertIndex, actions.Count));
+            actions.Insert(insertIndex, action);
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+            mainController.UpdateButtonStates();
+        }
+
+        private void HandleBrowserToggleRecording(JsonElement payload)
+        {
+            bool enabled = payload.TryGetProperty("enabled", out var enEl) && enEl.GetBoolean();
+            browserBridge?.SetRecordingMode(enabled);
         }
 
         private async void HandleProfileClick(JsonElement payload)

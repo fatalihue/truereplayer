@@ -14,6 +14,7 @@ export interface ActionItem {
   timeout: number;
   confidence: number;
   imageBase64: string;
+  browserText: string;
 }
 
 export interface ProfileEntry {
@@ -114,7 +115,8 @@ export type IncomingMessage =
   | { type: 'update:progress'; payload: { percent: number } }
   | { type: 'update:ready'; payload: Record<string, never> }
   | { type: 'update:error'; payload: { message: string } }
-  | { type: 'update:none'; payload: { currentVersion: string } };
+  | { type: 'update:none'; payload: { currentVersion: string } }
+  | { type: 'browser:status'; payload: { connected: boolean } };
 
 // ── Messages JS → C# ──
 
@@ -172,4 +174,6 @@ export type OutgoingMessage =
   | { type: 'update:check'; payload: Record<string, never> }
   | { type: 'update:apply'; payload: Record<string, never> }
   | { type: 'update:dismiss'; payload: Record<string, never> }
+  | { type: 'actions:addBrowserAction'; payload: { actionType: string; selector: string; browserText?: string; insertIndex?: number } }
+  | { type: 'browser:toggleRecording'; payload: { enabled: boolean } }
   | { type: 'theme:colors'; payload: { bgSurface: string; bgCard: string; textPrimary: string; textSecondary: string; accentSolid: string; borderSubtle: string } };

@@ -1,5 +1,14 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+	<ItemGroup>
+		<Compile Remove="NativeHost\**" />
+		<None Remove="NativeHost\**" />
+		<Content Remove="NativeHost\**" />
+		<Compile Remove="ChromeExtension\**" />
+		<None Remove="ChromeExtension\**" />
+		<Content Remove="ChromeExtension\**" />
+	</ItemGroup>
+
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
 		<TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
@@ -124,6 +133,13 @@
       <FrontendFilesPublish Include="frontend\dist\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(FrontendFilesPublish)" DestinationFiles="@(FrontendFilesPublish->'$(PublishDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+  <!-- Copy NativeHost.exe to output directory for Chrome Extension support -->
+  <Target Name="CopyNativeHost" AfterTargets="Build" Condition="Exists('NativeHost\publish\TrueReplayer.NativeHost.exe')">
+    <Copy SourceFiles="NativeHost\publish\TrueReplayer.NativeHost.exe" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyNativeHostPublish" AfterTargets="Publish" Condition="Exists('NativeHost\publish\TrueReplayer.NativeHost.exe')">
+    <Copy SourceFiles="NativeHost\publish\TrueReplayer.NativeHost.exe" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
   </Target>
   <!-- Remove WinUI/WinAppSDK locale folders (keep only en-us, wwwroot, Microsoft.UI.Xaml) -->
   <Target Name="CleanLocalesFolders" AfterTargets="CopyFrontendDistPublish">

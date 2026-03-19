@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using TrueReplayer.Models;
 using TrueReplayer.Interop;
+using TrueReplayer.Services;
 
 
 namespace TrueReplayer.Services
@@ -101,10 +102,11 @@ namespace TrueReplayer.Services
             Action updateButtonStates,
             Action<string>? onStatusChanged = null,
             Action<string, bool>? onButtonStateChanged = null,
-            Action<int>? onActionHighlight = null)
+            Action<int>? onActionHighlight = null,
+            BrowserBridgeService? browserBridge = null)
         {
             this.actions = actions;
-            this.replayer = new ActionReplayer(actions, dispatcherQueue);
+            this.replayer = new ActionReplayer(actions, dispatcherQueue, browserBridge);
             this.dispatcherQueue = dispatcherQueue;
             this.updateButtonStates = updateButtonStates;
             this.onStatusChanged = onStatusChanged;
@@ -146,9 +148,16 @@ namespace TrueReplayer.Services
 
             onStatusChanged?.Invoke("replaying");
 
-            _ = replayer.StartAsync().ContinueWith(_ =>
+            _ = replayer.StartAsync().ContinueWith(t =>
             {
-                dispatcherQueue.TryEnqueue(() => ResetReplayState());
+                dispatcherQueue.TryEnqueue(() =>
+                {
+                    ResetReplayState();
+                    if (t.Exception?.InnerException is TimeoutException tex)
+                        onStatusChanged?.Invoke($"error:{tex.Message}");
+                    else if (t.Exception?.InnerException != null)
+                        onStatusChanged?.Invoke($"error:{t.Exception.InnerException.Message}");
+                });
             });
         }
 
@@ -375,6 +384,7 @@ namespace TrueReplayer.Services
     {
         private readonly ObservableCollection<ActionItem> _actions;
         private readonly DispatcherQueue dispatcherQueue;
+        private readonly BrowserBridgeService? _browserBridge;
         private CancellationTokenSource? _cts;
         private int _loopCount = 0;
         private int _loopInterval = 0;
@@ -382,10 +392,11 @@ namespace TrueReplayer.Services
 
         public event Action<ActionItem>? OnActionExecuting;
 
-        public ActionReplayer(ObservableCollection<ActionItem> actions, DispatcherQueue dispatcherQueue)
+        public ActionReplayer(ObservableCollection<ActionItem> actions, DispatcherQueue dispatcherQueue, BrowserBridgeService? browserBridge = null)
         {
             _actions = actions;
             this.dispatcherQueue = dispatcherQueue;
+            _browserBridge = browserBridge;
         }
 
         public void SetProfileNameProvider(Func<string> getProfileName)
@@ -454,6 +465,13 @@ namespace TrueReplayer.Services
                                     case "ScrollDown": SimulateScroll(-120); break;
                                     case "SendText": await SimulateClipboardPaste(action.Key, token); break;
                                     case "WaitImage": await ExecuteWaitImage(action, token); break;
+                                    case "BrowserClick":
+                                    case "BrowserType":
+                                    case "BrowserWaitElement":
+                                    case "BrowserNavigate":
+                                        if (_browserBridge != null)
+                                            await _browserBridge.ExecuteBrowserCommandAsync(action, token, action.ActionType == "BrowserWaitElement" ? action.Timeout : 30000);
+                                        break;
                                 }
                             }
                             finally

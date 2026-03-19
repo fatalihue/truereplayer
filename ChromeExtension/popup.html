@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 240px;
+      padding: 16px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #1e1e1e;
+      color: #e0e0e0;
+    }
+    h1 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #60cdff;
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: #2d2d2d;
+      margin-bottom: 10px;
+      font-size: 12px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .dot.connected { background: #0E7A0D; }
+    .dot.disconnected { background: #5C5C5C; }
+    .dot.recording { background: #C42B1C; animation: pulse 1s infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .label { color: #9a9a9a; }
+    .value { color: #e0e0e0; font-weight: 500; }
+    .hint {
+      font-size: 11px;
+      color: #5c5c5c;
+      margin-top: 8px;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <h1>TrueReplayer</h1>
+  <div class="status">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">Checking...</span>
+  </div>
+  <div class="hint" id="hint"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

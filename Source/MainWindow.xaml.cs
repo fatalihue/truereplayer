@@ -25,6 +25,7 @@ namespace TrueReplayer
         private ProfileController profileController;
         private WindowEventManager windowEventManager;
         private WebViewBridge? bridge;
+        private readonly BrowserBridgeService browserBridge = new();
 
         private IntPtr hwnd;
 
@@ -67,13 +68,16 @@ namespace TrueReplayer
                 (text, isActive) => bridge?.PushButtonStates()
             );
 
+            browserBridge.Start();
+
             replayService = new ReplayService(
                 Actions,
                 DispatcherQueue,
                 () => mainController.UpdateButtonStates(),
                 status => bridge?.PushStatusChange(status),
                 (text, isActive) => bridge?.PushButtonStates(),
-                index => bridge?.PushActionHighlight(index)
+                index => bridge?.PushActionHighlight(index),
+                browserBridge
             );
 
             mainController = new MainController(
@@ -115,7 +119,8 @@ namespace TrueReplayer
                 recordingService,
                 replayService,
                 DispatcherQueue,
-                this);
+                this,
+                browserBridge);
 
             replayService.SetProfileNameProvider(() => bridge.CurrentProfileName != "No Profile" ? bridge.CurrentProfileName : "default");
 

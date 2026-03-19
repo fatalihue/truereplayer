@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Copy, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Copy, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -18,6 +18,7 @@ function ActionIcon({ actionType }: { actionType: string }) {
   if (actionType.startsWith('Key')) return <Keyboard size={size} />;
   if (actionType === 'SendText') return <Type size={size} />;
   if (actionType === 'WaitImage') return <ScanSearch size={size} />;
+  if (actionType.startsWith('Browser')) return <Globe size={size} />;
   return <Zap size={size} />;
 }
 
@@ -494,6 +495,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     { type: 'ScrollDown', label: 'Scroll Down', icon: ArrowDown },
     { type: 'SendText', label: 'Send Text', icon: Type },
     { type: 'WaitImage', label: 'Wait for Image', icon: ScanSearch },
+    { type: 'BrowserClick', label: 'Browser Click', icon: Globe },
+    { type: 'BrowserType', label: 'Browser Type', icon: Globe },
+    { type: 'BrowserWaitElement', label: 'Browser Wait', icon: Globe },
+    { type: 'BrowserNavigate', label: 'Navigate', icon: Globe },
   ] as const;
 
   return (
@@ -635,7 +640,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       style={{ background: colors.bg, color: colors.fg }}
                     >
                       <ActionIcon actionType={action.actionType} />
-                      {action.actionType === 'WaitImage' ? 'Wait Image' : action.actionType}
+                      {action.actionType === 'WaitImage' ? 'Wait Image'
+                        : action.actionType === 'BrowserClick' ? 'Browser Click'
+                        : action.actionType === 'BrowserType' ? 'Browser Type'
+                        : action.actionType === 'BrowserWaitElement' ? 'Browser Wait'
+                        : action.actionType === 'BrowserNavigate' ? 'Navigate'
+                        : action.actionType}
                     </span>
                   </td>
                   )}

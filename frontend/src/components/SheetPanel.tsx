@@ -20,7 +20,7 @@ const actionTypes = [
   { value: 'SendText', label: 'Text' },
 ];
 
-const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage']);
+const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'BrowserClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate']);
 
 export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const { actions } = useAppState();
@@ -36,6 +36,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const [comment, setComment] = useState('');
   const [timeout, setTimeout_] = useState('');
   const [confidence, setConfidence] = useState('');
+  const [browserText, setBrowserText] = useState('');
 
   // Sync local state from action
   useEffect(() => {
@@ -48,6 +49,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       setComment(action.comment || '');
       setTimeout_(String((action.timeout || 30000) / 1000));
       setConfidence(String(Math.round((action.confidence || 0.8) * 100)));
+      setBrowserText(action.browserText || '');
     }
   }, [action]);
 
@@ -96,8 +98,19 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       }
     }
 
+    // Browser-specific fields
+    if (actionType === 'BrowserType' && browserText !== (action.browserText || '')) {
+      send({ type: 'actions:edit', payload: { index: actionIndex, field: 'browserText', value: browserText } });
+    }
+    if (actionType === 'BrowserWaitElement') {
+      const newTimeoutMs = Math.max(1, parseFloat(timeout) || 30) * 1000;
+      if (newTimeoutMs !== (action.timeout || 30000)) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(Math.round(newTimeoutMs)) } });
+      }
+    }
+
     onClose();
-  }, [actionIndex, action, actionType, key, x, y, delay, comment, timeout, confidence, send, onClose]);
+  }, [actionIndex, action, actionType, key, x, y, delay, comment, timeout, confidence, browserText, send, onClose]);
 
   // Key capture handler
   const handleKeyCapture = useCallback((e: React.KeyboardEvent) => {
@@ -124,6 +137,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const isKeyAction = actionType === 'KeyDown' || actionType === 'KeyUp';
   const isSendText = actionType === 'SendText';
   const isWaitImage = actionType === 'WaitImage';
+  const isBrowser = actionType.startsWith('Browser');
+  const isBrowserType = actionType === 'BrowserType';
+  const isBrowserNavigate = actionType === 'BrowserNavigate';
+  const isBrowserWait = actionType === 'BrowserWaitElement';
   const showKey = isKeyAction || isSendText;
   const showCoords = !noCoordTypes.has(actionType);
 
@@ -149,15 +166,20 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           <div>
             <div className="text-sm font-semibold text-text-primary">Edit Action</div>
             <div className="text-[11px] text-text-tertiary mt-0.5">
-              Action #{(actionIndex ?? 0) + 1} — {isWaitImage ? 'Wait Image' : actionType}
+              Action #{(actionIndex ?? 0) + 1} — {isWaitImage ? 'Wait Image'
+                : actionType === 'BrowserClick' ? 'Browser Click'
+                : actionType === 'BrowserType' ? 'Browser Type'
+                : actionType === 'BrowserWaitElement' ? 'Browser Wait'
+                : actionType === 'BrowserNavigate' ? 'Navigate'
+                : actionType}
             </div>
           </div>
         </div>
 
         {/* Body */}
         <div className="p-4 space-y-4 flex-1 min-h-0">
-          {/* Action Type — hide for WaitImage */}
-          {!isWaitImage && (
+          {/* Action Type — hide for WaitImage and Browser */}
+          {!isWaitImage && !isBrowser && (
           <div>
             <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">ACTION TYPE</label>
             <div className="flex flex-wrap gap-1.5">
@@ -236,6 +258,54 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 />
               </div>
             </div>
+          </>
+          )}
+
+          {/* Browser Action Settings */}
+          {isBrowser && (
+          <>
+            {/* Selector / URL */}
+            <div>
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">
+                {isBrowserNavigate ? 'URL' : 'CSS SELECTOR'}
+              </label>
+              <input
+                type="text"
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                placeholder={isBrowserNavigate ? 'https://example.com' : '#element-id, .class, [name="field"]'}
+              />
+            </div>
+
+            {/* Text — only for BrowserType */}
+            {isBrowserType && (
+            <div>
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TEXT TO TYPE</label>
+              <input
+                type="text"
+                value={browserText}
+                onChange={(e) => setBrowserText(e.target.value)}
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                placeholder="Text to type into the element"
+              />
+            </div>
+            )}
+
+            {/* Timeout — only for BrowserWaitElement */}
+            {isBrowserWait && (
+            <div className="w-1/2">
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
+              <input
+                type="number"
+                value={timeout}
+                onChange={(e) => setTimeout_(e.target.value)}
+                min="1"
+                step="1"
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              />
+            </div>
+            )}
           </>
           )}
 
