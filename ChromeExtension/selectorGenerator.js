@@ -72,13 +72,27 @@ function buildNthChildPath(el) {
   let current = el;
 
   while (current && current !== document.body && current !== document.documentElement) {
-    let selector = current.tagName.toLowerCase();
-
+    // 1. Try ID — anchors the path immediately
     if (current.id && current.id !== 'null' && current.id !== 'undefined' && !/^\d/.test(current.id)) {
       parts.unshift(`#${CSS.escape(current.id)}`);
       break;
     }
 
+    // 2. Try unique class combination on this node
+    const classSelector = getUniqueClassSelector(current);
+    if (classSelector) {
+      parts.unshift(classSelector);
+      // Check if the path so far is already unique
+      const fullPath = parts.join(' > ');
+      if (isUnique(fullPath)) break;
+      // Even if not unique yet, a class anchor is better than nth-of-type — keep going up
+      current = current.parentElement;
+      if (parts.length > 6) break;
+      continue;
+    }
+
+    // 3. Fallback: tag + nth-of-type
+    let selector = current.tagName.toLowerCase();
     const parent = current.parentElement;
     if (parent) {
       const siblings = Array.from(parent.children).filter(
@@ -93,11 +107,60 @@ function buildNthChildPath(el) {
     parts.unshift(selector);
     current = current.parentElement;
 
-    // Limit depth
-    if (parts.length > 5) break;
+    // Check if already unique
+    if (parts.length >= 2) {
+      const fullPath = parts.join(' > ');
+      if (isUnique(fullPath)) break;
+    }
+
+    if (parts.length > 6) break;
   }
 
   return parts.join(' > ');
+}
+
+/**
+ * Try to build a unique selector from an element's classes.
+ * Filters out state classes (hover, active, etc.) and dynamic classes.
+ * Returns tag.class1.class2 if unique, or null.
+ */
+function getUniqueClassSelector(el) {
+  if (!el.classList || el.classList.length === 0) return null;
+
+  const validClasses = Array.from(el.classList).filter(c =>
+    !c.match(/^(hover|active|focus|selected|open|show|hidden|is-|has-|js-|u-)/i) &&
+    !c.match(/^(hovered|bordered|transparent|semibold)/i) &&
+    c.length > 1 &&
+    c.length < 60
+  );
+
+  if (validClasses.length === 0) return null;
+
+  // Try single most specific class (prefer BEM-style with __ or --)
+  const bemClasses = validClasses.filter(c => c.includes('__') || c.includes('--'));
+  const tryOrder = [...bemClasses, ...validClasses.filter(c => !bemClasses.includes(c))];
+
+  for (const cls of tryOrder) {
+    const selector = `${el.tagName.toLowerCase()}.${CSS.escape(cls)}`;
+    if (isUnique(selector)) return selector;
+  }
+
+  // Try two-class combo
+  if (validClasses.length >= 2) {
+    for (let i = 0; i < Math.min(validClasses.length, 3); i++) {
+      for (let j = i + 1; j < Math.min(validClasses.length, 4); j++) {
+        const selector = `${el.tagName.toLowerCase()}.${CSS.escape(validClasses[i])}.${CSS.escape(validClasses[j])}`;
+        if (isUnique(selector)) return selector;
+      }
+    }
+  }
+
+  // Return best class even if not unique (helps narrow path)
+  if (tryOrder.length > 0) {
+    return `${el.tagName.toLowerCase()}.${CSS.escape(tryOrder[0])}`;
+  }
+
+  return null;
 }
 
 function bubbleToInteractive(el) {
