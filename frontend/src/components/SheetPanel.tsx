@@ -47,7 +47,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       setY(String(action.y || ''));
       setDelay(String(action.delay));
       setComment(action.comment || '');
-      setTimeout_(String((action.timeout || 30000) / 1000));
+      setTimeout_(String((action.timeout || 5000) / 1000));
       setConfidence(String(Math.round((action.confidence || 0.8) * 100)));
       setBrowserText(action.browserText || '');
     }
@@ -88,8 +88,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
 
     // WaitImage-specific fields
     if (actionType === 'WaitImage') {
-      const newTimeoutMs = Math.max(1, parseFloat(timeout) || 30) * 1000;
-      if (newTimeoutMs !== (action.timeout || 30000)) {
+      const newTimeoutMs = Math.max(1, parseFloat(timeout) || 5) * 1000;
+      if (newTimeoutMs !== (action.timeout || 5000)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(Math.round(newTimeoutMs)) } });
       }
       const newConfidence = Math.min(100, Math.max(10, parseInt(confidence, 10) || 80)) / 100;
@@ -103,8 +103,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       send({ type: 'actions:edit', payload: { index: actionIndex, field: 'browserText', value: browserText } });
     }
     if (actionType === 'BrowserWaitElement' || actionType === 'BrowserClick') {
-      const newTimeoutMs = Math.max(1, parseFloat(timeout) || 30) * 1000;
-      if (newTimeoutMs !== (action.timeout || 30000)) {
+      const newTimeoutMs = Math.max(1, parseFloat(timeout) || 5) * 1000;
+      if (newTimeoutMs !== (action.timeout || 5000)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(Math.round(newTimeoutMs)) } });
       }
     }

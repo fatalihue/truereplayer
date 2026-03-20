@@ -12,6 +12,7 @@ namespace TrueReplayer.Services
     public class BrowserBridgeService : IDisposable
     {
         private const string PipeName = "TrueReplayerBridge";
+        private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
         private NamedPipeServerStream? _pipeServer;
         private StreamReader? _reader;
         private StreamWriter? _writer;
@@ -22,6 +23,7 @@ namespace TrueReplayer.Services
         private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonElement>> _pendingCommands = new();
 
         public bool IsConnected { get; private set; }
+        public bool IsRecordingMode { get; private set; }
         public event Action<bool>? ConnectionChanged;
         public event Action<string, string, string?, string?>? ElementClicked; // selector, description, url, tagName
 
@@ -41,11 +43,20 @@ namespace TrueReplayer.Services
 
                     await _pipeServer.WaitForConnectionAsync(token).ConfigureAwait(false);
 
-                    _reader = new StreamReader(_pipeServer, Encoding.UTF8);
-                    _writer = new StreamWriter(_pipeServer, Encoding.UTF8) { AutoFlush = true };
+                    _reader = new StreamReader(_pipeServer, Utf8NoBom);
+                    _writer = new StreamWriter(_pipeServer, Utf8NoBom) { AutoFlush = true };
 
                     IsConnected = true;
                     ConnectionChanged?.Invoke(true);
+
+                    // Send immediate heartbeat so NativeHost's watchdog doesn't timeout
+                    try { _writer.WriteLine("{\"type\":\"heartbeat\"}"); } catch { }
+
+                    // Re-sync recording mode if it was active before reconnection
+                    if (IsRecordingMode)
+                    {
+                        try { SendMessage(new { type = "browser:setRecording", enabled = true }); } catch { }
+                    }
 
                     // Run message reader and heartbeat sender concurrently
                     using var sessionCts = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -84,7 +95,16 @@ namespace TrueReplayer.Services
         {
             while (!token.IsCancellationRequested)
             {
-                var line = await _reader!.ReadLineAsync().ConfigureAwait(false);
+                string? line;
+                try
+                {
+                    line = await _reader!.ReadLineAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[BrowserBridge] ReadLineAsync error: {ex.Message}");
+                    break;
+                }
                 if (line == null) break; // EOF = pipe closed
 
                 try
@@ -164,7 +184,7 @@ namespace TrueReplayer.Services
         }
 
         public async Task<JsonElement> ExecuteBrowserCommandAsync(
-            TrueReplayer.Models.ActionItem action, CancellationToken token, int timeoutMs = 30000)
+            TrueReplayer.Models.ActionItem action, CancellationToken token, int timeoutMs = 5000)
         {
             if (!IsConnected)
                 throw new InvalidOperationException("Browser extension is not connected.");
@@ -193,7 +213,9 @@ namespace TrueReplayer.Services
                     throw new ArgumentException($"Unknown browser action type: {action.ActionType}");
             }
 
-            var timeout = action.ActionType == "BrowserWaitElement" ? action.Timeout : timeoutMs;
+            var timeout = (action.ActionType == "BrowserWaitElement" || action.ActionType == "BrowserClick") && action.Timeout > 0
+                ? action.Timeout
+                : timeoutMs;
 
             SendMessage(new
             {
@@ -227,6 +249,7 @@ namespace TrueReplayer.Services
 
         public void SetRecordingMode(bool enabled)
         {
+            IsRecordingMode = enabled;
             SendMessage(new { type = "browser:setRecording", enabled });
         }
 

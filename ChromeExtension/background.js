@@ -3,6 +3,8 @@ const NATIVE_HOST = 'com.truereplayer.native';
 let port = null;
 let isRecording = false;
 let isBridgeReady = false;
+let reconnectDelay = 3000;
+const MAX_RECONNECT_DELAY = 60000;
 
 function connect() {
   if (port) return;
@@ -16,6 +18,7 @@ function connect() {
       switch (msg.type) {
         case 'bridge:connected':
           isBridgeReady = true;
+          reconnectDelay = 3000; // Reset backoff on successful connection
           updateBadge();
           break;
 
@@ -23,6 +26,15 @@ function connect() {
           isBridgeReady = false;
           isRecording = false;
           updateBadge();
+          // Stop recording in all content scripts
+          chrome.tabs.query({}, (tabs) => {
+            tabs.forEach((tab) => {
+              chrome.tabs.sendMessage(tab.id, {
+                type: 'setRecording',
+                enabled: false,
+              }).catch(() => {});
+            });
+          });
           break;
 
         case 'browser:setRecording':
@@ -110,18 +122,34 @@ function connect() {
     });
 
     port.onDisconnect.addListener(() => {
+      const wasBridgeReady = isBridgeReady;
       port = null;
       isRecording = false;
       isBridgeReady = false;
       updateBadge();
-      // NativeHost process died — reconnect after short delay
-      setTimeout(connect, 3000);
+      // Stop recording in all content scripts
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach((tab) => {
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'setRecording',
+            enabled: false,
+          }).catch(() => {});
+        });
+      });
+      // NativeHost process died — reconnect with backoff
+      // If bridge was ready before, NativeHost worked → TrueReplayer probably restarted → fast retry
+      // If bridge was never ready, pipe wasn't found → increase backoff
+      if (!wasBridgeReady) {
+        reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+      }
+      setTimeout(connect, reconnectDelay);
     });
   } catch (e) {
     port = null;
     isBridgeReady = false;
     updateBadge();
-    setTimeout(connect, 3000);
+    reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+    setTimeout(connect, reconnectDelay);
   }
 }
 

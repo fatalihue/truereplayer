@@ -470,7 +470,7 @@ namespace TrueReplayer.Services
                                     case "BrowserWaitElement":
                                     case "BrowserNavigate":
                                         if (_browserBridge != null)
-                                            await _browserBridge.ExecuteBrowserCommandAsync(action, token, action.ActionType == "BrowserWaitElement" ? action.Timeout : 30000);
+                                            await _browserBridge.ExecuteBrowserCommandAsync(action, token, action.Timeout > 0 ? action.Timeout : 5000);
                                         break;
                                 }
                             }

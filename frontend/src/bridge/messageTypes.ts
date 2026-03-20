@@ -55,6 +55,7 @@ export interface SettingsState {
   recordScroll: boolean;
   recordKeyboard: boolean;
   profileKeyEnabled: boolean;
+  browserSelectorEnabled: boolean;
   recordingHotkey: string;
   replayHotkey: string;
   profileKeyToggleHotkey: string;

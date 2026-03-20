@@ -15,7 +15,7 @@ namespace TrueReplayer.Models
 
         // WaitImage properties
         public string? ImagePath { get; set; }
-        public int Timeout { get; set; } = 30000;
+        public int Timeout { get; set; } = 5000;
         public double Confidence { get; set; } = 0.8;
 
         // Browser action properties

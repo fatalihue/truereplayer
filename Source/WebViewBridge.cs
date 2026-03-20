@@ -46,6 +46,7 @@ namespace TrueReplayer
         public bool RecordScroll { get; set; } = true;
         public bool RecordKeyboard { get; set; } = true;
         public bool ProfileKeyEnabled { get; set; } = true;
+        public bool BrowserSelectorEnabled { get; set; } = false;
 
         // Selection state (synced from React)
         public int? SelectedInsertIndex { get; private set; }
@@ -107,7 +108,8 @@ namespace TrueReplayer
                             ActionType = "BrowserClick",
                             Key = selector,
                             Comment = description,
-                            Delay = delay
+                            Delay = delay,
+                            Timeout = 5000
                         };
                         actions.Add(action);
                         HasUnsavedChanges = true;
@@ -131,6 +133,7 @@ namespace TrueReplayer
             RecordScroll = saved.RecordScroll;
             RecordKeyboard = saved.RecordKeyboard;
             ProfileKeyEnabled = saved.ProfileKeyEnabled;
+            BrowserSelectorEnabled = saved.BrowserSelectorEnabled;
         }
 
         // ── Send message to React ──
@@ -246,8 +249,8 @@ namespace TrueReplayer
             SendMessage("status:changed", new { status });
             PushButtonStates();
 
-            // Sync browser extension: recording on when status is "recording", off otherwise
-            browserBridge?.SetRecordingMode(status == "recording");
+            // Sync browser extension: recording on only when status is "recording" AND browserSelectorEnabled
+            browserBridge?.SetRecordingMode(status == "recording" && BrowserSelectorEnabled);
         }
 
         public void PushActionsUpdate()
@@ -329,6 +332,7 @@ namespace TrueReplayer
                     recordScroll = RecordScroll,
                     recordKeyboard = RecordKeyboard,
                     profileKeyEnabled = ProfileKeyEnabled,
+                    browserSelectorEnabled = BrowserSelectorEnabled,
                     recordingHotkey = profile.RecordingHotkey,
                     replayHotkey = profile.ReplayHotkey,
                     profileKeyToggleHotkey = profile.ProfileKeyToggleHotkey,
@@ -478,6 +482,7 @@ namespace TrueReplayer
                     recordScroll = RecordScroll,
                     recordKeyboard = RecordKeyboard,
                     profileKeyEnabled = ProfileKeyEnabled,
+                    browserSelectorEnabled = BrowserSelectorEnabled,
                     recordingHotkey = profile.RecordingHotkey,
                     replayHotkey = profile.ReplayHotkey,
                     profileKeyToggleHotkey = profile.ProfileKeyToggleHotkey,
@@ -813,7 +818,7 @@ namespace TrueReplayer
                     ActionType = actionType,
                     Key = "",
                     Delay = delay,
-                    Timeout = actionType == "BrowserWaitElement" ? 30000 : 0
+                    Timeout = 5000
                 });
                 HasUnsavedChanges = true;
                 PushActionsUpdate();
@@ -899,7 +904,7 @@ namespace TrueReplayer
                 {
                     ActionType = "WaitImage",
                     ImagePath = imagePath,
-                    Timeout = 30000,
+                    Timeout = 5000,
                     Confidence = 0.8,
                     Delay = delay,
                     Key = "",
@@ -1040,7 +1045,7 @@ namespace TrueReplayer
                 Key = selector,
                 BrowserText = browserText,
                 Delay = delay,
-                Timeout = actionType == "BrowserWaitElement" ? 30000 : 0
+                Timeout = 5000
             };
 
             insertIndex = Math.Max(0, Math.Min(insertIndex, actions.Count));
@@ -1766,6 +1771,7 @@ namespace TrueReplayer
             RecordScroll = defaults.RecordScroll;
             RecordKeyboard = defaults.RecordKeyboard;
             ProfileKeyEnabled = defaults.ProfileKeyEnabled;
+            BrowserSelectorEnabled = false;
 
             // Reset window settings
             UserProfile.Current.AlwaysOnTop = defaults.AlwaysOnTop;
@@ -1808,6 +1814,7 @@ namespace TrueReplayer
                 ProfileKeyToggleHotkey = UserProfile.Current.ProfileKeyToggleHotkey,
                 ForegroundHotkey = UserProfile.Current.ForegroundHotkey,
                 ProfileKeyEnabled = ProfileKeyEnabled,
+                BrowserSelectorEnabled = BrowserSelectorEnabled,
             };
             AppSettingsManager.Save(s);
         }
@@ -1905,6 +1912,12 @@ namespace TrueReplayer
                     ProfileKeyEnabled = valueElement.GetBoolean();
                     UserProfile.Current.ProfileKeyEnabled = ProfileKeyEnabled;
                     TrayIconService.UpdateTrayIcon();
+                    break;
+                case "browserSelectorEnabled":
+                    BrowserSelectorEnabled = valueElement.GetBoolean();
+                    // If recording is active, sync browser extension immediately
+                    if (recordingService.IsRecording)
+                        browserBridge?.SetRecordingMode(BrowserSelectorEnabled);
                     break;
                 case "recordingHotkey":
                     UserProfile.Current.RecordingHotkey = valueElement.GetString() ?? "Ctrl+PageUp";
