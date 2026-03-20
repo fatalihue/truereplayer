@@ -1,10 +1,10 @@
 const NATIVE_HOST = 'com.truereplayer.native';
+const RECONNECT_ALARM = 'truereplayer-reconnect';
+const RECONNECT_INTERVAL_MIN = 0.25; // 15 seconds (minimum chrome.alarms allows in practice)
 
 let port = null;
 let isRecording = false;
 let isBridgeReady = false;
-let reconnectDelay = 3000;
-const MAX_RECONNECT_DELAY = 60000;
 
 function connect() {
   if (port) return;
@@ -18,7 +18,7 @@ function connect() {
       switch (msg.type) {
         case 'bridge:connected':
           isBridgeReady = true;
-          reconnectDelay = 3000; // Reset backoff on successful connection
+          stopReconnect(); // Connected — no need for reconnect alarm
           updateBadge();
           break;
 
@@ -136,22 +136,32 @@ function connect() {
           }).catch(() => {});
         });
       });
-      // NativeHost process died — reconnect with backoff
-      // If bridge was ready before, NativeHost worked → TrueReplayer probably restarted → fast retry
-      // If bridge was never ready, pipe wasn't found → increase backoff
-      if (!wasBridgeReady) {
-        reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
-      }
-      setTimeout(connect, reconnectDelay);
+      // NativeHost process died — schedule reconnect via alarm (survives service worker dormancy)
+      scheduleReconnect();
     });
   } catch (e) {
     port = null;
     isBridgeReady = false;
     updateBadge();
-    reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
-    setTimeout(connect, reconnectDelay);
+    scheduleReconnect();
   }
 }
+
+function scheduleReconnect() {
+  // chrome.alarms survives service worker going dormant, unlike setTimeout
+  chrome.alarms.create(RECONNECT_ALARM, { delayInMinutes: RECONNECT_INTERVAL_MIN });
+}
+
+function stopReconnect() {
+  chrome.alarms.clear(RECONNECT_ALARM);
+}
+
+// Alarm handler — wakes service worker to retry connection
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === RECONNECT_ALARM && !port) {
+    connect();
+  }
+});
 
 function sendToNative(msg) {
   if (port && isBridgeReady) {
