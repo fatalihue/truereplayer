@@ -53,7 +53,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number } | null>(null);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
-  const [activeSubmenu, setActiveSubmenu] = useState<'above' | 'below' | null>(null);
+  const [activeSubmenu, setActiveSubmenu] = useState<'below' | null>(null);
   const [submenuFlip, setSubmenuFlip] = useState(false);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const [sendTextInsert, setSendTextInsert] = useState<{ insertIndex: number } | null>(null);
@@ -222,6 +222,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         const next = new Set(prev);
         for (let i = start; i <= end; i++) next.add(i);
         return next;
+      }
+
+      // Toggle: clicking an already-selected row (single selection) deselects it
+      if (prev.size === 1 && prev.has(idx)) {
+        lastClickedIndex.current = null;
+        return new Set();
       }
 
       lastClickedIndex.current = idx;
@@ -452,16 +458,16 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     setActiveSubmenu(null);
   }, []);
 
-  const handleInsertAction = useCallback((actionType: string, direction: 'above' | 'below') => {
+  const handleInsertAction = useCallback((actionType: string) => {
     if (!contextMenu) return;
-    const insertIndex = direction === 'above' ? contextMenu.rowIndex : contextMenu.rowIndex + 1;
+    const insertIndex = contextMenu.rowIndex + 1;
     send({ type: 'actions:insertAction', payload: { actionType, insertIndex } });
     closeContextMenu();
   }, [contextMenu, send, closeContextMenu]);
 
-  const handleInsertSendText = useCallback((direction: 'above' | 'below') => {
+  const handleInsertSendText = useCallback(() => {
     if (!contextMenu) return;
-    const insertIndex = direction === 'above' ? contextMenu.rowIndex : contextMenu.rowIndex + 1;
+    const insertIndex = contextMenu.rowIndex + 1;
     closeContextMenu();
     setSendTextInsert({ insertIndex });
   }, [contextMenu, closeContextMenu]);
@@ -485,7 +491,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     closeContextMenu();
   }, [contextMenu, selectedIndices, send, closeContextMenu]);
 
-  // Submenu items definition
+  // Submenu items definition (mouse, keyboard, scroll only — other actions available in toolbar)
   const submenuItems = [
     { type: 'LeftClick', label: 'Left Click', icon: Mouse },
     { type: 'RightClick', label: 'Right Click', icon: Mouse },
@@ -493,12 +499,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     { type: 'KeyPress', label: 'Key Press', icon: Keyboard },
     { type: 'ScrollUp', label: 'Scroll Up', icon: ArrowUp },
     { type: 'ScrollDown', label: 'Scroll Down', icon: ArrowDown },
-    { type: 'SendText', label: 'Send Text', icon: Type },
-    { type: 'WaitImage', label: 'Wait for Image', icon: ScanSearch },
-    { type: 'BrowserClick', label: 'Browser Click', icon: Globe },
-    { type: 'BrowserType', label: 'Browser Type', icon: Globe },
-    { type: 'BrowserWaitElement', label: 'Browser Wait', icon: Globe },
-    { type: 'BrowserNavigate', label: 'Navigate', icon: Globe },
   ] as const;
 
   return (
@@ -857,46 +857,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           className="fixed z-50 min-w-[180px] py-1 bg-bg-card border border-border-default rounded-md shadow-lg"
           style={{ left: menuPos.x, top: menuPos.y }}
         >
-          {/* Insert Above */}
-          <div
-            className="relative"
-            onMouseEnter={() => setActiveSubmenu('above')}
-            onMouseLeave={() => setActiveSubmenu(null)}
-          >
-            <button
-              className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-            >
-              <span className="flex items-center gap-2.5">
-                <Plus size={13} className="text-text-tertiary" />
-                Insert Above
-              </span>
-              <ChevronRight size={12} className="text-text-disabled" />
-            </button>
-            {activeSubmenu === 'above' && (
-              <div className={`absolute top-0 min-w-[170px] bg-transparent ${submenuFlip ? 'right-full' : 'left-full'}`} style={submenuFlip ? { paddingRight: '4px' } : { paddingLeft: '4px' }}>
-                <div className="py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
-                  {submenuItems.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <button
-                        key={item.type}
-                        onClick={() => {
-                          if (item.type === 'SendText') handleInsertSendText('above');
-                          else handleInsertAction(item.type, 'above');
-                        }}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-                      >
-                        <Icon size={13} className="text-text-tertiary" />
-                        {item.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Insert Below */}
+          {/* Insert Action (inserts below selected row) */}
           <div
             className="relative"
             onMouseEnter={() => setActiveSubmenu('below')}
@@ -907,7 +868,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             >
               <span className="flex items-center gap-2.5">
                 <Plus size={13} className="text-text-tertiary" />
-                Insert Below
+                Insert Action
               </span>
               <ChevronRight size={12} className="text-text-disabled" />
             </button>
@@ -919,10 +880,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     return (
                       <button
                         key={item.type}
-                        onClick={() => {
-                          if (item.type === 'SendText') handleInsertSendText('below');
-                          else handleInsertAction(item.type, 'below');
-                        }}
+                        onClick={() => handleInsertAction(item.type)}
                         className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
                       >
                         <Icon size={13} className="text-text-tertiary" />

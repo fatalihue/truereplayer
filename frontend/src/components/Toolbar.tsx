@@ -194,21 +194,14 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                   { type: 'KeyPress', label: 'Key Press', icon: Keyboard },
                   { type: 'ScrollUp', label: 'Scroll Up', icon: ArrowUp },
                   { type: 'ScrollDown', label: 'Scroll Down', icon: ArrowDown },
-                  { type: 'SendText', label: 'Send Text', icon: Type },
-                  { type: 'WaitImage', label: 'Wait for Image', icon: ScanSearch },
                 ] as const).map(item => (
                   <button
                     key={item.type}
                     onClick={() => {
                       const sel = selectionRef.current;
                       const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-                      if (item.type === 'SendText') {
-                        setShowAddActions(false);
-                        setShowSendTextDialog(true);
-                      } else {
-                        send({ type: 'actions:insertAction', payload: { actionType: item.type, insertIndex } });
-                        setShowAddActions(false);
-                      }
+                      send({ type: 'actions:insertAction', payload: { actionType: item.type, insertIndex } });
+                      setShowAddActions(false);
                     }}
                     className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
                   >
