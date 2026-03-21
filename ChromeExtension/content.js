@@ -160,7 +160,8 @@
       const found = findFn();
       if (found) return found;
     }
-    throw new Error(`Timeout waiting for element: ${selector}`);
+    const seconds = Math.round(timeout / 1000);
+    throw new Error(`Element not found after ${seconds}s. Make sure it is visible on the page.`);
   }
 
   async function executeCommand(msg) {
@@ -233,6 +234,39 @@
             // Simulated events didn't cause any visible change — try native click
             el.click();
           }
+
+          return { success: true };
+        }
+
+        case 'rightClick': {
+          const el = await waitForElement(selector, timeout);
+          el.scrollIntoView({ block: 'center', behavior: 'instant' });
+
+          const rect = el.getBoundingClientRect();
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const opts = {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            button: 2,
+            buttons: 2,
+            clientX: cx,
+            clientY: cy,
+            screenX: cx + window.screenX,
+            screenY: cy + window.screenY,
+          };
+
+          el.dispatchEvent(new MouseEvent('mouseenter', { ...opts, buttons: 0 }));
+          el.dispatchEvent(new MouseEvent('mouseover', { ...opts, buttons: 0 }));
+          await new Promise(r => setTimeout(r, 50));
+
+          el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, pointerType: 'mouse' }));
+          el.dispatchEvent(new MouseEvent('mousedown', opts));
+          await new Promise(r => setTimeout(r, 30));
+          el.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerId: 1, pointerType: 'mouse', buttons: 0 }));
+          el.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0 }));
+          el.dispatchEvent(new MouseEvent('contextmenu', { ...opts, buttons: 0 }));
 
           return { success: true };
         }

@@ -41,6 +41,7 @@ export interface ThemeUISettings {
   actionMouseColor: string;
   actionKeyColor: string;
   actionScrollColor: string;
+  actionBrowserColor: string;
   fontMono: string;
 }
 
@@ -54,6 +55,7 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   actionMouseColor: '#a78bfa',
   actionKeyColor: '#60cdff',
   actionScrollColor: '#6bcb77',
+  actionBrowserColor: '#fb923c',
   fontMono: 'Consolas',
 };
 
@@ -525,6 +527,8 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   root.style.setProperty('--color-action-key-bg', `color-mix(in srgb, ${uiSettings.actionKeyColor} 10%, transparent)`);
   root.style.setProperty('--color-action-scroll-fg', uiSettings.actionScrollColor);
   root.style.setProperty('--color-action-scroll-bg', `color-mix(in srgb, ${uiSettings.actionScrollColor} 10%, transparent)`);
+  root.style.setProperty('--color-action-browser-fg', uiSettings.actionBrowserColor);
+  root.style.setProperty('--color-action-browser-bg', `color-mix(in srgb, ${uiSettings.actionBrowserColor} 10%, transparent)`);
   // Font
   root.style.setProperty('--font-mono', `'${uiSettings.fontMono}', 'Courier New', monospace`);
 }

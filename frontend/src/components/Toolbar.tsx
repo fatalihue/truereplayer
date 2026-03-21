@@ -5,6 +5,7 @@ import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { ThemeEditor } from './ThemeEditor';
 import { SendTextDialog } from './SendTextDialog';
+import { NavigateDialog } from './NavigateDialog';
 
 export interface ColumnVisibility {
   action: boolean;
@@ -38,17 +39,18 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
   const [showSendTextDialog, setShowSendTextDialog] = useState(false);
   const [showAddActions, setShowAddActions] = useState(false);
   const [showBrowserMenu, setShowBrowserMenu] = useState(false);
+  const [showNavigateDialog, setShowNavigateDialog] = useState(false);
   const colDropdownRef = useRef<HTMLDivElement>(null);
   const addActionsRef = useRef<HTMLDivElement>(null);
   const browserMenuRef = useRef<HTMLDivElement>(null);
 
-  // Suppress hotkeys while SendText dialog is open
+  // Suppress hotkeys while dialogs are open
   useEffect(() => {
-    if (showSendTextDialog) {
+    if (showSendTextDialog || showNavigateDialog) {
       send({ type: 'ui:modalOpen', payload: {} });
       return () => { send({ type: 'ui:modalClose', payload: {} }); };
     }
-  }, [showSendTextDialog, send]);
+  }, [showSendTextDialog, showNavigateDialog, send]);
 
   // Listen for command palette trigger
   useEffect(() => {
@@ -253,19 +255,25 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             {showBrowserMenu && (
               <div className="absolute top-full left-0 mt-1 w-44 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1">
                 {([
-                  { type: 'BrowserClick', label: 'Browser Click' },
-                  { type: 'BrowserType', label: 'Browser Type' },
-                  { type: 'BrowserWaitElement', label: 'Browser Wait' },
+                  { type: 'BrowserClick', label: 'Left Click' },
+                  { type: 'BrowserRightClick', label: 'Right Click' },
+                  { type: 'BrowserType', label: 'Input Text' },
+                  { type: 'BrowserWaitElement', label: 'Wait' },
                   { type: 'BrowserNavigate', label: 'Navigate' },
                 ] as const).map((item) => (
                   <button
                     key={item.type}
                     className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
                     onClick={() => {
-                      const sel = selectionRef.current;
-                      const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-                      send({ type: 'actions:addBrowserAction', payload: { actionType: item.type, selector: '', insertIndex } });
-                      setShowBrowserMenu(false);
+                      if (item.type === 'BrowserNavigate') {
+                        setShowBrowserMenu(false);
+                        setShowNavigateDialog(true);
+                      } else {
+                        const sel = selectionRef.current;
+                        const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                        send({ type: 'actions:addBrowserAction', payload: { actionType: item.type, selector: '', insertIndex } });
+                        setShowBrowserMenu(false);
+                      }
                     }}
                   >
                     <Globe size={12} className="text-[#60cdff]" />
@@ -371,6 +379,18 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             setShowSendTextDialog(false);
           }}
           onClose={() => setShowSendTextDialog(false)}
+        />
+      )}
+
+      {showNavigateDialog && (
+        <NavigateDialog
+          onConfirm={(url, newTab) => {
+            const sel = selectionRef.current;
+            const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+            send({ type: 'actions:addBrowserAction', payload: { actionType: 'BrowserNavigate', selector: url, newTab, insertIndex } });
+            setShowNavigateDialog(false);
+          }}
+          onClose={() => setShowNavigateDialog(false)}
         />
       )}
     </>

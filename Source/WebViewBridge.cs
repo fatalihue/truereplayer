@@ -273,7 +273,8 @@ namespace TrueReplayer
                 imageBase64 = a.ActionType == "WaitImage" && !string.IsNullOrEmpty(a.ImagePath)
                     ? ImageStorageService.ReadAsBase64(profileName, a.ImagePath) ?? ""
                     : "",
-                browserText = a.BrowserText ?? ""
+                browserText = a.BrowserText ?? "",
+                newTab = a.NewTab
             }).ToArray();
 
             SendMessage("actions:updated", new { actions = actionsList });
@@ -650,6 +651,7 @@ namespace TrueReplayer
                 case "timeout": if (int.TryParse(value, out int timeout)) action.Timeout = Math.Max(1000, timeout); break;
                 case "confidence": if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double conf)) action.Confidence = Math.Clamp(conf, 0.1, 1.0); break;
                 case "browserText": action.BrowserText = value; break;
+                case "newTab": action.NewTab = value == "true"; break;
             }
 
             HasUnsavedChanges = true;
@@ -1036,6 +1038,7 @@ namespace TrueReplayer
             string actionType = payload.GetProperty("actionType").GetString() ?? "";
             string selector = payload.TryGetProperty("selector", out var selEl) ? selEl.GetString() ?? "" : "";
             string? browserText = payload.TryGetProperty("browserText", out var textEl) ? textEl.GetString() : null;
+            bool newTab = payload.TryGetProperty("newTab", out var ntEl) && ntEl.GetBoolean();
             int insertIndex = payload.TryGetProperty("insertIndex", out var idxEl) ? idxEl.GetInt32() : actions.Count;
             int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
 
@@ -1044,6 +1047,7 @@ namespace TrueReplayer
                 ActionType = actionType,
                 Key = selector,
                 BrowserText = browserText,
+                NewTab = newTab,
                 Delay = delay,
                 Timeout = 5000
             };

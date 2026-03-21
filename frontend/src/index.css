@@ -37,6 +37,8 @@
   --color-action-key-bg: rgba(96, 205, 255, 0.1);
   --color-action-scroll-fg: #6bcb77;
   --color-action-scroll-bg: rgba(107, 203, 119, 0.1);
+  --color-action-browser-fg: #fb923c;
+  --color-action-browser-bg: rgba(251, 146, 60, 0.1);
 
   /* Hotkey badge — follows accent color */
   --color-hotkey-fg: var(--color-accent);

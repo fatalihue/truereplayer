@@ -15,6 +15,7 @@ export interface ActionItem {
   confidence: number;
   imageBase64: string;
   browserText: string;
+  newTab: boolean;
 }
 
 export interface ProfileEntry {
@@ -175,6 +176,6 @@ export type OutgoingMessage =
   | { type: 'update:check'; payload: Record<string, never> }
   | { type: 'update:apply'; payload: Record<string, never> }
   | { type: 'update:dismiss'; payload: Record<string, never> }
-  | { type: 'actions:addBrowserAction'; payload: { actionType: string; selector: string; browserText?: string; insertIndex?: number } }
+  | { type: 'actions:addBrowserAction'; payload: { actionType: string; selector: string; browserText?: string; newTab?: boolean; insertIndex?: number } }
   | { type: 'browser:toggleRecording'; payload: { enabled: boolean } }
   | { type: 'theme:colors'; payload: { bgSurface: string; bgCard: string; textPrimary: string; textSecondary: string; accentSolid: string; borderSubtle: string } };

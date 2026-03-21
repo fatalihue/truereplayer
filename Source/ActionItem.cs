@@ -22,6 +22,9 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? BrowserText { get; set; }
 
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool NewTab { get; set; }
+
         [System.Text.Json.Serialization.JsonIgnore]
         public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
 
@@ -78,7 +81,7 @@ namespace TrueReplayer.Models
         private static readonly HashSet<string> NoCoordinateActionTypes = new(StringComparer.OrdinalIgnoreCase)
         {
             "KeyDown", "KeyUp", "ScrollUp", "ScrollDown", "SendText", "WaitImage",
-            "BrowserClick", "BrowserType", "BrowserWaitElement", "BrowserNavigate"
+            "BrowserClick", "BrowserRightClick", "BrowserType", "BrowserWaitElement", "BrowserNavigate"
         };
 
         private bool HideCoordinates => NoCoordinateActionTypes.Contains(ActionType ?? "");
@@ -95,7 +98,7 @@ namespace TrueReplayer.Models
                 if (ActionType == "SendText") return Key;
                 if (ActionType == "WaitImage") return $"{Timeout / 1000}s";
                 if (ActionType == "BrowserNavigate") return Key;
-                if (ActionType == "BrowserClick" || ActionType == "BrowserType" || ActionType == "BrowserWaitElement")
+                if (ActionType == "BrowserClick" || ActionType == "BrowserRightClick" || ActionType == "BrowserType" || ActionType == "BrowserWaitElement")
                 {
                     var selector = Key.Length > 40 ? Key[..37] + "..." : Key;
                     return selector;

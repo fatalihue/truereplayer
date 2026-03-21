@@ -199,6 +199,9 @@ namespace TrueReplayer.Services
                 case "BrowserClick":
                     command = "click";
                     break;
+                case "BrowserRightClick":
+                    command = "rightClick";
+                    break;
                 case "BrowserType":
                     command = "type";
                     break;
@@ -213,7 +216,7 @@ namespace TrueReplayer.Services
                     throw new ArgumentException($"Unknown browser action type: {action.ActionType}");
             }
 
-            var timeout = (action.ActionType == "BrowserWaitElement" || action.ActionType == "BrowserClick") && action.Timeout > 0
+            var timeout = (action.ActionType == "BrowserWaitElement" || action.ActionType == "BrowserClick" || action.ActionType == "BrowserRightClick") && action.Timeout > 0
                 ? action.Timeout
                 : timeoutMs;
 
@@ -225,6 +228,7 @@ namespace TrueReplayer.Services
                 selector = action.Key ?? "",
                 text = action.BrowserText ?? "",
                 url = action.Key ?? "",
+                newTab = action.NewTab,
                 timeout
             });
 
@@ -236,7 +240,7 @@ namespace TrueReplayer.Services
                 using (token.Register(() => tcs.TrySetCanceled()))
                 // If command times out, set a timeout exception instead of cancellation
                 using (timeoutCts.Token.Register(() => tcs.TrySetException(
-                    new TimeoutException($"Browser command '{command}' timed out after {timeout}ms (selector: {action.Key})"))))
+                    new TimeoutException(GetFriendlyTimeoutMessage(command, timeout)))))
                 {
                     return await tcs.Task;
                 }
@@ -251,6 +255,20 @@ namespace TrueReplayer.Services
         {
             IsRecordingMode = enabled;
             SendMessage(new { type = "browser:setRecording", enabled });
+        }
+
+        private static string GetFriendlyTimeoutMessage(string command, int timeoutMs)
+        {
+            var seconds = timeoutMs / 1000;
+            return command switch
+            {
+                "click" => $"Browser Click timed out after {seconds}s. Make sure the element is visible on the page. Tip: try using a text= selector (e.g. text=Submit).",
+                "rightClick" => $"Browser Right Click timed out after {seconds}s. Make sure the element is visible on the page. Tip: try using a text= selector (e.g. text=Submit).",
+                "type" => $"Browser Type timed out after {seconds}s. Make sure the target input field is visible on the page. Tip: try using a text= selector.",
+                "waitElement" => $"Browser Wait timed out after {seconds}s. The element was not found on the page. Tip: try using a text= selector or increase the timeout.",
+                "navigate" => $"Browser Navigate timed out after {seconds}s. Check the URL and your internet connection.",
+                _ => $"Browser command timed out after {seconds}s. Make sure the page is fully loaded."
+            };
         }
 
         public void Dispose()

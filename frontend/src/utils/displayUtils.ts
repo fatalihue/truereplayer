@@ -17,7 +17,7 @@ const DISPLAY_KEY_MAP: Record<string, string> = {
   'Next': 'Page Down', 'Prior': 'Page Up',
 };
 
-const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'BrowserClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate']);
+const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate']);
 
 export function getDisplayKey(key: string): string {
   if (!key) return '';
@@ -34,6 +34,8 @@ export function getDisplayY(item: ActionItem): string {
 }
 
 export function getActionTypeColors(actionType: string) {
+  if (actionType.startsWith('Browser'))
+    return { bg: 'var(--color-action-browser-bg)', fg: 'var(--color-action-browser-fg)' };
   if (actionType.includes('Click'))
     return { bg: 'var(--color-action-mouse-bg)', fg: 'var(--color-action-mouse-fg)' };
   if (actionType.includes('Scroll'))
@@ -41,21 +43,19 @@ export function getActionTypeColors(actionType: string) {
   if (actionType.startsWith('Key'))
     return { bg: 'var(--color-action-key-bg)', fg: 'var(--color-action-key-fg)' };
   if (actionType === 'SendText')
-    return { bg: 'rgba(251, 191, 36, 0.10)', fg: '#fbbf24' };
+    return { bg: 'rgba(212, 160, 32, 0.10)', fg: '#d4a020' };
   if (actionType === 'WaitImage')
     return { bg: 'rgba(232, 121, 249, 0.10)', fg: '#e879f9' };
-  if (actionType.startsWith('Browser'))
-    return { bg: 'rgba(96, 205, 255, 0.10)', fg: '#60cdff' };
   return { bg: 'transparent', fg: 'var(--color-text-tertiary)' };
 }
 
 export function getActionTypeIcon(actionType: string): string {
+  if (actionType.startsWith('Browser')) return 'Globe';
   if (actionType.includes('Click')) return 'Mouse';
   if (actionType === 'ScrollUp') return 'ArrowUp';
   if (actionType === 'ScrollDown') return 'ArrowDown';
   if (actionType.startsWith('Key')) return 'Keyboard';
   if (actionType === 'SendText') return 'Type';
   if (actionType === 'WaitImage') return 'ScanSearch';
-  if (actionType.startsWith('Browser')) return 'Globe';
   return 'Zap';
 }

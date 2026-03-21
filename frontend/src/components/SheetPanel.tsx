@@ -20,7 +20,7 @@ const actionTypes = [
   { value: 'SendText', label: 'Text' },
 ];
 
-const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'BrowserClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate']);
+const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate']);
 
 export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const { actions } = useAppState();
@@ -37,6 +37,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const [timeout, setTimeout_] = useState('');
   const [confidence, setConfidence] = useState('');
   const [browserText, setBrowserText] = useState('');
+  const [newTab, setNewTab] = useState(false);
 
   // Sync local state from action
   useEffect(() => {
@@ -50,6 +51,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       setTimeout_(String((action.timeout || 5000) / 1000));
       setConfidence(String(Math.round((action.confidence || 0.8) * 100)));
       setBrowserText(action.browserText || '');
+      setNewTab(action.newTab || false);
     }
   }, [action]);
 
@@ -102,15 +104,18 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     if (actionType === 'BrowserType' && browserText !== (action.browserText || '')) {
       send({ type: 'actions:edit', payload: { index: actionIndex, field: 'browserText', value: browserText } });
     }
-    if (actionType === 'BrowserWaitElement' || actionType === 'BrowserClick') {
+    if (actionType === 'BrowserWaitElement' || actionType === 'BrowserClick' || actionType === 'BrowserRightClick') {
       const newTimeoutMs = Math.max(1, parseFloat(timeout) || 5) * 1000;
       if (newTimeoutMs !== (action.timeout || 5000)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(Math.round(newTimeoutMs)) } });
       }
     }
+    if (actionType === 'BrowserNavigate' && newTab !== (action.newTab || false)) {
+      send({ type: 'actions:edit', payload: { index: actionIndex, field: 'newTab', value: String(newTab) } });
+    }
 
     onClose();
-  }, [actionIndex, action, actionType, key, x, y, delay, comment, timeout, confidence, browserText, send, onClose]);
+  }, [actionIndex, action, actionType, key, x, y, delay, comment, timeout, confidence, browserText, newTab, send, onClose]);
 
   // Key capture handler
   const handleKeyCapture = useCallback((e: React.KeyboardEvent) => {
@@ -167,9 +172,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             <div className="text-sm font-semibold text-text-primary">Edit Action</div>
             <div className="text-[11px] text-text-tertiary mt-0.5">
               Action #{(actionIndex ?? 0) + 1} — {isWaitImage ? 'Wait Image'
-                : actionType === 'BrowserClick' ? 'Browser Click'
-                : actionType === 'BrowserType' ? 'Browser Type'
-                : actionType === 'BrowserWaitElement' ? 'Browser Wait'
+                : actionType === 'BrowserClick' ? 'Left Click'
+                : actionType === 'BrowserRightClick' ? 'Right Click'
+                : actionType === 'BrowserType' ? 'Input Text'
+                : actionType === 'BrowserWaitElement' ? 'Wait'
                 : actionType === 'BrowserNavigate' ? 'Navigate'
                 : actionType}
             </div>
@@ -278,6 +284,19 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               />
             </div>
 
+            {/* New Tab — only for BrowserNavigate */}
+            {isBrowserNavigate && (
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={newTab}
+                onChange={(e) => setNewTab(e.target.checked)}
+                className="w-3.5 h-3.5 rounded border-border-default accent-accent-solid cursor-pointer"
+              />
+              <span className="text-xs text-text-secondary">Open in new tab</span>
+            </label>
+            )}
+
             {/* Text — only for BrowserType */}
             {isBrowserType && (
             <div>
@@ -293,7 +312,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             )}
 
             {/* Timeout — for BrowserClick and BrowserWaitElement */}
-            {(isBrowserWait || actionType === 'BrowserClick') && (
+            {(isBrowserWait || actionType === 'BrowserClick' || actionType === 'BrowserRightClick') && (
             <div className="w-1/2">
               <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
               <input

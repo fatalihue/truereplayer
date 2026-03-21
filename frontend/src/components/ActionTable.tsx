@@ -12,13 +12,13 @@ import type { ColumnVisibility } from './Toolbar';
 
 function ActionIcon({ actionType }: { actionType: string }) {
   const size = 12;
+  if (actionType.startsWith('Browser')) return <Globe size={size} />;
   if (actionType.includes('Click')) return <Mouse size={size} />;
   if (actionType === 'ScrollUp') return <ArrowUp size={size} />;
   if (actionType === 'ScrollDown') return <ArrowDown size={size} />;
   if (actionType.startsWith('Key')) return <Keyboard size={size} />;
   if (actionType === 'SendText') return <Type size={size} />;
   if (actionType === 'WaitImage') return <ScanSearch size={size} />;
-  if (actionType.startsWith('Browser')) return <Globe size={size} />;
   return <Zap size={size} />;
 }
 
@@ -641,9 +641,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     >
                       <ActionIcon actionType={action.actionType} />
                       {action.actionType === 'WaitImage' ? 'Wait Image'
-                        : action.actionType === 'BrowserClick' ? 'Browser Click'
-                        : action.actionType === 'BrowserType' ? 'Browser Type'
-                        : action.actionType === 'BrowserWaitElement' ? 'Browser Wait'
+                        : action.actionType === 'BrowserClick' ? 'Left Click'
+                        : action.actionType === 'BrowserRightClick' ? 'Right Click'
+                        : action.actionType === 'BrowserType' ? 'Input Text'
+                        : action.actionType === 'BrowserWaitElement' ? 'Wait'
                         : action.actionType === 'BrowserNavigate' ? 'Navigate'
                         : action.actionType}
                     </span>

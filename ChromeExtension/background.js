@@ -66,31 +66,40 @@ function connect() {
             if (msg.command === 'navigate') {
               let url = msg.url;
               if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
-              const tabId = tabs[0].id;
-              const onUpdated = (updatedTabId, changeInfo) => {
-                if (updatedTabId === tabId && changeInfo.status === 'complete') {
+
+              const waitForLoad = (targetTabId) => {
+                const onUpdated = (updatedTabId, changeInfo) => {
+                  if (updatedTabId === targetTabId && changeInfo.status === 'complete') {
+                    chrome.tabs.onUpdated.removeListener(onUpdated);
+                    clearTimeout(fallback);
+                    setTimeout(() => {
+                      sendToNative({
+                        type: 'browser:commandResult',
+                        commandId: msg.commandId,
+                        success: true,
+                      });
+                    }, 300);
+                  }
+                };
+                chrome.tabs.onUpdated.addListener(onUpdated);
+                const fallback = setTimeout(() => {
                   chrome.tabs.onUpdated.removeListener(onUpdated);
-                  // Small delay to ensure content script is injected and ready
-                  setTimeout(() => {
-                    sendToNative({
-                      type: 'browser:commandResult',
-                      commandId: msg.commandId,
-                      success: true,
-                    });
-                  }, 300);
-                }
+                  sendToNative({
+                    type: 'browser:commandResult',
+                    commandId: msg.commandId,
+                    success: true,
+                  });
+                }, 30000);
               };
-              chrome.tabs.onUpdated.addListener(onUpdated);
-              chrome.tabs.update(tabId, { url });
-              // Timeout fallback in case onUpdated never fires
-              setTimeout(() => {
-                chrome.tabs.onUpdated.removeListener(onUpdated);
-                sendToNative({
-                  type: 'browser:commandResult',
-                  commandId: msg.commandId,
-                  success: true,
+
+              if (msg.newTab) {
+                chrome.tabs.create({ url, active: true }, (tab) => {
+                  waitForLoad(tab.id);
                 });
-              }, 30000);
+              } else {
+                waitForLoad(tabs[0].id);
+                chrome.tabs.update(tabs[0].id, { url });
+              }
               return;
             }
 

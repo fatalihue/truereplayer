@@ -553,6 +553,12 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                   defaultValue={DEFAULT_UI_SETTINGS.actionScrollColor}
                   onChange={(v) => setUISetting('actionScrollColor', v)}
                 />
+                <AppearanceColorRow
+                  label="Browser"
+                  value={config.uiSettings.actionBrowserColor}
+                  defaultValue={DEFAULT_UI_SETTINGS.actionBrowserColor}
+                  onChange={(v) => setUISetting('actionBrowserColor', v)}
+                />
               </div>
 
               {/* Font */}

@@ -466,6 +466,7 @@ namespace TrueReplayer.Services
                                     case "SendText": await SimulateClipboardPaste(action.Key, token); break;
                                     case "WaitImage": await ExecuteWaitImage(action, token); break;
                                     case "BrowserClick":
+                                    case "BrowserRightClick":
                                     case "BrowserType":
                                     case "BrowserWaitElement":
                                     case "BrowserNavigate":
@@ -735,8 +736,8 @@ namespace TrueReplayer.Services
 
                 if (matchResult == null && !token.IsCancellationRequested)
                 {
-                    // Timeout: stop replay
-                    Stop();
+                    var seconds = (action.Timeout > 0 ? action.Timeout : 30000) / 1000;
+                    throw new TimeoutException($"Wait for Image timed out after {seconds}s. Make sure the target image is visible on screen and the confidence threshold is not too high.");
                 }
             }
             finally
