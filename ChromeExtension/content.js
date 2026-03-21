@@ -1,5 +1,6 @@
 (() => {
   let recording = false;
+  let picking = false;
   let highlightEl = null;
 
   const { generateSelector, getElementDescription } = window.__trueReplayerSelectorGenerator || {};
@@ -7,7 +8,7 @@
   // ── Recording Mode ──
 
   function onMouseOver(e) {
-    if (!recording) return;
+    if (!recording && !picking) return;
     removeHighlight();
 
     const el = e.target;
@@ -38,6 +39,9 @@
   function onClick(e) {
     if (!recording) return;
 
+    // Right-clicks are handled by onContextMenu
+    if (e.button === 2) return;
+
     // Don't block the click — let it happen naturally so menus open, buttons toggle, etc.
     // Only prevent navigation on links to keep the user on the page
     const interactiveEl = bubbleToInteractiveForRecording(e.target);
@@ -53,11 +57,19 @@
 
     const description = getElementDescription?.(el) || '';
 
+    // Detect input-like elements for auto BrowserType
+    const tag = el.tagName.toLowerCase();
+    const isInput = tag === 'textarea'
+      || (tag === 'input' && !['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'image', 'hidden'].includes(el.type))
+      || el.isContentEditable;
+
     chrome.runtime.sendMessage({
       type: 'elementClicked',
       selector,
       description,
-      tagName: el.tagName.toLowerCase(),
+      tagName: tag,
+      button: e.type === 'contextmenu' ? 'right' : 'left',
+      isInput,
     });
 
     // Visual feedback: flash green
@@ -84,11 +96,43 @@
     }
   }
 
+  function onContextMenu(e) {
+    if (!recording) return;
+
+    // Prevent the native context menu so we can record the right-click
+    e.preventDefault();
+
+    // Reuse the same logic as onClick
+    const el = e.target;
+    if (!el) return;
+
+    const selector = generateSelector?.(el);
+    if (!selector) return;
+
+    const description = getElementDescription?.(el) || '';
+
+    chrome.runtime.sendMessage({
+      type: 'elementClicked',
+      selector,
+      description,
+      tagName: el.tagName.toLowerCase(),
+      button: 'right',
+    });
+
+    // Visual feedback: flash green
+    if (highlightEl) {
+      highlightEl.style.background = 'rgba(14, 122, 13, 0.25)';
+      highlightEl.style.borderColor = 'rgba(14, 122, 13, 0.8)';
+      setTimeout(removeHighlight, 300);
+    }
+  }
+
   function startRecording() {
     recording = true;
     document.addEventListener('mouseover', onMouseOver, true);
     document.addEventListener('mouseout', onMouseOut, true);
     document.addEventListener('click', onClick, true);
+    document.addEventListener('contextmenu', onContextMenu, true);
   }
 
   function stopRecording() {
@@ -97,6 +141,54 @@
     document.removeEventListener('mouseover', onMouseOver, true);
     document.removeEventListener('mouseout', onMouseOut, true);
     document.removeEventListener('click', onClick, true);
+    document.removeEventListener('contextmenu', onContextMenu, true);
+  }
+
+  // ── Pick Element Mode (single-pick for edit panel) ──
+
+  let pickResolve = null;
+
+  function onPickClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+
+    const el = e.target;
+    if (!el) return stopPick(null);
+
+    const selector = generateSelector?.(el);
+    stopPick(selector || null);
+  }
+
+  function startPick() {
+    picking = true;
+    document.addEventListener('mouseover', onMouseOver, true);
+    document.addEventListener('mouseout', onMouseOut, true);
+    document.addEventListener('click', onPickClick, true);
+    document.addEventListener('contextmenu', onPickClick, true);
+    // ESC cancels pick mode
+    document.addEventListener('keydown', onPickKeydown, true);
+  }
+
+  function onPickKeydown(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      stopPick(null);
+    }
+  }
+
+  function stopPick(selector) {
+    picking = false;
+    removeHighlight();
+    document.removeEventListener('mouseover', onMouseOver, true);
+    document.removeEventListener('mouseout', onMouseOut, true);
+    document.removeEventListener('click', onPickClick, true);
+    document.removeEventListener('contextmenu', onPickClick, true);
+    document.removeEventListener('keydown', onPickKeydown, true);
+    if (pickResolve) {
+      pickResolve(selector);
+      pickResolve = null;
+    }
   }
 
   // ── Command Execution ──
@@ -321,12 +413,16 @@
 
       case 'executeCommand':
         executeCommand(msg).then((result) => {
-          if (result.error) {
-            sendResponse(result);
-          } else {
-            sendResponse(result);
-          }
+          sendResponse(result);
         });
+        return true; // async response
+
+      case 'pickElement':
+        // Single-pick mode: highlights elements, returns selector on click, ESC cancels
+        pickResolve = (selector) => {
+          sendResponse({ selector });
+        };
+        startPick();
         return true; // async response
 
       default:

@@ -118,7 +118,8 @@ export type IncomingMessage =
   | { type: 'update:ready'; payload: Record<string, never> }
   | { type: 'update:error'; payload: { message: string } }
   | { type: 'update:none'; payload: { currentVersion: string } }
-  | { type: 'browser:status'; payload: { connected: boolean } };
+  | { type: 'browser:status'; payload: { connected: boolean } }
+  | { type: 'browser:pickResult'; payload: { selector: string | null; error?: string } };
 
 // ── Messages JS → C# ──
 
@@ -178,4 +179,5 @@ export type OutgoingMessage =
   | { type: 'update:dismiss'; payload: Record<string, never> }
   | { type: 'actions:addBrowserAction'; payload: { actionType: string; selector: string; browserText?: string; newTab?: boolean; insertIndex?: number } }
   | { type: 'browser:toggleRecording'; payload: { enabled: boolean } }
+  | { type: 'browser:pickElement'; payload: Record<string, never> }
   | { type: 'theme:colors'; payload: { bgSurface: string; bgCard: string; textPrimary: string; textSecondary: string; accentSolid: string; borderSubtle: string } };

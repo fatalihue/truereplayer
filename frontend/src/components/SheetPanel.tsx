@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, RefreshCw } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Crosshair } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
 
@@ -24,7 +24,7 @@ const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'Sen
 
 export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const { actions } = useAppState();
-  const { send } = useBridge();
+  const { send, subscribe } = useBridge();
 
   const action = actionIndex != null ? actions[actionIndex] : null;
 
@@ -38,6 +38,20 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const [confidence, setConfidence] = useState('');
   const [browserText, setBrowserText] = useState('');
   const [newTab, setNewTab] = useState(false);
+  const [isPicking, setIsPicking] = useState(false);
+
+  // Listen for pick element result from browser extension
+  useEffect(() => {
+    return subscribe((msg) => {
+      if (msg.type === 'browser:pickResult') {
+        setIsPicking(false);
+        const payload = msg.payload as { selector?: string | null };
+        if (payload.selector) {
+          setKey(payload.selector);
+        }
+      }
+    });
+  }, [subscribe]);
 
   // Sync local state from action
   useEffect(() => {
@@ -275,13 +289,32 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">
                 {isBrowserNavigate ? 'URL' : 'CSS SELECTOR'}
               </label>
-              <input
-                type="text"
-                value={key}
-                onChange={(e) => setKey(e.target.value)}
-                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-                placeholder={isBrowserNavigate ? 'https://example.com' : '#element-id, .class, [name="field"]'}
-              />
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={key}
+                  onChange={(e) => setKey(e.target.value)}
+                  className="flex-1 h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                  placeholder={isBrowserNavigate ? 'https://example.com' : '#element-id, .class, [name="field"]'}
+                />
+                {!isBrowserNavigate && (
+                  <button
+                    onClick={() => {
+                      setIsPicking(true);
+                      send({ type: 'browser:pickElement', payload: {} });
+                    }}
+                    disabled={isPicking}
+                    className={`h-8 w-8 flex items-center justify-center rounded border transition-colors ${
+                      isPicking
+                        ? 'bg-accent-solid/20 border-accent-solid text-accent-light'
+                        : 'bg-bg-input border-border-default text-text-tertiary hover:text-text-primary hover:border-text-tertiary'
+                    }`}
+                    title="Pick element from page"
+                  >
+                    <Crosshair size={14} />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* New Tab — only for BrowserNavigate */}

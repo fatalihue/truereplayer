@@ -127,6 +127,32 @@ function connect() {
             });
           });
           break;
+
+        case 'browser:pickElement':
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (!tabs[0]) {
+              sendToNative({
+                type: 'browser:pickResult',
+                requestId: msg.requestId,
+                selector: null,
+              });
+              return;
+            }
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'pickElement' }).then((response) => {
+              sendToNative({
+                type: 'browser:pickResult',
+                requestId: msg.requestId,
+                selector: response?.selector || null,
+              });
+            }).catch(() => {
+              sendToNative({
+                type: 'browser:pickResult',
+                requestId: msg.requestId,
+                selector: null,
+              });
+            });
+          });
+          break;
       }
     });
 
@@ -201,6 +227,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       selector: msg.selector,
       description: msg.description,
       tagName: msg.tagName,
+      button: msg.button || 'left',
+      isInput: msg.isInput || false,
       url: sender.tab?.url || '',
     });
     sendResponse({ ok: true });
