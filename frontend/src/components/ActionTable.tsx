@@ -465,12 +465,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     closeContextMenu();
   }, [contextMenu, send, closeContextMenu]);
 
-  const handleInsertSendText = useCallback(() => {
-    if (!contextMenu) return;
-    const insertIndex = contextMenu.rowIndex + 1;
-    closeContextMenu();
-    setSendTextInsert({ insertIndex });
-  }, [contextMenu, closeContextMenu]);
+
 
   const handleDuplicate = useCallback(() => {
     if (!contextMenu) return;
