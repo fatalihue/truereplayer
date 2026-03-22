@@ -6,7 +6,7 @@
 
 <p align="center">
   A modern macro recorder and replayer for Windows built with WinUI 3.<br/>
-  Record mouse clicks, keyboard inputs, and scroll actions — then replay them with precision.
+  Record mouse clicks, keyboard inputs, scroll actions, and browser elements — then replay them with precision.
 </p>
 
 <p align="center">
@@ -30,6 +30,8 @@
 **Installer** — Run `TrueReplayer-win-Setup.exe` for automatic installation with auto-updates.
 
 **Portable** — Extract `TrueReplayer-win-Portable.zip` and run `TrueReplayer.exe` — no installation needed.
+
+**Chrome Extension** — Download `TrueReplayer-ChromeExtension-1.1.0.zip`, extract it, then load unpacked in `chrome://extensions` (enable Developer mode).
 
 > **Requires:** Windows 10 (1809) or later — x64
 
@@ -57,7 +59,7 @@
 - **Multi-selection** — Ctrl+click, Shift+click, or Ctrl+A to select multiple rows
 - **Bulk operations** — Set delay, duplicate, or delete all selected actions at once
 - **Column visibility** — Show or hide Action, Key, X, Y, Delay, Notes columns from the toolbar
-- **Color-coded actions** — Each action type (mouse, key, scroll) has a distinct color pill
+- **Color-coded actions** — Each action type (mouse, key, scroll, browser, text, image) has a distinct color pill
 
 ### Send Text
 
@@ -69,6 +71,19 @@ Insert blocks of text as typed keystrokes with special capabilities:
 - **Snippets** — Save and reuse frequently used text blocks
 
 ![Send Text](Image%20App/TrueReplayer3.png)
+
+### Browser Automation (Chrome Extension)
+
+Automate web interactions using CSS selectors instead of screen coordinates:
+
+- **Browser Left Click / Right Click** — Click elements by CSS selector or visible text
+- **Browser Input Text** — Type into input fields with `{clipboard}`, `{date}`, `{time}`, `{datetime}` placeholders
+- **Browser Wait** — Wait for an element to appear before proceeding
+- **Browser Navigate** — Open a URL in the current tab or a new tab
+- **Pick Element** — Visual element picker with blue highlights — click to capture the CSS selector
+- **Text Match** — Match elements by visible text (e.g., "Submit") as an alternative to CSS selectors
+- **Auto-detect inputs** — Recording automatically creates Input Text actions when clicking input fields
+- **Alarm-based reconnect** — Extension reconnects reliably even after Chrome idles for a long time
 
 ### Profiles
 
@@ -105,7 +120,7 @@ Personalize the interface with 14 built-in presets or fully custom colors:
 | Section | Options |
 |---------|---------|
 | **Execution** | Fixed delay (ms), loop count, loop delay |
-| **Recording** | Toggle mouse clicks, scroll, keyboard, profile keys |
+| **Recording** | Toggle mouse clicks, scroll, keyboard, profile keys, browser actions |
 | **Hotkeys** | Recording, replay, profile keys toggle, bring-to-front |
 | **Window** | Always on top, system tray, run on startup, startup minimized |
 | **Updates** | Auto-check and manual check for updates |
