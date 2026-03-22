@@ -25,7 +25,7 @@ namespace TrueReplayer.Services
         public bool IsConnected { get; private set; }
         public bool IsRecordingMode { get; private set; }
         public event Action<bool>? ConnectionChanged;
-        public event Action<string, string, string?, string?>? ElementClicked; // selector, description, url, tagName
+        public event Action<string, string, string?, string?, string?, bool>? ElementClicked; // selector, description, url, tagName, button, isInput
 
         public void Start()
         {
@@ -120,7 +120,9 @@ namespace TrueReplayer.Services
                             var description = root.TryGetProperty("description", out var descEl) ? descEl.GetString() ?? "" : "";
                             var url = root.TryGetProperty("url", out var urlEl) ? urlEl.GetString() : null;
                             var tagName = root.TryGetProperty("tagName", out var tagEl) ? tagEl.GetString() : null;
-                            ElementClicked?.Invoke(selector, description, url, tagName);
+                            var button = root.TryGetProperty("button", out var btnEl) ? btnEl.GetString() ?? "left" : "left";
+                            var isInput = root.TryGetProperty("isInput", out var inputEl) && inputEl.GetBoolean();
+                            ElementClicked?.Invoke(selector, description, url, tagName, button, isInput);
                             break;
 
                         case "browser:commandResult":
@@ -131,6 +133,14 @@ namespace TrueReplayer.Services
                                     tcs.TrySetException(new Exception(errEl.GetString()));
                                 else
                                     tcs.TrySetResult(root);
+                            }
+                            break;
+
+                        case "browser:pickResult":
+                            var pickId = root.GetProperty("requestId").GetString() ?? "";
+                            if (_pendingCommands.TryRemove(pickId, out var pickTcs))
+                            {
+                                pickTcs.TrySetResult(root);
                             }
                             break;
                     }
@@ -183,8 +193,39 @@ namespace TrueReplayer.Services
             }
         }
 
+        public async Task<string?> PickElementAsync(CancellationToken token, int timeoutMs = 30000)
+        {
+            if (!IsConnected)
+                throw new InvalidOperationException("Browser extension is not connected.");
+
+            var requestId = Guid.NewGuid().ToString("N")[..8];
+            var tcs = new TaskCompletionSource<JsonElement>();
+            _pendingCommands[requestId] = tcs;
+
+            SendMessage(new { type = "browser:pickElement", requestId });
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            cts.CancelAfter(timeoutMs);
+
+            try
+            {
+                using (cts.Token.Register(() => tcs.TrySetCanceled()))
+                {
+                    var result = await tcs.Task;
+                    if (result.TryGetProperty("selector", out var selEl) && selEl.ValueKind == JsonValueKind.String)
+                        return selEl.GetString();
+                    return null;
+                }
+            }
+            catch
+            {
+                _pendingCommands.TryRemove(requestId, out _);
+                return null;
+            }
+        }
+
         public async Task<JsonElement> ExecuteBrowserCommandAsync(
-            TrueReplayer.Models.ActionItem action, CancellationToken token, int timeoutMs = 5000)
+            TrueReplayer.Models.ActionItem action, CancellationToken token, int timeoutMs = 5000, string? resolvedText = null)
         {
             if (!IsConnected)
                 throw new InvalidOperationException("Browser extension is not connected.");
@@ -226,7 +267,7 @@ namespace TrueReplayer.Services
                 commandId,
                 command,
                 selector = action.Key ?? "",
-                text = action.BrowserText ?? "",
+                text = resolvedText ?? action.BrowserText ?? "",
                 url = action.Key ?? "",
                 newTab = action.NewTab,
                 timeout
@@ -262,12 +303,12 @@ namespace TrueReplayer.Services
             var seconds = timeoutMs / 1000;
             return command switch
             {
-                "click" => $"Browser Click timed out after {seconds}s. Make sure the element is visible on the page. Tip: try using a text= selector (e.g. text=Submit).",
-                "rightClick" => $"Browser Right Click timed out after {seconds}s. Make sure the element is visible on the page. Tip: try using a text= selector (e.g. text=Submit).",
-                "type" => $"Browser Type timed out after {seconds}s. Make sure the target input field is visible on the page. Tip: try using a text= selector.",
-                "waitElement" => $"Browser Wait timed out after {seconds}s. The element was not found on the page. Tip: try using a text= selector or increase the timeout.",
-                "navigate" => $"Browser Navigate timed out after {seconds}s. Check the URL and your internet connection.",
-                _ => $"Browser command timed out after {seconds}s. Make sure the page is fully loaded."
+                "click" => $"Left Click timed out after {seconds}s. Element not found or not visible. Tip: use the Text Match field in Edit Action to match by visible text.",
+                "rightClick" => $"Right Click timed out after {seconds}s. Element not found or not visible. Tip: use the Text Match field in Edit Action to match by visible text.",
+                "type" => $"Input Text timed out after {seconds}s. Target field not found or not visible. Tip: use the Text Match field in Edit Action or pick the element with the crosshair.",
+                "waitElement" => $"Wait timed out after {seconds}s. Element not found on the page. Tip: use the Text Match field in Edit Action or increase the timeout.",
+                "navigate" => $"Navigate timed out after {seconds}s. Check the URL and your internet connection.",
+                _ => $"Browser action timed out after {seconds}s. Make sure the page is fully loaded."
             };
         }
 

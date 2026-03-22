@@ -37,6 +37,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const [timeout, setTimeout_] = useState('');
   const [confidence, setConfidence] = useState('');
   const [browserText, setBrowserText] = useState('');
+  const [textMatch, setTextMatch] = useState('');
   const [newTab, setNewTab] = useState(false);
   const [isPicking, setIsPicking] = useState(false);
 
@@ -57,7 +58,14 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   useEffect(() => {
     if (action) {
       setActionType(action.actionType);
-      setKey(action.key);
+      // Split text= prefix into separate textMatch field
+      if (action.key.startsWith('text=')) {
+        setKey('');
+        setTextMatch(action.key.slice(5));
+      } else {
+        setKey(action.key);
+        setTextMatch('');
+      }
       setX(String(action.x || ''));
       setY(String(action.y || ''));
       setDelay(String(action.delay));
@@ -83,8 +91,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     if (actionType !== action.actionType) {
       send({ type: 'actions:edit', payload: { index: actionIndex, field: 'actionType', value: actionType } });
     }
-    if (key !== action.key) {
-      send({ type: 'actions:edit', payload: { index: actionIndex, field: 'key', value: key } });
+    // Text match takes priority over CSS selector for browser click/wait actions
+    const effectiveKey = textMatch.trim() ? `text=${textMatch.trim()}` : key;
+    if (effectiveKey !== action.key) {
+      send({ type: 'actions:edit', payload: { index: actionIndex, field: 'key', value: effectiveKey } });
     }
     const newX = parseInt(x, 10);
     if (!isNaN(newX) && newX !== action.x) {
@@ -129,7 +139,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     }
 
     onClose();
-  }, [actionIndex, action, actionType, key, x, y, delay, comment, timeout, confidence, browserText, newTab, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, x, y, delay, comment, timeout, confidence, browserText, newTab, send, onClose]);
 
   // Key capture handler
   const handleKeyCapture = useCallback((e: React.KeyboardEvent) => {
@@ -165,11 +175,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
 
   return createPortal(
     <>
-      {/* Backdrop */}
+      {/* Backdrop — no click-to-close, user must Save/Cancel/arrow */}
       <div
         className="fixed inset-0 z-[60]"
         style={{ background: 'rgba(0,0,0,0.3)' }}
-        onClick={onClose}
       />
 
       {/* Panel */}
@@ -317,6 +326,21 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               </div>
             </div>
 
+            {/* Text Match — alternative to CSS selector for Click/RightClick/Wait */}
+            {!isBrowserNavigate && !isBrowserType && (
+            <div>
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TEXT MATCH</label>
+              <input
+                type="text"
+                value={textMatch}
+                onChange={(e) => setTextMatch(e.target.value)}
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                placeholder="Match element by visible text"
+              />
+              <p className="text-[10px] text-text-disabled mt-1">Takes priority over CSS selector when filled</p>
+            </div>
+            )}
+
             {/* New Tab — only for BrowserNavigate */}
             {isBrowserNavigate && (
             <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -341,6 +365,18 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
                 placeholder="Text to type into the element"
               />
+              <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                {['{clipboard}', '{date}', '{time}', '{datetime}'].map(tag => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setBrowserText(prev => prev + tag)}
+                    className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-bg-elevated text-text-tertiary hover:text-accent-light hover:bg-accent-solid/10 transition-colors cursor-pointer"
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
             </div>
             )}
 

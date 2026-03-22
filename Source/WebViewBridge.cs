@@ -86,7 +86,7 @@ namespace TrueReplayer
                 {
                     dispatcherQueue.TryEnqueue(() => SendMessage("browser:status", new { connected }));
                 };
-                browserBridge.ElementClicked += (selector, description, url, tagName) =>
+                browserBridge.ElementClicked += (selector, description, url, tagName, button, isInput) =>
                 {
                     dispatcherQueue.TryEnqueue(() =>
                     {
@@ -103,9 +103,13 @@ namespace TrueReplayer
                         }
 
                         int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
+                        // Input fields → BrowserType with empty text (user fills in later)
+                        var actionType = isInput ? "BrowserType"
+                            : button == "right" ? "BrowserRightClick"
+                            : "BrowserClick";
                         var action = new ActionItem
                         {
-                            ActionType = "BrowserClick",
+                            ActionType = actionType,
                             Key = selector,
                             Comment = description,
                             Delay = delay,
@@ -185,6 +189,7 @@ namespace TrueReplayer
                     case "waitimage:recapture": HandleWaitImageRecapture(payload); break;
                     case "actions:addBrowserAction": HandleAddBrowserAction(payload); break;
                     case "browser:toggleRecording": HandleBrowserToggleRecording(payload); break;
+                    case "browser:pickElement": HandlePickElement(); break;
                     case "profile:click": HandleProfileClick(payload); break;
                     case "profile:create": HandleProfileCreate(payload); break;
                     case "profile:rename": HandleProfileRename(payload); break;
@@ -1063,6 +1068,25 @@ namespace TrueReplayer
         {
             bool enabled = payload.TryGetProperty("enabled", out var enEl) && enEl.GetBoolean();
             browserBridge?.SetRecordingMode(enabled);
+        }
+
+        private async void HandlePickElement()
+        {
+            if (browserBridge == null || !browserBridge.IsConnected)
+            {
+                SendMessage("browser:pickResult", new { selector = (string?)null, error = "Browser extension is not connected." });
+                return;
+            }
+
+            try
+            {
+                var selector = await browserBridge.PickElementAsync(CancellationToken.None);
+                SendMessage("browser:pickResult", new { selector });
+            }
+            catch (Exception ex)
+            {
+                SendMessage("browser:pickResult", new { selector = (string?)null, error = ex.Message });
+            }
         }
 
         private async void HandleProfileClick(JsonElement payload)

@@ -471,7 +471,13 @@ namespace TrueReplayer.Services
                                     case "BrowserWaitElement":
                                     case "BrowserNavigate":
                                         if (_browserBridge != null)
-                                            await _browserBridge.ExecuteBrowserCommandAsync(action, token, action.Timeout > 0 ? action.Timeout : 5000);
+                                        {
+                                            // Resolve {clipboard}, {date}, {time}, {datetime} in BrowserText without mutating original
+                                            string? resolvedText = null;
+                                            if (action.ActionType == "BrowserType" && !string.IsNullOrEmpty(action.BrowserText))
+                                                resolvedText = await ResolveBrowserTextPlaceholders(action.BrowserText);
+                                            await _browserBridge.ExecuteBrowserCommandAsync(action, token, action.Timeout > 0 ? action.Timeout : 5000, resolvedText);
+                                        }
                                         break;
                                 }
                             }
@@ -626,6 +632,42 @@ namespace TrueReplayer.Services
                 }
             };
             NativeMethods.SendInput(1, new[] { clickInput }, inputSize);
+        }
+
+        private async Task<string> ResolveBrowserTextPlaceholders(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+
+            if (text.Contains("{clipboard}", StringComparison.OrdinalIgnoreCase))
+            {
+                var tcsClip = new TaskCompletionSource<string?>();
+                dispatcherQueue.TryEnqueue(async () =>
+                {
+                    try
+                    {
+                        var content = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
+                        if (content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
+                        {
+                            var clipText = await content.GetTextAsync();
+                            tcsClip.SetResult(clipText);
+                        }
+                        else tcsClip.SetResult(null);
+                    }
+                    catch { tcsClip.SetResult(null); }
+                });
+                var clipContent = await tcsClip.Task;
+                text = text.Replace("{clipboard}", clipContent ?? "", StringComparison.OrdinalIgnoreCase);
+            }
+
+            var now = DateTime.Now;
+            if (text.Contains("{datetime}", StringComparison.OrdinalIgnoreCase))
+                text = text.Replace("{datetime}", now.ToString("dd/MM/yyyy HH:mm:ss"), StringComparison.OrdinalIgnoreCase);
+            if (text.Contains("{date}", StringComparison.OrdinalIgnoreCase))
+                text = text.Replace("{date}", now.ToString("dd/MM/yyyy"), StringComparison.OrdinalIgnoreCase);
+            if (text.Contains("{time}", StringComparison.OrdinalIgnoreCase))
+                text = text.Replace("{time}", now.ToString("HH:mm:ss"), StringComparison.OrdinalIgnoreCase);
+
+            return text;
         }
 
         private async Task SimulateClipboardPaste(string text, CancellationToken token)
