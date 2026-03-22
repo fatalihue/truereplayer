@@ -81,32 +81,33 @@ export function UpdateOverlay() {
 
       {/* Card */}
       <div style={cardStyle}>
-        {/* Logo */}
-        <div
-          style={{
-            ...logoStyle,
-            ...(phase.step === 'complete' ? logoCompleteStyle : {}),
-          }}
-        >
-          {phase.step === 'complete' ? (
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
-              <polyline
-                points="6 12 10 16 18 8"
-                stroke="white"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{
-                  strokeDasharray: 24,
-                  strokeDashoffset: 0,
-                  animation: 'update-checkmark 0.4s ease 0.2s both',
-                }}
-              />
-            </svg>
-          ) : (
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="white">
-              <path d="M8 5v14l11-7z" />
-            </svg>
+        {/* App Icon */}
+        <div style={logoContainerStyle}>
+          <img
+            src="app-icon.png"
+            alt="TrueReplayer"
+            style={{
+              ...logoImgStyle,
+              ...(phase.step === 'complete' ? {} : { animation: 'update-logo-pulse 2s ease-in-out infinite' }),
+            }}
+          />
+          {phase.step === 'complete' && (
+            <div style={checkBadgeStyle}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <polyline
+                  points="6 12 10 16 18 8"
+                  stroke="white"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{
+                    strokeDasharray: 24,
+                    strokeDashoffset: 0,
+                    animation: 'update-checkmark 0.4s ease 0.2s both',
+                  }}
+                />
+              </svg>
+            </div>
           )}
         </div>
 
@@ -231,23 +232,33 @@ const cardStyle: React.CSSProperties = {
   animation: 'update-card-in 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
 };
 
-const logoStyle: React.CSSProperties = {
-  width: 64,
-  height: 64,
+const logoContainerStyle: React.CSSProperties = {
+  position: 'relative',
+  width: 72,
+  height: 72,
   margin: '0 auto 20px',
-  borderRadius: 14,
-  background: 'linear-gradient(135deg, #0078D4 0%, #60CDFF 100%)',
+};
+
+const logoImgStyle: React.CSSProperties = {
+  width: 72,
+  height: 72,
+  borderRadius: 16,
+  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
+};
+
+const checkBadgeStyle: React.CSSProperties = {
+  position: 'absolute',
+  bottom: -4,
+  right: -4,
+  width: 26,
+  height: 26,
+  borderRadius: '50%',
+  background: 'linear-gradient(135deg, #0E7A0D, #6bcb77)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  boxShadow: '0 8px 24px rgba(0, 120, 212, 0.3)',
-  animation: 'update-logo-pulse 2s ease-in-out infinite',
-};
-
-const logoCompleteStyle: React.CSSProperties = {
-  background: 'linear-gradient(135deg, #0E7A0D 0%, #6bcb77 100%)',
-  boxShadow: '0 8px 24px rgba(14, 122, 13, 0.3)',
-  animation: 'none',
+  boxShadow: '0 2px 8px rgba(14, 122, 13, 0.4)',
+  border: '2px solid #2d2d2d',
 };
 
 const titleStyle: React.CSSProperties = {
