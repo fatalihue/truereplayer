@@ -14,8 +14,8 @@ namespace TrueReplayer.Services
             // Window
             public bool AlwaysOnTop { get; set; } = false;
             public bool MinimizeToTray { get; set; } = true;
-            public bool RunOnStartup { get; set; } = false;
-            public bool StartMinimized { get; set; } = false;
+            public bool RunOnStartup { get; set; } = true;
+            public bool StartMinimized { get; set; } = true;
             // Execution
             public bool UseCustomDelay { get; set; } = true;
             public int CustomDelay { get; set; } = 100;

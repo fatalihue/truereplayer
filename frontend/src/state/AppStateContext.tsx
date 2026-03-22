@@ -21,8 +21,8 @@ const defaultSettings = {
   foregroundHotkey: 'Ctrl+Insert',
   alwaysOnTop: false,
   minimizeToTray: true,
-  runOnStartup: false,
-  startMinimized: false,
+  runOnStartup: true,
+  startMinimized: true,
 };
 
 const initialState: AppState = {

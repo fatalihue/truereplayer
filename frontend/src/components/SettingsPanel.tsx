@@ -300,7 +300,7 @@ export function SettingsPanel() {
               <SettingRow label="Profile Keys">
                 <Toggle isOn={settings.profileKeyEnabled} onChange={(v) => changeSetting('profileKeyEnabled', v)} />
               </SettingRow>
-              <SettingRow label="Browser Selector" tooltip="Record CSS selectors from Chrome instead of mouse coordinates">
+              <SettingRow label="Browser Actions" tooltip="Record CSS selectors from Chrome instead of mouse coordinates">
                 <Toggle isOn={settings.browserSelectorEnabled ?? false} onChange={(v) => changeSetting('browserSelectorEnabled', v)} />
               </SettingRow>
             </Section>
