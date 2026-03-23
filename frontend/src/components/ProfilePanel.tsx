@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Plus, Search, Pencil, Copy, Trash2, FolderOpen, Key, Keyboard, Crosshair, ArrowUpDown, Type, Ban, ChevronsLeft, ChevronsRight, Pin, PinOff, FolderPlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine } from 'lucide-react';
+import { Plus, Search, Pencil, Copy, Trash2, FolderOpen, Keyboard, Crosshair, ArrowUpDown, Type, Ban, ChevronsLeft, ChevronsRight, Pin, PinOff, FolderPlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine } from 'lucide-react';
 import type { ProfileEntry } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -887,7 +887,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         </span>
                         <FolderOpen size={12} style={{ color: folder.color }} className="shrink-0" />
                         <span className="text-xs font-medium text-text-secondary flex-1 truncate">{folder.name}</span>
-                        {folder.hasWindowTarget && <Crosshair size={10} className="text-text-tertiary shrink-0" title={folder.windowTargetProcessName || folder.windowTargetWindowTitle || 'Window Target'} />}
+                        {folder.hasWindowTarget && <span title={folder.windowTargetProcessName || folder.windowTargetWindowTitle || 'Window Target'} className="shrink-0"><Crosshair size={10} className="text-text-tertiary" /></span>}
                         <span className="text-[10px] text-text-disabled">{folder.items.length}</span>
                       </div>
                       {!folder.collapsed && hasVisibleProfiles && (
