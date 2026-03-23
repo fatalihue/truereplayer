@@ -92,8 +92,22 @@ namespace TrueReplayer.Services
 
         private static string GetPath()
         {
-            string dir = AppContext.BaseDirectory;
-            return Path.Combine(dir, FileName);
+            // Store in Documents/TrueReplayer so settings survive app updates
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "TrueReplayer");
+            Directory.CreateDirectory(dir);
+
+            // Migrate from old location (app install folder) if exists
+            string oldPath = Path.Combine(AppContext.BaseDirectory, FileName);
+            string newPath = Path.Combine(dir, FileName);
+            if (File.Exists(oldPath) && !File.Exists(newPath))
+            {
+                try { File.Move(oldPath, newPath); }
+                catch { /* best effort */ }
+            }
+
+            return newPath;
         }
     }
 }
