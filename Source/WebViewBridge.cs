@@ -418,11 +418,7 @@ namespace TrueReplayer
             return new UserProfile
             {
                 Actions = new ObservableCollection<ActionItem>(actions),
-                CustomHotkey = UserProfile.Current.CustomHotkey,
-                CustomHotstring = UserProfile.Current.CustomHotstring,
-                IsDisabled = UserProfile.Current.IsDisabled,
                 BatchDelay = UserProfile.Current.BatchDelay,
-                TargetWindow = UserProfile.Current.TargetWindow,
                 LastProfileDirectory = UserProfile.Current.LastProfileDirectory,
             };
         }
