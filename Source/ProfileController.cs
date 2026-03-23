@@ -132,9 +132,12 @@ namespace TrueReplayer.Controllers
 
             if (fileName != null)
             {
-                var profile = UserProfile.Current;
-                profile.Actions = window.Actions;
-                profile.LastProfileDirectory = Path.GetDirectoryName(fileName)!;
+                var profile = new UserProfile
+                {
+                    Actions = window.Actions,
+                    BatchDelay = UserProfile.Current.BatchDelay,
+                    LastProfileDirectory = Path.GetDirectoryName(fileName)!,
+                };
 
                 try
                 {
