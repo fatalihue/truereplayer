@@ -64,6 +64,11 @@ namespace TrueReplayer
                 using var edgeKey = Registry.CurrentUser.CreateSubKey(
                     @"Software\Microsoft\Edge\NativeMessagingHosts\com.truereplayer.native");
                 edgeKey?.SetValue("", manifestPath);
+
+                // Also register for Brave
+                using var braveKey = Registry.CurrentUser.CreateSubKey(
+                    @"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.truereplayer.native");
+                braveKey?.SetValue("", manifestPath);
             }
             catch (Exception ex)
             {
