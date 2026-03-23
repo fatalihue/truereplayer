@@ -137,6 +137,10 @@ namespace TrueReplayer.Controllers
                     Actions = window.Actions,
                     BatchDelay = UserProfile.Current.BatchDelay,
                     LastProfileDirectory = Path.GetDirectoryName(fileName)!,
+                    CustomHotkey = UserProfile.Current.CustomHotkey,
+                    CustomHotstring = UserProfile.Current.CustomHotstring,
+                    TargetWindow = UserProfile.Current.TargetWindow,
+                    IsDisabled = UserProfile.Current.IsDisabled,
                 };
 
                 try
