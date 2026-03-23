@@ -23,6 +23,7 @@ const defaultSettings = {
   minimizeToTray: true,
   runOnStartup: true,
   startMinimized: true,
+  runAsAdmin: false,
 };
 
 const initialState: AppState = {

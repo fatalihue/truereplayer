@@ -346,7 +346,8 @@ namespace TrueReplayer
                     alwaysOnTop = profile.AlwaysOnTop,
                     minimizeToTray = profile.MinimizeToTray,
                     runOnStartup = TrayIconService.IsRunOnStartup(),
-                    startMinimized = profile.StartMinimized
+                    startMinimized = profile.StartMinimized,
+                    runAsAdmin = AppSettingsManager.Load().RunAsAdmin
                 }
             });
         }
@@ -492,7 +493,8 @@ namespace TrueReplayer
                     alwaysOnTop = profile.AlwaysOnTop,
                     minimizeToTray = profile.MinimizeToTray,
                     runOnStartup = TrayIconService.IsRunOnStartup(),
-                    startMinimized = profile.StartMinimized
+                    startMinimized = profile.StartMinimized,
+                    runAsAdmin = AppSettingsManager.Load().RunAsAdmin
                 },
                 toolbar = new { profileName = CurrentProfileName, actionCount = actions.Count },
                 statusBar = new
@@ -1839,6 +1841,7 @@ namespace TrueReplayer
                 ForegroundHotkey = UserProfile.Current.ForegroundHotkey,
                 ProfileKeyEnabled = ProfileKeyEnabled,
                 BrowserSelectorEnabled = BrowserSelectorEnabled,
+                RunAsAdmin = AppSettingsManager.Load().RunAsAdmin,
             };
             AppSettingsManager.Save(s);
         }
@@ -1954,6 +1957,14 @@ namespace TrueReplayer
                     break;
                 case "foregroundHotkey":
                     UserProfile.Current.ForegroundHotkey = valueElement.GetString() ?? "Ctrl+Insert";
+                    break;
+                case "runAsAdmin":
+                    {
+                        // Save directly — RunAsAdmin is read from file, not a runtime field
+                        var current = AppSettingsManager.Load();
+                        current.RunAsAdmin = valueElement.GetBoolean();
+                        AppSettingsManager.Save(current);
+                    }
                     break;
             }
 

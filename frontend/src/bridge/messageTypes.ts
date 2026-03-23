@@ -65,6 +65,7 @@ export interface SettingsState {
   minimizeToTray: boolean;
   runOnStartup: boolean;
   startMinimized: boolean;
+  runAsAdmin: boolean;
 }
 
 export interface ButtonStates {

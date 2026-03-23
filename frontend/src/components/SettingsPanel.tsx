@@ -377,6 +377,12 @@ export function SettingsPanel() {
                   disabled={!settings.runOnStartup}
                 />
               </SettingRow>
+              <SettingRow label="Run as Administrator" tooltip="Relaunch with admin privileges on startup. Required to record clicks on elevated apps.">
+                <Toggle
+                  isOn={settings.runAsAdmin ?? false}
+                  onChange={(v) => changeSetting('runAsAdmin', v)}
+                />
+              </SettingRow>
             </Section>
 
             {/* Updates */}

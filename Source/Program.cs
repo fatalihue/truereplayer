@@ -1,10 +1,13 @@
 using System;
+using System.Diagnostics;
 using System.IO;
+using System.Security.Principal;
 using System.Threading;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.Win32;
 using Velopack;
+using TrueReplayer.Services;
 
 namespace TrueReplayer
 {
@@ -21,6 +24,26 @@ namespace TrueReplayer
             // Auto-update is handled in-app with a visual overlay (UpdateOverlay.tsx)
             // after the UI loads, via WebViewBridge → UpdateService.
 
+            // Self-elevate if RunAsAdmin setting is enabled and not already elevated
+            if (ShouldElevate())
+            {
+                try
+                {
+                    var exe = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
+                    if (exe != null)
+                    {
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = exe,
+                            UseShellExecute = true,
+                            Verb = "runas"
+                        });
+                    }
+                }
+                catch { /* User declined UAC — continue without admin */ }
+                return;
+            }
+
             // Register Native Messaging Host for Chrome Extension
             RegisterNativeMessagingHost();
 
@@ -33,6 +56,17 @@ namespace TrueReplayer
                 new App();
             });
         }
+
+        private static bool ShouldElevate()
+        {
+            var settings = AppSettingsManager.Load();
+            if (!settings.RunAsAdmin) return false;
+
+            using var identity = WindowsIdentity.GetCurrent();
+            var principal = new WindowsPrincipal(identity);
+            return !principal.IsInRole(WindowsBuiltInRole.Administrator);
+        }
+
         private static void RegisterNativeMessagingHost()
         {
             try

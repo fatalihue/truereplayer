@@ -34,6 +34,7 @@ namespace TrueReplayer.Services
             public string ForegroundHotkey { get; set; } = "Ctrl+Insert";
             public bool ProfileKeyEnabled { get; set; } = true;
             public bool BrowserSelectorEnabled { get; set; } = false;
+            public bool RunAsAdmin { get; set; } = false;
         }
 
         public static void Save(AppSettings settings)
