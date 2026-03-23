@@ -256,7 +256,8 @@ namespace TrueReplayer
                 var tail = bufferSpan.Slice(_hotstringBufferLen - seq.Length);
                 if (tail.SequenceEqual(seq.AsSpan()))
                 {
-                    if (seq.Length > bestLen)
+                    // Prefer the longest match that also matches the foreground window
+                    if (seq.Length >= bestLen && IsForegroundWindowMatch(profileName))
                     {
                         bestLen = seq.Length;
                         bestMatch = profileName;
@@ -347,11 +348,19 @@ namespace TrueReplayer
                     parts.Add(scrollKey);
                     string combo = string.Join("+", parts);
 
-                    var profileName = ProfileHotkeys.FirstOrDefault(p => p.Value == combo).Key;
-                    if (profileName != null && IsForegroundWindowMatch(profileName))
+                    string? matchedProfile = null;
+                    foreach (var p in ProfileHotkeys)
+                    {
+                        if (p.Value == combo && IsForegroundWindowMatch(p.Key))
+                        {
+                            matchedProfile = p.Key;
+                            break;
+                        }
+                    }
+                    if (matchedProfile != null)
                     {
                         LastTriggerHotkey = combo;
-                        OnHotkeyPressed?.Invoke($"PROFILE::{profileName}");
+                        OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
                         return (IntPtr)1;
                     }
                 }
@@ -478,15 +487,24 @@ namespace TrueReplayer
 
                     if (!IsReplayingAction && UserProfile.Current.ProfileKeyEnabled && isProfileKey && MainController.Instance != null && !MainController.Instance.IsRecording())
                     {
-                        var profileName = ProfileHotkeys.FirstOrDefault(p => p.Value == key).Key;
+                        // Find the first profile with this hotkey that matches the foreground window
+                        string? matchedProfile = null;
+                        foreach (var p in ProfileHotkeys)
+                        {
+                            if (p.Value == key && IsForegroundWindowMatch(p.Key))
+                            {
+                                matchedProfile = p.Key;
+                                break;
+                            }
+                        }
 
-                        if (profileName != null && !IsForegroundWindowMatch(profileName))
+                        if (matchedProfile == null)
                         {
                             return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
                         }
 
                         LastTriggerHotkey = key;
-                        OnHotkeyPressed?.Invoke($"PROFILE::{profileName}");
+                        OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
                         return (IntPtr)1;
                     }
 

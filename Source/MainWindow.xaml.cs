@@ -126,6 +126,9 @@ namespace TrueReplayer
 
             WebView.CoreWebView2.Settings.IsZoomControlEnabled = false;
 
+            // Block browser-like keys (F3=Find, F5=Refresh, F7=Caret, F12=DevTools)
+            WebView.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = false;
+
             WebView.CoreWebView2.WebMessageReceived += (s, e) =>
             {
                 bridge.HandleMessage(e.WebMessageAsJson);

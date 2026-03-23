@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Plus, Search, Pencil, Copy, Trash2, FolderOpen, Key, Crosshair, ArrowUpDown, Type, Ban, ChevronsLeft, ChevronsRight, Pin, PinOff, FolderPlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine } from 'lucide-react';
+import { Plus, Search, Pencil, Copy, Trash2, FolderOpen, Key, Keyboard, Crosshair, ArrowUpDown, Type, Ban, ChevronsLeft, ChevronsRight, Pin, PinOff, FolderPlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine } from 'lucide-react';
 import type { ProfileEntry } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -47,6 +47,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [folderDialogName, setFolderDialogName] = useState('');
   const [folderDialogColor, setFolderDialogColor] = useState('#60CDFF');
   const [showRenameFolderDialog, setShowRenameFolderDialog] = useState<string | null>(null);
+  const [showFolderTargetDialog, setShowFolderTargetDialog] = useState<string | null>(null);
+  const [folderTargetProcess, setFolderTargetProcess] = useState('');
+  const [folderTargetTitle, setFolderTargetTitle] = useState('');
+  const [folderTargetMatchMode, setFolderTargetMatchMode] = useState<'contains' | 'regex'>('contains');
   const [showMoveToFolderMenu, setShowMoveToFolderMenu] = useState<string | null>(null);
   const [folderContextMenu, setFolderContextMenu] = useState<{ x: number; y: number; folderName: string } | null>(null);
   const [showFolderColorPicker, setShowFolderColorPicker] = useState<string | null>(null);
@@ -178,7 +182,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   }, [showHotstringDialog]);
 
   // Suppress hotkeys while any dialog is open
-  const anyDialogOpen = showCreateDialog || showRenameDialog !== null || showDeleteConfirm !== null || showHotkeyDialog !== null || showHotstringDialog !== null || showWindowTargetDialog !== null || showExportDialog || showCreateFolderDialog || showRenameFolderDialog !== null;
+  const anyDialogOpen = showCreateDialog || showRenameDialog !== null || showDeleteConfirm !== null || showHotkeyDialog !== null || showHotstringDialog !== null || showWindowTargetDialog !== null || showExportDialog || showCreateFolderDialog || showRenameFolderDialog !== null || showFolderTargetDialog !== null;
   useEffect(() => {
     if (anyDialogOpen) {
       send({ type: 'ui:modalOpen', payload: {} });
@@ -415,7 +419,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   // Subscribe to window target detection result and auto-close on success
   useEffect(() => {
-    if (!showWindowTargetDialog) return;
+    if (!showWindowTargetDialog && !showFolderTargetDialog) return;
     return subscribe((msg) => {
       if (msg.type === 'profiles:updated') {
         setShowWindowTargetDialog(null);
@@ -423,8 +427,13 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       }
       if (msg.type === 'windowTarget:detected') {
         const p = msg.payload as { processName: string; windowTitle: string };
-        setTargetProcessName(p.processName);
-        setTargetWindowTitle(p.windowTitle);
+        if (showFolderTargetDialog) {
+          setFolderTargetProcess(p.processName);
+          setFolderTargetTitle(p.windowTitle);
+        } else {
+          setTargetProcessName(p.processName);
+          setTargetWindowTitle(p.windowTitle);
+        }
         setIsDetecting(false);
       }
       if (msg.type === 'windowTarget:detectState') {
@@ -432,7 +441,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         setIsDetecting(p.detecting);
       }
     });
-  }, [showWindowTargetDialog, subscribe]);
+  }, [showWindowTargetDialog, showFolderTargetDialog, subscribe]);
 
   const confirmCreate = () => {
     const name = dialogValue.trim();
@@ -867,14 +876,18 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       <div
                         className="w-full flex items-center gap-1.5 px-2 py-1.5 mt-1 rounded text-left hover:bg-bg-card transition-colors group cursor-default select-none"
                         onMouseDown={(e) => handleFolderMouseDown(e, folder.name)}
-                        onClick={() => { if (!folderDragActive.current) handleToggleFolderCollapse(folder.name); }}
                         onContextMenu={(e) => handleFolderContextMenu(e, folder.name)}
                       >
-                        <span style={{ color: folder.color }} className="shrink-0">
+                        <span
+                          style={{ color: folder.color }}
+                          className="shrink-0 cursor-pointer hover:opacity-70"
+                          onClick={(e) => { e.stopPropagation(); if (!folderDragActive.current) handleToggleFolderCollapse(folder.name); }}
+                        >
                           {folder.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
                         </span>
                         <FolderOpen size={12} style={{ color: folder.color }} className="shrink-0" />
                         <span className="text-xs font-medium text-text-secondary flex-1 truncate">{folder.name}</span>
+                        {folder.hasWindowTarget && <Crosshair size={10} className="text-text-tertiary shrink-0" title={folder.windowTargetProcessName || folder.windowTargetWindowTitle || 'Window Target'} />}
                         <span className="text-[10px] text-text-disabled">{folder.items.length}</span>
                       </div>
                       {!folder.collapsed && hasVisibleProfiles && (
@@ -1019,7 +1032,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             onClick={() => handleAssignHotkey(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
-            <Key size={13} className="text-text-tertiary" />
+            <Keyboard size={13} className="text-text-tertiary" />
             {profile?.hotkey ? 'Change Hotkey' : 'Assign Hotkey'}
           </button>
           <button
@@ -1091,6 +1104,33 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               </div>
             )}
           </div>
+          <div className="my-1 border-t border-border-subtle" />
+          <button
+            onClick={() => {
+              const folder = (profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName);
+              setFolderTargetProcess(folder?.windowTargetProcessName || '');
+              setFolderTargetTitle(folder?.windowTargetWindowTitle || '');
+              setFolderTargetMatchMode((folder?.windowTargetTitleMatchMode as 'contains' | 'regex') || 'contains');
+              setShowFolderTargetDialog(folderContextMenu.folderName);
+              setFolderContextMenu(null);
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Crosshair size={13} className="text-text-tertiary" />
+            {(profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName)?.hasWindowTarget ? 'Edit Window Target' : 'Set Window Target'}
+          </button>
+          {(profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName)?.hasWindowTarget && (
+            <button
+              onClick={() => {
+                send({ type: 'profile:removeFolderWindowTarget', payload: { folderName: folderContextMenu.folderName } });
+                setFolderContextMenu(null);
+              }}
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-recording hover:bg-bg-elevated transition-colors"
+            >
+              <Ban size={13} />
+              Remove Window Target
+            </button>
+          )}
           <div className="my-1 border-t border-border-subtle" />
           <button
             onClick={() => handleDeleteFolder(folderContextMenu.folderName)}
@@ -1553,6 +1593,113 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 >
                   Set Target
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Folder Window Target Dialog */}
+      {showFolderTargetDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-[380px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
+            <h3 className="text-sm font-semibold text-text-primary mb-3">Set Folder Target</h3>
+            <p className="text-xs text-text-secondary mb-4">
+              All profiles in <span className="text-text-primary font-medium">'{showFolderTargetDialog}'</span> will only fire when the target window is in focus. Profiles with their own target override this.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-text-tertiary mb-1">Process Name</label>
+                <input
+                  type="text"
+                  value={folderTargetProcess}
+                  onChange={(e) => setFolderTargetProcess(e.target.value)}
+                  placeholder="e.g. chrome.exe"
+                  className="w-full h-8 px-3 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-text-tertiary mb-1">
+                  Window Title {folderTargetMatchMode === 'contains' ? '(partial match)' : '(regex)'}
+                </label>
+                <input
+                  type="text"
+                  value={folderTargetTitle}
+                  onChange={(e) => setFolderTargetTitle(e.target.value)}
+                  placeholder={folderTargetMatchMode === 'contains' ? 'e.g. Chrome' : 'e.g. (Chrome|Firefox)'}
+                  className="w-full h-8 px-3 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                />
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <button
+                    onClick={() => setFolderTargetMatchMode('contains')}
+                    className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
+                      folderTargetMatchMode === 'contains'
+                        ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
+                        : 'bg-transparent border-border-default text-text-tertiary hover:text-text-secondary'
+                    }`}
+                  >Contains</button>
+                  <button
+                    onClick={() => setFolderTargetMatchMode('regex')}
+                    className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
+                      folderTargetMatchMode === 'regex'
+                        ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
+                        : 'bg-transparent border-border-default text-text-tertiary hover:text-text-secondary'
+                    }`}
+                  >Regex</button>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={handleDetectWindow}
+              className={`mt-3 w-full h-8 text-xs border rounded transition-colors ${
+                isDetecting
+                  ? 'text-recording border-recording/40 bg-recording/10 hover:bg-recording/20'
+                  : 'text-accent border-accent-solid/40 hover:bg-accent-solid/10'
+              }`}
+            >
+              {isDetecting
+                ? 'Waiting for click... (click target window)'
+                : 'Detect Window (click on target)'}
+            </button>
+
+            <div className="flex items-center mt-4">
+              {(profileOrder?.folders ?? []).find(f => f.name === showFolderTargetDialog)?.hasWindowTarget && (
+                <button
+                  onClick={() => {
+                    if (isDetecting) send({ type: 'profile:detectWindow', payload: {} });
+                    send({ type: 'profile:removeFolderWindowTarget', payload: { folderName: showFolderTargetDialog! } });
+                    setShowFolderTargetDialog(null);
+                    setIsDetecting(false);
+                  }}
+                  className="px-4 py-1.5 text-xs text-recording hover:text-recording/80 bg-bg-elevated rounded transition-colors"
+                >Remove</button>
+              )}
+              <div className="flex-1" />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { if (isDetecting) send({ type: 'profile:detectWindow', payload: {} }); setShowFolderTargetDialog(null); setIsDetecting(false); }}
+                  className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
+                >Cancel</button>
+                <button
+                  onClick={() => {
+                    if (isDetecting) send({ type: 'profile:detectWindow', payload: {} });
+                    send({
+                      type: 'profile:setFolderWindowTarget',
+                      payload: {
+                        folderName: showFolderTargetDialog!,
+                        processName: folderTargetProcess.trim(),
+                        windowTitle: folderTargetTitle.trim(),
+                        titleMatchMode: folderTargetMatchMode,
+                      }
+                    });
+                    setShowFolderTargetDialog(null);
+                    setIsDetecting(false);
+                  }}
+                  disabled={!folderTargetProcess.trim() && !folderTargetTitle.trim()}
+                  className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
+                >Set Target</button>
               </div>
             </div>
           </div>

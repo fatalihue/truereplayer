@@ -202,6 +202,8 @@ namespace TrueReplayer
                     case "profile:removeHotstring": HandleProfileRemoveHotstring(payload); break;
                     case "profile:setWindowTarget": HandleProfileSetWindowTarget(payload); break;
                     case "profile:removeWindowTarget": HandleProfileRemoveWindowTarget(payload); break;
+                    case "profile:setFolderWindowTarget": HandleSetFolderWindowTarget(payload); break;
+                    case "profile:removeFolderWindowTarget": HandleRemoveFolderWindowTarget(payload); break;
                     case "profile:detectWindow": HandleProfileDetectWindow(); break;
                     case "profile:openFolder": HandleProfileOpenFolder(payload); break;
                     case "profile:pin": HandleProfilePin(payload); break;
@@ -313,7 +315,11 @@ namespace TrueReplayer
                     name = f.Name,
                     color = f.Color,
                     collapsed = f.Collapsed,
-                    items = f.Items
+                    items = f.Items,
+                    hasWindowTarget = f.TargetWindow != null,
+                    windowTargetProcessName = f.TargetWindow?.ProcessName,
+                    windowTargetWindowTitle = f.TargetWindow?.WindowTitle,
+                    windowTargetTitleMatchMode = f.TargetWindow?.TitleMatchMode ?? "contains"
                 }).ToArray(),
                 ungroupedOrder = order.UngroupedOrder
             };
@@ -473,7 +479,11 @@ namespace TrueReplayer
                         name = f.Name,
                         color = f.Color,
                         collapsed = f.Collapsed,
-                        items = f.Items
+                        items = f.Items,
+                        hasWindowTarget = f.TargetWindow != null,
+                        windowTargetProcessName = f.TargetWindow?.ProcessName,
+                        windowTargetWindowTitle = f.TargetWindow?.WindowTitle,
+                        windowTargetTitleMatchMode = f.TargetWindow?.TitleMatchMode ?? "contains"
                     }).ToArray(),
                     ungroupedOrder = profileController.GetProfileOrder().UngroupedOrder
                 },
@@ -1277,7 +1287,8 @@ namespace TrueReplayer
             string hotkey = payload.GetProperty("hotkey").GetString() ?? "";
             if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(hotkey)) return;
 
-            var conflict = GetHotkeyConflict(hotkey, excludeSettingKey: null, excludeProfileName: name);
+            var effectiveTarget = profileController.GetEffectiveWindowTarget(name);
+            var conflict = GetHotkeyConflict(hotkey, excludeSettingKey: null, excludeProfileName: name, effectiveTarget: effectiveTarget);
             if (conflict != null)
             {
                 SendMessage("alert:show", new { message = $"\"{hotkey}\" is already used by {conflict}." });
@@ -1328,7 +1339,8 @@ namespace TrueReplayer
                 return;
             }
 
-            var conflict = GetHotstringConflict(sequence, excludeProfileName: name);
+            var effectiveTarget = profileController.GetEffectiveWindowTarget(name);
+            var conflict = GetHotstringConflict(sequence, excludeProfileName: name, effectiveTarget: effectiveTarget);
             if (conflict != null)
             {
                 SendMessage("alert:show", new { message = $"Hotstring \"{sequence}\" is already used by {conflict}." });
@@ -1364,14 +1376,17 @@ namespace TrueReplayer
             }
         }
 
-        private string? GetHotstringConflict(string sequence, string? excludeProfileName)
+        private string? GetHotstringConflict(string sequence, string? excludeProfileName, WindowTarget? effectiveTarget = null)
         {
             if (string.IsNullOrEmpty(sequence)) return null;
 
             foreach (var entry in profileController.ProfileEntries)
             {
                 if (entry.Name == excludeProfileName) continue;
-                if (string.Equals(entry.Hotstring, sequence, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(entry.Hotstring, sequence, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var otherTarget = profileController.GetEffectiveWindowTarget(entry.Name);
+                if (EffectiveTargetsOverlap(effectiveTarget, otherTarget))
                     return $"Profile \"{entry.Name}\"";
             }
 
@@ -1428,6 +1443,35 @@ namespace TrueReplayer
             string name = payload.GetProperty("name").GetString() ?? "";
             if (string.IsNullOrEmpty(name)) return;
 
+            // After removing, effective target becomes folder target or null (global)
+            var folder = profileController.GetProfileOrder().Folders.FirstOrDefault(f => f.Items.Contains(name));
+            WindowTarget? newEffectiveTarget = folder?.TargetWindow;
+            if (newEffectiveTarget != null && string.IsNullOrEmpty(newEffectiveTarget.ProcessName) && string.IsNullOrEmpty(newEffectiveTarget.WindowTitle))
+                newEffectiveTarget = null;
+
+            var entry = profileController.ProfileEntries.FirstOrDefault(e => e.Name == name);
+            if (entry != null)
+            {
+                if (!string.IsNullOrEmpty(entry.Hotkey))
+                {
+                    var conflict = GetHotkeyConflict(entry.Hotkey, excludeSettingKey: null, excludeProfileName: name, effectiveTarget: newEffectiveTarget);
+                    if (conflict != null)
+                    {
+                        SendMessage("alert:show", new { message = $"Cannot remove target: hotkey \"{entry.Hotkey}\" would conflict with {conflict}." });
+                        return;
+                    }
+                }
+                if (!string.IsNullOrEmpty(entry.Hotstring))
+                {
+                    var conflict = GetHotstringConflict(entry.Hotstring, excludeProfileName: name, effectiveTarget: newEffectiveTarget);
+                    if (conflict != null)
+                    {
+                        SendMessage("alert:show", new { message = $"Cannot remove target: hotstring \"{entry.Hotstring}\" would conflict with {conflict}." });
+                        return;
+                    }
+                }
+            }
+
             var profile = await profileController.LoadProfileByNameAsync(name);
             if (profile != null)
             {
@@ -1437,6 +1481,82 @@ namespace TrueReplayer
                 InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
                 PushProfilesUpdate();
             }
+        }
+
+        private async void HandleSetFolderWindowTarget(JsonElement payload)
+        {
+            string folderName = payload.GetProperty("folderName").GetString() ?? "";
+            string processName = payload.GetProperty("processName").GetString() ?? "";
+            string windowTitle = payload.GetProperty("windowTitle").GetString() ?? "";
+            string titleMatchMode = payload.TryGetProperty("titleMatchMode", out var tm)
+                ? tm.GetString() ?? "contains" : "contains";
+
+            if (string.IsNullOrEmpty(folderName)) return;
+
+            if (string.IsNullOrWhiteSpace(processName) && string.IsNullOrWhiteSpace(windowTitle))
+            {
+                SendMessage("alert:show", new { message = "Please specify at least a process name or window title." });
+                return;
+            }
+
+            if (titleMatchMode == "regex" && !string.IsNullOrWhiteSpace(windowTitle))
+            {
+                try { _ = new System.Text.RegularExpressions.Regex(windowTitle.Trim()); }
+                catch { SendMessage("alert:show", new { message = "Invalid regex pattern." }); return; }
+            }
+
+            await profileController.SetFolderWindowTargetAsync(folderName, new WindowTarget
+            {
+                ProcessName = string.IsNullOrWhiteSpace(processName) ? null : processName.Trim(),
+                WindowTitle = string.IsNullOrWhiteSpace(windowTitle) ? null : windowTitle.Trim(),
+                TitleMatchMode = titleMatchMode
+            });
+            InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
+            PushProfilesUpdate();
+        }
+
+        private async void HandleRemoveFolderWindowTarget(JsonElement payload)
+        {
+            string folderName = payload.GetProperty("folderName").GetString() ?? "";
+            if (string.IsNullOrEmpty(folderName)) return;
+
+            // Check all profiles in this folder — removing folder target makes them global (if no own target)
+            var folder = profileController.GetProfileOrder().Folders.FirstOrDefault(f => f.Name == folderName);
+            if (folder != null)
+            {
+                foreach (var profileName in folder.Items)
+                {
+                    // Skip profiles that have their own target (they won't be affected)
+                    var ownTarget = profileController.ProfileEntries.FirstOrDefault(e => e.Name == profileName);
+                    if (ownTarget?.HasWindowTarget == true) continue;
+
+                    var entry = profileController.ProfileEntries.FirstOrDefault(e => e.Name == profileName);
+                    if (entry == null) continue;
+
+                    if (!string.IsNullOrEmpty(entry.Hotkey))
+                    {
+                        var conflict = GetHotkeyConflict(entry.Hotkey, excludeSettingKey: null, excludeProfileName: profileName, effectiveTarget: null);
+                        if (conflict != null)
+                        {
+                            SendMessage("alert:show", new { message = $"Cannot remove folder target: hotkey \"{entry.Hotkey}\" on \"{profileName}\" would conflict with {conflict}." });
+                            return;
+                        }
+                    }
+                    if (!string.IsNullOrEmpty(entry.Hotstring))
+                    {
+                        var conflict = GetHotstringConflict(entry.Hotstring, excludeProfileName: profileName, effectiveTarget: null);
+                        if (conflict != null)
+                        {
+                            SendMessage("alert:show", new { message = $"Cannot remove folder target: hotstring \"{entry.Hotstring}\" on \"{profileName}\" would conflict with {conflict}." });
+                            return;
+                        }
+                    }
+                }
+            }
+
+            await profileController.RemoveFolderWindowTargetAsync(folderName);
+            InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
+            PushProfilesUpdate();
         }
 
         // Window detection state
@@ -1605,6 +1725,7 @@ namespace TrueReplayer
             string name = payload.GetProperty("name").GetString() ?? "";
             if (string.IsNullOrEmpty(name)) return;
             await profileController.DeleteFolderAsync(name);
+            InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
             PushProfilesUpdate();
         }
 
@@ -1633,6 +1754,7 @@ namespace TrueReplayer
                 : null;
             if (string.IsNullOrEmpty(profileName)) return;
             await profileController.MoveToFolderAsync(profileName, folderName);
+            InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
             PushProfilesUpdate();
         }
 
@@ -1863,10 +1985,24 @@ namespace TrueReplayer
             ["foregroundHotkey"] = "Foreground",
         };
 
-        private string? GetHotkeyConflict(string hotkey, string? excludeSettingKey, string? excludeProfileName = null)
+        private static bool EffectiveTargetsOverlap(WindowTarget? a, WindowTarget? b)
+        {
+            if (a == null && b == null) return true;     // both global
+            if (a == null || b == null) return true;     // one global = overlaps everything
+
+            bool sameProcess = string.Equals(
+                a.ProcessName ?? "", b.ProcessName ?? "", StringComparison.OrdinalIgnoreCase);
+            bool sameTitle = string.Equals(
+                a.WindowTitle ?? "", b.WindowTitle ?? "", StringComparison.OrdinalIgnoreCase);
+
+            return sameProcess && sameTitle;
+        }
+
+        private string? GetHotkeyConflict(string hotkey, string? excludeSettingKey, string? excludeProfileName = null, WindowTarget? effectiveTarget = null)
         {
             if (string.IsNullOrEmpty(hotkey)) return null;
 
+            // Global hotkeys always conflict (they have no window target)
             var globalHotkeys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["recordingHotkey"] = UserProfile.Current.RecordingHotkey,
@@ -1885,7 +2021,10 @@ namespace TrueReplayer
             foreach (var entry in profileController.ProfileEntries)
             {
                 if (entry.Name == excludeProfileName) continue;
-                if (string.Equals(entry.Hotkey, hotkey, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(entry.Hotkey, hotkey, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var otherTarget = profileController.GetEffectiveWindowTarget(entry.Name);
+                if (EffectiveTargetsOverlap(effectiveTarget, otherTarget))
                     return $"Profile \"{entry.Name}\"";
             }
 

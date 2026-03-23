@@ -288,13 +288,13 @@ namespace TrueReplayer.Controllers
                 }
             }
 
+            await LoadProfileOrderAsync();
+
             var map = GetProfileHotkeys();
             InputHookManager.RegisterProfileHotkeys(map);
-            InputHookManager.RegisterProfileWindowTargets(_cachedWindowTargets);
+            InputHookManager.RegisterProfileWindowTargets(GetProfileWindowTargets());
             var hotstringMap = GetProfileHotstrings();
             InputHookManager.RegisterProfileHotstrings(hotstringMap);
-
-            await LoadProfileOrderAsync();
         }
 
         public async Task RefreshProfileListAsync(bool suppressWatcher = false)
@@ -479,7 +479,54 @@ namespace TrueReplayer.Controllers
 
         public Dictionary<string, WindowTarget> GetProfileWindowTargets()
         {
-            return new Dictionary<string, WindowTarget>(_cachedWindowTargets);
+            var effective = new Dictionary<string, WindowTarget>(_cachedWindowTargets);
+
+            // Add folder-inherited targets for profiles without their own target
+            foreach (var entry in ProfileEntries)
+            {
+                if (effective.ContainsKey(entry.Name)) continue;
+                var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(entry.Name));
+                if (folder?.TargetWindow != null &&
+                    (!string.IsNullOrEmpty(folder.TargetWindow.ProcessName) || !string.IsNullOrEmpty(folder.TargetWindow.WindowTitle)))
+                {
+                    effective[entry.Name] = folder.TargetWindow;
+                }
+            }
+
+            return effective;
+        }
+
+        public WindowTarget? GetEffectiveWindowTarget(string profileName)
+        {
+            if (_cachedWindowTargets.TryGetValue(profileName, out var profileTarget))
+                return profileTarget;
+
+            var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(profileName));
+            if (folder?.TargetWindow != null &&
+                (!string.IsNullOrEmpty(folder.TargetWindow.ProcessName) || !string.IsNullOrEmpty(folder.TargetWindow.WindowTitle)))
+                return folder.TargetWindow;
+
+            return null;
+        }
+
+        public async Task SetFolderWindowTargetAsync(string folderName, WindowTarget target)
+        {
+            var folder = _profileOrder.Folders.FirstOrDefault(f => f.Name == folderName);
+            if (folder != null)
+            {
+                folder.TargetWindow = target;
+                await SaveProfileOrderAsync();
+            }
+        }
+
+        public async Task RemoveFolderWindowTargetAsync(string folderName)
+        {
+            var folder = _profileOrder.Folders.FirstOrDefault(f => f.Name == folderName);
+            if (folder != null)
+            {
+                folder.TargetWindow = null;
+                await SaveProfileOrderAsync();
+            }
         }
 
         #endregion

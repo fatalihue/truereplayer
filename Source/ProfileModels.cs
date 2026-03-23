@@ -140,6 +140,7 @@ namespace TrueReplayer.Models
         public string Color { get; set; } = "#60CDFF";
         public bool Collapsed { get; set; } = false;
         public List<string> Items { get; set; } = new();
+        public WindowTarget? TargetWindow { get; set; }
     }
 
     public class ProfileOrderData

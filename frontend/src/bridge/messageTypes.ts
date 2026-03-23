@@ -37,6 +37,10 @@ export interface ProfileFolder {
   color: string;
   collapsed: boolean;
   items: string[];
+  hasWindowTarget?: boolean;
+  windowTargetProcessName?: string;
+  windowTargetWindowTitle?: string;
+  windowTargetTitleMatchMode?: string;
 }
 
 export interface ProfileOrderData {
@@ -144,6 +148,8 @@ export type OutgoingMessage =
   | { type: 'profile:removeHotstring'; payload: { name: string } }
   | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string } }
   | { type: 'profile:removeWindowTarget'; payload: { name: string } }
+  | { type: 'profile:setFolderWindowTarget'; payload: { folderName: string; processName: string; windowTitle: string; titleMatchMode: string } }
+  | { type: 'profile:removeFolderWindowTarget'; payload: { folderName: string } }
   | { type: 'profile:detectWindow'; payload: Record<string, never> }
   | { type: 'profile:openFolder'; payload: { name: string } }
   | { type: 'profile:pin'; payload: { name: string } }

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Search, Circle, Play, Square, Type, Save, FolderOpen, RotateCcw, Plus,
-  Copy, Trash2, PinOff, Pin, ArrowUpDown,
+  Copy, Trash2, PinOff, Pin, ArrowUpDown, MonitorDown, Shield, Minimize2,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -154,6 +154,30 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
               ? <PinOff size={14} className="text-text-secondary" />
               : <Pin size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'window:alwaysOnTop', payload: { enabled: !settings.alwaysOnTop } }); onClose(); },
+          },
+          {
+            id: 'systemtray',
+            label: settings.minimizeToTray ? 'Disable System Tray' : 'Enable System Tray',
+            icon: <Minimize2 size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'window:minimizeToTray', payload: { enabled: !settings.minimizeToTray } }); onClose(); },
+          },
+          {
+            id: 'runonstartup',
+            label: settings.runOnStartup ? 'Disable Run on Startup' : 'Enable Run on Startup',
+            icon: <MonitorDown size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'window:runOnStartup', payload: { enabled: !settings.runOnStartup } }); onClose(); },
+          },
+          {
+            id: 'startminimized',
+            label: settings.startMinimized ? 'Disable Start Minimized' : 'Enable Start Minimized',
+            icon: <Minimize2 size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'window:startMinimized', payload: { enabled: !settings.startMinimized } }); onClose(); },
+          },
+          {
+            id: 'runasadmin',
+            label: settings.runAsAdmin ? 'Disable Run as Administrator' : 'Enable Run as Administrator',
+            icon: <Shield size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'settings:change', payload: { key: 'runAsAdmin', value: !settings.runAsAdmin } }); onClose(); },
           },
         ],
       },

@@ -180,6 +180,7 @@ namespace TrueReplayer.Services
             bool isMinimizeToTray = UserProfile.Current.MinimizeToTray;
             bool isStartup = IsRunOnStartup();
             bool isStartMinimized = UserProfile.Current.StartMinimized;
+            bool isRunAsAdmin = AppSettingsManager.Load().RunAsAdmin;
 
             IntPtr hMenu = CreatePopupMenu();
             AppendMenu(hMenu, MF_STRING, 1, "Restore");
@@ -188,6 +189,7 @@ namespace TrueReplayer.Services
             AppendMenu(hMenu, MF_STRING | (isMinimizeToTray ? MF_CHECKED : 0), 6, "System Tray");
             AppendMenu(hMenu, MF_STRING | (isStartup ? MF_CHECKED : 0), 3, "Run on Startup");
             AppendMenu(hMenu, MF_STRING | (isStartMinimized ? MF_CHECKED : 0), 4, "Startup Minimized");
+            AppendMenu(hMenu, MF_STRING | (isRunAsAdmin ? MF_CHECKED : 0), 7, "Run as Administrator");
             AppendMenu(hMenu, MF_SEPARATOR, 0, null);
             AppendMenu(hMenu, MF_STRING, 2, "Exit");
 
@@ -224,6 +226,13 @@ namespace TrueReplayer.Services
                 UserProfile.Current.StartMinimized = !isStartMinimized;
                 var settings = AppSettingsManager.Load();
                 settings.StartMinimized = UserProfile.Current.StartMinimized;
+                AppSettingsManager.Save(settings);
+                OnTraySettingChanged?.Invoke();
+            }
+            else if (cmd == 7)
+            {
+                var settings = AppSettingsManager.Load();
+                settings.RunAsAdmin = !isRunAsAdmin;
                 AppSettingsManager.Save(settings);
                 OnTraySettingChanged?.Invoke();
             }
