@@ -19,7 +19,7 @@
 
 ---
 
-![Main Window](Image%20App/TrueReplayer1.png)
+![Main Window](Image%20App/TrueReplayerNew.png)
 
 ## Download
 
