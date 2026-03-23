@@ -22,7 +22,7 @@ const FOLDER_COLORS = [
 ];
 
 export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePanelProps) {
-  const { profiles, profileOrder } = useAppState();
+  const { profiles, profileOrder, activeProfile } = useAppState();
   const { send, subscribe } = useBridge();
   const [searchQuery, setSearchQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -728,23 +728,35 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         </span>
 
         {p.hasWindowTarget && (
-          <span title="Window target set">
-            <Crosshair size={11} className="shrink-0 text-text-tertiary" />
+          <span className="group/target shrink-0 relative" title="Window target set">
+            <Crosshair size={11} className="text-text-tertiary" />
+            <button
+              onClick={(e) => { e.stopPropagation(); handleRemoveWindowTarget(p.name); }}
+              className="hidden group-hover/target:inline-flex absolute top-0 right-0 w-full h-full items-center justify-center rounded-full bg-recording text-white text-[7px] font-bold leading-none hover:bg-red-500"
+            >✕</button>
           </span>
         )}
 
         {p.hotkey && (
-          <span className="shrink-0">
+          <span className="group/hotkey shrink-0 relative">
             <KbdTag combo={p.hotkey} />
+            <button
+              onClick={(e) => { e.stopPropagation(); handleRemoveHotkey(p.name); }}
+              className="hidden group-hover/hotkey:inline-flex absolute top-0 right-0 bottom-0 w-4 items-center justify-center rounded-r bg-recording/80 text-white text-[7px] font-bold leading-none hover:bg-recording"
+            >✕</button>
           </span>
         )}
 
         {p.hotstring && (
           <span
-            className="shrink-0 px-1.5 py-0.5 rounded text-[11px] font-mono bg-hotkey-bg border border-hotkey-border text-accent-hover"
+            className="group/hotstring shrink-0 relative px-1.5 py-0.5 rounded text-[11px] font-mono bg-hotkey-bg border border-hotkey-border text-accent-hover"
             title={p.hotstringInstant ? 'Hotstring (instant)' : 'Hotstring (terminator)'}
           >
             {p.hotstringInstant ? '\u26A1' : '\u21B5'}{p.hotstring}
+            <button
+              onClick={(e) => { e.stopPropagation(); handleRemoveHotstring(p.name); }}
+              className="hidden group-hover/hotstring:inline-flex absolute top-0 right-0 bottom-0 w-4 items-center justify-center rounded-r bg-recording/80 text-white text-[7px] font-bold leading-none hover:bg-recording"
+            >✕</button>
           </span>
         )}
     </div>
@@ -799,6 +811,22 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               title="Collapse sidebar"
             >
               <ChevronsLeft size={14} />
+            </button>
+            <button
+              onClick={() => activeProfile && handleOpenFolder(activeProfile)}
+              disabled={!activeProfile}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Open Folder"
+            >
+              <FolderOpen size={14} />
+            </button>
+            <button
+              onClick={() => activeProfile && handleDuplicate(activeProfile)}
+              disabled={!activeProfile}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Duplicate Profile"
+            >
+              <Copy size={14} />
             </button>
             <button
               onClick={handleCreateFolder}
@@ -1013,20 +1041,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             <Pencil size={13} className="text-text-tertiary" />
             Rename
           </button>
-          <button
-            onClick={() => handleDuplicate(contextMenu.profileName)}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-          >
-            <Copy size={13} className="text-text-tertiary" />
-            Duplicate
-          </button>
-          <button
-            onClick={() => handleOpenFolder(contextMenu.profileName)}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-          >
-            <FolderOpen size={13} className="text-text-tertiary" />
-            Open Folder
-          </button>
           <div className="my-1 border-t border-border-subtle" />
           <button
             onClick={() => handleAssignHotkey(contextMenu.profileName)}
@@ -1208,7 +1222,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
       {/* Delete Confirm Dialog */}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onKeyDown={(e) => { if (e.key === 'Enter') confirmDelete(); else if (e.key === 'Escape') setShowDeleteConfirm(null); }}>
           <div className="w-[340px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
             <h3 className="text-sm font-semibold text-text-primary mb-3">Delete Profile</h3>
             <p className="text-sm text-text-secondary">
@@ -1222,6 +1236,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 Cancel
               </button>
               <button
+                autoFocus
                 onClick={confirmDelete}
                 className="px-4 py-1.5 text-xs text-white bg-recording hover:bg-recording/80 rounded transition-colors"
               >
