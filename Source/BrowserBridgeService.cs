@@ -2,6 +2,8 @@ using System;
 using System.Collections.Concurrent;
 using System.IO;
 using System.IO.Pipes;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -39,7 +41,15 @@ namespace TrueReplayer.Services
                 try
                 {
                     _pipeServer?.Dispose();
-                    _pipeServer = new NamedPipeServerStream(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                    // Allow non-elevated processes (e.g. NativeHost launched by Chrome) to connect
+                    // even when TrueReplayer runs as Administrator
+                    var pipeSecurity = new PipeSecurity();
+                    pipeSecurity.AddAccessRule(new PipeAccessRule(
+                        new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+                        PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
+                        AccessControlType.Allow));
+                    _pipeServer = NamedPipeServerStreamAcl.Create(PipeName, PipeDirection.InOut, 1,
+                        PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 0, 0, pipeSecurity);
 
                     await _pipeServer.WaitForConnectionAsync(token).ConfigureAwait(false);
 
