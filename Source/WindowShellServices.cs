@@ -370,7 +370,20 @@ namespace TrueReplayer.Services
 
         private async void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
         {
-            if (closingConfirmed || OnCloseRequested == null)
+            if (closingConfirmed)
+                return;
+
+            // When System Tray is enabled, close (X) minimizes to tray instead of exiting
+            if (((MainWindow)window).IsMinimizeToTrayEnabled())
+            {
+                args.Cancel = true;
+                TrayIconService.Initialize((MainWindow)window, hwnd);
+                TrayIconService.ShowMinimizeBalloon();
+                appWindow.Hide();
+                return;
+            }
+
+            if (OnCloseRequested == null)
                 return;
 
             args.Cancel = true;
@@ -423,16 +436,8 @@ namespace TrueReplayer.Services
             {
                 int command = wParam.ToInt32() & 0xFFF0;
 
-                if (command == SC_MINIMIZE && ((MainWindow)window).IsMinimizeToTrayEnabled())
-                {
-                    TrayIconService.Initialize((MainWindow)window, hwnd);
-                    TrayIconService.ShowMinimizeBalloon();
-
-                    var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
-                    AppWindow.GetFromWindowId(windowId).Hide();
-
-                    return IntPtr.Zero;
-                }
+                // SC_MINIMIZE: normal minimize (taskbar), not tray
+                // Tray is handled by OnAppWindowClosing (X button) when System Tray is enabled
             }
 
             return HwndHookManager.CallOriginalWndProc(hwnd, msg, wParam, lParam);

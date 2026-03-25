@@ -89,6 +89,13 @@ namespace TrueReplayer.Services
             profile.ProfileKeyToggleHotkey = s.ProfileKeyToggleHotkey;
             profile.ForegroundHotkey = s.ForegroundHotkey;
             profile.ProfileKeyEnabled = s.ProfileKeyEnabled;
+
+            // Sync Run on Startup registry key with saved setting
+            // On first install, setting defaults to true but registry key doesn't exist yet
+            if (s.RunOnStartup && !Services.TrayIconService.IsRunOnStartup())
+                Services.TrayIconService.SetRunOnStartup(true);
+            else if (!s.RunOnStartup && Services.TrayIconService.IsRunOnStartup())
+                Services.TrayIconService.SetRunOnStartup(false);
         }
 
         private static string GetPath()
