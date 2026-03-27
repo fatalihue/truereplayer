@@ -21,8 +21,22 @@ namespace TrueReplayer
             // invoked by the updater (e.g. --velopack-install).
             VelopackApp.Build().Run();
 
-            // Auto-update is handled in-app with a visual overlay (UpdateOverlay.tsx)
-            // after the UI loads, via WebViewBridge → UpdateService.
+            // Prevent multiple instances
+            using var mutex = new Mutex(true, "TrueReplayer_SingleInstance_Mutex", out bool createdNew);
+            if (!createdNew)
+            {
+                // Another instance is already running — bring it to focus and exit
+                var existing = Process.GetProcessesByName("TrueReplayer");
+                foreach (var proc in existing)
+                {
+                    if (proc.Id != Environment.ProcessId && proc.MainWindowHandle != IntPtr.Zero)
+                    {
+                        ShowWindow(proc.MainWindowHandle, 9); // SW_RESTORE
+                        SetForegroundWindow(proc.MainWindowHandle);
+                    }
+                }
+                return;
+            }
 
             // Self-elevate if RunAsAdmin setting is enabled and not already elevated
             if (ShouldElevate())
@@ -82,6 +96,12 @@ namespace TrueReplayer
             var principal = new WindowsPrincipal(identity);
             return !principal.IsInRole(WindowsBuiltInRole.Administrator);
         }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
 
         [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
         private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);

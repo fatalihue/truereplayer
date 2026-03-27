@@ -14,7 +14,7 @@ const defaultSettings = {
   recordScroll: true,
   recordKeyboard: true,
   profileKeyEnabled: true,
-  browserSelectorEnabled: false,
+  browserSelectorEnabled: true,
   recordingHotkey: 'Ctrl+PageUp',
   replayHotkey: 'Ctrl+PageDown',
   profileKeyToggleHotkey: 'Pause',

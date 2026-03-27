@@ -33,7 +33,7 @@ namespace TrueReplayer.Services
             public string ProfileKeyToggleHotkey { get; set; } = "Pause";
             public string ForegroundHotkey { get; set; } = "Ctrl+Insert";
             public bool ProfileKeyEnabled { get; set; } = true;
-            public bool BrowserSelectorEnabled { get; set; } = false;
+            public bool BrowserSelectorEnabled { get; set; } = true;
             public bool RunAsAdmin { get; set; } = false;
         }
 
