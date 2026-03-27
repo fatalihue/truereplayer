@@ -44,6 +44,22 @@ namespace TrueReplayer
                 return;
             }
 
+            // Check WebView2 Runtime before initializing UI
+            if (!IsWebView2Available())
+            {
+                NativeMessageBox(
+                    "TrueReplayer requires Microsoft Edge WebView2 Runtime.\n\n" +
+                    "Click OK to open the download page.\n" +
+                    "After installing, restart TrueReplayer.",
+                    "TrueReplayer — Missing Dependency");
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "https://developer.microsoft.com/en-us/microsoft-edge/webview2/",
+                    UseShellExecute = true
+                });
+                return;
+            }
+
             // Register Native Messaging Host for Chrome Extension
             RegisterNativeMessagingHost();
 
@@ -65,6 +81,28 @@ namespace TrueReplayer
             using var identity = WindowsIdentity.GetCurrent();
             var principal = new WindowsPrincipal(identity);
             return !principal.IsInRole(WindowsBuiltInRole.Administrator);
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+
+        private static void NativeMessageBox(string text, string caption)
+        {
+            // MB_OK | MB_ICONWARNING = 0x00000030
+            MessageBoxW(IntPtr.Zero, text, caption, 0x00000030);
+        }
+
+        private static bool IsWebView2Available()
+        {
+            try
+            {
+                var version = Microsoft.Web.WebView2.Core.CoreWebView2Environment.GetAvailableBrowserVersionString();
+                return !string.IsNullOrEmpty(version);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static void RegisterNativeMessagingHost()
