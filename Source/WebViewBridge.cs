@@ -1923,7 +1923,7 @@ namespace TrueReplayer
             RecordScroll = defaults.RecordScroll;
             RecordKeyboard = defaults.RecordKeyboard;
             ProfileKeyEnabled = defaults.ProfileKeyEnabled;
-            BrowserSelectorEnabled = false;
+            BrowserSelectorEnabled = defaults.BrowserSelectorEnabled;
 
             // Reset window settings
             UserProfile.Current.AlwaysOnTop = defaults.AlwaysOnTop;
