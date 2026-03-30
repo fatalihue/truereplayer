@@ -77,6 +77,23 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
     return () => document.removeEventListener('mousedown', handler);
   }, [showColDropdown, showAddActions, showBrowserMenu]);
 
+  // Ctrl+Z / Ctrl+Y keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') return;
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        send({ type: 'actions:undo', payload: {} });
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        send({ type: 'actions:redo', payload: {} });
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [send]);
+
   const toggleColumn = (key: keyof ColumnVisibility) => {
     onColumnVisibilityChange({ ...columnVisibility, [key]: !columnVisibility[key] });
   };
@@ -103,20 +120,22 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
 
         {/* Right: tools — prevent focus on click so Space/Enter can't re-trigger */}
         <div className="flex items-center gap-1" onMouseDown={(e) => e.preventDefault()}>
-          {/* Undo / Redo (placeholders) */}
+          {/* Undo / Redo */}
           <button
             tabIndex={-1}
-            disabled
-            className="p-1.5 rounded text-text-disabled cursor-not-allowed opacity-50"
-            title="Undo (coming soon)"
+            disabled={!buttonStates.canUndo}
+            onClick={() => send({ type: 'actions:undo', payload: {} })}
+            className={`p-1.5 rounded transition-colors ${buttonStates.canUndo ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled cursor-not-allowed opacity-50'}`}
+            title="Undo (Ctrl+Z)"
           >
             <Undo2 size={14} />
           </button>
           <button
             tabIndex={-1}
-            disabled
-            className="p-1.5 rounded text-text-disabled cursor-not-allowed opacity-50"
-            title="Redo (coming soon)"
+            disabled={!buttonStates.canRedo}
+            onClick={() => send({ type: 'actions:redo', payload: {} })}
+            className={`p-1.5 rounded transition-colors ${buttonStates.canRedo ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled cursor-not-allowed opacity-50'}`}
+            title="Redo (Ctrl+Y)"
           >
             <Redo2 size={14} />
           </button>

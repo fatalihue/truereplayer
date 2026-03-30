@@ -58,7 +58,7 @@ export default function App() {
             <TitleBar onOpenCommandPalette={handleOpenCommandPalette} />
 
             {/* Main Content: 3-column layout */}
-            <div className="flex-1 flex gap-1 p-2 min-h-0">
+            <div className="flex-1 flex gap-1 px-2 py-1 min-h-0">
               {/* Left: Profiles */}
               <ProfilePanel
                 collapsed={sidebarCollapsed}
@@ -66,7 +66,7 @@ export default function App() {
               />
 
               {/* Center: Toolbar + Table + Action Bar */}
-              <div className="flex-1 flex flex-col gap-1.5 min-w-0">
+              <div className="flex-1 flex flex-col gap-1 min-w-0">
                 <Toolbar
                   columnVisibility={columnVisibility}
                   onColumnVisibilityChange={setColumnVisibility}

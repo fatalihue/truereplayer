@@ -19,6 +19,8 @@ namespace TrueReplayer.Services
             // Execution
             public bool UseCustomDelay { get; set; } = true;
             public int CustomDelay { get; set; } = 100;
+            public bool UseDelayVariation { get; set; } = false;
+            public int DelayVariation { get; set; } = 20;
             public bool EnableLoop { get; set; } = false;
             public int LoopCount { get; set; } = 0;
             public bool LoopIntervalEnabled { get; set; } = false;

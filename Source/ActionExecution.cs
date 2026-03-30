@@ -129,15 +129,15 @@ namespace TrueReplayer.Services
             replayer.SetProfileNameProvider(getProfileName);
         }
 
-        public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText)
+        public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation = false, int delayVariationPercent = 20)
         {
             if (!IsReplaying && actions.Count > 0)
-                StartReplay(loopEnabled, loopCountText, intervalEnabled, intervalText);
+                StartReplay(loopEnabled, loopCountText, intervalEnabled, intervalText, useDelayVariation, delayVariationPercent);
             else if (IsReplaying)
                 StopReplay();
         }
 
-        private void StartReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText)
+        private void StartReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation, int delayVariationPercent)
         {
             IsReplaying = true;
             onButtonStateChanged?.Invoke("Stop", true);
@@ -145,6 +145,7 @@ namespace TrueReplayer.Services
             int loopCount = loopEnabled && int.TryParse(loopCountText, out int count) && count >= 0 ? count : 1;
             int loopInterval = intervalEnabled && int.TryParse(intervalText, out int interval) && interval >= 0 ? interval : 0;
             replayer.SetLoopOptions(loopCount, loopInterval);
+            replayer.SetDelayVariation(useDelayVariation, delayVariationPercent);
 
             onStatusChanged?.Invoke("replaying");
 
@@ -410,6 +411,15 @@ namespace TrueReplayer.Services
             _loopInterval = loopInterval >= 0 ? loopInterval : 0;
         }
 
+        private bool _useDelayVariation = false;
+        private int _delayVariationPercent = 20;
+
+        public void SetDelayVariation(bool enabled, int percent)
+        {
+            _useDelayVariation = enabled;
+            _delayVariationPercent = Math.Clamp(percent, 0, 50);
+        }
+
         public async Task StartAsync()
         {
             // Cancel any previous run and wait for it to finish before disposing
@@ -444,6 +454,12 @@ namespace TrueReplayer.Services
                             if (token.IsCancellationRequested) break;
                             var action = snapshot[i];
                             int safeDelay = Math.Max(0, action.Delay);
+                            if (_useDelayVariation && _delayVariationPercent > 0 && safeDelay > 0)
+                            {
+                                int variation = safeDelay * _delayVariationPercent / 100;
+                                safeDelay += Random.Shared.Next(-variation, variation + 1);
+                                safeDelay = Math.Max(0, safeDelay);
+                            }
 
                             await Task.Delay(safeDelay, token);
                             dispatcherQueue.TryEnqueue(() => OnActionExecuting?.Invoke(action));

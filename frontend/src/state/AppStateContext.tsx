@@ -6,6 +6,8 @@ import type { AppState, IncomingMessage } from '../bridge/messageTypes';
 const defaultSettings = {
   customDelay: '100',
   useCustomDelay: true,
+  delayVariation: '20',
+  useDelayVariation: false,
   loopCount: '0',
   enableLoop: false,
   loopInterval: '1000',
@@ -43,6 +45,8 @@ const initialState: AppState = {
     replayActive: false,
     recordButtonText: 'Recording',
     replayButtonText: 'Replay',
+    canUndo: false,
+    canRedo: false,
   },
 };
 

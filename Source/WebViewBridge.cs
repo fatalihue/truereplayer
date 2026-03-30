@@ -35,9 +35,16 @@ namespace TrueReplayer
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         };
 
+        // Undo/Redo history
+        private readonly Stack<string> _undoStack = new();
+        private readonly Stack<string> _redoStack = new();
+        private const int MaxHistory = 50;
+
         // In-memory settings state (replaces reading from XAML controls)
         public string CustomDelay { get; set; } = "100";
         public bool UseCustomDelay { get; set; } = true;
+        public string DelayVariation { get; set; } = "20";
+        public bool UseDelayVariation { get; set; } = false;
         public string LoopCount { get; set; } = "0";
         public bool EnableLoop { get; set; } = false;
         public string LoopInterval { get; set; } = "1000";
@@ -129,6 +136,8 @@ namespace TrueReplayer
             var saved = AppSettingsManager.Load();
             CustomDelay = saved.CustomDelay.ToString();
             UseCustomDelay = saved.UseCustomDelay;
+            DelayVariation = saved.DelayVariation.ToString();
+            UseDelayVariation = saved.UseDelayVariation;
             LoopCount = saved.LoopCount.ToString();
             EnableLoop = saved.EnableLoop;
             LoopInterval = saved.LoopInterval.ToString();
@@ -177,6 +186,8 @@ namespace TrueReplayer
                     case "recording:toggle": HandleRecordingToggle(payload); break;
                     case "replay:toggle": HandleReplayToggle(payload); break;
                     case "actions:clear": HandleActionsClear(); break;
+                    case "actions:undo": HandleUndo(); break;
+                    case "actions:redo": HandleRedo(); break;
                     case "actions:copy": HandleActionsCopy(); break;
                     case "actions:edit": HandleActionsEdit(payload); break;
                     case "actions:delete": HandleActionsDelete(payload); break;
@@ -289,6 +300,57 @@ namespace TrueReplayer
             PushStatusBarUpdate();
         }
 
+        private void PushUndoState()
+        {
+            var snapshot = JsonSerializer.Serialize(actions.ToList(), JsonOptions);
+            _undoStack.Push(snapshot);
+            if (_undoStack.Count > MaxHistory)
+            {
+                var temp = new Stack<string>(_undoStack.Reverse().Skip(_undoStack.Count - MaxHistory));
+                _undoStack.Clear();
+                foreach (var item in temp.Reverse()) _undoStack.Push(item);
+            }
+            _redoStack.Clear();
+            mainController.UpdateButtonStates();
+        }
+
+        private void HandleUndo()
+        {
+            if (_undoStack.Count == 0) return;
+            var current = JsonSerializer.Serialize(actions.ToList(), JsonOptions);
+            _redoStack.Push(current);
+            var snapshot = _undoStack.Pop();
+            RestoreActionsFromSnapshot(snapshot);
+            mainController.UpdateButtonStates();
+        }
+
+        private void HandleRedo()
+        {
+            if (_redoStack.Count == 0) return;
+            var current = JsonSerializer.Serialize(actions.ToList(), JsonOptions);
+            _undoStack.Push(current);
+            var snapshot = _redoStack.Pop();
+            RestoreActionsFromSnapshot(snapshot);
+            mainController.UpdateButtonStates();
+        }
+
+        private void RestoreActionsFromSnapshot(string snapshot)
+        {
+            var restored = JsonSerializer.Deserialize<List<ActionItem>>(snapshot, JsonOptions);
+            if (restored == null) return;
+            actions.Clear();
+            foreach (var item in restored)
+            {
+                item.RowNumber = actions.Count + 1;
+                actions.Add(item);
+            }
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+        }
+
+        public bool CanUndo => _undoStack.Count > 0;
+        public bool CanRedo => _redoStack.Count > 0;
+
         public void PushProfilesUpdate()
         {
             var profiles = profileController.ProfileEntries.Select(p => new
@@ -336,6 +398,8 @@ namespace TrueReplayer
                 {
                     customDelay = CustomDelay,
                     useCustomDelay = UseCustomDelay,
+                    delayVariation = DelayVariation,
+                    useDelayVariation = UseDelayVariation,
                     loopCount = LoopCount,
                     enableLoop = EnableLoop,
                     loopInterval = LoopInterval,
@@ -367,7 +431,9 @@ namespace TrueReplayer
                 recordingActive = recordingService.IsRecording,
                 replayActive = replayService.IsReplaying,
                 recordButtonText = recordingService.IsRecording ? "Pause" : "Recording",
-                replayButtonText = replayService.IsReplaying ? "Stop" : "Replay"
+                replayButtonText = replayService.IsReplaying ? "Stop" : "Replay",
+                canUndo = CanUndo,
+                canRedo = CanRedo
             });
         }
 
@@ -491,6 +557,8 @@ namespace TrueReplayer
                 {
                     customDelay = CustomDelay,
                     useCustomDelay = UseCustomDelay,
+                    delayVariation = DelayVariation,
+                    useDelayVariation = UseDelayVariation,
                     loopCount = LoopCount,
                     enableLoop = EnableLoop,
                     loopInterval = LoopInterval,
@@ -633,11 +701,14 @@ namespace TrueReplayer
             bool intervalEnabled = payload.GetProperty("intervalEnabled").GetBoolean();
             string intervalText = payload.GetProperty("intervalText").GetString() ?? "0";
 
-            mainController.ToggleReplay(loopEnabled, loopCount, intervalEnabled, intervalText);
+            bool useVariation = UseDelayVariation;
+            int variationPercent = int.TryParse(DelayVariation, out var vp) ? vp : 20;
+            mainController.ToggleReplay(loopEnabled, loopCount, intervalEnabled, intervalText, useVariation, variationPercent);
         }
 
         private void HandleActionsClear()
         {
+            PushUndoState();
             actions.Clear();
             HasUnsavedChanges = false;
             mainController.UpdateButtonStates();
@@ -650,6 +721,7 @@ namespace TrueReplayer
 
         private void HandleActionsEdit(JsonElement payload)
         {
+            PushUndoState();
             int index = payload.GetProperty("index").GetInt32();
             string field = payload.GetProperty("field").GetString() ?? "";
             string value = payload.GetProperty("value").GetString() ?? "";
@@ -677,6 +749,7 @@ namespace TrueReplayer
 
         private void HandleActionsDelete(JsonElement payload)
         {
+            PushUndoState();
             var indices = payload.GetProperty("indices").EnumerateArray()
                 .Select(e => e.GetInt32())
                 .OrderByDescending(i => i)
@@ -700,6 +773,7 @@ namespace TrueReplayer
 
         private void HandleBulkUpdateDelay(JsonElement payload)
         {
+            PushUndoState();
             var indices = payload.GetProperty("indices").EnumerateArray()
                 .Select(e => e.GetInt32())
                 .ToList();
@@ -718,6 +792,7 @@ namespace TrueReplayer
 
         private void HandleActionsReorder(JsonElement payload)
         {
+            PushUndoState();
             var indices = payload.GetProperty("indices").EnumerateArray()
                 .Select(e => e.GetInt32())
                 .OrderBy(i => i)
@@ -764,6 +839,7 @@ namespace TrueReplayer
 
         private void HandleAddSendText(JsonElement payload)
         {
+            PushUndoState();
             string text = payload.GetProperty("text").GetString() ?? "";
             if (string.IsNullOrEmpty(text)) return;
 
@@ -789,6 +865,7 @@ namespace TrueReplayer
 
         private void HandleEditSendText(JsonElement payload)
         {
+            PushUndoState();
             int index = payload.GetProperty("index").GetInt32();
             string text = payload.GetProperty("text").GetString() ?? "";
 
@@ -802,6 +879,7 @@ namespace TrueReplayer
 
         private void HandleInsertAction(JsonElement payload)
         {
+            PushUndoState();
             string actionType = payload.GetProperty("actionType").GetString() ?? "";
             int insertIndex = payload.GetProperty("insertIndex").GetInt32();
             if (string.IsNullOrEmpty(actionType)) return;
@@ -1004,6 +1082,7 @@ namespace TrueReplayer
 
         private void HandleDuplicateActions(JsonElement payload)
         {
+            PushUndoState();
             var indices = payload.GetProperty("indices").EnumerateArray()
                 .Select(e => e.GetInt32())
                 .OrderBy(i => i)
@@ -1052,6 +1131,7 @@ namespace TrueReplayer
 
         private void HandleAddBrowserAction(JsonElement payload)
         {
+            PushUndoState();
             string actionType = payload.GetProperty("actionType").GetString() ?? "";
             string selector = payload.TryGetProperty("selector", out var selEl) ? selEl.GetString() ?? "" : "";
             string? browserText = payload.TryGetProperty("browserText", out var textEl) ? textEl.GetString() : null;
@@ -1915,6 +1995,8 @@ namespace TrueReplayer
             // Sync bridge state from defaults
             CustomDelay = defaults.CustomDelay.ToString();
             UseCustomDelay = defaults.UseCustomDelay;
+            DelayVariation = defaults.DelayVariation.ToString();
+            UseDelayVariation = defaults.UseDelayVariation;
             LoopCount = defaults.LoopCount.ToString();
             EnableLoop = defaults.EnableLoop;
             LoopInterval = defaults.LoopInterval.ToString();
@@ -1954,6 +2036,8 @@ namespace TrueReplayer
                 StartMinimized = UserProfile.Current.StartMinimized,
                 UseCustomDelay = UseCustomDelay,
                 CustomDelay = int.TryParse(CustomDelay, out var d) ? d : 100,
+                UseDelayVariation = UseDelayVariation,
+                DelayVariation = int.TryParse(DelayVariation, out var dv) ? dv : 20,
                 EnableLoop = EnableLoop,
                 LoopCount = int.TryParse(LoopCount, out var c) ? c : 0,
                 LoopIntervalEnabled = LoopIntervalEnabled,
@@ -2056,6 +2140,12 @@ namespace TrueReplayer
                     break;
                 case "useCustomDelay":
                     UseCustomDelay = valueElement.GetBoolean();
+                    break;
+                case "delayVariation":
+                    DelayVariation = valueElement.GetString() ?? "20";
+                    break;
+                case "useDelayVariation":
+                    UseDelayVariation = valueElement.GetBoolean();
                     break;
                 case "loopCount":
                     LoopCount = valueElement.GetString() ?? "0";

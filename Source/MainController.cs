@@ -51,12 +51,12 @@ namespace TrueReplayer.Controllers
             recordingService.ToggleRecording();
         }
 
-        public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText)
+        public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation = false, int delayVariationPercent = 20)
         {
             if (recordingService.IsRecording)
                 recordingService.ToggleRecording();
 
-            replayService.ToggleReplay(loopEnabled, loopCountText, intervalEnabled, intervalText);
+            replayService.ToggleReplay(loopEnabled, loopCountText, intervalEnabled, intervalText, useDelayVariation, delayVariationPercent);
         }
 
         public void CancelInsertMode()

@@ -258,6 +258,19 @@ export function SettingsPanel() {
                 />
                 <Toggle isOn={settings.useCustomDelay} onChange={(v) => changeSetting('useCustomDelay', v)} />
               </SettingRow>
+              <SettingRow label="Jitter %" tooltip="Random ±% applied to each delay for natural timing">
+                <SettingInput
+                  value={settings.delayVariation}
+                  onCommit={(v) => changeSetting('delayVariation', v)}
+                  onEnter={() => {
+                    if (!settings.useDelayVariation) {
+                      changeSetting('useDelayVariation', true);
+                    }
+                  }}
+                  width="w-[72px]"
+                />
+                <Toggle isOn={settings.useDelayVariation} onChange={(v) => changeSetting('useDelayVariation', v)} />
+              </SettingRow>
               <SettingRow label="Loops" tooltip="Number of times to repeat">
                 <SettingInput
                   value={settings.loopCount}

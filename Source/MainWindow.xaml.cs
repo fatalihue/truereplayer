@@ -298,7 +298,9 @@ namespace TrueReplayer
                             bridge?.EnableLoop ?? false,
                             bridge?.LoopCount ?? "1",
                             bridge?.LoopIntervalEnabled ?? false,
-                            bridge?.LoopInterval ?? "0");
+                            bridge?.LoopInterval ?? "0",
+                            bridge?.UseDelayVariation ?? false,
+                            int.TryParse(bridge?.DelayVariation ?? "20", out var hvp) ? hvp : 20);
                     }
                     else if (key.StartsWith("PROFILE::"))
                     {
@@ -321,7 +323,9 @@ namespace TrueReplayer
                                 bridge.EnableLoop,
                                 bridge.LoopCount,
                                 bridge.LoopIntervalEnabled,
-                                bridge.LoopInterval);
+                                bridge.LoopInterval,
+                                bridge.UseDelayVariation,
+                                int.TryParse(bridge.DelayVariation, out var pvp) ? pvp : 20);
 
                             profileController.UpdateProfileColors(profileName);
                             bridge.PushProfilesUpdate();

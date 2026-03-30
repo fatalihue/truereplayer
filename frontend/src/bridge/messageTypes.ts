@@ -52,6 +52,8 @@ export interface ProfileOrderData {
 export interface SettingsState {
   customDelay: string;
   useCustomDelay: boolean;
+  delayVariation: string;
+  useDelayVariation: boolean;
   loopCount: string;
   enableLoop: boolean;
   loopInterval: string;
@@ -79,6 +81,8 @@ export interface ButtonStates {
   replayActive: boolean;
   recordButtonText: string;
   replayButtonText: string;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 // ── App State ──
@@ -133,6 +137,8 @@ export type OutgoingMessage =
   | { type: 'recording:toggle'; payload: { insertIndex?: number } }
   | { type: 'replay:toggle'; payload: { loopEnabled: boolean; loopCount: string; intervalEnabled: boolean; intervalText: string } }
   | { type: 'actions:clear'; payload: Record<string, never> }
+  | { type: 'actions:undo'; payload: Record<string, never> }
+  | { type: 'actions:redo'; payload: Record<string, never> }
   | { type: 'actions:copy'; payload: Record<string, never> }
   | { type: 'actions:edit'; payload: { index: number; field: string; value: string } }
   | { type: 'actions:delete'; payload: { indices: number[] } }
