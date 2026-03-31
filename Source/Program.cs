@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Security.Principal;
 using System.Threading;
 using Microsoft.UI.Dispatching;
@@ -46,9 +47,13 @@ namespace TrueReplayer
                     var exe = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
                     if (exe != null)
                     {
+                        // Forward command-line args (e.g. --startup) so the elevated process
+                        // knows it was launched by OS autostart and should start minimized
+                        var currentArgs = Environment.GetCommandLineArgs().Skip(1);
                         Process.Start(new ProcessStartInfo
                         {
                             FileName = exe,
+                            Arguments = string.Join(" ", currentArgs),
                             UseShellExecute = true,
                             Verb = "runas"
                         });
