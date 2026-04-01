@@ -41,6 +41,8 @@ export interface ThemeUISettings {
   actionMouseColor: string;
   actionKeyColor: string;
   actionScrollColor: string;
+  actionSendTextColor: string;
+  actionWaitImageColor: string;
   actionBrowserColor: string;
   fontMono: string;
 }
@@ -55,6 +57,8 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   actionMouseColor: '#a78bfa',
   actionKeyColor: '#60cdff',
   actionScrollColor: '#6bcb77',
+  actionSendTextColor: '#d4a020',
+  actionWaitImageColor: '#e879f9',
   actionBrowserColor: '#fb923c',
   fontMono: 'Consolas',
 };
@@ -527,6 +531,10 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   root.style.setProperty('--color-action-key-bg', `color-mix(in srgb, ${uiSettings.actionKeyColor} 10%, transparent)`);
   root.style.setProperty('--color-action-scroll-fg', uiSettings.actionScrollColor);
   root.style.setProperty('--color-action-scroll-bg', `color-mix(in srgb, ${uiSettings.actionScrollColor} 10%, transparent)`);
+  root.style.setProperty('--color-action-sendtext-fg', uiSettings.actionSendTextColor);
+  root.style.setProperty('--color-action-sendtext-bg', `color-mix(in srgb, ${uiSettings.actionSendTextColor} 10%, transparent)`);
+  root.style.setProperty('--color-action-waitimage-fg', uiSettings.actionWaitImageColor);
+  root.style.setProperty('--color-action-waitimage-bg', `color-mix(in srgb, ${uiSettings.actionWaitImageColor} 10%, transparent)`);
   root.style.setProperty('--color-action-browser-fg', uiSettings.actionBrowserColor);
   root.style.setProperty('--color-action-browser-bg', `color-mix(in srgb, ${uiSettings.actionBrowserColor} 10%, transparent)`);
   // Font

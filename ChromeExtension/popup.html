@@ -47,6 +47,18 @@
       margin-top: 8px;
       line-height: 1.4;
     }
+    .update-notice {
+      display: none;
+      margin-top: 10px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: rgba(251, 146, 60, 0.1);
+      border: 1px solid rgba(251, 146, 60, 0.25);
+      font-size: 11px;
+      color: #fb923c;
+      line-height: 1.4;
+    }
+    .update-notice strong { color: #fff; font-weight: 500; }
   </style>
 </head>
 <body>
@@ -56,6 +68,10 @@
     <span id="statusText">Checking...</span>
   </div>
   <div class="hint" id="hint"></div>
+  <div class="update-notice" id="updateNotice">
+    <strong>Update available!</strong><br>
+    Reload this extension in chrome://extensions to get the latest version.
+  </div>
   <script src="popup.js"></script>
 </body>
 </html>

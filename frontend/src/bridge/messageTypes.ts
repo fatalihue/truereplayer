@@ -128,7 +128,8 @@ export type IncomingMessage =
   | { type: 'update:error'; payload: { message: string } }
   | { type: 'update:none'; payload: { currentVersion: string } }
   | { type: 'browser:status'; payload: { connected: boolean } }
-  | { type: 'browser:pickResult'; payload: { selector: string | null; error?: string } };
+  | { type: 'browser:pickResult'; payload: { selector: string | null; error?: string } }
+  | { type: 'browser:extensionOutdated'; payload: { currentVersion: string; expectedVersion: string } };
 
 // ── Messages JS → C# ──
 

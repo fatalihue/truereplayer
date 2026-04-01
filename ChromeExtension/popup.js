@@ -23,4 +23,9 @@ chrome.runtime.sendMessage({ type: 'getStatus' }, (response) => {
     text.textContent = 'Disconnected';
     hint.textContent = 'Open TrueReplayer to connect.';
   }
+
+  if (response.outdated) {
+    const update = document.getElementById('updateNotice');
+    if (update) update.style.display = 'block';
+  }
 });

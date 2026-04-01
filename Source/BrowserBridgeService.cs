@@ -14,6 +14,7 @@ namespace TrueReplayer.Services
     public class BrowserBridgeService : IDisposable
     {
         private const string PipeName = "TrueReplayerBridge";
+        public const string ExpectedExtensionVersion = "1.2.0";
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
         private NamedPipeServerStream? _pipeServer;
         private StreamReader? _reader;
@@ -27,6 +28,7 @@ namespace TrueReplayer.Services
         public bool IsConnected { get; private set; }
         public bool IsRecordingMode { get; private set; }
         public event Action<bool>? ConnectionChanged;
+        public event Action<string, string>? ExtensionVersionMismatch; // currentVersion, expectedVersion
         public event Action<string, string, string?, string?, string?, bool>? ElementClicked; // selector, description, url, tagName, button, isInput
 
         public void Start()
@@ -61,6 +63,9 @@ namespace TrueReplayer.Services
 
                     // Send immediate heartbeat so NativeHost's watchdog doesn't timeout
                     try { _writer.WriteLine("{\"type\":\"heartbeat\"}"); } catch { }
+
+                    // Send expected extension version for update check
+                    try { SendMessage(new { type = "bridge:expectedVersion", version = ExpectedExtensionVersion }); } catch { }
 
                     // Re-sync recording mode if it was active before reconnection
                     if (IsRecordingMode)
@@ -151,6 +156,14 @@ namespace TrueReplayer.Services
                             if (_pendingCommands.TryRemove(pickId, out var pickTcs))
                             {
                                 pickTcs.TrySetResult(root);
+                            }
+                            break;
+
+                        case "browser:extensionVersion":
+                            var extVersion = root.GetProperty("version").GetString() ?? "";
+                            if (!string.IsNullOrEmpty(extVersion) && extVersion != ExpectedExtensionVersion)
+                            {
+                                ExtensionVersionMismatch?.Invoke(extVersion, ExpectedExtensionVersion);
                             }
                             break;
                     }

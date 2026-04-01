@@ -14,6 +14,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { StatusBar } from './components/StatusBar';
 import { Toast } from './components/Toast';
 import { UpdateOverlay } from './components/UpdateOverlay';
+import { ExtensionUpdateBanner } from './components/ExtensionUpdateBanner';
 import { CommandPalette } from './components/CommandPalette';
 import { SheetPanel } from './components/SheetPanel';
 
@@ -67,6 +68,7 @@ export default function App() {
 
               {/* Center: Toolbar + Table + Action Bar */}
               <div className="flex-1 flex flex-col gap-1 min-w-0">
+                <ExtensionUpdateBanner />
                 <Toolbar
                   columnVisibility={columnVisibility}
                   onColumnVisibilityChange={setColumnVisibility}

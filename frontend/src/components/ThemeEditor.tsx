@@ -116,15 +116,28 @@ function SliderSetting({ label, value, min, max, unit, onChange }: {
   unit: string;
   onChange: (v: number) => void;
 }) {
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY < 0 ? 1 : -1;
-    const next = Math.min(max, Math.max(min, value + delta));
-    if (next !== value) onChange(next);
-  };
+  const containerRef = useRef<HTMLDivElement>(null);
+  const hovering = useRef(false);
+  const latestValue = useRef(value);
+  latestValue.current = value;
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (!hovering.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const delta = e.deltaY < 0 ? 1 : -1;
+      const next = Math.min(max, Math.max(min, latestValue.current + delta));
+      if (next !== latestValue.current) onChange(next);
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, [min, max, onChange]);
 
   return (
-    <div className="flex items-center gap-3 py-2" onWheel={handleWheel}>
+    <div ref={containerRef} className="flex items-center gap-3 py-2" onMouseEnter={() => { hovering.current = true; }} onMouseLeave={() => { hovering.current = false; }}>
       <span className="text-xs text-text-secondary w-[100px]">{label}</span>
       <input
         type="range"
@@ -232,10 +245,12 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
     return () => window.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
-  // Close on click outside
+  // Close on click outside (but not on title bar controls like maximize/restore)
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        // Ignore clicks on window title bar area (top 32px)
+        if (e.clientY < 40) return;
         onClose();
       }
     };
@@ -321,7 +336,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div
         ref={panelRef}
-        className="w-[520px] max-h-[80vh] bg-bg-surface border border-border-default rounded-lg shadow-2xl overflow-hidden flex flex-col"
+        className="w-[520px] h-[95vh] bg-bg-surface border border-border-default rounded-lg shadow-2xl overflow-hidden flex flex-col"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-subtle shrink-0">
@@ -552,6 +567,18 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                   value={config.uiSettings.actionScrollColor}
                   defaultValue={DEFAULT_UI_SETTINGS.actionScrollColor}
                   onChange={(v) => setUISetting('actionScrollColor', v)}
+                />
+                <AppearanceColorRow
+                  label="Send Text"
+                  value={config.uiSettings.actionSendTextColor}
+                  defaultValue={DEFAULT_UI_SETTINGS.actionSendTextColor}
+                  onChange={(v) => setUISetting('actionSendTextColor', v)}
+                />
+                <AppearanceColorRow
+                  label="Wait Image"
+                  value={config.uiSettings.actionWaitImageColor}
+                  defaultValue={DEFAULT_UI_SETTINGS.actionWaitImageColor}
+                  onChange={(v) => setUISetting('actionWaitImageColor', v)}
                 />
                 <AppearanceColorRow
                   label="Browser"

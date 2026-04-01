@@ -43,9 +43,9 @@ export function getActionTypeColors(actionType: string) {
   if (actionType.startsWith('Key'))
     return { bg: 'var(--color-action-key-bg)', fg: 'var(--color-action-key-fg)' };
   if (actionType === 'SendText')
-    return { bg: 'rgba(212, 160, 32, 0.10)', fg: '#d4a020' };
+    return { bg: 'var(--color-action-sendtext-bg)', fg: 'var(--color-action-sendtext-fg)' };
   if (actionType === 'WaitImage')
-    return { bg: 'rgba(232, 121, 249, 0.10)', fg: '#e879f9' };
+    return { bg: 'var(--color-action-waitimage-bg)', fg: 'var(--color-action-waitimage-fg)' };
   return { bg: 'transparent', fg: 'var(--color-text-tertiary)' };
 }
 

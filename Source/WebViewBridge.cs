@@ -93,6 +93,10 @@ namespace TrueReplayer
                 {
                     dispatcherQueue.TryEnqueue(() => SendMessage("browser:status", new { connected }));
                 };
+                browserBridge.ExtensionVersionMismatch += (currentVersion, expectedVersion) =>
+                {
+                    dispatcherQueue.TryEnqueue(() => SendMessage("browser:extensionOutdated", new { currentVersion, expectedVersion }));
+                };
                 browserBridge.ElementClicked += (selector, description, url, tagName, button, isInput) =>
                 {
                     dispatcherQueue.TryEnqueue(() =>

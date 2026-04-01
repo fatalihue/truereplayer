@@ -5,6 +5,7 @@ const RECONNECT_INTERVAL_MIN = 0.25; // 15 seconds (minimum chrome.alarms allows
 let port = null;
 let isRecording = false;
 let isBridgeReady = false;
+let isOutdated = false;
 
 function connect() {
   if (port) return;
@@ -18,9 +19,20 @@ function connect() {
       switch (msg.type) {
         case 'bridge:connected':
           isBridgeReady = true;
+          isOutdated = false;
           stopReconnect(); // Connected — no need for reconnect alarm
           updateBadge();
           break;
+
+        case 'bridge:expectedVersion': {
+          const expected = msg.version;
+          const current = chrome.runtime.getManifest().version;
+          isOutdated = expected !== current;
+          // Send our version back to TrueReplayer
+          sendToNative({ type: 'browser:extensionVersion', version: current });
+          updateBadge();
+          break;
+        }
 
         case 'bridge:disconnected':
           isBridgeReady = false;
@@ -209,7 +221,10 @@ function sendToNative(msg) {
 }
 
 function updateBadge() {
-  if (isBridgeReady) {
+  if (isOutdated && !isRecording) {
+    chrome.action.setBadgeText({ text: '!' });
+    chrome.action.setBadgeBackgroundColor({ color: '#fb923c' });
+  } else if (isBridgeReady) {
     chrome.action.setBadgeText({ text: isRecording ? 'REC' : 'ON' });
     chrome.action.setBadgeBackgroundColor({
       color: isRecording ? '#C42B1C' : '#0E7A0D',
@@ -244,6 +259,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({
       connected: isBridgeReady,
       recording: isRecording,
+      outdated: isOutdated,
     });
   }
   return true;
