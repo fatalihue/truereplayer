@@ -1,7 +1,10 @@
 (() => {
+  const isMainFrame = window === window.top;
+
   let recording = false;
   let picking = false;
   let highlightEl = null;
+  let _mouseOverPending = false;
 
   const { generateSelector, getElementDescription } = window.__trueReplayerSelectorGenerator || {};
 
@@ -9,27 +12,33 @@
 
   function onMouseOver(e) {
     if (!recording && !picking) return;
-    removeHighlight();
+    if (_mouseOverPending) return;
+    _mouseOverPending = true;
+    requestAnimationFrame(() => {
+      _mouseOverPending = false;
+      if (!recording && !picking) return;
+      removeHighlight();
 
-    const el = e.target;
-    if (!el || el === document.body || el === document.documentElement) return;
+      const el = e.target;
+      if (!el || el === document.body || el === document.documentElement) return;
 
-    highlightEl = document.createElement('div');
-    const rect = el.getBoundingClientRect();
-    Object.assign(highlightEl.style, {
-      position: 'fixed',
-      left: rect.left + 'px',
-      top: rect.top + 'px',
-      width: rect.width + 'px',
-      height: rect.height + 'px',
-      background: 'rgba(96, 205, 255, 0.15)',
-      border: '2px solid rgba(96, 205, 255, 0.6)',
-      borderRadius: '3px',
-      pointerEvents: 'none',
-      zIndex: '2147483647',
-      transition: 'all 0.1s ease',
+      highlightEl = document.createElement('div');
+      const rect = el.getBoundingClientRect();
+      Object.assign(highlightEl.style, {
+        position: 'fixed',
+        left: rect.left + 'px',
+        top: rect.top + 'px',
+        width: rect.width + 'px',
+        height: rect.height + 'px',
+        background: 'rgba(96, 205, 255, 0.15)',
+        border: '2px solid rgba(96, 205, 255, 0.6)',
+        borderRadius: '3px',
+        pointerEvents: 'none',
+        zIndex: '2147483647',
+        transition: 'all 0.1s ease',
+      });
+      document.body.appendChild(highlightEl);
     });
-    document.body.appendChild(highlightEl);
   }
 
   function onMouseOut() {
@@ -128,6 +137,7 @@
   }
 
   function startRecording() {
+    if (!isMainFrame) return; // Only record in main frame — iframes cause multiplied handlers
     recording = true;
     document.addEventListener('mouseover', onMouseOver, true);
     document.addEventListener('mouseout', onMouseOut, true);
@@ -161,6 +171,7 @@
   }
 
   function startPick() {
+    if (!isMainFrame) return;
     picking = true;
     document.addEventListener('mouseover', onMouseOver, true);
     document.addEventListener('mouseout', onMouseOut, true);
@@ -304,7 +315,7 @@
           await new Promise(r => setTimeout(r, 50));
 
           // Snapshot state before click to detect if simulated events worked
-          const domBefore = document.body.innerHTML.length;
+          const childCountBefore = document.body.childElementCount;
           const rectBefore = el.getBoundingClientRect();
 
           el.focus();
@@ -319,8 +330,8 @@
           // (element still in DOM, same position, no DOM changes)
           await new Promise(r => setTimeout(r, 100));
           const stillInDom = document.body.contains(el);
-          const domAfter = document.body.innerHTML.length;
-          const domChanged = Math.abs(domAfter - domBefore) > 10;
+          const childCountAfter = document.body.childElementCount;
+          const domChanged = childCountAfter !== childCountBefore;
 
           if (stillInDom && !domChanged) {
             // Simulated events didn't cause any visible change — try native click
