@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Plus, Search, Pencil, Copy, Trash2, FolderOpen, Keyboard, Crosshair, ArrowUpDown, Type, Ban, ChevronsLeft, ChevronsRight, Pin, PinOff, FolderPlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine } from 'lucide-react';
+import { Plus, Search, X, Pencil, Copy, Trash2, FolderOpen, Keyboard, Crosshair, ArrowUpDown, Type, Ban, ChevronsLeft, ChevronsRight, Pin, PinOff, FolderPlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine } from 'lucide-react';
 import type { ProfileEntry } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -863,6 +863,14 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               onChange={(e) => setSearchQuery(e.target.value)}
               className="bg-transparent text-xs text-text-primary placeholder:text-text-disabled outline-none flex-1 min-w-0"
             />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="text-text-disabled hover:text-text-secondary transition-colors shrink-0"
+              >
+                <X size={12} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -1047,7 +1055,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Keyboard size={13} className="text-text-tertiary" />
-            {profile?.hotkey ? 'Change Hotkey' : 'Assign Hotkey'}
+            {profile?.hotkey ? 'Edit Hotkey' : 'Assign Hotkey'}
           </button>
           <button
             onClick={() => handleAssignHotstring(contextMenu.profileName)}

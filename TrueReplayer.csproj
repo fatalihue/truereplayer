@@ -12,13 +12,14 @@
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
 		<TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
-		<Version>1.9.23</Version>
-		<AssemblyVersion>1.9.23.0</AssemblyVersion>
-		<FileVersion>1.9.23.0</FileVersion>
+		<Version>1.9.24</Version>
+		<AssemblyVersion>1.9.24.0</AssemblyVersion>
+		<FileVersion>1.9.24.0</FileVersion>
 		<TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
 		<RootNamespace>TrueReplayer</RootNamespace>
 		<ApplicationIcon>TrueReplayer.ico</ApplicationIcon>
 		<ApplicationManifest>app.manifest</ApplicationManifest>
+		<NoWarn>$(NoWarn);MSB3243;APPX0104;APPX0107</NoWarn>
 		<Platforms>x86;x64;ARM64</Platforms>
 		<RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
 		<PublishProfile>win-$(Platform).pubxml</PublishProfile>
@@ -133,6 +134,19 @@
       <FrontendFilesPublish Include="frontend\dist\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(FrontendFilesPublish)" DestinationFiles="@(FrontendFilesPublish->'$(PublishDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+  <!-- Copy Chrome Extension files to output/publish for bundled distribution -->
+  <Target Name="CopyChromeExtension" AfterTargets="Build">
+    <ItemGroup>
+      <ChromeExtFiles Include="ChromeExtension\**\*" Exclude="ChromeExtension\**\.git*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ChromeExtFiles)" DestinationFiles="@(ChromeExtFiles->'$(OutDir)ChromeExtension\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyChromeExtensionPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <ChromeExtFilesPublish Include="ChromeExtension\**\*" Exclude="ChromeExtension\**\.git*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ChromeExtFilesPublish)" DestinationFiles="@(ChromeExtFilesPublish->'$(PublishDir)ChromeExtension\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
   <!-- Copy NativeHost.exe to output directory for Chrome Extension support -->
   <Target Name="CopyNativeHost" AfterTargets="Build" Condition="Exists('NativeHost\publish\TrueReplayer.NativeHost.exe')">

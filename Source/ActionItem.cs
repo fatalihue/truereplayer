@@ -6,12 +6,12 @@ namespace TrueReplayer.Models
 {
     public class ActionItem : INotifyPropertyChanged
     {
-        public string ActionType { get; set; }
-        public string Key { get; set; }
+        public string ActionType { get; set; } = "";
+        public string Key { get; set; } = "";
         public int X { get; set; }
         public int Y { get; set; }
         public int Delay { get; set; }
-        public string Comment { get; set; }
+        public string Comment { get; set; } = "";
 
         // WaitImage properties
         public string? ImagePath { get; set; }

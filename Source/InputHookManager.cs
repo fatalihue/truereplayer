@@ -370,10 +370,13 @@ namespace TrueReplayer
                     if ((int)wParam != NativeMethods.WM_MOUSEWHEEL)
                         _hotstringBufferLen = 0;
 
+                    // Snapshot suppress state before invoking event (callback may clear the flag)
+                    bool shouldSuppress = SuppressMouseClick && button != "Scroll";
+
                     OnMouseEvent?.Invoke(button, hookStruct.pt.x, hookStruct.pt.y, isDown, scrollDelta);
 
                     // In capture mode, swallow mouse clicks so they don't reach the target app
-                    if (SuppressMouseClick && button != "Scroll")
+                    if (shouldSuppress)
                         return (IntPtr)1;
                 }
             }
