@@ -175,6 +175,8 @@ export type OutgoingMessage =
   | { type: 'actions:addSendText'; payload: { text: string; insertIndex?: number } }
   | { type: 'actions:editSendText'; payload: { index: number; text: string } }
   | { type: 'actions:bulkUpdateDelay'; payload: { indices: number[]; delay: number } }
+  | { type: 'actions:bulkUpdateCoord'; payload: { indices: number[]; axis: 'x' | 'y'; value: string } }
+  | { type: 'actions:bulkUpdateComment'; payload: { indices: number[]; comment: string } }
   | { type: 'actions:reorder'; payload: { indices: number[]; targetIndex: number } }
   | { type: 'actions:insertAction'; payload: { actionType: string; insertIndex: number } }
   | { type: 'actions:duplicate'; payload: { indices: number[] } }

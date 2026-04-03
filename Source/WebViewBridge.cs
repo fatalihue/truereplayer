@@ -198,6 +198,8 @@ namespace TrueReplayer
                     case "actions:addSendText": HandleAddSendText(payload); break;
                     case "actions:editSendText": HandleEditSendText(payload); break;
                     case "actions:bulkUpdateDelay": HandleBulkUpdateDelay(payload); break;
+                    case "actions:bulkUpdateCoord": HandleBulkUpdateCoord(payload); break;
+                    case "actions:bulkUpdateComment": HandleBulkUpdateComment(payload); break;
                     case "actions:reorder": HandleActionsReorder(payload); break;
                     case "actions:insertAction": HandleInsertAction(payload); break;
                     case "actions:duplicate": HandleDuplicateActions(payload); break;
@@ -342,11 +344,21 @@ namespace TrueReplayer
         {
             var restored = JsonSerializer.Deserialize<List<ActionItem>>(snapshot, JsonOptions);
             if (restored == null) return;
-            actions.Clear();
-            foreach (var item in restored)
+
+            // Suppress CollectionChanged to avoid flooding PushActionsUpdate on each Add
+            actions.CollectionChanged -= OnActionsChanged;
+            try
             {
-                item.RowNumber = actions.Count + 1;
-                actions.Add(item);
+                actions.Clear();
+                foreach (var item in restored)
+                {
+                    item.RowNumber = actions.Count + 1;
+                    actions.Add(item);
+                }
+            }
+            finally
+            {
+                actions.CollectionChanged += OnActionsChanged;
             }
             HasUnsavedChanges = true;
             PushActionsUpdate();
@@ -482,10 +494,17 @@ namespace TrueReplayer
 
         public void ApplyProfile(UserProfile profile)
         {
-            actions.Clear();
-            foreach (var action in profile.Actions)
-                actions.Add(action);
-
+            actions.CollectionChanged -= OnActionsChanged;
+            try
+            {
+                actions.Clear();
+                foreach (var action in profile.Actions)
+                    actions.Add(action);
+            }
+            finally
+            {
+                actions.CollectionChanged += OnActionsChanged;
+            }
             PushActionsUpdate();
             PushButtonStates();
         }
@@ -790,6 +809,46 @@ namespace TrueReplayer
                     actions[idx].Delay = delay;
             }
 
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+        }
+
+        private void HandleBulkUpdateCoord(JsonElement payload)
+        {
+            PushUndoState();
+            var indices = payload.GetProperty("indices").EnumerateArray()
+                .Select(e => e.GetInt32()).ToList();
+            string axis = payload.GetProperty("axis").GetString() ?? "x"; // "x" or "y"
+            string valueStr = payload.GetProperty("value").GetString() ?? "0";
+            bool isOffset = valueStr.StartsWith("+") || valueStr.StartsWith("-");
+            int val = int.TryParse(valueStr, out var v) ? v : 0;
+
+            foreach (var idx in indices)
+            {
+                if (idx >= 0 && idx < actions.Count)
+                {
+                    if (axis == "x")
+                        actions[idx].X = isOffset ? actions[idx].X + val : val;
+                    else
+                        actions[idx].Y = isOffset ? actions[idx].Y + val : val;
+                }
+            }
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+        }
+
+        private void HandleBulkUpdateComment(JsonElement payload)
+        {
+            PushUndoState();
+            var indices = payload.GetProperty("indices").EnumerateArray()
+                .Select(e => e.GetInt32()).ToList();
+            string comment = payload.GetProperty("comment").GetString() ?? "";
+
+            foreach (var idx in indices)
+            {
+                if (idx >= 0 && idx < actions.Count)
+                    actions[idx].Comment = comment;
+            }
             HasUnsavedChanges = true;
             PushActionsUpdate();
         }
@@ -1293,6 +1352,18 @@ namespace TrueReplayer
 
             File.Copy(entry.FilePath, copyPath);
             await profileController.RefreshProfileListAsync(true);
+
+            // Place the copy in the same folder as the original
+            var order = profileController.GetProfileOrder();
+            var folder = order.Folders.FirstOrDefault(f => f.Items.Contains(name));
+            if (folder != null)
+            {
+                order.UngroupedOrder.Remove(copyName);
+                int idx = folder.Items.IndexOf(name);
+                folder.Items.Insert(idx + 1, copyName);
+                await profileController.SaveProfileOrderAsync();
+            }
+
             PushProfilesUpdate();
         }
 

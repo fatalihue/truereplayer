@@ -110,17 +110,36 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     }
   }, [highlightedActionIndex]);
 
+  // Preserve scroll position across action list updates (undo/redo, edits, bulk ops)
+  const savedScrollTop = useRef(0);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => { savedScrollTop.current = el.scrollTop; };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!buttonStates.recordingActive && !buttonStates.replayActive && scrollRef.current) {
+      const saved = savedScrollTop.current;
+      requestAnimationFrame(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = saved;
+      });
+    }
+  }, [actions, buttonStates.recordingActive, buttonStates.replayActive]);
+
   // Auto-scroll when new actions are added during recording
   // In append mode (no selection): scroll to bottom
   // In insert mode (has selection): keep viewport stable
   useEffect(() => {
-    if (actions.length > prevActionsLength.current && scrollRef.current) {
+    if (buttonStates.recordingActive && actions.length > prevActionsLength.current && scrollRef.current) {
       if (selectionRef.current.size === 0) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       }
     }
     prevActionsLength.current = actions.length;
-  }, [actions.length, selectionRef]);
+  }, [actions.length, selectionRef, buttonStates.recordingActive]);
 
   // Scroll to top only on profile switch (not on edits or manual additions)
   useEffect(() => {
@@ -842,6 +861,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           onSetDelay={(delay) => {
             send({ type: 'actions:bulkUpdateDelay', payload: { indices: Array.from(selectedIndices), delay } });
             showToast(`Set delay to ${delay}ms for ${selectedIndices.size} action(s)`, 'success');
+          }}
+          onSetCoord={(axis, value) => {
+            send({ type: 'actions:bulkUpdateCoord', payload: { indices: Array.from(selectedIndices), axis, value } });
+            const label = value.startsWith('+') || value.startsWith('-') ? `${value}` : `= ${value}`;
+            showToast(`Set ${axis.toUpperCase()} ${label} for ${selectedIndices.size} action(s)`, 'success');
+          }}
+          onSetComment={(comment) => {
+            send({ type: 'actions:bulkUpdateComment', payload: { indices: Array.from(selectedIndices), comment } });
+            showToast(`Set notes for ${selectedIndices.size} action(s)`, 'success');
           }}
         />
       )}

@@ -1000,8 +1000,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               <ChevronRight size={11} className="ml-auto text-text-tertiary" />
             </button>
             {showMoveToFolderMenu === contextMenu.profileName && (
-              <div className="absolute left-full top-0 min-w-[140px] bg-transparent" style={{ paddingLeft: '4px' }}>
-              <div className="py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
+              <div className="absolute left-full top-0 bg-transparent" style={{ paddingLeft: '4px' }}>
+              <div className="py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60] whitespace-nowrap">
                 {(profileOrder?.folders ?? []).map(f => (
                   <button
                     key={f.name}
