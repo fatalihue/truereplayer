@@ -490,6 +490,38 @@ namespace TrueReplayer
             SendMessage("actions:highlight", new { index });
         }
 
+        /// <summary>
+        /// Checks for unsaved changes and prompts Save/Discard/Cancel.
+        /// Returns true if the caller should proceed, false to cancel.
+        /// </summary>
+        private async Task<bool> CheckUnsavedChangesAsync()
+        {
+            if (!HasUnsavedChanges || actions.Count == 0)
+                return true;
+
+            var result = await profileController.ShowUnsavedChangesDialogAsync();
+
+            if (result == Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary) // Save
+            {
+                if (CurrentProfilePath != null)
+                {
+                    var profile = CreateProfileFromState();
+                    await SettingsManager.SaveProfileAsync(CurrentProfilePath, profile);
+                    return true;
+                }
+                else
+                {
+                    bool saved = await profileController.SaveProfileAsync();
+                    return saved;
+                }
+            }
+
+            if (result == Microsoft.UI.Xaml.Controls.ContentDialogResult.Secondary) // Discard
+                return true;
+
+            return false; // Cancel
+        }
+
         // ── Apply profile to bridge state ──
 
         public void ApplyProfile(UserProfile profile)
@@ -1263,6 +1295,9 @@ namespace TrueReplayer
             string name = payload.GetProperty("name").GetString() ?? "";
             if (string.IsNullOrEmpty(name)) return;
 
+            // Guard: check for unsaved changes before switching
+            if (!await CheckUnsavedChangesAsync()) return;
+
             // Deselect if clicking the already-active profile
             if (CurrentProfileName == name)
             {
@@ -2031,6 +2066,9 @@ namespace TrueReplayer
 
         private async void HandleProfileLoad()
         {
+            // Guard: check for unsaved changes before loading
+            if (!await CheckUnsavedChangesAsync()) return;
+
             string? loadedPath = await profileController.LoadProfileAsync();
             if (loadedPath == null) return;
 
