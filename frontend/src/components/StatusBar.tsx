@@ -63,7 +63,7 @@ export function StatusBar() {
       )}
 
       <div className="flex-1" />
-      <span className="text-[11px] text-text-disabled">v1.9.24</span>
+      <span className="text-[11px] text-text-disabled">v1.9.25</span>
     </div>
   );
 }

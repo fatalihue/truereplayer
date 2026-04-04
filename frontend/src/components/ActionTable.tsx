@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Copy, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Copy, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -962,6 +962,27 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           >
             <Copy size={13} className="text-text-tertiary" />
             Duplicate
+          </button>
+
+          {/* Select Similar */}
+          <button
+            onMouseEnter={() => setActiveSubmenu(null)}
+            onClick={() => {
+              const ref = actions[contextMenu.rowIndex];
+              if (!ref) { closeContextMenu(); return; }
+              const similar = new Set<number>();
+              actions.forEach((a, i) => {
+                if (a.actionType === ref.actionType && a.key === ref.key && a.x === ref.x && a.y === ref.y)
+                  similar.add(i);
+              });
+              setSelectedIndices(similar);
+              showToast(`Selected ${similar.size} similar action(s)`, 'success');
+              closeContextMenu();
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <CheckCheck size={13} className="text-text-tertiary" />
+            Select Similar
           </button>
 
           {/* Delete */}

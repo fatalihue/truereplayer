@@ -1396,7 +1396,9 @@ namespace TrueReplayer
             string newFileName = newName.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ? newName : newName + ".json";
             string newFilePath = Path.Combine(folderPath, newFileName);
 
-            if (File.Exists(newFilePath)) return;
+            // Allow case-only rename (e.g. "teste" → "TESTE") on case-insensitive file systems
+            if (File.Exists(newFilePath) && !string.Equals(entry.FilePath, newFilePath, StringComparison.OrdinalIgnoreCase))
+                return;
 
             try
             {
