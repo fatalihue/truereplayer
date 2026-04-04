@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Plus, Search, X, Pencil, Copy, Trash2, FolderOpen, Keyboard, Crosshair, ArrowUpDown, Type, Ban, ChevronsLeft, ChevronsRight, Pin, PinOff, FolderPlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine } from 'lucide-react';
+import { Plus, Search, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowUpDown, Type, Ban, ChevronsLeft, ChevronsRight, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine } from 'lucide-react';
 import type { ProfileEntry } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -192,9 +192,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   }, [anyDialogOpen, send]);
 
   const handleExportClick = () => {
-    const selection: Record<string, boolean> = {};
-    profiles.forEach(p => { selection[p.name] = true; });
-    setExportSelection(selection);
+    setExportSelection({});
     setExportSearch('');
     setShowExportDialog(true);
   };
@@ -216,12 +214,19 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setExportSelection(prev => ({ ...prev, [name]: !prev[name] }));
   };
 
+  const toggleExportFolder = (folderItems: string[]) => {
+    const allSelected = folderItems.every(n => exportSelection[n]);
+    const updated = { ...exportSelection };
+    folderItems.forEach(n => { updated[n] = !allSelected; });
+    setExportSelection(updated);
+  };
+
   const confirmExport = () => {
     const selectedNames = Object.entries(exportSelection)
       .filter(([, checked]) => checked)
       .map(([name]) => name);
     if (selectedNames.length > 0) {
-      send({ type: 'profile:export', payload: { names: selectedNames, includeOrganization: exportIncludeOrg } });
+      send({ type: 'profile:export', payload: { names: selectedNames, includeOrganization: true } });
     }
     setShowExportDialog(false);
   };
@@ -831,13 +836,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               <Copy size={14} />
             </button>
             <button
-              onClick={handleCreateFolder}
-              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              title="New Folder"
-            >
-              <FolderPlus size={14} />
-            </button>
-            <button
               onClick={handleExportClick}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
               title="Import / Export"
@@ -845,11 +843,18 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               <ArrowUpDown size={14} />
             </button>
             <button
+              onClick={handleCreateFolder}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+              title="New Folder"
+            >
+              <FolderPlus size={14} />
+            </button>
+            <button
               onClick={handleCreate}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
               title="Create Profile"
             >
-              <Plus size={14} />
+              <FilePlus size={14} />
             </button>
           </div>
         </div>
@@ -1023,7 +1028,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       onClick={() => handleMoveToFolder(contextMenu.profileName, null)}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
                     >
-                      Remove from Folder
+                      <FolderMinus size={11} className="text-text-tertiary" />
+                      Remove
                     </button>
                   </>
                 )}
@@ -1371,10 +1377,25 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       )}
 
       {/* Export Profiles Dialog */}
-      {showExportDialog && (
+      {showExportDialog && (() => {
+        const matchesExport = (name: string) => !exportSearch || name.toLowerCase().includes(exportSearch.toLowerCase());
+        const folders = (profileOrder?.folders ?? []).filter(f => f.items.some(matchesExport));
+        const ungrouped = profiles.filter(p => {
+          const inFolder = (profileOrder?.folders ?? []).some(f => f.items.includes(p.name));
+          const isPinned = (profileOrder?.pinned ?? []).includes(p.name) && !inFolder;
+          return !inFolder && !isPinned && matchesExport(p.name);
+        });
+        const pinned = (profileOrder?.pinned ?? []).filter(n => {
+          const inFolder = (profileOrder?.folders ?? []).some(f => f.items.includes(n));
+          return !inFolder && matchesExport(n);
+        });
+        const selectedCount = Object.values(exportSelection).filter(v => v).length;
+
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-[340px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
+          <div className="w-[360px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
             <h3 className="text-sm font-semibold text-text-primary mb-3">Import / Export</h3>
+
             {/* Search */}
             <div className="flex items-center gap-2 px-2.5 py-1.5 mb-2 bg-bg-input border border-border-default rounded">
               <Search size={12} className="text-text-disabled shrink-0" />
@@ -1392,45 +1413,74 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               )}
             </div>
 
+            {/* Select All */}
             <label className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-elevated cursor-pointer border-b border-border-subtle mb-1">
-              <input
-                type="checkbox"
-                checked={allExportSelected}
-                onChange={toggleExportSelectAll}
-                className="accent-[#0078D4]"
-              />
+              <input type="checkbox" checked={allExportSelected} onChange={toggleExportSelectAll} className="accent-[#0078D4]" />
               <span className="text-xs font-medium text-text-secondary">Select All</span>
+              <span className="ml-auto text-[10px] text-text-disabled">{selectedCount}/{profiles.length}</span>
             </label>
 
-            <div className="h-[200px] overflow-y-auto">
-              {profiles.filter(p => !exportSearch || p.name.toLowerCase().includes(exportSearch.toLowerCase())).map(p => (
-                <label
-                  key={p.name}
-                  className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-elevated cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={!!exportSelection[p.name]}
-                    onChange={() => toggleExportProfile(p.name)}
-                    className="accent-[#0078D4]"
-                  />
-                  <span className="text-xs text-text-primary truncate">{p.name}</span>
-                </label>
-              ))}
+            {/* Scrollable list organized by folders */}
+            <div className="h-[240px] overflow-y-auto">
+              {/* Pinned (not in folders) */}
+              {pinned.length > 0 && (
+                <div className="mb-1">
+                  <div className="px-2 py-1 text-[10px] font-semibold text-text-disabled uppercase tracking-wide">Pinned</div>
+                  {pinned.map(name => (
+                    <label key={name} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer">
+                      <input type="checkbox" checked={!!exportSelection[name]} onChange={() => toggleExportProfile(name)} className="accent-[#0078D4]" />
+                      <span className="text-xs text-text-primary truncate">{name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {/* Folders */}
+              {folders.map(f => {
+                const visibleItems = f.items.filter(matchesExport);
+                const folderAllSelected = visibleItems.every(n => exportSelection[n]);
+                const folderSomeSelected = visibleItems.some(n => exportSelection[n]);
+                return (
+                  <div key={f.name} className="mb-1">
+                    <label className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={folderAllSelected}
+                        ref={el => { if (el) el.indeterminate = folderSomeSelected && !folderAllSelected; }}
+                        onChange={() => toggleExportFolder(visibleItems)}
+                        className="accent-[#0078D4]"
+                      />
+                      <FolderOpen size={11} style={{ color: f.color }} className="shrink-0" />
+                      <span className="text-xs font-medium text-text-secondary truncate">{f.name}</span>
+                      <span className="ml-auto text-[10px] text-text-disabled">{visibleItems.filter(n => exportSelection[n]).length}/{visibleItems.length}</span>
+                    </label>
+                    <div className="ml-5">
+                      {visibleItems.map(name => (
+                        <label key={name} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer">
+                          <input type="checkbox" checked={!!exportSelection[name]} onChange={() => toggleExportProfile(name)} className="accent-[#0078D4]" />
+                          <span className="text-xs text-text-primary truncate">{name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Ungrouped */}
+              {ungrouped.length > 0 && (
+                <div className="mb-1">
+                  {folders.length > 0 && <div className="px-2 py-1 text-[10px] font-semibold text-text-disabled uppercase tracking-wide">Ungrouped</div>}
+                  {ungrouped.map(p => (
+                    <label key={p.name} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer">
+                      <input type="checkbox" checked={!!exportSelection[p.name]} onChange={() => toggleExportProfile(p.name)} className="accent-[#0078D4]" />
+                      <span className="text-xs text-text-primary truncate">{p.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* Include folder organization checkbox */}
-            <label className="flex items-center gap-2 mt-3 px-2 py-1.5 rounded hover:bg-bg-elevated cursor-pointer border-t border-border-subtle pt-3">
-              <input
-                type="checkbox"
-                checked={exportIncludeOrg}
-                onChange={() => setExportIncludeOrg(prev => !prev)}
-                className="accent-[#0078D4]"
-              />
-              <span className="text-xs text-text-secondary">Include folder organization</span>
-            </label>
-
-            <div className="flex justify-between mt-3">
+            <div className="flex justify-between mt-3 border-t border-border-subtle pt-3">
               <button
                 onClick={() => { handleImportClick(); setShowExportDialog(false); }}
                 className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
@@ -1446,16 +1496,17 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 </button>
                 <button
                   onClick={confirmExport}
-                  disabled={!Object.values(exportSelection).some(v => v)}
+                  disabled={selectedCount === 0}
                   className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
                 >
-                  Export
+                  Export ({selectedCount})
                 </button>
               </div>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Create Folder Dialog */}
       {showCreateFolderDialog && (

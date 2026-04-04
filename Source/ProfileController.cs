@@ -584,7 +584,8 @@ namespace TrueReplayer.Controllers
                             Name = f.Name,
                             Color = f.Color,
                             Collapsed = false,
-                            Items = f.Items.Where(i => exportedNames.Contains(i)).ToList()
+                            Items = f.Items.Where(i => exportedNames.Contains(i)).ToList(),
+                            TargetWindow = f.TargetWindow
                         }).ToList(),
                     UngroupedOrder = _profileOrder.UngroupedOrder.Where(n => exportedNames.Contains(n)).ToList()
                 };
@@ -757,7 +758,8 @@ namespace TrueReplayer.Controllers
                         Name = importedFolder.Name,
                         Color = importedFolder.Color,
                         Collapsed = false,
-                        Items = importedFolder.Items
+                        Items = importedFolder.Items,
+                        TargetWindow = importedFolder.TargetWindow
                     });
                 }
 
