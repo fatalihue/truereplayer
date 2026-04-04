@@ -365,15 +365,21 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
                 placeholder="Text to type into the element"
               />
-              <div className="flex gap-1.5 mt-1.5 flex-wrap">
-                {['{clipboard}', '{date}', '{time}', '{datetime}'].map(tag => (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {[
+                  { var: '{clipboard}', label: 'Clipboard' },
+                  { var: '{date}', label: 'Date' },
+                  { var: '{time}', label: 'Time' },
+                  { var: '{datetime}', label: 'DateTime' },
+                ].map(item => (
                   <button
-                    key={tag}
+                    key={item.var}
                     type="button"
-                    onClick={() => setBrowserText(prev => prev + tag)}
-                    className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-bg-elevated text-text-tertiary hover:text-accent-light hover:bg-accent-solid/10 transition-colors cursor-pointer"
+                    onClick={() => setBrowserText(prev => prev + item.var)}
+                    className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-accent-light hover:border-accent-solid/30 transition-colors"
+                    title={item.var}
                   >
-                    {tag}
+                    {item.label}
                   </button>
                 ))}
               </div>

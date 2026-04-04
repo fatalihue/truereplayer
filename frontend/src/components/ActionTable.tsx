@@ -864,8 +864,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           }}
           onSetCoord={(axis, value) => {
             send({ type: 'actions:bulkUpdateCoord', payload: { indices: Array.from(selectedIndices), axis, value } });
-            const label = value.startsWith('+') || value.startsWith('-') ? `${value}` : `= ${value}`;
-            showToast(`Set ${axis.toUpperCase()} ${label} for ${selectedIndices.size} action(s)`, 'success');
           }}
           onSetComment={(comment) => {
             send({ type: 'actions:bulkUpdateComment', payload: { indices: Array.from(selectedIndices), comment } });

@@ -42,6 +42,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportSelection, setExportSelection] = useState<Record<string, boolean>>({});
   const [exportIncludeOrg, setExportIncludeOrg] = useState(true);
+  const [exportSearch, setExportSearch] = useState('');
   const [dialogValue, setDialogValue] = useState('');
   const [showCreateFolderDialog, setShowCreateFolderDialog] = useState(false);
   const [folderDialogName, setFolderDialogName] = useState('');
@@ -194,6 +195,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     const selection: Record<string, boolean> = {};
     profiles.forEach(p => { selection[p.name] = true; });
     setExportSelection(selection);
+    setExportSearch('');
     setShowExportDialog(true);
   };
 
@@ -1373,7 +1375,22 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="w-[340px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
             <h3 className="text-sm font-semibold text-text-primary mb-3">Import / Export</h3>
-            <p className="text-xs text-text-secondary mb-3">Select profiles to export:</p>
+            {/* Search */}
+            <div className="flex items-center gap-2 px-2.5 py-1.5 mb-2 bg-bg-input border border-border-default rounded">
+              <Search size={12} className="text-text-disabled shrink-0" />
+              <input
+                type="text"
+                placeholder="Filter profiles..."
+                value={exportSearch}
+                onChange={(e) => setExportSearch(e.target.value)}
+                className="bg-transparent text-xs text-text-primary placeholder:text-text-disabled outline-none flex-1 min-w-0"
+              />
+              {exportSearch && (
+                <button onClick={() => setExportSearch('')} className="text-text-disabled hover:text-text-secondary transition-colors shrink-0">
+                  <X size={11} />
+                </button>
+              )}
+            </div>
 
             <label className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-elevated cursor-pointer border-b border-border-subtle mb-1">
               <input
@@ -1385,8 +1402,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               <span className="text-xs font-medium text-text-secondary">Select All</span>
             </label>
 
-            <div className="max-h-[200px] overflow-y-auto">
-              {profiles.map(p => (
+            <div className="h-[200px] overflow-y-auto">
+              {profiles.filter(p => !exportSearch || p.name.toLowerCase().includes(exportSearch.toLowerCase())).map(p => (
                 <label
                   key={p.name}
                   className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-elevated cursor-pointer"

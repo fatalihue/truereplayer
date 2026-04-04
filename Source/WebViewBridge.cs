@@ -823,16 +823,30 @@ namespace TrueReplayer
             bool isOffset = valueStr.StartsWith("+") || valueStr.StartsWith("-");
             int val = int.TryParse(valueStr, out var v) ? v : 0;
 
+            int updated = 0;
             foreach (var idx in indices)
             {
                 if (idx >= 0 && idx < actions.Count)
                 {
+                    var a = actions[idx];
+                    // Only apply X/Y to mouse click actions
+                    if (a.ActionType is not ("LeftClickDown" or "LeftClickUp" or "RightClickDown" or "RightClickUp" or "MiddleClickDown" or "MiddleClickUp"))
+                        continue;
                     if (axis == "x")
-                        actions[idx].X = isOffset ? actions[idx].X + val : val;
+                        a.X = isOffset ? a.X + val : val;
                     else
-                        actions[idx].Y = isOffset ? actions[idx].Y + val : val;
+                        a.Y = isOffset ? a.Y + val : val;
+                    updated++;
                 }
             }
+            if (updated == 0)
+            {
+                SendMessage("alert:show", new { message = "X/Y can only be set on mouse click actions." });
+                _undoStack.TryPop(out _); // Remove undo state since nothing changed
+                return;
+            }
+            var label = isOffset ? valueStr : $"= {val}";
+            SendMessage("alert:show", new { message = $"Set {axis.ToUpper()} {label} for {updated} action(s)" });
             HasUnsavedChanges = true;
             PushActionsUpdate();
         }

@@ -135,7 +135,7 @@ type PanelType = 'emoji' | 'variables' | 'snippets';
 
 export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: SendTextDialogProps) {
   const [text, setText] = useState(initialText);
-  const [activePanel, setActivePanel] = useState<PanelType | null>('emoji');
+  const [activePanel, setActivePanel] = useState<PanelType | null>('variables');
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [snippets, setSnippets] = useState<Snippet[]>(loadSnippets);
   const [snippetName, setSnippetName] = useState('');
@@ -331,14 +331,14 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                     previewConfig={{ showPreview: false }}
                     skinTonesDisabled
                     style={{
-                      '--epr-bg-color': '#2a2a2a',
-                      '--epr-category-label-bg-color': '#2a2a2a',
-                      '--epr-hover-bg-color': '#353535',
-                      '--epr-search-input-bg-color': '#0e0e0e',
-                      '--epr-search-border-color': 'rgba(255, 255, 255, 0.06)',
-                      '--epr-text-color': '#e0e0e0',
-                      '--epr-category-icon-active-color': '#42a5f5',
-                      '--epr-highlight-color': '#42a5f5',
+                      '--epr-bg-color': 'var(--color-bg-card)',
+                      '--epr-category-label-bg-color': 'var(--color-bg-card)',
+                      '--epr-hover-bg-color': 'var(--color-bg-elevated)',
+                      '--epr-search-input-bg-color': 'var(--color-bg-input)',
+                      '--epr-search-border-color': 'var(--color-border-default)',
+                      '--epr-text-color': 'var(--color-text-primary)',
+                      '--epr-category-icon-active-color': 'var(--color-accent-solid)',
+                      '--epr-highlight-color': 'var(--color-accent-solid)',
                     } as React.CSSProperties}
                   />
                 </div>

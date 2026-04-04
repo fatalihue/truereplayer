@@ -22,7 +22,7 @@ function inferType(message: string): ToastType {
   const lower = message.toLowerCase();
   if (lower.includes('error') || lower.includes('fail') || lower.includes('conflict') || lower.includes('invalid') || lower.includes('timed out'))
     return 'error';
-  if (lower.includes('saved') || lower.includes('created') || lower.includes('updated') || lower.includes('success') || lower.includes('deleted') || lower.includes('imported'))
+  if (lower.includes('saved') || lower.includes('created') || lower.includes('updated') || lower.includes('success') || lower.includes('deleted') || lower.includes('imported') || lower.startsWith('set '))
     return 'success';
   return 'info';
 }
