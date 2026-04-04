@@ -79,6 +79,14 @@ html, body, #root {
 }
 
 /* Title bar drag region */
+/* Remove focus outline on all non-input elements (app is not keyboard-navigated) */
+*:not(input):not(textarea):focus {
+  outline: none !important;
+}
+*:not(input):not(textarea):focus-visible {
+  outline: none !important;
+}
+
 .drag-region {
   -webkit-app-region: drag;
   app-region: drag;

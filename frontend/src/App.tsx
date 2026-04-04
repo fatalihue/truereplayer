@@ -24,12 +24,22 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>(defaultColumnVisibility);
 
-  // Global Ctrl+K listener for command palette
+  // Global keyboard handler: Ctrl+K for command palette + block UI interaction keys
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         setCmdPaletteOpen(prev => !prev);
+        return;
+      }
+
+      // Allow keys inside inputs/textareas (user is actively typing)
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+
+      // Block Tab, Space, Enter, arrows from interacting with UI elements
+      if (['Tab', ' ', 'Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
