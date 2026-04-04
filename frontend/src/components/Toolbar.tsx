@@ -125,8 +125,8 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             tabIndex={-1}
             disabled={!buttonStates.canUndo}
             onClick={() => send({ type: 'actions:undo', payload: {} })}
-            className={`p-1.5 rounded transition-colors ${buttonStates.canUndo ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled cursor-not-allowed opacity-50'}`}
-            title="Undo (Ctrl+Z)"
+            className={`p-1.5 rounded transition-colors ${buttonStates.canUndo ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled'}`}
+            data-tip="Undo (Ctrl+Z)"
           >
             <Undo2 size={14} />
           </button>
@@ -134,8 +134,8 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             tabIndex={-1}
             disabled={!buttonStates.canRedo}
             onClick={() => send({ type: 'actions:redo', payload: {} })}
-            className={`p-1.5 rounded transition-colors ${buttonStates.canRedo ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled cursor-not-allowed opacity-50'}`}
-            title="Redo (Ctrl+Y)"
+            className={`p-1.5 rounded transition-colors ${buttonStates.canRedo ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled'}`}
+            data-tip="Redo (Ctrl+Y)"
           >
             <Redo2 size={14} />
           </button>
@@ -157,8 +157,8 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
               window.dispatchEvent(new CustomEvent('selection:set', { detail: indices.map(i => i - 1) }));
             }}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Move Up"
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip="Move Up"
           >
             <ChevronUp size={14} />
           </button>
@@ -175,8 +175,8 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
               window.dispatchEvent(new CustomEvent('selection:set', { detail: indices.map(i => i + 1) }));
             }}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Move Down"
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip="Move Down"
           >
             <ChevronDown size={14} />
           </button>
@@ -190,12 +190,12 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
               tabIndex={-1}
               onClick={() => setShowAddActions(prev => !prev)}
               disabled={buttonStates.recordingActive || buttonStates.replayActive}
-              className={`p-1.5 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              className={`p-1.5 rounded transition-colors disabled:text-text-disabled ${
                 showAddActions
                   ? 'bg-bg-elevated text-accent'
                   : 'hover:bg-bg-elevated text-text-tertiary hover:text-text-primary'
               }`}
-              title="Add Actions"
+              data-tip="Add Actions"
             >
               <Plus size={14} />
             </button>
@@ -239,8 +239,8 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             tabIndex={-1}
             onClick={() => setShowSendTextDialog(true)}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Send Text"
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip="Send Text"
           >
             <Type size={14} />
           </button>
@@ -254,8 +254,8 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
               send({ type: 'actions:insertAction', payload: { actionType: 'WaitImage', insertIndex } });
             }}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Wait for Image"
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip="Wait for Image"
           >
             <ScanSearch size={14} />
           </button>
@@ -266,8 +266,8 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
               tabIndex={-1}
               onClick={() => setShowBrowserMenu(!showBrowserMenu)}
               disabled={buttonStates.recordingActive || buttonStates.replayActive}
-              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Browser Actions"
+              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+              data-tip="Browser Actions"
             >
               <Globe size={14} />
             </button>
@@ -311,7 +311,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             tabIndex={-1}
             onClick={() => send({ type: 'actions:copy', payload: {} })}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-            title="Copy Actions"
+            data-tip="Copy Actions"
           >
             <Copy size={14} />
           </button>
@@ -319,7 +319,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             tabIndex={-1}
             onClick={() => send({ type: 'actions:clear', payload: {} })}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-            title="Clear All"
+            data-tip="Clear All"
           >
             <Trash2 size={14} />
           </button>
@@ -337,7 +337,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                   ? 'bg-bg-elevated text-accent'
                   : 'hover:bg-bg-elevated text-text-tertiary hover:text-text-primary'
               }`}
-              title="Toggle Columns"
+              data-tip="Toggle Columns"
             >
               <LayoutGrid size={14} />
             </button>
@@ -379,7 +379,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                 ? 'bg-bg-elevated text-accent'
                 : 'hover:bg-bg-elevated text-text-tertiary hover:text-text-primary'
             }`}
-            title="Theme Editor"
+            data-tip="Theme Editor"
           >
             <Palette size={14} />
           </button>

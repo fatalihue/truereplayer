@@ -785,7 +785,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               <button
                 onClick={onToggleCollapse}
                 className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-                title="Expand sidebar"
+                data-tip="Expand" data-tip-pos="right"
               >
                 <ChevronsRight size={14} />
               </button>
@@ -815,44 +815,44 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             <button
               onClick={onToggleCollapse}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              title="Collapse sidebar"
+              data-tip="Collapse"
             >
               <ChevronsLeft size={14} />
             </button>
             <button
               onClick={() => activeProfile && handleOpenFolder(activeProfile)}
               disabled={!activeProfile}
-              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Open Folder"
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+              data-tip="Open Folder"
             >
               <FolderOpen size={14} />
             </button>
             <button
               onClick={() => activeProfile && handleDuplicate(activeProfile)}
               disabled={!activeProfile}
-              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Duplicate Profile"
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+              data-tip="Duplicate"
             >
               <Copy size={14} />
             </button>
             <button
               onClick={handleExportClick}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              title="Import / Export"
+              data-tip="Import / Export"
             >
               <ArrowUpDown size={14} />
             </button>
             <button
               onClick={handleCreateFolder}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              title="New Folder"
+              data-tip="New Folder"
             >
               <FolderPlus size={14} />
             </button>
             <button
               onClick={handleCreate}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              title="Create Profile"
+              data-tip="Create Profile" data-tip-pos="end"
             >
               <FilePlus size={14} />
             </button>

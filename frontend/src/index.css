@@ -17,7 +17,7 @@
   --color-text-primary: #e0e0e0;
   --color-text-secondary: #a0a0a0;
   --color-text-tertiary: #707070;
-  --color-text-disabled: #484848;
+  --color-text-disabled: #333333;
 
   /* Accent */
   --color-accent: #90caf9;
@@ -85,6 +85,54 @@ html, body, #root {
 }
 *:not(input):not(textarea):focus-visible {
   outline: none !important;
+}
+
+/* Allow tooltips on disabled buttons */
+[data-tip][disabled] {
+  pointer-events: auto !important;
+  cursor: default !important;
+}
+
+/* Custom tooltips — faster and more consistent than native title attribute */
+[data-tip] {
+  position: relative;
+}
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: auto;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 400;
+  white-space: nowrap;
+  color: var(--color-text-primary);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-default);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 9999;
+}
+[data-tip]:hover::after {
+  opacity: 1;
+}
+/* Right-aligned (for buttons near right edge) */
+[data-tip-pos="end"]::after {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+/* Right position variant */
+[data-tip-pos="right"]::after {
+  bottom: auto;
+  left: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .drag-region {
