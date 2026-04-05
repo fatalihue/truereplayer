@@ -445,8 +445,20 @@ namespace TrueReplayer.Services
 
         public void BringToForeground()
         {
+            // AttachThreadInput trick: attach our thread to the foreground thread
+            // so Windows allows SetForegroundWindow from background
+            var foregroundHwnd = GetForegroundWindow();
+            uint foregroundThread = GetWindowThreadProcessId(foregroundHwnd, out _);
+            uint currentThread = GetCurrentThreadId();
+
+            if (foregroundThread != currentThread)
+                AttachThreadInput(foregroundThread, currentThread, true);
+
             ShowWindow(hwnd, SW_RESTORE);
             SetForegroundWindow(hwnd);
+
+            if (foregroundThread != currentThread)
+                AttachThreadInput(foregroundThread, currentThread, false);
         }
 
         public void UpdateAlwaysOnTop(bool isAlwaysOnTop)
@@ -468,6 +480,10 @@ namespace TrueReplayer.Services
         }
 
         [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+        [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+        [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+        [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
         [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
     }
