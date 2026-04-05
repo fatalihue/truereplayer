@@ -53,6 +53,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [folderTargetMatchMode, setFolderTargetMatchMode] = useState<'contains' | 'regex'>('contains');
   const [showMoveToFolderMenu, setShowMoveToFolderMenu] = useState<string | null>(null);
   const [folderContextMenu, setFolderContextMenu] = useState<{ x: number; y: number; folderName: string } | null>(null);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [showFolderColorPicker, setShowFolderColorPicker] = useState<string | null>(null);
   const [dragProfile, setDragProfile] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null); // folder name or '__ungrouped__'
@@ -452,7 +453,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const confirmCreate = () => {
     const name = dialogValue.trim();
     if (name) {
-      send({ type: 'profile:create', payload: { name } });
+      send({ type: 'profile:create', payload: { name, folder: selectedFolder || undefined } });
     }
     setShowCreateDialog(false);
   };
@@ -916,8 +917,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       className={`rounded transition-colors ${isDragOver ? 'bg-accent-solid/20 ring-2 ring-accent-solid/50' : ''} ${isFolderDragging ? 'opacity-50' : ''}`}
                     >
                       <div
-                        className="w-full flex items-center gap-1.5 px-2 py-1.5 mt-1 rounded text-left hover:bg-bg-card transition-colors group cursor-default select-none"
+                        className={`w-full flex items-center gap-1.5 px-2 py-1.5 mt-1 rounded text-left hover:bg-bg-card transition-colors group cursor-default select-none ${selectedFolder === folder.name ? 'bg-bg-card ring-1 ring-accent-solid/30' : ''}`}
                         onMouseDown={(e) => handleFolderMouseDown(e, folder.name)}
+                        onClick={() => { if (!folderDragActive.current) setSelectedFolder(prev => prev === folder.name ? null : folder.name); }}
                         onContextMenu={(e) => handleFolderContextMenu(e, folder.name)}
                       >
                         <span

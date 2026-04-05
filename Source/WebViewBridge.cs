@@ -1334,8 +1334,10 @@ namespace TrueReplayer
         private async void HandleProfileCreate(JsonElement payload)
         {
             string name = payload.GetProperty("name").GetString() ?? "";
-            // If name is empty, the profile creation dialog should be handled
-            // For now, skip if empty (Phase 6 will add React dialogs)
+            // Extract folder before any await (JsonDocument may be disposed after await)
+            string? folderName = payload.TryGetProperty("folder", out var fp) && fp.ValueKind == JsonValueKind.String
+                ? fp.GetString() : null;
+
             if (string.IsNullOrEmpty(name)) return;
 
             string profileDir = Path.Combine(
@@ -1352,6 +1354,20 @@ namespace TrueReplayer
             var profile = UserProfile.Default;
             await SettingsManager.SaveProfileAsync(fullPath, profile);
             await profileController.RefreshProfileListAsync(true);
+            if (!string.IsNullOrEmpty(folderName))
+            {
+                var order = profileController.GetProfileOrder();
+                var folder = order.Folders.FirstOrDefault(f => f.Name == folderName);
+                if (folder != null)
+                {
+                    string profileName = Path.GetFileNameWithoutExtension(fullPath);
+                    order.UngroupedOrder.Remove(profileName);
+                    if (!folder.Items.Contains(profileName))
+                        folder.Items.Add(profileName);
+                    await profileController.SaveProfileOrderAsync();
+                }
+            }
+
             PushProfilesUpdate();
         }
 
@@ -1930,7 +1946,48 @@ namespace TrueReplayer
         {
             string name = payload.GetProperty("name").GetString() ?? "";
             if (string.IsNullOrEmpty(name)) return;
-            await profileController.DeleteFolderAsync(name);
+
+            var order = profileController.GetProfileOrder();
+            var folder = order.Folders.FirstOrDefault(f => f.Name == name);
+            int profileCount = folder?.Items.Count ?? 0;
+
+            if (profileCount > 0)
+            {
+                var msgBlock = new Microsoft.UI.Xaml.Controls.TextBlock
+                {
+                    Text = $"Folder \"{name}\" contains {profileCount} profile(s).\nDelete only the folder or everything inside?",
+                    TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap
+                };
+                var dialog = new Microsoft.UI.Xaml.Controls.ContentDialog
+                {
+                    Title = "Delete Folder",
+                    XamlRoot = window.Content.XamlRoot,
+                    RequestedTheme = Microsoft.UI.Xaml.ElementTheme.Dark,
+                    PrimaryButtonText = "Folder Only",
+                    SecondaryButtonText = "Delete All",
+                    CloseButtonText = "Cancel",
+                    DefaultButton = Microsoft.UI.Xaml.Controls.ContentDialogButton.Primary,
+                    CornerRadius = new Microsoft.UI.Xaml.CornerRadius(8),
+                    Content = msgBlock
+                };
+
+                InputHookManager.SuppressAllHotkeys = true;
+                Microsoft.UI.Xaml.Controls.ContentDialogResult result;
+                try { result = await dialog.ShowAsync(); }
+                finally { InputHookManager.SuppressAllHotkeys = false; }
+
+                if (result == Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary)
+                    await profileController.DeleteFolderAsync(name, deleteProfiles: false);
+                else if (result == Microsoft.UI.Xaml.Controls.ContentDialogResult.Secondary)
+                    await profileController.DeleteFolderAsync(name, deleteProfiles: true);
+                else
+                    return; // Cancel
+            }
+            else
+            {
+                await profileController.DeleteFolderAsync(name);
+            }
+
             InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
             PushProfilesUpdate();
         }

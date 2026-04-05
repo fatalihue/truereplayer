@@ -144,7 +144,7 @@ export type OutgoingMessage =
   | { type: 'actions:edit'; payload: { index: number; field: string; value: string } }
   | { type: 'actions:delete'; payload: { indices: number[] } }
   | { type: 'profile:click'; payload: { name: string } }
-  | { type: 'profile:create'; payload: { name: string } }
+  | { type: 'profile:create'; payload: { name: string; folder?: string } }
   | { type: 'profile:rename'; payload: { oldName: string; newName: string } }
   | { type: 'profile:duplicate'; payload: { name: string } }
   | { type: 'profile:toggleDisable'; payload: { name: string } }

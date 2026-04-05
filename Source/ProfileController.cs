@@ -976,19 +976,38 @@ namespace TrueReplayer.Controllers
             }
         }
 
-        public async Task DeleteFolderAsync(string folderName)
+        public async Task DeleteFolderAsync(string folderName, bool deleteProfiles = false)
         {
             var folder = _profileOrder.Folders.FirstOrDefault(f => f.Name == folderName);
             if (folder != null)
             {
-                // Move items back to ungrouped
-                foreach (var item in folder.Items)
+                if (deleteProfiles)
                 {
-                    if (!_profileOrder.UngroupedOrder.Contains(item))
-                        _profileOrder.UngroupedOrder.Add(item);
+                    // Delete all profile files inside the folder
+                    foreach (var item in folder.Items)
+                    {
+                        var entry = ProfileEntries.FirstOrDefault(p => p.Name == item);
+                        if (entry != null && File.Exists(entry.FilePath))
+                        {
+                            try { File.Delete(entry.FilePath); } catch { }
+                        }
+                        _profileOrder.Pinned.Remove(item);
+                    }
+                }
+                else
+                {
+                    // Move items back to ungrouped
+                    foreach (var item in folder.Items)
+                    {
+                        if (!_profileOrder.UngroupedOrder.Contains(item))
+                            _profileOrder.UngroupedOrder.Add(item);
+                    }
                 }
                 _profileOrder.Folders.Remove(folder);
                 await SaveProfileOrderAsync();
+
+                if (deleteProfiles)
+                    await RefreshProfileListAsync(true);
             }
         }
 
