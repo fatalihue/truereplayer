@@ -651,6 +651,10 @@ namespace TrueReplayer
                 }
             });
 
+            // Apply saved window settings that require the window handle
+            if (UserProfile.Current.AlwaysOnTop)
+                window.UpdateAlwaysOnTop(true);
+
             // Check for updates in the background after UI is ready
             _ = CheckForUpdateAsync();
         }

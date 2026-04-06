@@ -106,7 +106,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   // Auto-scroll to highlighted row during replay
   useEffect(() => {
     if (highlightedActionIndex !== null && highlightedRowRef.current) {
-      highlightedRowRef.current.scrollIntoView({ block: 'center', behavior: 'auto' });
+      highlightedRowRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
   }, [highlightedActionIndex]);
 
