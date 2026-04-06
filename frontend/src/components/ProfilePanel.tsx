@@ -191,6 +191,25 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     }
   }, [anyDialogOpen, send]);
 
+  // Close all dialogs when app loses focus
+  useEffect(() => {
+    const handleBlur = () => {
+      setShowCreateDialog(false);
+      setShowRenameDialog(null);
+      setShowDeleteConfirm(null);
+      setShowHotkeyDialog(null);
+      setShowHotstringDialog(null);
+      setShowWindowTargetDialog(null);
+      setShowExportDialog(false);
+      setShowCreateFolderDialog(false);
+      setShowRenameFolderDialog(null);
+      setShowFolderTargetDialog(null);
+      setIsDetecting(false);
+    };
+    window.addEventListener('app:blur', handleBlur);
+    return () => window.removeEventListener('app:blur', handleBlur);
+  }, []);
+
   const handleExportClick = () => {
     setExportSelection({});
     setExportSearch('');

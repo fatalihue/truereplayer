@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Search, Circle, Play, Square, Type, Save, FolderOpen, RotateCcw, Plus,
-  Copy, Trash2, PinOff, Pin, ArrowUpDown, MonitorDown, Shield, Minimize2,
+  Search, Circle, Play, Square, Type, Save, FolderOpen, RotateCcw, FilePlus,
+  Copy, Trash2, PinOff, Pin, ArrowUpDown, Download, Upload, MonitorDown, Shield, Minimize2, RefreshCw,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -123,7 +123,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         items: [
           {
             id: 'newprofile', label: 'New Profile',
-            icon: <Plus size={14} className="text-text-secondary" />,
+            icon: <FilePlus size={14} className="text-text-secondary" />,
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:newprofile')); },
           },
           ...(activeProfile ? [{
@@ -133,13 +133,13 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           }] : []),
           {
             id: 'importprofiles', label: 'Import Profiles',
-            icon: <ArrowUpDown size={14} className="text-text-secondary" />,
+            icon: <Download size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:import', payload: {} }); onClose(); },
           },
           {
             id: 'exportall', label: 'Export All Profiles',
-            icon: <ArrowUpDown size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'profile:export', payload: { names: profiles.map(p => p.name) } }); onClose(); },
+            icon: <Upload size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'profile:export', payload: { names: profiles.map(p => p.name), includeOrganization: true } }); onClose(); },
           },
         ],
       },
@@ -178,6 +178,12 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             label: settings.runAsAdmin ? 'Disable Run as Administrator' : 'Enable Run as Administrator',
             icon: <Shield size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'settings:change', payload: { key: 'runAsAdmin', value: !settings.runAsAdmin } }); onClose(); },
+          },
+          {
+            id: 'reloadui',
+            label: 'Reload UI',
+            icon: <RefreshCw size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'window:reloadUI', payload: {} }); onClose(); },
           },
         ],
       },

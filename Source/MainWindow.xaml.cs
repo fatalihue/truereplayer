@@ -145,13 +145,21 @@ namespace TrueReplayer
             {
                 DispatcherQueue.TryEnqueue(() => windowEventManager.UpdateAlwaysOnTop(enabled));
             };
+            TrayIconService.OnReloadUI = () =>
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    try { WebView.CoreWebView2.Reload(); }
+                    catch { }
+                });
+            };
 
-            // Recover from WebView2 renderer crashes by reloading the page
+            // Recover from any WebView2 process failure by reloading the page
             WebView.CoreWebView2.ProcessFailed += (s, e) =>
             {
                 System.Diagnostics.Debug.WriteLine($"[WebView2] ProcessFailed: {e.ProcessFailedKind}");
-                if (e.ProcessFailedKind == Microsoft.Web.WebView2.Core.CoreWebView2ProcessFailedKind.RenderProcessExited ||
-                    e.ProcessFailedKind == Microsoft.Web.WebView2.Core.CoreWebView2ProcessFailedKind.RenderProcessUnresponsive)
+                // Handle all recoverable failure types (renderer exit, unresponsive, GPU crash, etc.)
+                if (e.ProcessFailedKind != Microsoft.Web.WebView2.Core.CoreWebView2ProcessFailedKind.BrowserProcessExited)
                 {
                     DispatcherQueue.TryEnqueue(() =>
                     {

@@ -173,6 +173,7 @@ namespace TrueReplayer.Services
 
         /// Callback to apply Always On Top window state from the tray menu.
         public static Action<bool>? OnAlwaysOnTopChanged { get; set; }
+        public static Action? OnReloadUI { get; set; }
 
         public static async void ShowContextMenu()
         {
@@ -190,6 +191,7 @@ namespace TrueReplayer.Services
             AppendMenu(hMenu, MF_STRING | (isStartup ? MF_CHECKED : 0), 3, "Run on Startup");
             AppendMenu(hMenu, MF_STRING | (isStartMinimized ? MF_CHECKED : 0), 4, "Startup Minimized");
             AppendMenu(hMenu, MF_STRING | (isRunAsAdmin ? MF_CHECKED : 0), 7, "Run as Administrator");
+            AppendMenu(hMenu, MF_STRING, 8, "Reload UI");
             AppendMenu(hMenu, MF_SEPARATOR, 0, null);
             AppendMenu(hMenu, MF_STRING, 2, "Exit");
 
@@ -235,6 +237,10 @@ namespace TrueReplayer.Services
                 settings.RunAsAdmin = !isRunAsAdmin;
                 AppSettingsManager.Save(settings);
                 OnTraySettingChanged?.Invoke();
+            }
+            else if (cmd == 8)
+            {
+                OnReloadUI?.Invoke();
             }
             else if (cmd == 2)
             {

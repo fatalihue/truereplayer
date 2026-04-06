@@ -82,6 +82,18 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     }
   }, [modalActive, send]);
 
+  // Close modals when app loses focus
+  useEffect(() => {
+    const handleBlur = () => {
+      setSendTextEdit(null);
+      setEditingCell(null);
+      setContextMenu(null);
+      setSendTextInsert(null);
+    };
+    window.addEventListener('app:blur', handleBlur);
+    return () => window.removeEventListener('app:blur', handleBlur);
+  }, []);
+
   // Clear selection when recording stops so next recording appends normally
   useEffect(() => {
     if (wasRecording.current && !buttonStates.recordingActive) {

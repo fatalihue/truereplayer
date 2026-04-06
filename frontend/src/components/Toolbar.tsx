@@ -59,6 +59,20 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
     return () => window.removeEventListener('cmd:sendtext', handler);
   }, []);
 
+  // Close dialogs when app loses focus
+  useEffect(() => {
+    const handleBlur = () => {
+      setShowSendTextDialog(false);
+      setShowNavigateDialog(false);
+      setShowThemeEditor(false);
+      setShowAddActions(false);
+      setShowBrowserMenu(false);
+      setShowColDropdown(false);
+    };
+    window.addEventListener('app:blur', handleBlur);
+    return () => window.removeEventListener('app:blur', handleBlur);
+  }, []);
+
   // Close dropdowns on outside click
   useEffect(() => {
     if (!showColDropdown && !showAddActions && !showBrowserMenu) return;

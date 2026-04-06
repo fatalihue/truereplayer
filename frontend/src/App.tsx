@@ -46,6 +46,17 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Close modals when app loses focus (so hotkeys aren't blocked while user is in another window)
+  useEffect(() => {
+    const handleBlur = () => {
+      setCmdPaletteOpen(false);
+      setSheetActionIndex(null);
+      window.dispatchEvent(new Event('app:blur'));
+    };
+    window.addEventListener('blur', handleBlur);
+    return () => window.removeEventListener('blur', handleBlur);
+  }, []);
+
   const handleOpenCommandPalette = useCallback(() => {
     setCmdPaletteOpen(true);
   }, []);
