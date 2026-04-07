@@ -54,6 +54,7 @@ namespace TrueReplayer.Services
             recorder.RecordMouse = getMouse();
             recorder.RecordScroll = getScroll();
             recorder.RecordKeyboard = getKeyboard();
+            recorder.UseRelativeCoordinates = Models.UserProfile.Current.UseRelativeCoordinates;
             recorder.Start();
             setLastActionTime(DateTime.Now);
             onStatusChanged?.Invoke("recording");
@@ -129,15 +130,15 @@ namespace TrueReplayer.Services
             replayer.SetProfileNameProvider(getProfileName);
         }
 
-        public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation = false, int delayVariationPercent = 20)
+        public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation = false, int delayVariationPercent = 20, bool useRelativeCoords = false, Models.WindowTarget? windowTarget = null)
         {
             if (!IsReplaying && actions.Count > 0)
-                StartReplay(loopEnabled, loopCountText, intervalEnabled, intervalText, useDelayVariation, delayVariationPercent);
+                StartReplay(loopEnabled, loopCountText, intervalEnabled, intervalText, useDelayVariation, delayVariationPercent, useRelativeCoords, windowTarget);
             else if (IsReplaying)
                 StopReplay();
         }
 
-        private void StartReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation, int delayVariationPercent)
+        private void StartReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation, int delayVariationPercent, bool useRelativeCoords, Models.WindowTarget? windowTarget)
         {
             IsReplaying = true;
             onButtonStateChanged?.Invoke("Stop", true);
@@ -146,6 +147,7 @@ namespace TrueReplayer.Services
             int loopInterval = intervalEnabled && int.TryParse(intervalText, out int interval) && interval >= 0 ? interval : 0;
             replayer.SetLoopOptions(loopCount, loopInterval);
             replayer.SetDelayVariation(useDelayVariation, delayVariationPercent);
+            replayer.SetRelativeCoordinates(useRelativeCoords, windowTarget);
 
             onStatusChanged?.Invoke("replaying");
 
@@ -199,6 +201,7 @@ namespace TrueReplayer.Services
         public bool RecordMouse { get; set; } = true;
         public bool RecordScroll { get; set; } = true;
         public bool RecordKeyboard { get; set; } = true;
+        public bool UseRelativeCoordinates { get; set; } = false;
         public bool IsCaptureMode => _captureType != CaptureType.None;
 
         public ActionRecorder(
@@ -354,9 +357,31 @@ namespace TrueReplayer.Services
             int delay = GetDelayForNewAction();
 
             if (button == "Scroll")
+            {
                 AddAction(new ActionItem { ActionType = actionType, Delay = delay });
+            }
             else
-                AddAction(new ActionItem { ActionType = actionType, X = x, Y = y, Delay = delay });
+            {
+                int recX = x, recY = y;
+                if (UseRelativeCoordinates)
+                {
+                    // Convert screen coords to window-relative
+                    var pt = new NativeMethods.POINT { x = x, y = y };
+                    var hwnd = NativeMethods.WindowFromPoint(pt);
+                    if (hwnd != IntPtr.Zero)
+                    {
+                        // Get the top-level window (not child controls)
+                        var root = NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT);
+                        if (root != IntPtr.Zero) hwnd = root;
+                        if (NativeMethods.GetWindowRect(hwnd, out var rect))
+                        {
+                            recX = x - rect.Left;
+                            recY = y - rect.Top;
+                        }
+                    }
+                }
+                AddAction(new ActionItem { ActionType = actionType, X = recX, Y = recY, Delay = delay });
+            }
         }
 
         private void AddAction(ActionItem action)
@@ -409,6 +434,15 @@ namespace TrueReplayer.Services
         {
             _loopCount = loopCount >= 0 ? loopCount : 0;
             _loopInterval = loopInterval >= 0 ? loopInterval : 0;
+        }
+
+        private bool _useRelativeCoordinates = false;
+        private Models.WindowTarget? _windowTarget;
+
+        public void SetRelativeCoordinates(bool enabled, Models.WindowTarget? target)
+        {
+            _useRelativeCoordinates = enabled;
+            _windowTarget = target;
         }
 
         private bool _useDelayVariation = false;
@@ -594,8 +628,50 @@ namespace TrueReplayer.Services
             NativeMethods.SendInput(1, new[] { scrollInput }, inputSize);
         }
 
+        private IntPtr FindTargetWindow()
+        {
+            if (_windowTarget == null) return IntPtr.Zero;
+            // Enumerate all windows and find by process name
+            IntPtr result = IntPtr.Zero;
+            NativeMethods.EnumWindows((hwnd, lParam) =>
+            {
+                if (!NativeMethods.IsWindowVisible(hwnd)) return true;
+                NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+                IntPtr hProcess = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+                if (hProcess == IntPtr.Zero) return true;
+                try
+                {
+                    var sb = new System.Text.StringBuilder(1024);
+                    uint len = NativeMethods.GetProcessImageFileName(hProcess, sb, (uint)sb.Capacity);
+                    if (len == 0) return true;
+                    string fullPath = sb.ToString();
+                    string fileName = fullPath.Substring(fullPath.LastIndexOf('\\') + 1);
+                    if (!string.IsNullOrEmpty(_windowTarget.ProcessName) &&
+                        fileName.Equals(_windowTarget.ProcessName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        result = hwnd;
+                        return false; // stop enumeration
+                    }
+                }
+                finally { NativeMethods.CloseHandle(hProcess); }
+                return true;
+            }, IntPtr.Zero);
+            return result;
+        }
+
         private void SimulateMouse(int x, int y, uint mouseEvent, int mouseData = 0)
         {
+            // Convert window-relative coordinates to screen-absolute
+            if (_useRelativeCoordinates && _windowTarget != null)
+            {
+                var hwnd = FindTargetWindow();
+                if (hwnd != IntPtr.Zero && NativeMethods.GetWindowRect(hwnd, out var rect))
+                {
+                    x = x + rect.Left;
+                    y = y + rect.Top;
+                }
+            }
+
             int vx = NativeMethods.GetSystemMetrics(76); // SM_XVIRTUALSCREEN
             int vy = NativeMethods.GetSystemMetrics(77); // SM_YVIRTUALSCREEN
             int vw = NativeMethods.GetSystemMetrics(78); // SM_CXVIRTUALSCREEN

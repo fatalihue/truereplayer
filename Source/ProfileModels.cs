@@ -60,6 +60,7 @@ namespace TrueReplayer.Models
         public string? CustomHotkey { get; set; }
         public HotstringConfig? CustomHotstring { get; set; }
         public WindowTarget? TargetWindow { get; set; }
+        public bool UseRelativeCoordinates { get; set; } = false;
         public bool IsDisabled { get; set; }
 
         [JsonIgnore]
@@ -112,6 +113,7 @@ namespace TrueReplayer.Models
         public string? WindowTargetProcessName { get; set; }
         public string? WindowTargetWindowTitle { get; set; }
         public string WindowTargetTitleMatchMode { get; set; } = "contains";
+        public bool UseRelativeCoordinates { get; set; }
         public bool IsDisabled { get; set; }
         public string Display => string.IsNullOrEmpty(Hotkey) ? Name : $"{Name} ({Hotkey})";
 

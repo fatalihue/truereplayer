@@ -31,6 +31,7 @@ namespace TrueReplayer.Controllers
 
         public ObservableCollection<ProfileEntry> ProfileEntries { get; } = new();
         private Dictionary<string, WindowTarget> _cachedWindowTargets = new();
+        private string? _activeProfileName;
         private ProfileOrderData _profileOrder = new();
         private readonly SemaphoreSlim _profileOrderLock = new(1, 1);
 
@@ -275,6 +276,7 @@ namespace TrueReplayer.Controllers
                             WindowTargetProcessName = profile.TargetWindow?.ProcessName,
                             WindowTargetWindowTitle = profile.TargetWindow?.WindowTitle,
                             WindowTargetTitleMatchMode = profile.TargetWindow?.TitleMatchMode ?? "contains",
+                            UseRelativeCoordinates = profile.UseRelativeCoordinates,
                             IsDisabled = profile.IsDisabled
                         });
 
@@ -303,6 +305,10 @@ namespace TrueReplayer.Controllers
                 suppressWatcherUntil = DateTime.UtcNow.AddSeconds(2);
 
             await LoadProfileListAsync();
+
+            // Restore active profile state after list rebuild
+            if (_activeProfileName != null)
+                UpdateProfileColors(_activeProfileName);
         }
 
         public void RefreshProfileList(bool suppressWatcher = false)
@@ -437,6 +443,7 @@ namespace TrueReplayer.Controllers
 
         public void UpdateProfileColors(string? activeProfileName)
         {
+            _activeProfileName = activeProfileName;
             foreach (var entry in ProfileEntries)
                 entry.IsActive = (activeProfileName != null && entry.Name == activeProfileName);
         }

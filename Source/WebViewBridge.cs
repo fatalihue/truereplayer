@@ -218,6 +218,7 @@ namespace TrueReplayer
                     case "profile:assignHotstring": HandleProfileAssignHotstring(payload); break;
                     case "profile:removeHotstring": HandleProfileRemoveHotstring(payload); break;
                     case "profile:setWindowTarget": HandleProfileSetWindowTarget(payload); break;
+                    case "profile:setRelativeCoordinates": HandleSetRelativeCoordinates(payload); break;
                     case "profile:removeWindowTarget": HandleProfileRemoveWindowTarget(payload); break;
                     case "profile:setFolderWindowTarget": HandleSetFolderWindowTarget(payload); break;
                     case "profile:removeFolderWindowTarget": HandleRemoveFolderWindowTarget(payload); break;
@@ -382,6 +383,7 @@ namespace TrueReplayer
                 windowTargetProcessName = p.WindowTargetProcessName,
                 windowTargetWindowTitle = p.WindowTargetWindowTitle,
                 windowTargetTitleMatchMode = p.WindowTargetTitleMatchMode,
+                useRelativeCoordinates = p.UseRelativeCoordinates,
                 isDisabled = p.IsDisabled
             }).ToArray();
 
@@ -552,6 +554,7 @@ namespace TrueReplayer
                 CustomHotkey = UserProfile.Current.CustomHotkey,
                 CustomHotstring = UserProfile.Current.CustomHotstring,
                 TargetWindow = UserProfile.Current.TargetWindow,
+                UseRelativeCoordinates = UserProfile.Current.UseRelativeCoordinates,
                 IsDisabled = UserProfile.Current.IsDisabled,
             };
         }
@@ -763,7 +766,9 @@ namespace TrueReplayer
 
             bool useVariation = UseDelayVariation;
             int variationPercent = int.TryParse(DelayVariation, out var vp) ? vp : 20;
-            mainController.ToggleReplay(loopEnabled, loopCount, intervalEnabled, intervalText, useVariation, variationPercent);
+            bool useRelative = UserProfile.Current.UseRelativeCoordinates;
+            var windowTarget = UserProfile.Current.TargetWindow;
+            mainController.ToggleReplay(loopEnabled, loopCount, intervalEnabled, intervalText, useVariation, variationPercent, useRelative, windowTarget);
         }
 
         private void HandleActionsClear()
@@ -1329,6 +1334,9 @@ namespace TrueReplayer
                 CurrentProfileName = name;
                 CurrentProfilePath = entry?.FilePath;
                 HasUnsavedChanges = false;
+                // Sync cached entry with loaded profile data
+                if (entry != null)
+                    entry.UseRelativeCoordinates = profile.UseRelativeCoordinates;
                 ApplyProfile(profile);
                 profileController.UpdateProfileColors(name);
                 PushProfilesUpdate();
@@ -1527,6 +1535,8 @@ namespace TrueReplayer
             {
                 profile.CustomHotkey = hotkey;
                 await profileController.SaveProfileByNameAsync(name, profile);
+                if (CurrentProfileName == name)
+                    UserProfile.Current.CustomHotkey = hotkey;
                 await profileController.RefreshProfileListAsync(true);
                 var map = profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(map);
@@ -1544,6 +1554,8 @@ namespace TrueReplayer
             {
                 profile.CustomHotkey = null;
                 await profileController.SaveProfileByNameAsync(name, profile);
+                if (CurrentProfileName == name)
+                    UserProfile.Current.CustomHotkey = null;
                 await profileController.RefreshProfileListAsync(true);
                 var map = profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(map);
@@ -1579,6 +1591,8 @@ namespace TrueReplayer
             {
                 profile.CustomHotstring = new Models.HotstringConfig { Sequence = sequence, Instant = instant };
                 await profileController.SaveProfileByNameAsync(name, profile);
+                if (CurrentProfileName == name)
+                    UserProfile.Current.CustomHotstring = profile.CustomHotstring;
                 await profileController.RefreshProfileListAsync(true);
                 var hotstringMap = profileController.GetProfileHotstrings();
                 InputHookManager.RegisterProfileHotstrings(hotstringMap);
@@ -1596,6 +1610,8 @@ namespace TrueReplayer
             {
                 profile.CustomHotstring = null;
                 await profileController.SaveProfileByNameAsync(name, profile);
+                if (CurrentProfileName == name)
+                    UserProfile.Current.CustomHotstring = null;
                 await profileController.RefreshProfileListAsync(true);
                 var hotstringMap = profileController.GetProfileHotstrings();
                 InputHookManager.RegisterProfileHotstrings(hotstringMap);
@@ -1659,6 +1675,8 @@ namespace TrueReplayer
                     TitleMatchMode = titleMatchMode
                 };
                 await profileController.SaveProfileByNameAsync(name, profile);
+                if (CurrentProfileName == name)
+                    UserProfile.Current.TargetWindow = profile.TargetWindow;
                 await profileController.RefreshProfileListAsync(true);
                 InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
                 PushProfilesUpdate();
@@ -1703,9 +1721,48 @@ namespace TrueReplayer
             if (profile != null)
             {
                 profile.TargetWindow = null;
+                profile.UseRelativeCoordinates = false;
                 await profileController.SaveProfileByNameAsync(name, profile);
+                if (CurrentProfileName == name)
+                {
+                    UserProfile.Current.TargetWindow = null;
+                    UserProfile.Current.UseRelativeCoordinates = false;
+                }
                 await profileController.RefreshProfileListAsync(true);
                 InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
+                PushProfilesUpdate();
+            }
+        }
+
+        private async void HandleSetRelativeCoordinates(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            bool enabled = payload.GetProperty("enabled").GetBoolean();
+            if (string.IsNullOrEmpty(name)) return;
+
+            // Block if actions exist
+            if (actions.Count > 0)
+            {
+                SendMessage("alert:show", new { message = "Clear all actions before changing Relative Coordinates." });
+                return;
+            }
+
+            var profile = await profileController.LoadProfileByNameAsync(name);
+            if (profile != null)
+            {
+                // Block if no window target when enabling
+                if (enabled && profile.TargetWindow == null)
+                {
+                    SendMessage("alert:show", new { message = "Set a Window Target first." });
+                    return;
+                }
+                profile.UseRelativeCoordinates = enabled;
+                await profileController.SaveProfileByNameAsync(name, profile);
+                // Update cached entry directly (avoid RefreshProfileListAsync which resets IsActive)
+                var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
+                if (entry != null) entry.UseRelativeCoordinates = enabled;
+                if (CurrentProfileName == name)
+                    UserProfile.Current.UseRelativeCoordinates = enabled;
                 PushProfilesUpdate();
             }
         }
