@@ -4,6 +4,7 @@ import type { ProfileEntry } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { KbdTag } from './common/KbdTag';
+import { Toggle } from './common/Toggle';
 
 interface ContextMenuState {
   x: number;
@@ -38,6 +39,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [targetProcessName, setTargetProcessName] = useState('');
   const [targetWindowTitle, setTargetWindowTitle] = useState('');
   const [titleMatchMode, setTitleMatchMode] = useState<'contains' | 'regex'>('contains');
+  const [targetRelativeCoords, setTargetRelativeCoords] = useState(false);
+  const [targetBringToFocus, setTargetBringToFocus] = useState(false);
   const [isDetecting, setIsDetecting] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportSelection, setExportSelection] = useState<Record<string, boolean>>({});
@@ -51,6 +54,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [folderTargetProcess, setFolderTargetProcess] = useState('');
   const [folderTargetTitle, setFolderTargetTitle] = useState('');
   const [folderTargetMatchMode, setFolderTargetMatchMode] = useState<'contains' | 'regex'>('contains');
+  const [folderTargetRelCoords, setFolderTargetRelCoords] = useState(false);
+  const [folderTargetBringToFocus, setFolderTargetBringToFocus] = useState(false);
   const [showMoveToFolderMenu, setShowMoveToFolderMenu] = useState<string | null>(null);
   const [folderContextMenu, setFolderContextMenu] = useState<{ x: number; y: number; folderName: string } | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
@@ -340,6 +345,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setTargetProcessName(existing?.windowTargetProcessName ?? '');
     setTargetWindowTitle(existing?.windowTargetWindowTitle ?? '');
     setTitleMatchMode((existing?.windowTargetTitleMatchMode as 'contains' | 'regex') ?? 'contains');
+    setTargetRelativeCoords(existing?.useRelativeCoordinates ?? false);
+    setTargetBringToFocus(existing?.bringToFocus ?? false);
     setIsDetecting(false);
     setShowWindowTargetDialog(name);
   };
@@ -361,7 +368,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           name: showWindowTargetDialog,
           processName: targetProcessName.trim(),
           windowTitle: targetWindowTitle.trim(),
-          titleMatchMode
+          titleMatchMode,
+          relativeCoordinates: targetRelativeCoords,
+          bringToFocus: targetBringToFocus
         }
       });
     }
@@ -1097,7 +1106,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Crosshair size={13} className="text-text-tertiary" />
-            {profile?.hasWindowTarget ? 'Edit Target Window' : 'Set Target Window'}
+            {profile?.hasWindowTarget ? 'Edit Target' : 'Set Target'}
           </button>
           <div className="my-1 border-t border-border-subtle" />
           <button
@@ -1161,6 +1170,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               setFolderTargetProcess(folder?.windowTargetProcessName || '');
               setFolderTargetTitle(folder?.windowTargetWindowTitle || '');
               setFolderTargetMatchMode((folder?.windowTargetTitleMatchMode as 'contains' | 'regex') || 'contains');
+              setFolderTargetRelCoords(folder?.useRelativeCoordinates ?? false);
+              setFolderTargetBringToFocus(folder?.bringToFocus ?? false);
               setShowFolderTargetDialog(folderContextMenu.folderName);
               setFolderContextMenu(null);
             }}
@@ -1614,34 +1625,48 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       {showWindowTargetDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="w-[380px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
-            <h3 className="text-sm font-semibold text-text-primary mb-3">Set Target Window</h3>
+            <h3 className="text-sm font-semibold text-text-primary mb-3">Target Configuration</h3>
             <p className="text-xs text-text-secondary mb-4">
-              Profile hotkey for <span className="text-text-primary font-medium">'{showWindowTargetDialog}'</span> will only fire when the target window is in focus.
+              Configure target window for <span className="text-text-primary font-medium">'{showWindowTargetDialog}'</span>
             </p>
 
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-text-tertiary mb-1">Process Name</label>
-                <input
-                  type="text"
-                  value={targetProcessName}
-                  onChange={(e) => setTargetProcessName(e.target.value)}
-                  placeholder="e.g. chrome.exe"
-                  className="w-full h-8 px-3 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={targetProcessName}
+                    onChange={(e) => setTargetProcessName(e.target.value)}
+                    placeholder="e.g. chrome.exe"
+                    className="w-full h-8 px-3 pr-7 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                  />
+                  {targetProcessName && (
+                    <button onClick={() => setTargetProcessName('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-disabled hover:text-text-secondary transition-colors">
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="block text-xs text-text-tertiary mb-1">
                   Window Title
                   {titleMatchMode === 'contains' ? ' (partial match)' : ' (regex)'}
                 </label>
-                <input
-                  type="text"
-                  value={targetWindowTitle}
-                  onChange={(e) => setTargetWindowTitle(e.target.value)}
-                  placeholder={titleMatchMode === 'contains' ? 'e.g. Notepad' : 'e.g. (Crisp|Zendesk)'}
-                  className="w-full h-8 px-3 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={targetWindowTitle}
+                    onChange={(e) => setTargetWindowTitle(e.target.value)}
+                    placeholder={titleMatchMode === 'contains' ? 'e.g. Notepad' : 'e.g. (Crisp|Zendesk)'}
+                    className="w-full h-8 px-3 pr-7 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                  />
+                  {targetWindowTitle && (
+                    <button onClick={() => setTargetWindowTitle('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-disabled hover:text-text-secondary transition-colors">
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
                 <div className="flex items-center gap-1.5 mt-1.5">
                   <button
                     onClick={() => setTitleMatchMode('contains')}
@@ -1680,6 +1705,18 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 : 'Detect Window (click on target)'}
             </button>
 
+            {/* Options */}
+            <div className="mt-3 pt-3 border-t border-border-subtle space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-secondary">Relative Coordinates</span>
+                <Toggle isOn={targetRelativeCoords} onChange={setTargetRelativeCoords} />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-secondary">Bring to Focus</span>
+                <Toggle isOn={targetBringToFocus} onChange={setTargetBringToFocus} />
+              </div>
+            </div>
+
             <div className="flex items-center mt-4">
               {profiles.find(p => p.name === showWindowTargetDialog)?.hasWindowTarget && (
                 <button
@@ -1714,33 +1751,47 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       {showFolderTargetDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="w-[380px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
-            <h3 className="text-sm font-semibold text-text-primary mb-3">Set Folder Target</h3>
+            <h3 className="text-sm font-semibold text-text-primary mb-3">Folder Target Configuration</h3>
             <p className="text-xs text-text-secondary mb-4">
-              All profiles in <span className="text-text-primary font-medium">'{showFolderTargetDialog}'</span> will only fire when the target window is in focus. Profiles with their own target override this.
+              Configure target for all profiles in <span className="text-text-primary font-medium">'{showFolderTargetDialog}'</span>. Profiles with their own target override this.
             </p>
 
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-text-tertiary mb-1">Process Name</label>
-                <input
-                  type="text"
-                  value={folderTargetProcess}
-                  onChange={(e) => setFolderTargetProcess(e.target.value)}
-                  placeholder="e.g. chrome.exe"
-                  className="w-full h-8 px-3 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={folderTargetProcess}
+                    onChange={(e) => setFolderTargetProcess(e.target.value)}
+                    placeholder="e.g. chrome.exe"
+                    className="w-full h-8 px-3 pr-7 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                  />
+                  {folderTargetProcess && (
+                    <button onClick={() => setFolderTargetProcess('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-disabled hover:text-text-secondary transition-colors">
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="block text-xs text-text-tertiary mb-1">
                   Window Title {folderTargetMatchMode === 'contains' ? '(partial match)' : '(regex)'}
                 </label>
-                <input
-                  type="text"
-                  value={folderTargetTitle}
-                  onChange={(e) => setFolderTargetTitle(e.target.value)}
-                  placeholder={folderTargetMatchMode === 'contains' ? 'e.g. Chrome' : 'e.g. (Chrome|Firefox)'}
-                  className="w-full h-8 px-3 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={folderTargetTitle}
+                    onChange={(e) => setFolderTargetTitle(e.target.value)}
+                    placeholder={folderTargetMatchMode === 'contains' ? 'e.g. Chrome' : 'e.g. (Chrome|Firefox)'}
+                    className="w-full h-8 px-3 pr-7 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                  />
+                  {folderTargetTitle && (
+                    <button onClick={() => setFolderTargetTitle('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-disabled hover:text-text-secondary transition-colors">
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
                 <div className="flex items-center gap-1.5 mt-1.5">
                   <button
                     onClick={() => setFolderTargetMatchMode('contains')}
@@ -1775,6 +1826,18 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 : 'Detect Window (click on target)'}
             </button>
 
+            {/* Options */}
+            <div className="mt-3 pt-3 border-t border-border-subtle space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-secondary">Relative Coordinates</span>
+                <Toggle isOn={folderTargetRelCoords} onChange={setFolderTargetRelCoords} />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-secondary">Bring to Focus</span>
+                <Toggle isOn={folderTargetBringToFocus} onChange={setFolderTargetBringToFocus} />
+              </div>
+            </div>
+
             <div className="flex items-center mt-4">
               {(profileOrder?.folders ?? []).find(f => f.name === showFolderTargetDialog)?.hasWindowTarget && (
                 <button
@@ -1803,6 +1866,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         processName: folderTargetProcess.trim(),
                         windowTitle: folderTargetTitle.trim(),
                         titleMatchMode: folderTargetMatchMode,
+                        relativeCoordinates: folderTargetRelCoords,
+                        bringToFocus: folderTargetBringToFocus,
                       }
                     });
                     setShowFolderTargetDialog(null);

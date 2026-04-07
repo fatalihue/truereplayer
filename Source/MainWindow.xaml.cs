@@ -302,6 +302,10 @@ namespace TrueReplayer
                             return;
 
                         mainController.SetLastHotkeyPressed(key);
+                        var curName = bridge?.CurrentProfileName ?? "";
+                        var effTarget = curName != "No Profile" ? profileController.GetEffectiveWindowTarget(curName) : UserProfile.Current.TargetWindow;
+                        var effRelCoords = curName != "No Profile" ? profileController.GetEffectiveRelativeCoordinates(curName) : UserProfile.Current.UseRelativeCoordinates;
+                        var effBringFocus = curName != "No Profile" ? profileController.GetEffectiveBringToFocus(curName) : UserProfile.Current.BringToFocus;
                         mainController.ToggleReplay(
                             bridge?.EnableLoop ?? false,
                             bridge?.LoopCount ?? "1",
@@ -309,8 +313,9 @@ namespace TrueReplayer
                             bridge?.LoopInterval ?? "0",
                             bridge?.UseDelayVariation ?? false,
                             int.TryParse(bridge?.DelayVariation ?? "20", out var hvp) ? hvp : 20,
-                            UserProfile.Current.UseRelativeCoordinates,
-                            UserProfile.Current.TargetWindow);
+                            effRelCoords,
+                            effTarget,
+                            effBringFocus);
                     }
                     else if (key.StartsWith("PROFILE::"))
                     {
@@ -323,12 +328,18 @@ namespace TrueReplayer
                             mainController.SetLastHotkeyPressed(key);
                             UserProfile.Current = profile;
                             AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
+                            // Apply effective folder-inherited values
+                            UserProfile.Current.UseRelativeCoordinates = profileController.GetEffectiveRelativeCoordinates(profileName);
+                            UserProfile.Current.BringToFocus = profileController.GetEffectiveBringToFocus(profileName);
                             if (bridge == null) return;
                             bridge.ApplyProfile(profile);
                             bridge.CurrentProfileName = profileName;
                             bridge.CurrentProfilePath = entry?.FilePath;
                             bridge.HasUnsavedChanges = false;
 
+                            var effectiveTarget = profileController.GetEffectiveWindowTarget(profileName);
+                            var effectiveRelCoords = profileController.GetEffectiveRelativeCoordinates(profileName);
+                            var effectiveBringToFocus = profileController.GetEffectiveBringToFocus(profileName);
                             mainController.ToggleReplay(
                                 bridge.EnableLoop,
                                 bridge.LoopCount,
@@ -336,8 +347,9 @@ namespace TrueReplayer
                                 bridge.LoopInterval,
                                 bridge.UseDelayVariation,
                                 int.TryParse(bridge.DelayVariation, out var pvp) ? pvp : 20,
-                                UserProfile.Current.UseRelativeCoordinates,
-                                UserProfile.Current.TargetWindow);
+                                effectiveRelCoords,
+                                effectiveTarget,
+                                effectiveBringToFocus);
 
                             profileController.UpdateProfileColors(profileName);
                             bridge.PushProfilesUpdate();

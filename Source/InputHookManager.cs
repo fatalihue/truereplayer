@@ -33,6 +33,7 @@ namespace TrueReplayer
         {
             public Dictionary<string, WindowTarget> Targets { get; init; } = new();
             public Dictionary<string, Regex?> CompiledRegexes { get; init; } = new();
+            public HashSet<string> BringToFocusProfiles { get; init; } = new();
         }
         private static volatile WindowTargetSnapshot _windowTargets = new();
 
@@ -89,7 +90,7 @@ namespace TrueReplayer
             _hotstringBufferLen = 0;
         }
 
-        public static void RegisterProfileWindowTargets(Dictionary<string, WindowTarget> targets)
+        public static void RegisterProfileWindowTargets(Dictionary<string, WindowTarget> targets, HashSet<string>? bringToFocusProfiles = null)
         {
             var regexes = new Dictionary<string, Regex?>();
             foreach (var (name, target) in targets)
@@ -109,7 +110,12 @@ namespace TrueReplayer
                 }
             }
             // Assign both atomically as a single snapshot
-            _windowTargets = new WindowTargetSnapshot { Targets = targets, CompiledRegexes = regexes };
+            _windowTargets = new WindowTargetSnapshot
+            {
+                Targets = targets,
+                CompiledRegexes = regexes,
+                BringToFocusProfiles = bringToFocusProfiles ?? new HashSet<string>()
+            };
         }
 
         private static readonly StringBuilder _windowTextBuffer = new(512);
@@ -119,6 +125,11 @@ namespace TrueReplayer
         {
             // Read snapshot once for consistent access
             var wt = _windowTargets;
+
+            // Bring to Focus profiles skip foreground check — they fire from any window
+            if (wt.BringToFocusProfiles.Contains(profileName))
+                return true;
+
             if (!wt.Targets.TryGetValue(profileName, out var target))
                 return true;
 

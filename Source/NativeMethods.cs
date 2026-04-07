@@ -220,6 +220,15 @@ namespace TrueReplayer.Interop
         [DllImport("user32.dll")]
         public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
+        [DllImport("user32.dll")]
+        public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+        [DllImport("kernel32.dll")]
+        public static extern uint GetCurrentThreadId();
+
         public static IntPtr SetMouseHook(LowLevelMouseProc proc)
         {
             using var curProcess = System.Diagnostics.Process.GetCurrentProcess();

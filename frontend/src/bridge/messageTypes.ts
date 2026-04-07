@@ -30,6 +30,7 @@ export interface ProfileEntry {
   windowTargetWindowTitle: string | null;
   windowTargetTitleMatchMode: string;
   useRelativeCoordinates: boolean;
+  bringToFocus: boolean;
   isDisabled: boolean;
 }
 
@@ -42,6 +43,8 @@ export interface ProfileFolder {
   windowTargetProcessName?: string;
   windowTargetWindowTitle?: string;
   windowTargetTitleMatchMode?: string;
+  useRelativeCoordinates?: boolean;
+  bringToFocus?: boolean;
 }
 
 export interface ProfileOrderData {
@@ -156,6 +159,7 @@ export type OutgoingMessage =
   | { type: 'profile:removeHotstring'; payload: { name: string } }
   | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string } }
   | { type: 'profile:setRelativeCoordinates'; payload: { name: string; enabled: boolean } }
+  | { type: 'profile:setBringToFocus'; payload: { name: string; enabled: boolean } }
   | { type: 'profile:removeWindowTarget'; payload: { name: string } }
   | { type: 'profile:setFolderWindowTarget'; payload: { folderName: string; processName: string; windowTitle: string; titleMatchMode: string } }
   | { type: 'profile:removeFolderWindowTarget'; payload: { folderName: string } }

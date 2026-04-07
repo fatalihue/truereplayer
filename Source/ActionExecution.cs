@@ -130,15 +130,15 @@ namespace TrueReplayer.Services
             replayer.SetProfileNameProvider(getProfileName);
         }
 
-        public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation = false, int delayVariationPercent = 20, bool useRelativeCoords = false, Models.WindowTarget? windowTarget = null)
+        public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation = false, int delayVariationPercent = 20, bool useRelativeCoords = false, Models.WindowTarget? windowTarget = null, bool bringToFocus = false)
         {
             if (!IsReplaying && actions.Count > 0)
-                StartReplay(loopEnabled, loopCountText, intervalEnabled, intervalText, useDelayVariation, delayVariationPercent, useRelativeCoords, windowTarget);
+                StartReplay(loopEnabled, loopCountText, intervalEnabled, intervalText, useDelayVariation, delayVariationPercent, useRelativeCoords, windowTarget, bringToFocus);
             else if (IsReplaying)
                 StopReplay();
         }
 
-        private void StartReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation, int delayVariationPercent, bool useRelativeCoords, Models.WindowTarget? windowTarget)
+        private void StartReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation, int delayVariationPercent, bool useRelativeCoords, Models.WindowTarget? windowTarget, bool bringToFocus)
         {
             IsReplaying = true;
             onButtonStateChanged?.Invoke("Stop", true);
@@ -148,6 +148,7 @@ namespace TrueReplayer.Services
             replayer.SetLoopOptions(loopCount, loopInterval);
             replayer.SetDelayVariation(useDelayVariation, delayVariationPercent);
             replayer.SetRelativeCoordinates(useRelativeCoords, windowTarget);
+            replayer.SetBringToFocus(bringToFocus);
 
             onStatusChanged?.Invoke("replaying");
 
@@ -439,10 +440,17 @@ namespace TrueReplayer.Services
         private bool _useRelativeCoordinates = false;
         private Models.WindowTarget? _windowTarget;
 
+        private bool _bringToFocus = false;
+
         public void SetRelativeCoordinates(bool enabled, Models.WindowTarget? target)
         {
             _useRelativeCoordinates = enabled;
             _windowTarget = target;
+        }
+
+        public void SetBringToFocus(bool enabled)
+        {
+            _bringToFocus = enabled;
         }
 
         private bool _useDelayVariation = false;
@@ -475,6 +483,26 @@ namespace TrueReplayer.Services
             try
             {
                 await WaitForHotkeyReleaseAsync(token);
+
+                // Bring target window to focus if enabled
+                if (_bringToFocus && _windowTarget != null)
+                {
+                    var targetHwnd = FindTargetWindow();
+                    if (targetHwnd != IntPtr.Zero)
+                    {
+                        NativeMethods.ShowWindow(targetHwnd, 9); // SW_RESTORE
+                        // AttachThreadInput trick to bypass foreground restriction
+                        var fgHwnd = NativeMethods.GetForegroundWindow();
+                        uint fgThread = NativeMethods.GetWindowThreadProcessId(fgHwnd, out _);
+                        uint curThread = NativeMethods.GetCurrentThreadId();
+                        if (fgThread != curThread)
+                            NativeMethods.AttachThreadInput(fgThread, curThread, true);
+                        NativeMethods.SetForegroundWindow(targetHwnd);
+                        if (fgThread != curThread)
+                            NativeMethods.AttachThreadInput(fgThread, curThread, false);
+                        await Task.Delay(300, token); // Wait for window to restore and gain focus
+                    }
+                }
 
                 // Run replay on a dedicated thread to avoid blocking the thread pool
                 await Task.Factory.StartNew(async () =>

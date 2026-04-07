@@ -61,6 +61,7 @@ namespace TrueReplayer.Models
         public HotstringConfig? CustomHotstring { get; set; }
         public WindowTarget? TargetWindow { get; set; }
         public bool UseRelativeCoordinates { get; set; } = false;
+        public bool BringToFocus { get; set; } = false;
         public bool IsDisabled { get; set; }
 
         [JsonIgnore]
@@ -114,6 +115,7 @@ namespace TrueReplayer.Models
         public string? WindowTargetWindowTitle { get; set; }
         public string WindowTargetTitleMatchMode { get; set; } = "contains";
         public bool UseRelativeCoordinates { get; set; }
+        public bool BringToFocus { get; set; }
         public bool IsDisabled { get; set; }
         public string Display => string.IsNullOrEmpty(Hotkey) ? Name : $"{Name} ({Hotkey})";
 
@@ -143,6 +145,8 @@ namespace TrueReplayer.Models
         public bool Collapsed { get; set; } = false;
         public List<string> Items { get; set; } = new();
         public WindowTarget? TargetWindow { get; set; }
+        public bool UseRelativeCoordinates { get; set; } = false;
+        public bool BringToFocus { get; set; } = false;
     }
 
     public class ProfileOrderData

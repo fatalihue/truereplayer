@@ -169,8 +169,7 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
 }
 
 export function SettingsPanel() {
-  const { settings, profiles, activeProfile: activeProfileName } = useAppState();
-  const activeProfile = profiles.find(p => p.isActive);
+  const { settings } = useAppState();
   const { send, subscribe } = useBridge();
   const selectionRef = useSelectionRef();
   const hotkeyFocusCount = useRef(0);
@@ -317,18 +316,6 @@ export function SettingsPanel() {
               <SettingRow label="Browser Actions" tooltip="Record CSS selectors from Chrome instead of mouse coordinates">
                 <Toggle isOn={settings.browserSelectorEnabled ?? true} onChange={(v) => changeSetting('browserSelectorEnabled', v)} />
               </SettingRow>
-              {activeProfile?.hasWindowTarget && (
-              <SettingRow label="Relative Coords" tooltip="Record clicks relative to the target window position. Only changeable when action list is empty.">
-                <Toggle
-                  isOn={activeProfile?.useRelativeCoordinates ?? false}
-                  onChange={(v) => {
-                    if (activeProfile) {
-                      send({ type: 'profile:setRelativeCoordinates', payload: { name: activeProfile.name, enabled: v } });
-                    }
-                  }}
-                />
-              </SettingRow>
-              )}
             </Section>
 
 

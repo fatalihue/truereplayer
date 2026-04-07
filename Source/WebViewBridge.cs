@@ -219,6 +219,7 @@ namespace TrueReplayer
                     case "profile:removeHotstring": HandleProfileRemoveHotstring(payload); break;
                     case "profile:setWindowTarget": HandleProfileSetWindowTarget(payload); break;
                     case "profile:setRelativeCoordinates": HandleSetRelativeCoordinates(payload); break;
+                    case "profile:setBringToFocus": HandleSetBringToFocus(payload); break;
                     case "profile:removeWindowTarget": HandleProfileRemoveWindowTarget(payload); break;
                     case "profile:setFolderWindowTarget": HandleSetFolderWindowTarget(payload); break;
                     case "profile:removeFolderWindowTarget": HandleRemoveFolderWindowTarget(payload); break;
@@ -384,6 +385,7 @@ namespace TrueReplayer
                 windowTargetWindowTitle = p.WindowTargetWindowTitle,
                 windowTargetTitleMatchMode = p.WindowTargetTitleMatchMode,
                 useRelativeCoordinates = p.UseRelativeCoordinates,
+                bringToFocus = p.BringToFocus,
                 isDisabled = p.IsDisabled
             }).ToArray();
 
@@ -400,7 +402,9 @@ namespace TrueReplayer
                     hasWindowTarget = f.TargetWindow != null,
                     windowTargetProcessName = f.TargetWindow?.ProcessName,
                     windowTargetWindowTitle = f.TargetWindow?.WindowTitle,
-                    windowTargetTitleMatchMode = f.TargetWindow?.TitleMatchMode ?? "contains"
+                    windowTargetTitleMatchMode = f.TargetWindow?.TitleMatchMode ?? "contains",
+                    useRelativeCoordinates = f.UseRelativeCoordinates,
+                    bringToFocus = f.BringToFocus
                 }).ToArray(),
                 ungroupedOrder = order.UngroupedOrder
             };
@@ -555,6 +559,7 @@ namespace TrueReplayer
                 CustomHotstring = UserProfile.Current.CustomHotstring,
                 TargetWindow = UserProfile.Current.TargetWindow,
                 UseRelativeCoordinates = UserProfile.Current.UseRelativeCoordinates,
+                BringToFocus = UserProfile.Current.BringToFocus,
                 IsDisabled = UserProfile.Current.IsDisabled,
             };
         }
@@ -608,7 +613,9 @@ namespace TrueReplayer
                         hasWindowTarget = f.TargetWindow != null,
                         windowTargetProcessName = f.TargetWindow?.ProcessName,
                         windowTargetWindowTitle = f.TargetWindow?.WindowTitle,
-                        windowTargetTitleMatchMode = f.TargetWindow?.TitleMatchMode ?? "contains"
+                        windowTargetTitleMatchMode = f.TargetWindow?.TitleMatchMode ?? "contains",
+                    useRelativeCoordinates = f.UseRelativeCoordinates,
+                    bringToFocus = f.BringToFocus
                     }).ToArray(),
                     ungroupedOrder = profileController.GetProfileOrder().UngroupedOrder
                 },
@@ -766,9 +773,10 @@ namespace TrueReplayer
 
             bool useVariation = UseDelayVariation;
             int variationPercent = int.TryParse(DelayVariation, out var vp) ? vp : 20;
-            bool useRelative = UserProfile.Current.UseRelativeCoordinates;
-            var windowTarget = UserProfile.Current.TargetWindow;
-            mainController.ToggleReplay(loopEnabled, loopCount, intervalEnabled, intervalText, useVariation, variationPercent, useRelative, windowTarget);
+            var effTarget = CurrentProfileName != "No Profile" ? profileController.GetEffectiveWindowTarget(CurrentProfileName) : UserProfile.Current.TargetWindow;
+            var effRelCoords = CurrentProfileName != "No Profile" ? profileController.GetEffectiveRelativeCoordinates(CurrentProfileName) : UserProfile.Current.UseRelativeCoordinates;
+            var effBringFocus = CurrentProfileName != "No Profile" ? profileController.GetEffectiveBringToFocus(CurrentProfileName) : UserProfile.Current.BringToFocus;
+            mainController.ToggleReplay(loopEnabled, loopCount, intervalEnabled, intervalText, useVariation, variationPercent, effRelCoords, effTarget, effBringFocus);
         }
 
         private void HandleActionsClear()
@@ -1336,7 +1344,13 @@ namespace TrueReplayer
                 HasUnsavedChanges = false;
                 // Sync cached entry with loaded profile data
                 if (entry != null)
+                {
                     entry.UseRelativeCoordinates = profile.UseRelativeCoordinates;
+                    entry.BringToFocus = profile.BringToFocus;
+                }
+                // Apply effective values (profile's own > folder-inherited)
+                UserProfile.Current.UseRelativeCoordinates = profileController.GetEffectiveRelativeCoordinates(name);
+                UserProfile.Current.BringToFocus = profileController.GetEffectiveBringToFocus(name);
                 ApplyProfile(profile);
                 profileController.UpdateProfileColors(name);
                 PushProfilesUpdate();
@@ -1644,6 +1658,8 @@ namespace TrueReplayer
             string titleMatchMode = payload.TryGetProperty("titleMatchMode", out var tmProp)
                 ? tmProp.GetString() ?? "contains"
                 : "contains";
+            bool relativeCoordinates = payload.TryGetProperty("relativeCoordinates", out var rcProp) && rcProp.GetBoolean();
+            bool bringToFocus = payload.TryGetProperty("bringToFocus", out var btfProp) && btfProp.GetBoolean();
             if (string.IsNullOrEmpty(name)) return;
 
             if (string.IsNullOrWhiteSpace(processName) && string.IsNullOrWhiteSpace(windowTitle))
@@ -1674,11 +1690,17 @@ namespace TrueReplayer
                     WindowTitle = string.IsNullOrWhiteSpace(windowTitle) ? null : windowTitle.Trim(),
                     TitleMatchMode = titleMatchMode
                 };
+                profile.UseRelativeCoordinates = relativeCoordinates;
+                profile.BringToFocus = bringToFocus;
                 await profileController.SaveProfileByNameAsync(name, profile);
                 if (CurrentProfileName == name)
+                {
                     UserProfile.Current.TargetWindow = profile.TargetWindow;
+                    UserProfile.Current.UseRelativeCoordinates = relativeCoordinates;
+                    UserProfile.Current.BringToFocus = bringToFocus;
+                }
                 await profileController.RefreshProfileListAsync(true);
-                InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
+                InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
                 PushProfilesUpdate();
             }
         }
@@ -1729,7 +1751,7 @@ namespace TrueReplayer
                     UserProfile.Current.UseRelativeCoordinates = false;
                 }
                 await profileController.RefreshProfileListAsync(true);
-                InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
+                InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
                 PushProfilesUpdate();
             }
         }
@@ -1740,22 +1762,9 @@ namespace TrueReplayer
             bool enabled = payload.GetProperty("enabled").GetBoolean();
             if (string.IsNullOrEmpty(name)) return;
 
-            // Block if actions exist
-            if (actions.Count > 0)
-            {
-                SendMessage("alert:show", new { message = "Clear all actions before changing Relative Coordinates." });
-                return;
-            }
-
             var profile = await profileController.LoadProfileByNameAsync(name);
             if (profile != null)
             {
-                // Block if no window target when enabling
-                if (enabled && profile.TargetWindow == null)
-                {
-                    SendMessage("alert:show", new { message = "Set a Window Target first." });
-                    return;
-                }
                 profile.UseRelativeCoordinates = enabled;
                 await profileController.SaveProfileByNameAsync(name, profile);
                 // Update cached entry directly (avoid RefreshProfileListAsync which resets IsActive)
@@ -1767,6 +1776,27 @@ namespace TrueReplayer
             }
         }
 
+        private async void HandleSetBringToFocus(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            bool enabled = payload.GetProperty("enabled").GetBoolean();
+            if (string.IsNullOrEmpty(name)) return;
+
+            var profile = await profileController.LoadProfileByNameAsync(name);
+            if (profile != null)
+            {
+                profile.BringToFocus = enabled;
+                await profileController.SaveProfileByNameAsync(name, profile);
+                var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
+                if (entry != null) entry.BringToFocus = enabled;
+                if (CurrentProfileName == name)
+                    UserProfile.Current.BringToFocus = enabled;
+                // Re-register so IsForegroundWindowMatch skips check for bring-to-focus profiles
+                InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
+                PushProfilesUpdate();
+            }
+        }
+
         private async void HandleSetFolderWindowTarget(JsonElement payload)
         {
             string folderName = payload.GetProperty("folderName").GetString() ?? "";
@@ -1774,6 +1804,8 @@ namespace TrueReplayer
             string windowTitle = payload.GetProperty("windowTitle").GetString() ?? "";
             string titleMatchMode = payload.TryGetProperty("titleMatchMode", out var tm)
                 ? tm.GetString() ?? "contains" : "contains";
+            bool relativeCoordinates = payload.TryGetProperty("relativeCoordinates", out var rcProp) && rcProp.GetBoolean();
+            bool bringToFocus = payload.TryGetProperty("bringToFocus", out var btfProp) && btfProp.GetBoolean();
 
             if (string.IsNullOrEmpty(folderName)) return;
 
@@ -1794,8 +1826,8 @@ namespace TrueReplayer
                 ProcessName = string.IsNullOrWhiteSpace(processName) ? null : processName.Trim(),
                 WindowTitle = string.IsNullOrWhiteSpace(windowTitle) ? null : windowTitle.Trim(),
                 TitleMatchMode = titleMatchMode
-            });
-            InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
+            }, relativeCoordinates, bringToFocus);
+            InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
             PushProfilesUpdate();
         }
 
@@ -1839,7 +1871,17 @@ namespace TrueReplayer
             }
 
             await profileController.RemoveFolderWindowTargetAsync(folderName);
-            InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
+            // Reset effective values on active profile if it was inheriting from this folder
+            if (folder != null && CurrentProfileName != "No Profile" && folder.Items.Contains(CurrentProfileName))
+            {
+                var ownTarget = profileController.ProfileEntries.FirstOrDefault(e => e.Name == CurrentProfileName);
+                if (ownTarget != null && !ownTarget.HasWindowTarget)
+                {
+                    UserProfile.Current.UseRelativeCoordinates = false;
+                    UserProfile.Current.BringToFocus = false;
+                }
+            }
+            InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
             PushProfilesUpdate();
         }
 
@@ -2050,7 +2092,7 @@ namespace TrueReplayer
                 await profileController.DeleteFolderAsync(name);
             }
 
-            InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
+            InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
             PushProfilesUpdate();
         }
 
@@ -2079,7 +2121,7 @@ namespace TrueReplayer
                 : null;
             if (string.IsNullOrEmpty(profileName)) return;
             await profileController.MoveToFolderAsync(profileName, folderName);
-            InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets());
+            InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
             PushProfilesUpdate();
         }
 

@@ -277,6 +277,7 @@ namespace TrueReplayer.Controllers
                             WindowTargetWindowTitle = profile.TargetWindow?.WindowTitle,
                             WindowTargetTitleMatchMode = profile.TargetWindow?.TitleMatchMode ?? "contains",
                             UseRelativeCoordinates = profile.UseRelativeCoordinates,
+                            BringToFocus = profile.BringToFocus,
                             IsDisabled = profile.IsDisabled
                         });
 
@@ -294,7 +295,7 @@ namespace TrueReplayer.Controllers
 
             var map = GetProfileHotkeys();
             InputHookManager.RegisterProfileHotkeys(map);
-            InputHookManager.RegisterProfileWindowTargets(GetProfileWindowTargets());
+            InputHookManager.RegisterProfileWindowTargets(GetProfileWindowTargets(), GetBringToFocusProfiles());
             var hotstringMap = GetProfileHotstrings();
             InputHookManager.RegisterProfileHotstrings(hotstringMap);
         }
@@ -516,14 +517,63 @@ namespace TrueReplayer.Controllers
             return null;
         }
 
-        public async Task SetFolderWindowTargetAsync(string folderName, WindowTarget target)
+        public bool GetEffectiveRelativeCoordinates(string profileName)
+        {
+            // Profile's own target takes priority
+            if (_cachedWindowTargets.ContainsKey(profileName))
+            {
+                var entry = ProfileEntries.FirstOrDefault(p => p.Name == profileName);
+                return entry?.UseRelativeCoordinates ?? false;
+            }
+            // Folder target inheritance
+            var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(profileName));
+            return folder?.UseRelativeCoordinates ?? false;
+        }
+
+        public bool GetEffectiveBringToFocus(string profileName)
+        {
+            if (_cachedWindowTargets.ContainsKey(profileName))
+            {
+                var entry = ProfileEntries.FirstOrDefault(p => p.Name == profileName);
+                return entry?.BringToFocus ?? false;
+            }
+            var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(profileName));
+            return folder?.BringToFocus ?? false;
+        }
+
+        public async Task SetFolderWindowTargetAsync(string folderName, WindowTarget target, bool relativeCoordinates = false, bool bringToFocus = false)
         {
             var folder = _profileOrder.Folders.FirstOrDefault(f => f.Name == folderName);
             if (folder != null)
             {
                 folder.TargetWindow = target;
+                folder.UseRelativeCoordinates = relativeCoordinates;
+                folder.BringToFocus = bringToFocus;
                 await SaveProfileOrderAsync();
             }
+        }
+
+        public HashSet<string> GetBringToFocusProfiles()
+        {
+            var set = new HashSet<string>();
+            foreach (var entry in ProfileEntries)
+            {
+                if (entry.IsDisabled) continue;
+                // Profile's own bring-to-focus
+                if (entry.BringToFocus && entry.HasWindowTarget)
+                {
+                    set.Add(entry.Name);
+                    continue;
+                }
+                // Folder-inherited bring-to-focus
+                if (!entry.HasWindowTarget)
+                {
+                    var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(entry.Name));
+                    if (folder?.BringToFocus == true && folder.TargetWindow != null)
+                        set.Add(entry.Name);
+                }
+            }
+            return set;
         }
 
         public async Task RemoveFolderWindowTargetAsync(string folderName)
@@ -532,6 +582,8 @@ namespace TrueReplayer.Controllers
             if (folder != null)
             {
                 folder.TargetWindow = null;
+                folder.UseRelativeCoordinates = false;
+                folder.BringToFocus = false;
                 await SaveProfileOrderAsync();
             }
         }
