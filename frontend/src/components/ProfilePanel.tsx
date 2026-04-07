@@ -585,6 +585,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       const dy = e.clientY - dragStartPos.current.y;
       // Require 5px movement to start drag
       if (!dragActive.current && Math.abs(dx) + Math.abs(dy) < 5) return;
+      if (!dragActive.current) document.body.style.cursor = 'grabbing';
       dragActive.current = true;
 
       // Hit-test which folder or ungrouped area the mouse is over
@@ -612,6 +613,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           send({ type: 'profile:moveToFolder', payload: { profileName: dragProfile, folderName: targetFolder } });
         }
       }
+      document.body.style.cursor = '';
       dragStartPos.current = null;
       dragActive.current = false;
       setDragProfile(null);
@@ -645,6 +647,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       const dx = e.clientX - folderDragStartPos.current.x;
       const dy = e.clientY - folderDragStartPos.current.y;
       if (!folderDragActive.current && Math.abs(dx) + Math.abs(dy) < 5) return;
+      if (!folderDragActive.current) document.body.style.cursor = 'grabbing';
       folderDragActive.current = true;
 
       // Hit-test folder positions to find drop index
@@ -673,6 +676,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           send({ type: 'profile:reorder', payload: { folders } });
         }
       }
+      document.body.style.cursor = '';
       folderDragStartPos.current = null;
       folderDragActive.current = false;
       setDragFolder(null);
@@ -713,7 +717,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         send({ type: 'profile:click', payload: { name: p.name } }); (e.target as HTMLElement).blur();
       }}
       onContextMenu={(e) => handleContextMenu(e, p.name)}
-      className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-left transition-colors outline-none select-none ${
+      className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-left transition-colors outline-none select-none cursor-grab active:cursor-grabbing ${
         dragProfile === p.name && dragActive.current ? 'opacity-50 ' : ''
       }${p.isDisabled ? 'opacity-40 ' : ''}${
         p.isActive
@@ -918,7 +922,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       className={`rounded transition-colors ${isDragOver ? 'bg-accent-solid/20 ring-2 ring-accent-solid/50' : ''} ${isFolderDragging ? 'opacity-50' : ''}`}
                     >
                       <div
-                        className={`w-full flex items-center gap-1.5 px-2 py-1.5 mt-1 rounded text-left hover:bg-bg-card transition-colors group cursor-default select-none ${selectedFolder === folder.name ? 'bg-bg-card ring-1 ring-accent-solid/30' : ''}`}
+                        className={`w-full flex items-center gap-1.5 px-2 py-1.5 mt-1 rounded text-left hover:bg-bg-card transition-colors group cursor-grab active:cursor-grabbing select-none ${selectedFolder === folder.name ? 'bg-bg-card ring-1 ring-accent-solid/30' : ''}`}
                         onMouseDown={(e) => handleFolderMouseDown(e, folder.name)}
                         onClick={() => { if (!folderDragActive.current) setSelectedFolder(prev => prev === folder.name ? null : folder.name); }}
                         onContextMenu={(e) => handleFolderContextMenu(e, folder.name)}
