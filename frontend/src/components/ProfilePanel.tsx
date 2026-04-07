@@ -187,33 +187,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     }
   }, [showHotstringDialog]);
 
-  // Suppress hotkeys while any dialog is open
   const anyDialogOpen = showCreateDialog || showRenameDialog !== null || showDeleteConfirm !== null || showHotkeyDialog !== null || showHotstringDialog !== null || showWindowTargetDialog !== null || showExportDialog || showCreateFolderDialog || showRenameFolderDialog !== null || showFolderTargetDialog !== null;
-  useEffect(() => {
-    if (anyDialogOpen) {
-      send({ type: 'ui:modalOpen', payload: {} });
-      return () => { send({ type: 'ui:modalClose', payload: {} }); };
-    }
-  }, [anyDialogOpen, send]);
-
-  // Close all dialogs when app loses focus
-  useEffect(() => {
-    const handleBlur = () => {
-      setShowCreateDialog(false);
-      setShowRenameDialog(null);
-      setShowDeleteConfirm(null);
-      setShowHotkeyDialog(null);
-      setShowHotstringDialog(null);
-      setShowWindowTargetDialog(null);
-      setShowExportDialog(false);
-      setShowCreateFolderDialog(false);
-      setShowRenameFolderDialog(null);
-      setShowFolderTargetDialog(null);
-      setIsDetecting(false);
-    };
-    window.addEventListener('app:blur', handleBlur);
-    return () => window.removeEventListener('app:blur', handleBlur);
-  }, []);
 
   const handleExportClick = () => {
     setExportSelection({});
@@ -959,7 +933,15 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         </span>
                         <FolderOpen size={12} style={{ color: folder.color }} className="shrink-0" />
                         <span className="text-xs font-medium text-text-secondary flex-1 truncate">{folder.name}</span>
-                        {folder.hasWindowTarget && <span title={folder.windowTargetProcessName || folder.windowTargetWindowTitle || 'Window Target'} className="shrink-0"><Crosshair size={10} className="text-text-tertiary" /></span>}
+                        {folder.hasWindowTarget && (
+                          <span className="group/ftarget shrink-0 relative" title={folder.windowTargetProcessName || folder.windowTargetWindowTitle || 'Window Target'}>
+                            <Crosshair size={10} className="text-text-tertiary" />
+                            <button
+                              onClick={(e) => { e.stopPropagation(); send({ type: 'profile:removeFolderWindowTarget', payload: { folderName: folder.name } }); }}
+                              className="hidden group-hover/ftarget:inline-flex absolute top-0 right-0 w-full h-full items-center justify-center rounded-full bg-recording text-white text-[7px] font-bold leading-none hover:bg-red-500"
+                            >✕</button>
+                          </span>
+                        )}
                         <span className="text-[10px] text-text-disabled">{folder.items.length}</span>
                       </div>
                       {!folder.collapsed && hasVisibleProfiles && (
@@ -1178,20 +1160,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Crosshair size={13} className="text-text-tertiary" />
-            {(profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName)?.hasWindowTarget ? 'Edit Window Target' : 'Set Window Target'}
+            {(profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName)?.hasWindowTarget ? 'Edit Target' : 'Set Target'}
           </button>
-          {(profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName)?.hasWindowTarget && (
-            <button
-              onClick={() => {
-                send({ type: 'profile:removeFolderWindowTarget', payload: { folderName: folderContextMenu.folderName } });
-                setFolderContextMenu(null);
-              }}
-              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-recording hover:bg-bg-elevated transition-colors"
-            >
-              <Ban size={13} />
-              Remove Window Target
-            </button>
-          )}
           <div className="my-1 border-t border-border-subtle" />
           <button
             onClick={() => handleDeleteFolder(folderContextMenu.folderName)}

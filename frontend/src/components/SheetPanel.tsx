@@ -77,13 +77,6 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     }
   }, [action]);
 
-  // Suppress hotkeys while open
-  useEffect(() => {
-    if (actionIndex != null) {
-      send({ type: 'ui:modalOpen', payload: {} });
-      return () => { send({ type: 'ui:modalClose', payload: {} }); };
-    }
-  }, [actionIndex, send]);
 
   const handleSave = useCallback(() => {
     if (actionIndex == null || !action) return;

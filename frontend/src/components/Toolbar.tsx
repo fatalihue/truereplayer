@@ -44,14 +44,6 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
   const addActionsRef = useRef<HTMLDivElement>(null);
   const browserMenuRef = useRef<HTMLDivElement>(null);
 
-  // Suppress hotkeys while dialogs are open
-  useEffect(() => {
-    if (showSendTextDialog || showNavigateDialog) {
-      send({ type: 'ui:modalOpen', payload: {} });
-      return () => { send({ type: 'ui:modalClose', payload: {} }); };
-    }
-  }, [showSendTextDialog, showNavigateDialog, send]);
-
   // Listen for command palette trigger
   useEffect(() => {
     const handler = () => setShowSendTextDialog(true);
@@ -60,19 +52,6 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
   }, []);
 
   // Close dialogs when app loses focus
-  useEffect(() => {
-    const handleBlur = () => {
-      setShowSendTextDialog(false);
-      setShowNavigateDialog(false);
-      setShowThemeEditor(false);
-      setShowAddActions(false);
-      setShowBrowserMenu(false);
-      setShowColDropdown(false);
-    };
-    window.addEventListener('app:blur', handleBlur);
-    return () => window.removeEventListener('app:blur', handleBlur);
-  }, []);
-
   // Close dropdowns on outside click
   useEffect(() => {
     if (!showColDropdown && !showAddActions && !showBrowserMenu) return;

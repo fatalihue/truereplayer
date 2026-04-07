@@ -192,18 +192,8 @@ export function SettingsPanel() {
     send({ type: 'settings:change', payload: { key: settingKey, value: hotkey } });
   };
 
-  const handleHotkeyFocusChange = (focused: boolean) => {
-    if (focused) {
-      hotkeyFocusCount.current++;
-      if (hotkeyFocusCount.current === 1) {
-        send({ type: 'ui:modalOpen', payload: {} });
-      }
-    } else {
-      hotkeyFocusCount.current = Math.max(0, hotkeyFocusCount.current - 1);
-      if (hotkeyFocusCount.current === 0) {
-        send({ type: 'ui:modalClose', payload: {} });
-      }
-    }
+  const handleHotkeyFocusChange = (_focused: boolean) => {
+    // Hotkey inputs no longer suppress global hotkeys
   };
 
   return (

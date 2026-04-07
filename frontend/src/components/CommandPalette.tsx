@@ -35,16 +35,13 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   const [focusedIndex, setFocusedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Suppress hotkeys
   useEffect(() => {
     if (isOpen) {
-      send({ type: 'ui:modalOpen', payload: {} });
       inputRef.current?.focus();
       setQuery('');
       setFocusedIndex(0);
-      return () => { send({ type: 'ui:modalClose', payload: {} }); };
     }
-  }, [isOpen, send]);
+  }, [isOpen]);
 
   // Build command groups
   const groups: CommandGroup[] = useMemo(() => {
