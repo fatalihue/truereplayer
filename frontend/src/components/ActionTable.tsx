@@ -74,7 +74,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   }, [contextMenuEnabled, selectedIndices]);
 
   // Suppress hotkeys while SendText edit dialog or inline key editing is active
-  const modalActive = sendTextEdit !== null || editingCell !== null || contextMenu !== null || sendTextInsert !== null;
 
   // Clear selection when recording stops so next recording appends normally
   useEffect(() => {

@@ -246,8 +246,6 @@ namespace TrueReplayer
                     case "window:runOnStartup": HandleRunOnStartup(payload); break;
                     case "window:startMinimized": HandleStartMinimized(payload); break;
                     case "window:reloadUI": try { webView.Reload(); } catch { } break;
-                    case "ui:modalOpen": InputHookManager.SuppressAllHotkeys = true; break;
-                    case "ui:modalClose": InputHookManager.SuppressAllHotkeys = false; break;
                     case "update:check": _ = CheckForUpdateAsync(); break;
                     case "update:apply": _ = HandleUpdateApply(); break;
                     case "update:dismiss": break;
@@ -1413,6 +1411,8 @@ namespace TrueReplayer
             await SettingsManager.SaveProfileAsync(entry.FilePath, profile);
 
             entry.IsDisabled = profile.IsDisabled;
+            if (CurrentProfileName == name)
+                UserProfile.Current.IsDisabled = profile.IsDisabled;
             PushProfilesUpdate();
 
             // Re-register hotkeys so disabled profiles are excluded

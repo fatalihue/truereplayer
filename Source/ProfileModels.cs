@@ -162,6 +162,8 @@ namespace TrueReplayer.Models
         public string? CustomHotkey { get; set; }
         public HotstringConfig? CustomHotstring { get; set; }
         public WindowTarget? TargetWindow { get; set; }
+        public bool UseRelativeCoordinates { get; set; } = false;
+        public bool BringToFocus { get; set; } = false;
         public string BatchDelay { get; set; } = "Delay (ms)";
         public ObservableCollection<ActionItem> Actions { get; set; } = new();
         /// <summary>

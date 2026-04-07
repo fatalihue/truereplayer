@@ -187,7 +187,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     }
   }, [showHotstringDialog]);
 
-  const anyDialogOpen = showCreateDialog || showRenameDialog !== null || showDeleteConfirm !== null || showHotkeyDialog !== null || showHotstringDialog !== null || showWindowTargetDialog !== null || showExportDialog || showCreateFolderDialog || showRenameFolderDialog !== null || showFolderTargetDialog !== null;
 
   const handleExportClick = () => {
     setExportSelection({});
