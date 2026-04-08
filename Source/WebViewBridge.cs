@@ -40,6 +40,9 @@ namespace TrueReplayer
         private readonly Stack<string> _redoStack = new();
         private const int MaxHistory = 50;
 
+        // Internal action clipboard for copy/paste between profiles
+        private List<ActionItem>? _copiedActions = null;
+
         // In-memory settings state (replaces reading from XAML controls)
         public string CustomDelay { get; set; } = "100";
         public bool UseCustomDelay { get; set; } = true;
@@ -193,6 +196,8 @@ namespace TrueReplayer
                     case "actions:undo": HandleUndo(); break;
                     case "actions:redo": HandleRedo(); break;
                     case "actions:copy": HandleActionsCopy(); break;
+                    case "actions:copyInternal": HandleActionsCopyInternal(payload); break;
+                    case "actions:paste": HandleActionsPaste(payload); break;
                     case "actions:edit": HandleActionsEdit(payload); break;
                     case "actions:delete": HandleActionsDelete(payload); break;
                     case "actions:addSendText": HandleAddSendText(payload); break;
@@ -454,6 +459,7 @@ namespace TrueReplayer
                 recordButtonText = recordingService.IsRecording ? "Pause" : "Recording",
                 replayButtonText = replayService.IsReplaying ? "Stop" : "Replay",
                 canUndo = CanUndo,
+                copiedCount = _copiedActions?.Count ?? 0,
                 canRedo = CanRedo
             });
         }
@@ -788,6 +794,81 @@ namespace TrueReplayer
         private void HandleActionsCopy()
         {
             ClipboardService.CopyActions(actions);
+        }
+
+        private void HandleActionsCopyInternal(JsonElement payload)
+        {
+            var indices = payload.GetProperty("indices").EnumerateArray()
+                .Select(e => e.GetInt32())
+                .OrderBy(i => i)
+                .ToList();
+
+            _copiedActions = new List<ActionItem>();
+            foreach (var idx in indices)
+            {
+                if (idx >= 0 && idx < actions.Count)
+                {
+                    var a = actions[idx];
+                    _copiedActions.Add(new ActionItem
+                    {
+                        ActionType = a.ActionType,
+                        Key = a.Key,
+                        X = a.X,
+                        Y = a.Y,
+                        Delay = a.Delay,
+                        Comment = a.Comment,
+                        Timeout = a.Timeout,
+                        Confidence = a.Confidence,
+                        ImagePath = a.ImagePath,
+                        BrowserText = a.BrowserText,
+                        NewTab = a.NewTab
+                    });
+                }
+            }
+            SendMessage("alert:show", new { message = $"Copied {_copiedActions.Count} action(s)" });
+            PushButtonStates();
+        }
+
+        private void HandleActionsPaste(JsonElement payload)
+        {
+            if (_copiedActions == null || _copiedActions.Count == 0)
+            {
+                SendMessage("alert:show", new { message = "No actions copied" });
+                return;
+            }
+
+            PushUndoState();
+            int insertIndex = payload.TryGetProperty("insertIndex", out var idxEl) ? idxEl.GetInt32() : actions.Count;
+            insertIndex = Math.Max(0, Math.Min(insertIndex, actions.Count));
+
+            foreach (var copied in _copiedActions)
+            {
+                var clone = new ActionItem
+                {
+                    ActionType = copied.ActionType,
+                    Key = copied.Key,
+                    X = copied.X,
+                    Y = copied.Y,
+                    Delay = copied.Delay,
+                    Comment = copied.Comment,
+                    Timeout = copied.Timeout,
+                    Confidence = copied.Confidence,
+                    ImagePath = copied.ImagePath,
+                    BrowserText = copied.BrowserText,
+                    NewTab = copied.NewTab,
+                    RowNumber = insertIndex + 1
+                };
+                actions.Insert(insertIndex, clone);
+                insertIndex++;
+            }
+
+            // Recalculate row numbers
+            for (int i = 0; i < actions.Count; i++)
+                actions[i].RowNumber = i + 1;
+
+            HasUnsavedChanges = true;
+            SendMessage("alert:show", new { message = $"Pasted {_copiedActions.Count} action(s)" });
+            PushActionsUpdate();
         }
 
         private void HandleActionsEdit(JsonElement payload)

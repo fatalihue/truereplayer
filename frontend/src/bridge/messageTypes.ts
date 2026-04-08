@@ -87,6 +87,7 @@ export interface ButtonStates {
   replayButtonText: string;
   canUndo: boolean;
   canRedo: boolean;
+  copiedCount: number;
 }
 
 // ── App State ──
@@ -145,6 +146,8 @@ export type OutgoingMessage =
   | { type: 'actions:undo'; payload: Record<string, never> }
   | { type: 'actions:redo'; payload: Record<string, never> }
   | { type: 'actions:copy'; payload: Record<string, never> }
+  | { type: 'actions:copyInternal'; payload: { indices: number[] } }
+  | { type: 'actions:paste'; payload: { insertIndex: number } }
   | { type: 'actions:edit'; payload: { index: number; field: string; value: string } }
   | { type: 'actions:delete'; payload: { indices: number[] } }
   | { type: 'profile:click'; payload: { name: string } }

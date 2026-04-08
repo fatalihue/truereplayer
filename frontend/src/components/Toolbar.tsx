@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Copy, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ChevronUp, ChevronDown, ScanSearch, Plus, Mouse, Keyboard, ArrowUp, ArrowDown, Globe } from 'lucide-react';
+import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ChevronUp, ChevronDown, ScanSearch, Plus, Mouse, Keyboard, ArrowUp, ArrowDown, Globe } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -81,6 +81,19 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
       if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
         e.preventDefault();
         send({ type: 'actions:redo', payload: {} });
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        const sel = selectionRef.current;
+        if (sel.size > 0) {
+          e.preventDefault();
+          send({ type: 'actions:copyInternal', payload: { indices: Array.from(sel) } });
+        }
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        e.preventDefault();
+        const sel = selectionRef.current;
+        const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+        send({ type: 'actions:paste', payload: { insertIndex } });
       }
     };
     window.addEventListener('keydown', handler);
@@ -299,7 +312,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
           {/* Divider */}
           <div className="w-px h-4 bg-border-subtle mx-1" />
 
-          {/* Copy / Clear */}
+          {/* Copy / Paste / Clear */}
           <button
             tabIndex={-1}
             onClick={() => send({ type: 'actions:copy', payload: {} })}
@@ -308,6 +321,20 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
           >
             <Copy size={14} />
           </button>
+          {buttonStates.copiedCount > 0 && (
+            <button
+              tabIndex={-1}
+              onClick={() => {
+                const sel = selectionRef.current;
+                const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                send({ type: 'actions:paste', payload: { insertIndex } });
+              }}
+              className="relative p-1.5 rounded hover:bg-bg-elevated text-accent-light hover:text-accent transition-colors"
+              data-tip={`Paste ${buttonStates.copiedCount} action(s) (Ctrl+V)`}
+            >
+              <ClipboardPaste size={14} />
+            </button>
+          )}
           <button
             tabIndex={-1}
             onClick={() => send({ type: 'actions:clear', payload: {} })}

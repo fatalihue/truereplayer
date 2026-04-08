@@ -847,6 +847,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             showToast(`Deleted ${selectedIndices.size} action(s)`, 'success');
             setSelectedIndices(new Set());
           }}
+          onCopyActions={() => {
+            send({ type: 'actions:copyInternal', payload: { indices: Array.from(selectedIndices) } });
+          }}
           onDuplicate={() => {
             send({ type: 'actions:duplicate', payload: { indices: Array.from(selectedIndices) } });
             showToast(`Duplicated ${selectedIndices.size} action(s)`, 'success');

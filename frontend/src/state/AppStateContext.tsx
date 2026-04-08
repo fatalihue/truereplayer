@@ -47,6 +47,7 @@ const initialState: AppState = {
     replayButtonText: 'Replay',
     canUndo: false,
     canRedo: false,
+    copiedCount: 0,
   },
 };
 
