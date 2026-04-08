@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Clock, Copy, Clipboard, Trash2, X, Move, MessageSquare } from 'lucide-react';
+import { Clock, Copy, Clipboard, Trash2, X, Hash, MessageSquare } from 'lucide-react';
 
 interface BulkActionBarProps {
   selectedCount: number;
@@ -117,7 +117,7 @@ export function BulkActionBar({
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
               title="Set X for selected (use +/- for offset)"
             >
-              <Move size={11} />
+              <Hash size={11} />
               X
             </button>
 
@@ -127,7 +127,7 @@ export function BulkActionBar({
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
               title="Set Y for selected (use +/- for offset)"
             >
-              <Move size={11} />
+              <Hash size={11} />
               Y
             </button>
 
