@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Search, Circle, Play, Square, Type, Save, FolderOpen, RotateCcw, FilePlus,
-  Copy, Trash2, PinOff, Pin, ArrowUpDown, Download, Upload, MonitorDown, Shield, Minimize2, RefreshCw,
+  Copy, Trash2, PinOff, Pin, Download, Upload, MonitorDown, Shield, Minimize2, RefreshCw,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';

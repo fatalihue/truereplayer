@@ -157,11 +157,11 @@ export type OutgoingMessage =
   | { type: 'profile:removeHotkey'; payload: { name: string } }
   | { type: 'profile:assignHotstring'; payload: { name: string; sequence: string; instant: boolean } }
   | { type: 'profile:removeHotstring'; payload: { name: string } }
-  | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string } }
+  | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean } }
   | { type: 'profile:setRelativeCoordinates'; payload: { name: string; enabled: boolean } }
   | { type: 'profile:setBringToFocus'; payload: { name: string; enabled: boolean } }
   | { type: 'profile:removeWindowTarget'; payload: { name: string } }
-  | { type: 'profile:setFolderWindowTarget'; payload: { folderName: string; processName: string; windowTitle: string; titleMatchMode: string } }
+  | { type: 'profile:setFolderWindowTarget'; payload: { folderName: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean } }
   | { type: 'profile:removeFolderWindowTarget'; payload: { folderName: string } }
   | { type: 'profile:detectWindow'; payload: Record<string, never> }
   | { type: 'profile:openFolder'; payload: { name: string } }
@@ -192,6 +192,7 @@ export type OutgoingMessage =
   | { type: 'window:minimizeToTray'; payload: { enabled: boolean } }
   | { type: 'window:runOnStartup'; payload: { enabled: boolean } }
   | { type: 'window:startMinimized'; payload: { enabled: boolean } }
+  | { type: 'window:reloadUI'; payload: Record<string, never> }
   | { type: 'profile:export'; payload: { names: string[]; includeOrganization?: boolean } }
   | { type: 'profile:import'; payload: Record<string, never> }
   | { type: 'ui:modalOpen'; payload: Record<string, never> }

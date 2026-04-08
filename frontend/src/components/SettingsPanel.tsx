@@ -172,7 +172,6 @@ export function SettingsPanel() {
   const { settings } = useAppState();
   const { send, subscribe } = useBridge();
   const selectionRef = useSelectionRef();
-  const hotkeyFocusCount = useRef(0);
   const [activeTab, setActiveTab] = useState<'profile' | 'global'>('profile');
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'up-to-date' | 'error'>('idle');
 
