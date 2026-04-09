@@ -646,7 +646,9 @@ namespace TrueReplayer.Controllers
                             Color = f.Color,
                             Collapsed = false,
                             Items = f.Items.Where(i => exportedNames.Contains(i)).ToList(),
-                            TargetWindow = f.TargetWindow
+                            TargetWindow = f.TargetWindow,
+                            UseRelativeCoordinates = f.UseRelativeCoordinates,
+                            BringToFocus = f.BringToFocus
                         }).ToList(),
                     UngroupedOrder = _profileOrder.UngroupedOrder.Where(n => exportedNames.Contains(n)).ToList()
                 };
@@ -822,7 +824,9 @@ namespace TrueReplayer.Controllers
                         Color = importedFolder.Color,
                         Collapsed = false,
                         Items = importedFolder.Items,
-                        TargetWindow = importedFolder.TargetWindow
+                        TargetWindow = importedFolder.TargetWindow,
+                        UseRelativeCoordinates = importedFolder.UseRelativeCoordinates,
+                        BringToFocus = importedFolder.BringToFocus
                     });
                 }
 

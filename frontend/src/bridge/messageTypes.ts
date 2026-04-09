@@ -198,8 +198,6 @@ export type OutgoingMessage =
   | { type: 'window:reloadUI'; payload: Record<string, never> }
   | { type: 'profile:export'; payload: { names: string[]; includeOrganization?: boolean } }
   | { type: 'profile:import'; payload: Record<string, never> }
-  | { type: 'ui:modalOpen'; payload: Record<string, never> }
-  | { type: 'ui:modalClose'; payload: Record<string, never> }
   | { type: 'update:check'; payload: Record<string, never> }
   | { type: 'update:apply'; payload: Record<string, never> }
   | { type: 'update:dismiss'; payload: Record<string, never> }
