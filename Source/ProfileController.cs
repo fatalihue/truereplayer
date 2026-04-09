@@ -1124,7 +1124,26 @@ namespace TrueReplayer.Controllers
         public async Task ReorderProfilesAsync(List<string>? pinned, List<ProfileFolder>? folders, List<string>? ungrouped)
         {
             if (pinned != null) _profileOrder.Pinned = pinned;
-            if (folders != null) _profileOrder.Folders = folders;
+            if (folders != null)
+            {
+                // Preserve existing folder data (TargetWindow, UseRelativeCoordinates, BringToFocus)
+                // Only reorder based on incoming folder names and items
+                var reordered = new List<ProfileFolder>();
+                foreach (var incoming in folders)
+                {
+                    var existing = _profileOrder.Folders.FirstOrDefault(f => f.Name == incoming.Name);
+                    if (existing != null)
+                    {
+                        existing.Items = incoming.Items;
+                        reordered.Add(existing);
+                    }
+                    else
+                    {
+                        reordered.Add(incoming);
+                    }
+                }
+                _profileOrder.Folders = reordered;
+            }
             if (ungrouped != null) _profileOrder.UngroupedOrder = ungrouped;
             await SaveProfileOrderAsync();
         }
