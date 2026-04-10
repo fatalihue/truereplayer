@@ -26,6 +26,9 @@ namespace TrueReplayer
         private WindowEventManager windowEventManager;
         private WebViewBridge? bridge;
         private readonly BrowserBridgeService browserBridge = new();
+        private System.Threading.Timer? _uiReadyWatchdog;
+        private int _uiReloadAttempts = 0;
+        private const int MaxReloadAttempts = 3;
 
         private IntPtr hwnd;
 
@@ -179,6 +182,20 @@ namespace TrueReplayer
                     {
                         bridge.PushFullState();
                     });
+
+                    // Start watchdog: if UI doesn't send ui:ready within 5s, auto-reload
+                    _uiReadyWatchdog?.Dispose();
+                    _uiReadyWatchdog = new System.Threading.Timer(_ =>
+                    {
+                        if (_uiReloadAttempts >= MaxReloadAttempts) return;
+                        _uiReloadAttempts++;
+                        System.Diagnostics.Debug.WriteLine($"[WebView2] UI watchdog: no ui:ready after 5s, reloading (attempt {_uiReloadAttempts})");
+                        DispatcherQueue.TryEnqueue(() =>
+                        {
+                            try { WebView.CoreWebView2.Reload(); }
+                            catch { }
+                        });
+                    }, null, 5000, System.Threading.Timeout.Infinite);
                 }
             };
 
@@ -394,6 +411,13 @@ namespace TrueReplayer
                 if (!mainController.IsRecording()) return;
                 actionRecorder.RecordKeyboardAction(key, isDown);
             };
+        }
+
+        public void CancelUIWatchdog()
+        {
+            _uiReadyWatchdog?.Dispose();
+            _uiReadyWatchdog = null;
+            _uiReloadAttempts = 0;
         }
 
         public void UpdateAlwaysOnTop(bool isAlwaysOnTop)

@@ -573,6 +573,9 @@ namespace TrueReplayer
 
         private void HandleUIReady()
         {
+            // UI loaded successfully — cancel the watchdog timer
+            window.CancelUIWatchdog();
+
             // Send full state to React
             var profile = UserProfile.Current;
             SendMessage("state:init", new
