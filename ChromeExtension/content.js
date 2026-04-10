@@ -5,6 +5,7 @@
   let picking = false;
   let highlightEl = null;
   let _mouseOverPending = false;
+  let _lastHighlightedEl = null;
 
   const { generateSelector, getElementDescription } = window.__trueReplayerSelectorGenerator || {};
 
@@ -12,15 +13,17 @@
 
   function onMouseOver(e) {
     if (!recording && !picking) return;
+    const el = e.target;
+    if (!el || el === document.body || el === document.documentElement) return;
+    if (el === _lastHighlightedEl) return; // Skip if same element — no reflow needed
     if (_mouseOverPending) return;
     _mouseOverPending = true;
     requestAnimationFrame(() => {
       _mouseOverPending = false;
       if (!recording && !picking) return;
+      if (el === _lastHighlightedEl) return;
+      _lastHighlightedEl = el;
       removeHighlight();
-
-      const el = e.target;
-      if (!el || el === document.body || el === document.documentElement) return;
 
       highlightEl = document.createElement('div');
       const rect = el.getBoundingClientRect();
@@ -42,6 +45,7 @@
   }
 
   function onMouseOut() {
+    _lastHighlightedEl = null;
     removeHighlight();
   }
 
@@ -254,17 +258,34 @@
       ? () => findByText(selector.slice(5))
       : () => { const el = document.querySelector(selector); return el && isVisible(el) ? el : null; };
 
+    // Check immediately first
     const el = findFn();
     if (el) return el;
 
-    const startTime = Date.now();
-    while (Date.now() - startTime < timeout) {
-      await new Promise((r) => setTimeout(r, 150));
-      const found = findFn();
-      if (found) return found;
-    }
-    const seconds = Math.round(timeout / 1000);
-    throw new Error(`Element not found after ${seconds}s. Make sure it is visible on the page.`);
+    // Use MutationObserver instead of polling — zero CPU when DOM is idle
+    return new Promise((resolve, reject) => {
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (resolved) return;
+        resolved = true;
+        observer.disconnect();
+        const seconds = Math.round(timeout / 1000);
+        reject(new Error(`Element not found after ${seconds}s. Make sure it is visible on the page.`));
+      }, timeout);
+
+      const observer = new MutationObserver(() => {
+        if (resolved) return;
+        const found = findFn();
+        if (found) {
+          resolved = true;
+          clearTimeout(timer);
+          observer.disconnect();
+          resolve(found);
+        }
+      });
+
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+    });
   }
 
   async function executeCommand(msg) {
@@ -383,12 +404,13 @@
           el.value = '';
           el.dispatchEvent(new Event('input', { bubbles: true }));
 
-          // Type text character by character for better compatibility
+          // Type text character by character with micro-delays for browser responsiveness
           for (const char of text) {
             el.value += char;
             el.dispatchEvent(new Event('input', { bubbles: true }));
             el.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
             el.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
+            if (text.length > 20) await new Promise(r => setTimeout(r, 5));
           }
           el.dispatchEvent(new Event('change', { bubbles: true }));
           return { success: true };
