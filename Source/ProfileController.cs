@@ -1029,7 +1029,7 @@ namespace TrueReplayer.Controllers
         {
             if (_profileOrder.Folders.Any(f => f.Name == folderName))
                 return;
-            _profileOrder.Folders.Add(new ProfileFolder { Name = folderName, Color = color });
+            _profileOrder.Folders.Insert(0, new ProfileFolder { Name = folderName, Color = color });
             await SaveProfileOrderAsync();
         }
 

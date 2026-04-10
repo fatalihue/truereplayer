@@ -1165,6 +1165,21 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             <Crosshair size={13} className="text-text-tertiary" />
             {(profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName)?.hasWindowTarget ? 'Edit Target' : 'Set Target'}
           </button>
+          <button
+            onClick={() => {
+              send({ type: 'profile:toggleFolderDisable', payload: { name: folderContextMenu.folderName } });
+              setFolderContextMenu(null);
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Ban size={13} className="text-text-tertiary" />
+            {(() => {
+              const folder = (profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName);
+              const items = folder?.items ?? [];
+              const allDisabled = items.length > 0 && items.every(n => profiles.find(p => p.name === n)?.isDisabled);
+              return allDisabled ? 'Enable All Profiles' : 'Disable All Profiles';
+            })()}
+          </button>
           <div className="my-1 border-t border-border-subtle" />
           <button
             onClick={() => handleDeleteFolder(folderContextMenu.folderName)}

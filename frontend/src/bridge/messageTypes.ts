@@ -175,6 +175,7 @@ export type OutgoingMessage =
   | { type: 'profile:deleteFolder'; payload: { name: string } }
   | { type: 'profile:setFolderColor'; payload: { name: string; color: string } }
   | { type: 'profile:toggleFolderCollapse'; payload: { name: string } }
+  | { type: 'profile:toggleFolderDisable'; payload: { name: string } }
   | { type: 'profile:moveToFolder'; payload: { profileName: string; folderName: string | null } }
   | { type: 'profile:reorder'; payload: { pinned?: string[]; folders?: ProfileFolder[]; ungroupedOrder?: string[] } }
   | { type: 'profile:save'; payload: Record<string, never> }

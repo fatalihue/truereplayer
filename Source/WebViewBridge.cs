@@ -235,6 +235,7 @@ namespace TrueReplayer
                     case "profile:createFolder": HandleCreateFolder(payload); break;
                     case "profile:renameFolder": HandleRenameFolder(payload); break;
                     case "profile:deleteFolder": HandleDeleteFolder(payload); break;
+                    case "profile:toggleFolderDisable": HandleToggleFolderDisable(payload); break;
                     case "profile:setFolderColor": HandleSetFolderColor(payload); break;
                     case "profile:toggleFolderCollapse": HandleToggleFolderCollapse(payload); break;
                     case "profile:moveToFolder": HandleMoveToFolder(payload); break;
@@ -2175,6 +2176,42 @@ namespace TrueReplayer
 
             InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
             PushProfilesUpdate();
+        }
+
+        private async void HandleToggleFolderDisable(JsonElement payload)
+        {
+            string folderName = payload.GetProperty("name").GetString() ?? "";
+            if (string.IsNullOrEmpty(folderName)) return;
+
+            var folder = profileController.GetProfileOrder().Folders.FirstOrDefault(f => f.Name == folderName);
+            if (folder == null) return;
+
+            // Determine new state: if ANY profile is enabled, disable all. Otherwise enable all.
+            var folderEntries = folder.Items
+                .Select(n => profileController.ProfileEntries.FirstOrDefault(p => p.Name == n))
+                .Where(e => e != null)
+                .ToList();
+
+            bool newDisabled = folderEntries.Any(e => !e!.IsDisabled);
+
+            foreach (var entry in folderEntries)
+            {
+                if (entry == null) continue;
+                var profile = await SettingsManager.LoadProfileAsync(entry.FilePath);
+                if (profile == null) continue;
+                profile.IsDisabled = newDisabled;
+                await SettingsManager.SaveProfileAsync(entry.FilePath, profile);
+                entry.IsDisabled = newDisabled;
+                if (CurrentProfileName == entry.Name)
+                    UserProfile.Current.IsDisabled = newDisabled;
+            }
+
+            PushProfilesUpdate();
+            var hotkeys = profileController.GetProfileHotkeys();
+            InputHookManager.RegisterProfileHotkeys(hotkeys);
+            var hotstrings = profileController.GetProfileHotstrings();
+            InputHookManager.RegisterProfileHotstrings(hotstrings);
+            InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
         }
 
         private async void HandleSetFolderColor(JsonElement payload)
