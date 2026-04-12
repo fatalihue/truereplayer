@@ -243,7 +243,7 @@ export function SettingsPanel() {
                       }
                     }
                   }}
-                  width="w-[72px]"
+                  width="w-[80px]"
                 />
                 <Toggle isOn={settings.useCustomDelay} onChange={(v) => changeSetting('useCustomDelay', v)} />
               </SettingRow>
@@ -256,7 +256,7 @@ export function SettingsPanel() {
                       changeSetting('useDelayVariation', true);
                     }
                   }}
-                  width="w-[72px]"
+                  width="w-[80px]"
                 />
                 <Toggle isOn={settings.useDelayVariation} onChange={(v) => changeSetting('useDelayVariation', v)} />
               </SettingRow>
@@ -269,7 +269,7 @@ export function SettingsPanel() {
                       changeSetting('enableLoop', true);
                     }
                   }}
-                  width="w-[72px]"
+                  width="w-[80px]"
                 />
                 <Toggle isOn={settings.enableLoop} onChange={(v) => changeSetting('enableLoop', v)} />
               </SettingRow>
@@ -282,9 +282,21 @@ export function SettingsPanel() {
                       changeSetting('loopIntervalEnabled', true);
                     }
                   }}
-                  width="w-[72px]"
+                  width="w-[80px]"
                 />
                 <Toggle isOn={settings.loopIntervalEnabled} onChange={(v) => changeSetting('loopIntervalEnabled', v)} />
+              </SettingRow>
+              <SettingRow label="Clicker" tooltip="Replay clicks at cursor position using Execution settings. Ignores recorded actions.">
+                <select
+                  value={settings.cursorClickButton}
+                  onChange={(e) => changeSetting('cursorClickButton', e.target.value)}
+                  className="w-[80px] h-7 px-1.5 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary text-center outline-none focus:border-accent-solid"
+                >
+                  <option value="Left">Left</option>
+                  <option value="Right">Right</option>
+                  <option value="Middle">Middle</option>
+                </select>
+                <Toggle isOn={settings.useCursorClick} onChange={(v) => changeSetting('useCursorClick', v)} />
               </SettingRow>
             </Section>
 

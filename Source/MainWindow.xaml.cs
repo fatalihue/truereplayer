@@ -319,20 +319,33 @@ namespace TrueReplayer
                             return;
 
                         mainController.SetLastHotkeyPressed(key);
-                        var curName = bridge?.CurrentProfileName ?? "";
-                        var effTarget = curName != "No Profile" ? profileController.GetEffectiveWindowTarget(curName) : UserProfile.Current.TargetWindow;
-                        var effRelCoords = curName != "No Profile" ? profileController.GetEffectiveRelativeCoordinates(curName) : UserProfile.Current.UseRelativeCoordinates;
-                        var effBringFocus = curName != "No Profile" ? profileController.GetEffectiveBringToFocus(curName) : UserProfile.Current.BringToFocus;
-                        mainController.ToggleReplay(
-                            bridge?.EnableLoop ?? false,
-                            bridge?.LoopCount ?? "1",
-                            bridge?.LoopIntervalEnabled ?? false,
-                            bridge?.LoopInterval ?? "0",
-                            bridge?.UseDelayVariation ?? false,
-                            int.TryParse(bridge?.DelayVariation ?? "20", out var hvp) ? hvp : 20,
-                            effRelCoords,
-                            effTarget,
-                            effBringFocus);
+
+                        if (bridge?.UseCursorClick == true)
+                        {
+                            int delay = int.TryParse(bridge?.CustomDelay ?? "100", out var cd) ? cd : 100;
+                            bool useJitter = bridge?.UseDelayVariation ?? false;
+                            int jitterPercent = int.TryParse(bridge?.DelayVariation ?? "20", out var jp) ? jp : 20;
+                            int loops = (bridge?.EnableLoop ?? false) && int.TryParse(bridge?.LoopCount ?? "0", out var lc) ? lc : 0;
+                            int interval = (bridge?.LoopIntervalEnabled ?? false) && int.TryParse(bridge?.LoopInterval ?? "0", out var li) ? li : 0;
+                            mainController.ToggleCursorClickReplay(delay, useJitter, jitterPercent, loops, interval, bridge?.CursorClickButton ?? "Left");
+                        }
+                        else
+                        {
+                            var curName = bridge?.CurrentProfileName ?? "";
+                            var effTarget = curName != "No Profile" ? profileController.GetEffectiveWindowTarget(curName) : UserProfile.Current.TargetWindow;
+                            var effRelCoords = curName != "No Profile" ? profileController.GetEffectiveRelativeCoordinates(curName) : UserProfile.Current.UseRelativeCoordinates;
+                            var effBringFocus = curName != "No Profile" ? profileController.GetEffectiveBringToFocus(curName) : UserProfile.Current.BringToFocus;
+                            mainController.ToggleReplay(
+                                bridge?.EnableLoop ?? false,
+                                bridge?.LoopCount ?? "1",
+                                bridge?.LoopIntervalEnabled ?? false,
+                                bridge?.LoopInterval ?? "0",
+                                bridge?.UseDelayVariation ?? false,
+                                int.TryParse(bridge?.DelayVariation ?? "20", out var hvp) ? hvp : 20,
+                                effRelCoords,
+                                effTarget,
+                                effBringFocus);
+                        }
                     }
                     else if (key.StartsWith("PROFILE::"))
                     {

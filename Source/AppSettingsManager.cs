@@ -20,11 +20,13 @@ namespace TrueReplayer.Services
             public bool UseCustomDelay { get; set; } = true;
             public int CustomDelay { get; set; } = 100;
             public bool UseDelayVariation { get; set; } = false;
-            public int DelayVariation { get; set; } = 20;
+            public int DelayVariation { get; set; } = 10;
             public bool EnableLoop { get; set; } = false;
             public int LoopCount { get; set; } = 0;
             public bool LoopIntervalEnabled { get; set; } = false;
             public int LoopInterval { get; set; } = 1000;
+            public bool UseCursorClick { get; set; } = false;
+            public string CursorClickButton { get; set; } = "Left";
             // Recording
             public bool RecordMouse { get; set; } = true;
             public bool RecordScroll { get; set; } = true;

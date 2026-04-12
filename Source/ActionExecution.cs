@@ -168,6 +168,116 @@ namespace TrueReplayer.Services
         private void StopReplay()
         {
             replayer.Stop();
+            _cursorClickCts?.Cancel();
+        }
+
+        private CancellationTokenSource? _cursorClickCts;
+
+        public void ToggleCursorClickReplay(int delay, bool useJitter, int jitterPercent, int loopCount, int loopInterval, string button = "Left")
+        {
+            if (IsReplaying)
+            {
+                _cursorClickCts?.Cancel();
+                return;
+            }
+
+            IsReplaying = true;
+            onButtonStateChanged?.Invoke("Stop", true);
+            onStatusChanged?.Invoke("replaying");
+
+            _cursorClickCts = new CancellationTokenSource();
+            var token = _cursorClickCts.Token;
+
+            _ = Task.Factory.StartNew(async () =>
+            {
+                try
+                {
+                    // Wait for hotkey release
+                    await Task.Delay(200, token);
+
+                    int iteration = 0;
+                    bool isInfinite = loopCount == 0;
+
+                    // Resolve button flags
+                    uint downFlag = button switch
+                    {
+                        "Right" => NativeMethods.MOUSEEVENTF_RIGHTDOWN,
+                        "Middle" => NativeMethods.MOUSEEVENTF_MIDDLEDOWN,
+                        _ => NativeMethods.MOUSEEVENTF_LEFTDOWN,
+                    };
+                    uint upFlag = button switch
+                    {
+                        "Right" => NativeMethods.MOUSEEVENTF_RIGHTUP,
+                        "Middle" => NativeMethods.MOUSEEVENTF_MIDDLEUP,
+                        _ => NativeMethods.MOUSEEVENTF_LEFTUP,
+                    };
+
+                    while (!token.IsCancellationRequested && (isInfinite || iteration < loopCount))
+                    {
+                        iteration++;
+
+                        NativeMethods.GetCursorPos(out var pos);
+
+                        int vx = NativeMethods.GetSystemMetrics(76);
+                        int vy = NativeMethods.GetSystemMetrics(77);
+                        int vw = NativeMethods.GetSystemMetrics(78);
+                        int vh = NativeMethods.GetSystemMetrics(79);
+                        int absX = (int)(((double)(pos.x - vx) * 65535) / (vw - 1));
+                        int absY = (int)(((double)(pos.y - vy) * 65535) / (vh - 1));
+                        uint posFlags = NativeMethods.MOUSEEVENTF_MOVE | NativeMethods.MOUSEEVENTF_ABSOLUTE | NativeMethods.MOUSEEVENTF_VIRTUALDESK;
+                        int inputSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.INPUT));
+
+                        var downInput = new NativeMethods.INPUT
+                        {
+                            type = NativeMethods.INPUT_MOUSE,
+                            U = new NativeMethods.InputUnion
+                            {
+                                mi = new NativeMethods.MOUSEINPUT
+                                {
+                                    dx = absX, dy = absY,
+                                    dwFlags = downFlag | posFlags,
+                                }
+                            }
+                        };
+                        NativeMethods.SendInput(1, new[] { downInput }, inputSize);
+
+                        await Task.Delay(10, token);
+
+                        var upInput = new NativeMethods.INPUT
+                        {
+                            type = NativeMethods.INPUT_MOUSE,
+                            U = new NativeMethods.InputUnion
+                            {
+                                mi = new NativeMethods.MOUSEINPUT
+                                {
+                                    dx = absX, dy = absY,
+                                    dwFlags = upFlag | posFlags,
+                                }
+                            }
+                        };
+                        NativeMethods.SendInput(1, new[] { upInput }, inputSize);
+
+                        // Apply delay + jitter
+                        int safeDelay = Math.Max(10, delay);
+                        if (useJitter && jitterPercent > 0)
+                        {
+                            int variation = safeDelay * jitterPercent / 100;
+                            safeDelay += Random.Shared.Next(-variation, variation + 1);
+                            safeDelay = Math.Max(10, safeDelay);
+                        }
+                        await Task.Delay(safeDelay, token);
+
+                        // Loop interval (between iterations when looping)
+                        if (loopInterval > 0 && (isInfinite || iteration < loopCount))
+                            await Task.Delay(loopInterval, token);
+                    }
+                }
+                catch (OperationCanceledException) { }
+                finally
+                {
+                    dispatcherQueue.TryEnqueue(() => ResetReplayState());
+                }
+            }, token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
         }
 
         private void ResetReplayState()

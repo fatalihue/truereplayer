@@ -62,6 +62,8 @@ export interface SettingsState {
   enableLoop: boolean;
   loopInterval: string;
   loopIntervalEnabled: boolean;
+  useCursorClick: boolean;
+  cursorClickButton: string;
   recordMouse: boolean;
   recordScroll: boolean;
   recordKeyboard: boolean;

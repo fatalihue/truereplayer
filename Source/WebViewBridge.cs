@@ -52,6 +52,8 @@ namespace TrueReplayer
         public bool EnableLoop { get; set; } = false;
         public string LoopInterval { get; set; } = "1000";
         public bool LoopIntervalEnabled { get; set; } = false;
+        public bool UseCursorClick { get; set; } = false;
+        public string CursorClickButton { get; set; } = "Left";
         public bool RecordMouse { get; set; } = true;
         public bool RecordScroll { get; set; } = true;
         public bool RecordKeyboard { get; set; } = true;
@@ -149,6 +151,8 @@ namespace TrueReplayer
             EnableLoop = saved.EnableLoop;
             LoopInterval = saved.LoopInterval.ToString();
             LoopIntervalEnabled = saved.LoopIntervalEnabled;
+            UseCursorClick = saved.UseCursorClick;
+            CursorClickButton = saved.CursorClickButton;
             RecordMouse = saved.RecordMouse;
             RecordScroll = saved.RecordScroll;
             RecordKeyboard = saved.RecordKeyboard;
@@ -431,6 +435,8 @@ namespace TrueReplayer
                     enableLoop = EnableLoop,
                     loopInterval = LoopInterval,
                     loopIntervalEnabled = LoopIntervalEnabled,
+                    useCursorClick = UseCursorClick,
+                    cursorClickButton = CursorClickButton,
                     recordMouse = RecordMouse,
                     recordScroll = RecordScroll,
                     recordKeyboard = RecordKeyboard,
@@ -637,6 +643,8 @@ namespace TrueReplayer
                     enableLoop = EnableLoop,
                     loopInterval = LoopInterval,
                     loopIntervalEnabled = LoopIntervalEnabled,
+                    useCursorClick = UseCursorClick,
+                    cursorClickButton = CursorClickButton,
                     recordMouse = RecordMouse,
                     recordScroll = RecordScroll,
                     recordKeyboard = RecordKeyboard,
@@ -774,6 +782,17 @@ namespace TrueReplayer
 
         private void HandleReplayToggle(JsonElement payload)
         {
+            if (UseCursorClick)
+            {
+                int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
+                bool useJitter = UseDelayVariation;
+                int jitterPercent = int.TryParse(DelayVariation, out var jp) ? jp : 20;
+                int loops = EnableLoop && int.TryParse(LoopCount, out var lc) ? lc : 0;
+                int interval = LoopIntervalEnabled && int.TryParse(LoopInterval, out var li) ? li : 0;
+                mainController.ToggleCursorClickReplay(delay, useJitter, jitterPercent, loops, interval, CursorClickButton);
+                return;
+            }
+
             bool loopEnabled = payload.GetProperty("loopEnabled").GetBoolean();
             string loopCount = payload.GetProperty("loopCount").GetString() ?? "1";
             bool intervalEnabled = payload.GetProperty("intervalEnabled").GetBoolean();
@@ -2412,6 +2431,8 @@ namespace TrueReplayer
             EnableLoop = defaults.EnableLoop;
             LoopInterval = defaults.LoopInterval.ToString();
             LoopIntervalEnabled = defaults.LoopIntervalEnabled;
+            UseCursorClick = defaults.UseCursorClick;
+            CursorClickButton = defaults.CursorClickButton;
             RecordMouse = defaults.RecordMouse;
             RecordScroll = defaults.RecordScroll;
             RecordKeyboard = defaults.RecordKeyboard;
@@ -2453,6 +2474,8 @@ namespace TrueReplayer
                 LoopCount = int.TryParse(LoopCount, out var c) ? c : 0,
                 LoopIntervalEnabled = LoopIntervalEnabled,
                 LoopInterval = int.TryParse(LoopInterval, out var li) ? li : 1000,
+                UseCursorClick = UseCursorClick,
+                CursorClickButton = CursorClickButton,
                 RecordMouse = RecordMouse,
                 RecordScroll = RecordScroll,
                 RecordKeyboard = RecordKeyboard,
@@ -2569,6 +2592,12 @@ namespace TrueReplayer
                     break;
                 case "loopIntervalEnabled":
                     LoopIntervalEnabled = valueElement.GetBoolean();
+                    break;
+                case "useCursorClick":
+                    UseCursorClick = valueElement.GetBoolean();
+                    break;
+                case "cursorClickButton":
+                    CursorClickButton = valueElement.GetString() ?? "Left";
                     break;
                 case "recordMouse":
                     RecordMouse = valueElement.GetBoolean();
