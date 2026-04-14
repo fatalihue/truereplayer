@@ -255,7 +255,7 @@ namespace TrueReplayer
                     case "window:minimizeToTray": HandleMinimizeToTray(payload); break;
                     case "window:runOnStartup": HandleRunOnStartup(payload); break;
                     case "window:startMinimized": HandleStartMinimized(payload); break;
-                    case "window:reloadUI": try { webView.Reload(); } catch { } break;
+                    case "window:reloadUI": try { var url = webView.Source; webView.Navigate(url); } catch { } break;
                     case "update:check": _ = CheckForUpdateAsync(); break;
                     case "update:apply": _ = HandleUpdateApply(); break;
                     case "update:dismiss": break;

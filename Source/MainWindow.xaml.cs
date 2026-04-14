@@ -152,7 +152,12 @@ namespace TrueReplayer
             {
                 DispatcherQueue.TryEnqueue(() =>
                 {
-                    try { WebView.CoreWebView2.Reload(); }
+                    try
+                    {
+                        // Navigate instead of Reload — forces renderer recreation on complete crash
+                        var currentUrl = WebView.CoreWebView2.Source;
+                        WebView.CoreWebView2.Navigate(currentUrl);
+                    }
                     catch { }
                 });
             };
@@ -166,7 +171,11 @@ namespace TrueReplayer
                 {
                     DispatcherQueue.TryEnqueue(() =>
                     {
-                        try { WebView.CoreWebView2.Reload(); }
+                        try
+                        {
+                            var url = WebView.CoreWebView2.Source;
+                            WebView.CoreWebView2.Navigate(url);
+                        }
                         catch { }
                     });
                 }
@@ -189,10 +198,14 @@ namespace TrueReplayer
                     {
                         if (_uiReloadAttempts >= MaxReloadAttempts) return;
                         _uiReloadAttempts++;
-                        System.Diagnostics.Debug.WriteLine($"[WebView2] UI watchdog: no ui:ready after 5s, reloading (attempt {_uiReloadAttempts})");
+                        System.Diagnostics.Debug.WriteLine($"[WebView2] UI watchdog: no ui:ready after 5s, navigating (attempt {_uiReloadAttempts})");
                         DispatcherQueue.TryEnqueue(() =>
                         {
-                            try { WebView.CoreWebView2.Reload(); }
+                            try
+                            {
+                                var url = WebView.CoreWebView2.Source;
+                                WebView.CoreWebView2.Navigate(url);
+                            }
                             catch { }
                         });
                     }, null, 5000, System.Threading.Timeout.Infinite);
