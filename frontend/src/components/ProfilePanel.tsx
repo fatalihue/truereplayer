@@ -315,11 +315,14 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const handleSetWindowTarget = (name: string) => {
     setContextMenu(null);
     const existing = profiles.find(p => p.name === name);
-    setTargetProcessName(existing?.windowTargetProcessName ?? '');
-    setTargetWindowTitle(existing?.windowTargetWindowTitle ?? '');
-    setTitleMatchMode((existing?.windowTargetTitleMatchMode as 'contains' | 'regex') ?? 'contains');
-    setTargetRelativeCoords(existing?.useRelativeCoordinates ?? false);
-    setTargetBringToFocus(existing?.bringToFocus ?? false);
+    const hasOwnTarget = existing?.hasWindowTarget ?? false;
+    // Resolve effective values: profile's own target > folder-inherited
+    const folder = !hasOwnTarget ? (profileOrder?.folders ?? []).find(f => f.items.includes(name)) : null;
+    setTargetProcessName(hasOwnTarget ? (existing?.windowTargetProcessName ?? '') : (folder?.windowTargetProcessName ?? ''));
+    setTargetWindowTitle(hasOwnTarget ? (existing?.windowTargetWindowTitle ?? '') : (folder?.windowTargetWindowTitle ?? ''));
+    setTitleMatchMode((hasOwnTarget ? (existing?.windowTargetTitleMatchMode ?? 'contains') : (folder?.windowTargetTitleMatchMode ?? 'contains')) as 'contains' | 'regex');
+    setTargetRelativeCoords(hasOwnTarget ? (existing?.useRelativeCoordinates ?? false) : (folder?.useRelativeCoordinates ?? false));
+    setTargetBringToFocus(hasOwnTarget ? (existing?.bringToFocus ?? false) : (folder?.bringToFocus ?? false));
     setIsDetecting(false);
     setShowWindowTargetDialog(name);
   };
