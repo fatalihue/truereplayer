@@ -570,6 +570,8 @@ namespace TrueReplayer
                 CustomHotstring = UserProfile.Current.CustomHotstring,
                 TargetWindow = UserProfile.Current.TargetWindow,
                 UseRelativeCoordinates = UserProfile.Current.UseRelativeCoordinates,
+                WindowWidth = UserProfile.Current.WindowWidth,
+                WindowHeight = UserProfile.Current.WindowHeight,
                 BringToFocus = UserProfile.Current.BringToFocus,
                 IsDisabled = UserProfile.Current.IsDisabled,
             };
@@ -803,7 +805,7 @@ namespace TrueReplayer
             var effTarget = CurrentProfileName != "No Profile" ? profileController.GetEffectiveWindowTarget(CurrentProfileName) : UserProfile.Current.TargetWindow;
             var effRelCoords = CurrentProfileName != "No Profile" ? profileController.GetEffectiveRelativeCoordinates(CurrentProfileName) : UserProfile.Current.UseRelativeCoordinates;
             var effBringFocus = CurrentProfileName != "No Profile" ? profileController.GetEffectiveBringToFocus(CurrentProfileName) : UserProfile.Current.BringToFocus;
-            mainController.ToggleReplay(loopEnabled, loopCount, intervalEnabled, intervalText, useVariation, variationPercent, effRelCoords, effTarget, effBringFocus);
+            mainController.ToggleReplay(loopEnabled, loopCount, intervalEnabled, intervalText, useVariation, variationPercent, effRelCoords, effTarget, effBringFocus, UserProfile.Current.WindowWidth, UserProfile.Current.WindowHeight);
         }
 
         private void HandleActionsClear()

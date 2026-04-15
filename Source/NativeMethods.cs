@@ -174,6 +174,12 @@ namespace TrueReplayer.Interop
         public static extern bool IsIconic(IntPtr hWnd); // true if minimized
 
         [DllImport("user32.dll")]
+        public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+        public const uint SWP_NOMOVE = 0x0002;
+        public const uint SWP_NOZORDER = 0x0004;
+
+        [DllImport("user32.dll")]
         public static extern IntPtr GetKeyboardLayout(uint idThread);
 
         [DllImport("user32.dll")]

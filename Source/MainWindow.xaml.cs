@@ -357,7 +357,9 @@ namespace TrueReplayer
                                 int.TryParse(bridge?.DelayVariation ?? "20", out var hvp) ? hvp : 20,
                                 effRelCoords,
                                 effTarget,
-                                effBringFocus);
+                                effBringFocus,
+                                UserProfile.Current.WindowWidth,
+                                UserProfile.Current.WindowHeight);
                         }
                     }
                     else if (key.StartsWith("PROFILE::"))
@@ -392,7 +394,9 @@ namespace TrueReplayer
                                 int.TryParse(bridge.DelayVariation, out var pvp) ? pvp : 20,
                                 effectiveRelCoords,
                                 effectiveTarget,
-                                effectiveBringToFocus);
+                                effectiveBringToFocus,
+                                UserProfile.Current.WindowWidth,
+                                UserProfile.Current.WindowHeight);
 
                             profileController.UpdateProfileColors(profileName);
                             bridge.PushProfilesUpdate();

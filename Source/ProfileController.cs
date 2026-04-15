@@ -623,6 +623,8 @@ namespace TrueReplayer.Controllers
                     CustomHotstring = profile.CustomHotstring,
                     TargetWindow = profile.TargetWindow,
                     UseRelativeCoordinates = profile.UseRelativeCoordinates,
+                    WindowWidth = profile.WindowWidth,
+                    WindowHeight = profile.WindowHeight,
                     BringToFocus = profile.BringToFocus,
                     BatchDelay = profile.BatchDelay,
                     Actions = profile.Actions,
@@ -765,6 +767,8 @@ namespace TrueReplayer.Controllers
                     CustomHotstring = entry.CustomHotstring,
                     TargetWindow = entry.TargetWindow,
                     UseRelativeCoordinates = entry.UseRelativeCoordinates,
+                    WindowWidth = entry.WindowWidth,
+                    WindowHeight = entry.WindowHeight,
                     BringToFocus = entry.BringToFocus,
                     BatchDelay = entry.BatchDelay ?? "Delay (ms)"
                 };
