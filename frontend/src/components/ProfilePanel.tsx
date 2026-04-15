@@ -1737,6 +1737,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                   Convert to Absolute
                 </button>
               </div>
+              <button
+                onClick={() => send({ type: 'profile:updateWindowSize', payload: {} })}
+                className="w-full h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors"
+              >
+                Update Window Size
+              </button>
             </div>
 
             <div className="flex items-center mt-4">

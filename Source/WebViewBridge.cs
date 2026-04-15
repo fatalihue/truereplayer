@@ -249,6 +249,7 @@ namespace TrueReplayer
                     case "profile:save": HandleProfileSave(); break;
                     case "profile:load": HandleProfileLoad(); break;
                     case "profile:convertCoordinates": HandleConvertCoordinates(payload); break;
+                    case "profile:updateWindowSize": HandleUpdateWindowSize(); break;
                     case "profile:reset": HandleProfileReset(); break;
                     case "selection:changed": HandleSelectionChanged(payload); break;
                     case "settings:change": HandleSettingsChange(payload); break;
@@ -1982,6 +1983,63 @@ namespace TrueReplayer
             HasUnsavedChanges = true;
             PushActionsUpdate();
             SendMessage("alert:show", new { message = $"Converted {converted} action(s) to {(direction == "toRelative" ? "relative" : "absolute")} coordinates." });
+        }
+
+        private void HandleUpdateWindowSize()
+        {
+            var target = CurrentProfileName != "No Profile"
+                ? profileController.GetEffectiveWindowTarget(CurrentProfileName)
+                : UserProfile.Current.TargetWindow;
+
+            if (target == null || string.IsNullOrEmpty(target.ProcessName))
+            {
+                SendMessage("alert:show", new { message = "Set a Window Target first." });
+                return;
+            }
+
+            // Find target window
+            IntPtr hwnd = IntPtr.Zero;
+            NativeMethods.EnumWindows((h, l) =>
+            {
+                if (!NativeMethods.IsWindowVisible(h)) return true;
+                NativeMethods.GetWindowThreadProcessId(h, out uint pid);
+                IntPtr hProcess = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+                if (hProcess == IntPtr.Zero) return true;
+                try
+                {
+                    var sb = new System.Text.StringBuilder(1024);
+                    uint len = NativeMethods.GetProcessImageFileName(hProcess, sb, (uint)sb.Capacity);
+                    if (len == 0) return true;
+                    string fullPath = sb.ToString();
+                    string fileName = fullPath.Substring(fullPath.LastIndexOf('\\') + 1);
+                    if (fileName.Equals(target.ProcessName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        hwnd = h;
+                        return false;
+                    }
+                }
+                finally { NativeMethods.CloseHandle(hProcess); }
+                return true;
+            }, IntPtr.Zero);
+
+            if (hwnd == IntPtr.Zero)
+            {
+                SendMessage("alert:show", new { message = "Target window not found. Make sure it is open and visible." });
+                return;
+            }
+
+            if (!NativeMethods.GetWindowRect(hwnd, out var rect))
+            {
+                SendMessage("alert:show", new { message = "Could not get window dimensions." });
+                return;
+            }
+
+            int w = rect.Right - rect.Left;
+            int h = rect.Bottom - rect.Top;
+            UserProfile.Current.WindowWidth = w;
+            UserProfile.Current.WindowHeight = h;
+            HasUnsavedChanges = true;
+            SendMessage("alert:show", new { message = $"Window size updated to {w} x {h}" });
         }
 
         private async void HandleSetRelativeCoordinates(JsonElement payload)
