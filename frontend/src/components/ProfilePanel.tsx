@@ -1703,6 +1703,21 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 <span className="text-xs text-text-secondary">Bring to Focus</span>
                 <Toggle isOn={targetBringToFocus} onChange={setTargetBringToFocus} />
               </div>
+              {/* Convert coordinates */}
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => send({ type: 'profile:convertCoordinates', payload: { direction: 'toRelative' } })}
+                  className="flex-1 h-7 text-[11px] text-accent border border-accent-solid/30 rounded hover:bg-accent-solid/10 transition-colors"
+                >
+                  Convert to Relative
+                </button>
+                <button
+                  onClick={() => send({ type: 'profile:convertCoordinates', payload: { direction: 'toAbsolute' } })}
+                  className="flex-1 h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors"
+                >
+                  Convert to Absolute
+                </button>
+              </div>
             </div>
 
             <div className="flex items-center mt-4">

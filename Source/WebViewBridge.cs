@@ -248,6 +248,7 @@ namespace TrueReplayer
                     case "profile:import": HandleProfileImport(); break;
                     case "profile:save": HandleProfileSave(); break;
                     case "profile:load": HandleProfileLoad(); break;
+                    case "profile:convertCoordinates": HandleConvertCoordinates(payload); break;
                     case "profile:reset": HandleProfileReset(); break;
                     case "selection:changed": HandleSelectionChanged(payload); break;
                     case "settings:change": HandleSettingsChange(payload); break;
@@ -1860,6 +1861,104 @@ namespace TrueReplayer
                 InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
                 PushProfilesUpdate();
             }
+        }
+
+        private void HandleConvertCoordinates(JsonElement payload)
+        {
+            string direction = payload.GetProperty("direction").GetString() ?? "toRelative";
+
+            if (actions.Count == 0)
+            {
+                SendMessage("alert:show", new { message = "No actions to convert." });
+                return;
+            }
+
+            // Use effective target (profile's own > folder-inherited)
+            var target = CurrentProfileName != "No Profile"
+                ? profileController.GetEffectiveWindowTarget(CurrentProfileName)
+                : UserProfile.Current.TargetWindow;
+            if (target == null || string.IsNullOrEmpty(target.ProcessName))
+            {
+                SendMessage("alert:show", new { message = "Set a Window Target first (profile or folder)." });
+                return;
+            }
+
+            // Find target window
+            IntPtr hwnd = IntPtr.Zero;
+            NativeMethods.EnumWindows((h, l) =>
+            {
+                if (!NativeMethods.IsWindowVisible(h)) return true;
+                NativeMethods.GetWindowThreadProcessId(h, out uint pid);
+                IntPtr hProcess = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+                if (hProcess == IntPtr.Zero) return true;
+                try
+                {
+                    var sb = new System.Text.StringBuilder(1024);
+                    uint len = NativeMethods.GetProcessImageFileName(hProcess, sb, (uint)sb.Capacity);
+                    if (len == 0) return true;
+                    string fullPath = sb.ToString();
+                    string fileName = fullPath.Substring(fullPath.LastIndexOf('\\') + 1);
+                    if (fileName.Equals(target.ProcessName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        hwnd = h;
+                        return false;
+                    }
+                }
+                finally { NativeMethods.CloseHandle(hProcess); }
+                return true;
+            }, IntPtr.Zero);
+
+            if (hwnd == IntPtr.Zero)
+            {
+                SendMessage("alert:show", new { message = "Target window not found. Make sure it is open and visible." });
+                return;
+            }
+
+            if (!NativeMethods.GetWindowRect(hwnd, out var rect))
+            {
+                SendMessage("alert:show", new { message = "Could not get window position." });
+                return;
+            }
+
+            PushUndoState();
+
+            var clickTypes = new HashSet<string> { "LeftClickDown", "LeftClickUp", "RightClickDown", "RightClickUp", "MiddleClickDown", "MiddleClickUp" };
+            int converted = 0;
+
+            if (direction == "toRelative")
+            {
+                foreach (var action in actions)
+                {
+                    if (clickTypes.Contains(action.ActionType))
+                    {
+                        action.X -= rect.Left;
+                        action.Y -= rect.Top;
+                        converted++;
+                    }
+                }
+                UserProfile.Current.UseRelativeCoordinates = true;
+                UserProfile.Current.WindowWidth = rect.Right - rect.Left;
+                UserProfile.Current.WindowHeight = rect.Bottom - rect.Top;
+            }
+            else // toAbsolute
+            {
+                foreach (var action in actions)
+                {
+                    if (clickTypes.Contains(action.ActionType))
+                    {
+                        action.X += rect.Left;
+                        action.Y += rect.Top;
+                        converted++;
+                    }
+                }
+                UserProfile.Current.UseRelativeCoordinates = false;
+                UserProfile.Current.WindowWidth = 0;
+                UserProfile.Current.WindowHeight = 0;
+            }
+
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+            SendMessage("alert:show", new { message = $"Converted {converted} action(s) to {(direction == "toRelative" ? "relative" : "absolute")} coordinates." });
         }
 
         private async void HandleSetRelativeCoordinates(JsonElement payload)

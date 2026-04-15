@@ -164,6 +164,7 @@ export type OutgoingMessage =
   | { type: 'profile:removeHotstring'; payload: { name: string } }
   | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean } }
   | { type: 'profile:setRelativeCoordinates'; payload: { name: string; enabled: boolean } }
+  | { type: 'profile:convertCoordinates'; payload: { direction: 'toRelative' | 'toAbsolute' } }
   | { type: 'profile:setBringToFocus'; payload: { name: string; enabled: boolean } }
   | { type: 'profile:removeWindowTarget'; payload: { name: string } }
   | { type: 'profile:setFolderWindowTarget'; payload: { folderName: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean } }
