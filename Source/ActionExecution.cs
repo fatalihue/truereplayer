@@ -600,7 +600,9 @@ namespace TrueReplayer.Services
                     var targetHwnd = FindTargetWindow();
                     if (targetHwnd != IntPtr.Zero)
                     {
-                        NativeMethods.ShowWindow(targetHwnd, 9); // SW_RESTORE
+                        // Only restore if minimized — preserves maximized/fullscreen state
+                        if (NativeMethods.IsIconic(targetHwnd))
+                            NativeMethods.ShowWindow(targetHwnd, 9); // SW_RESTORE
                         // AttachThreadInput trick to bypass foreground restriction
                         var fgHwnd = NativeMethods.GetForegroundWindow();
                         uint fgThread = NativeMethods.GetWindowThreadProcessId(fgHwnd, out _);

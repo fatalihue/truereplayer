@@ -171,6 +171,9 @@ namespace TrueReplayer.Interop
         public static extern bool IsWindowVisible(IntPtr hWnd);
 
         [DllImport("user32.dll")]
+        public static extern bool IsIconic(IntPtr hWnd); // true if minimized
+
+        [DllImport("user32.dll")]
         public static extern IntPtr GetKeyboardLayout(uint idThread);
 
         [DllImport("user32.dll")]

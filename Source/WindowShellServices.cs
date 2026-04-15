@@ -460,7 +460,9 @@ namespace TrueReplayer.Services
             if (foregroundThread != currentThread)
                 AttachThreadInput(foregroundThread, currentThread, true);
 
-            ShowWindow(hwnd, SW_RESTORE);
+            // Only restore if minimized — preserves maximized state
+            if (IsIconic(hwnd))
+                ShowWindow(hwnd, SW_RESTORE);
             SetForegroundWindow(hwnd);
 
             if (foregroundThread != currentThread)
@@ -491,6 +493,7 @@ namespace TrueReplayer.Services
         [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
         [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
         [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
     }
 }
