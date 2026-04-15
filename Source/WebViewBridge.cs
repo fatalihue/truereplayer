@@ -260,6 +260,7 @@ namespace TrueReplayer
                     case "update:check": _ = CheckForUpdateAsync(); break;
                     case "update:apply": _ = HandleUpdateApply(); break;
                     case "update:dismiss": break;
+                    case "hotkey:suppress": HandleHotkeySuppress(payload); break;
                     case "theme:colors": HandleThemeColors(payload); break;
                     default:
                         System.Diagnostics.Debug.WriteLine($"[Bridge] Unknown message type: {type}");
@@ -615,6 +616,8 @@ namespace TrueReplayer
                     windowTargetProcessName = p.WindowTargetProcessName,
                     windowTargetWindowTitle = p.WindowTargetWindowTitle,
                     windowTargetTitleMatchMode = p.WindowTargetTitleMatchMode,
+                    useRelativeCoordinates = p.UseRelativeCoordinates,
+                    bringToFocus = p.BringToFocus,
                     isDisabled = p.IsDisabled
                 }).ToArray(),
                 activeProfile = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName,
@@ -753,6 +756,12 @@ namespace TrueReplayer
             {
                 profileController.SetDialogThemeColors(bgSurface, bgCard ?? bgSurface, textPrimary, textSecondary ?? textPrimary, accentSolid, borderSubtle);
             }
+        }
+
+        private void HandleHotkeySuppress(JsonElement payload)
+        {
+            bool enabled = payload.GetProperty("enabled").GetBoolean();
+            InputHookManager.SuppressAllHotkeys = enabled;
         }
 
         private void HandleSelectionChanged(JsonElement payload)
@@ -1342,7 +1351,9 @@ namespace TrueReplayer
                         Comment = original.Comment,
                         ImagePath = original.ImagePath,
                         Timeout = original.Timeout,
-                        Confidence = original.Confidence
+                        Confidence = original.Confidence,
+                        BrowserText = original.BrowserText,
+                        NewTab = original.NewTab
                     };
                     actions.Insert(insertPos, clone);
                     insertPos++;
@@ -1623,13 +1634,23 @@ namespace TrueReplayer
                 {
                     CurrentProfileName = "No Profile";
                     CurrentProfilePath = null;
+                    HasUnsavedChanges = false;
+                    actions.Clear();
                 }
 
                 await profileController.RemoveProfileFromOrderAsync(name);
                 await profileController.RefreshProfileListAsync(true);
+                // Re-register hotkeys since a profile was removed
+                var hotkeys = profileController.GetProfileHotkeys();
+                InputHookManager.RegisterProfileHotkeys(hotkeys);
+                var hotstrings = profileController.GetProfileHotstrings();
+                InputHookManager.RegisterProfileHotstrings(hotstrings);
+                InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
                 PushProfilesUpdate();
+                PushButtonStates();
                 PushToolbarUpdate();
                 PushStatusBarUpdate();
+                TrayIconService.UpdateTrayIcon();
             }
             catch (Exception ex)
             {
@@ -1851,11 +1872,13 @@ namespace TrueReplayer
             {
                 profile.TargetWindow = null;
                 profile.UseRelativeCoordinates = false;
+                profile.BringToFocus = false;
                 await profileController.SaveProfileByNameAsync(name, profile);
                 if (CurrentProfileName == name)
                 {
                     UserProfile.Current.TargetWindow = null;
                     UserProfile.Current.UseRelativeCoordinates = false;
+                    UserProfile.Current.BringToFocus = false;
                 }
                 await profileController.RefreshProfileListAsync(true);
                 InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());

@@ -282,6 +282,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setContextMenu(null);
     setHotkeyCapture('...');
     setShowHotkeyDialog(name);
+    send({ type: 'hotkey:suppress', payload: { enabled: true } });
   };
 
   const handleRemoveHotkey = (name: string) => {
@@ -295,6 +296,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setHotstringValue(existing?.hotstring ?? '');
     setHotstringInstant(existing?.hotstring ? existing.hotstringInstant : true);
     setShowHotstringDialog(name);
+    send({ type: 'hotkey:suppress', payload: { enabled: true } });
   };
 
   const handleRemoveHotstring = (name: string) => {
@@ -408,6 +410,13 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     }
   };
 
+  // Suppress global hotkeys while hotkey dialog is open
+  useEffect(() => {
+    if (!showHotkeyDialog) {
+      send({ type: 'hotkey:suppress', payload: { enabled: false } });
+    }
+  }, [showHotkeyDialog]);
+
   // Auto-close hotkey dialog when profile list updates (means hotkey was saved successfully)
   useEffect(() => {
     if (!showHotkeyDialog) return;
@@ -417,6 +426,13 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       }
     });
   }, [showHotkeyDialog, subscribe]);
+
+  // Suppress global hotkeys while hotstring dialog is open
+  useEffect(() => {
+    if (!showHotstringDialog) {
+      send({ type: 'hotkey:suppress', payload: { enabled: false } });
+    }
+  }, [showHotstringDialog]);
 
   // Auto-close hotstring dialog when profile list updates
   useEffect(() => {

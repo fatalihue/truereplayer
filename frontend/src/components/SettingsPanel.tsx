@@ -102,6 +102,7 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
   onChange: (key: string, hotkey: string) => void;
   onFocusChange?: (focused: boolean) => void;
 }) {
+  const { send } = useBridge();
   const [localValue, setLocalValue] = useState(value);
   const [isFocused, setIsFocused] = useState(false);
 
@@ -155,8 +156,8 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
       type="text"
       readOnly
       value={isFocused ? (localValue || '...') : localValue}
-      onFocus={() => { setIsFocused(true); setLocalValue('...'); onFocusChange?.(true); }}
-      onBlur={() => { setIsFocused(false); setLocalValue(value); onFocusChange?.(false); }}
+      onFocus={() => { setIsFocused(true); setLocalValue('...'); onFocusChange?.(true); send({ type: 'hotkey:suppress', payload: { enabled: true } }); }}
+      onBlur={() => { setIsFocused(false); setLocalValue(value); onFocusChange?.(false); send({ type: 'hotkey:suppress', payload: { enabled: false } }); }}
       onKeyDown={handleKeyDown}
       className={`w-[110px] h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer ${
         isFocused
