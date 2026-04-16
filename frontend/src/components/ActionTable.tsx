@@ -170,7 +170,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     return () => window.removeEventListener('selection:set', handler);
   }, []);
 
-  // Close context menu on click outside
+  // Close context menu on click outside or Escape
   useEffect(() => {
     if (!contextMenu) return;
     const handleClick = (e: MouseEvent) => {
@@ -182,8 +182,21 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         setActiveSubmenu(null);
       }
     };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setContextMenu(null);
+        setMenuPos(null);
+        setActiveSubmenu(null);
+      }
+    };
     document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey, true);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey, true);
+    };
   }, [contextMenu]);
 
   // Two-pass context menu positioning (same pattern as ProfilePanel)

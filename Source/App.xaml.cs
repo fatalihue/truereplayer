@@ -12,6 +12,16 @@ namespace TrueReplayer
         public App()
         {
             this.InitializeComponent();
+
+            // Prevent app termination from unhandled exceptions in async void handlers
+            // (common in WebViewBridge profile/file I/O handlers). Log and continue —
+            // individual operations may fail but the app stays responsive.
+            this.UnhandledException += (_, e) =>
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"[App] UnhandledException: {e.Exception.GetType().Name}: {e.Message}\n{e.Exception}");
+                e.Handled = true;
+            };
         }
 
         protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)

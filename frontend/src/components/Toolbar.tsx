@@ -51,8 +51,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
     return () => window.removeEventListener('cmd:sendtext', handler);
   }, []);
 
-  // Close dialogs when app loses focus
-  // Close dropdowns on outside click
+  // Close dropdowns on outside click or Escape
   useEffect(() => {
     if (!showColDropdown && !showAddActions && !showBrowserMenu) return;
     const handler = (e: MouseEvent) => {
@@ -66,8 +65,20 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
         setShowBrowserMenu(false);
       }
     };
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      setShowColDropdown(false);
+      setShowAddActions(false);
+      setShowBrowserMenu(false);
+    };
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('keydown', keyHandler, true);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('keydown', keyHandler, true);
+    };
   }, [showColDropdown, showAddActions, showBrowserMenu]);
 
   // Ctrl+Z / Ctrl+Y keyboard shortcuts for undo/redo

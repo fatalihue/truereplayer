@@ -589,6 +589,7 @@ namespace TrueReplayer
 
             // Send full state to React
             var profile = UserProfile.Current;
+            string stateInitProfileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
             SendMessage("state:init", new
             {
                 status = "ready",
@@ -602,7 +603,15 @@ namespace TrueReplayer
                     comment = a.Comment ?? "",
                     rowNumber = i + 1,
                     isInsertionPoint = a.IsInsertionPoint,
-                    shouldHighlight = a.ShouldHighlight
+                    shouldHighlight = a.ShouldHighlight,
+                    imagePath = a.ImagePath ?? "",
+                    timeout = a.Timeout,
+                    confidence = a.Confidence,
+                    imageBase64 = a.ActionType == "WaitImage" && !string.IsNullOrEmpty(a.ImagePath)
+                        ? ImageStorageService.ReadAsBase64(stateInitProfileName, a.ImagePath) ?? ""
+                        : "",
+                    browserText = a.BrowserText ?? "",
+                    newTab = a.NewTab
                 }).ToArray(),
                 highlightedActionIndex = (int?)null,
                 profiles = profileController.ProfileEntries.Select(p => new
@@ -681,7 +690,10 @@ namespace TrueReplayer
                     recordingActive = false,
                     replayActive = false,
                     recordButtonText = "Recording",
-                    replayButtonText = "Replay"
+                    replayButtonText = "Replay",
+                    canUndo = CanUndo,
+                    canRedo = CanRedo,
+                    copiedCount = _copiedActions?.Count ?? 0
                 }
             });
 
@@ -1549,7 +1561,8 @@ namespace TrueReplayer
             var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
             if (entry == null || !File.Exists(entry.FilePath)) return;
 
-            string dir = Path.GetDirectoryName(entry.FilePath)!;
+            string? dir = Path.GetDirectoryName(entry.FilePath);
+            if (string.IsNullOrEmpty(dir)) return;
             string copyName = $"{name} - Copy";
             string copyPath = Path.Combine(dir, copyName + ".json");
 
@@ -2206,12 +2219,14 @@ namespace TrueReplayer
 
                 // Ignore clicks on our own window
                 IntPtr ownHwnd = IntPtr.Zero;
-                dispatcherQueue.TryEnqueue(() => { }); // no-op; just need to check
                 try
                 {
                     ownHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[Bridge] GetWindowHandle failed: {ex.Message}");
+                }
 
                 if (hwnd != IntPtr.Zero && hwnd != ownHwnd)
                 {

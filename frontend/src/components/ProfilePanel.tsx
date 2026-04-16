@@ -121,7 +121,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
 
-  // Close context menu on click outside
+  // Close context menu on click outside or Escape
   useEffect(() => {
     if (!contextMenu) return;
     const handleClick = (e: MouseEvent) => {
@@ -130,8 +130,19 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         setMenuPos(null);
       }
     };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setContextMenu(null);
+        setMenuPos(null);
+      }
+    };
     document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
   }, [contextMenu]);
 
   // Adjust context menu position to stay within viewport
@@ -552,7 +563,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setFolderContextMenu({ x: e.clientX, y: e.clientY, folderName });
   };
 
-  // Close folder context menu on click outside
+  // Close folder context menu on click outside or Escape
   useEffect(() => {
     if (!folderContextMenu) return;
     const handleClick = (e: MouseEvent) => {
@@ -561,8 +572,19 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         setShowFolderColorPicker(null);
       }
     };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setFolderContextMenu(null);
+        setShowFolderColorPicker(null);
+      }
+    };
     document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
   }, [folderContextMenu]);
 
   // Focus folder dialog input

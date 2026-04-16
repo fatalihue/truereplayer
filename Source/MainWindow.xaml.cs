@@ -103,7 +103,13 @@ namespace TrueReplayer
             mainController.UpdateButtonStates();
 
             profileController = new ProfileController(this);
-            this.Closed += (_, _) => { bridge?.Dispose(); profileController.Dispose(); };
+            this.Closed += (_, _) =>
+            {
+                _uiReadyWatchdog?.Dispose();
+                _uiReadyWatchdog = null;
+                bridge?.Dispose();
+                profileController.Dispose();
+            };
 
             InitializeWebView();
         }

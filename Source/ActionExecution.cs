@@ -915,7 +915,7 @@ namespace TrueReplayer.Services
 
             var now = DateTime.Now;
             if (text.Contains("{datetime}", StringComparison.OrdinalIgnoreCase))
-                text = text.Replace("{datetime}", now.ToString("dd/MM/yyyy  - HH:mm:ss"), StringComparison.OrdinalIgnoreCase);
+                text = text.Replace("{datetime}", now.ToString("dd/MM/yyyy - HH:mm:ss"), StringComparison.OrdinalIgnoreCase);
             if (text.Contains("{date}", StringComparison.OrdinalIgnoreCase))
                 text = text.Replace("{date}", now.ToString("dd/MM/yyyy"), StringComparison.OrdinalIgnoreCase);
             if (text.Contains("{time}", StringComparison.OrdinalIgnoreCase))
@@ -961,7 +961,7 @@ namespace TrueReplayer.Services
             // Resolve {datetime} before {date}/{time} to avoid partial matches
             var now = DateTime.Now;
             if (text.Contains("{datetime}", StringComparison.OrdinalIgnoreCase))
-                text = text.Replace("{datetime}", now.ToString("dd/MM/yyyy  - HH:mm:ss"), StringComparison.OrdinalIgnoreCase);
+                text = text.Replace("{datetime}", now.ToString("dd/MM/yyyy - HH:mm:ss"), StringComparison.OrdinalIgnoreCase);
             if (text.Contains("{date}", StringComparison.OrdinalIgnoreCase))
                 text = text.Replace("{date}", now.ToString("dd/MM/yyyy"), StringComparison.OrdinalIgnoreCase);
             if (text.Contains("{time}", StringComparison.OrdinalIgnoreCase))

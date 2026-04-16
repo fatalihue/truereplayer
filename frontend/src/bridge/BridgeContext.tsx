@@ -44,15 +44,24 @@ export function BridgeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onMessage = (event: { data: unknown }) => {
+      let message: IncomingMessage;
       try {
-        const message: IncomingMessage = typeof event.data === 'string'
+        message = typeof event.data === 'string'
           ? JSON.parse(event.data)
-          : event.data;
-        console.log('[Bridge] ← C#:', message.type);
-        handlersRef.current.forEach(handler => handler(message));
+          : event.data as IncomingMessage;
       } catch (err) {
         console.error('[Bridge] Failed to parse message:', err);
+        return;
       }
+      console.log('[Bridge] ← C#:', message.type);
+      // Isolate handlers: a thrown exception in one must not block others
+      handlersRef.current.forEach(handler => {
+        try {
+          handler(message);
+        } catch (err) {
+          console.error('[Bridge] Handler threw for', message.type, err);
+        }
+      });
     };
 
     if (window.chrome?.webview) {
