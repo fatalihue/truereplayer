@@ -25,6 +25,11 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
         public bool NewTab { get; set; }
 
+        // When true, the action is retained in the list but skipped during replay.
+        // Persisted so users can load a profile with actions pre-disabled.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool IsSkipped { get; set; }
+
         [System.Text.Json.Serialization.JsonIgnore]
         public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
 

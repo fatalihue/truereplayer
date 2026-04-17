@@ -592,6 +592,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               const canEditXY = isMouseAction(action.actionType);
 
               const isDragged = dragIndices?.includes(idx) ?? false;
+              const isSkipped = action.isSkipped;
               const showDropBefore = dropTarget === idx && !isDragged;
               const showDropAfter = dropTarget === idx + 1 && !isDragged && !(dragIndices?.includes(idx + 1));
 
@@ -604,6 +605,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   onContextMenu={(e) => handleRowContextMenu(idx, e)}
                   className={`group h-row border-b border-border-subtle transition-colors cursor-default relative ${
                     isDragged ? 'opacity-40' : ''
+                  } ${
+                    isSkipped ? 'opacity-40 [&_td]:line-through [&_td]:decoration-text-disabled [&_td]:decoration-[1px]' : ''
                   } ${
                     isHighlighted
                       ? 'bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)]'
@@ -854,6 +857,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         <BulkActionBar
           selectedCount={selectedIndices.size}
           selectedIndices={selectedIndices}
+          allSelectedSkipped={Array.from(selectedIndices).every(i => actions[i]?.isSkipped)}
           onClearSelection={() => setSelectedIndices(new Set())}
           onDelete={() => {
             send({ type: 'actions:delete', payload: { indices: Array.from(selectedIndices) } });
@@ -877,6 +881,16 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           onSetComment={(comment) => {
             send({ type: 'actions:bulkUpdateComment', payload: { indices: Array.from(selectedIndices), comment } });
             showToast(`Set notes for ${selectedIndices.size} action(s)`, 'success');
+          }}
+          onToggleSkip={() => {
+            const allSkipped = Array.from(selectedIndices).every(i => actions[i]?.isSkipped);
+            send({ type: 'actions:toggleSkip', payload: { indices: Array.from(selectedIndices) } });
+            showToast(
+              allSkipped
+                ? `Enabled ${selectedIndices.size} action(s)`
+                : `Skipped ${selectedIndices.size} action(s)`,
+              'success'
+            );
           }}
         />
       )}

@@ -664,6 +664,9 @@ namespace TrueReplayer.Services
                         {
                             if (token.IsCancellationRequested) break;
                             var action = snapshot[i];
+                            // Skipped actions: retained in the list but not replayed.
+                            // Their delay is also skipped — treat as if the line doesn't exist.
+                            if (action.IsSkipped) continue;
                             int safeDelay = Math.Max(0, action.Delay);
                             if (_useDelayVariation && _delayVariationPercent > 0 && safeDelay > 0)
                             {

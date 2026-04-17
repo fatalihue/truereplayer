@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Clock, Copy, Clipboard, Trash2, X, Hash, MessageSquare } from 'lucide-react';
+import { Clock, Copy, Clipboard, Trash2, X, Hash, MessageSquare, Ban } from 'lucide-react';
 
 interface BulkActionBarProps {
   selectedCount: number;
   selectedIndices: Set<number>;
+  allSelectedSkipped: boolean;
   onClearSelection: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
@@ -11,11 +12,13 @@ interface BulkActionBarProps {
   onSetCoord: (axis: 'x' | 'y', value: string) => void;
   onSetComment: (comment: string) => void;
   onCopyActions: () => void;
+  onToggleSkip: () => void;
 }
 
 export function BulkActionBar({
   selectedCount,
   selectedIndices: _selectedIndices,
+  allSelectedSkipped,
   onClearSelection,
   onDelete,
   onDuplicate,
@@ -23,6 +26,7 @@ export function BulkActionBar({
   onSetCoord,
   onCopyActions,
   onSetComment,
+  onToggleSkip,
 }: BulkActionBarProps) {
   const [activeInput, setActiveInput] = useState<'delay' | 'x' | 'y' | 'notes' | null>(null);
   const [inputValue, setInputValue] = useState('');
@@ -161,6 +165,20 @@ export function BulkActionBar({
             >
               <Copy size={11} />
               Duplicate
+            </button>
+
+            {/* Skip / Unskip */}
+            <button
+              onClick={onToggleSkip}
+              className={`flex items-center gap-1 h-6 px-2 rounded text-[11px] transition-colors ${
+                allSelectedSkipped
+                  ? 'text-accent hover:text-accent hover:bg-accent-solid/10'
+                  : 'text-text-tertiary hover:text-text-primary hover:bg-bg-elevated'
+              }`}
+              title={allSelectedSkipped ? 'Enable selected (include in replay)' : 'Skip selected (exclude from replay)'}
+            >
+              <Ban size={11} />
+              {allSelectedSkipped ? 'Enable' : 'Skip'}
             </button>
 
             <div className="w-px h-3.5 bg-border-subtle mx-0.5" />

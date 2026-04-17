@@ -209,6 +209,7 @@ namespace TrueReplayer
                     case "actions:bulkUpdateDelay": HandleBulkUpdateDelay(payload); break;
                     case "actions:bulkUpdateCoord": HandleBulkUpdateCoord(payload); break;
                     case "actions:bulkUpdateComment": HandleBulkUpdateComment(payload); break;
+                    case "actions:toggleSkip": HandleActionsToggleSkip(payload); break;
                     case "actions:reorder": HandleActionsReorder(payload); break;
                     case "actions:insertAction": HandleInsertAction(payload); break;
                     case "actions:duplicate": HandleDuplicateActions(payload); break;
@@ -313,7 +314,8 @@ namespace TrueReplayer
                     ? ImageStorageService.ReadAsBase64(profileName, a.ImagePath) ?? ""
                     : "",
                 browserText = a.BrowserText ?? "",
-                newTab = a.NewTab
+                newTab = a.NewTab,
+                isSkipped = a.IsSkipped
             }).ToArray();
 
             SendMessage("actions:updated", new { actions = actionsList });
@@ -616,7 +618,8 @@ namespace TrueReplayer
                         ? ImageStorageService.ReadAsBase64(stateInitProfileName, a.ImagePath) ?? ""
                         : "",
                     browserText = a.BrowserText ?? "",
-                    newTab = a.NewTab
+                    newTab = a.NewTab,
+                    isSkipped = a.IsSkipped
                 }).ToArray(),
                 highlightedActionIndex = (int?)null,
                 profiles = profileController.ProfileEntries.Select(p => new
@@ -874,7 +877,8 @@ namespace TrueReplayer
                         Confidence = a.Confidence,
                         ImagePath = a.ImagePath,
                         BrowserText = a.BrowserText,
-                        NewTab = a.NewTab
+                        NewTab = a.NewTab,
+                        IsSkipped = a.IsSkipped
                     });
                 }
             }
@@ -909,6 +913,7 @@ namespace TrueReplayer
                     ImagePath = copied.ImagePath,
                     BrowserText = copied.BrowserText,
                     NewTab = copied.NewTab,
+                    IsSkipped = copied.IsSkipped,
                     RowNumber = insertIndex + 1
                 };
                 actions.Insert(insertIndex, clone);
@@ -1045,6 +1050,27 @@ namespace TrueReplayer
                 if (idx >= 0 && idx < actions.Count)
                     actions[idx].Comment = comment;
             }
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+        }
+
+        private void HandleActionsToggleSkip(JsonElement payload)
+        {
+            PushUndoState();
+            var indices = payload.GetProperty("indices").EnumerateArray()
+                .Select(e => e.GetInt32())
+                .Where(i => i >= 0 && i < actions.Count)
+                .ToList();
+            if (indices.Count == 0) return;
+
+            // Smart toggle: if every selected action is already skipped, un-skip all;
+            // otherwise skip all. Consistent with how most UIs handle batch toggles.
+            bool allSkipped = indices.All(i => actions[i].IsSkipped);
+            bool newState = !allSkipped;
+
+            foreach (var idx in indices)
+                actions[idx].IsSkipped = newState;
+
             HasUnsavedChanges = true;
             PushActionsUpdate();
         }
@@ -1371,7 +1397,8 @@ namespace TrueReplayer
                         Timeout = original.Timeout,
                         Confidence = original.Confidence,
                         BrowserText = original.BrowserText,
-                        NewTab = original.NewTab
+                        NewTab = original.NewTab,
+                        IsSkipped = original.IsSkipped
                     };
                     actions.Insert(insertPos, clone);
                     insertPos++;

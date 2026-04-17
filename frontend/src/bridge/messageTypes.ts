@@ -16,6 +16,7 @@ export interface ActionItem {
   imageBase64: string;
   browserText: string;
   newTab: boolean;
+  isSkipped: boolean;
 }
 
 export interface ProfileEntry {
@@ -193,6 +194,7 @@ export type OutgoingMessage =
   | { type: 'actions:bulkUpdateDelay'; payload: { indices: number[]; delay: number } }
   | { type: 'actions:bulkUpdateCoord'; payload: { indices: number[]; axis: 'x' | 'y'; value: string } }
   | { type: 'actions:bulkUpdateComment'; payload: { indices: number[]; comment: string } }
+  | { type: 'actions:toggleSkip'; payload: { indices: number[] } }
   | { type: 'actions:reorder'; payload: { indices: number[]; targetIndex: number } }
   | { type: 'actions:insertAction'; payload: { actionType: string; insertIndex: number } }
   | { type: 'actions:duplicate'; payload: { indices: number[] } }
