@@ -63,6 +63,9 @@ namespace TrueReplayer.Models
         public bool UseRelativeCoordinates { get; set; } = false;
         public int WindowWidth { get; set; } = 0;
         public int WindowHeight { get; set; } = 0;
+        public int WindowX { get; set; } = 0;
+        public int WindowY { get; set; } = 0;
+        public bool LockPosition { get; set; } = false;
         public bool BringToFocus { get; set; } = false;
         public bool IsDisabled { get; set; }
 
@@ -118,6 +121,7 @@ namespace TrueReplayer.Models
         public string WindowTargetTitleMatchMode { get; set; } = "contains";
         public bool UseRelativeCoordinates { get; set; }
         public bool BringToFocus { get; set; }
+        public bool LockPosition { get; set; }
         public bool IsDisabled { get; set; }
         public string Display => string.IsNullOrEmpty(Hotkey) ? Name : $"{Name} ({Hotkey})";
 
@@ -167,6 +171,9 @@ namespace TrueReplayer.Models
         public bool UseRelativeCoordinates { get; set; } = false;
         public int WindowWidth { get; set; } = 0;
         public int WindowHeight { get; set; } = 0;
+        public int WindowX { get; set; } = 0;
+        public int WindowY { get; set; } = 0;
+        public bool LockPosition { get; set; } = false;
         public bool BringToFocus { get; set; } = false;
         public string BatchDelay { get; set; } = "Delay (ms)";
         public ObservableCollection<ActionItem> Actions { get; set; } = new();

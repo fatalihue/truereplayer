@@ -31,6 +31,7 @@ export interface ProfileEntry {
   windowTargetTitleMatchMode: string;
   useRelativeCoordinates: boolean;
   bringToFocus: boolean;
+  lockPosition: boolean;
   isDisabled: boolean;
 }
 
@@ -162,11 +163,12 @@ export type OutgoingMessage =
   | { type: 'profile:removeHotkey'; payload: { name: string } }
   | { type: 'profile:assignHotstring'; payload: { name: string; sequence: string; instant: boolean } }
   | { type: 'profile:removeHotstring'; payload: { name: string } }
-  | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean } }
+  | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean; lockPosition?: boolean } }
   | { type: 'profile:setRelativeCoordinates'; payload: { name: string; enabled: boolean } }
   | { type: 'profile:convertCoordinates'; payload: { direction: 'toRelative' | 'toAbsolute' } }
   | { type: 'profile:updateWindowSize'; payload: Record<string, never> }
   | { type: 'profile:setBringToFocus'; payload: { name: string; enabled: boolean } }
+  | { type: 'profile:setLockPosition'; payload: { name: string; enabled: boolean } }
   | { type: 'profile:removeWindowTarget'; payload: { name: string } }
   | { type: 'profile:setFolderWindowTarget'; payload: { folderName: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean } }
   | { type: 'profile:removeFolderWindowTarget'; payload: { folderName: string } }

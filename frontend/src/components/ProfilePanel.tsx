@@ -41,6 +41,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [titleMatchMode, setTitleMatchMode] = useState<'contains' | 'regex'>('contains');
   const [targetRelativeCoords, setTargetRelativeCoords] = useState(false);
   const [targetBringToFocus, setTargetBringToFocus] = useState(false);
+  const [targetLockPosition, setTargetLockPosition] = useState(false);
   const [isDetecting, setIsDetecting] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportSelection, setExportSelection] = useState<Record<string, boolean>>({});
@@ -336,6 +337,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setTitleMatchMode((hasOwnTarget ? (existing?.windowTargetTitleMatchMode ?? 'contains') : (folder?.windowTargetTitleMatchMode ?? 'contains')) as 'contains' | 'regex');
     setTargetRelativeCoords(hasOwnTarget ? (existing?.useRelativeCoordinates ?? false) : (folder?.useRelativeCoordinates ?? false));
     setTargetBringToFocus(hasOwnTarget ? (existing?.bringToFocus ?? false) : (folder?.bringToFocus ?? false));
+    setTargetLockPosition(existing?.lockPosition ?? false);
     setIsDetecting(false);
     setShowWindowTargetDialog(name);
   };
@@ -359,7 +361,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           windowTitle: targetWindowTitle.trim(),
           titleMatchMode,
           relativeCoordinates: targetRelativeCoords,
-          bringToFocus: targetBringToFocus
+          bringToFocus: targetBringToFocus,
+          lockPosition: targetLockPosition
         }
       });
     }
@@ -1744,6 +1747,20 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 <span className="text-xs text-text-secondary">Bring to Focus</span>
                 <Toggle isOn={targetBringToFocus} onChange={setTargetBringToFocus} />
               </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-secondary" title="Restore the target window to its saved position before replay">Lock Position</span>
+                <Toggle
+                  isOn={targetLockPosition}
+                  onChange={(enabled) => {
+                    setTargetLockPosition(enabled);
+                    // Auto-save so profiles that inherit target from a folder don't need to
+                    // click "Set Target" (which would copy the folder's target into the profile)
+                    if (showWindowTargetDialog) {
+                      send({ type: 'profile:setLockPosition', payload: { name: showWindowTargetDialog, enabled } });
+                    }
+                  }}
+                />
+              </div>
               {/* Convert coordinates */}
               <div className="flex gap-2 pt-1">
                 <button
@@ -1762,8 +1779,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               <button
                 onClick={() => send({ type: 'profile:updateWindowSize', payload: {} })}
                 className="w-full h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors"
+                title="Capture current size and position of the target window"
               >
-                Update Window Size
+                Update Window Size &amp; Position
               </button>
             </div>
 

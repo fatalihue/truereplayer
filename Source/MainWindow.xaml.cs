@@ -365,7 +365,10 @@ namespace TrueReplayer
                                 effTarget,
                                 effBringFocus,
                                 UserProfile.Current.WindowWidth,
-                                UserProfile.Current.WindowHeight);
+                                UserProfile.Current.WindowHeight,
+                                UserProfile.Current.WindowX,
+                                UserProfile.Current.WindowY,
+                                UserProfile.Current.LockPosition);
                         }
                     }
                     else if (key.StartsWith("PROFILE::"))
@@ -402,7 +405,10 @@ namespace TrueReplayer
                                 effectiveTarget,
                                 effectiveBringToFocus,
                                 UserProfile.Current.WindowWidth,
-                                UserProfile.Current.WindowHeight);
+                                UserProfile.Current.WindowHeight,
+                                UserProfile.Current.WindowX,
+                                UserProfile.Current.WindowY,
+                                UserProfile.Current.LockPosition);
 
                             profileController.UpdateProfileColors(profileName);
                             bridge.PushProfilesUpdate();

@@ -278,6 +278,7 @@ namespace TrueReplayer.Controllers
                             WindowTargetTitleMatchMode = profile.TargetWindow?.TitleMatchMode ?? "contains",
                             UseRelativeCoordinates = profile.UseRelativeCoordinates,
                             BringToFocus = profile.BringToFocus,
+                            LockPosition = profile.LockPosition,
                             IsDisabled = profile.IsDisabled
                         });
 
@@ -625,6 +626,9 @@ namespace TrueReplayer.Controllers
                     UseRelativeCoordinates = profile.UseRelativeCoordinates,
                     WindowWidth = profile.WindowWidth,
                     WindowHeight = profile.WindowHeight,
+                    WindowX = profile.WindowX,
+                    WindowY = profile.WindowY,
+                    LockPosition = profile.LockPosition,
                     BringToFocus = profile.BringToFocus,
                     BatchDelay = profile.BatchDelay,
                     Actions = profile.Actions,
@@ -769,6 +773,9 @@ namespace TrueReplayer.Controllers
                     UseRelativeCoordinates = entry.UseRelativeCoordinates,
                     WindowWidth = entry.WindowWidth,
                     WindowHeight = entry.WindowHeight,
+                    WindowX = entry.WindowX,
+                    WindowY = entry.WindowY,
+                    LockPosition = entry.LockPosition,
                     BringToFocus = entry.BringToFocus,
                     BatchDelay = entry.BatchDelay ?? "Delay (ms)"
                 };
