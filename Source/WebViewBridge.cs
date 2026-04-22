@@ -231,6 +231,7 @@ namespace TrueReplayer
                     case "profile:setRelativeCoordinates": HandleSetRelativeCoordinates(payload); break;
                     case "profile:setBringToFocus": HandleSetBringToFocus(payload); break;
                     case "profile:setLockPosition": HandleProfileSetLockPosition(payload); break;
+                    case "profile:setTriggerMode": HandleProfileSetTriggerMode(payload); break;
                     case "profile:removeWindowTarget": HandleProfileRemoveWindowTarget(payload); break;
                     case "profile:setFolderWindowTarget": HandleSetFolderWindowTarget(payload); break;
                     case "profile:removeFolderWindowTarget": HandleRemoveFolderWindowTarget(payload); break;
@@ -251,7 +252,7 @@ namespace TrueReplayer
                     case "profile:save": HandleProfileSave(); break;
                     case "profile:load": HandleProfileLoad(); break;
                     case "profile:convertCoordinates": HandleConvertCoordinates(payload); break;
-                    case "profile:updateWindowSize": HandleUpdateWindowSize(); break;
+                    case "profile:updateWindowSize": HandleUpdateWindowSize(payload); break;
                     case "profile:reset": HandleProfileReset(); break;
                     case "selection:changed": HandleSelectionChanged(payload); break;
                     case "settings:change": HandleSettingsChange(payload); break;
@@ -276,6 +277,25 @@ namespace TrueReplayer
             }
         }
 
+        // ── Helpers ──
+
+        private static string TriggerModeToString(Models.TriggerMode mode) => mode switch
+        {
+            Models.TriggerMode.OnPress => "onPress",
+            Models.TriggerMode.OnRelease => "onRelease",
+            Models.TriggerMode.WhilePressed => "whilePressed",
+            Models.TriggerMode.Toggle => "toggle",
+            _ => "onPress"
+        };
+
+        private static Models.TriggerMode TriggerModeFromString(string? s) => s switch
+        {
+            "onRelease" => Models.TriggerMode.OnRelease,
+            "whilePressed" => Models.TriggerMode.WhilePressed,
+            "toggle" => Models.TriggerMode.Toggle,
+            _ => Models.TriggerMode.OnPress
+        };
+
         // ── Push methods (C# → React) ──
 
         public void PushStatusChange(string status)
@@ -288,6 +308,11 @@ namespace TrueReplayer
 
             SendMessage("status:changed", new { status });
             PushButtonStates();
+
+            // When replay ends (naturally or via stop), clear any lingering WhilePressed hold state
+            // in the input hook so a stale release doesn't try to stop a non-running replay.
+            if (status == "ready")
+                InputHookManager.ClearActiveHold();
 
             // Sync browser extension: recording on only when status is "recording" AND browserSelectorEnabled
             browserBridge?.SetRecordingMode(status == "recording" && BrowserSelectorEnabled);
@@ -401,6 +426,7 @@ namespace TrueReplayer
                 useRelativeCoordinates = p.UseRelativeCoordinates,
                 bringToFocus = p.BringToFocus,
                 lockPosition = p.LockPosition,
+                triggerMode = TriggerModeToString(p.TriggerMode),
                 isDisabled = p.IsDisabled
             }).ToArray();
 
@@ -636,6 +662,8 @@ namespace TrueReplayer
                     windowTargetTitleMatchMode = p.WindowTargetTitleMatchMode,
                     useRelativeCoordinates = p.UseRelativeCoordinates,
                     bringToFocus = p.BringToFocus,
+                    lockPosition = p.LockPosition,
+                    triggerMode = TriggerModeToString(p.TriggerMode),
                     isDisabled = p.IsDisabled
                 }).ToArray(),
                 activeProfile = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName,
@@ -1581,6 +1609,7 @@ namespace TrueReplayer
             // Re-register hotkeys so disabled profiles are excluded
             var hotkeys = profileController.GetProfileHotkeys();
             InputHookManager.RegisterProfileHotkeys(hotkeys);
+            InputHookManager.RegisterProfileTriggerModes(profileController.GetProfileTriggerModes());
             var hotstrings = profileController.GetProfileHotstrings();
             InputHookManager.RegisterProfileHotstrings(hotstrings);
         }
@@ -1689,6 +1718,7 @@ namespace TrueReplayer
                 // Re-register hotkeys since a profile was removed
                 var hotkeys = profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(hotkeys);
+                InputHookManager.RegisterProfileTriggerModes(profileController.GetProfileTriggerModes());
                 var hotstrings = profileController.GetProfileHotstrings();
                 InputHookManager.RegisterProfileHotstrings(hotstrings);
                 InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
@@ -1710,6 +1740,12 @@ namespace TrueReplayer
             string hotkey = payload.GetProperty("hotkey").GetString() ?? "";
             if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(hotkey)) return;
 
+            // Optional trigger mode: saved atomically with the hotkey so the UI doesn't need
+            // to fire a second message.
+            Models.TriggerMode? newMode = null;
+            if (payload.TryGetProperty("mode", out var modeEl) && modeEl.ValueKind == JsonValueKind.String)
+                newMode = TriggerModeFromString(modeEl.GetString());
+
             var effectiveTarget = profileController.GetEffectiveWindowTarget(name);
             var conflict = GetHotkeyConflict(hotkey, excludeSettingKey: null, excludeProfileName: name, effectiveTarget: effectiveTarget);
             if (conflict != null)
@@ -1722,12 +1758,17 @@ namespace TrueReplayer
             if (profile != null)
             {
                 profile.CustomHotkey = hotkey;
+                if (newMode.HasValue) profile.TriggerMode = newMode.Value;
                 await profileController.SaveProfileByNameAsync(name, profile);
                 if (CurrentProfileName == name)
+                {
                     UserProfile.Current.CustomHotkey = hotkey;
+                    if (newMode.HasValue) UserProfile.Current.TriggerMode = newMode.Value;
+                }
                 await profileController.RefreshProfileListAsync(true);
                 var map = profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(map);
+                InputHookManager.RegisterProfileTriggerModes(profileController.GetProfileTriggerModes());
                 PushProfilesUpdate();
             }
         }
@@ -1747,6 +1788,7 @@ namespace TrueReplayer
                 await profileController.RefreshProfileListAsync(true);
                 var map = profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(map);
+                InputHookManager.RegisterProfileTriggerModes(profileController.GetProfileTriggerModes());
                 PushProfilesUpdate();
             }
         }
@@ -1835,36 +1877,47 @@ namespace TrueReplayer
             bool relativeCoordinates = payload.TryGetProperty("relativeCoordinates", out var rcProp) && rcProp.GetBoolean();
             bool bringToFocus = payload.TryGetProperty("bringToFocus", out var btfProp) && btfProp.GetBoolean();
             bool lockPosition = payload.TryGetProperty("lockPosition", out var lpProp) && lpProp.GetBoolean();
+            // When true, the profile keeps its inherited target (from folder or none). We only
+            // write the flags (relativeCoords/bringToFocus/lockPosition/geometry). Prevents the
+            // dialog from accidentally "promoting" a folder-inherited target into a profile-level
+            // target just because the user toggled a flag.
+            bool keepInheritedTarget = payload.TryGetProperty("keepInheritedTarget", out var kitProp) && kitProp.GetBoolean();
             if (string.IsNullOrEmpty(name)) return;
 
-            if (string.IsNullOrWhiteSpace(processName) && string.IsNullOrWhiteSpace(windowTitle))
+            if (!keepInheritedTarget)
             {
-                SendMessage("alert:show", new { message = "Please specify at least a process name or window title." });
-                return;
-            }
-
-            if (titleMatchMode == "regex" && !string.IsNullOrWhiteSpace(windowTitle))
-            {
-                try
+                if (string.IsNullOrWhiteSpace(processName) && string.IsNullOrWhiteSpace(windowTitle))
                 {
-                    _ = new System.Text.RegularExpressions.Regex(windowTitle.Trim());
-                }
-                catch
-                {
-                    SendMessage("alert:show", new { message = "Invalid regex pattern. Please check the syntax." });
+                    SendMessage("alert:show", new { message = "Please specify at least a process name or window title." });
                     return;
+                }
+
+                if (titleMatchMode == "regex" && !string.IsNullOrWhiteSpace(windowTitle))
+                {
+                    try
+                    {
+                        _ = new System.Text.RegularExpressions.Regex(windowTitle.Trim());
+                    }
+                    catch
+                    {
+                        SendMessage("alert:show", new { message = "Invalid regex pattern. Please check the syntax." });
+                        return;
+                    }
                 }
             }
 
             var profile = await profileController.LoadProfileByNameAsync(name);
             if (profile != null)
             {
-                profile.TargetWindow = new WindowTarget
+                if (!keepInheritedTarget)
                 {
-                    ProcessName = string.IsNullOrWhiteSpace(processName) ? null : processName.Trim(),
-                    WindowTitle = string.IsNullOrWhiteSpace(windowTitle) ? null : windowTitle.Trim(),
-                    TitleMatchMode = titleMatchMode
-                };
+                    profile.TargetWindow = new WindowTarget
+                    {
+                        ProcessName = string.IsNullOrWhiteSpace(processName) ? null : processName.Trim(),
+                        WindowTitle = string.IsNullOrWhiteSpace(windowTitle) ? null : windowTitle.Trim(),
+                        TitleMatchMode = titleMatchMode
+                    };
+                }
                 profile.UseRelativeCoordinates = relativeCoordinates;
                 profile.BringToFocus = bringToFocus;
                 profile.LockPosition = lockPosition;
@@ -1881,7 +1934,8 @@ namespace TrueReplayer
                 await profileController.SaveProfileByNameAsync(name, profile);
                 if (CurrentProfileName == name)
                 {
-                    UserProfile.Current.TargetWindow = profile.TargetWindow;
+                    if (!keepInheritedTarget)
+                        UserProfile.Current.TargetWindow = profile.TargetWindow;
                     UserProfile.Current.UseRelativeCoordinates = relativeCoordinates;
                     UserProfile.Current.BringToFocus = bringToFocus;
                     UserProfile.Current.LockPosition = lockPosition;
@@ -1933,12 +1987,22 @@ namespace TrueReplayer
                 profile.TargetWindow = null;
                 profile.UseRelativeCoordinates = false;
                 profile.BringToFocus = false;
+                profile.LockPosition = false;
+                profile.WindowX = 0;
+                profile.WindowY = 0;
+                profile.WindowWidth = 0;
+                profile.WindowHeight = 0;
                 await profileController.SaveProfileByNameAsync(name, profile);
                 if (CurrentProfileName == name)
                 {
                     UserProfile.Current.TargetWindow = null;
                     UserProfile.Current.UseRelativeCoordinates = false;
                     UserProfile.Current.BringToFocus = false;
+                    UserProfile.Current.LockPosition = false;
+                    UserProfile.Current.WindowX = 0;
+                    UserProfile.Current.WindowY = 0;
+                    UserProfile.Current.WindowWidth = 0;
+                    UserProfile.Current.WindowHeight = 0;
                 }
                 await profileController.RefreshProfileListAsync(true);
                 InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
@@ -2044,41 +2108,101 @@ namespace TrueReplayer
             SendMessage("alert:show", new { message = $"Converted {converted} action(s) to {(direction == "toRelative" ? "relative" : "absolute")} coordinates." });
         }
 
-        private async void HandleUpdateWindowSize()
+        private async void HandleUpdateWindowSize(JsonElement payload)
         {
-            var target = CurrentProfileName != "No Profile"
-                ? profileController.GetEffectiveWindowTarget(CurrentProfileName)
-                : UserProfile.Current.TargetWindow;
-
-            if (target == null || string.IsNullOrEmpty(target.ProcessName))
+            // Optional overrides from the Window Target dialog so the user can capture geometry
+            // BEFORE clicking "Set Target" — enabling a single-pass configuration flow (detect
+            // window → capture geometry → toggle flags → Set Target) instead of having to save,
+            // reopen, update, and save again.
+            string? dialogProcess = null, dialogTitle = null, dialogMatchMode = null;
+            string? targetProfileName = null;
+            if (payload.ValueKind == JsonValueKind.Object)
             {
-                SendMessage("alert:show", new { message = "Set a Window Target first." });
+                if (payload.TryGetProperty("processName", out var pnEl) && pnEl.ValueKind == JsonValueKind.String)
+                    dialogProcess = pnEl.GetString();
+                if (payload.TryGetProperty("windowTitle", out var wtEl) && wtEl.ValueKind == JsonValueKind.String)
+                    dialogTitle = wtEl.GetString();
+                if (payload.TryGetProperty("titleMatchMode", out var mmEl) && mmEl.ValueKind == JsonValueKind.String)
+                    dialogMatchMode = mmEl.GetString();
+                if (payload.TryGetProperty("name", out var nEl) && nEl.ValueKind == JsonValueKind.String)
+                    targetProfileName = nEl.GetString();
+            }
+
+            // Resolve which target definition to search for:
+            // - If the dialog supplied process/title, use those (allows capture before Set Target).
+            // - Otherwise fall back to the saved effective target of the active profile.
+            WindowTarget? target;
+            bool haveDialogTarget = !string.IsNullOrWhiteSpace(dialogProcess) || !string.IsNullOrWhiteSpace(dialogTitle);
+            if (haveDialogTarget)
+            {
+                target = new WindowTarget
+                {
+                    ProcessName = string.IsNullOrWhiteSpace(dialogProcess) ? null : dialogProcess!.Trim(),
+                    WindowTitle = string.IsNullOrWhiteSpace(dialogTitle) ? null : dialogTitle!.Trim(),
+                    TitleMatchMode = string.IsNullOrWhiteSpace(dialogMatchMode) ? "contains" : dialogMatchMode!
+                };
+            }
+            else
+            {
+                target = CurrentProfileName != "No Profile"
+                    ? profileController.GetEffectiveWindowTarget(CurrentProfileName)
+                    : UserProfile.Current.TargetWindow;
+            }
+
+            if (target == null || (string.IsNullOrEmpty(target.ProcessName) && string.IsNullOrEmpty(target.WindowTitle)))
+            {
+                SendMessage("alert:show", new { message = "Detect or set a Window Target first, then click Update." });
                 return;
             }
 
-            // Find target window
+            // Compile regex once if needed
+            System.Text.RegularExpressions.Regex? titleRegex = null;
+            if (target.TitleMatchMode == "regex" && !string.IsNullOrWhiteSpace(target.WindowTitle))
+            {
+                try { titleRegex = new System.Text.RegularExpressions.Regex(target.WindowTitle.Trim()); }
+                catch { /* fall through to substring match */ }
+            }
+
+            // Find target window — matches by process name (if given) and/or title
             IntPtr hwnd = IntPtr.Zero;
             NativeMethods.EnumWindows((h, l) =>
             {
                 if (!NativeMethods.IsWindowVisible(h)) return true;
-                NativeMethods.GetWindowThreadProcessId(h, out uint pid);
-                IntPtr hProcess = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-                if (hProcess == IntPtr.Zero) return true;
-                try
+
+                // Process name check
+                bool procOk = string.IsNullOrEmpty(target.ProcessName);
+                if (!procOk)
                 {
-                    var sb = new System.Text.StringBuilder(1024);
-                    uint len = NativeMethods.GetProcessImageFileName(hProcess, sb, (uint)sb.Capacity);
-                    if (len == 0) return true;
-                    string fullPath = sb.ToString();
-                    string fileName = fullPath.Substring(fullPath.LastIndexOf('\\') + 1);
-                    if (fileName.Equals(target.ProcessName, StringComparison.OrdinalIgnoreCase))
+                    NativeMethods.GetWindowThreadProcessId(h, out uint pid);
+                    IntPtr hProcess = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+                    if (hProcess == IntPtr.Zero) return true;
+                    try
                     {
-                        hwnd = h;
-                        return false;
+                        var sb = new System.Text.StringBuilder(1024);
+                        uint len = NativeMethods.GetProcessImageFileName(hProcess, sb, (uint)sb.Capacity);
+                        if (len == 0) return true;
+                        string fullPath = sb.ToString();
+                        string fileName = fullPath.Substring(fullPath.LastIndexOf('\\') + 1);
+                        procOk = fileName.Equals(target.ProcessName, StringComparison.OrdinalIgnoreCase);
                     }
+                    finally { NativeMethods.CloseHandle(hProcess); }
                 }
-                finally { NativeMethods.CloseHandle(hProcess); }
-                return true;
+                if (!procOk) return true;
+
+                // Title check
+                bool titleOk = string.IsNullOrEmpty(target.WindowTitle);
+                if (!titleOk)
+                {
+                    var titleSb = new System.Text.StringBuilder(512);
+                    NativeMethods.GetWindowText(h, titleSb, titleSb.Capacity);
+                    string winTitle = titleSb.ToString();
+                    if (titleRegex != null) titleOk = titleRegex.IsMatch(winTitle);
+                    else titleOk = winTitle.IndexOf(target.WindowTitle!, StringComparison.OrdinalIgnoreCase) >= 0;
+                }
+                if (!titleOk) return true;
+
+                hwnd = h;
+                return false;
             }, IntPtr.Zero);
 
             if (hwnd == IntPtr.Zero)
@@ -2094,31 +2218,38 @@ namespace TrueReplayer
             }
 
             int w = rect.Right - rect.Left;
-            int h = rect.Bottom - rect.Top;
-            UserProfile.Current.WindowWidth = w;
-            UserProfile.Current.WindowHeight = h;
-            UserProfile.Current.WindowX = rect.Left;
-            UserProfile.Current.WindowY = rect.Top;
+            int hgt = rect.Bottom - rect.Top;
 
-            // Persist to disk so geometry works even for profiles inheriting target from a folder
-            // (user shouldn't be forced to click "Set Target" which would copy folder target to profile)
-            if (CurrentProfileName != "No Profile" && !string.IsNullOrEmpty(CurrentProfilePath))
+            // Resolve the profile to save geometry into: explicit name from the dialog, or the
+            // currently active profile as fallback.
+            string saveName = !string.IsNullOrEmpty(targetProfileName) ? targetProfileName : CurrentProfileName;
+
+            if (saveName == CurrentProfileName && CurrentProfileName != "No Profile")
             {
-                var profile = await profileController.LoadProfileByNameAsync(CurrentProfileName);
+                UserProfile.Current.WindowWidth = w;
+                UserProfile.Current.WindowHeight = hgt;
+                UserProfile.Current.WindowX = rect.Left;
+                UserProfile.Current.WindowY = rect.Top;
+            }
+
+            // Persist to disk so geometry survives even without hitting Set Target afterwards
+            if (!string.IsNullOrEmpty(saveName) && saveName != "No Profile")
+            {
+                var profile = await profileController.LoadProfileByNameAsync(saveName);
                 if (profile != null)
                 {
                     profile.WindowWidth = w;
-                    profile.WindowHeight = h;
+                    profile.WindowHeight = hgt;
                     profile.WindowX = rect.Left;
                     profile.WindowY = rect.Top;
-                    await profileController.SaveProfileByNameAsync(CurrentProfileName, profile);
+                    await profileController.SaveProfileByNameAsync(saveName, profile);
                 }
             }
             else
             {
                 HasUnsavedChanges = true;
             }
-            SendMessage("alert:show", new { message = $"Window geometry updated: {w}×{h} @ ({rect.Left}, {rect.Top})" });
+            SendMessage("alert:show", new { message = $"Window geometry captured: {w}×{hgt} @ ({rect.Left}, {rect.Top})" });
         }
 
         private async void HandleProfileSetLockPosition(JsonElement payload)
@@ -2136,6 +2267,28 @@ namespace TrueReplayer
             if (entry != null) entry.LockPosition = enabled;
             if (CurrentProfileName == name)
                 UserProfile.Current.LockPosition = enabled;
+            PushProfilesUpdate();
+        }
+
+        private async void HandleProfileSetTriggerMode(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            string modeStr = payload.GetProperty("mode").GetString() ?? "onPress";
+            if (string.IsNullOrEmpty(name)) return;
+
+            var mode = TriggerModeFromString(modeStr);
+            var profile = await profileController.LoadProfileByNameAsync(name);
+            if (profile == null) return;
+
+            profile.TriggerMode = mode;
+            await profileController.SaveProfileByNameAsync(name, profile);
+            var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
+            if (entry != null) entry.TriggerMode = mode;
+            if (CurrentProfileName == name)
+                UserProfile.Current.TriggerMode = mode;
+
+            // Re-register so the hook sees the new mode immediately
+            InputHookManager.RegisterProfileTriggerModes(profileController.GetProfileTriggerModes());
             PushProfilesUpdate();
         }
 
@@ -2512,6 +2665,7 @@ namespace TrueReplayer
             PushProfilesUpdate();
             var hotkeys = profileController.GetProfileHotkeys();
             InputHookManager.RegisterProfileHotkeys(hotkeys);
+            InputHookManager.RegisterProfileTriggerModes(profileController.GetProfileTriggerModes());
             var hotstrings = profileController.GetProfileHotstrings();
             InputHookManager.RegisterProfileHotstrings(hotstrings);
             InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());

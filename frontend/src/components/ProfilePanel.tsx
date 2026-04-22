@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Search, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowUpDown, Type, Ban, ChevronsLeft, ChevronsRight, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine } from 'lucide-react';
+import { Search, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowUpDown, Type, Ban, ChevronsLeft, ChevronsRight, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot } from 'lucide-react';
 import type { ProfileEntry } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -32,6 +32,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showHotkeyDialog, setShowHotkeyDialog] = useState<string | null>(null);
   const [hotkeyCapture, setHotkeyCapture] = useState('...');
+  const [hotkeyTriggerMode, setHotkeyTriggerMode] = useState<'onPress' | 'onRelease' | 'whilePressed' | 'toggle'>('onPress');
   const [showHotstringDialog, setShowHotstringDialog] = useState<string | null>(null);
   const [hotstringValue, setHotstringValue] = useState('');
   const [hotstringInstant, setHotstringInstant] = useState(false);
@@ -42,6 +43,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [targetRelativeCoords, setTargetRelativeCoords] = useState(false);
   const [targetBringToFocus, setTargetBringToFocus] = useState(false);
   const [targetLockPosition, setTargetLockPosition] = useState(false);
+  // Tracks whether the user has explicitly edited the target fields (process/title/match mode or
+  // detected a new window) since opening the dialog. When false for a profile that inherits its
+  // target from a folder, "Set Target" will keep the inheritance and only save the flags.
+  const [targetExplicitlyEdited, setTargetExplicitlyEdited] = useState(false);
   const [isDetecting, setIsDetecting] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportSelection, setExportSelection] = useState<Record<string, boolean>>({});
@@ -292,7 +297,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   const handleAssignHotkey = (name: string) => {
     setContextMenu(null);
-    setHotkeyCapture('...');
+    const existing = profiles.find(p => p.name === name);
+    // Pre-fill hotkey with existing so user can change just the trigger mode without re-capturing.
+    setHotkeyCapture(existing?.hotkey || '...');
+    setHotkeyTriggerMode(existing?.triggerMode || 'onPress');
     setShowHotkeyDialog(name);
     send({ type: 'hotkey:suppress', payload: { enabled: true } });
   };
@@ -338,6 +346,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setTargetRelativeCoords(hasOwnTarget ? (existing?.useRelativeCoordinates ?? false) : (folder?.useRelativeCoordinates ?? false));
     setTargetBringToFocus(hasOwnTarget ? (existing?.bringToFocus ?? false) : (folder?.bringToFocus ?? false));
     setTargetLockPosition(existing?.lockPosition ?? false);
+    setTargetExplicitlyEdited(false);
     setIsDetecting(false);
     setShowWindowTargetDialog(name);
   };
@@ -348,24 +357,38 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   };
 
   const handleDetectWindow = () => {
+    setTargetExplicitlyEdited(true);
     send({ type: 'profile:detectWindow', payload: {} });
   };
 
   const confirmWindowTarget = () => {
-    if (showWindowTargetDialog && (targetProcessName.trim() || targetWindowTitle.trim())) {
-      send({
-        type: 'profile:setWindowTarget',
-        payload: {
-          name: showWindowTargetDialog,
-          processName: targetProcessName.trim(),
-          windowTitle: targetWindowTitle.trim(),
-          titleMatchMode,
-          relativeCoordinates: targetRelativeCoords,
-          bringToFocus: targetBringToFocus,
-          lockPosition: targetLockPosition
-        }
-      });
-    }
+    if (!showWindowTargetDialog) return;
+    const existing = profiles.find(p => p.name === showWindowTargetDialog);
+    const hasOwnTarget = existing?.hasWindowTarget ?? false;
+    // If the profile already has its own target, always save target.
+    // If it inherits from folder and the user didn't touch target fields, keep inheritance.
+    const keepInheritedTarget = !hasOwnTarget && !targetExplicitlyEdited;
+
+    // Guard: need at least a target when creating/updating profile-level target
+    if (!keepInheritedTarget && !targetProcessName.trim() && !targetWindowTitle.trim()) return;
+
+    send({
+      type: 'profile:setWindowTarget',
+      payload: {
+        name: showWindowTargetDialog,
+        processName: targetProcessName.trim(),
+        windowTitle: targetWindowTitle.trim(),
+        titleMatchMode,
+        relativeCoordinates: targetRelativeCoords,
+        bringToFocus: targetBringToFocus,
+        lockPosition: targetLockPosition,
+        keepInheritedTarget,
+      }
+    });
+    // Close optimistically — the backend handler ends with PushProfilesUpdate which we no longer
+    // react to by auto-closing, so we close here on user confirmation.
+    setShowWindowTargetDialog(null);
+    setIsDetecting(false);
   };
 
   const handleHotkeyCapture = (e: React.KeyboardEvent) => {
@@ -419,7 +442,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   const confirmHotkey = () => {
     if (showHotkeyDialog && hotkeyCapture && hotkeyCapture !== '...') {
-      send({ type: 'profile:assignHotkey', payload: { name: showHotkeyDialog, hotkey: hotkeyCapture } });
+      send({ type: 'profile:assignHotkey', payload: { name: showHotkeyDialog, hotkey: hotkeyCapture, mode: hotkeyTriggerMode } });
       // Don't close dialog here — wait for profiles:updated (success) or alert:show (conflict)
     }
   };
@@ -458,12 +481,16 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     });
   }, [showHotstringDialog, subscribe]);
 
-  // Subscribe to window target detection result and auto-close on success
+  // Subscribe to window target detect events so the dialog receives the captured window info.
+  // Note: the dialog is NOT auto-closed on profiles:updated anymore — closing happens only via
+  // explicit user action (Cancel, Set Target, Remove), so the user can tweak multiple flags
+  // (Relative Coords / Bring to Focus / Lock Position / Update Window Size) without the dialog
+  // snapping shut in the middle of configuration.
   useEffect(() => {
     if (!showWindowTargetDialog && !showFolderTargetDialog) return;
     return subscribe((msg) => {
       if (msg.type === 'profiles:updated') {
-        setShowWindowTargetDialog(null);
+        // Only reset the detecting indicator — don't close the dialog.
         setIsDetecting(false);
       }
       if (msg.type === 'windowTarget:detected') {
@@ -474,6 +501,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         } else {
           setTargetProcessName(p.processName);
           setTargetWindowTitle(p.windowTitle);
+          // Detecting explicitly sets a new target → mark edited so Set Target creates profile-level target
+          setTargetExplicitlyEdited(true);
         }
         setIsDetecting(false);
       }
@@ -794,13 +823,31 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         )}
 
         {p.hotkey && (
-          <span className="group/hotkey shrink-0 relative">
-            <KbdTag combo={p.hotkey} />
-            <button
-              onClick={(e) => { e.stopPropagation(); handleRemoveHotkey(p.name); }}
-              className="hidden group-hover/hotkey:inline-flex absolute top-0 right-0 bottom-0 w-4 items-center justify-center rounded-r bg-recording/80 text-white text-[7px] font-bold leading-none hover:bg-recording"
-            >✕</button>
-          </span>
+          <>
+            <span className="group/hotkey shrink-0 relative">
+              <KbdTag combo={p.hotkey} />
+              <button
+                onClick={(e) => { e.stopPropagation(); handleRemoveHotkey(p.name); }}
+                className="hidden group-hover/hotkey:inline-flex absolute top-0 right-0 bottom-0 w-4 items-center justify-center rounded-r bg-recording/80 text-white text-[7px] font-bold leading-none hover:bg-recording"
+              >✕</button>
+            </span>
+            {/* Trigger mode indicator — sibling of the hotkey chip so hovering it doesn't trigger the remove overlay */}
+            {p.triggerMode === 'onRelease' && (
+              <span title="On Release — fires when key is released" className="shrink-0 text-text-tertiary flex">
+                <ArrowUpFromDot size={10} />
+              </span>
+            )}
+            {p.triggerMode === 'whilePressed' && (
+              <span title="While Pressed — autofires while held" className="shrink-0 text-text-tertiary flex">
+                <Zap size={10} />
+              </span>
+            )}
+            {p.triggerMode === 'toggle' && (
+              <span title="Toggle — press to start, press again to stop" className="shrink-0 text-text-tertiary flex">
+                <Repeat size={10} />
+              </span>
+            )}
+          </>
         )}
 
         {p.hotstring && (
@@ -1343,6 +1390,39 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               onWheel={handleHotkeyWheel}
               className="w-full h-9 px-3 text-sm font-mono text-accent bg-bg-input border border-accent-solid rounded text-center outline-none"
             />
+
+            {/* Trigger Mode */}
+            <div className="mt-4">
+              <div className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1.5">Trigger Mode</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {([
+                  { id: 'onPress', label: 'On Press', help: 'Fires once when the key is pressed down.' },
+                  { id: 'onRelease', label: 'On Release', help: 'Fires once when the key is released.' },
+                  { id: 'whilePressed', label: 'While Pressed', help: 'Runs in infinite loop while held. Stops on release.' },
+                  { id: 'toggle', label: 'Toggle', help: "Press to start, press again to stop. Uses the profile's loop settings." },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => setHotkeyTriggerMode(opt.id)}
+                    className={`h-7 text-[11px] rounded border transition-colors ${
+                      hotkeyTriggerMode === opt.id
+                        ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
+                        : 'bg-transparent border-border-default text-text-tertiary hover:text-text-secondary hover:border-border-strong'
+                    }`}
+                    title={opt.help}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-1.5 text-[10px] text-text-tertiary leading-tight min-h-[14px]">
+                {hotkeyTriggerMode === 'onPress' && 'Fires once when the key is pressed down.'}
+                {hotkeyTriggerMode === 'onRelease' && 'Fires once when the key is released.'}
+                {hotkeyTriggerMode === 'whilePressed' && 'Runs in infinite loop while held. Stops on release.'}
+                {hotkeyTriggerMode === 'toggle' && "Press to start, press again to stop. Uses the profile's loop settings."}
+              </div>
+            </div>
+
             <div className="flex items-center mt-4">
               {profiles.find(p => p.name === showHotkeyDialog)?.hotkey && (
                 <button
@@ -1669,12 +1749,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                   <input
                     type="text"
                     value={targetProcessName}
-                    onChange={(e) => setTargetProcessName(e.target.value)}
+                    onChange={(e) => { setTargetProcessName(e.target.value); setTargetExplicitlyEdited(true); }}
                     placeholder="e.g. chrome.exe"
                     className="w-full h-8 px-3 pr-7 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
                   />
                   {targetProcessName && (
-                    <button onClick={() => setTargetProcessName('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-disabled hover:text-text-secondary transition-colors">
+                    <button onClick={() => { setTargetProcessName(''); setTargetExplicitlyEdited(true); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-disabled hover:text-text-secondary transition-colors">
                       <X size={12} />
                     </button>
                   )}
@@ -1689,19 +1769,19 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                   <input
                     type="text"
                     value={targetWindowTitle}
-                    onChange={(e) => setTargetWindowTitle(e.target.value)}
+                    onChange={(e) => { setTargetWindowTitle(e.target.value); setTargetExplicitlyEdited(true); }}
                     placeholder={titleMatchMode === 'contains' ? 'e.g. Notepad' : 'e.g. (Crisp|Zendesk)'}
                     className="w-full h-8 px-3 pr-7 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
                   />
                   {targetWindowTitle && (
-                    <button onClick={() => setTargetWindowTitle('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-disabled hover:text-text-secondary transition-colors">
+                    <button onClick={() => { setTargetWindowTitle(''); setTargetExplicitlyEdited(true); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-disabled hover:text-text-secondary transition-colors">
                       <X size={12} />
                     </button>
                   )}
                 </div>
                 <div className="flex items-center gap-1.5 mt-1.5">
                   <button
-                    onClick={() => setTitleMatchMode('contains')}
+                    onClick={() => { setTitleMatchMode('contains'); setTargetExplicitlyEdited(true); }}
                     className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
                       titleMatchMode === 'contains'
                         ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
@@ -1711,7 +1791,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                     Contains
                   </button>
                   <button
-                    onClick={() => setTitleMatchMode('regex')}
+                    onClick={() => { setTitleMatchMode('regex'); setTargetExplicitlyEdited(true); }}
                     className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
                       titleMatchMode === 'regex'
                         ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
@@ -1749,17 +1829,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-text-secondary" title="Restore the target window to its saved position before replay">Lock Position</span>
-                <Toggle
-                  isOn={targetLockPosition}
-                  onChange={(enabled) => {
-                    setTargetLockPosition(enabled);
-                    // Auto-save so profiles that inherit target from a folder don't need to
-                    // click "Set Target" (which would copy the folder's target into the profile)
-                    if (showWindowTargetDialog) {
-                      send({ type: 'profile:setLockPosition', payload: { name: showWindowTargetDialog, enabled } });
-                    }
-                  }}
-                />
+                <Toggle isOn={targetLockPosition} onChange={setTargetLockPosition} />
               </div>
               {/* Convert coordinates */}
               <div className="flex gap-2 pt-1">
@@ -1777,9 +1847,20 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 </button>
               </div>
               <button
-                onClick={() => send({ type: 'profile:updateWindowSize', payload: {} })}
-                className="w-full h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors"
-                title="Capture current size and position of the target window"
+                onClick={() => send({
+                  type: 'profile:updateWindowSize',
+                  payload: {
+                    name: showWindowTargetDialog ?? undefined,
+                    // Use the dialog's current target fields so the user can capture geometry
+                    // BEFORE clicking Set Target — no need to save, reopen, and update.
+                    processName: targetProcessName.trim() || undefined,
+                    windowTitle: targetWindowTitle.trim() || undefined,
+                    titleMatchMode,
+                  }
+                })}
+                disabled={!targetProcessName.trim() && !targetWindowTitle.trim()}
+                className="w-full h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Capture the current size and position of the target window matching the fields above"
               >
                 Update Window Size &amp; Position
               </button>

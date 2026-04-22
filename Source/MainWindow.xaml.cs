@@ -252,6 +252,7 @@ namespace TrueReplayer
 
                 var hotkeys = profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(hotkeys);
+                InputHookManager.RegisterProfileTriggerModes(profileController.GetProfileTriggerModes());
             });
         }
 
@@ -311,8 +312,36 @@ namespace TrueReplayer
                         return;
                     }
 
-                    if (key.StartsWith("PROFILE::") &&
-                        (!UserProfile.Current.ProfileKeyEnabled || mainController.IsRecording() || mainController.IsReplayInProgress()))
+                    // PROFILE_STOP:: is fired by WhilePressed release to cancel a running replay.
+                    // Must run even when IsReplayInProgress (that's the whole point).
+                    // We intentionally do NOT call ClearActiveHold here — the hook thread already
+                    // cleared its own state before dispatching PROFILE_STOP. Touching those fields
+                    // from the UI thread would race with any later hook-thread keydown writes.
+                    if (key.StartsWith("PROFILE_STOP::"))
+                    {
+                        if (mainController.IsReplayInProgress())
+                            mainController.StopReplayIfRunning();
+                        return;
+                    }
+
+                    bool isProfileTrigger = key.StartsWith("PROFILE::") || key.StartsWith("PROFILE_HOLD::") || key.StartsWith("PROFILE_TOGGLE::");
+                    if (isProfileTrigger && (!UserProfile.Current.ProfileKeyEnabled || mainController.IsRecording()))
+                    {
+                        return;
+                    }
+
+                    // Re-triggering OnPress / OnRelease during an active replay stops it —
+                    // otherwise a user running an infinite-loop profile in OnRelease mode has
+                    // no way to stop without using the global replay hotkey.
+                    if (key.StartsWith("PROFILE::") && mainController.IsReplayInProgress())
+                    {
+                        mainController.StopReplayIfRunning();
+                        return;
+                    }
+
+                    // PROFILE_HOLD:: during active replay: ignored (WhilePressed shouldn't re-enter).
+                    // PROFILE_TOGGLE:: passes through — ToggleReplay handles the "press again = stop".
+                    if (key.StartsWith("PROFILE_HOLD::") && mainController.IsReplayInProgress())
                     {
                         return;
                     }
@@ -371,10 +400,25 @@ namespace TrueReplayer
                                 UserProfile.Current.LockPosition);
                         }
                     }
-                    else if (key.StartsWith("PROFILE::"))
+                    else if (key.StartsWith("PROFILE::") || key.StartsWith("PROFILE_HOLD::") || key.StartsWith("PROFILE_TOGGLE::"))
                     {
-                        string profileName = key.Substring("PROFILE::".Length);
+                        string prefix = key.StartsWith("PROFILE_HOLD::") ? "PROFILE_HOLD::"
+                            : key.StartsWith("PROFILE_TOGGLE::") ? "PROFILE_TOGGLE::"
+                            : "PROFILE::";
+                        string profileName = key.Substring(prefix.Length);
+                        bool forceInfiniteLoop = prefix == "PROFILE_HOLD::";
+
                         var profile = await profileController.LoadProfileByNameAsync(profileName);
+
+                        // Race guard for WhilePressed: user may have already released the key
+                        // before this async handler reached here. In that case the key-up already
+                        // fired a PROFILE_STOP, the hold state was cleared, and we should NOT
+                        // start the replay — otherwise it would loop forever with no keyup to
+                        // stop it.
+                        if (forceInfiniteLoop && !InputHookManager.IsHoldActiveForProfile(profileName))
+                        {
+                            return;
+                        }
 
                         if (profile != null)
                         {
@@ -408,7 +452,19 @@ namespace TrueReplayer
                                 UserProfile.Current.WindowHeight,
                                 UserProfile.Current.WindowX,
                                 UserProfile.Current.WindowY,
-                                UserProfile.Current.LockPosition);
+                                UserProfile.Current.LockPosition,
+                                forceInfiniteLoop);
+
+                            // Post-start safety net for WhilePressed: if the user released the
+                            // key between the race guard above and the moment IsReplayInProgress
+                            // became true, the STOP handler would have seen no running replay
+                            // and done nothing — leaving an infinite-loop replay with no way to
+                            // stop it. Re-check hold state right after starting and stop if the
+                            // key is no longer held.
+                            if (forceInfiniteLoop && !InputHookManager.IsHoldActiveForProfile(profileName))
+                            {
+                                mainController.StopReplayIfRunning();
+                            }
 
                             profileController.UpdateProfileColors(profileName);
                             bridge.PushProfilesUpdate();

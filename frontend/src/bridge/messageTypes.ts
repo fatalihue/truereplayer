@@ -33,8 +33,11 @@ export interface ProfileEntry {
   useRelativeCoordinates: boolean;
   bringToFocus: boolean;
   lockPosition: boolean;
+  triggerMode: TriggerMode;
   isDisabled: boolean;
 }
+
+export type TriggerMode = 'onPress' | 'onRelease' | 'whilePressed' | 'toggle';
 
 export interface ProfileFolder {
   name: string;
@@ -160,16 +163,17 @@ export type OutgoingMessage =
   | { type: 'profile:duplicate'; payload: { name: string } }
   | { type: 'profile:toggleDisable'; payload: { name: string } }
   | { type: 'profile:delete'; payload: { name: string } }
-  | { type: 'profile:assignHotkey'; payload: { name: string; hotkey: string } }
+  | { type: 'profile:assignHotkey'; payload: { name: string; hotkey: string; mode?: TriggerMode } }
   | { type: 'profile:removeHotkey'; payload: { name: string } }
   | { type: 'profile:assignHotstring'; payload: { name: string; sequence: string; instant: boolean } }
   | { type: 'profile:removeHotstring'; payload: { name: string } }
-  | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean; lockPosition?: boolean } }
+  | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean; lockPosition?: boolean; keepInheritedTarget?: boolean } }
   | { type: 'profile:setRelativeCoordinates'; payload: { name: string; enabled: boolean } }
   | { type: 'profile:convertCoordinates'; payload: { direction: 'toRelative' | 'toAbsolute' } }
-  | { type: 'profile:updateWindowSize'; payload: Record<string, never> }
+  | { type: 'profile:updateWindowSize'; payload: { name?: string; processName?: string; windowTitle?: string; titleMatchMode?: string } }
   | { type: 'profile:setBringToFocus'; payload: { name: string; enabled: boolean } }
   | { type: 'profile:setLockPosition'; payload: { name: string; enabled: boolean } }
+  | { type: 'profile:setTriggerMode'; payload: { name: string; mode: TriggerMode } }
   | { type: 'profile:removeWindowTarget'; payload: { name: string } }
   | { type: 'profile:setFolderWindowTarget'; payload: { folderName: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean } }
   | { type: 'profile:removeFolderWindowTarget'; payload: { folderName: string } }

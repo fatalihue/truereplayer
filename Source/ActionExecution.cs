@@ -130,15 +130,15 @@ namespace TrueReplayer.Services
             replayer.SetProfileNameProvider(getProfileName);
         }
 
-        public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation = false, int delayVariationPercent = 20, bool useRelativeCoords = false, Models.WindowTarget? windowTarget = null, bool bringToFocus = false, int lockWidth = 0, int lockHeight = 0, int lockX = 0, int lockY = 0, bool lockPosition = false)
+        public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation = false, int delayVariationPercent = 20, bool useRelativeCoords = false, Models.WindowTarget? windowTarget = null, bool bringToFocus = false, int lockWidth = 0, int lockHeight = 0, int lockX = 0, int lockY = 0, bool lockPosition = false, bool forceInfiniteLoop = false)
         {
             if (!IsReplaying && actions.Count > 0)
-                StartReplay(loopEnabled, loopCountText, intervalEnabled, intervalText, useDelayVariation, delayVariationPercent, useRelativeCoords, windowTarget, bringToFocus, lockWidth, lockHeight, lockX, lockY, lockPosition);
+                StartReplay(loopEnabled, loopCountText, intervalEnabled, intervalText, useDelayVariation, delayVariationPercent, useRelativeCoords, windowTarget, bringToFocus, lockWidth, lockHeight, lockX, lockY, lockPosition, forceInfiniteLoop);
             else if (IsReplaying)
                 StopReplay();
         }
 
-        private void StartReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation, int delayVariationPercent, bool useRelativeCoords, Models.WindowTarget? windowTarget, bool bringToFocus, int lockWidth, int lockHeight, int lockX, int lockY, bool lockPosition)
+        private void StartReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation, int delayVariationPercent, bool useRelativeCoords, Models.WindowTarget? windowTarget, bool bringToFocus, int lockWidth, int lockHeight, int lockX, int lockY, bool lockPosition, bool forceInfiniteLoop)
         {
             IsReplaying = true;
             onButtonStateChanged?.Invoke("Stop", true);
@@ -149,6 +149,7 @@ namespace TrueReplayer.Services
             replayer.SetDelayVariation(useDelayVariation, delayVariationPercent);
             replayer.SetRelativeCoordinates(useRelativeCoords, windowTarget, lockWidth, lockHeight, lockX, lockY, lockPosition);
             replayer.SetBringToFocus(bringToFocus);
+            replayer.SetForceInfiniteLoop(forceInfiniteLoop);
 
             onStatusChanged?.Invoke("replaying");
 
@@ -169,6 +170,16 @@ namespace TrueReplayer.Services
         {
             replayer.Stop();
             _cursorClickCts?.Cancel();
+        }
+
+        /// <summary>
+        /// Stop replay if currently running. No-op if idle. Used by the WhilePressed trigger mode
+        /// release handler, where calling ToggleReplay could otherwise start a new replay if the
+        /// previous one had already completed naturally before the key was released.
+        /// </summary>
+        public void StopIfRunning()
+        {
+            if (IsReplaying) StopReplay();
         }
 
         private CancellationTokenSource? _cursorClickCts;
@@ -590,6 +601,10 @@ namespace TrueReplayer.Services
             _delayVariationPercent = Math.Clamp(percent, 0, 50);
         }
 
+        // Forced infinite loop (set by WhilePressed trigger mode, overrides profile's LoopCount)
+        private bool _forceInfiniteLoop = false;
+        public void SetForceInfiniteLoop(bool enabled) => _forceInfiniteLoop = enabled;
+
         public async Task StartAsync()
         {
             // Cancel any previous run and wait for it to finish before disposing
@@ -603,7 +618,7 @@ namespace TrueReplayer.Services
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
             int iteration = 0;
-            bool isInfinite = _loopCount == 0;
+            bool isInfinite = _forceInfiniteLoop || _loopCount == 0;
 
             // Snapshot the actions list to avoid crashes from concurrent modifications
             var snapshot = _actions.ToList();
@@ -634,9 +649,11 @@ namespace TrueReplayer.Services
                     }
                 }
 
-                // Lock Size / Lock Position: resize/reposition target window before replay
+                // Lock Size / Lock Position: resize/reposition target window before replay.
+                // Independent from Relative Coordinates — the user can lock geometry even with
+                // absolute coordinates (e.g., they just want the window consistently placed).
                 bool hasSize = _lockWidth > 0 && _lockHeight > 0;
-                if (_useRelativeCoordinates && _windowTarget != null && (hasSize || _lockPosition))
+                if (_windowTarget != null && (hasSize || _lockPosition))
                 {
                     var sizeHwnd = FindTargetWindow();
                     if (sizeHwnd != IntPtr.Zero && !NativeMethods.IsIconic(sizeHwnd))
@@ -685,12 +702,12 @@ namespace TrueReplayer.Services
                                 {
                                     case "KeyDown": SimulateKey(action.Key, true); break;
                                     case "KeyUp": SimulateKey(action.Key, false); break;
-                                    case "LeftClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN); break;
-                                    case "LeftClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP); break;
-                                    case "RightClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTDOWN); break;
-                                    case "RightClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTUP); break;
-                                    case "MiddleClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN); break;
-                                    case "MiddleClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEUP); break;
+                                    case "LeftClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN); _simLeftDown = true; break;
+                                    case "LeftClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP); _simLeftDown = false; break;
+                                    case "RightClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTDOWN); _simRightDown = true; break;
+                                    case "RightClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTUP); _simRightDown = false; break;
+                                    case "MiddleClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN); _simMiddleDown = true; break;
+                                    case "MiddleClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEUP); _simMiddleDown = false; break;
                                     case "ScrollUp": SimulateScroll(120); break;
                                     case "ScrollDown": SimulateScroll(-120); break;
                                     case "SendText": await SimulateClipboardPaste(action.Key, token); break;
@@ -782,12 +799,18 @@ namespace TrueReplayer.Services
             ResetMouseState();
         }
 
+        // Tracks mouse buttons pressed down by the replay that have not yet been released.
+        // Used by ResetMouseState to only release buttons we actually pressed — avoids firing
+        // spurious UP events (which some apps perceive as a click) when replay stops cleanly.
+        private bool _simLeftDown, _simRightDown, _simMiddleDown;
+
         private void ResetMouseState()
         {
+            if (!_simLeftDown && !_simRightDown && !_simMiddleDown) return;
             NativeMethods.GetCursorPos(out var pos);
-            SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_LEFTUP);
-            SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_RIGHTUP);
-            SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_MIDDLEUP);
+            if (_simLeftDown)   { SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_LEFTUP);   _simLeftDown = false; }
+            if (_simRightDown)  { SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_RIGHTUP);  _simRightDown = false; }
+            if (_simMiddleDown) { SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_MIDDLEUP); _simMiddleDown = false; }
         }
 
         private void SimulateScroll(int delta)
