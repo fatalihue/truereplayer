@@ -813,7 +813,11 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         </span>
 
         {p.hasWindowTarget && (
-          <span className="group/target shrink-0 relative" title="Window target set">
+          <span
+            className="group/target shrink-0 relative"
+            data-tip={p.windowTargetProcessName || p.windowTargetWindowTitle || 'Window target set'}
+            data-tip-pos="end"
+          >
             <Crosshair size={11} className="text-text-tertiary" />
             <button
               onClick={(e) => { e.stopPropagation(); handleRemoveWindowTarget(p.name); }}
@@ -833,17 +837,17 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             </span>
             {/* Trigger mode indicator — sibling of the hotkey chip so hovering it doesn't trigger the remove overlay */}
             {p.triggerMode === 'onRelease' && (
-              <span title="On Release — fires when key is released" className="shrink-0 text-text-tertiary flex">
+              <span data-tip="On Release — fires when key is released" data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
                 <ArrowUpFromDot size={10} />
               </span>
             )}
             {p.triggerMode === 'whilePressed' && (
-              <span title="While Pressed — autofires while held" className="shrink-0 text-text-tertiary flex">
+              <span data-tip="While Pressed — autofires while held" data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
                 <Zap size={10} />
               </span>
             )}
             {p.triggerMode === 'toggle' && (
-              <span title="Toggle — press to start, press again to stop" className="shrink-0 text-text-tertiary flex">
+              <span data-tip="Toggle — press to start, press again to stop" data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
                 <Repeat size={10} />
               </span>
             )}
@@ -1028,7 +1032,11 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         <FolderOpen size={12} style={{ color: folder.color }} className="shrink-0" />
                         <span className="text-xs font-medium text-text-secondary flex-1 truncate">{folder.name}</span>
                         {folder.hasWindowTarget && (
-                          <span className="group/ftarget shrink-0 relative" title={folder.windowTargetProcessName || folder.windowTargetWindowTitle || 'Window Target'}>
+                          <span
+                            className="group/ftarget shrink-0 relative"
+                            data-tip={folder.windowTargetProcessName || folder.windowTargetWindowTitle || 'Window Target'}
+                            data-tip-pos="end"
+                          >
                             <Crosshair size={10} className="text-text-tertiary" />
                             <button
                               onClick={(e) => { e.stopPropagation(); send({ type: 'profile:removeFolderWindowTarget', payload: { folderName: folder.name } }); }}

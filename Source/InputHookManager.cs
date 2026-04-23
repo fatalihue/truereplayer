@@ -136,6 +136,49 @@ namespace TrueReplayer
             _holdDebounceTimer = null;
         }
 
+        /// <summary>
+        /// Injects a benign F15 key-down / key-up pair via SendInput. Used right after we
+        /// swallow a profile hotkey that includes Alt (or Win) so that when the user releases
+        /// the modifier, Windows does NOT interpret it as "modifier pressed alone" and open
+        /// the Alt menu / Start menu. F15 is unbound on virtually all apps.
+        /// </summary>
+        private static void InjectMenuCancelKey()
+        {
+            const ushort VK_F15 = 0x7E;
+            var inputs = new NativeMethods.INPUT[]
+            {
+                new NativeMethods.INPUT
+                {
+                    type = NativeMethods.INPUT_KEYBOARD,
+                    U = new NativeMethods.InputUnion
+                    {
+                        ki = new NativeMethods.KEYBDINPUT { wVk = VK_F15, dwFlags = 0 }
+                    }
+                },
+                new NativeMethods.INPUT
+                {
+                    type = NativeMethods.INPUT_KEYBOARD,
+                    U = new NativeMethods.InputUnion
+                    {
+                        ki = new NativeMethods.KEYBDINPUT { wVk = VK_F15, dwFlags = NativeMethods.KEYEVENTF_KEYUP }
+                    }
+                }
+            };
+            NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
+        }
+
+        private static bool ShouldCancelMenuFor(string key)
+        {
+            // Alt alone triggers browser/app menu bar on release; Win alone triggers Start menu.
+            // If our hotkey uses these as modifiers, inject a phantom key so the target app
+            // sees "something happened" while the modifier was held — which cancels the
+            // menu-activation heuristic.
+            return key.StartsWith("Alt+", StringComparison.OrdinalIgnoreCase)
+                || key.Contains("+Alt+", StringComparison.OrdinalIgnoreCase)
+                || key.StartsWith("Win+", StringComparison.OrdinalIgnoreCase)
+                || key.Contains("+Win+", StringComparison.OrdinalIgnoreCase);
+        }
+
         public static void RegisterProfileWindowTargets(Dictionary<string, WindowTarget> targets, HashSet<string>? bringToFocusProfiles = null)
         {
             var regexes = new Dictionary<string, Regex?>();
@@ -594,24 +637,34 @@ namespace TrueReplayer
                             return (IntPtr)1; // still swallow to prevent leak
                         }
 
+                        // If the swallowed hotkey uses Alt or Win as a modifier, inject a
+                        // phantom F15 so the target app doesn't later interpret the modifier
+                        // release as "pressed alone" → no browser Alt menu / Start menu.
+                        bool needsMenuCancel = !isRepeat && ShouldCancelMenuFor(key);
+
                         switch (triggerMode)
                         {
                             case TriggerMode.OnPress:
                                 if (!isRepeat)
                                 {
                                     LastTriggerHotkey = key;
+                                    if (needsMenuCancel) InjectMenuCancelKey();
                                     OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
                                 }
                                 return (IntPtr)1;
 
                             case TriggerMode.OnRelease:
-                                // Swallow down, fire on up
+                                // Swallow down now; the phantom key is injected on release
+                                // (see the OnRelease key-up block below) — injecting here would
+                                // be too early because the user hasn't done anything observable
+                                // yet and we don't want to nudge the target prematurely.
                                 return (IntPtr)1;
 
                             case TriggerMode.WhilePressed:
                                 if (!isRepeat)
                                 {
                                     LastTriggerHotkey = key;
+                                    if (needsMenuCancel) InjectMenuCancelKey();
                                     _activeHoldProfile = matchedProfile;
                                     _activeHoldVkCode = vkCode;
                                     _holdConfirmed = false;
@@ -638,6 +691,7 @@ namespace TrueReplayer
                                 if (!isRepeat)
                                 {
                                     LastTriggerHotkey = key;
+                                    if (needsMenuCancel) InjectMenuCancelKey();
                                     OnHotkeyPressed?.Invoke($"PROFILE_TOGGLE::{matchedProfile}");
                                 }
                                 return (IntPtr)1;
@@ -753,6 +807,9 @@ namespace TrueReplayer
                         if (mode == TriggerMode.OnRelease && !IsReplayingAction)
                         {
                             LastTriggerHotkey = key;
+                            // Inject phantom key BEFORE firing so if the hotkey uses Alt/Win, the
+                            // modifier keyup (about to arrive) doesn't trigger the target's menu.
+                            if (ShouldCancelMenuFor(key)) InjectMenuCancelKey();
                             OnHotkeyPressed?.Invoke($"PROFILE::{releaseProfile}");
                             return (IntPtr)1;
                         }
