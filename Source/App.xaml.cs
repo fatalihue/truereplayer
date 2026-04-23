@@ -13,14 +13,34 @@ namespace TrueReplayer
         {
             this.InitializeComponent();
 
+            // Initialize the diagnostic log FIRST so any startup errors are captured.
+            var appVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown";
+            DiagnosticLog.Initialize(appVersion);
+            DiagnosticLog.Info("App constructor: UnhandledException handler attached");
+
             // Prevent app termination from unhandled exceptions in async void handlers
             // (common in WebViewBridge profile/file I/O handlers). Log and continue —
             // individual operations may fail but the app stays responsive.
             this.UnhandledException += (_, e) =>
             {
-                System.Diagnostics.Debug.WriteLine(
-                    $"[App] UnhandledException: {e.Exception.GetType().Name}: {e.Message}\n{e.Exception}");
+                DiagnosticLog.Error("Application.UnhandledException", e.Exception);
                 e.Handled = true;
+            };
+
+            // .NET unhandled exceptions (e.g., from fire-and-forget tasks before a dispatcher
+            // catches them) — last-chance log before process terminates.
+            AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            {
+                if (e.ExceptionObject is Exception ex)
+                    DiagnosticLog.Error($"AppDomain.UnhandledException (terminating={e.IsTerminating})", ex);
+                else
+                    DiagnosticLog.Error($"AppDomain.UnhandledException (non-Exception object, terminating={e.IsTerminating})");
+            };
+
+            System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, e) =>
+            {
+                DiagnosticLog.Error("UnobservedTaskException", e.Exception);
+                e.SetObserved();
             };
         }
 
