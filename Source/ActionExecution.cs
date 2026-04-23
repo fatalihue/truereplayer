@@ -625,7 +625,18 @@ namespace TrueReplayer.Services
 
             try
             {
-                await WaitForHotkeyReleaseAsync(token);
+                // WhilePressed (forceInfiniteLoop) is semantically "run while the key is held"
+                // — waiting for the user to release the hotkey before starting would defeat
+                // the entire purpose. Skip the release wait in that mode.
+                if (!_forceInfiniteLoop)
+                    await WaitForHotkeyReleaseAsync(token);
+
+                // Release any physically-held modifier keys from the target app's perspective.
+                // Without this, a combined hotkey like Alt+Q leaves Alt "pressed" in the target
+                // while the replay runs, turning every simulated keystroke into Alt+<key> (so a
+                // plain KeyDown A becomes Alt+A in the target). The user's real Alt release later
+                // will send a duplicate keyup which is harmless.
+                ReleasePhysicallyHeldModifiers();
 
                 // Bring target window to focus if enabled
                 if (_bringToFocus && _windowTarget != null)
@@ -748,6 +759,47 @@ namespace TrueReplayer.Services
             ["Alt"] = 0x12,    // VK_MENU (left or right)
             ["Shift"] = 0x10,  // VK_SHIFT (left or right)
         };
+
+        /// <summary>
+        /// Sends key-up events for any modifier keys (Alt, Ctrl, Shift, Win) the user is
+        /// currently physically holding, so the target app's input state is clean when the
+        /// replay's simulated keystrokes arrive. Without this, a replay triggered by a
+        /// combined hotkey like Alt+Q would have every simulated key stroke seen as Alt+key
+        /// by the target because the OS still reports Alt as pressed.
+        /// The user's real key-up event that follows is a benign duplicate for the target.
+        /// </summary>
+        private void ReleasePhysicallyHeldModifiers()
+        {
+            // Check specific L/R vk codes so we send keyup for the exact key the user is holding,
+            // not the generic virtual key (which some drivers ignore).
+            ReadOnlySpan<ushort> modifierVks = new ushort[]
+            {
+                0xA0, 0xA1,   // LShift, RShift
+                0xA2, 0xA3,   // LControl, RControl
+                0xA4, 0xA5,   // LMenu, RMenu (Alt)
+                0x5B, 0x5C,   // LWin, RWin
+            };
+
+            var inputs = new System.Collections.Generic.List<NativeMethods.INPUT>(modifierVks.Length);
+            foreach (var vk in modifierVks)
+            {
+                if ((NativeMethods.GetAsyncKeyState(vk) & 0x8000) == 0) continue;
+                inputs.Add(new NativeMethods.INPUT
+                {
+                    type = NativeMethods.INPUT_KEYBOARD,
+                    U = new NativeMethods.InputUnion
+                    {
+                        ki = new NativeMethods.KEYBDINPUT { wVk = vk, dwFlags = NativeMethods.KEYEVENTF_KEYUP }
+                    }
+                });
+            }
+
+            if (inputs.Count > 0)
+            {
+                NativeMethods.SendInput((uint)inputs.Count, inputs.ToArray(),
+                    Marshal.SizeOf(typeof(NativeMethods.INPUT)));
+            }
+        }
 
         private async Task WaitForHotkeyReleaseAsync(CancellationToken token)
         {

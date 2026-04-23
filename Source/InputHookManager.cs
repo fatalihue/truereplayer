@@ -48,6 +48,14 @@ namespace TrueReplayer
         private static System.Threading.Timer? _holdDebounceTimer;
         private static volatile bool _holdConfirmed = false;
 
+        // OnRelease: when the profile hotkey key-down is swallowed, we remember which profile
+        // is pending a release-fire and which physical vkCode will trigger it. Tracking by
+        // vkCode (not composed key) so users who release the modifier before the main key
+        // still get the profile to fire — otherwise the composed key on key-up would be just
+        // "Q" instead of "Alt+Q", missing the profile lookup entirely.
+        private static volatile string? _pendingReleaseProfile = null;
+        private static volatile int _pendingReleaseVkCode = 0;
+
         /// <summary>
         /// Exposes whether a WhilePressed hold is still active for a given profile. Used by
         /// the MainWindow dispatcher to detect when the user released the key BEFORE the async
@@ -537,6 +545,18 @@ namespace TrueReplayer
                 int vkCode = Marshal.ReadInt32(lParam);
                 bool isDown = wParam == (IntPtr)NativeMethods.WM_KEYDOWN || wParam == (IntPtr)0x0104;
 
+                // Skip any trigger-mode / hotkey / hotstring logic for events we injected
+                // via SendInput — replay-simulated keystrokes and the F15 menu-cancel phantom.
+                // Processing them would cause feedback loops (simulated keys treated as repeats,
+                // triggering PROFILE_STOP, feeding the hotstring buffer, etc.).
+                // LLKHF_INJECTED is flag bit 4 (0x10) in KBDLLHOOKSTRUCT.flags (offset 8).
+                uint hookFlags = (uint)Marshal.ReadInt32(lParam, 8);
+                bool isInjected = (hookFlags & 0x10) != 0;
+                if (isInjected)
+                {
+                    return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
+                }
+
                 if (vkCode == 165 && isDown)
                 {
                     lastAltRightPressTime = DateTime.Now;
@@ -567,6 +587,22 @@ namespace TrueReplayer
                 bool isRepeat = isDown && _vkCodesCurrentlyDown.Contains(vkCode);
                 if (isDown) _vkCodesCurrentlyDown.Add(vkCode);
                 else _vkCodesCurrentlyDown.Remove(vkCode);
+
+                // Unconditional swallow for the physical main key of an active WhilePressed hold
+                // or a pending OnRelease. If we don't do this here, any code path that decides
+                // the event "doesn't match a profile hotkey" (because the user released the
+                // modifier, or the foreground window changed, or any other reason the composed
+                // key no longer matches) would let the physical key pass through to the target.
+                // That would leak the held Q (or whatever) into the target as text, on top of
+                // whatever the replay is outputting.
+                if (isDown && _activeHoldProfile != null && _activeHoldVkCode == vkCode)
+                {
+                    return (IntPtr)1;
+                }
+                if (isDown && _pendingReleaseProfile != null && _pendingReleaseVkCode == vkCode)
+                {
+                    return (IntPtr)1;
+                }
 
                 if (isDown)
                 {
@@ -654,10 +690,21 @@ namespace TrueReplayer
                                 return (IntPtr)1;
 
                             case TriggerMode.OnRelease:
-                                // Swallow down now; the phantom key is injected on release
-                                // (see the OnRelease key-up block below) — injecting here would
-                                // be too early because the user hasn't done anything observable
-                                // yet and we don't want to nudge the target prematurely.
+                                // Remember this key-down so the release-fire can match by
+                                // physical vkCode. Without this, if the user releases the
+                                // modifier before the main key, the composed key on key-up
+                                // reduces to just "Q" and our lookup against ProfileHotkeys
+                                // (which holds "Alt+Q") would miss.
+                                if (!isRepeat)
+                                {
+                                    _pendingReleaseProfile = matchedProfile;
+                                    _pendingReleaseVkCode = vkCode;
+                                    // Inject F15 during the down phase (while the modifier is
+                                    // guaranteed physically held). Injecting only on key-up
+                                    // would race the user's modifier release — if the target
+                                    // sees Alt↑ before F15 arrives, the menu opens.
+                                    if (needsMenuCancel) InjectMenuCancelKey();
+                                }
                                 return (IntPtr)1;
 
                             case TriggerMode.WhilePressed:
@@ -760,6 +807,22 @@ namespace TrueReplayer
                             }
                         }
                     }
+                }
+
+                // KEY UP handling for OnRelease mode (matched by physical vkCode so releasing
+                // the modifier before the main key still fires the profile). The composed
+                // key at this point may be just "Q" instead of "Alt+Q" — we ignore that and
+                // match against the vkCode we recorded on key-down.
+                if (!isDown && _pendingReleaseVkCode == vkCode && _pendingReleaseProfile != null
+                    && MainController.Instance != null && !MainController.Instance.IsRecording()
+                    && !IsReplayingAction)
+                {
+                    var pendingProfile = _pendingReleaseProfile;
+                    _pendingReleaseProfile = null;
+                    _pendingReleaseVkCode = 0;
+                    LastTriggerHotkey = key;
+                    OnHotkeyPressed?.Invoke($"PROFILE::{pendingProfile}");
+                    return (IntPtr)1;
                 }
 
                 // KEY UP handling for WhilePressed release (matched by physical vkCode so
