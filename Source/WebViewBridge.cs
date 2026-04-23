@@ -609,6 +609,7 @@ namespace TrueReplayer
                 WindowY = UserProfile.Current.WindowY,
                 LockPosition = UserProfile.Current.LockPosition,
                 BringToFocus = UserProfile.Current.BringToFocus,
+                TriggerMode = UserProfile.Current.TriggerMode,
                 IsDisabled = UserProfile.Current.IsDisabled,
             };
         }

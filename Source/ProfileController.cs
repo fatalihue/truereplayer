@@ -141,6 +141,14 @@ namespace TrueReplayer.Controllers
                     CustomHotkey = UserProfile.Current.CustomHotkey,
                     CustomHotstring = UserProfile.Current.CustomHotstring,
                     TargetWindow = UserProfile.Current.TargetWindow,
+                    UseRelativeCoordinates = UserProfile.Current.UseRelativeCoordinates,
+                    WindowWidth = UserProfile.Current.WindowWidth,
+                    WindowHeight = UserProfile.Current.WindowHeight,
+                    WindowX = UserProfile.Current.WindowX,
+                    WindowY = UserProfile.Current.WindowY,
+                    LockPosition = UserProfile.Current.LockPosition,
+                    BringToFocus = UserProfile.Current.BringToFocus,
+                    TriggerMode = UserProfile.Current.TriggerMode,
                     IsDisabled = UserProfile.Current.IsDisabled,
                 };
 
