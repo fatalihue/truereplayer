@@ -18,8 +18,14 @@ interface ProfilePanelProps {
 }
 
 const FOLDER_COLORS = [
-  '#60CDFF', '#0E7A0D', '#C42B1C', '#FF8C00', '#B4009E',
-  '#8764B8', '#00B7C3', '#E74856', '#567C73', '#8E562E',
+  // Blues & purples (neon & vivid)
+  '#00FFFF', '#0099FF', '#0066FF', '#6B5BFF', '#BF00FF',
+  // Pinks & reds
+  '#FF00FF', '#FF1493', '#FF073A', '#FF4500', '#E74856',
+  // Oranges & yellows
+  '#FF8C00', '#FFB900', '#FFFF00', '#CCFF00', '#39FF14',
+  // Greens, teals, neutrals
+  '#00CC6A', '#00B7C3', '#FFFFFF', '#8E8E8E', '#444444',
 ];
 
 export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePanelProps) {
@@ -826,32 +832,34 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           </span>
         )}
 
+        {/* Trigger mode indicator — placed before the hotkey so the visual order
+            right-to-left is: hotstring → hotkey → trigger icon → target crosshair.
+            Tooltip shows only the mode name; the full description lives in the
+            hotkey configuration dialog. */}
+        {p.hotkey && p.triggerMode === 'onRelease' && (
+          <span data-tip="On Release" data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
+            <ArrowUpFromDot size={10} />
+          </span>
+        )}
+        {p.hotkey && p.triggerMode === 'whilePressed' && (
+          <span data-tip="While Pressed" data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
+            <Zap size={10} />
+          </span>
+        )}
+        {p.hotkey && p.triggerMode === 'toggle' && (
+          <span data-tip="Toggle" data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
+            <Repeat size={10} />
+          </span>
+        )}
+
         {p.hotkey && (
-          <>
-            <span className="group/hotkey shrink-0 relative">
-              <KbdTag combo={p.hotkey} />
-              <button
-                onClick={(e) => { e.stopPropagation(); handleRemoveHotkey(p.name); }}
-                className="hidden group-hover/hotkey:inline-flex absolute top-0 right-0 bottom-0 w-4 items-center justify-center rounded-r bg-recording/80 text-white text-[7px] font-bold leading-none hover:bg-recording"
-              >✕</button>
-            </span>
-            {/* Trigger mode indicator — sibling of the hotkey chip so hovering it doesn't trigger the remove overlay */}
-            {p.triggerMode === 'onRelease' && (
-              <span data-tip="On Release — fires when key is released" data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
-                <ArrowUpFromDot size={10} />
-              </span>
-            )}
-            {p.triggerMode === 'whilePressed' && (
-              <span data-tip="While Pressed — autofires while held" data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
-                <Zap size={10} />
-              </span>
-            )}
-            {p.triggerMode === 'toggle' && (
-              <span data-tip="Toggle — press to start, press again to stop" data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
-                <Repeat size={10} />
-              </span>
-            )}
-          </>
+          <span className="group/hotkey shrink-0 relative">
+            <KbdTag combo={p.hotkey} />
+            <button
+              onClick={(e) => { e.stopPropagation(); handleRemoveHotkey(p.name); }}
+              className="hidden group-hover/hotkey:inline-flex absolute top-0 right-0 bottom-0 w-4 items-center justify-center rounded-r bg-recording/80 text-white text-[7px] font-bold leading-none hover:bg-recording"
+            >✕</button>
+          </span>
         )}
 
         {p.hotstring && (
@@ -1044,7 +1052,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                             >✕</button>
                           </span>
                         )}
-                        <span className="text-[10px] text-text-disabled">{folder.items.length}</span>
                       </div>
                       {!folder.collapsed && hasVisibleProfiles && (
                         <div className="ml-3 pl-1.5" style={{ borderLeft: `2px solid ${folder.color}40` }}>
