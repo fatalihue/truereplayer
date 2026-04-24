@@ -6,6 +6,22 @@ using System.Text.Json.Serialization;
 
 namespace TrueReplayer.Models
 {
+    /// <summary>
+    /// Determines how a profile's hotkey behaves when pressed.
+    /// OnPress  - fire once on key down (current default behavior).
+    /// OnRelease - fire once on key up; key down is swallowed but does nothing.
+    /// WhilePressed - start replay with infinite loop on key down, cancel on key up (autofire).
+    /// Toggle - key down starts replay (respecting loop settings); pressing again stops it.
+    /// </summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public enum TriggerMode
+    {
+        OnPress,
+        OnRelease,
+        WhilePressed,
+        Toggle
+    }
+
     public class UserProfile
     {
         public static UserProfile Current { get; set; } = Default;
@@ -67,6 +83,7 @@ namespace TrueReplayer.Models
         public int WindowY { get; set; } = 0;
         public bool LockPosition { get; set; } = false;
         public bool BringToFocus { get; set; } = false;
+        public TriggerMode TriggerMode { get; set; } = TriggerMode.OnPress;
         public bool IsDisabled { get; set; }
 
         [JsonIgnore]
@@ -122,6 +139,7 @@ namespace TrueReplayer.Models
         public bool UseRelativeCoordinates { get; set; }
         public bool BringToFocus { get; set; }
         public bool LockPosition { get; set; }
+        public TriggerMode TriggerMode { get; set; } = TriggerMode.OnPress;
         public bool IsDisabled { get; set; }
         public string Display => string.IsNullOrEmpty(Hotkey) ? Name : $"{Name} ({Hotkey})";
 
@@ -175,6 +193,7 @@ namespace TrueReplayer.Models
         public int WindowY { get; set; } = 0;
         public bool LockPosition { get; set; } = false;
         public bool BringToFocus { get; set; } = false;
+        public TriggerMode TriggerMode { get; set; } = TriggerMode.OnPress;
         public string BatchDelay { get; set; } = "Delay (ms)";
         public ObservableCollection<ActionItem> Actions { get; set; } = new();
         /// <summary>

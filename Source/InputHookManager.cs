@@ -27,6 +27,42 @@ namespace TrueReplayer
 
         public static volatile Dictionary<string, string> ProfileHotkeys = new();
         public static volatile Dictionary<string, HotstringConfig> ProfileHotstrings = new();
+        public static volatile Dictionary<string, TriggerMode> ProfileTriggerModes = new();
+
+        // Tracks VK codes currently held down to suppress Windows auto-repeat. Keyed by vkCode
+        // (physical key) rather than the composed hotkey string, because the composed string can
+        // change between key-down and key-up if the user releases modifiers in a different order
+        // than they pressed them (which would leak entries and make the next press look like a repeat).
+        private static readonly HashSet<int> _vkCodesCurrentlyDown = new();
+
+        // When WhilePressed mode is active, records which profile is currently running tied to
+        // which PHYSICAL key (vkCode), so releasing that key stops the replay. Tracked by
+        // vkCode (not composed key) so modifier-state flicker between down and up doesn't
+        // break the release match. volatile for cross-thread visibility.
+        private static volatile string? _activeHoldProfile = null;
+        private static volatile int _activeHoldVkCode = 0;
+
+        // Debounce: WhilePressed only starts the replay if the key is held for at least this
+        // many milliseconds. Prevents an accidental brush against the key from triggering.
+        private const int WhilePressedDebounceMs = 120;
+        private static System.Threading.Timer? _holdDebounceTimer;
+        private static volatile bool _holdConfirmed = false;
+
+        // OnRelease: when the profile hotkey key-down is swallowed, we remember which profile
+        // is pending a release-fire and which physical vkCode will trigger it. Tracking by
+        // vkCode (not composed key) so users who release the modifier before the main key
+        // still get the profile to fire — otherwise the composed key on key-up would be just
+        // "Q" instead of "Alt+Q", missing the profile lookup entirely.
+        private static volatile string? _pendingReleaseProfile = null;
+        private static volatile int _pendingReleaseVkCode = 0;
+
+        /// <summary>
+        /// Exposes whether a WhilePressed hold is still active for a given profile. Used by
+        /// the MainWindow dispatcher to detect when the user released the key BEFORE the async
+        /// replay-start handler had a chance to run — in that case we skip starting the replay
+        /// instead of leaving it looping forever.
+        /// </summary>
+        public static bool IsHoldActiveForProfile(string profileName) => _activeHoldProfile == profileName;
 
         // Window targets and compiled regexes are bundled together for atomic access
         private sealed class WindowTargetSnapshot
@@ -88,6 +124,67 @@ namespace TrueReplayer
         {
             ProfileHotstrings = hotstrings;
             _hotstringBufferLen = 0;
+        }
+
+        public static void RegisterProfileTriggerModes(Dictionary<string, TriggerMode> modes)
+        {
+            ProfileTriggerModes = modes;
+        }
+
+        /// <summary>
+        /// Called from MainWindow when replay ends, so Toggle mode's "pressing again stops it"
+        /// logic doesn't get stuck thinking a stopped replay is still running.
+        /// </summary>
+        public static void ClearActiveHold()
+        {
+            _activeHoldProfile = null;
+            _activeHoldVkCode = 0;
+            _holdConfirmed = false;
+            _holdDebounceTimer?.Dispose();
+            _holdDebounceTimer = null;
+        }
+
+        /// <summary>
+        /// Injects a benign F15 key-down / key-up pair via SendInput. Used right after we
+        /// swallow a profile hotkey that includes Alt (or Win) so that when the user releases
+        /// the modifier, Windows does NOT interpret it as "modifier pressed alone" and open
+        /// the Alt menu / Start menu. F15 is unbound on virtually all apps.
+        /// </summary>
+        private static void InjectMenuCancelKey()
+        {
+            const ushort VK_F15 = 0x7E;
+            var inputs = new NativeMethods.INPUT[]
+            {
+                new NativeMethods.INPUT
+                {
+                    type = NativeMethods.INPUT_KEYBOARD,
+                    U = new NativeMethods.InputUnion
+                    {
+                        ki = new NativeMethods.KEYBDINPUT { wVk = VK_F15, dwFlags = 0 }
+                    }
+                },
+                new NativeMethods.INPUT
+                {
+                    type = NativeMethods.INPUT_KEYBOARD,
+                    U = new NativeMethods.InputUnion
+                    {
+                        ki = new NativeMethods.KEYBDINPUT { wVk = VK_F15, dwFlags = NativeMethods.KEYEVENTF_KEYUP }
+                    }
+                }
+            };
+            NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
+        }
+
+        private static bool ShouldCancelMenuFor(string key)
+        {
+            // Alt alone triggers browser/app menu bar on release; Win alone triggers Start menu.
+            // If our hotkey uses these as modifiers, inject a phantom key so the target app
+            // sees "something happened" while the modifier was held — which cancels the
+            // menu-activation heuristic.
+            return key.StartsWith("Alt+", StringComparison.OrdinalIgnoreCase)
+                || key.Contains("+Alt+", StringComparison.OrdinalIgnoreCase)
+                || key.StartsWith("Win+", StringComparison.OrdinalIgnoreCase)
+                || key.Contains("+Win+", StringComparison.OrdinalIgnoreCase);
         }
 
         public static void RegisterProfileWindowTargets(Dictionary<string, WindowTarget> targets, HashSet<string>? bringToFocusProfiles = null)
@@ -448,6 +545,18 @@ namespace TrueReplayer
                 int vkCode = Marshal.ReadInt32(lParam);
                 bool isDown = wParam == (IntPtr)NativeMethods.WM_KEYDOWN || wParam == (IntPtr)0x0104;
 
+                // Skip any trigger-mode / hotkey / hotstring logic for events we injected
+                // via SendInput — replay-simulated keystrokes and the F15 menu-cancel phantom.
+                // Processing them would cause feedback loops (simulated keys treated as repeats,
+                // triggering PROFILE_STOP, feeding the hotstring buffer, etc.).
+                // LLKHF_INJECTED is flag bit 4 (0x10) in KBDLLHOOKSTRUCT.flags (offset 8).
+                uint hookFlags = (uint)Marshal.ReadInt32(lParam, 8);
+                bool isInjected = (hookFlags & 0x10) != 0;
+                if (isInjected)
+                {
+                    return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
+                }
+
                 if (vkCode == 165 && isDown)
                 {
                     lastAltRightPressTime = DateTime.Now;
@@ -472,34 +581,72 @@ namespace TrueReplayer
 
                 bool isProfileKey = ProfileHotkeys.ContainsValue(key);
 
+                // Auto-repeat detection: Windows fires WM_KEYDOWN repeatedly while a key is held.
+                // Only the first down counts for hotkey triggers; repeats are ignored. Keyed by
+                // vkCode (physical key) so modifier release order doesn't desync the set.
+                bool isRepeat = isDown && _vkCodesCurrentlyDown.Contains(vkCode);
+                if (isDown) _vkCodesCurrentlyDown.Add(vkCode);
+                else _vkCodesCurrentlyDown.Remove(vkCode);
+
+                // Unconditional swallow for the physical main key of an active WhilePressed hold
+                // or a pending OnRelease. If we don't do this here, any code path that decides
+                // the event "doesn't match a profile hotkey" (because the user released the
+                // modifier, or the foreground window changed, or any other reason the composed
+                // key no longer matches) would let the physical key pass through to the target.
+                // That would leak the held Q (or whatever) into the target as text, on top of
+                // whatever the replay is outputting.
+                if (isDown && _activeHoldProfile != null && _activeHoldVkCode == vkCode)
+                {
+                    return (IntPtr)1;
+                }
+                if (isDown && _pendingReleaseProfile != null && _pendingReleaseVkCode == vkCode)
+                {
+                    return (IntPtr)1;
+                }
+
                 if (isDown)
                 {
-                    if (key == UserProfile.Current.RecordingHotkey)
+                    // Global hotkeys — always OnPress, ignore auto-repeat
+                    if (!isRepeat)
                     {
-                        OnHotkeyPressed?.Invoke(key);
-                        return (IntPtr)1;
+                        if (key == UserProfile.Current.RecordingHotkey)
+                        {
+                            OnHotkeyPressed?.Invoke(key);
+                            return (IntPtr)1;
+                        }
+
+                        if (key == UserProfile.Current.ReplayHotkey)
+                        {
+                            LastTriggerHotkey = key;
+                            OnHotkeyPressed?.Invoke(key);
+                            return (IntPtr)1;
+                        }
+
+                        if (key == UserProfile.Current.ProfileKeyToggleHotkey)
+                        {
+                            OnHotkeyPressed?.Invoke(key);
+                            return (IntPtr)1;
+                        }
+
+                        if (key == UserProfile.Current.ForegroundHotkey)
+                        {
+                            OnHotkeyPressed?.Invoke(key);
+                            return (IntPtr)1;
+                        }
+                    }
+                    else
+                    {
+                        // Repeat press of a global hotkey — swallow, don't re-fire
+                        if (key == UserProfile.Current.RecordingHotkey
+                            || key == UserProfile.Current.ReplayHotkey
+                            || key == UserProfile.Current.ProfileKeyToggleHotkey
+                            || key == UserProfile.Current.ForegroundHotkey)
+                        {
+                            return (IntPtr)1;
+                        }
                     }
 
-                    if (key == UserProfile.Current.ReplayHotkey)
-                    {
-                        LastTriggerHotkey = key;
-                        OnHotkeyPressed?.Invoke(key);
-                        return (IntPtr)1;
-                    }
-
-                    if (key == UserProfile.Current.ProfileKeyToggleHotkey)
-                    {
-                        OnHotkeyPressed?.Invoke(key);
-                        return (IntPtr)1;
-                    }
-
-                    if (key == UserProfile.Current.ForegroundHotkey)
-                    {
-                        OnHotkeyPressed?.Invoke(key);
-                        return (IntPtr)1;
-                    }
-
-                    if (!IsReplayingAction && UserProfile.Current.ProfileKeyEnabled && isProfileKey && MainController.Instance != null && !MainController.Instance.IsRecording())
+                    if (UserProfile.Current.ProfileKeyEnabled && isProfileKey && MainController.Instance != null && !MainController.Instance.IsRecording())
                     {
                         // Find the first profile with this hotkey that matches the foreground window
                         string? matchedProfile = null;
@@ -517,9 +664,85 @@ namespace TrueReplayer
                             return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
                         }
 
-                        LastTriggerHotkey = key;
-                        OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
-                        return (IntPtr)1;
+                        var triggerMode = ProfileTriggerModes.TryGetValue(matchedProfile, out var tm) ? tm : TriggerMode.OnPress;
+
+                        // Toggle is the only mode that needs to dispatch even when a replay is active
+                        // (second press = stop). For other modes, ignore presses during replay.
+                        if (IsReplayingAction && triggerMode != TriggerMode.Toggle && triggerMode != TriggerMode.WhilePressed)
+                        {
+                            return (IntPtr)1; // still swallow to prevent leak
+                        }
+
+                        // If the swallowed hotkey uses Alt or Win as a modifier, inject a
+                        // phantom F15 so the target app doesn't later interpret the modifier
+                        // release as "pressed alone" → no browser Alt menu / Start menu.
+                        bool needsMenuCancel = !isRepeat && ShouldCancelMenuFor(key);
+
+                        switch (triggerMode)
+                        {
+                            case TriggerMode.OnPress:
+                                if (!isRepeat)
+                                {
+                                    LastTriggerHotkey = key;
+                                    if (needsMenuCancel) InjectMenuCancelKey();
+                                    OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
+                                }
+                                return (IntPtr)1;
+
+                            case TriggerMode.OnRelease:
+                                // Remember this key-down so the release-fire can match by
+                                // physical vkCode. Without this, if the user releases the
+                                // modifier before the main key, the composed key on key-up
+                                // reduces to just "Q" and our lookup against ProfileHotkeys
+                                // (which holds "Alt+Q") would miss.
+                                if (!isRepeat)
+                                {
+                                    _pendingReleaseProfile = matchedProfile;
+                                    _pendingReleaseVkCode = vkCode;
+                                    // Inject F15 during the down phase (while the modifier is
+                                    // guaranteed physically held). Injecting only on key-up
+                                    // would race the user's modifier release — if the target
+                                    // sees Alt↑ before F15 arrives, the menu opens.
+                                    if (needsMenuCancel) InjectMenuCancelKey();
+                                }
+                                return (IntPtr)1;
+
+                            case TriggerMode.WhilePressed:
+                                if (!isRepeat)
+                                {
+                                    LastTriggerHotkey = key;
+                                    if (needsMenuCancel) InjectMenuCancelKey();
+                                    _activeHoldProfile = matchedProfile;
+                                    _activeHoldVkCode = vkCode;
+                                    _holdConfirmed = false;
+                                    // Debounce: only fire PROFILE_HOLD after the key has been held
+                                    // long enough to be "intentional" — stops accidental brushes
+                                    // from kicking off the infinite-loop replay.
+                                    var profileCapture = matchedProfile;
+                                    var vkCapture = vkCode;
+                                    _holdDebounceTimer?.Dispose();
+                                    _holdDebounceTimer = new System.Threading.Timer(_ =>
+                                    {
+                                        // Confirm the hold is still on the same physical key
+                                        // (user hasn't released or pressed a different hotkey).
+                                        if (_activeHoldVkCode == vkCapture && _activeHoldProfile == profileCapture)
+                                        {
+                                            _holdConfirmed = true;
+                                            OnHotkeyPressed?.Invoke($"PROFILE_HOLD::{profileCapture}");
+                                        }
+                                    }, null, WhilePressedDebounceMs, System.Threading.Timeout.Infinite);
+                                }
+                                return (IntPtr)1;
+
+                            case TriggerMode.Toggle:
+                                if (!isRepeat)
+                                {
+                                    LastTriggerHotkey = key;
+                                    if (needsMenuCancel) InjectMenuCancelKey();
+                                    OnHotkeyPressed?.Invoke($"PROFILE_TOGGLE::{matchedProfile}");
+                                }
+                                return (IntPtr)1;
+                        }
                     }
 
                     // ── Hotstring buffer management ──
@@ -583,6 +806,79 @@ namespace TrueReplayer
                                 HotstringBufferClear(); // non-character key clears buffer
                             }
                         }
+                    }
+                }
+
+                // KEY UP handling for OnRelease mode (matched by physical vkCode so releasing
+                // the modifier before the main key still fires the profile). The composed
+                // key at this point may be just "Q" instead of "Alt+Q" — we ignore that and
+                // match against the vkCode we recorded on key-down.
+                if (!isDown && _pendingReleaseVkCode == vkCode && _pendingReleaseProfile != null
+                    && MainController.Instance != null && !MainController.Instance.IsRecording()
+                    && !IsReplayingAction)
+                {
+                    var pendingProfile = _pendingReleaseProfile;
+                    _pendingReleaseProfile = null;
+                    _pendingReleaseVkCode = 0;
+                    LastTriggerHotkey = key;
+                    OnHotkeyPressed?.Invoke($"PROFILE::{pendingProfile}");
+                    return (IntPtr)1;
+                }
+
+                // KEY UP handling for WhilePressed release (matched by physical vkCode so
+                // modifier-state flicker between down and up doesn't break the match). Runs
+                // outside the isProfileKey gate so it still fires even if the hotkey config
+                // changed mid-hold.
+                if (!isDown && _activeHoldVkCode == vkCode && _activeHoldProfile != null
+                    && MainController.Instance != null && !MainController.Instance.IsRecording())
+                {
+                    var heldProfile = _activeHoldProfile;
+                    bool wasConfirmed = _holdConfirmed;
+                    _holdDebounceTimer?.Dispose();
+                    _holdDebounceTimer = null;
+                    ClearActiveHold();
+                    _holdConfirmed = false;
+
+                    // Only fire PROFILE_STOP if the hold was actually confirmed (replay had
+                    // started or is about to start). If released before the debounce window
+                    // expired, the press was an accidental brush — silently drop it.
+                    if (wasConfirmed)
+                    {
+                        OnHotkeyPressed?.Invoke($"PROFILE_STOP::{heldProfile}");
+                    }
+                    return (IntPtr)1;
+                }
+
+                // KEY UP handling for OnRelease trigger mode (still keyed by composed key)
+                if (!isDown && isProfileKey && UserProfile.Current.ProfileKeyEnabled
+                    && MainController.Instance != null && !MainController.Instance.IsRecording())
+                {
+
+                    // 2) OnRelease mode: fire on key up
+                    string? releaseProfile = null;
+                    foreach (var p in ProfileHotkeys)
+                    {
+                        if (p.Value == key && IsForegroundWindowMatch(p.Key))
+                        {
+                            releaseProfile = p.Key;
+                            break;
+                        }
+                    }
+                    if (releaseProfile != null)
+                    {
+                        var mode = ProfileTriggerModes.TryGetValue(releaseProfile, out var rm) ? rm : TriggerMode.OnPress;
+                        if (mode == TriggerMode.OnRelease && !IsReplayingAction)
+                        {
+                            LastTriggerHotkey = key;
+                            // Inject phantom key BEFORE firing so if the hotkey uses Alt/Win, the
+                            // modifier keyup (about to arrive) doesn't trigger the target's menu.
+                            if (ShouldCancelMenuFor(key)) InjectMenuCancelKey();
+                            OnHotkeyPressed?.Invoke($"PROFILE::{releaseProfile}");
+                            return (IntPtr)1;
+                        }
+                        // OnPress and Toggle modes: let the key-up pass through to the target app
+                        // (matches pre-feature behavior; the orphan key-up is harmless since the
+                        // matching key-down was swallowed).
                     }
                 }
 

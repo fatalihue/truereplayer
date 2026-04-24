@@ -141,6 +141,14 @@ namespace TrueReplayer.Controllers
                     CustomHotkey = UserProfile.Current.CustomHotkey,
                     CustomHotstring = UserProfile.Current.CustomHotstring,
                     TargetWindow = UserProfile.Current.TargetWindow,
+                    UseRelativeCoordinates = UserProfile.Current.UseRelativeCoordinates,
+                    WindowWidth = UserProfile.Current.WindowWidth,
+                    WindowHeight = UserProfile.Current.WindowHeight,
+                    WindowX = UserProfile.Current.WindowX,
+                    WindowY = UserProfile.Current.WindowY,
+                    LockPosition = UserProfile.Current.LockPosition,
+                    BringToFocus = UserProfile.Current.BringToFocus,
+                    TriggerMode = UserProfile.Current.TriggerMode,
                     IsDisabled = UserProfile.Current.IsDisabled,
                 };
 
@@ -279,6 +287,7 @@ namespace TrueReplayer.Controllers
                             UseRelativeCoordinates = profile.UseRelativeCoordinates,
                             BringToFocus = profile.BringToFocus,
                             LockPosition = profile.LockPosition,
+                            TriggerMode = profile.TriggerMode,
                             IsDisabled = profile.IsDisabled
                         });
 
@@ -296,6 +305,7 @@ namespace TrueReplayer.Controllers
 
             var map = GetProfileHotkeys();
             InputHookManager.RegisterProfileHotkeys(map);
+            InputHookManager.RegisterProfileTriggerModes(GetProfileTriggerModes());
             InputHookManager.RegisterProfileWindowTargets(GetProfileWindowTargets(), GetBringToFocusProfiles());
             var hotstringMap = GetProfileHotstrings();
             InputHookManager.RegisterProfileHotstrings(hotstringMap);
@@ -467,6 +477,19 @@ namespace TrueReplayer.Controllers
             return hotkeys;
         }
 
+        public Dictionary<string, TriggerMode> GetProfileTriggerModes()
+        {
+            var modes = new Dictionary<string, TriggerMode>();
+
+            foreach (var entry in ProfileEntries)
+            {
+                if (!string.IsNullOrEmpty(entry.Hotkey) && !entry.IsDisabled)
+                    modes[entry.Name] = entry.TriggerMode;
+            }
+
+            return modes;
+        }
+
         public Dictionary<string, HotstringConfig> GetProfileHotstrings()
         {
             var hotstrings = new Dictionary<string, HotstringConfig>();
@@ -630,6 +653,7 @@ namespace TrueReplayer.Controllers
                     WindowY = profile.WindowY,
                     LockPosition = profile.LockPosition,
                     BringToFocus = profile.BringToFocus,
+                    TriggerMode = profile.TriggerMode,
                     BatchDelay = profile.BatchDelay,
                     Actions = profile.Actions,
                     Images = images
@@ -777,6 +801,7 @@ namespace TrueReplayer.Controllers
                     WindowY = entry.WindowY,
                     LockPosition = entry.LockPosition,
                     BringToFocus = entry.BringToFocus,
+                    TriggerMode = entry.TriggerMode,
                     BatchDelay = entry.BatchDelay ?? "Delay (ms)"
                 };
 

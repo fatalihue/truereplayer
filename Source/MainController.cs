@@ -51,12 +51,12 @@ namespace TrueReplayer.Controllers
             recordingService.ToggleRecording();
         }
 
-        public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation = false, int delayVariationPercent = 20, bool useRelativeCoords = false, Models.WindowTarget? windowTarget = null, bool bringToFocus = false, int lockWidth = 0, int lockHeight = 0, int lockX = 0, int lockY = 0, bool lockPosition = false)
+        public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation = false, int delayVariationPercent = 20, bool useRelativeCoords = false, Models.WindowTarget? windowTarget = null, bool bringToFocus = false, int lockWidth = 0, int lockHeight = 0, int lockX = 0, int lockY = 0, bool lockPosition = false, bool forceInfiniteLoop = false)
         {
             if (recordingService.IsRecording)
                 recordingService.ToggleRecording();
 
-            replayService.ToggleReplay(loopEnabled, loopCountText, intervalEnabled, intervalText, useDelayVariation, delayVariationPercent, useRelativeCoords, windowTarget, bringToFocus, lockWidth, lockHeight, lockX, lockY, lockPosition);
+            replayService.ToggleReplay(loopEnabled, loopCountText, intervalEnabled, intervalText, useDelayVariation, delayVariationPercent, useRelativeCoords, windowTarget, bringToFocus, lockWidth, lockHeight, lockX, lockY, lockPosition, forceInfiniteLoop);
         }
 
         public void ToggleCursorClickReplay(int delay, bool useJitter, int jitterPercent, int loopCount, int loopInterval, string button = "Left")
@@ -112,6 +112,8 @@ namespace TrueReplayer.Controllers
         public bool IsRecording() => recordingService.IsRecording;
 
         public bool IsReplayInProgress() => replayService.IsReplaying;
+
+        public void StopReplayIfRunning() => replayService.StopIfRunning();
 
         public void UpdateButtonStates()
         {

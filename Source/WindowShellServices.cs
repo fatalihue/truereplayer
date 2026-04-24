@@ -174,6 +174,8 @@ namespace TrueReplayer.Services
         /// Callback to apply Always On Top window state from the tray menu.
         public static Action<bool>? OnAlwaysOnTopChanged { get; set; }
         public static Action? OnReloadUI { get; set; }
+        public static Action? OnOpenDevTools { get; set; }
+        public static Action? OnOpenLogsFolder { get; set; }
 
         public static async void ShowContextMenu()
         {
@@ -192,6 +194,8 @@ namespace TrueReplayer.Services
             AppendMenu(hMenu, MF_STRING | (isStartMinimized ? MF_CHECKED : 0), 4, "Startup Minimized");
             AppendMenu(hMenu, MF_STRING | (isRunAsAdmin ? MF_CHECKED : 0), 7, "Run as Administrator");
             AppendMenu(hMenu, MF_STRING, 8, "Reload UI");
+            AppendMenu(hMenu, MF_STRING, 9, "Open DevTools");
+            AppendMenu(hMenu, MF_STRING, 10, "Open Logs Folder");
             AppendMenu(hMenu, MF_SEPARATOR, 0, null);
             AppendMenu(hMenu, MF_STRING, 2, "Exit");
 
@@ -242,6 +246,14 @@ namespace TrueReplayer.Services
             {
                 OnReloadUI?.Invoke();
             }
+            else if (cmd == 9)
+            {
+                OnOpenDevTools?.Invoke();
+            }
+            else if (cmd == 10)
+            {
+                OnOpenLogsFolder?.Invoke();
+            }
             else if (cmd == 2)
             {
                 if (OnTrayExitRequested != null)
@@ -251,6 +263,7 @@ namespace TrueReplayer.Services
                     if (!canExit) return;
                 }
 
+                DiagnosticLog.Info("Tray Exit — terminating application");
                 RemoveTrayIcon();
                 Microsoft.UI.Xaml.Application.Current.Exit();
             }

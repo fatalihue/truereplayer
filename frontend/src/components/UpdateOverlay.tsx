@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useBridge } from '../bridge/BridgeContext';
 
 type Phase =
   | { step: 'hidden' }
-  | { step: 'checking' }
+  | { step: 'available'; version: string; currentVersion: string; notes: string[] }
   | { step: 'downloading'; percent: number; version: string; currentVersion: string }
   | { step: 'installing'; version: string; currentVersion: string }
   | { step: 'complete'; version: string; currentVersion: string };
@@ -11,31 +11,23 @@ type Phase =
 export function UpdateOverlay() {
   const { send, subscribe } = useBridge();
   const [phase, setPhase] = useState<Phase>({ step: 'hidden' });
-  const autoApplied = useRef(false);
 
   useEffect(() => {
     return subscribe((msg) => {
       switch (msg.type) {
         case 'update:available':
-          // Update found — start download automatically
+          // Show confirmation screen — user decides when to download
           setPhase({
-            step: 'downloading',
-            percent: 0,
+            step: 'available',
             version: msg.payload.version,
             currentVersion: msg.payload.currentVersion,
+            notes: msg.payload.notes ?? [],
           });
-          if (!autoApplied.current) {
-            autoApplied.current = true;
-            send({ type: 'update:apply', payload: {} });
-          }
           break;
         case 'update:progress':
           setPhase((prev) => {
             if (prev.step === 'downloading') {
               return { ...prev, percent: msg.payload.percent };
-            }
-            if (prev.step === 'hidden' || prev.step === 'checking') {
-              return prev; // ignore stale progress
             }
             return prev;
           });
@@ -57,7 +49,7 @@ export function UpdateOverlay() {
           break;
       }
     });
-  }, [subscribe, send]);
+  }, [subscribe]);
 
   // Transition to installing when download reaches 100%
   useEffect(() => {
@@ -71,8 +63,21 @@ export function UpdateOverlay() {
 
   if (phase.step === 'hidden') return null;
 
-  const version = phase.step !== 'checking' ? phase.version : '';
-  const currentVersion = phase.step !== 'checking' ? phase.currentVersion : '';
+  const handleAccept = () => {
+    if (phase.step !== 'available') return;
+    setPhase({
+      step: 'downloading',
+      percent: 0,
+      version: phase.version,
+      currentVersion: phase.currentVersion,
+    });
+    send({ type: 'update:apply', payload: {} });
+  };
+
+  const version = phase.version;
+  const currentVersion = phase.currentVersion;
+  const isComplete = phase.step === 'complete';
+  const isInstalling = phase.step === 'installing';
 
   return (
     <div style={overlayStyle}>
@@ -88,12 +93,12 @@ export function UpdateOverlay() {
             alt="TrueReplayer"
             style={{
               ...logoImgStyle,
-              ...(phase.step === 'complete' ? {} : { animation: 'update-logo-pulse 2s ease-in-out infinite' }),
+              ...(isComplete ? {} : { animation: 'update-logo-pulse 2s ease-in-out infinite' }),
             }}
           />
-          {phase.step === 'complete' && (
+          {isComplete && (
             <div style={checkBadgeStyle}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
                 <polyline
                   points="6 12 10 16 18 8"
                   stroke="white"
@@ -112,59 +117,117 @@ export function UpdateOverlay() {
         </div>
 
         {/* Title */}
-        <div style={titleStyle}>
-          {phase.step === 'complete' ? 'Update Complete' : phase.step === 'installing' ? 'Installing Update' : 'Updating TrueReplayer'}
+        <div
+          style={{
+            ...titleStyle,
+            ...(isComplete || isInstalling ? { color: '#6bcb77' } : {}),
+          }}
+        >
+          {phase.step === 'available' && 'Atualização disponível'}
+          {phase.step === 'downloading' && 'Baixando atualização'}
+          {phase.step === 'installing' && `Atualizando para v${version}`}
+          {phase.step === 'complete' && 'Atualizado com sucesso!'}
         </div>
 
-        {/* Version */}
-        {version && (
+        {/* Subtitle */}
+        <div style={subtitleStyle}>
+          {phase.step === 'available' && 'Uma nova versão do TrueReplayer está pronta'}
+          {phase.step === 'downloading' && 'Não feche o aplicativo'}
+          {phase.step === 'installing' && 'Encerrando TrueReplayer...'}
+          {phase.step === 'complete' && 'Você está agora na versão mais recente'}
+        </div>
+
+        {/* Version chips (current ➜ new), or single chip for "complete" */}
+        {isComplete ? (
           <div style={versionRowStyle}>
-            <span>v{currentVersion}</span>
-            <span style={{ color: '#60CDFF', fontSize: 11 }}>&#10132;</span>
-            <span style={{ color: '#60CDFF', fontWeight: 600 }}>v{version}</span>
+            <div style={{ ...versionChipStyle, ...versionChipNewStyle, minWidth: 120 }}>
+              <div style={{ ...versionLabelStyle, color: '#60CDFF' }}>Versão atual</div>
+              <div style={{ ...versionValueStyle, color: '#60CDFF' }}>v{version}</div>
+            </div>
+          </div>
+        ) : (
+          <div style={versionRowStyle}>
+            <div style={versionChipStyle}>
+              <div style={versionLabelStyle}>Versão atual</div>
+              <div style={versionValueStyle}>v{currentVersion}</div>
+            </div>
+            <div style={versionArrowStyle}>&#10132;</div>
+            <div style={{ ...versionChipStyle, ...versionChipNewStyle }}>
+              <div style={{ ...versionLabelStyle, color: '#60CDFF' }}>Nova versão</div>
+              <div style={{ ...versionValueStyle, color: '#60CDFF' }}>v{version}</div>
+            </div>
           </div>
         )}
 
-        {/* Progress bar */}
-        <div style={progressContainerStyle}>
-          <div style={progressTrackStyle}>
-            <div
-              style={{
-                ...progressFillStyle,
-                ...(phase.step === 'checking'
-                  ? { width: '40%', animation: 'update-indeterminate 1.8s ease-in-out infinite' }
-                  : phase.step === 'downloading'
-                    ? { width: `${phase.percent}%`, animation: 'none', transform: 'none' }
-                    : phase.step === 'installing'
-                      ? { width: '100%', animation: 'update-install-pulse 1.5s ease-in-out infinite', transform: 'none' }
-                      : phase.step === 'complete'
-                        ? {
-                            width: '100%',
-                            animation: 'none',
-                            transform: 'none',
-                            background: 'linear-gradient(90deg, #0E7A0D, #6bcb77)',
-                            boxShadow: '0 0 12px rgba(107, 203, 119, 0.3)',
-                          }
-                        : {}),
-              }}
-            />
+        {/* Changelog — only on 'available' phase (full list before user decides) */}
+        {phase.step === 'available' && phase.notes.length > 0 && (
+          <div style={changelogStyle}>
+            <div style={changelogTitleStyle}>
+              <span style={changelogDotStyle} />
+              O que há de novo
+            </div>
+            <ul style={changelogListStyle} className="update-changelog-list">
+              {phase.notes.slice(0, 6).map((note, i) => (
+                <li key={i} style={changelogItemStyle}>
+                  {note}
+                </li>
+              ))}
+            </ul>
           </div>
-        </div>
+        )}
+        {phase.step === 'complete' && <div style={{ height: 12 }} />}
 
-        {/* Status text */}
-        <div style={statusStyle}>
-          {phase.step === 'checking' && 'Checking for updates...'}
-          {phase.step === 'downloading' && (
-            <>
-              Downloading update...{' '}
-              <span style={{ color: '#c5c5c5', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
-                {phase.percent}%
-              </span>
-            </>
-          )}
-          {phase.step === 'installing' && 'Applying update, please wait...'}
-          {phase.step === 'complete' && 'Restarting application...'}
-        </div>
+        {/* Progress bar (downloading / installing) */}
+        {(phase.step === 'downloading' || phase.step === 'installing') && (
+          <>
+            <div style={progressContainerStyle}>
+              <div style={progressTrackStyle}>
+                <div
+                  style={{
+                    ...progressFillStyle,
+                    ...(phase.step === 'downloading'
+                      ? { width: `${phase.percent}%`, animation: 'none', transform: 'none' }
+                      : { width: '100%', animation: 'update-install-pulse 1.5s ease-in-out infinite', transform: 'none' }),
+                  }}
+                />
+              </div>
+              {phase.step === 'downloading' && (
+                <div style={progressMetaStyle}>
+                  <span>Baixando...</span>
+                  <span style={{ color: '#60CDFF', fontWeight: 600 }}>{phase.percent}%</span>
+                </div>
+              )}
+            </div>
+            {phase.step === 'installing' && (
+              <>
+                <div style={statusStyle}>Aplicando atualização, aguarde...</div>
+                <div style={hintStyle}>O aplicativo será reiniciado automaticamente</div>
+              </>
+            )}
+          </>
+        )}
+
+        {/* Button — only on "available" phase */}
+        {phase.step === 'available' && (
+          <button
+            type="button"
+            style={primaryButtonStyle}
+            onClick={handleAccept}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'linear-gradient(180deg, #0b88e4, #0072c4)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'linear-gradient(180deg, #0078D4, #0065B3)';
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Baixar e Instalar
+          </button>
+        )}
       </div>
 
       {/* Keyframe animations injected as style tag */}
@@ -176,7 +239,7 @@ export function UpdateOverlay() {
 /* ── Keyframes ── */
 const keyframes = `
 @keyframes update-card-in {
-  from { opacity: 0; transform: scale(0.92) translateY(10px); }
+  from { opacity: 0; transform: scale(0.94) translateY(8px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
 @keyframes update-fade-in {
@@ -187,17 +250,23 @@ const keyframes = `
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.04); }
 }
-@keyframes update-indeterminate {
-  0% { transform: translateX(-120%); }
-  100% { transform: translateX(350%); }
-}
 @keyframes update-install-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
+  50% { opacity: 0.65; }
 }
 @keyframes update-checkmark {
   from { stroke-dashoffset: 24; }
   to { stroke-dashoffset: 0; }
+}
+.update-changelog-list li::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 10px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #5c5c5c;
 }
 `;
 
@@ -222,86 +291,203 @@ const backdropStyle: React.CSSProperties = {
 
 const cardStyle: React.CSSProperties = {
   position: 'relative',
-  width: 420,
-  background: 'rgba(45, 45, 45, 0.85)',
+  width: '88%',
+  maxWidth: 420,
+  background: 'rgba(45, 45, 45, 0.88)',
   border: '1px solid rgba(255, 255, 255, 0.08)',
-  borderRadius: 16,
-  padding: '40px 36px 36px',
-  textAlign: 'center',
-  boxShadow: '0 24px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.04) inset',
-  animation: 'update-card-in 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
+  borderRadius: 14,
+  padding: '28px 28px 24px',
+  boxShadow: '0 24px 80px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255,255,255,0.04)',
+  animation: 'update-card-in 0.45s cubic-bezier(0.16, 1, 0.3, 1)',
 };
 
 const logoContainerStyle: React.CSSProperties = {
   position: 'relative',
-  width: 72,
-  height: 72,
-  margin: '0 auto 20px',
+  width: 56,
+  height: 56,
+  margin: '0 auto 14px',
 };
 
 const logoImgStyle: React.CSSProperties = {
-  width: 72,
-  height: 72,
-  borderRadius: 16,
-  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
+  width: 56,
+  height: 56,
+  borderRadius: 14,
+  boxShadow: '0 6px 18px rgba(0, 0, 0, 0.45)',
+  display: 'block',
+  objectFit: 'cover',
 };
 
 const checkBadgeStyle: React.CSSProperties = {
   position: 'absolute',
-  bottom: -4,
-  right: -4,
-  width: 26,
-  height: 26,
+  bottom: -3,
+  right: -3,
+  width: 22,
+  height: 22,
   borderRadius: '50%',
   background: 'linear-gradient(135deg, #0E7A0D, #6bcb77)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  boxShadow: '0 2px 8px rgba(14, 122, 13, 0.4)',
+  boxShadow: '0 2px 6px rgba(14, 122, 13, 0.4)',
   border: '2px solid #2d2d2d',
 };
 
 const titleStyle: React.CSSProperties = {
-  fontSize: 20,
+  textAlign: 'center',
+  fontSize: 17,
   fontWeight: 600,
   color: '#ffffff',
-  marginBottom: 6,
-  letterSpacing: -0.3,
+  letterSpacing: -0.2,
+  marginBottom: 4,
+};
+
+const subtitleStyle: React.CSSProperties = {
+  textAlign: 'center',
+  fontSize: 11,
+  color: '#9a9a9a',
+  marginBottom: 18,
 };
 
 const versionRowStyle: React.CSSProperties = {
-  fontSize: 13,
-  color: '#9a9a9a',
-  marginBottom: 28,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  gap: 8,
+  gap: 10,
+  marginBottom: 16,
+};
+
+const versionChipStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  background: 'rgba(255, 255, 255, 0.04)',
+  border: '1px solid rgba(255, 255, 255, 0.06)',
+  borderRadius: 8,
+  padding: '8px 14px',
+  minWidth: 80,
+};
+
+const versionChipNewStyle: React.CSSProperties = {
+  background: 'rgba(96, 205, 255, 0.08)',
+  borderColor: 'rgba(96, 205, 255, 0.25)',
+};
+
+const versionLabelStyle: React.CSSProperties = {
+  fontSize: 9,
+  color: '#7a7a7a',
+  textTransform: 'uppercase',
+  letterSpacing: 0.8,
+  marginBottom: 2,
+};
+
+const versionValueStyle: React.CSSProperties = {
+  fontSize: 14,
+  fontWeight: 600,
+  color: '#c5c5c5',
+  fontVariantNumeric: 'tabular-nums',
+};
+
+const versionArrowStyle: React.CSSProperties = {
+  color: '#60CDFF',
+  fontSize: 14,
+};
+
+const changelogStyle: React.CSSProperties = {
+  marginBottom: 18,
+};
+
+const changelogTitleStyle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  color: '#c5c5c5',
+  marginBottom: 8,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 5,
+};
+
+const changelogDotStyle: React.CSSProperties = {
+  width: 5,
+  height: 5,
+  borderRadius: '50%',
+  background: '#60CDFF',
+  display: 'inline-block',
+};
+
+const changelogListStyle: React.CSSProperties = {
+  listStyle: 'none',
+  padding: 0,
+  margin: 0,
+};
+
+const changelogItemStyle: React.CSSProperties = {
+  position: 'relative',
+  fontSize: 11.5,
+  color: '#b5b5b5',
+  padding: '3px 0 3px 16px',
+  lineHeight: 1.4,
 };
 
 const progressContainerStyle: React.CSSProperties = {
-  marginBottom: 16,
+  marginBottom: 12,
 };
 
 const progressTrackStyle: React.CSSProperties = {
   width: '100%',
-  height: 4,
-  background: '#404040',
-  borderRadius: 2,
+  height: 6,
+  background: '#3a3a3a',
+  borderRadius: 3,
   overflow: 'hidden',
+  position: 'relative',
 };
 
 const progressFillStyle: React.CSSProperties = {
   height: '100%',
   background: 'linear-gradient(90deg, #0078D4, #60CDFF)',
-  borderRadius: 2,
+  borderRadius: 3,
   width: '0%',
-  transition: 'width 0.4s ease',
-  boxShadow: '0 0 12px rgba(96, 205, 255, 0.3)',
+  transition: 'width 0.3s ease',
+  boxShadow: '0 0 10px rgba(96, 205, 255, 0.35)',
+};
+
+const progressMetaStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  marginTop: 6,
+  fontSize: 10.5,
+  color: '#9a9a9a',
+  fontVariantNumeric: 'tabular-nums',
 };
 
 const statusStyle: React.CSSProperties = {
-  fontSize: 12,
+  textAlign: 'center',
+  fontSize: 11.5,
   color: '#9a9a9a',
-  height: 18,
+  marginTop: 4,
+};
+
+const hintStyle: React.CSSProperties = {
+  marginTop: 14,
+  fontSize: 10,
+  color: '#7a7a7a',
+  textAlign: 'center',
+};
+
+const primaryButtonStyle: React.CSSProperties = {
+  width: '100%',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
+  height: 36,
+  border: 'none',
+  borderRadius: 8,
+  background: 'linear-gradient(180deg, #0078D4, #0065B3)',
+  color: 'white',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+  boxShadow: '0 2px 6px rgba(0, 120, 212, 0.35)',
+  transition: 'background 0.15s ease',
+  fontFamily: 'inherit',
 };
