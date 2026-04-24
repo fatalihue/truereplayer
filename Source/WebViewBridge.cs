@@ -263,7 +263,6 @@ namespace TrueReplayer
                     case "window:reloadUI": try { var url = webView.Source; webView.Navigate(url); } catch { } break;
                     case "update:check": _ = CheckForUpdateAsync(); break;
                     case "update:apply": _ = HandleUpdateApply(); break;
-                    case "update:dismiss": break;
                     case "hotkey:suppress": HandleHotkeySuppress(payload); break;
                     case "theme:colors": HandleThemeColors(payload); break;
                     default:
@@ -749,10 +748,14 @@ namespace TrueReplayer
                 var newVersion = await UpdateService.CheckForUpdateAsync();
                 if (newVersion != null)
                 {
+                    // Fetch release notes in parallel — best-effort, may be empty
+                    var notes = await UpdateService.GetPendingReleaseNotesAsync();
+
                     SendMessage("update:available", new
                     {
                         version = newVersion,
-                        currentVersion = UpdateService.CurrentVersion ?? "unknown"
+                        currentVersion = UpdateService.CurrentVersion ?? "unknown",
+                        notes = notes
                     });
                 }
                 else

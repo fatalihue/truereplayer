@@ -134,7 +134,7 @@ export type IncomingMessage =
   | { type: 'alert:show'; payload: { message: string } }
   | { type: 'windowTarget:detected'; payload: { processName: string; windowTitle: string } }
   | { type: 'windowTarget:detectState'; payload: { detecting: boolean } }
-  | { type: 'update:available'; payload: { version: string; currentVersion: string } }
+  | { type: 'update:available'; payload: { version: string; currentVersion: string; notes: string[] } }
   | { type: 'update:progress'; payload: { percent: number } }
   | { type: 'update:ready'; payload: Record<string, never> }
   | { type: 'update:error'; payload: { message: string } }
@@ -213,7 +213,6 @@ export type OutgoingMessage =
   | { type: 'profile:import'; payload: Record<string, never> }
   | { type: 'update:check'; payload: Record<string, never> }
   | { type: 'update:apply'; payload: Record<string, never> }
-  | { type: 'update:dismiss'; payload: Record<string, never> }
   | { type: 'actions:addBrowserAction'; payload: { actionType: string; selector: string; browserText?: string; newTab?: boolean; insertIndex?: number } }
   | { type: 'browser:toggleRecording'; payload: { enabled: boolean } }
   | { type: 'browser:pickElement'; payload: Record<string, never> }
