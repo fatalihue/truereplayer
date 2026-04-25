@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using TrueReplayer.Models;
@@ -981,11 +982,100 @@ namespace TrueReplayer.Services
             NativeMethods.SendInput(1, new[] { clickInput }, inputSize);
         }
 
-        private async Task<string> ResolveBrowserTextPlaceholders(string text)
+        // Matches {clipboard} or {clipboard:modifier[:arg]...}
+        // Group 1 captures the modifier chain (without the leading colon); empty when no modifiers.
+        private static readonly Regex ClipboardTokenRegex = new(
+            @"\{clipboard(?::([^}]+))?\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        /// <summary>
+        /// Applies modifier chain (e.g. "trim:line:1:first:8:upper") to clipboard content.
+        /// Unknown modifiers are silently ignored so that future modifiers stay forward-compatible.
+        /// </summary>
+        internal static string ApplyClipboardModifiers(string content, string? modifierChain)
+        {
+            if (string.IsNullOrEmpty(modifierChain)) return content;
+            if (content == null) return string.Empty;
+
+            var parts = modifierChain.Split(':');
+            var result = content;
+            int i = 0;
+            while (i < parts.Length)
+            {
+                var mod = parts[i].ToLowerInvariant();
+                switch (mod)
+                {
+                    case "upper":
+                        result = result.ToUpperInvariant();
+                        i++;
+                        break;
+                    case "lower":
+                        result = result.ToLowerInvariant();
+                        i++;
+                        break;
+                    case "trim":
+                        result = result.Trim();
+                        i++;
+                        break;
+                    case "line":
+                        if (i + 1 < parts.Length && int.TryParse(parts[i + 1], out var lineN) && lineN >= 1)
+                        {
+                            var lines = result.Replace("\r\n", "\n").Split('\n');
+                            result = lineN <= lines.Length ? lines[lineN - 1] : string.Empty;
+                            i += 2;
+                        }
+                        else i++;
+                        break;
+                    case "word":
+                        if (i + 1 < parts.Length && int.TryParse(parts[i + 1], out var wordN) && wordN >= 1)
+                        {
+                            var words = result.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                            result = wordN <= words.Length ? words[wordN - 1] : string.Empty;
+                            i += 2;
+                        }
+                        else i++;
+                        break;
+                    case "first":
+                        if (i + 1 < parts.Length && int.TryParse(parts[i + 1], out var firstN) && firstN >= 0)
+                        {
+                            result = firstN >= result.Length ? result : result.Substring(0, firstN);
+                            i += 2;
+                        }
+                        else i++;
+                        break;
+                    case "last":
+                        if (i + 1 < parts.Length && int.TryParse(parts[i + 1], out var lastN) && lastN >= 0)
+                        {
+                            result = lastN >= result.Length ? result : result.Substring(result.Length - lastN);
+                            i += 2;
+                        }
+                        else i++;
+                        break;
+                    default:
+                        // Unknown modifier — skip it (forward-compat)
+                        i++;
+                        break;
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Replaces every {clipboard[:mods]} token in <paramref name="text"/> with the
+        /// clipboard content transformed by the given modifiers. Reads the clipboard only once.
+        /// If <paramref name="clipboardOverride"/> is non-null it is used instead of reading the OS clipboard.
+        /// </summary>
+        private async Task<string> ResolveClipboardTokens(string text, string? clipboardOverride = null)
         {
             if (string.IsNullOrEmpty(text)) return text;
+            if (!ClipboardTokenRegex.IsMatch(text)) return text;
 
-            if (text.Contains("{clipboard}", StringComparison.OrdinalIgnoreCase))
+            string? clipContent;
+            if (clipboardOverride != null)
+            {
+                clipContent = clipboardOverride;
+            }
+            else
             {
                 var tcsClip = new TaskCompletionSource<string?>();
                 dispatcherQueue.TryEnqueue(async () =>
@@ -1002,9 +1092,22 @@ namespace TrueReplayer.Services
                     }
                     catch { tcsClip.SetResult(null); }
                 });
-                var clipContent = await tcsClip.Task;
-                text = text.Replace("{clipboard}", clipContent ?? "", StringComparison.OrdinalIgnoreCase);
+                clipContent = await tcsClip.Task;
             }
+
+            var raw = clipContent ?? string.Empty;
+            return ClipboardTokenRegex.Replace(text, m =>
+            {
+                var mods = m.Groups[1].Success ? m.Groups[1].Value : null;
+                return ApplyClipboardModifiers(raw, mods);
+            });
+        }
+
+        private async Task<string> ResolveBrowserTextPlaceholders(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+
+            text = await ResolveClipboardTokens(text);
 
             var now = DateTime.Now;
             if (text.Contains("{datetime}", StringComparison.OrdinalIgnoreCase))
@@ -1045,11 +1148,9 @@ namespace TrueReplayer.Services
             });
             var originalClipboard = await tcsBackup.Task;
 
-            // Resolve {clipboard} placeholder using the saved clipboard content
-            if (text.Contains("{clipboard}", StringComparison.OrdinalIgnoreCase))
-            {
-                text = text.Replace("{clipboard}", originalClipboard ?? "", StringComparison.OrdinalIgnoreCase);
-            }
+            // Resolve {clipboard[:mods]} placeholders using the saved clipboard content
+            // so that subsequent writes to the clipboard (for pasting) don't affect token resolution.
+            text = await ResolveClipboardTokens(text, originalClipboard ?? string.Empty);
 
             // Resolve {datetime} before {date}/{time} to avoid partial matches
             var now = DateTime.Now;

@@ -134,6 +134,7 @@ export type IncomingMessage =
   | { type: 'alert:show'; payload: { message: string } }
   | { type: 'windowTarget:detected'; payload: { processName: string; windowTitle: string } }
   | { type: 'windowTarget:detectState'; payload: { detecting: boolean } }
+  | { type: 'clipboard:content'; payload: { text: string } }
   | { type: 'update:available'; payload: { version: string; currentVersion: string; notes: string[] } }
   | { type: 'update:progress'; payload: { percent: number } }
   | { type: 'update:ready'; payload: Record<string, never> }
@@ -211,6 +212,7 @@ export type OutgoingMessage =
   | { type: 'window:reloadUI'; payload: Record<string, never> }
   | { type: 'profile:export'; payload: { names: string[]; includeOrganization?: boolean } }
   | { type: 'profile:import'; payload: Record<string, never> }
+  | { type: 'clipboard:read'; payload: Record<string, never> }
   | { type: 'update:check'; payload: Record<string, never> }
   | { type: 'update:apply'; payload: Record<string, never> }
   | { type: 'actions:addBrowserAction'; payload: { actionType: string; selector: string; browserText?: string; newTab?: boolean; insertIndex?: number } }

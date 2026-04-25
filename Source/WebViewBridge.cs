@@ -263,6 +263,7 @@ namespace TrueReplayer
                     case "window:reloadUI": try { var url = webView.Source; webView.Navigate(url); } catch { } break;
                     case "update:check": _ = CheckForUpdateAsync(); break;
                     case "update:apply": _ = HandleUpdateApply(); break;
+                    case "clipboard:read": _ = HandleClipboardRead(); break;
                     case "hotkey:suppress": HandleHotkeySuppress(payload); break;
                     case "theme:colors": HandleThemeColors(payload); break;
                     default:
@@ -794,6 +795,24 @@ namespace TrueReplayer
             {
                 SendMessage("update:error", new { message = "Download failed" });
             }
+        }
+
+        private async Task HandleClipboardRead()
+        {
+            string content = string.Empty;
+            try
+            {
+                var data = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
+                if (data.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
+                {
+                    content = await data.GetTextAsync() ?? string.Empty;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Bridge] Clipboard read failed: {ex.Message}");
+            }
+            SendMessage("clipboard:content", new { text = content });
         }
 
         private void HandleThemeColors(JsonElement payload)
