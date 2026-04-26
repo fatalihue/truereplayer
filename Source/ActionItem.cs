@@ -30,6 +30,11 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
         public bool IsSkipped { get; set; }
 
+        // RunProfile action: how many times to invoke the called profile back-to-back.
+        // 1 means a single call. Default 1. Range enforced at edit time (1..999).
+        // Always serialized so backward-load of old profiles uses the property's default of 1.
+        public int RepeatCount { get; set; } = 1;
+
         [System.Text.Json.Serialization.JsonIgnore]
         public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
 
@@ -86,7 +91,8 @@ namespace TrueReplayer.Models
         private static readonly HashSet<string> NoCoordinateActionTypes = new(StringComparer.OrdinalIgnoreCase)
         {
             "KeyDown", "KeyUp", "ScrollUp", "ScrollDown", "SendText", "WaitImage",
-            "BrowserClick", "BrowserRightClick", "BrowserType", "BrowserWaitElement", "BrowserNavigate"
+            "BrowserClick", "BrowserRightClick", "BrowserType", "BrowserWaitElement", "BrowserNavigate",
+            "RunProfile"
         };
 
         private bool HideCoordinates => NoCoordinateActionTypes.Contains(ActionType ?? "");
@@ -103,6 +109,7 @@ namespace TrueReplayer.Models
                 if (ActionType == "SendText") return Key;
                 if (ActionType == "WaitImage") return $"{Timeout / 1000}s";
                 if (ActionType == "BrowserNavigate") return Key;
+                if (ActionType == "RunProfile") return RepeatCount > 1 ? $"{Key} ×{RepeatCount}" : Key;
                 if (ActionType == "BrowserClick" || ActionType == "BrowserRightClick" || ActionType == "BrowserType" || ActionType == "BrowserWaitElement")
                 {
                     var selector = Key.Length > 40 ? Key[..37] + "..." : Key;

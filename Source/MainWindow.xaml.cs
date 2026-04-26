@@ -109,6 +109,16 @@ namespace TrueReplayer
             mainController.UpdateButtonStates();
 
             profileController = new ProfileController(this);
+
+            // ── Profile chaining wiring ──
+            // Sub-profile resolver: RunProfile actions look up other profiles by name.
+            replayService.SetProfileLookup(name => profileController.LoadProfileByNameAsync(name));
+            // Chain-status callback: keeps the status bar's "Running A → B" display in sync.
+            replayService.SetChainChangedCallback(stack =>
+            {
+                bridge?.PushReplayChainUpdate(stack);
+            });
+
             this.Closed += (_, _) =>
             {
                 Services.DiagnosticLog.Info("Window closing — disposing bridge and controllers");

@@ -1,12 +1,13 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Copy, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Copy, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Workflow } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { useToast } from '../state/ToastContext';
 import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors } from '../utils/displayUtils';
 import { SendTextDialog } from './SendTextDialog';
+import { RunProfileDialog } from './RunProfileDialog';
 import { BulkActionBar } from './BulkActionBar';
 import type { ColumnVisibility } from './Toolbar';
 
@@ -19,6 +20,7 @@ function ActionIcon({ actionType }: { actionType: string }) {
   if (actionType.startsWith('Key')) return <Keyboard size={size} />;
   if (actionType === 'SendText') return <Type size={size} />;
   if (actionType === 'WaitImage') return <ScanSearch size={size} />;
+  if (actionType === 'RunProfile') return <Workflow size={size} />;
   return <Zap size={size} />;
 }
 
@@ -47,6 +49,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const prevProfileRef = useRef(activeProfile);
   const wasRecording = useRef(false);
   const [sendTextEdit, setSendTextEdit] = useState<{ index: number; text: string } | null>(null);
+  const [runProfileEdit, setRunProfileEdit] = useState<{ index: number; profileName: string; repeatCount: number } | null>(null);
   const [dragIndices, setDragIndices] = useState<number[] | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null);
 
@@ -586,7 +589,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               const isSelected = selectedIndices.has(idx);
               const displayKey = action.actionType === 'WaitImage'
                 ? ''
-                : getDisplayKey(action.key);
+                : action.actionType === 'RunProfile'
+                  ? (action.repeatCount && action.repeatCount > 1 ? `${action.key} ×${action.repeatCount}` : action.key)
+                  : getDisplayKey(action.key);
               const displayX = getDisplayX(action);
               const displayY = getDisplayY(action);
               const canEditXY = isMouseAction(action.actionType);
@@ -669,6 +674,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         : action.actionType === 'BrowserType' ? 'Input Text'
                         : action.actionType === 'BrowserWaitElement' ? 'Wait'
                         : action.actionType === 'BrowserNavigate' ? 'Navigate'
+                        : action.actionType === 'RunProfile' ? 'Run Profile'
                         : action.actionType}
                     </span>
                   </td>
@@ -691,14 +697,16 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     ) : displayKey ? (
                       <span
                         className={`inline-flex items-center translate-y-[-2px] px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input max-w-[92px] truncate ${
-                          action.actionType === 'SendText' || action.actionType.startsWith('Key')
+                          action.actionType === 'SendText' || action.actionType.startsWith('Key') || action.actionType === 'RunProfile'
                             ? 'cursor-text hover:text-accent-light'
                             : ''
                         }`}
-                        title={action.actionType === 'SendText' ? action.key : undefined}
+                        title={action.actionType === 'SendText' ? action.key : action.actionType === 'RunProfile' ? `Run profile "${action.key}"` : undefined}
                         onDoubleClick={() => {
                           if (action.actionType === 'SendText') {
                             setSendTextEdit({ index: idx, text: action.key });
+                          } else if (action.actionType === 'RunProfile') {
+                            setRunProfileEdit({ index: idx, profileName: action.key, repeatCount: action.repeatCount ?? 1 });
                           } else if (action.actionType.startsWith('Key')) {
                             startEdit(idx, 'key', action.key);
                           }
@@ -852,6 +860,18 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         />
       )}
 
+      {runProfileEdit && (
+        <RunProfileDialog
+          initial={{ profileName: runProfileEdit.profileName, repeatCount: runProfileEdit.repeatCount }}
+          excludeProfileName={activeProfile ?? undefined}
+          onConfirm={(profileName, repeatCount) => {
+            send({ type: 'actions:editRunProfile', payload: { index: runProfileEdit.index, profileName, repeatCount } });
+            setRunProfileEdit(null);
+          }}
+          onClose={() => setRunProfileEdit(null)}
+        />
+      )}
+
       {/* Bulk Action Bar — inline at bottom */}
       {selectedIndices.size > 0 && !buttonStates.recordingActive && !buttonStates.replayActive && (
         <BulkActionBar
@@ -940,13 +960,20 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
           <div className="my-1 border-t border-border-subtle" />
 
-          {/* Edit — SendText rows open SendTextDialog; others open sheet panel */}
+          {/* Edit — specialized dialogs for SendText / RunProfile; others fall back
+              to the generic sheet panel which only edits delay/comment/X/Y/key. */}
           <button
             onMouseEnter={() => setActiveSubmenu(null)}
             onClick={() => {
               const rowAction = actions[contextMenu.rowIndex];
               if (rowAction?.actionType === 'SendText') {
                 setSendTextEdit({ index: contextMenu.rowIndex, text: rowAction.key });
+              } else if (rowAction?.actionType === 'RunProfile') {
+                setRunProfileEdit({
+                  index: contextMenu.rowIndex,
+                  profileName: rowAction.key,
+                  repeatCount: rowAction.repeatCount ?? 1,
+                });
               } else {
                 onOpenSheet?.(contextMenu.rowIndex);
               }

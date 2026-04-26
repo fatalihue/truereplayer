@@ -131,6 +131,16 @@ namespace TrueReplayer.Services
             replayer.SetProfileNameProvider(getProfileName);
         }
 
+        public void SetProfileLookup(Func<string, Task<Models.UserProfile?>> lookup)
+        {
+            replayer.SetProfileLookup(lookup);
+        }
+
+        public void SetChainChangedCallback(Action<List<string>> callback)
+        {
+            replayer.SetChainChangedCallback(callback);
+        }
+
         public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation = false, int delayVariationPercent = 20, bool useRelativeCoords = false, Models.WindowTarget? windowTarget = null, bool bringToFocus = false, int lockWidth = 0, int lockHeight = 0, int lockX = 0, int lockY = 0, bool lockPosition = false, bool forceInfiniteLoop = false)
         {
             if (!IsReplaying && actions.Count > 0)
@@ -547,6 +557,19 @@ namespace TrueReplayer.Services
         private int _loopInterval = 0;
         private Func<string>? _getProfileName;
 
+        // ── Profile chaining ──
+        // Async lookup that resolves a profile name into its UserProfile. Returns null when missing.
+        private Func<string, Task<Models.UserProfile?>>? _profileLookup;
+        // Active call stack of profile names (excluding the root). Used for cycle detection
+        // and for the status-bar "A → B → C" display.
+        private readonly List<string> _callStack = new();
+        // Hard cap on how deep RunProfile chains can recurse. Prevents accidental infinite loops
+        // even if cycle detection were somehow bypassed.
+        private const int MaxCallDepth = 5;
+        // Fires whenever the call stack changes so the host can update the status bar.
+        // The argument is the current stack snapshot (empty when no sub-profile is running).
+        private Action<List<string>>? _onChainChanged;
+
         public event Action<ActionItem>? OnActionExecuting;
 
         public ActionReplayer(ObservableCollection<ActionItem> actions, DispatcherQueue dispatcherQueue, BrowserBridgeService? browserBridge = null)
@@ -559,6 +582,16 @@ namespace TrueReplayer.Services
         public void SetProfileNameProvider(Func<string> getProfileName)
         {
             _getProfileName = getProfileName;
+        }
+
+        public void SetProfileLookup(Func<string, Task<Models.UserProfile?>> lookup)
+        {
+            _profileLookup = lookup;
+        }
+
+        public void SetChainChangedCallback(Action<List<string>> callback)
+        {
+            _onChainChanged = callback;
         }
 
         public void SetLoopOptions(int loopCount, int loopInterval)
@@ -682,6 +715,17 @@ namespace TrueReplayer.Services
                     }
                 }
 
+                // Reset the call stack at the start of every replay run (in case a previous
+                // run was canceled mid-sub-profile, leaving stack residue). Push the ROOT
+                // profile name so cycle detection treats "A directly invoked → B → A" as a
+                // cycle. Without this, the root would be invisible to RunProfile and a
+                // sub-profile could re-call its own grandparent recursively.
+                _callStack.Clear();
+                var rootName = _getProfileName?.Invoke();
+                if (!string.IsNullOrEmpty(rootName))
+                    _callStack.Add(rootName);
+                NotifyChainChanged();
+
                 // Run replay on a dedicated thread to avoid blocking the thread pool
                 await Task.Factory.StartNew(async () =>
                 {
@@ -689,62 +733,7 @@ namespace TrueReplayer.Services
                     {
                         iteration++;
 
-                        for (int i = 0; i < snapshot.Count; i++)
-                        {
-                            if (token.IsCancellationRequested) break;
-                            var action = snapshot[i];
-                            // Skipped actions: retained in the list but not replayed.
-                            // Their delay is also skipped — treat as if the line doesn't exist.
-                            if (action.IsSkipped) continue;
-                            int safeDelay = Math.Max(0, action.Delay);
-                            if (_useDelayVariation && _delayVariationPercent > 0 && safeDelay > 0)
-                            {
-                                int variation = safeDelay * _delayVariationPercent / 100;
-                                safeDelay += Random.Shared.Next(-variation, variation + 1);
-                                safeDelay = Math.Max(0, safeDelay);
-                            }
-
-                            await Task.Delay(safeDelay, token);
-                            dispatcherQueue.TryEnqueue(() => OnActionExecuting?.Invoke(action));
-                            InputHookManager.IsReplayingAction = true;
-
-                            try
-                            {
-                                switch (action.ActionType)
-                                {
-                                    case "KeyDown": SimulateKey(action.Key, true); break;
-                                    case "KeyUp": SimulateKey(action.Key, false); break;
-                                    case "LeftClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN); _simLeftDown = true; break;
-                                    case "LeftClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP); _simLeftDown = false; break;
-                                    case "RightClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTDOWN); _simRightDown = true; break;
-                                    case "RightClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTUP); _simRightDown = false; break;
-                                    case "MiddleClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN); _simMiddleDown = true; break;
-                                    case "MiddleClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEUP); _simMiddleDown = false; break;
-                                    case "ScrollUp": SimulateScroll(120); break;
-                                    case "ScrollDown": SimulateScroll(-120); break;
-                                    case "SendText": await SimulateClipboardPaste(action.Key, token); break;
-                                    case "WaitImage": await ExecuteWaitImage(action, token); break;
-                                    case "BrowserClick":
-                                    case "BrowserRightClick":
-                                    case "BrowserType":
-                                    case "BrowserWaitElement":
-                                    case "BrowserNavigate":
-                                        if (_browserBridge != null)
-                                        {
-                                            // Resolve {clipboard}, {date}, {time}, {datetime} in BrowserText without mutating original
-                                            string? resolvedText = null;
-                                            if (action.ActionType == "BrowserType" && !string.IsNullOrEmpty(action.BrowserText))
-                                                resolvedText = await ResolveBrowserTextPlaceholders(action.BrowserText);
-                                            await _browserBridge.ExecuteBrowserCommandAsync(action, token, action.Timeout > 0 ? action.Timeout : 5000, resolvedText);
-                                        }
-                                        break;
-                                }
-                            }
-                            finally
-                            {
-                                InputHookManager.IsReplayingAction = false;
-                            }
-                        }
+                        await ExecuteActionsAsync(snapshot, token);
 
                         if (!token.IsCancellationRequested && (isInfinite || iteration < _loopCount) && _loopInterval > 0)
                             await Task.Delay(_loopInterval, token);
@@ -752,6 +741,271 @@ namespace TrueReplayer.Services
                 }, token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
             }
             catch (TaskCanceledException) { }
+            finally
+            {
+                _callStack.Clear();
+                NotifyChainChanged();
+            }
+        }
+
+        /// <summary>
+        /// Executes a flat list of actions sequentially. Reentrant: a RunProfile action invokes
+        /// this method again with the sub-profile's actions. Honors the same cancellation token,
+        /// delay variation and skip behavior as the top-level loop.
+        /// </summary>
+        private async Task ExecuteActionsAsync(List<ActionItem> actions, CancellationToken token)
+        {
+            for (int i = 0; i < actions.Count; i++)
+            {
+                if (token.IsCancellationRequested) break;
+                var action = actions[i];
+                if (action.IsSkipped) continue;
+                int safeDelay = Math.Max(0, action.Delay);
+                if (_useDelayVariation && _delayVariationPercent > 0 && safeDelay > 0)
+                {
+                    int variation = safeDelay * _delayVariationPercent / 100;
+                    safeDelay += Random.Shared.Next(-variation, variation + 1);
+                    safeDelay = Math.Max(0, safeDelay);
+                }
+
+                await Task.Delay(safeDelay, token);
+                dispatcherQueue.TryEnqueue(() => OnActionExecuting?.Invoke(action));
+                InputHookManager.IsReplayingAction = true;
+
+                try
+                {
+                    switch (action.ActionType)
+                    {
+                        case "KeyDown": SimulateKey(action.Key, true); break;
+                        case "KeyUp": SimulateKey(action.Key, false); break;
+                        case "LeftClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN); _simLeftDown = true; break;
+                        case "LeftClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP); _simLeftDown = false; break;
+                        case "RightClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTDOWN); _simRightDown = true; break;
+                        case "RightClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTUP); _simRightDown = false; break;
+                        case "MiddleClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN); _simMiddleDown = true; break;
+                        case "MiddleClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEUP); _simMiddleDown = false; break;
+                        case "ScrollUp": SimulateScroll(120); break;
+                        case "ScrollDown": SimulateScroll(-120); break;
+                        case "SendText": await SimulateClipboardPaste(action.Key, token); break;
+                        case "WaitImage": await ExecuteWaitImage(action, token); break;
+                        case "RunProfile": await HandleRunProfile(action, token); break;
+                        case "BrowserClick":
+                        case "BrowserRightClick":
+                        case "BrowserType":
+                        case "BrowserWaitElement":
+                        case "BrowserNavigate":
+                            if (_browserBridge != null)
+                            {
+                                // Resolve {clipboard}, {date}, {time}, {datetime} in BrowserText without mutating original
+                                string? resolvedText = null;
+                                if (action.ActionType == "BrowserType" && !string.IsNullOrEmpty(action.BrowserText))
+                                    resolvedText = await ResolveBrowserTextPlaceholders(action.BrowserText);
+                                await _browserBridge.ExecuteBrowserCommandAsync(action, token, action.Timeout > 0 ? action.Timeout : 5000, resolvedText);
+                            }
+                            break;
+                    }
+                }
+                finally
+                {
+                    InputHookManager.IsReplayingAction = false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Saved snapshot of the window-context state so a sub-profile can apply its own without
+        /// destroying the caller's context.
+        /// </summary>
+        private struct WindowContextSnapshot
+        {
+            public bool UseRelativeCoordinates;
+            public Models.WindowTarget? WindowTarget;
+            public int LockWidth, LockHeight, LockX, LockY;
+            public bool LockPosition;
+            public bool BringToFocus;
+        }
+
+        private WindowContextSnapshot SaveWindowContext() => new()
+        {
+            UseRelativeCoordinates = _useRelativeCoordinates,
+            WindowTarget = _windowTarget,
+            LockWidth = _lockWidth,
+            LockHeight = _lockHeight,
+            LockX = _lockX,
+            LockY = _lockY,
+            LockPosition = _lockPosition,
+            BringToFocus = _bringToFocus,
+        };
+
+        private void RestoreWindowContext(WindowContextSnapshot snap)
+        {
+            _useRelativeCoordinates = snap.UseRelativeCoordinates;
+            _windowTarget = snap.WindowTarget;
+            _lockWidth = snap.LockWidth;
+            _lockHeight = snap.LockHeight;
+            _lockX = snap.LockX;
+            _lockY = snap.LockY;
+            _lockPosition = snap.LockPosition;
+            _bringToFocus = snap.BringToFocus;
+        }
+
+        /// <summary>
+        /// Runs the focus + lock-position + lock-size setup that StartAsync does at the top,
+        /// but extracted so a sub-profile entry can apply its own target window the same way.
+        /// </summary>
+        private async Task ApplyWindowContextAsync(CancellationToken token)
+        {
+            if (_bringToFocus && _windowTarget != null)
+            {
+                var targetHwnd = FindTargetWindow();
+                if (targetHwnd != IntPtr.Zero)
+                {
+                    if (NativeMethods.IsIconic(targetHwnd))
+                        NativeMethods.ShowWindow(targetHwnd, 9); // SW_RESTORE
+                    var fgHwnd = NativeMethods.GetForegroundWindow();
+                    uint fgThread = NativeMethods.GetWindowThreadProcessId(fgHwnd, out _);
+                    uint curThread = NativeMethods.GetCurrentThreadId();
+                    if (fgThread != curThread)
+                        NativeMethods.AttachThreadInput(fgThread, curThread, true);
+                    NativeMethods.SetForegroundWindow(targetHwnd);
+                    if (fgThread != curThread)
+                        NativeMethods.AttachThreadInput(fgThread, curThread, false);
+                    await Task.Delay(200, token);
+                }
+            }
+
+            bool hasSize = _lockWidth > 0 && _lockHeight > 0;
+            if (_windowTarget != null && (hasSize || _lockPosition))
+            {
+                var sizeHwnd = FindTargetWindow();
+                if (sizeHwnd != IntPtr.Zero && !NativeMethods.IsIconic(sizeHwnd))
+                {
+                    uint flags = NativeMethods.SWP_NOZORDER;
+                    if (!_lockPosition) flags |= NativeMethods.SWP_NOMOVE;
+                    if (!hasSize) flags |= NativeMethods.SWP_NOSIZE;
+                    int posX = _lockPosition ? _lockX : 0;
+                    int posY = _lockPosition ? _lockY : 0;
+                    int sizeW = hasSize ? _lockWidth : 0;
+                    int sizeH = hasSize ? _lockHeight : 0;
+                    NativeMethods.SetWindowPos(sizeHwnd, IntPtr.Zero, posX, posY, sizeW, sizeH, flags);
+                    await Task.Delay(80, token);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Resolves a RunProfile action: validates target, guards cycles and depth, applies the
+        /// sub-profile's window context (if it has one), executes its actions N times, then
+        /// restores the caller's context.
+        /// </summary>
+        private async Task HandleRunProfile(ActionItem action, CancellationToken token)
+        {
+            var targetName = action.Key?.Trim();
+            if (string.IsNullOrEmpty(targetName))
+            {
+                DiagnosticLog.Info("[Chain] RunProfile with empty profile name — skipped.");
+                return;
+            }
+
+            // Cycle detection: refuse if the target is already on the active call stack.
+            if (_callStack.Contains(targetName, StringComparer.OrdinalIgnoreCase))
+            {
+                var path = string.Join(" → ", _callStack) + " → " + targetName;
+                DiagnosticLog.Info($"[Chain] Cycle detected, aborting sub-call: {path}");
+                return;
+            }
+
+            // Hard depth cap as a defensive belt-and-suspenders even when cycle detection passes.
+            if (_callStack.Count >= MaxCallDepth)
+            {
+                DiagnosticLog.Info($"[Chain] Max depth {MaxCallDepth} exceeded at '{targetName}', aborting.");
+                return;
+            }
+
+            if (_profileLookup == null)
+            {
+                DiagnosticLog.Info("[Chain] Profile lookup not configured — RunProfile is a no-op.");
+                return;
+            }
+
+            Models.UserProfile? subProfile;
+            try
+            {
+                subProfile = await _profileLookup(targetName);
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Info($"[Chain] Profile lookup threw for '{targetName}': {ex.Message}");
+                return;
+            }
+
+            if (subProfile == null)
+            {
+                DiagnosticLog.Info($"[Chain] Profile '{targetName}' not found, skipping.");
+                return;
+            }
+
+            // Push and update chain status BEFORE applying sub context so the user sees the
+            // chain even during the focus/lock setup phase.
+            _callStack.Add(targetName);
+            NotifyChainChanged();
+
+            var savedContext = SaveWindowContext();
+            try
+            {
+                // If sub has its own target, switch into its context. Otherwise inherit caller's.
+                if (subProfile.TargetWindow != null)
+                {
+                    _windowTarget = subProfile.TargetWindow;
+                    _useRelativeCoordinates = subProfile.UseRelativeCoordinates;
+                    _bringToFocus = subProfile.BringToFocus;
+                    _lockPosition = subProfile.LockPosition;
+                    _lockWidth = subProfile.WindowWidth;
+                    _lockHeight = subProfile.WindowHeight;
+                    _lockX = subProfile.WindowX;
+                    _lockY = subProfile.WindowY;
+                    await ApplyWindowContextAsync(token);
+                }
+
+                int repeats = Math.Max(1, action.RepeatCount);
+                var subActions = subProfile.Actions.ToList();
+                for (int r = 0; r < repeats && !token.IsCancellationRequested; r++)
+                {
+                    await ExecuteActionsAsync(subActions, token);
+                }
+            }
+            finally
+            {
+                RestoreWindowContext(savedContext);
+
+                // After returning to the caller's context, re-bring its window to focus so the
+                // remaining actions of the parent run against the intended window. We don't
+                // re-apply lock-position because the window is still where we put it.
+                if (_bringToFocus && _windowTarget != null && !token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        var hwnd = FindTargetWindow();
+                        if (hwnd != IntPtr.Zero)
+                        {
+                            NativeMethods.SetForegroundWindow(hwnd);
+                            await Task.Delay(80, token);
+                        }
+                    }
+                    catch { /* best-effort restore */ }
+                }
+
+                if (_callStack.Count > 0) _callStack.RemoveAt(_callStack.Count - 1);
+                NotifyChainChanged();
+            }
+        }
+
+        private void NotifyChainChanged()
+        {
+            if (_onChainChanged == null) return;
+            // Send a defensive copy so callers can't mutate our internal state.
+            var snapshot = new List<string>(_callStack);
+            dispatcherQueue.TryEnqueue(() => _onChainChanged?.Invoke(snapshot));
         }
 
         private static readonly Dictionary<string, int> ModifierGenericVkCodes = new(StringComparer.OrdinalIgnoreCase)

@@ -44,6 +44,7 @@ export interface ThemeUISettings {
   actionSendTextColor: string;
   actionWaitImageColor: string;
   actionBrowserColor: string;
+  actionRunProfileColor: string;
   fontMono: string;
 }
 
@@ -60,6 +61,9 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   actionSendTextColor: '#d4a020',
   actionWaitImageColor: '#e879f9',
   actionBrowserColor: '#fb923c',
+  // True blue, picked to be distinct from Key cyan (#60cdff) and Mouse purple
+  // (#a78bfa). Carries the "control flow / chain call" semantic.
+  actionRunProfileColor: '#3b82f6',
   fontMono: 'Consolas',
 };
 
@@ -764,6 +768,8 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   root.style.setProperty('--color-action-waitimage-bg', `color-mix(in srgb, ${uiSettings.actionWaitImageColor} 10%, transparent)`);
   root.style.setProperty('--color-action-browser-fg', uiSettings.actionBrowserColor);
   root.style.setProperty('--color-action-browser-bg', `color-mix(in srgb, ${uiSettings.actionBrowserColor} 10%, transparent)`);
+  root.style.setProperty('--color-action-runprofile-fg', uiSettings.actionRunProfileColor);
+  root.style.setProperty('--color-action-runprofile-bg', `color-mix(in srgb, ${uiSettings.actionRunProfileColor} 10%, transparent)`);
   // Font
   root.style.setProperty('--font-mono', `'${uiSettings.fontMono}', 'Courier New', monospace`);
 }

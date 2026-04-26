@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ChevronUp, ChevronDown, ScanSearch, Plus, Mouse, Keyboard, ArrowUp, ArrowDown, Globe } from 'lucide-react';
+import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ChevronUp, ChevronDown, ScanSearch, Plus, Mouse, Keyboard, ArrowUp, ArrowDown, Globe, Workflow } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { ThemeEditor } from './ThemeEditor';
 import { SendTextDialog } from './SendTextDialog';
+import { RunProfileDialog } from './RunProfileDialog';
 import { NavigateDialog } from './NavigateDialog';
 
 export interface ColumnVisibility {
@@ -31,7 +32,7 @@ interface ToolbarProps {
 }
 
 export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarProps) {
-  const { toolbar, buttonStates, actions } = useAppState();
+  const { toolbar, buttonStates, actions, activeProfile } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
   const [showThemeEditor, setShowThemeEditor] = useState(false);
@@ -40,6 +41,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
   const [showAddActions, setShowAddActions] = useState(false);
   const [showBrowserMenu, setShowBrowserMenu] = useState(false);
   const [showNavigateDialog, setShowNavigateDialog] = useState(false);
+  const [showRunProfileDialog, setShowRunProfileDialog] = useState(false);
   const colDropdownRef = useRef<HTMLDivElement>(null);
   const addActionsRef = useRef<HTMLDivElement>(null);
   const browserMenuRef = useRef<HTMLDivElement>(null);
@@ -277,6 +279,17 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             <ScanSearch size={14} />
           </button>
 
+          {/* Run Profile (chain) */}
+          <button
+            tabIndex={-1}
+            onClick={() => setShowRunProfileDialog(true)}
+            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip="Run Profile"
+          >
+            <Workflow size={14} />
+          </button>
+
           {/* Browser Actions */}
           <div className="relative" ref={browserMenuRef}>
             <button
@@ -429,6 +442,19 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             setShowSendTextDialog(false);
           }}
           onClose={() => setShowSendTextDialog(false)}
+        />
+      )}
+
+      {showRunProfileDialog && (
+        <RunProfileDialog
+          excludeProfileName={activeProfile ?? undefined}
+          onConfirm={(profileName, repeatCount) => {
+            const sel = selectionRef.current;
+            const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : undefined;
+            send({ type: 'actions:addRunProfile', payload: { profileName, repeatCount, insertIndex } });
+            setShowRunProfileDialog(false);
+          }}
+          onClose={() => setShowRunProfileDialog(false)}
         />
       )}
 

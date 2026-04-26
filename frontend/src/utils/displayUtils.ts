@@ -17,7 +17,7 @@ const DISPLAY_KEY_MAP: Record<string, string> = {
   'Next': 'Page Down', 'Prior': 'Page Up',
 };
 
-const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate']);
+const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'RunProfile']);
 
 export function getDisplayKey(key: string): string {
   if (!key) return '';
@@ -46,6 +46,8 @@ export function getActionTypeColors(actionType: string) {
     return { bg: 'var(--color-action-sendtext-bg)', fg: 'var(--color-action-sendtext-fg)' };
   if (actionType === 'WaitImage')
     return { bg: 'var(--color-action-waitimage-bg)', fg: 'var(--color-action-waitimage-fg)' };
+  if (actionType === 'RunProfile')
+    return { bg: 'var(--color-action-runprofile-bg)', fg: 'var(--color-action-runprofile-fg)' };
   return { bg: 'transparent', fg: 'var(--color-text-tertiary)' };
 }
 
@@ -57,5 +59,6 @@ export function getActionTypeIcon(actionType: string): string {
   if (actionType.startsWith('Key')) return 'Keyboard';
   if (actionType === 'SendText') return 'Type';
   if (actionType === 'WaitImage') return 'ScanSearch';
+  if (actionType === 'RunProfile') return 'Workflow';
   return 'Zap';
 }
