@@ -64,13 +64,13 @@ function ColorRow({ label, colorKey, value, baseValue, onChange, onReset }: {
   const hexValue = toHex(value);
 
   return (
-    <div className="flex items-center gap-2 py-1 group">
+    <div className="flex items-center gap-2 py-0.5 group">
       <div className="flex items-center gap-1.5 w-[90px]">
         {isOverridden && <div className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
         <span className={`text-xs ${isOverridden ? 'text-text-primary' : 'text-text-secondary'}`}>{label}</span>
       </div>
 
-      <label className="relative w-7 h-7 rounded border border-border-default cursor-pointer shrink-0 overflow-hidden">
+      <label className="relative w-6 h-6 rounded border border-border-default cursor-pointer shrink-0 overflow-hidden">
         <div className="absolute inset-0" style={{ backgroundColor: value }} />
         <input
           type="color"
@@ -92,12 +92,12 @@ function ColorRow({ label, colorKey, value, baseValue, onChange, onReset }: {
             onChange(colorKey, withOriginalAlpha(v, value));
           }
         }}
-        className="w-[80px] h-7 px-2 text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
+        className="w-[80px] h-6 px-2 text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
       />
 
       <button
         onClick={() => onReset(colorKey)}
-        className={`p-1 rounded text-text-disabled hover:text-text-primary hover:bg-bg-elevated transition-colors ${isOverridden ? 'visible' : 'invisible'}`}
+        className={`p-0.5 rounded text-text-disabled hover:text-text-primary hover:bg-bg-elevated transition-colors ${isOverridden ? 'visible' : 'invisible'}`}
         title="Reset to base"
       >
         <RotateCcw size={12} />
@@ -137,7 +137,7 @@ function SliderSetting({ label, value, min, max, unit, onChange }: {
   }, [min, max, onChange]);
 
   return (
-    <div ref={containerRef} className="flex items-center gap-3 py-2" onMouseEnter={() => { hovering.current = true; }} onMouseLeave={() => { hovering.current = false; }}>
+    <div ref={containerRef} className="flex items-center gap-3 py-1" onMouseEnter={() => { hovering.current = true; }} onMouseLeave={() => { hovering.current = false; }}>
       <span className="text-xs text-text-secondary w-[100px]">{label}</span>
       <input
         type="range"
@@ -183,12 +183,12 @@ function AppearanceColorRow({ label, value, defaultValue, onChange }: {
 }) {
   const isCustom = value !== defaultValue;
   return (
-    <div className="flex items-center gap-2 py-1 group">
+    <div className="flex items-center gap-2 py-0.5 group">
       <div className="flex items-center gap-1.5 w-[100px]">
         {isCustom && <div className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
         <span className={`text-xs ${isCustom ? 'text-text-primary' : 'text-text-secondary'}`}>{label}</span>
       </div>
-      <label className="relative w-7 h-7 rounded border border-border-default cursor-pointer shrink-0 overflow-hidden">
+      <label className="relative w-6 h-6 rounded border border-border-default cursor-pointer shrink-0 overflow-hidden">
         <div className="absolute inset-0" style={{ backgroundColor: value }} />
         <input
           type="color"
@@ -203,11 +203,11 @@ function AppearanceColorRow({ label, value, defaultValue, onChange }: {
         onChange={(e) => {
           if (/^#[0-9a-fA-F]{6}$/.test(e.target.value)) onChange(e.target.value);
         }}
-        className="w-[80px] h-7 px-2 text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
+        className="w-[80px] h-6 px-2 text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
       />
       <button
         onClick={() => onChange(defaultValue)}
-        className={`p-1 rounded text-text-disabled hover:text-text-primary hover:bg-bg-elevated transition-colors ${isCustom ? 'visible' : 'invisible'}`}
+        className={`p-0.5 rounded text-text-disabled hover:text-text-primary hover:bg-bg-elevated transition-colors ${isCustom ? 'visible' : 'invisible'}`}
         title="Reset to default"
       >
         <RotateCcw size={12} />
@@ -437,20 +437,20 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
 
           {/* ═══ Tab 2: Colors ═══ */}
           {activeTab === 'colors' && (
-            <div className="p-4 space-y-1">
+            <div className="p-3 space-y-1">
               {COLOR_SECTIONS.map(section => {
                 const isCollapsed = collapsedSections.has(section.title);
                 return (
                   <div key={section.title} className="border border-border-subtle rounded-md overflow-hidden">
                     <button
                       onClick={() => toggleSection(section.title)}
-                      className="w-full flex items-center justify-between px-3 py-2 hover:bg-bg-card transition-colors"
+                      className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-bg-card transition-colors"
                     >
                       <span className="text-xs font-semibold text-text-primary">{section.title}</span>
                       <span className="text-xs text-text-disabled">{isCollapsed ? '+' : '-'}</span>
                     </button>
                     {!isCollapsed && (
-                      <div className="px-3 pb-2">
+                      <div className="px-3 pb-1.5">
                         {section.keys.map(key => (
                           <ColorRow
                             key={key}
@@ -492,10 +492,10 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
 
           {/* ═══ Tab 3: Appearance ═══ */}
           {activeTab === 'appearance' && (
-            <div className="p-4 space-y-4">
+            <div className="p-3 space-y-2">
               {/* Layout */}
               <div>
-                <div className="text-[11px] font-semibold text-text-disabled mb-1">LAYOUT</div>
+                <div className="text-[11px] font-semibold text-text-disabled mb-0.5">LAYOUT</div>
                 <SliderSetting
                   label="Font Size"
                   value={config.uiSettings.fontSize}
@@ -532,7 +532,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
 
               {/* Semantic Colors */}
               <div>
-                <div className="text-[11px] font-semibold text-text-disabled mb-1">SEMANTIC COLORS</div>
+                <div className="text-[11px] font-semibold text-text-disabled mb-0.5">SEMANTIC COLORS</div>
                 <AppearanceColorRow
                   label="Recording"
                   value={config.uiSettings.recordingColor}
@@ -549,7 +549,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
 
               {/* Action Type Colors */}
               <div>
-                <div className="text-[11px] font-semibold text-text-disabled mb-1">ACTION TYPES</div>
+                <div className="text-[11px] font-semibold text-text-disabled mb-0.5">ACTION TYPES</div>
                 <AppearanceColorRow
                   label="Mouse"
                   value={config.uiSettings.actionMouseColor}
@@ -586,12 +586,18 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                   defaultValue={DEFAULT_UI_SETTINGS.actionBrowserColor}
                   onChange={(v) => setUISetting('actionBrowserColor', v)}
                 />
+                <AppearanceColorRow
+                  label="Run Profile"
+                  value={config.uiSettings.actionRunProfileColor}
+                  defaultValue={DEFAULT_UI_SETTINGS.actionRunProfileColor}
+                  onChange={(v) => setUISetting('actionRunProfileColor', v)}
+                />
               </div>
 
               {/* Font */}
               <div>
-                <div className="text-[11px] font-semibold text-text-disabled mb-1">FONT</div>
-                <div className="flex items-center gap-2 py-1">
+                <div className="text-[11px] font-semibold text-text-disabled mb-0.5">FONT</div>
+                <div className="flex items-center gap-2 py-0.5">
                   <span className="text-xs text-text-secondary w-[100px]">Monospace</span>
                   <select
                     value={MONO_FONTS.includes(config.uiSettings.fontMono) ? config.uiSettings.fontMono : '__custom'}

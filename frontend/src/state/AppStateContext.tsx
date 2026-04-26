@@ -51,6 +51,7 @@ const initialState: AppState = {
     canRedo: false,
     copiedCount: 0,
   },
+  replayChain: [],
 };
 
 function appStateReducer(state: AppState, message: IncomingMessage): AppState {
@@ -73,6 +74,8 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
       return { ...state, toolbar: message.payload };
     case 'statusbar:updated':
       return { ...state, statusBar: message.payload };
+    case 'replay:chain':
+      return { ...state, replayChain: message.payload.stack };
     default:
       return state;
   }

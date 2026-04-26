@@ -213,6 +213,8 @@ namespace TrueReplayer
                     case "actions:reorder": HandleActionsReorder(payload); break;
                     case "actions:insertAction": HandleInsertAction(payload); break;
                     case "actions:duplicate": HandleDuplicateActions(payload); break;
+                    case "actions:addRunProfile": HandleAddRunProfile(payload); break;
+                    case "actions:editRunProfile": HandleEditRunProfile(payload); break;
                     case "waitimage:recapture": HandleWaitImageRecapture(payload); break;
                     case "actions:addBrowserAction": HandleAddBrowserAction(payload); break;
                     case "browser:toggleRecording": HandleBrowserToggleRecording(payload); break;
@@ -263,6 +265,7 @@ namespace TrueReplayer
                     case "window:reloadUI": try { var url = webView.Source; webView.Navigate(url); } catch { } break;
                     case "update:check": _ = CheckForUpdateAsync(); break;
                     case "update:apply": _ = HandleUpdateApply(); break;
+                    case "clipboard:read": _ = HandleClipboardRead(); break;
                     case "hotkey:suppress": HandleHotkeySuppress(payload); break;
                     case "theme:colors": HandleThemeColors(payload); break;
                     default:
@@ -339,7 +342,8 @@ namespace TrueReplayer
                     : "",
                 browserText = a.BrowserText ?? "",
                 newTab = a.NewTab,
-                isSkipped = a.IsSkipped
+                isSkipped = a.IsSkipped,
+                repeatCount = a.RepeatCount
             }).ToArray();
 
             SendMessage("actions:updated", new { actions = actionsList });
@@ -645,7 +649,8 @@ namespace TrueReplayer
                         : "",
                     browserText = a.BrowserText ?? "",
                     newTab = a.NewTab,
-                    isSkipped = a.IsSkipped
+                    isSkipped = a.IsSkipped,
+                    repeatCount = a.RepeatCount
                 }).ToArray(),
                 highlightedActionIndex = (int?)null,
                 profiles = profileController.ProfileEntries.Select(p => new
@@ -794,6 +799,24 @@ namespace TrueReplayer
             {
                 SendMessage("update:error", new { message = "Download failed" });
             }
+        }
+
+        private async Task HandleClipboardRead()
+        {
+            string content = string.Empty;
+            try
+            {
+                var data = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
+                if (data.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
+                {
+                    content = await data.GetTextAsync() ?? string.Empty;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Bridge] Clipboard read failed: {ex.Message}");
+            }
+            SendMessage("clipboard:content", new { text = content });
         }
 
         private void HandleThemeColors(JsonElement payload)
@@ -1192,6 +1215,77 @@ namespace TrueReplayer
             actions[index].Key = text;
             HasUnsavedChanges = true;
             PushActionsUpdate();
+        }
+
+        // ── Profile chaining: insert / edit a RunProfile action ──
+
+        private void HandleAddRunProfile(JsonElement payload)
+        {
+            PushUndoState();
+            string targetName = payload.GetProperty("profileName").GetString() ?? "";
+            if (string.IsNullOrEmpty(targetName)) return;
+
+            int repeat = 1;
+            if (payload.TryGetProperty("repeatCount", out var rEl) && rEl.ValueKind == JsonValueKind.Number)
+                repeat = Math.Clamp(rEl.GetInt32(), 1, 999);
+
+            int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
+            var action = new ActionItem
+            {
+                ActionType = "RunProfile",
+                Key = targetName,
+                RepeatCount = repeat,
+                Delay = delay,
+            };
+
+            if (payload.TryGetProperty("insertIndex", out var idxEl) && idxEl.ValueKind == JsonValueKind.Number)
+            {
+                int idx = idxEl.GetInt32();
+                if (idx >= 0 && idx <= actions.Count)
+                    actions.Insert(idx, action);
+                else
+                    actions.Add(action);
+            }
+            else
+            {
+                actions.Add(action);
+            }
+
+            for (int i = 0; i < actions.Count; i++)
+                actions[i].RowNumber = i + 1;
+
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+            mainController.UpdateButtonStates();
+        }
+
+        private void HandleEditRunProfile(JsonElement payload)
+        {
+            PushUndoState();
+            int index = payload.GetProperty("index").GetInt32();
+            if (index < 0 || index >= actions.Count) return;
+            if (actions[index].ActionType != "RunProfile") return;
+
+            if (payload.TryGetProperty("profileName", out var nameEl) && nameEl.ValueKind == JsonValueKind.String)
+            {
+                var name = nameEl.GetString();
+                if (!string.IsNullOrEmpty(name)) actions[index].Key = name;
+            }
+
+            if (payload.TryGetProperty("repeatCount", out var rEl) && rEl.ValueKind == JsonValueKind.Number)
+                actions[index].RepeatCount = Math.Clamp(rEl.GetInt32(), 1, 999);
+
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+        }
+
+        /// <summary>
+        /// Pushes the current sub-profile call stack to the UI. Empty list = not in a chain.
+        /// React renders "Running A → B" in the status bar based on this.
+        /// </summary>
+        public void PushReplayChainUpdate(List<string> stack)
+        {
+            SendMessage("replay:chain", new { stack });
         }
 
         private void HandleInsertAction(JsonElement payload)
