@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ChevronUp, ChevronDown, ScanSearch, Plus, Mouse, Keyboard, ArrowUp, ArrowDown, Globe, Workflow } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -29,6 +29,60 @@ export const defaultColumnVisibility: ColumnVisibility = {
 interface ToolbarProps {
   columnVisibility: ColumnVisibility;
   onColumnVisibilityChange: (vis: ColumnVisibility) => void;
+}
+
+/**
+ * Profile-name display that gracefully degrades:
+ * 1. fits at base size → text-base (16px)
+ * 2. slightly too long  → text-sm (14px) — keeps the full name readable
+ * 3. way too long       → text-sm + ellipsis truncation
+ *
+ * Width is measured via a hidden mirror element so we always know the
+ * NATURAL width at base size, regardless of which class is currently
+ * applied to the visible span.
+ */
+function ResponsiveProfileName({ name }: { name: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef<HTMLSpanElement>(null);
+  const [size, setSize] = useState<'base' | 'sm'>('base');
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const measure = measureRef.current;
+    if (!container || !measure) return;
+
+    const update = () => {
+      const naturalWidth = measure.scrollWidth;
+      const available = container.clientWidth;
+      // 4px slack so we don't toggle for sub-pixel rounding
+      setSize(naturalWidth > available + 4 ? 'sm' : 'base');
+    };
+
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [name]);
+
+  return (
+    <div ref={containerRef} className="flex-1 min-w-0 relative">
+      <span
+        className={`block font-semibold text-text-primary truncate ${size === 'sm' ? 'text-sm' : 'text-base'}`}
+        title={name}
+      >
+        {name}
+      </span>
+      {/* Off-screen mirror used only to measure the unconstrained natural width
+          at base size. Kept aria-hidden so screen readers don't see it twice. */}
+      <span
+        ref={measureRef}
+        className="absolute -left-[9999px] top-0 font-semibold text-base whitespace-nowrap pointer-events-none"
+        aria-hidden="true"
+      >
+        {name}
+      </span>
+    </div>
+  );
 }
 
 export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarProps) {
@@ -128,17 +182,14 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
 
   return (
     <>
-      <div className="flex items-center justify-between px-4 py-2.5 bg-bg-surface border border-border-subtle rounded-ui">
-        {/* Left: profile name + action count */}
-        <div className="flex items-center gap-3">
-          <span className="text-base font-semibold text-text-primary">{toolbar.profileName}</span>
-          <span className="px-2.5 py-0.5 text-xs text-text-tertiary border border-border-subtle rounded-full">
-            {toolbar.actionCount} actions
-          </span>
-        </div>
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-bg-surface border border-border-subtle rounded-ui">
+        {/* Left: profile name (responsive font + truncation when very long).
+            Action count is intentionally omitted here — the status bar shows
+            it discreetly, which is sufficient. */}
+        <ResponsiveProfileName name={toolbar.profileName} />
 
         {/* Right: tools — prevent focus on click so Space/Enter can't re-trigger */}
-        <div className="flex items-center gap-1" onMouseDown={(e) => e.preventDefault()}>
+        <div className="flex items-center gap-1 shrink-0" onMouseDown={(e) => e.preventDefault()}>
           {/* Undo / Redo */}
           <button
             tabIndex={-1}
