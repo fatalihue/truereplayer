@@ -560,7 +560,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           >
             <CheckboxBox
               checked={actions.length > 0 && selectedIndices.size === actions.length}
-              indeterminate={selectedIndices.size > 0 && selectedIndices.size < actions.length}
             />
           </button>
         </span>
