@@ -7,7 +7,14 @@
   let _mouseOverPending = false;
   let _lastHighlightedEl = null;
 
-  const { generateSelector, getElementDescription } = window.__trueReplayerSelectorGenerator || {};
+  // #10 — Typing capture during recording
+  let _typingObserver = null;       // currently-monitored input element
+  let _typingObserverInitial = '';  // value at time of focus
+  let _typingObserverHandler = null;
+  let _typingObserverBlur = null;
+
+  const { generateSelector, generateSelectorAlternatives, getElementDescription } =
+    window.__trueReplayerSelectorGenerator || {};
 
   // ── Recording Mode ──
 
@@ -85,6 +92,14 @@
       isInput,
     });
 
+    // #10 — If user clicked into an input/contentEditable, start observing typing
+    if (isInput) {
+      startTypingObserver(el);
+    } else {
+      // Non-input click commits whatever was being typed
+      flushTypingObserver();
+    }
+
     // Visual feedback: flash green
     if (highlightEl) {
       highlightEl.style.background = 'rgba(14, 122, 13, 0.25)';
@@ -132,12 +147,69 @@
       button: 'right',
     });
 
+    flushTypingObserver();
+
     // Visual feedback: flash green
     if (highlightEl) {
       highlightEl.style.background = 'rgba(14, 122, 13, 0.25)';
       highlightEl.style.borderColor = 'rgba(14, 122, 13, 0.8)';
       setTimeout(removeHighlight, 300);
     }
+  }
+
+  // #10 — Typing capture: when user focuses a field via recorded click,
+  // observe input events. When focus leaves, send the typed text as a BrowserType action.
+  function startTypingObserver(el) {
+    flushTypingObserver(); // commit any pending observer first
+
+    _typingObserver = el;
+    _typingObserverInitial = el.isContentEditable ? (el.textContent || '') : (el.value || '');
+
+    _typingObserverHandler = () => {
+      // Just track changes; we'll commit on blur
+    };
+    _typingObserverBlur = () => {
+      flushTypingObserver();
+    };
+
+    el.addEventListener('input', _typingObserverHandler, true);
+    el.addEventListener('blur', _typingObserverBlur, true);
+  }
+
+  function flushTypingObserver() {
+    if (!_typingObserver) return;
+
+    const el = _typingObserver;
+    const initial = _typingObserverInitial;
+    const current = el.isContentEditable ? (el.textContent || '') : (el.value || '');
+
+    // Detach listeners
+    if (_typingObserverHandler) el.removeEventListener('input', _typingObserverHandler, true);
+    if (_typingObserverBlur) el.removeEventListener('blur', _typingObserverBlur, true);
+    _typingObserver = null;
+    _typingObserverHandler = null;
+    _typingObserverBlur = null;
+    _typingObserverInitial = '';
+
+    // Compute typed delta
+    let typed = current;
+    let isAppend = false;
+    if (initial && current.startsWith(initial)) {
+      typed = current.slice(initial.length);
+      isAppend = true;
+    }
+
+    if (typed.length === 0) return;
+
+    const selector = generateSelector?.(el);
+    if (!selector) return;
+
+    chrome.runtime.sendMessage({
+      type: 'typingCaptured',
+      selector,
+      text: typed,
+      isAppend,
+    });
   }
 
   function startRecording() {
@@ -151,6 +223,7 @@
 
   function stopRecording() {
     recording = false;
+    flushTypingObserver();
     removeHighlight();
     document.removeEventListener('mouseover', onMouseOver, true);
     document.removeEventListener('mouseout', onMouseOut, true);
@@ -168,10 +241,17 @@
     e.stopImmediatePropagation();
 
     const el = e.target;
-    if (!el) return stopPick(null);
+    if (!el) return stopPick(null, []);
 
-    const selector = generateSelector?.(el);
-    stopPick(selector || null);
+    // #2 — Generate alternatives ranked by stability (returns array; first is primary)
+    let alternatives = [];
+    if (generateSelectorAlternatives) {
+      try { alternatives = generateSelectorAlternatives(el) || []; } catch { alternatives = []; }
+    }
+
+    const primary = alternatives[0]?.selector || generateSelector?.(el) || null;
+
+    stopPick(primary, alternatives);
   }
 
   function startPick() {
@@ -188,11 +268,11 @@
   function onPickKeydown(e) {
     if (e.key === 'Escape') {
       e.preventDefault();
-      stopPick(null);
+      stopPick(null, []);
     }
   }
 
-  function stopPick(selector) {
+  function stopPick(selector, alternatives) {
     picking = false;
     removeHighlight();
     document.removeEventListener('mouseover', onMouseOver, true);
@@ -201,12 +281,18 @@
     document.removeEventListener('contextmenu', onPickClick, true);
     document.removeEventListener('keydown', onPickKeydown, true);
     if (pickResolve) {
-      pickResolve(selector);
+      pickResolve(selector, alternatives || []);
       pickResolve = null;
     }
   }
 
   // ── Command Execution ──
+
+  // #8 — Structured error helper. Returns an object the bridge deserializes as
+  // {code, message, tip} for friendly UX.
+  function mkError(code, message, tip) {
+    return { code, message, tip };
+  }
 
   function isVisible(el) {
     if (!el) return false;
@@ -219,28 +305,126 @@
     return rect.width > 0 && rect.height > 0;
   }
 
+  // #4 — Element interactable: not disabled (native or aria)
+  function isInteractable(el) {
+    if (el.disabled) return false;
+    if (el.getAttribute('aria-disabled') === 'true') return false;
+    return true;
+  }
+
+  // #4 — Element covered: returns the covering element if alvo isn't on top, else null
+  function getCoveringElement(el) {
+    const rect = el.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const top = document.elementFromPoint(cx, cy);
+    if (!top) return null;
+    if (top === el || el.contains(top) || top.contains(el)) return null;
+    return top;
+  }
+
+  // #4 — Smart scrollIntoView: skip if already in viewport
+  function scrollIntoViewIfNeeded(el) {
+    const rect = el.getBoundingClientRect();
+    const inView =
+      rect.top >= 0 &&
+      rect.left >= 0 &&
+      rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+      rect.right <= (window.innerWidth || document.documentElement.clientWidth);
+    if (!inView) {
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+    }
+  }
+
+  // #1 — Parse a selector into {kind, mode, value}.
+  // CSS selectors return {kind:'css'}. Text selectors recognize 4 prefixes:
+  //   text=    → exact
+  //   text*=   → contains (case-sensitive)
+  //   text~=   → contains (case-insensitive)
+  //   text/.../flags  → regex (flags optional, e.g. /i, /im)
+  function parseTextSelector(selector) {
+    if (typeof selector !== 'string') return { kind: 'css', value: selector || '' };
+
+    // Regex form: text/.../flags
+    if (selector.startsWith('text/')) {
+      const lastSlash = selector.lastIndexOf('/');
+      if (lastSlash > 4) {
+        const pattern = selector.slice(5, lastSlash);
+        const flags = selector.slice(lastSlash + 1);
+        return { kind: 'text', mode: 'regex', value: pattern, flags };
+      }
+    }
+
+    if (selector.startsWith('text*=')) return { kind: 'text', mode: 'contains', value: selector.slice(6) };
+    if (selector.startsWith('text~=')) return { kind: 'text', mode: 'icontains', value: selector.slice(6) };
+    if (selector.startsWith('text=')) return { kind: 'text', mode: 'exact', value: selector.slice(5) };
+
+    return { kind: 'css', value: selector };
+  }
+
+  // #1 — Test if element text matches the parsed text selector
+  function elementTextMatches(el, parsed) {
+    const elText = (el.textContent || '').trim();
+
+    const directText = Array.from(el.childNodes)
+      .filter(n => n.nodeType === Node.TEXT_NODE)
+      .map(n => n.textContent.trim())
+      .join(' ').trim();
+
+    switch (parsed.mode) {
+      case 'exact':
+        return directText === parsed.value || elText === parsed.value;
+      case 'contains':
+        return directText.includes(parsed.value) || elText.includes(parsed.value);
+      case 'icontains': {
+        const needle = parsed.value.toLowerCase();
+        return directText.toLowerCase().includes(needle) || elText.toLowerCase().includes(needle);
+      }
+      case 'regex': {
+        try {
+          const re = new RegExp(parsed.value, parsed.flags || '');
+          return re.test(directText) || re.test(elText);
+        } catch {
+          return false;
+        }
+      }
+      default:
+        return false;
+    }
+  }
+
   /**
-   * Find element by text content. Searches visible elements matching the text.
-   * Prefers smaller/more specific elements (buttons, links, spans, list items).
+   * #1 — Find element by parsed text selector, ranking direct-text matches and
+   * deeper (more specific) elements higher.
    */
-  function findByText(text) {
+  function findByParsedText(parsed) {
     const candidates = [];
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
     while (walker.nextNode()) {
       const el = walker.currentNode;
       const elText = el.textContent?.trim();
       if (!elText) continue;
-      // Exact match on direct text (not children's text)
+
+      if (!elementTextMatches(el, parsed)) continue;
+      if (!isVisible(el)) continue;
+
+      // Direct-text match preference
       const directText = Array.from(el.childNodes)
         .filter(n => n.nodeType === Node.TEXT_NODE)
         .map(n => n.textContent.trim())
         .join(' ').trim();
-      if (directText === text || elText === text) {
-        if (isVisible(el)) candidates.push({ el, directMatch: directText === text, depth: getDepth(el) });
-      }
+      // Re-test using only direct text to determine direct-match preference
+      const directMatch = directText && (
+        parsed.mode === 'exact' ? directText === parsed.value :
+        parsed.mode === 'contains' ? directText.includes(parsed.value) :
+        parsed.mode === 'icontains' ? directText.toLowerCase().includes(parsed.value.toLowerCase()) :
+        parsed.mode === 'regex' ? (() => { try { return new RegExp(parsed.value, parsed.flags || '').test(directText); } catch { return false; } })() :
+        false
+      );
+
+      candidates.push({ el, directMatch: !!directMatch, depth: getDepth(el) });
     }
     if (candidates.length === 0) return null;
-    // Prefer direct text match, then deepest element (most specific)
     candidates.sort((a, b) => (b.directMatch - a.directMatch) || (b.depth - a.depth));
     return candidates[0].el;
   }
@@ -252,17 +436,115 @@
     return d;
   }
 
-  async function waitForElement(selector, timeout = 30000) {
-    const isTextSelector = selector.startsWith('text=');
-    const findFn = isTextSelector
-      ? () => findByText(selector.slice(5))
-      : () => { const el = document.querySelector(selector); return el && isVisible(el) ? el : null; };
+  // #1 + #8 — Validate CSS selector syntax. Returns true if valid, false otherwise.
+  function isValidCssSelector(sel) {
+    try {
+      document.querySelector(sel);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
-    // Check immediately first
-    const el = findFn();
-    if (el) return el;
+  /**
+   * #6 — Find element matching the selector. Mode determines what "match" means.
+   * mode = 'appears' | 'enabled' | 'text-match' (uses textPattern)
+   * For 'appears' and 'text-match', element must be visible.
+   * For 'enabled', element must be visible AND interactable.
+   */
+  function findElementForMode(parsedSelector, mode, textPattern) {
+    const findCss = () => {
+      try {
+        return document.querySelector(parsedSelector.value);
+      } catch {
+        return null;
+      }
+    };
+    const findText = () => findByParsedText(parsedSelector);
 
-    // Use MutationObserver instead of polling — zero CPU when DOM is idle
+    const baseFinder = parsedSelector.kind === 'text' ? findText : findCss;
+    const el = baseFinder();
+    if (!el) return null;
+
+    switch (mode) {
+      case 'appears':
+        return isVisible(el) ? el : null;
+      case 'enabled':
+        return isVisible(el) && isInteractable(el) ? el : null;
+      case 'text-match': {
+        if (!isVisible(el)) return null;
+        if (!textPattern) return el;
+        const parsedText = parseTextSelector(textPattern);
+        return elementTextMatches(el, parsedText) ? el : null;
+      }
+      default:
+        return isVisible(el) ? el : null;
+    }
+  }
+
+  /**
+   * #6 — waitForElement with mode support.
+   *   appears (default) — element exists and is visible
+   *   disappears — element is gone or invisible
+   *   enabled — element exists, visible, and not disabled
+   *   text-match — element exists, visible, and its text matches textPattern
+   */
+  async function waitForElement(selector, timeout = 30000, mode = 'appears', textPattern = null) {
+    const parsed = parseTextSelector(selector);
+
+    // #8 — Validate CSS selector syntax up front for clearer error
+    if (parsed.kind === 'css' && !isValidCssSelector(parsed.value)) {
+      throw mkError(
+        'SELECTOR_INVALID',
+        'CSS selector is invalid.',
+        'Check syntax — selector failed querySelector validation.'
+      );
+    }
+
+    const checkPositive = () => findElementForMode(parsed, mode, textPattern);
+    const checkDisappears = () => {
+      const el = parsed.kind === 'text' ? findByParsedText(parsed) :
+        (() => { try { return document.querySelector(parsed.value); } catch { return null; } })();
+      // Element gone OR present but no longer visible
+      if (!el) return true;
+      return !isVisible(el);
+    };
+
+    if (mode === 'disappears') {
+      // Immediate check
+      if (checkDisappears()) return null;
+
+      return new Promise((resolve, reject) => {
+        let resolved = false;
+        const timer = setTimeout(() => {
+          if (resolved) return;
+          resolved = true;
+          observer.disconnect();
+          const seconds = Math.round(timeout / 1000);
+          reject(mkError(
+            'ELEMENT_NOT_FOUND',
+            `Element still present after ${seconds}s.`,
+            'Element did not disappear in time. Increase the timeout or check selector.'
+          ));
+        }, timeout);
+
+        const observer = new MutationObserver(() => {
+          if (resolved) return;
+          if (checkDisappears()) {
+            resolved = true;
+            clearTimeout(timer);
+            observer.disconnect();
+            resolve(null);
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+      });
+    }
+
+    // Positive modes (appears, enabled, text-match)
+    const found = checkPositive();
+    if (found) return found;
+
     return new Promise((resolve, reject) => {
       let resolved = false;
       const timer = setTimeout(() => {
@@ -270,37 +552,244 @@
         resolved = true;
         observer.disconnect();
         const seconds = Math.round(timeout / 1000);
-        reject(new Error(`Element not found after ${seconds}s. Make sure it is visible on the page.`));
+
+        // Provide more specific error code if the element exists but doesn't satisfy mode
+        let el = null;
+        try {
+          el = parsed.kind === 'text' ? findByParsedText(parsed) : document.querySelector(parsed.value);
+        } catch { /* swallow */ }
+
+        if (el && !isVisible(el)) {
+          reject(mkError('ELEMENT_HIDDEN', `Element exists but is hidden after ${seconds}s.`,
+            'Element has display:none, visibility:hidden, or zero size. Wait for it to become visible first.'));
+        } else if (el && mode === 'enabled' && !isInteractable(el)) {
+          reject(mkError('ELEMENT_DISABLED', `Element is disabled after ${seconds}s.`,
+            'Button/input is disabled. Wait for the form/page to enable it.'));
+        } else {
+          reject(mkError('ELEMENT_NOT_FOUND', `Element not found after ${seconds}s.`,
+            'Page might be loading slowly, or selector doesn\'t match anything. Try Pick again.'));
+        }
       }, timeout);
 
       const observer = new MutationObserver(() => {
         if (resolved) return;
-        const found = findFn();
-        if (found) {
+        const f = checkPositive();
+        if (f) {
           resolved = true;
           clearTimeout(timer);
           observer.disconnect();
-          resolve(found);
+          resolve(f);
         }
       });
-
       observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
     });
   }
 
-  async function executeCommand(msg) {
-    const { command, commandId, selector, text, url, timeout = 30000 } = msg;
+  // #9 — Replay highlight: brief overlay around an element during action execution
+  function flashHighlight(el, status, durationMs) {
+    if (!el || !document.body.contains(el)) return;
+    if (typeof status !== 'string') status = 'active';
+    if (typeof durationMs !== 'number') durationMs = 300;
+    const colors = {
+      active:  { bg: 'rgba(96, 205, 255, 0.22)', border: 'rgba(96, 205, 255, 0.85)' },
+      success: { bg: 'rgba(14, 122, 13, 0.25)',  border: 'rgba(14, 122, 13, 0.85)' },
+      error:   { bg: 'rgba(196, 43, 28, 0.25)',  border: 'rgba(196, 43, 28, 0.85)' },
+    };
+    const c = colors[status] || colors.active;
+    const overlay = document.createElement('div');
+    const rect = el.getBoundingClientRect();
+    Object.assign(overlay.style, {
+      position: 'fixed',
+      left: rect.left + 'px',
+      top: rect.top + 'px',
+      width: rect.width + 'px',
+      height: rect.height + 'px',
+      background: c.bg,
+      border: '2px solid ' + c.border,
+      borderRadius: '3px',
+      pointerEvents: 'none',
+      zIndex: '2147483646',
+      transition: 'opacity 0.15s ease',
+    });
+    document.body.appendChild(overlay);
+    setTimeout(() => {
+      overlay.style.opacity = '0';
+      setTimeout(() => overlay.remove(), 200);
+    }, durationMs);
+  }
 
+  // #5 — Type into a contentEditable element using execCommand or selection API
+  function typeIntoContentEditable(el, text, append) {
+    el.focus();
+    if (!append) {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      try { document.execCommand('delete', false); } catch { /* fallback below */ }
+    } else {
+      // Move caret to end
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    try {
+      // execCommand('insertText') fires native input events that frameworks listen to
+      document.execCommand('insertText', false, text);
+    } catch {
+      el.textContent = (append ? (el.textContent || '') : '') + text;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+
+  // #5 — Paste text via clipboard for fast bulk entry
+  async function typeViaPaste(el, text, append) {
+    el.focus();
+    // Clear first if not appending, so paste replaces existing content
+    if (!append) {
+      if ('value' in el) {
+        el.value = '';
+      } else if (el.isContentEditable) {
+        el.textContent = '';
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    let clipboardOk = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      clipboardOk = true;
+    } catch {
+      clipboardOk = false;
+    }
+    if (clipboardOk) {
+      try {
+        const dt = new DataTransfer();
+        dt.setData('text/plain', text);
+        const pasteEvent = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt });
+        el.dispatchEvent(pasteEvent);
+        try { document.execCommand('paste'); } catch { /* fallback */ }
+      } catch { /* fallback */ }
+    }
+
+    // Fallback / final write — covers apps that ignore the synthetic paste event
+    const empty = (el.isContentEditable ? !el.textContent : !el.value);
+    if (empty) {
+      if (el.isContentEditable) {
+        el.textContent = text;
+      } else {
+        el.value = text;
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  // ── Key chip parsing for BrowserType ──
+  // Supports {enter}, {tab}, {esc}/{escape}, {backspace}, {delete}, {up}/{down}/{left}/{right}
+  // mixed with regular text, e.g. "user{tab}pass{enter}".
+
+  const KEY_CHIP_MAP = {
+    enter:     { key: 'Enter',      code: 'Enter',      keyCode: 13 },
+    tab:       { key: 'Tab',        code: 'Tab',        keyCode: 9  },
+    esc:       { key: 'Escape',     code: 'Escape',     keyCode: 27 },
+    escape:    { key: 'Escape',     code: 'Escape',     keyCode: 27 },
+    backspace: { key: 'Backspace',  code: 'Backspace',  keyCode: 8  },
+    delete:    { key: 'Delete',     code: 'Delete',     keyCode: 46 },
+    up:        { key: 'ArrowUp',    code: 'ArrowUp',    keyCode: 38 },
+    down:      { key: 'ArrowDown',  code: 'ArrowDown',  keyCode: 40 },
+    left:      { key: 'ArrowLeft',  code: 'ArrowLeft',  keyCode: 37 },
+    right:     { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
+  };
+  const KEY_CHIP_PATTERN = /\{(enter|tab|esc|escape|backspace|delete|up|down|left|right)\}/gi;
+
+  function parseTypeSegments(text) {
+    if (!text) return [{ kind: 'text', value: '' }];
+    const segments = [];
+    let lastIndex = 0;
+    let match;
+    KEY_CHIP_PATTERN.lastIndex = 0;
+    while ((match = KEY_CHIP_PATTERN.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        segments.push({ kind: 'text', value: text.slice(lastIndex, match.index) });
+      }
+      segments.push({ kind: 'key', name: match[1].toLowerCase() });
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < text.length) {
+      segments.push({ kind: 'text', value: text.slice(lastIndex) });
+    }
+    return segments.length > 0 ? segments : [{ kind: 'text', value: text }];
+  }
+
+  /**
+   * Dispatch a special key (Enter/Tab/Esc/etc.) on an element.
+   * For Enter on form inputs, also calls form.requestSubmit() when no handler
+   * called preventDefault — makes traditional <form> submission work, since
+   * synthetic events don't trigger the browser's default form-submit action.
+   */
+  function dispatchSpecialKey(el, name) {
+    const meta = KEY_CHIP_MAP[name];
+    if (!meta) return;
+    const opts = {
+      key: meta.key, code: meta.code,
+      keyCode: meta.keyCode, which: meta.keyCode,
+      bubbles: true, cancelable: true,
+    };
+    const downEvt = new KeyboardEvent('keydown', opts);
+    el.dispatchEvent(downEvt);
+    el.dispatchEvent(new KeyboardEvent('keypress', opts));
+    el.dispatchEvent(new KeyboardEvent('keyup', opts));
+
+    // Enter form-submit fallback (synthetic events skip the browser's default submit)
+    if (name === 'enter' && !downEvt.defaultPrevented && el.tagName !== 'TEXTAREA') {
+      const form = el.form || (el.closest && el.closest('form'));
+      if (form && typeof form.requestSubmit === 'function') {
+        try { form.requestSubmit(); } catch { /* ignore */ }
+      }
+    }
+  }
+
+  async function executeCommand(msg) {
+    const {
+      command, commandId, selector, text, url, timeout = 30000,
+      waitMode, urlWaitPattern, postNavigateSelector,
+      typeAppend, typePaste, typeDelay,
+    } = msg;
+
+    let actionEl = null;
     try {
       switch (command) {
         case 'click': {
-          const el = await waitForElement(selector, timeout);
-          el.scrollIntoView({ block: 'center', behavior: 'instant' });
+          const el = await waitForElement(selector, timeout, 'appears');
+          actionEl = el;
+
+          // #4 — Reject early on disabled elements with specific code
+          if (!isInteractable(el)) {
+            throw mkError('ELEMENT_DISABLED', 'Element is disabled — cannot click.',
+              'Wait for the element to be enabled first (use Wait with mode=enabled).');
+          }
+
+          scrollIntoViewIfNeeded(el);
+          await new Promise(r => setTimeout(r, 30));
+
+          // #4 — Reject if covered by another element (modal, sticky header, tooltip)
+          const coveredBy = getCoveringElement(el);
+          if (coveredBy) {
+            throw mkError('ELEMENT_COVERED', 'Element is covered by another element.',
+              'Modal, tooltip, or sticky header is on top. Add a Wait or scroll before this action.');
+          }
+
+          // #9 — Highlight before action
+          flashHighlight(el, 'active', 220);
 
           // Native <select>: set value directly instead of clicking
           if (el.tagName === 'SELECT') {
             el.focus();
-            // If text is provided, select that option; otherwise just focus
             if (text) {
               const option = Array.from(el.options).find(o => o.value === text || o.textContent.trim() === text);
               if (option) {
@@ -308,7 +797,6 @@
                 el.dispatchEvent(new Event('change', { bubbles: true }));
               }
             } else {
-              // Simulate opening the select
               el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
             }
             return { success: true };
@@ -330,14 +818,16 @@
             screenY: cy + window.screenY,
           };
 
-          // Hover first — reveals submenus that appear on mouseenter/mouseover
           el.dispatchEvent(new MouseEvent('mouseenter', { ...opts, buttons: 0 }));
           el.dispatchEvent(new MouseEvent('mouseover', { ...opts, buttons: 0 }));
           await new Promise(r => setTimeout(r, 50));
 
-          // Snapshot state before click to detect if simulated events worked
-          const childCountBefore = document.body.childElementCount;
-          const rectBefore = el.getBoundingClientRect();
+          // #4 — Smart fallback: snapshot toggle/state signals before click
+          const beforeClassList = el.className;
+          const beforeAriaExpanded = el.getAttribute('aria-expanded');
+          const beforeAriaPressed = el.getAttribute('aria-pressed');
+          const beforeAriaChecked = el.getAttribute('aria-checked');
+          const beforeFocused = document.activeElement;
 
           el.focus();
           el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, pointerType: 'mouse' }));
@@ -347,24 +837,45 @@
           el.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0 }));
           el.dispatchEvent(new MouseEvent('click', { ...opts, buttons: 0 }));
 
-          // Only use .click() fallback if simulated events had no visible effect
-          // (element still in DOM, same position, no DOM changes)
-          await new Promise(r => setTimeout(r, 100));
-          const stillInDom = document.body.contains(el);
-          const childCountAfter = document.body.childElementCount;
-          const domChanged = childCountAfter !== childCountBefore;
+          await new Promise(r => setTimeout(r, 200));
 
-          if (stillInDom && !domChanged) {
-            // Simulated events didn't cause any visible change — try native click
-            el.click();
+          // #4 — Use native .click() only if synthetic events caused NO state change.
+          // Robust signals: classList change, aria-* toggles, focus change, element removal.
+          const stillInDom = document.body.contains(el);
+          if (stillInDom) {
+            const noClassChange = el.className === beforeClassList;
+            const noAriaChange = el.getAttribute('aria-expanded') === beforeAriaExpanded
+              && el.getAttribute('aria-pressed') === beforeAriaPressed
+              && el.getAttribute('aria-checked') === beforeAriaChecked;
+            const noFocusChange = document.activeElement === beforeFocused;
+
+            if (noClassChange && noAriaChange && noFocusChange) {
+              try { el.click(); } catch { /* swallow */ }
+            }
           }
 
+          flashHighlight(el, 'success', 200);
           return { success: true };
         }
 
         case 'rightClick': {
-          const el = await waitForElement(selector, timeout);
-          el.scrollIntoView({ block: 'center', behavior: 'instant' });
+          const el = await waitForElement(selector, timeout, 'appears');
+          actionEl = el;
+
+          if (!isInteractable(el)) {
+            throw mkError('ELEMENT_DISABLED', 'Element is disabled — cannot right-click.',
+              'Wait for the element to be enabled first.');
+          }
+
+          scrollIntoViewIfNeeded(el);
+
+          const coveredBy = getCoveringElement(el);
+          if (coveredBy) {
+            throw mkError('ELEMENT_COVERED', 'Element is covered by another element.',
+              'Modal, tooltip, or sticky header is on top.');
+          }
+
+          flashHighlight(el, 'active', 220);
 
           const rect = el.getBoundingClientRect();
           const cx = rect.left + rect.width / 2;
@@ -392,46 +903,167 @@
           el.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0 }));
           el.dispatchEvent(new MouseEvent('contextmenu', { ...opts, buttons: 0 }));
 
+          flashHighlight(el, 'success', 200);
           return { success: true };
         }
 
         case 'type': {
-          const el = await waitForElement(selector, timeout);
-          el.scrollIntoView({ block: 'center', behavior: 'instant' });
+          const el = await waitForElement(selector, timeout, 'appears');
+          actionEl = el;
+
+          if (!isInteractable(el)) {
+            throw mkError('ELEMENT_DISABLED', 'Field is disabled — cannot type.',
+              'Wait for the field to be enabled first.');
+          }
+
+          scrollIntoViewIfNeeded(el);
+          flashHighlight(el, 'active', 220);
           el.focus();
 
-          // Clear existing value
-          el.value = '';
-          el.dispatchEvent(new Event('input', { bubbles: true }));
+          // Parse text for key chips: {enter}, {tab}, {esc}, {backspace}, {delete}, {up}/{down}/{left}/{right}.
+          // Mixed sequences like "user{tab}pass{enter}" type each text segment, then
+          // dispatch the key, then continue typing on the new active element.
+          const segments = parseTypeSegments(text);
+          let currentEl = el;
+          // Each text segment that follows a focus transition (start, or after a key)
+          // re-applies the typeAppend rule — so non-append clears each new field too.
+          let justTransitioned = true;
 
-          // Type text character by character with micro-delays for browser responsiveness
-          for (const char of text) {
-            el.value += char;
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
-            el.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
-            if (text.length > 20) await new Promise(r => setTimeout(r, 5));
+          const charDelay = (typeof typeDelay === 'number' && typeDelay >= 0)
+            ? typeDelay
+            : (text.length > 20 ? 5 : 0);
+
+          for (const seg of segments) {
+            if (seg.kind === 'key') {
+              dispatchSpecialKey(currentEl, seg.name);
+              // Let async handlers / focus moves settle, then track the new active element
+              await new Promise(r => setTimeout(r, 30));
+              const active = document.activeElement;
+              if (active && active !== document.body && active.isConnected) {
+                currentEl = active;
+              }
+              justTransitioned = true;
+              continue;
+            }
+
+            // Text segment
+            const value = seg.value;
+            const shouldClear = !typeAppend && justTransitioned;
+
+            if (typePaste) {
+              await typeViaPaste(currentEl, value, !shouldClear);
+              justTransitioned = false;
+              continue;
+            }
+
+            if (currentEl.isContentEditable) {
+              typeIntoContentEditable(currentEl, value, !shouldClear);
+              justTransitioned = false;
+              continue;
+            }
+
+            // Native input/textarea path
+            if (shouldClear && 'value' in currentEl) {
+              currentEl.value = '';
+              currentEl.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            for (const char of value) {
+              if ('value' in currentEl) currentEl.value += char;
+              currentEl.dispatchEvent(new Event('input', { bubbles: true }));
+              currentEl.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
+              currentEl.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
+              if (charDelay > 0) await new Promise(r => setTimeout(r, charDelay));
+            }
+            currentEl.dispatchEvent(new Event('change', { bubbles: true }));
+            justTransitioned = false;
           }
-          el.dispatchEvent(new Event('change', { bubbles: true }));
+
+          flashHighlight(el, 'success', 200);
           return { success: true };
         }
 
         case 'waitElement': {
-          await waitForElement(selector, timeout);
+          // #6 — Wait modes: appears (default) | disappears | enabled | text-match
+          const mode = waitMode || 'appears';
+          const el = await waitForElement(selector, timeout, mode, msg.text);
+          if (el) {
+            actionEl = el;
+            flashHighlight(el, 'success', 200);
+          }
           return { success: true };
         }
 
         case 'navigate': {
+          // background.js handles tab-level navigation; this same-tab fallback only fires
+          // if invoked directly on a content script (legacy path).
           window.location.href = url;
           return { success: true };
         }
 
+        // #7 — New helper command: wait for current URL to match a pattern (glob or regex)
+        case 'waitUrl': {
+          const pattern = msg.urlPattern || '';
+          if (!pattern) return { success: true };
+          const matches = (u) => urlMatchesPattern(u, pattern);
+          if (matches(location.href)) return { success: true };
+
+          return await new Promise((resolve, reject) => {
+            let resolved = false;
+            const cleanup = () => {
+              window.removeEventListener('popstate', check);
+              clearInterval(intv);
+            };
+            const timer = setTimeout(() => {
+              if (resolved) return;
+              resolved = true;
+              cleanup();
+              const seconds = Math.round(timeout / 1000);
+              reject(mkError('NAVIGATION_TIMEOUT',
+                `URL didn't match pattern after ${seconds}s.`,
+                'Check the pattern (glob or /regex/). Current URL: ' + location.href));
+            }, timeout);
+
+            const check = () => {
+              if (matches(location.href)) {
+                if (resolved) return;
+                resolved = true;
+                clearTimeout(timer);
+                cleanup();
+                resolve({ success: true });
+              }
+            };
+            window.addEventListener('popstate', check);
+            const intv = setInterval(check, 200);
+          });
+        }
+
         default:
-          throw new Error(`Unknown command: ${command}`);
+          throw mkError('UNKNOWN_COMMAND', `Unknown command: ${command}`, null);
       }
     } catch (err) {
-      return { success: false, error: err.message };
+      // Flash error highlight if we identified the element
+      if (actionEl) flashHighlight(actionEl, 'error', 600);
+
+      // err can be a structured {code, message, tip} or a native Error
+      if (err && typeof err === 'object' && err.code) {
+        return { success: false, error: { code: err.code, message: err.message, tip: err.tip || null } };
+      }
+      return { success: false, error: { code: 'UNKNOWN_ERROR', message: err?.message || String(err), tip: null } };
     }
+  }
+
+  // #7 — URL pattern matching: supports glob (*) and /regex/flags syntax
+  function urlMatchesPattern(url, pattern) {
+    if (!pattern) return true;
+    if (pattern.startsWith('/') && pattern.lastIndexOf('/') > 0) {
+      const last = pattern.lastIndexOf('/');
+      const pat = pattern.slice(1, last);
+      const flags = pattern.slice(last + 1);
+      try { return new RegExp(pat, flags).test(url); } catch { return false; }
+    }
+    // Glob: escape regex metas, then convert * → .* and ? → .
+    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+    try { return new RegExp('^' + escaped + '$').test(url); } catch { return false; }
   }
 
   // ── Message Handling ──
@@ -451,9 +1083,9 @@
         return true; // async response
 
       case 'pickElement':
-        // Single-pick mode: highlights elements, returns selector on click, ESC cancels
-        pickResolve = (selector) => {
-          sendResponse({ selector });
+        // Single-pick mode: highlights elements, returns selector + alternatives, ESC cancels
+        pickResolve = (selector, alternatives) => {
+          sendResponse({ selector, alternatives });
         };
         startPick();
         return true; // async response

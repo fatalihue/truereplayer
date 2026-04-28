@@ -5,6 +5,7 @@ import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { KbdTag } from './common/KbdTag';
 import { Toggle } from './common/Toggle';
+import { CheckboxBox } from './Checkbox';
 
 interface ContextMenuState {
   x: number;
@@ -1493,16 +1494,15 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               Min 2 characters.
             </p>
 
-            <label className="flex items-center gap-2 mt-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={hotstringInstant}
-                onChange={(e) => setHotstringInstant(e.target.checked)}
-                className="accent-[#0078D4]"
-              />
+            <button
+              type="button"
+              onClick={() => setHotstringInstant(!hotstringInstant)}
+              className="flex items-center gap-2 mt-3 cursor-pointer text-left"
+            >
+              <CheckboxBox checked={hotstringInstant} />
               <span className="text-xs text-text-secondary">Instant trigger</span>
               <span className="text-[11px] text-text-tertiary">(no Enter/Space/Tab needed)</span>
-            </label>
+            </button>
 
             <div className="flex items-center mt-4">
               {profiles.find(p => p.name === showHotstringDialog)?.hotstring && (
@@ -1572,11 +1572,15 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             </div>
 
             {/* Select All */}
-            <label className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-elevated cursor-pointer border-b border-border-subtle mb-1">
-              <input type="checkbox" checked={allExportSelected} onChange={toggleExportSelectAll} className="accent-[#0078D4]" />
+            <button
+              type="button"
+              onClick={toggleExportSelectAll}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-elevated cursor-pointer border-b border-border-subtle mb-1 text-left"
+            >
+              <CheckboxBox checked={allExportSelected} />
               <span className="text-xs font-medium text-text-secondary">Select All</span>
               <span className="ml-auto text-[10px] text-text-disabled">{selectedCount}/{profiles.length}</span>
-            </label>
+            </button>
 
             {/* Scrollable list organized by folders */}
             <div className="h-[240px] overflow-y-auto">
@@ -1585,10 +1589,15 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 <div className="mb-1">
                   <div className="px-2 py-1 text-[10px] font-semibold text-text-disabled uppercase tracking-wide">Pinned</div>
                   {pinned.map(name => (
-                    <label key={name} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer">
-                      <input type="checkbox" checked={!!exportSelection[name]} onChange={() => toggleExportProfile(name)} className="accent-[#0078D4]" />
+                    <button
+                      key={name}
+                      type="button"
+                      onClick={() => toggleExportProfile(name)}
+                      className="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer text-left"
+                    >
+                      <CheckboxBox checked={!!exportSelection[name]} />
                       <span className="text-xs text-text-primary truncate">{name}</span>
-                    </label>
+                    </button>
                   ))}
                 </div>
               )}
@@ -1600,24 +1609,30 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 const folderSomeSelected = visibleItems.some(n => exportSelection[n]);
                 return (
                   <div key={f.name} className="mb-1">
-                    <label className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer">
-                      <input
-                        type="checkbox"
+                    <button
+                      type="button"
+                      onClick={() => toggleExportFolder(visibleItems)}
+                      className="w-full flex items-center gap-1.5 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer text-left"
+                    >
+                      <CheckboxBox
                         checked={folderAllSelected}
-                        ref={el => { if (el) el.indeterminate = folderSomeSelected && !folderAllSelected; }}
-                        onChange={() => toggleExportFolder(visibleItems)}
-                        className="accent-[#0078D4]"
+                        indeterminate={folderSomeSelected && !folderAllSelected}
                       />
                       <FolderOpen size={11} style={{ color: f.color }} className="shrink-0" />
                       <span className="text-xs font-medium text-text-secondary truncate">{f.name}</span>
                       <span className="ml-auto text-[10px] text-text-disabled">{visibleItems.filter(n => exportSelection[n]).length}/{visibleItems.length}</span>
-                    </label>
+                    </button>
                     <div className="ml-5">
                       {visibleItems.map(name => (
-                        <label key={name} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer">
-                          <input type="checkbox" checked={!!exportSelection[name]} onChange={() => toggleExportProfile(name)} className="accent-[#0078D4]" />
+                        <button
+                          key={name}
+                          type="button"
+                          onClick={() => toggleExportProfile(name)}
+                          className="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer text-left"
+                        >
+                          <CheckboxBox checked={!!exportSelection[name]} />
                           <span className="text-xs text-text-primary truncate">{name}</span>
-                        </label>
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -1629,10 +1644,15 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 <div className="mb-1">
                   {folders.length > 0 && <div className="px-2 py-1 text-[10px] font-semibold text-text-disabled uppercase tracking-wide">Ungrouped</div>}
                   {ungrouped.map(p => (
-                    <label key={p.name} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer">
-                      <input type="checkbox" checked={!!exportSelection[p.name]} onChange={() => toggleExportProfile(p.name)} className="accent-[#0078D4]" />
+                    <button
+                      key={p.name}
+                      type="button"
+                      onClick={() => toggleExportProfile(p.name)}
+                      className="w-full flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-elevated cursor-pointer text-left"
+                    >
+                      <CheckboxBox checked={!!exportSelection[p.name]} />
                       <span className="text-xs text-text-primary truncate">{p.name}</span>
-                    </label>
+                    </button>
                   ))}
                 </div>
               )}

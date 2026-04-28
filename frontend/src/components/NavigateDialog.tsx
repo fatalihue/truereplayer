@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Globe } from 'lucide-react';
+import { Checkbox } from './Checkbox';
 
 interface NavigateDialogProps {
   onConfirm: (url: string, newTab: boolean) => void;
@@ -62,15 +63,11 @@ export function NavigateDialog({ onConfirm, onClose }: NavigateDialogProps) {
             className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-subtle rounded outline-none focus:border-accent-solid placeholder:text-text-disabled transition-colors"
           />
 
-          <label className="flex items-center gap-2 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={newTab}
-              onChange={(e) => setNewTab(e.target.checked)}
-              className="w-3.5 h-3.5 rounded border-border-default accent-accent-solid cursor-pointer"
-            />
-            <span className="text-xs text-text-secondary">Open in new tab</span>
-          </label>
+          <Checkbox
+            checked={newTab}
+            onChange={setNewTab}
+            label="Open in new tab"
+          />
 
           <p className="text-[11px] text-text-tertiary">
             Protocol (https://) will be added automatically if omitted.

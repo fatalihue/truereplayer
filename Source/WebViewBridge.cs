@@ -136,6 +136,44 @@ namespace TrueReplayer
                         mainController.UpdateButtonStates();
                     });
                 };
+                // #10 — Typing observed in a recorded input field. Locate the most recent
+                // matching BrowserType action for the same selector and fill its text.
+                browserBridge.TypingCaptured += (selector, text, isAppend) =>
+                {
+                    dispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (!recordingService.IsRecording) return;
+                        if (string.IsNullOrEmpty(text)) return;
+
+                        for (int i = actions.Count - 1; i >= 0 && i >= actions.Count - 8; i--)
+                        {
+                            var a = actions[i];
+                            if (a.ActionType == "BrowserType" && a.Key == selector)
+                            {
+                                a.BrowserText = (a.BrowserText ?? "") + text;
+                                a.TypeAppend = isAppend;
+                                HasUnsavedChanges = true;
+                                PushActionsUpdate();
+                                return;
+                            }
+                        }
+
+                        // No matching BrowserType found (e.g. user typed without clicking field via extension);
+                        // append a fresh action so the keystrokes aren't lost.
+                        int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
+                        actions.Add(new ActionItem
+                        {
+                            ActionType = "BrowserType",
+                            Key = selector,
+                            BrowserText = text,
+                            TypeAppend = isAppend,
+                            Delay = delay,
+                            Timeout = 5000
+                        });
+                        HasUnsavedChanges = true;
+                        mainController.UpdateButtonStates();
+                    });
+                };
             }
 
             // Watch for actions collection changes
@@ -219,6 +257,7 @@ namespace TrueReplayer
                     case "actions:addBrowserAction": HandleAddBrowserAction(payload); break;
                     case "browser:toggleRecording": HandleBrowserToggleRecording(payload); break;
                     case "browser:pickElement": HandlePickElement(); break;
+                    case "browser:testAction": HandleBrowserTestAction(payload); break;
                     case "profile:click": HandleProfileClick(payload); break;
                     case "profile:create": HandleProfileCreate(payload); break;
                     case "profile:rename": HandleProfileRename(payload); break;
@@ -343,7 +382,14 @@ namespace TrueReplayer
                 browserText = a.BrowserText ?? "",
                 newTab = a.NewTab,
                 isSkipped = a.IsSkipped,
-                repeatCount = a.RepeatCount
+                repeatCount = a.RepeatCount,
+                // New browser action fields (must be forwarded so the editor restores their state)
+                waitMode = a.WaitMode,
+                urlWaitPattern = a.UrlWaitPattern,
+                postNavigateSelector = a.PostNavigateSelector,
+                typeAppend = a.TypeAppend,
+                typePaste = a.TypePaste,
+                typeDelay = a.TypeDelay
             }).ToArray();
 
             SendMessage("actions:updated", new { actions = actionsList });
@@ -933,7 +979,13 @@ namespace TrueReplayer
                         ImagePath = a.ImagePath,
                         BrowserText = a.BrowserText,
                         NewTab = a.NewTab,
-                        IsSkipped = a.IsSkipped
+                        IsSkipped = a.IsSkipped,
+                        WaitMode = a.WaitMode,
+                        UrlWaitPattern = a.UrlWaitPattern,
+                        PostNavigateSelector = a.PostNavigateSelector,
+                        TypeAppend = a.TypeAppend,
+                        TypePaste = a.TypePaste,
+                        TypeDelay = a.TypeDelay
                     });
                 }
             }
@@ -1006,6 +1058,15 @@ namespace TrueReplayer
                 case "confidence": if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double conf)) action.Confidence = Math.Clamp(conf, 0.1, 1.0); break;
                 case "browserText": action.BrowserText = value; break;
                 case "newTab": action.NewTab = value == "true"; break;
+                case "waitMode": action.WaitMode = string.IsNullOrEmpty(value) ? null : value; break;
+                case "urlWaitPattern": action.UrlWaitPattern = string.IsNullOrEmpty(value) ? null : value; break;
+                case "postNavigateSelector": action.PostNavigateSelector = string.IsNullOrEmpty(value) ? null : value; break;
+                case "typeAppend": action.TypeAppend = value == "true"; break;
+                case "typePaste": action.TypePaste = value == "true"; break;
+                case "typeDelay":
+                    if (string.IsNullOrEmpty(value)) action.TypeDelay = null;
+                    else if (int.TryParse(value, out int td)) action.TypeDelay = Math.Max(0, td);
+                    break;
             }
 
             HasUnsavedChanges = true;
@@ -1524,7 +1585,13 @@ namespace TrueReplayer
                         Confidence = original.Confidence,
                         BrowserText = original.BrowserText,
                         NewTab = original.NewTab,
-                        IsSkipped = original.IsSkipped
+                        IsSkipped = original.IsSkipped,
+                        WaitMode = original.WaitMode,
+                        UrlWaitPattern = original.UrlWaitPattern,
+                        PostNavigateSelector = original.PostNavigateSelector,
+                        TypeAppend = original.TypeAppend,
+                        TypePaste = original.TypePaste,
+                        TypeDelay = original.TypeDelay
                     };
                     actions.Insert(insertPos, clone);
                     insertPos++;
@@ -1580,18 +1647,93 @@ namespace TrueReplayer
         {
             if (browserBridge == null || !browserBridge.IsConnected)
             {
-                SendMessage("browser:pickResult", new { selector = (string?)null, error = "Browser extension is not connected." });
+                SendMessage("browser:pickResult", new { selector = (string?)null, alternatives = new object[0], error = "Browser extension is not connected." });
                 return;
             }
 
             try
             {
-                var selector = await browserBridge.PickElementAsync(CancellationToken.None);
-                SendMessage("browser:pickResult", new { selector });
+                var pick = await browserBridge.PickElementAsync(CancellationToken.None);
+                SendMessage("browser:pickResult", new
+                {
+                    selector = pick.Selector,
+                    alternatives = pick.Alternatives.Select(a => new { selector = a.Selector, tier = a.Tier, description = a.Description }).ToArray()
+                });
             }
             catch (Exception ex)
             {
-                SendMessage("browser:pickResult", new { selector = (string?)null, error = ex.Message });
+                SendMessage("browser:pickResult", new { selector = (string?)null, alternatives = new object[0], error = ex.Message });
+            }
+        }
+
+        // #3 — Test action: execute a one-shot browser command from the editor without saving the profile.
+        private async void HandleBrowserTestAction(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var idEl) ? idEl.GetString() ?? "" : "";
+
+            if (browserBridge == null || !browserBridge.IsConnected)
+            {
+                SendMessage("browser:testResult", new
+                {
+                    requestId,
+                    success = false,
+                    error = new { code = "EXTENSION_DISCONNECTED", message = "Browser extension is not connected.", tip = "Open Chrome with the TrueReplayer extension installed." },
+                });
+                return;
+            }
+
+            try
+            {
+                var actionType = payload.GetProperty("actionType").GetString() ?? "";
+                var key = payload.TryGetProperty("key", out var kEl) ? kEl.GetString() ?? "" : "";
+                var browserText = payload.TryGetProperty("browserText", out var btEl) ? btEl.GetString() : null;
+                var newTab = payload.TryGetProperty("newTab", out var ntEl) && ntEl.GetBoolean();
+                var timeoutMs = payload.TryGetProperty("timeout", out var toEl) ? toEl.GetInt32() : 5000;
+                var waitMode = payload.TryGetProperty("waitMode", out var wmEl) ? wmEl.GetString() : null;
+                var urlWaitPattern = payload.TryGetProperty("urlWaitPattern", out var uwEl) ? uwEl.GetString() : null;
+                var postNavigateSelector = payload.TryGetProperty("postNavigateSelector", out var pnEl) ? pnEl.GetString() : null;
+                var typeAppend = payload.TryGetProperty("typeAppend", out var taEl) && taEl.GetBoolean();
+                var typePaste = payload.TryGetProperty("typePaste", out var tpEl) && tpEl.GetBoolean();
+                int? typeDelay = payload.TryGetProperty("typeDelay", out var tdEl) && tdEl.ValueKind == JsonValueKind.Number ? tdEl.GetInt32() : (int?)null;
+
+                var temp = new ActionItem
+                {
+                    ActionType = actionType,
+                    Key = key,
+                    BrowserText = browserText,
+                    NewTab = newTab,
+                    Timeout = Math.Max(1000, timeoutMs),
+                    WaitMode = waitMode,
+                    UrlWaitPattern = urlWaitPattern,
+                    PostNavigateSelector = postNavigateSelector,
+                    TypeAppend = typeAppend,
+                    TypePaste = typePaste,
+                    TypeDelay = typeDelay,
+                };
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                await browserBridge.TestActionAsync(temp, CancellationToken.None, browserText);
+                sw.Stop();
+
+                SendMessage("browser:testResult", new { requestId, success = true, durationMs = sw.ElapsedMilliseconds });
+            }
+            catch (TrueReplayer.Services.BrowserActionException bex)
+            {
+                SendMessage("browser:testResult", new
+                {
+                    requestId,
+                    success = false,
+                    error = new { code = bex.Code ?? "UNKNOWN_ERROR", message = bex.Message, tip = bex.Tip },
+                });
+            }
+            catch (Exception ex)
+            {
+                SendMessage("browser:testResult", new
+                {
+                    requestId,
+                    success = false,
+                    error = new { code = "UNKNOWN_ERROR", message = ex.Message, tip = (string?)null },
+                });
             }
         }
 

@@ -9,6 +9,7 @@ import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors } from '..
 import { SendTextDialog } from './SendTextDialog';
 import { RunProfileDialog } from './RunProfileDialog';
 import { BulkActionBar } from './BulkActionBar';
+import { Checkbox, CheckboxBox } from './Checkbox';
 import type { ColumnVisibility } from './Toolbar';
 
 function ActionIcon({ actionType }: { actionType: string }) {
@@ -545,18 +546,23 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         ].join(' ') }}
       >
         <span className="flex items-center justify-center">
-          <input
-            type="checkbox"
-            checked={actions.length > 0 && selectedIndices.size === actions.length}
-            onChange={(e) => {
-              if (e.target.checked) {
-                setSelectedIndices(new Set(actions.map((_, i) => i)));
-              } else {
+          <button
+            type="button"
+            onClick={() => {
+              if (selectedIndices.size === actions.length) {
                 setSelectedIndices(new Set());
+              } else {
+                setSelectedIndices(new Set(actions.map((_, i) => i)));
               }
             }}
-            className="checkbox-subtle"
-          />
+            className="flex items-center justify-center cursor-pointer"
+            title={selectedIndices.size === actions.length ? 'Deselect all' : 'Select all'}
+          >
+            <CheckboxBox
+              checked={actions.length > 0 && selectedIndices.size === actions.length}
+              indeterminate={selectedIndices.size > 0 && selectedIndices.size < actions.length}
+            />
+          </button>
         </span>
         <span className="text-xs font-semibold text-text-tertiary pl-3">#</span>
         {columnVisibility.action && <span className="text-xs font-semibold text-text-tertiary pl-1">Action</span>}
@@ -637,11 +643,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   {/* Checkbox */}
                   <td className="w-7">
                     <div className="flex items-center justify-center">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={isSelected}
-                        onChange={(e) => {
-                          e.stopPropagation();
+                        stopPropagation
+                        onChange={() => {
                           setSelectedIndices(prev => {
                             const next = new Set(prev);
                             if (next.has(idx)) next.delete(idx);
@@ -649,8 +654,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             return next;
                           });
                         }}
-                        onClick={(e) => e.stopPropagation()}
-                        className="checkbox-subtle"
                       />
                     </div>
                   </td>

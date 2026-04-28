@@ -18,6 +18,30 @@ export interface ActionItem {
   newTab: boolean;
   isSkipped: boolean;
   repeatCount?: number;
+  // #6 — BrowserWaitElement: appears | disappears | enabled | text-match
+  waitMode?: string | null;
+  // #7 — BrowserNavigate: optional URL pattern + post-navigation selector
+  urlWaitPattern?: string | null;
+  postNavigateSelector?: string | null;
+  // #5 — BrowserType options
+  typeAppend?: boolean;
+  typePaste?: boolean;
+  typeDelay?: number | null;
+}
+
+// #2 — Selector alternative returned by the picker
+export interface SelectorAlternative {
+  selector: string;
+  tier: 'S' | 'A' | 'B' | 'C';
+  description: string;
+}
+
+// #3 — Test action result returned by the bridge
+export interface BrowserTestResult {
+  requestId: string;
+  success: boolean;
+  durationMs?: number;
+  error?: { code: string; message: string; tip: string | null };
 }
 
 export interface ProfileEntry {
@@ -149,7 +173,8 @@ export type IncomingMessage =
   | { type: 'update:error'; payload: { message: string } }
   | { type: 'update:none'; payload: { currentVersion: string } }
   | { type: 'browser:status'; payload: { connected: boolean } }
-  | { type: 'browser:pickResult'; payload: { selector: string | null; error?: string } }
+  | { type: 'browser:pickResult'; payload: { selector: string | null; alternatives?: SelectorAlternative[]; error?: string } }
+  | { type: 'browser:testResult'; payload: BrowserTestResult }
   | { type: 'browser:extensionOutdated'; payload: { currentVersion: string; expectedVersion: string } };
 
 // ── Messages JS → C# ──
@@ -228,5 +253,6 @@ export type OutgoingMessage =
   | { type: 'actions:addBrowserAction'; payload: { actionType: string; selector: string; browserText?: string; newTab?: boolean; insertIndex?: number } }
   | { type: 'browser:toggleRecording'; payload: { enabled: boolean } }
   | { type: 'browser:pickElement'; payload: Record<string, never> }
+  | { type: 'browser:testAction'; payload: { requestId: string; actionType: string; key: string; browserText?: string; newTab?: boolean; timeout: number; waitMode?: string | null; urlWaitPattern?: string | null; postNavigateSelector?: string | null; typeAppend?: boolean; typePaste?: boolean; typeDelay?: number | null } }
   | { type: 'theme:colors'; payload: { bgSurface: string; bgCard: string; textPrimary: string; textSecondary: string; accentSolid: string; borderSubtle: string } }
   | { type: 'hotkey:suppress'; payload: { enabled: boolean } };
