@@ -74,34 +74,111 @@ function connect() {
             }
 
             // Navigate uses Chrome API directly — works on any page including chrome://newtab
-            // Waits for page to fully load before returning success so content script is ready
+            // Waits for page to fully load before returning success so content script is ready.
+            // #7 — Optional postNavigateSelector and urlWaitPattern for richer wait semantics.
             if (msg.command === 'navigate') {
               let url = msg.url;
               if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
 
+              const navTimeout = Math.max(msg.timeout || 30000, 30000);
+              const postSel = msg.postNavigateSelector || '';
+              const urlPattern = msg.urlWaitPattern || '';
+
+              const finishOk = () => {
+                sendToNative({
+                  type: 'browser:commandResult',
+                  commandId: msg.commandId,
+                  success: true,
+                });
+              };
+              const finishErr = (code, message, tip) => {
+                sendToNative({
+                  type: 'browser:commandResult',
+                  commandId: msg.commandId,
+                  error: { code, message, tip: tip || null },
+                });
+              };
+
+              const runPostChecks = (tabId) => {
+                // If neither check is configured, return success immediately
+                if (!postSel && !urlPattern) {
+                  finishOk();
+                  return;
+                }
+                // Sequential post-checks: urlWaitPattern first (cheap), then postNavigateSelector
+                const checkUrl = (cb) => {
+                  if (!urlPattern) return cb();
+                  chrome.tabs.sendMessage(tabId, {
+                    type: 'executeCommand',
+                    commandId: msg.commandId + ':wu',
+                    command: 'waitUrl',
+                    urlPattern,
+                    timeout: Math.min(navTimeout, msg.timeout || 30000),
+                  }).then((response) => {
+                    if (response?.success) cb();
+                    else finishErr(
+                      response?.error?.code || 'NAVIGATION_TIMEOUT',
+                      response?.error?.message || `URL didn't match pattern.`,
+                      response?.error?.tip || 'Check the URL pattern (glob or /regex/).'
+                    );
+                  }).catch((err) => {
+                    finishErr('NAVIGATION_TIMEOUT', err?.message || 'URL wait failed.', null);
+                  });
+                };
+                const checkSel = () => {
+                  if (!postSel) {
+                    finishOk();
+                    return;
+                  }
+                  chrome.tabs.sendMessage(tabId, {
+                    type: 'executeCommand',
+                    commandId: msg.commandId + ':ws',
+                    command: 'waitElement',
+                    selector: postSel,
+                    timeout: Math.min(navTimeout, msg.timeout || 30000),
+                  }).then((response) => {
+                    if (response?.success) finishOk();
+                    else finishErr(
+                      response?.error?.code || 'ELEMENT_NOT_FOUND',
+                      response?.error?.message || 'Post-navigation element not found.',
+                      response?.error?.tip || 'Check the selector or extend the timeout.'
+                    );
+                  }).catch((err) => {
+                    finishErr('ELEMENT_NOT_FOUND', err?.message || 'Post-navigation wait failed.', null);
+                  });
+                };
+                checkUrl(checkSel);
+              };
+
               const waitForLoad = (targetTabId) => {
-                const onUpdated = (updatedTabId, changeInfo) => {
+                let onUpdated = null;
+                let fallback = null;
+                let done = false;
+
+                const finalize = () => {
+                  if (done) return;
+                  done = true;
+                  if (onUpdated) chrome.tabs.onUpdated.removeListener(onUpdated);
+                  if (fallback) clearTimeout(fallback);
+                  setTimeout(() => runPostChecks(targetTabId), 300);
+                };
+
+                onUpdated = (updatedTabId, changeInfo) => {
                   if (updatedTabId === targetTabId && changeInfo.status === 'complete') {
-                    chrome.tabs.onUpdated.removeListener(onUpdated);
-                    clearTimeout(fallback);
-                    setTimeout(() => {
-                      sendToNative({
-                        type: 'browser:commandResult',
-                        commandId: msg.commandId,
-                        success: true,
-                      });
-                    }, 300);
+                    finalize();
                   }
                 };
                 chrome.tabs.onUpdated.addListener(onUpdated);
-                const fallback = setTimeout(() => {
-                  chrome.tabs.onUpdated.removeListener(onUpdated);
-                  sendToNative({
-                    type: 'browser:commandResult',
-                    commandId: msg.commandId,
-                    success: true,
-                  });
-                }, 30000);
+
+                // Real timeout: report failure instead of silent success
+                fallback = setTimeout(() => {
+                  if (done) return;
+                  done = true;
+                  if (onUpdated) chrome.tabs.onUpdated.removeListener(onUpdated);
+                  finishErr('NAVIGATION_TIMEOUT',
+                    `Page didn't finish loading after ${Math.round(navTimeout / 1000)}s.`,
+                    'Site is slow or unreachable. Increase timeout or check connection.');
+                }, navTimeout);
               };
 
               if (msg.newTab) {
@@ -123,18 +200,25 @@ function connect() {
               text: msg.text,
               url: msg.url,
               timeout: msg.timeout,
+              // Forward new fields (extension 1.3.0)
+              waitMode: msg.waitMode,
+              urlWaitPattern: msg.urlWaitPattern,
+              postNavigateSelector: msg.postNavigateSelector,
+              typeAppend: msg.typeAppend,
+              typePaste: msg.typePaste,
+              typeDelay: msg.typeDelay,
             }).then((response) => {
+              // Forward response — preserves response.success and response.error (object form)
               sendToNative({
                 type: 'browser:commandResult',
                 commandId: msg.commandId,
-                success: true,
                 ...response,
               });
             }).catch((err) => {
               sendToNative({
                 type: 'browser:commandResult',
                 commandId: msg.commandId,
-                error: err.message || 'Failed to execute command',
+                error: { code: 'EXTENSION_ERROR', message: err.message || 'Failed to execute command', tip: null },
               });
             });
           });
@@ -147,6 +231,7 @@ function connect() {
                 type: 'browser:pickResult',
                 requestId: msg.requestId,
                 selector: null,
+                alternatives: [],
               });
               return;
             }
@@ -155,12 +240,14 @@ function connect() {
                 type: 'browser:pickResult',
                 requestId: msg.requestId,
                 selector: response?.selector || null,
+                alternatives: response?.alternatives || [],
               });
             }).catch(() => {
               sendToNative({
                 type: 'browser:pickResult',
                 requestId: msg.requestId,
                 selector: null,
+                alternatives: [],
               });
             });
           });
@@ -245,6 +332,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       button: msg.button || 'left',
       isInput: msg.isInput || false,
       url: sender.tab?.url || '',
+    });
+    sendResponse({ ok: true });
+  } else if (msg.type === 'typingCaptured' && isRecording) {
+    // #10 — Typing in an input was observed; bridge fills the BrowserType action's text
+    sendToNative({
+      type: 'browser:typingCaptured',
+      selector: msg.selector,
+      text: msg.text || '',
+      isAppend: !!msg.isAppend,
     });
     sendResponse({ ok: true });
   } else if (msg.type === 'commandResult') {

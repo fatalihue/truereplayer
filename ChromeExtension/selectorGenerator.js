@@ -205,7 +205,128 @@ function getElementDescription(el) {
   return ariaLabel || title || alt || placeholder || (text ? `"${text}"` : value || el.tagName.toLowerCase());
 }
 
+/**
+ * #2 — Generate up to 5 stable selector alternatives ranked by stability tier.
+ * Tier S (green): #id, [data-testid], [data-cy], [data-test]
+ * Tier A (blue):  [name], [aria-label], unique [role][aria-label] combos
+ * Tier B (yellow): text= (when text content is unique on page)
+ * Tier C (red):   nth-child CSS path (current full path generator)
+ *
+ * Returns an array of {selector, tier, description} sorted by stability.
+ */
+function generateSelectorAlternatives(el) {
+  if (!el || el === document.documentElement || el === document.body) return [];
+
+  // Bubble up to nearest interactive ancestor for consistency with generateSelector
+  el = bubbleToInteractive(el);
+
+  const alts = [];
+  const seen = new Set();
+  const push = (selector, tier, description) => {
+    if (!selector || seen.has(selector)) return;
+    if (!isUnique(selector)) return; // Skip ambiguous selectors at S/A tiers
+    seen.add(selector);
+    alts.push({ selector, tier, description });
+  };
+
+  // Tier S — strongest stability signals
+  if (el.id && el.id !== 'null' && el.id !== 'undefined' && !/^\d/.test(el.id)) {
+    push(`#${CSS.escape(el.id)}`, 'S', 'ID');
+  }
+  for (const attr of ['data-testid', 'data-test', 'data-cy', 'data-qa']) {
+    const v = el.getAttribute(attr);
+    if (v) push(`[${attr}="${CSS.escape(v)}"]`, 'S', attr);
+  }
+
+  // Tier A — strong but not as durable as test IDs
+  const nameAttr = el.getAttribute('name');
+  if (nameAttr) {
+    push(`${el.tagName.toLowerCase()}[name="${CSS.escape(nameAttr)}"]`, 'A', 'name');
+  }
+  const ariaLabel = el.getAttribute('aria-label');
+  if (ariaLabel) {
+    push(`${el.tagName.toLowerCase()}[aria-label="${CSS.escape(ariaLabel)}"]`, 'A', 'aria-label');
+    const role = el.getAttribute('role');
+    if (role) {
+      push(`[role="${CSS.escape(role)}"][aria-label="${CSS.escape(ariaLabel)}"]`, 'A', 'role+aria-label');
+    }
+  }
+  const placeholder = el.getAttribute('placeholder');
+  if (placeholder && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+    push(`${el.tagName.toLowerCase()}[placeholder="${CSS.escape(placeholder)}"]`, 'A', 'placeholder');
+  }
+
+  // Tier B — text= match if this element's visible text is unique on the page
+  const directText = Array.from(el.childNodes)
+    .filter(n => n.nodeType === Node.TEXT_NODE)
+    .map(n => n.textContent.trim())
+    .join(' ').trim();
+  const visibleText = (directText || el.textContent?.trim() || '').slice(0, 80);
+  if (visibleText && visibleText.length >= 2 && visibleText.length <= 80) {
+    if (isTextUnique(visibleText)) {
+      alts.push({ selector: `text=${visibleText}`, tier: 'B', description: 'visible text' });
+    }
+  }
+
+  // Tier C — fallback CSS path (always include so user has a working option)
+  const path = generateSelector(el);
+  if (path && !seen.has(path)) {
+    alts.push({ selector: path, tier: 'C', description: 'CSS path' });
+  }
+
+  // Cap at 5; always sorted by tier (S, A, B, C)
+  const tierRank = { S: 0, A: 1, B: 2, C: 3 };
+  alts.sort((a, b) => tierRank[a.tier] - tierRank[b.tier]);
+  return alts.slice(0, 5);
+}
+
+// #2 — Check whether a visible-text query would resolve uniquely.
+// We approximate: walk the DOM and count visible elements whose direct text matches.
+function isTextUnique(text) {
+  let count = 0;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+  while (walker.nextNode()) {
+    const el = walker.currentNode;
+    const direct = Array.from(el.childNodes)
+      .filter(n => n.nodeType === Node.TEXT_NODE)
+      .map(n => n.textContent.trim())
+      .join(' ').trim();
+    if (direct === text) {
+      count++;
+      if (count > 1) return false;
+    }
+  }
+  return count === 1;
+}
+
+/**
+ * #2 — Estimate the stability tier of an arbitrary selector string for the
+ * SheetPanel shield indicator. No DOM lookup; pure pattern detection.
+ */
+function estimateSelectorTier(selector) {
+  if (!selector) return 'C';
+  const s = selector.trim();
+  // Text-based selectors → tier B
+  if (s.startsWith('text=') || s.startsWith('text*=') || s.startsWith('text~=') || s.startsWith('text/')) return 'B';
+  // ID or test-id → tier S
+  if (/^#[A-Za-z_][\w\-]*$/.test(s)) return 'S';
+  if (/\[data-(testid|test|cy|qa)=/.test(s)) return 'S';
+  // name / aria-label / placeholder → tier A
+  if (/\[(name|aria-label|placeholder)=/.test(s)) return 'A';
+  // nth-of-type / nth-child / direct child paths → tier C
+  if (s.includes(':nth-') || s.includes(' > ')) return 'C';
+  // Class-only selectors → tier B (decent but not test-id)
+  if (/^[a-z]+\./i.test(s)) return 'B';
+  // Default
+  return 'C';
+}
+
 // Export for content.js
 if (typeof window !== 'undefined') {
-  window.__trueReplayerSelectorGenerator = { generateSelector, getElementDescription };
+  window.__trueReplayerSelectorGenerator = {
+    generateSelector,
+    generateSelectorAlternatives,
+    estimateSelectorTier,
+    getElementDescription,
+  };
 }

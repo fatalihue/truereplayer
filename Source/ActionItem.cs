@@ -25,6 +25,30 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
         public bool NewTab { get; set; }
 
+        // BrowserWaitElement: "appears" (default), "disappears", "enabled", "text-match"
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? WaitMode { get; set; }
+
+        // BrowserNavigate: optional URL pattern (glob or /regex/) to wait for after navigation
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? UrlWaitPattern { get; set; }
+
+        // BrowserNavigate: optional CSS selector to wait for after page load
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? PostNavigateSelector { get; set; }
+
+        // BrowserType: when true, append text to existing field value instead of replacing it
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool TypeAppend { get; set; }
+
+        // BrowserType: when true, use clipboard paste (Ctrl+V) instead of char-by-char typing
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool TypePaste { get; set; }
+
+        // BrowserType: optional ms delay between chars. null = use default (5ms for long text)
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? TypeDelay { get; set; }
+
         // When true, the action is retained in the list but skipped during replay.
         // Persisted so users can load a profile with actions pre-disabled.
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]

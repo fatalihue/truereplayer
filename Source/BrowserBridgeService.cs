@@ -14,7 +14,7 @@ namespace TrueReplayer.Services
     public class BrowserBridgeService : IDisposable
     {
         private const string PipeName = "TrueReplayerBridge";
-        public const string ExpectedExtensionVersion = "1.2.0";
+        public const string ExpectedExtensionVersion = "1.3.0";
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
         private NamedPipeServerStream? _pipeServer;
         private StreamReader? _reader;
@@ -30,6 +30,8 @@ namespace TrueReplayer.Services
         public event Action<bool>? ConnectionChanged;
         public event Action<string, string>? ExtensionVersionMismatch; // currentVersion, expectedVersion
         public event Action<string, string, string?, string?, string?, bool>? ElementClicked; // selector, description, url, tagName, button, isInput
+        // #10 — typingCaptured(selector, text, isAppend)
+        public event Action<string, string, bool>? TypingCaptured;
 
         public void Start()
         {
@@ -140,14 +142,41 @@ namespace TrueReplayer.Services
                             ElementClicked?.Invoke(selector, description, url, tagName, button, isInput);
                             break;
 
+                        case "browser:typingCaptured":
+                            // #10 — Typing observed in a recorded input field
+                            var typeSelector = root.GetProperty("selector").GetString() ?? "";
+                            var typedText = root.TryGetProperty("text", out var ttEl) ? ttEl.GetString() ?? "" : "";
+                            var typedAppend = root.TryGetProperty("isAppend", out var taEl) && taEl.GetBoolean();
+                            TypingCaptured?.Invoke(typeSelector, typedText, typedAppend);
+                            break;
+
                         case "browser:commandResult":
                             var cmdId = root.GetProperty("commandId").GetString() ?? "";
                             if (_pendingCommands.TryRemove(cmdId, out var tcs))
                             {
-                                if (root.TryGetProperty("error", out var errEl) && errEl.ValueKind == JsonValueKind.String)
-                                    tcs.TrySetException(new Exception(errEl.GetString()));
+                                if (root.TryGetProperty("error", out var errEl))
+                                {
+                                    // Support legacy string format and new {code, message, tip} object format
+                                    if (errEl.ValueKind == JsonValueKind.String)
+                                    {
+                                        tcs.TrySetException(new BrowserActionException(null, errEl.GetString() ?? "Unknown error", null));
+                                    }
+                                    else if (errEl.ValueKind == JsonValueKind.Object)
+                                    {
+                                        var code = errEl.TryGetProperty("code", out var c) ? c.GetString() : null;
+                                        var msg = errEl.TryGetProperty("message", out var m) ? m.GetString() : null;
+                                        var tip = errEl.TryGetProperty("tip", out var t) ? t.GetString() : null;
+                                        tcs.TrySetException(new BrowserActionException(code, msg ?? "Unknown error", tip));
+                                    }
+                                    else
+                                    {
+                                        tcs.TrySetResult(root);
+                                    }
+                                }
                                 else
+                                {
                                     tcs.TrySetResult(root);
+                                }
                             }
                             break;
 
@@ -216,7 +245,7 @@ namespace TrueReplayer.Services
             }
         }
 
-        public async Task<string?> PickElementAsync(CancellationToken token, int timeoutMs = 30000)
+        public async Task<PickResult> PickElementAsync(CancellationToken token, int timeoutMs = 30000)
         {
             if (!IsConnected)
                 throw new InvalidOperationException("Browser extension is not connected.");
@@ -235,17 +264,33 @@ namespace TrueReplayer.Services
                 using (cts.Token.Register(() => tcs.TrySetCanceled()))
                 {
                     var result = await tcs.Task;
+                    string? primary = null;
+                    var alternatives = new System.Collections.Generic.List<SelectorAlternative>();
                     if (result.TryGetProperty("selector", out var selEl) && selEl.ValueKind == JsonValueKind.String)
-                        return selEl.GetString();
-                    return null;
+                        primary = selEl.GetString();
+                    if (result.TryGetProperty("alternatives", out var altEl) && altEl.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var alt in altEl.EnumerateArray())
+                        {
+                            var altSel = alt.TryGetProperty("selector", out var s) ? s.GetString() : null;
+                            var altTier = alt.TryGetProperty("tier", out var t) ? t.GetString() : null;
+                            var altDesc = alt.TryGetProperty("description", out var d) ? d.GetString() : null;
+                            if (!string.IsNullOrEmpty(altSel))
+                                alternatives.Add(new SelectorAlternative(altSel!, altTier ?? "C", altDesc ?? ""));
+                        }
+                    }
+                    return new PickResult(primary, alternatives);
                 }
             }
             catch
             {
                 _pendingCommands.TryRemove(requestId, out _);
-                return null;
+                return new PickResult(null, new System.Collections.Generic.List<SelectorAlternative>());
             }
         }
+
+        public record PickResult(string? Selector, System.Collections.Generic.IReadOnlyList<SelectorAlternative> Alternatives);
+        public record SelectorAlternative(string Selector, string Tier, string Description);
 
         public async Task<JsonElement> ExecuteBrowserCommandAsync(
             TrueReplayer.Models.ActionItem action, CancellationToken token, int timeoutMs = 5000, string? resolvedText = null)
@@ -284,6 +329,9 @@ namespace TrueReplayer.Services
                 ? action.Timeout
                 : timeoutMs;
 
+            // Navigation can take longer than action timeout; give it generous headroom (timeout * 6 or 30s).
+            var pipeTimeout = command == "navigate" ? Math.Max(timeout * 6, 30000) : timeout;
+
             SendMessage(new
             {
                 type = "browser:executeCommand",
@@ -293,10 +341,17 @@ namespace TrueReplayer.Services
                 text = resolvedText ?? action.BrowserText ?? "",
                 url = action.Key ?? "",
                 newTab = action.NewTab,
-                timeout
+                timeout,
+                // New fields (extension 1.3.0) — older extensions ignore unknown keys
+                waitMode = action.WaitMode,
+                urlWaitPattern = action.UrlWaitPattern,
+                postNavigateSelector = action.PostNavigateSelector,
+                typeAppend = action.TypeAppend,
+                typePaste = action.TypePaste,
+                typeDelay = action.TypeDelay
             });
 
-            using var timeoutCts = new CancellationTokenSource(timeout);
+            using var timeoutCts = new CancellationTokenSource(pipeTimeout);
 
             try
             {
@@ -304,7 +359,10 @@ namespace TrueReplayer.Services
                 using (token.Register(() => tcs.TrySetCanceled()))
                 // If command times out, set a timeout exception instead of cancellation
                 using (timeoutCts.Token.Register(() => tcs.TrySetException(
-                    new TimeoutException(GetFriendlyTimeoutMessage(command, timeout)))))
+                    new BrowserActionException(
+                        code: command == "navigate" ? "NAVIGATION_TIMEOUT" : "ELEMENT_NOT_FOUND",
+                        message: GetFriendlyTimeoutMessage(command, timeout),
+                        tip: GetFriendlyTimeoutTip(command)))))
                 {
                     return await tcs.Task;
                 }
@@ -313,6 +371,17 @@ namespace TrueReplayer.Services
             {
                 _pendingCommands.TryRemove(commandId, out _);
             }
+        }
+
+        /// <summary>
+        /// One-shot browser action execution for the "Test action" button in the editor.
+        /// Same as ExecuteBrowserCommandAsync but does not require an existing replay context.
+        /// </summary>
+        public async Task<JsonElement> TestActionAsync(
+            TrueReplayer.Models.ActionItem action, CancellationToken token, string? resolvedText = null)
+        {
+            return await ExecuteBrowserCommandAsync(action, token,
+                action.Timeout > 0 ? action.Timeout : 5000, resolvedText);
         }
 
         public void SetRecordingMode(bool enabled)
@@ -326,12 +395,24 @@ namespace TrueReplayer.Services
             var seconds = timeoutMs / 1000;
             return command switch
             {
-                "click" => $"Left Click timed out after {seconds}s. Element not found or not visible. Tip: use the Text Match field in Edit Action to match by visible text.",
-                "rightClick" => $"Right Click timed out after {seconds}s. Element not found or not visible. Tip: use the Text Match field in Edit Action to match by visible text.",
-                "type" => $"Input Text timed out after {seconds}s. Target field not found or not visible. Tip: use the Text Match field in Edit Action or pick the element with the crosshair.",
-                "waitElement" => $"Wait timed out after {seconds}s. Element not found on the page. Tip: use the Text Match field in Edit Action or increase the timeout.",
-                "navigate" => $"Navigate timed out after {seconds}s. Check the URL and your internet connection.",
-                _ => $"Browser action timed out after {seconds}s. Make sure the page is fully loaded."
+                "click" => $"Left Click timed out after {seconds}s. Element not found or not visible.",
+                "rightClick" => $"Right Click timed out after {seconds}s. Element not found or not visible.",
+                "type" => $"Input Text timed out after {seconds}s. Target field not found or not visible.",
+                "waitElement" => $"Wait timed out after {seconds}s. Element not found on the page.",
+                "navigate" => $"Page didn't finish loading after {seconds}s.",
+                _ => $"Browser action timed out after {seconds}s."
+            };
+        }
+
+        private static string GetFriendlyTimeoutTip(string command)
+        {
+            return command switch
+            {
+                "click" or "rightClick" => "Use the Text Match field to match by visible text, or pick the element with the crosshair.",
+                "type" => "Use the Text Match field or pick the element with the crosshair.",
+                "waitElement" => "Use the Text Match field or increase the timeout.",
+                "navigate" => "Check the URL and your internet connection.",
+                _ => "Make sure the page is fully loaded."
             };
         }
 
@@ -343,5 +424,26 @@ namespace TrueReplayer.Services
             _pipeServer?.Dispose();
             _cts.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Structured browser action error with code + message + actionable tip.
+    /// Codes: SELECTOR_INVALID, ELEMENT_NOT_FOUND, ELEMENT_HIDDEN, ELEMENT_COVERED,
+    /// ELEMENT_DISABLED, NAVIGATION_TIMEOUT, EXTENSION_DISCONNECTED, REGEX_INVALID.
+    /// </summary>
+    public class BrowserActionException : Exception
+    {
+        public string? Code { get; }
+        public string? Tip { get; }
+
+        public BrowserActionException(string? code, string message, string? tip)
+            : base(BuildMessage(message, tip))
+        {
+            Code = code;
+            Tip = tip;
+        }
+
+        private static string BuildMessage(string message, string? tip)
+            => string.IsNullOrEmpty(tip) ? message : $"{message} Tip: {tip}";
     }
 }
