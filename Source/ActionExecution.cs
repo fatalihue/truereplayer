@@ -124,7 +124,24 @@ namespace TrueReplayer.Services
                         onActionHighlight?.Invoke(index);
                 });
             };
+
+            replayer.OnReplayPaused += (hotkey, timeoutMs) =>
+            {
+                OnReplayPaused?.Invoke(hotkey, timeoutMs);
+            };
+            replayer.OnReplayResumed += () =>
+            {
+                OnReplayResumed?.Invoke();
+            };
         }
+
+        // Re-exposed events from the inner replayer so MainWindow/WebViewBridge can wire UI feedback.
+        public event Action<string, int>? OnReplayPaused;
+        public event Action? OnReplayResumed;
+
+        // Manual resume from UI button (status bar). Forwards to InputHookManager which fires the
+        // same callback the resume hotkey would.
+        public void ManualResume() => InputHookManager.TriggerReplayPauseListener();
 
         public void SetProfileNameProvider(Func<string> getProfileName)
         {
@@ -571,6 +588,8 @@ namespace TrueReplayer.Services
         private Action<List<string>>? _onChainChanged;
 
         public event Action<ActionItem>? OnActionExecuting;
+        public event Action<string, int>? OnReplayPaused;
+        public event Action? OnReplayResumed;
 
         public ActionReplayer(ObservableCollection<ActionItem> actions, DispatcherQueue dispatcherQueue, BrowserBridgeService? browserBridge = null)
         {
@@ -800,6 +819,7 @@ namespace TrueReplayer.Services
                         case "SendText": await SimulateClipboardPaste(action.Key, token); break;
                         case "WaitImage": await ExecuteWaitImage(action, token); break;
                         case "RunProfile": await HandleRunProfile(action, token); break;
+                        case "Pause": await ExecutePause(action, token); break;
                         case "BrowserClick":
                         case "BrowserRightClick":
                         case "BrowserType":
@@ -1509,6 +1529,38 @@ namespace TrueReplayer.Services
             finally
             {
                 referenceImage.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Pauses replay until either the configured resume hotkey is pressed, or the timeout
+        /// expires, or the replay is cancelled. The hotkey is suppressed (not sent to the target
+        /// app). If both fields are empty/zero, this is a no-op so the replay continues immediately.
+        /// </summary>
+        private async Task ExecutePause(ActionItem action, CancellationToken token)
+        {
+            string? hotkey = string.IsNullOrWhiteSpace(action.Key) ? null : action.Key.Trim();
+            int timeoutMs = action.Timeout > 0 ? action.Timeout : 0;
+            if (hotkey == null && timeoutMs == 0) return;
+
+            var resumeTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            dispatcherQueue.TryEnqueue(() => OnReplayPaused?.Invoke(hotkey ?? "", timeoutMs));
+
+            if (hotkey != null)
+                InputHookManager.SetReplayPauseListener(hotkey, () => resumeTcs.TrySetResult(true));
+
+            try
+            {
+                var resumeTask = resumeTcs.Task;
+                var timeoutTask = timeoutMs > 0 ? Task.Delay(timeoutMs, token) : Task.Delay(Timeout.Infinite, token);
+                await Task.WhenAny(resumeTask, timeoutTask);
+                token.ThrowIfCancellationRequested();
+            }
+            finally
+            {
+                InputHookManager.ClearReplayPauseListener();
+                dispatcherQueue.TryEnqueue(() => OnReplayResumed?.Invoke());
             }
         }
 

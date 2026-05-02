@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ChevronUp, ChevronDown, ScanSearch, Plus, Mouse, Keyboard, ArrowUp, ArrowDown, Globe, Workflow } from 'lucide-react';
+import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ChevronUp, ChevronDown, ScanSearch, Plus, Mouse, Keyboard, ArrowUp, ArrowDown, Globe, Workflow, Pause } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -339,6 +339,21 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             data-tip="Run Profile"
           >
             <Workflow size={14} />
+          </button>
+
+          {/* Pause */}
+          <button
+            tabIndex={-1}
+            onClick={() => {
+              const sel = selectionRef.current;
+              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+              send({ type: 'actions:insertAction', payload: { actionType: 'Pause', insertIndex } });
+            }}
+            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip="Pause"
+          >
+            <Pause size={14} />
           </button>
 
           {/* Browser Actions */}

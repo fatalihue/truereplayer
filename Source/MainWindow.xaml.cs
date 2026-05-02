@@ -119,6 +119,18 @@ namespace TrueReplayer
                 bridge?.PushReplayChainUpdate(stack);
             });
 
+            // ── Pause action wiring ──
+            // ExecutePause raises these events; the bridge pushes them to React so the status
+            // bar shows "PAUSED — Press F4 or wait Ns" with a manual Resume button.
+            replayService.OnReplayPaused += (hotkey, timeoutMs) =>
+            {
+                bridge?.PushReplayPaused(hotkey, timeoutMs);
+            };
+            replayService.OnReplayResumed += () =>
+            {
+                bridge?.PushReplayResumed();
+            };
+
             this.Closed += (_, _) =>
             {
                 Services.DiagnosticLog.Info("Window closing — disposing bridge and controllers");

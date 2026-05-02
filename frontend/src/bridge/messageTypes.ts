@@ -149,6 +149,17 @@ export interface AppState {
    * "Running A → B" while a sub-profile executes.
    */
   replayChain: string[];
+  /**
+   * Pause action state. isPaused=true while the replay is awaiting either the
+   * configured resume hotkey or timeout expiry. The status bar renders
+   * "PAUSED — Press X or wait Ns" + a manual Resume button while active.
+   */
+  pauseState: {
+    isPaused: boolean;
+    hotkey: string;
+    timeoutMs: number;
+    startedAt: number;
+  };
 }
 
 // ── Messages C# → JS ──
@@ -168,6 +179,8 @@ export type IncomingMessage =
   | { type: 'windowTarget:detectState'; payload: { detecting: boolean } }
   | { type: 'clipboard:content'; payload: { text: string } }
   | { type: 'replay:chain'; payload: { stack: string[] } }
+  | { type: 'replay:paused'; payload: { hotkey: string; timeoutMs: number } }
+  | { type: 'replay:resumed'; payload: Record<string, never> }
   | { type: 'update:available'; payload: { version: string; currentVersion: string; notes: string[] } }
   | { type: 'update:progress'; payload: { percent: number } }
   | { type: 'update:ready'; payload: Record<string, never> }
@@ -184,6 +197,7 @@ export type OutgoingMessage =
   | { type: 'ui:ready'; payload: Record<string, never> }
   | { type: 'recording:toggle'; payload: { insertIndex?: number } }
   | { type: 'replay:toggle'; payload: { loopEnabled: boolean; loopCount: string; intervalEnabled: boolean; intervalText: string } }
+  | { type: 'replay:resume'; payload: Record<string, never> }
   | { type: 'actions:clear'; payload: Record<string, never> }
   | { type: 'actions:undo'; payload: Record<string, never> }
   | { type: 'actions:redo'; payload: Record<string, never> }

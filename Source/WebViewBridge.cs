@@ -234,6 +234,7 @@ namespace TrueReplayer
                     case "ui:ready": HandleUIReady(); break;
                     case "recording:toggle": HandleRecordingToggle(payload); break;
                     case "replay:toggle": HandleReplayToggle(payload); break;
+                    case "replay:resume": HandleReplayResume(payload); break;
                     case "actions:clear": HandleActionsClear(); break;
                     case "actions:undo": HandleUndo(); break;
                     case "actions:redo": HandleRedo(); break;
@@ -1353,6 +1354,23 @@ namespace TrueReplayer
             SendMessage("replay:chain", new { stack });
         }
 
+        public void PushReplayPaused(string hotkey, int timeoutMs)
+        {
+            SendMessage("replay:paused", new { hotkey, timeoutMs });
+        }
+
+        public void PushReplayResumed()
+        {
+            SendMessage("replay:resumed", new { });
+        }
+
+        // Manual resume from the status-bar Resume button. Forwards to the replay service which
+        // fires the same callback the resume hotkey would, freeing ExecutePause's await.
+        private void HandleReplayResume(JsonElement payload)
+        {
+            replayService.ManualResume();
+        }
+
         private void HandleInsertAction(JsonElement payload)
         {
             PushUndoState();
@@ -1393,6 +1411,25 @@ namespace TrueReplayer
                     Delay = delay,
                     Timeout = 5000
                 });
+                HasUnsavedChanges = true;
+                PushActionsUpdate();
+                mainController.UpdateButtonStates();
+                return;
+            }
+
+            // Pause: insert directly with empty hotkey + 0 timeout (user configures via Edit sheet)
+            if (actionType == "Pause")
+            {
+                int delay = int.TryParse(CustomDelay, out var pd) ? pd : 100;
+                actions.Insert(insertIndex, new ActionItem
+                {
+                    ActionType = "Pause",
+                    Key = "",
+                    Delay = delay,
+                    Timeout = 0
+                });
+                for (int i = 0; i < actions.Count; i++)
+                    actions[i].RowNumber = i + 1;
                 HasUnsavedChanges = true;
                 PushActionsUpdate();
                 mainController.UpdateButtonStates();

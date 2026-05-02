@@ -22,7 +22,7 @@ const actionTypes = [
   { value: 'SendText', label: 'Text' },
 ];
 
-const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate']);
+const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'Pause']);
 
 // #1 — Text matching modes mapped to selector prefixes
 type TextMode = 'exact' | 'contains' | 'icontains' | 'regex';
@@ -158,7 +158,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       setY(String(action.y || ''));
       setDelay(String(action.delay));
       setComment(action.comment || '');
-      setTimeout_(String((action.timeout || 5000) / 1000));
+      // Pause defaults timeout to 0 (infinite); other actions default to 5000ms.
+      setTimeout_(action.actionType === 'Pause'
+        ? String((action.timeout ?? 0) / 1000)
+        : String((action.timeout || 5000) / 1000));
       setConfidence(String(Math.round((action.confidence || 0.8) * 100)));
       setBrowserText(action.browserText || '');
       setNewTab(action.newTab || false);
@@ -211,6 +214,16 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       const newConfidence = Math.min(100, Math.max(10, parseInt(confidence, 10) || 80)) / 100;
       if (newConfidence !== (action.confidence || 0.8)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'confidence', value: String(newConfidence) } });
+      }
+    }
+
+    // Pause-specific fields: timeout in seconds. Hotkey shares the `key` field with other action
+    // types (already saved above by the generic key-equality check). Default seconds=0 = infinite.
+    if (actionType === 'Pause') {
+      const parsedSecs = parseFloat(timeout);
+      const newTimeoutMs = isNaN(parsedSecs) || parsedSecs < 0 ? 0 : Math.round(parsedSecs * 1000);
+      if (newTimeoutMs !== (action.timeout || 0)) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(newTimeoutMs) } });
       }
     }
 
@@ -325,6 +338,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const isKeyAction = actionType === 'KeyDown' || actionType === 'KeyUp';
   const isSendText = actionType === 'SendText';
   const isWaitImage = actionType === 'WaitImage';
+  const isPause = actionType === 'Pause';
   const isBrowser = actionType.startsWith('Browser');
   const isBrowserType = actionType === 'BrowserType';
   const isBrowserNavigate = actionType === 'BrowserNavigate';
@@ -371,8 +385,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
 
         {/* Body */}
         <div className="p-4 space-y-4 flex-1 min-h-0 overflow-y-auto">
-          {/* Action Type — hide for WaitImage and Browser */}
-          {!isWaitImage && !isBrowser && (
+          {/* Action Type — hide for WaitImage, Browser, and Pause */}
+          {!isWaitImage && !isBrowser && !isPause && (
           <div>
             <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">ACTION TYPE</label>
             <div className="flex flex-wrap gap-1.5">
@@ -449,6 +463,69 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   step="5"
                   className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
                 />
+              </div>
+            </div>
+          </>
+          )}
+
+          {/* Pause Settings */}
+          {isPause && (
+          <>
+            <div>
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">RESUME HOTKEY</label>
+              <input
+                type="text"
+                readOnly
+                value={key || ''}
+                placeholder="Click and press a key combo (or leave empty)"
+                onKeyDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const modifierKeys = new Set(['Control', 'Alt', 'Shift', 'Meta']);
+                  const modifiers: string[] = [];
+                  if (e.ctrlKey) modifiers.push('Ctrl');
+                  if (e.altKey) modifiers.push('Alt');
+                  if (e.shiftKey) modifiers.push('Shift');
+                  if (modifierKeys.has(e.key)) return;
+                  if (e.key === 'Escape') { setKey(''); return; }
+                  let mainKey = e.key;
+                  if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter') {
+                    const numpadMap: Record<string, string> = {
+                      Numpad0: 'Num0', Numpad1: 'Num1', Numpad2: 'Num2', Numpad3: 'Num3',
+                      Numpad4: 'Num4', Numpad5: 'Num5', Numpad6: 'Num6', Numpad7: 'Num7',
+                      Numpad8: 'Num8', Numpad9: 'Num9',
+                      NumpadMultiply: 'NumMultiply', NumpadDivide: 'NumDivide',
+                      NumpadAdd: 'NumAdd', NumpadSubtract: 'NumSubtract',
+                      NumpadDecimal: 'NumDecimal',
+                    };
+                    mainKey = numpadMap[e.code] ?? e.code;
+                  } else if (mainKey === ' ') mainKey = 'Space';
+                  else if (mainKey.length === 1) mainKey = mainKey.toUpperCase();
+                  else if (mainKey === 'ArrowUp') mainKey = 'Up';
+                  else if (mainKey === 'ArrowDown') mainKey = 'Down';
+                  else if (mainKey === 'ArrowLeft') mainKey = 'Left';
+                  else if (mainKey === 'ArrowRight') mainKey = 'Right';
+                  if (!modifiers.includes(mainKey)) modifiers.push(mainKey);
+                  setKey(modifiers.join('+'));
+                }}
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              />
+              <div className="text-[10px] text-text-tertiary mt-1">
+                Press the key combo to set. Press Esc to clear. Leave empty to use timeout only.
+              </div>
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s) — 0 = infinite</label>
+              <input
+                type="number"
+                value={timeout}
+                onChange={(e) => setTimeout_(e.target.value)}
+                min="0"
+                step="1"
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              />
+              <div className="text-[10px] text-text-tertiary mt-1">
+                Auto-resume after N seconds if hotkey isn't pressed. 0 means wait forever.
               </div>
             </div>
           </>

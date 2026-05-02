@@ -116,7 +116,7 @@ namespace TrueReplayer.Models
         {
             "KeyDown", "KeyUp", "ScrollUp", "ScrollDown", "SendText", "WaitImage",
             "BrowserClick", "BrowserRightClick", "BrowserType", "BrowserWaitElement", "BrowserNavigate",
-            "RunProfile"
+            "RunProfile", "Pause"
         };
 
         private bool HideCoordinates => NoCoordinateActionTypes.Contains(ActionType ?? "");
@@ -128,6 +128,16 @@ namespace TrueReplayer.Models
         {
             get
             {
+                if (ActionType == "Pause")
+                {
+                    bool hasHotkey = !string.IsNullOrWhiteSpace(Key);
+                    bool hasTimeout = Timeout > 0;
+                    if (hasHotkey && hasTimeout) return $"{Key} / {Timeout / 1000}s";
+                    if (hasHotkey) return Key;
+                    if (hasTimeout) return $"{Timeout / 1000}s";
+                    return "—";
+                }
+
                 if (string.IsNullOrEmpty(Key)) return "";
 
                 if (ActionType == "SendText") return Key;
