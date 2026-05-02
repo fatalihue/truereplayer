@@ -49,7 +49,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [titleMatchMode, setTitleMatchMode] = useState<'contains' | 'regex'>('contains');
   const [targetRelativeCoords, setTargetRelativeCoords] = useState(false);
   const [targetBringToFocus, setTargetBringToFocus] = useState(false);
-  const [targetLockPosition, setTargetLockPosition] = useState(false);
+  const [targetRestorePosition, setTargetRestorePosition] = useState(false);
+  const [targetRestoreSize, setTargetRestoreSize] = useState(false);
   // Tracks whether the user has explicitly edited the target fields (process/title/match mode or
   // detected a new window) since opening the dialog. When false for a profile that inherits its
   // target from a folder, "Set Target" will keep the inheritance and only save the flags.
@@ -352,7 +353,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setTitleMatchMode((hasOwnTarget ? (existing?.windowTargetTitleMatchMode ?? 'contains') : (folder?.windowTargetTitleMatchMode ?? 'contains')) as 'contains' | 'regex');
     setTargetRelativeCoords(hasOwnTarget ? (existing?.useRelativeCoordinates ?? false) : (folder?.useRelativeCoordinates ?? false));
     setTargetBringToFocus(hasOwnTarget ? (existing?.bringToFocus ?? false) : (folder?.bringToFocus ?? false));
-    setTargetLockPosition(existing?.lockPosition ?? false);
+    setTargetRestorePosition(existing?.restorePosition ?? false);
+    setTargetRestoreSize(existing?.restoreSize ?? false);
     setTargetExplicitlyEdited(false);
     setIsDetecting(false);
     setShowWindowTargetDialog(name);
@@ -388,7 +390,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         titleMatchMode,
         relativeCoordinates: targetRelativeCoords,
         bringToFocus: targetBringToFocus,
-        lockPosition: targetLockPosition,
+        restorePosition: targetRestorePosition,
+        restoreSize: targetRestoreSize,
         keepInheritedTarget,
       }
     });
@@ -491,7 +494,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   // Subscribe to window target detect events so the dialog receives the captured window info.
   // Note: the dialog is NOT auto-closed on profiles:updated anymore — closing happens only via
   // explicit user action (Cancel, Set Target, Remove), so the user can tweak multiple flags
-  // (Relative Coords / Bring to Focus / Lock Position / Update Window Size) without the dialog
+  // (Relative Coords / Bring to Focus / Restore Position / Restore Size / Update Window Size) without the dialog
   // snapping shut in the middle of configuration.
   useEffect(() => {
     if (!showWindowTargetDialog && !showFolderTargetDialog) return;
@@ -1863,8 +1866,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 <Toggle isOn={targetBringToFocus} onChange={setTargetBringToFocus} />
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-text-secondary" title="Restore the target window to its saved position before replay">Lock Position</span>
-                <Toggle isOn={targetLockPosition} onChange={setTargetLockPosition} />
+                <span className="text-xs text-text-secondary" title="Restore the target window to its saved position before replay">Restore Position</span>
+                <Toggle isOn={targetRestorePosition} onChange={setTargetRestorePosition} />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-secondary" title="Restore the target window to its saved size before replay (un-maximizes if needed)">Restore Size</span>
+                <Toggle isOn={targetRestoreSize} onChange={setTargetRestoreSize} />
               </div>
               {/* Convert coordinates */}
               <div className="flex gap-2 pt-1">

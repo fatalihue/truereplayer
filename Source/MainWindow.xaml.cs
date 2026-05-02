@@ -446,7 +446,8 @@ namespace TrueReplayer
                                 UserProfile.Current.WindowHeight,
                                 UserProfile.Current.WindowX,
                                 UserProfile.Current.WindowY,
-                                UserProfile.Current.LockPosition);
+                                UserProfile.Current.RestorePosition,
+                                UserProfile.Current.RestoreSize);
                         }
                     }
                     else if (key.StartsWith("PROFILE::") || key.StartsWith("PROFILE_HOLD::") || key.StartsWith("PROFILE_TOGGLE::"))
@@ -501,7 +502,8 @@ namespace TrueReplayer
                                 UserProfile.Current.WindowHeight,
                                 UserProfile.Current.WindowX,
                                 UserProfile.Current.WindowY,
-                                UserProfile.Current.LockPosition,
+                                UserProfile.Current.RestorePosition,
+                                UserProfile.Current.RestoreSize,
                                 forceInfiniteLoop);
 
                             // Post-start safety net for WhilePressed: if the user released the

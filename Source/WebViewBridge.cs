@@ -271,7 +271,8 @@ namespace TrueReplayer
                     case "profile:setWindowTarget": HandleProfileSetWindowTarget(payload); break;
                     case "profile:setRelativeCoordinates": HandleSetRelativeCoordinates(payload); break;
                     case "profile:setBringToFocus": HandleSetBringToFocus(payload); break;
-                    case "profile:setLockPosition": HandleProfileSetLockPosition(payload); break;
+                    case "profile:setRestorePosition": HandleProfileSetRestorePosition(payload); break;
+                    case "profile:setRestoreSize": HandleProfileSetRestoreSize(payload); break;
                     case "profile:setTriggerMode": HandleProfileSetTriggerMode(payload); break;
                     case "profile:removeWindowTarget": HandleProfileRemoveWindowTarget(payload); break;
                     case "profile:setFolderWindowTarget": HandleSetFolderWindowTarget(payload); break;
@@ -474,7 +475,8 @@ namespace TrueReplayer
                 windowTargetTitleMatchMode = p.WindowTargetTitleMatchMode,
                 useRelativeCoordinates = p.UseRelativeCoordinates,
                 bringToFocus = p.BringToFocus,
-                lockPosition = p.LockPosition,
+                restorePosition = p.RestorePosition,
+                restoreSize = p.RestoreSize,
                 triggerMode = TriggerModeToString(p.TriggerMode),
                 isDisabled = p.IsDisabled
             }).ToArray();
@@ -656,7 +658,8 @@ namespace TrueReplayer
                 WindowHeight = UserProfile.Current.WindowHeight,
                 WindowX = UserProfile.Current.WindowX,
                 WindowY = UserProfile.Current.WindowY,
-                LockPosition = UserProfile.Current.LockPosition,
+                RestorePosition = UserProfile.Current.RestorePosition,
+                RestoreSize = UserProfile.Current.RestoreSize,
                 BringToFocus = UserProfile.Current.BringToFocus,
                 TriggerMode = UserProfile.Current.TriggerMode,
                 IsDisabled = UserProfile.Current.IsDisabled,
@@ -713,7 +716,8 @@ namespace TrueReplayer
                     windowTargetTitleMatchMode = p.WindowTargetTitleMatchMode,
                     useRelativeCoordinates = p.UseRelativeCoordinates,
                     bringToFocus = p.BringToFocus,
-                    lockPosition = p.LockPosition,
+                    restorePosition = p.RestorePosition,
+                    restoreSize = p.RestoreSize,
                     triggerMode = TriggerModeToString(p.TriggerMode),
                     isDisabled = p.IsDisabled
                 }).ToArray(),
@@ -937,7 +941,7 @@ namespace TrueReplayer
             var effTarget = CurrentProfileName != "No Profile" ? profileController.GetEffectiveWindowTarget(CurrentProfileName) : UserProfile.Current.TargetWindow;
             var effRelCoords = CurrentProfileName != "No Profile" ? profileController.GetEffectiveRelativeCoordinates(CurrentProfileName) : UserProfile.Current.UseRelativeCoordinates;
             var effBringFocus = CurrentProfileName != "No Profile" ? profileController.GetEffectiveBringToFocus(CurrentProfileName) : UserProfile.Current.BringToFocus;
-            mainController.ToggleReplay(loopEnabled, loopCount, intervalEnabled, intervalText, useVariation, variationPercent, effRelCoords, effTarget, effBringFocus, UserProfile.Current.WindowWidth, UserProfile.Current.WindowHeight, UserProfile.Current.WindowX, UserProfile.Current.WindowY, UserProfile.Current.LockPosition);
+            mainController.ToggleReplay(loopEnabled, loopCount, intervalEnabled, intervalText, useVariation, variationPercent, effRelCoords, effTarget, effBringFocus, UserProfile.Current.WindowWidth, UserProfile.Current.WindowHeight, UserProfile.Current.WindowX, UserProfile.Current.WindowY, UserProfile.Current.RestorePosition, UserProfile.Current.RestoreSize);
         }
 
         private void HandleActionsClear()
@@ -2116,11 +2120,12 @@ namespace TrueReplayer
                 : "contains";
             bool relativeCoordinates = payload.TryGetProperty("relativeCoordinates", out var rcProp) && rcProp.GetBoolean();
             bool bringToFocus = payload.TryGetProperty("bringToFocus", out var btfProp) && btfProp.GetBoolean();
-            bool lockPosition = payload.TryGetProperty("lockPosition", out var lpProp) && lpProp.GetBoolean();
+            bool restorePosition = payload.TryGetProperty("restorePosition", out var rpProp) && rpProp.GetBoolean();
+            bool restoreSize = payload.TryGetProperty("restoreSize", out var rsProp) && rsProp.GetBoolean();
             // When true, the profile keeps its inherited target (from folder or none). We only
-            // write the flags (relativeCoords/bringToFocus/lockPosition/geometry). Prevents the
-            // dialog from accidentally "promoting" a folder-inherited target into a profile-level
-            // target just because the user toggled a flag.
+            // write the flags (relativeCoords/bringToFocus/restorePosition/restoreSize/geometry).
+            // Prevents the dialog from accidentally "promoting" a folder-inherited target into a
+            // profile-level target just because the user toggled a flag.
             bool keepInheritedTarget = payload.TryGetProperty("keepInheritedTarget", out var kitProp) && kitProp.GetBoolean();
             if (string.IsNullOrEmpty(name)) return;
 
@@ -2160,7 +2165,8 @@ namespace TrueReplayer
                 }
                 profile.UseRelativeCoordinates = relativeCoordinates;
                 profile.BringToFocus = bringToFocus;
-                profile.LockPosition = lockPosition;
+                profile.RestorePosition = restorePosition;
+                profile.RestoreSize = restoreSize;
                 // If this is the active profile, the in-memory UserProfile.Current may hold
                 // fresher WindowX/Y/Width/Height (captured via "Update Window Size & Position"
                 // button since last save). Copy those across so Set Target doesn't overwrite them.
@@ -2178,7 +2184,8 @@ namespace TrueReplayer
                         UserProfile.Current.TargetWindow = profile.TargetWindow;
                     UserProfile.Current.UseRelativeCoordinates = relativeCoordinates;
                     UserProfile.Current.BringToFocus = bringToFocus;
-                    UserProfile.Current.LockPosition = lockPosition;
+                    UserProfile.Current.RestorePosition = restorePosition;
+                    UserProfile.Current.RestoreSize = restoreSize;
                     HasUnsavedChanges = false;
                 }
                 await profileController.RefreshProfileListAsync(true);
@@ -2227,7 +2234,8 @@ namespace TrueReplayer
                 profile.TargetWindow = null;
                 profile.UseRelativeCoordinates = false;
                 profile.BringToFocus = false;
-                profile.LockPosition = false;
+                profile.RestorePosition = false;
+                profile.RestoreSize = false;
                 profile.WindowX = 0;
                 profile.WindowY = 0;
                 profile.WindowWidth = 0;
@@ -2238,7 +2246,8 @@ namespace TrueReplayer
                     UserProfile.Current.TargetWindow = null;
                     UserProfile.Current.UseRelativeCoordinates = false;
                     UserProfile.Current.BringToFocus = false;
-                    UserProfile.Current.LockPosition = false;
+                    UserProfile.Current.RestorePosition = false;
+                    UserProfile.Current.RestoreSize = false;
                     UserProfile.Current.WindowX = 0;
                     UserProfile.Current.WindowY = 0;
                     UserProfile.Current.WindowWidth = 0;
@@ -2492,7 +2501,7 @@ namespace TrueReplayer
             SendMessage("alert:show", new { message = $"Window geometry captured: {w}×{hgt} @ ({rect.Left}, {rect.Top})" });
         }
 
-        private async void HandleProfileSetLockPosition(JsonElement payload)
+        private async void HandleProfileSetRestorePosition(JsonElement payload)
         {
             string name = payload.GetProperty("name").GetString() ?? "";
             bool enabled = payload.GetProperty("enabled").GetBoolean();
@@ -2501,12 +2510,30 @@ namespace TrueReplayer
             var profile = await profileController.LoadProfileByNameAsync(name);
             if (profile == null) return;
 
-            profile.LockPosition = enabled;
+            profile.RestorePosition = enabled;
             await profileController.SaveProfileByNameAsync(name, profile);
             var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
-            if (entry != null) entry.LockPosition = enabled;
+            if (entry != null) entry.RestorePosition = enabled;
             if (CurrentProfileName == name)
-                UserProfile.Current.LockPosition = enabled;
+                UserProfile.Current.RestorePosition = enabled;
+            PushProfilesUpdate();
+        }
+
+        private async void HandleProfileSetRestoreSize(JsonElement payload)
+        {
+            string name = payload.GetProperty("name").GetString() ?? "";
+            bool enabled = payload.GetProperty("enabled").GetBoolean();
+            if (string.IsNullOrEmpty(name)) return;
+
+            var profile = await profileController.LoadProfileByNameAsync(name);
+            if (profile == null) return;
+
+            profile.RestoreSize = enabled;
+            await profileController.SaveProfileByNameAsync(name, profile);
+            var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
+            if (entry != null) entry.RestoreSize = enabled;
+            if (CurrentProfileName == name)
+                UserProfile.Current.RestoreSize = enabled;
             PushProfilesUpdate();
         }
 

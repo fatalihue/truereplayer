@@ -141,15 +141,15 @@ namespace TrueReplayer.Services
             replayer.SetChainChangedCallback(callback);
         }
 
-        public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation = false, int delayVariationPercent = 20, bool useRelativeCoords = false, Models.WindowTarget? windowTarget = null, bool bringToFocus = false, int lockWidth = 0, int lockHeight = 0, int lockX = 0, int lockY = 0, bool lockPosition = false, bool forceInfiniteLoop = false)
+        public void ToggleReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation = false, int delayVariationPercent = 20, bool useRelativeCoords = false, Models.WindowTarget? windowTarget = null, bool bringToFocus = false, int lockWidth = 0, int lockHeight = 0, int lockX = 0, int lockY = 0, bool restorePosition = false, bool restoreSize = false, bool forceInfiniteLoop = false)
         {
             if (!IsReplaying && actions.Count > 0)
-                StartReplay(loopEnabled, loopCountText, intervalEnabled, intervalText, useDelayVariation, delayVariationPercent, useRelativeCoords, windowTarget, bringToFocus, lockWidth, lockHeight, lockX, lockY, lockPosition, forceInfiniteLoop);
+                StartReplay(loopEnabled, loopCountText, intervalEnabled, intervalText, useDelayVariation, delayVariationPercent, useRelativeCoords, windowTarget, bringToFocus, lockWidth, lockHeight, lockX, lockY, restorePosition, restoreSize, forceInfiniteLoop);
             else if (IsReplaying)
                 StopReplay();
         }
 
-        private void StartReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation, int delayVariationPercent, bool useRelativeCoords, Models.WindowTarget? windowTarget, bool bringToFocus, int lockWidth, int lockHeight, int lockX, int lockY, bool lockPosition, bool forceInfiniteLoop)
+        private void StartReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation, int delayVariationPercent, bool useRelativeCoords, Models.WindowTarget? windowTarget, bool bringToFocus, int lockWidth, int lockHeight, int lockX, int lockY, bool restorePosition, bool restoreSize, bool forceInfiniteLoop)
         {
             IsReplaying = true;
             onButtonStateChanged?.Invoke("Stop", true);
@@ -158,7 +158,7 @@ namespace TrueReplayer.Services
             int loopInterval = intervalEnabled && int.TryParse(intervalText, out int interval) && interval >= 0 ? interval : 0;
             replayer.SetLoopOptions(loopCount, loopInterval);
             replayer.SetDelayVariation(useDelayVariation, delayVariationPercent);
-            replayer.SetRelativeCoordinates(useRelativeCoords, windowTarget, lockWidth, lockHeight, lockX, lockY, lockPosition);
+            replayer.SetRelativeCoordinates(useRelativeCoords, windowTarget, lockWidth, lockHeight, lockX, lockY, restorePosition, restoreSize);
             replayer.SetBringToFocus(bringToFocus);
             replayer.SetForceInfiniteLoop(forceInfiniteLoop);
 
@@ -510,7 +510,7 @@ namespace TrueReplayer.Services
                         {
                             recX = x - rect.Left;
                             recY = y - rect.Top;
-                            // Capture window geometry on first click for Lock Size / Lock Position
+                            // Capture window geometry on first click for Restore Position / Restore Size
                             if (Models.UserProfile.Current.WindowWidth == 0)
                             {
                                 Models.UserProfile.Current.WindowWidth = rect.Right - rect.Left;
@@ -606,11 +606,12 @@ namespace TrueReplayer.Services
         private int _lockHeight = 0;
         private int _lockX = 0;
         private int _lockY = 0;
-        private bool _lockPosition = false;
+        private bool _restorePosition = false;
+        private bool _restoreSize = false;
 
         private bool _bringToFocus = false;
 
-        public void SetRelativeCoordinates(bool enabled, Models.WindowTarget? target, int lockWidth = 0, int lockHeight = 0, int lockX = 0, int lockY = 0, bool lockPosition = false)
+        public void SetRelativeCoordinates(bool enabled, Models.WindowTarget? target, int lockWidth = 0, int lockHeight = 0, int lockX = 0, int lockY = 0, bool restorePosition = false, bool restoreSize = false)
         {
             _useRelativeCoordinates = enabled;
             _windowTarget = target;
@@ -618,7 +619,8 @@ namespace TrueReplayer.Services
             _lockHeight = lockHeight;
             _lockX = lockX;
             _lockY = lockY;
-            _lockPosition = lockPosition;
+            _restorePosition = restorePosition;
+            _restoreSize = restoreSize;
         }
 
         public void SetBringToFocus(bool enabled)
@@ -694,22 +696,31 @@ namespace TrueReplayer.Services
                     }
                 }
 
-                // Lock Size / Lock Position: resize/reposition target window before replay.
-                // Independent from Relative Coordinates — the user can lock geometry even with
+                // Restore Position / Restore Size: reposition/resize target window before replay.
+                // Independent from Relative Coordinates — the user can restore geometry even with
                 // absolute coordinates (e.g., they just want the window consistently placed).
                 bool hasSize = _lockWidth > 0 && _lockHeight > 0;
-                if (_windowTarget != null && (hasSize || _lockPosition))
+                bool applySize = _restoreSize && hasSize;   // gating explícito + sanity-check
+                bool applyPos = _restorePosition;
+                if (_windowTarget != null && (applySize || applyPos))
                 {
                     var sizeHwnd = FindTargetWindow();
                     if (sizeHwnd != IntPtr.Zero && !NativeMethods.IsIconic(sizeHwnd))
                     {
+                        // Chrome fix: SetWindowPos resize é silenciosamente ignorado em janelas
+                        // maximizadas (chrome customizado/DWM). Un-maximize antes de aplicar tamanho.
+                        if (applySize && NativeMethods.IsZoomed(sizeHwnd))
+                        {
+                            NativeMethods.ShowWindow(sizeHwnd, NativeMethods.SW_RESTORE);
+                            await Task.Delay(80, token);
+                        }
                         uint flags = NativeMethods.SWP_NOZORDER;
-                        if (!_lockPosition) flags |= NativeMethods.SWP_NOMOVE;
-                        if (!hasSize) flags |= NativeMethods.SWP_NOSIZE;
-                        int posX = _lockPosition ? _lockX : 0;
-                        int posY = _lockPosition ? _lockY : 0;
-                        int sizeW = hasSize ? _lockWidth : 0;
-                        int sizeH = hasSize ? _lockHeight : 0;
+                        if (!applyPos) flags |= NativeMethods.SWP_NOMOVE;
+                        if (!applySize) flags |= NativeMethods.SWP_NOSIZE;
+                        int posX = applyPos ? _lockX : 0;
+                        int posY = applyPos ? _lockY : 0;
+                        int sizeW = applySize ? _lockWidth : 0;
+                        int sizeH = applySize ? _lockHeight : 0;
                         NativeMethods.SetWindowPos(sizeHwnd, IntPtr.Zero, posX, posY, sizeW, sizeH, flags);
                         await Task.Delay(100, token); // Wait for reposition/resize
                     }
@@ -821,7 +832,8 @@ namespace TrueReplayer.Services
             public bool UseRelativeCoordinates;
             public Models.WindowTarget? WindowTarget;
             public int LockWidth, LockHeight, LockX, LockY;
-            public bool LockPosition;
+            public bool RestorePosition;
+            public bool RestoreSize;
             public bool BringToFocus;
         }
 
@@ -833,7 +845,8 @@ namespace TrueReplayer.Services
             LockHeight = _lockHeight,
             LockX = _lockX,
             LockY = _lockY,
-            LockPosition = _lockPosition,
+            RestorePosition = _restorePosition,
+            RestoreSize = _restoreSize,
             BringToFocus = _bringToFocus,
         };
 
@@ -845,7 +858,8 @@ namespace TrueReplayer.Services
             _lockHeight = snap.LockHeight;
             _lockX = snap.LockX;
             _lockY = snap.LockY;
-            _lockPosition = snap.LockPosition;
+            _restorePosition = snap.RestorePosition;
+            _restoreSize = snap.RestoreSize;
             _bringToFocus = snap.BringToFocus;
         }
 
@@ -875,18 +889,25 @@ namespace TrueReplayer.Services
             }
 
             bool hasSize = _lockWidth > 0 && _lockHeight > 0;
-            if (_windowTarget != null && (hasSize || _lockPosition))
+            bool applySize = _restoreSize && hasSize;
+            bool applyPos = _restorePosition;
+            if (_windowTarget != null && (applySize || applyPos))
             {
                 var sizeHwnd = FindTargetWindow();
                 if (sizeHwnd != IntPtr.Zero && !NativeMethods.IsIconic(sizeHwnd))
                 {
+                    if (applySize && NativeMethods.IsZoomed(sizeHwnd))
+                    {
+                        NativeMethods.ShowWindow(sizeHwnd, NativeMethods.SW_RESTORE);
+                        await Task.Delay(80, token);
+                    }
                     uint flags = NativeMethods.SWP_NOZORDER;
-                    if (!_lockPosition) flags |= NativeMethods.SWP_NOMOVE;
-                    if (!hasSize) flags |= NativeMethods.SWP_NOSIZE;
-                    int posX = _lockPosition ? _lockX : 0;
-                    int posY = _lockPosition ? _lockY : 0;
-                    int sizeW = hasSize ? _lockWidth : 0;
-                    int sizeH = hasSize ? _lockHeight : 0;
+                    if (!applyPos) flags |= NativeMethods.SWP_NOMOVE;
+                    if (!applySize) flags |= NativeMethods.SWP_NOSIZE;
+                    int posX = applyPos ? _lockX : 0;
+                    int posY = applyPos ? _lockY : 0;
+                    int sizeW = applySize ? _lockWidth : 0;
+                    int sizeH = applySize ? _lockHeight : 0;
                     NativeMethods.SetWindowPos(sizeHwnd, IntPtr.Zero, posX, posY, sizeW, sizeH, flags);
                     await Task.Delay(80, token);
                 }
@@ -959,7 +980,8 @@ namespace TrueReplayer.Services
                     _windowTarget = subProfile.TargetWindow;
                     _useRelativeCoordinates = subProfile.UseRelativeCoordinates;
                     _bringToFocus = subProfile.BringToFocus;
-                    _lockPosition = subProfile.LockPosition;
+                    _restorePosition = subProfile.RestorePosition;
+                    _restoreSize = subProfile.RestoreSize;
                     _lockWidth = subProfile.WindowWidth;
                     _lockHeight = subProfile.WindowHeight;
                     _lockX = subProfile.WindowX;
