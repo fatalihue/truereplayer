@@ -264,11 +264,21 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setShowCreateDialog(true);
   }, []);
 
-  // Listen for command palette trigger
+  // Listen for command palette triggers
   useEffect(() => {
     window.addEventListener('cmd:newprofile', handleCreate);
     return () => window.removeEventListener('cmd:newprofile', handleCreate);
   }, [handleCreate]);
+
+  useEffect(() => {
+    const handler = () => {
+      setFolderDialogName('');
+      setFolderDialogColor('#60CDFF');
+      setShowCreateFolderDialog(true);
+    };
+    window.addEventListener('cmd:newfolder', handler);
+    return () => window.removeEventListener('cmd:newfolder', handler);
+  }, []);
 
   const handleRename = (name: string) => {
     setContextMenu(null);

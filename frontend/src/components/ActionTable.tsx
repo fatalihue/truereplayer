@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Copy, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Workflow, Pause } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Workflow, Pause, Code2, Files } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -1012,7 +1012,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               }}
               className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
             >
-              <Copy size={13} className="text-text-tertiary" />
+              <Code2 size={13} className="text-text-tertiary" />
               Copy Selector
             </button>
           )}
@@ -1023,7 +1023,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             onClick={handleDuplicate}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
-            <Copy size={13} className="text-text-tertiary" />
+            <Files size={13} className="text-text-tertiary" />
             Duplicate
           </button>
 
