@@ -1013,6 +1013,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 const hasVisibleProfiles = folder.profiles.length > 0;
                 const isDragOver = dropTarget === folder.name && dragProfile !== null;
                 const isFolderDragging = dragFolder === folder.name && folderDragActive.current;
+                // Visually mark the folder as disabled when every profile inside is disabled,
+                // matching the dimmed look of disabled profiles. Empty folders stay normal.
+                const folderAllDisabled = folder.items.length > 0
+                  && folder.items.every(n => profileMap.get(n)?.isDisabled);
                 const showDropBefore = dragFolder && dropFolderIndex === folderIdx && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder);
                 const showDropAfter = dragFolder && dropFolderIndex === folderIdx + 1 && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder) && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder) + 1;
                 return (
@@ -1041,8 +1045,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         >
                           {folder.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
                         </span>
-                        <FolderOpen size={12} style={{ color: folder.color }} className="shrink-0" />
-                        <span className="text-xs font-medium text-text-secondary flex-1 truncate">{folder.name}</span>
+                        <FolderOpen size={12} style={{ color: folder.color }} className={`shrink-0 ${folderAllDisabled ? 'opacity-40' : ''}`} />
+                        <span className={`text-xs font-medium flex-1 truncate ${folderAllDisabled ? 'text-text-disabled' : 'text-text-secondary'}`}>{folder.name}</span>
                         {folder.hasWindowTarget && (
                           <span
                             className="group/ftarget shrink-0 relative"
@@ -1113,7 +1117,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
             >
               <Pin size={13} className="text-text-tertiary" />
-              Pin to Top
+              Pin
             </button>
           )}
 
@@ -1127,7 +1131,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
             >
               <ArrowRightFromLine size={13} className="text-text-tertiary" />
-              Move to Folder
+              Folder
               <ChevronRight size={11} className="ml-auto text-text-tertiary" />
             </button>
             {showMoveToFolderMenu === contextMenu.profileName && (
@@ -1187,21 +1191,21 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Keyboard size={13} className="text-text-tertiary" />
-            {profile?.hotkey ? 'Edit Hotkey' : 'Assign Hotkey'}
+            Hotkey
           </button>
           <button
             onClick={() => handleAssignHotstring(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Type size={13} className="text-text-tertiary" />
-            {profile?.hotstring ? 'Edit Hotstring' : 'Assign Hotstring'}
+            Hotstrings
           </button>
           <button
             onClick={() => handleSetWindowTarget(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Crosshair size={13} className="text-text-tertiary" />
-            {profile?.hasWindowTarget ? 'Edit Target' : 'Set Target'}
+            Target
           </button>
           <div className="my-1 border-t border-border-subtle" />
           <button
@@ -1226,7 +1230,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Pencil size={13} className="text-text-tertiary" />
-            Rename Folder
+            Rename
           </button>
           <div
             className="relative"
@@ -1237,7 +1241,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
             >
               <Palette size={13} className="text-text-tertiary" />
-              Change Color
+              Color
               <ChevronRight size={11} className="ml-auto text-text-tertiary" />
             </button>
             {showFolderColorPicker === folderContextMenu.folderName && (
@@ -1273,7 +1277,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Crosshair size={13} className="text-text-tertiary" />
-            {(profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName)?.hasWindowTarget ? 'Edit Target' : 'Set Target'}
+            Target
           </button>
           <button
             onClick={() => {
@@ -1287,7 +1291,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               const folder = (profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName);
               const items = folder?.items ?? [];
               const allDisabled = items.length > 0 && items.every(n => profiles.find(p => p.name === n)?.isDisabled);
-              return allDisabled ? 'Enable All Profiles' : 'Disable All Profiles';
+              return allDisabled ? 'Enable' : 'Disable';
             })()}
           </button>
           <div className="my-1 border-t border-border-subtle" />

@@ -477,7 +477,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 type="text"
                 readOnly
                 value={key || ''}
-                placeholder="Click and press a key combo (or leave empty)"
+                placeholder="Click to capture"
                 onKeyDown={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
@@ -511,7 +511,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
               />
               <div className="text-[10px] text-text-tertiary mt-1">
-                Press the key combo to set. Press Esc to clear. Leave empty to use timeout only.
+                Press a key combo. Esc clears.
               </div>
             </div>
             <div>
@@ -525,7 +525,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
               />
               <div className="text-[10px] text-text-tertiary mt-1">
-                Auto-resume after N seconds if hotkey isn't pressed. 0 means wait forever.
+                Auto-resumes if the hotkey isn't pressed in time.
               </div>
             </div>
           </>
