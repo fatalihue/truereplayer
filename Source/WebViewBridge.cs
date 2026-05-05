@@ -42,6 +42,9 @@ namespace TrueReplayer
 
         // Internal action clipboard for copy/paste between profiles
         private List<ActionItem>? _copiedActions = null;
+        // Profile name from which _copiedActions was copied — used to locate WaitImage PNGs
+        // when pasting into a different profile.
+        private string? _copiedSourceProfile = null;
 
         // In-memory settings state (replaces reading from XAML controls)
         public string CustomDelay { get; set; } = "100";
@@ -966,6 +969,7 @@ namespace TrueReplayer
                 .ToList();
 
             _copiedActions = new List<ActionItem>();
+            _copiedSourceProfile = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
             foreach (var idx in indices)
             {
                 if (idx >= 0 && idx < actions.Count)
@@ -1010,8 +1014,17 @@ namespace TrueReplayer
             int insertIndex = payload.TryGetProperty("insertIndex", out var idxEl) ? idxEl.GetInt32() : actions.Count;
             insertIndex = Math.Max(0, Math.Min(insertIndex, actions.Count));
 
+            string dstProfile = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
+            string srcProfile = _copiedSourceProfile ?? dstProfile;
+
             foreach (var copied in _copiedActions)
             {
+                string? clonedImagePath = copied.ImagePath;
+                if (copied.ActionType == "WaitImage" && !string.IsNullOrEmpty(copied.ImagePath))
+                {
+                    clonedImagePath = ImageStorageService.CloneReferenceImage(srcProfile, copied.ImagePath, dstProfile)
+                                      ?? copied.ImagePath;
+                }
                 var clone = new ActionItem
                 {
                     ActionType = copied.ActionType,
@@ -1022,7 +1035,7 @@ namespace TrueReplayer
                     Comment = copied.Comment,
                     Timeout = copied.Timeout,
                     Confidence = copied.Confidence,
-                    ImagePath = copied.ImagePath,
+                    ImagePath = clonedImagePath,
                     BrowserText = copied.BrowserText,
                     NewTab = copied.NewTab,
                     IsSkipped = copied.IsSkipped,
@@ -1606,6 +1619,8 @@ namespace TrueReplayer
             var validIndices = indices.Where(i => i >= 0 && i < actions.Count).ToList();
             if (validIndices.Count == 0) return;
 
+            string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
+
             actions.CollectionChanged -= OnActionsChanged;
             try
             {
@@ -1613,6 +1628,12 @@ namespace TrueReplayer
                 foreach (var idx in validIndices)
                 {
                     var original = actions[idx];
+                    string? clonedImagePath = original.ImagePath;
+                    if (original.ActionType == "WaitImage" && !string.IsNullOrEmpty(original.ImagePath))
+                    {
+                        clonedImagePath = ImageStorageService.CloneReferenceImage(profileName, original.ImagePath, profileName)
+                                          ?? original.ImagePath;
+                    }
                     var clone = new ActionItem
                     {
                         ActionType = original.ActionType,
@@ -1621,7 +1642,7 @@ namespace TrueReplayer
                         Y = original.Y,
                         Delay = original.Delay,
                         Comment = original.Comment,
-                        ImagePath = original.ImagePath,
+                        ImagePath = clonedImagePath,
                         Timeout = original.Timeout,
                         Confidence = original.Confidence,
                         BrowserText = original.BrowserText,
@@ -1956,6 +1977,7 @@ namespace TrueReplayer
             {
                 File.Move(entry.FilePath, newFilePath);
                 var actualNewName = Path.GetFileNameWithoutExtension(newFileName);
+                ImageStorageService.RenameProfileDirectory(oldName, actualNewName);
                 if (CurrentProfileName == oldName)
                 {
                     CurrentProfileName = actualNewName;
@@ -1985,6 +2007,8 @@ namespace TrueReplayer
             {
                 if (File.Exists(entry.FilePath))
                     File.Delete(entry.FilePath);
+
+                ImageStorageService.DeleteProfileDirectory(name);
 
                 if (CurrentProfileName == name)
                 {
