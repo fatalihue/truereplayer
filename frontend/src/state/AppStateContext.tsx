@@ -52,6 +52,7 @@ const initialState: AppState = {
     copiedCount: 0,
   },
   replayChain: [],
+  pauseState: { isPaused: false, hotkey: '', timeoutMs: 0, startedAt: 0 },
 };
 
 function appStateReducer(state: AppState, message: IncomingMessage): AppState {
@@ -76,6 +77,21 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
       return { ...state, statusBar: message.payload };
     case 'replay:chain':
       return { ...state, replayChain: message.payload.stack };
+    case 'replay:paused':
+      return {
+        ...state,
+        pauseState: {
+          isPaused: true,
+          hotkey: message.payload.hotkey,
+          timeoutMs: message.payload.timeoutMs,
+          startedAt: Date.now(),
+        },
+      };
+    case 'replay:resumed':
+      return {
+        ...state,
+        pauseState: { isPaused: false, hotkey: '', timeoutMs: 0, startedAt: 0 },
+      };
     default:
       return state;
   }

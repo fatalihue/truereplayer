@@ -81,7 +81,8 @@ namespace TrueReplayer.Models
         public int WindowHeight { get; set; } = 0;
         public int WindowX { get; set; } = 0;
         public int WindowY { get; set; } = 0;
-        public bool LockPosition { get; set; } = false;
+        public bool RestorePosition { get; set; } = false;
+        public bool RestoreSize { get; set; } = false;
         public bool BringToFocus { get; set; } = false;
         public TriggerMode TriggerMode { get; set; } = TriggerMode.OnPress;
         public bool IsDisabled { get; set; }
@@ -138,7 +139,8 @@ namespace TrueReplayer.Models
         public string WindowTargetTitleMatchMode { get; set; } = "contains";
         public bool UseRelativeCoordinates { get; set; }
         public bool BringToFocus { get; set; }
-        public bool LockPosition { get; set; }
+        public bool RestorePosition { get; set; }
+        public bool RestoreSize { get; set; }
         public TriggerMode TriggerMode { get; set; } = TriggerMode.OnPress;
         public bool IsDisabled { get; set; }
         public string Display => string.IsNullOrEmpty(Hotkey) ? Name : $"{Name} ({Hotkey})";
@@ -191,7 +193,8 @@ namespace TrueReplayer.Models
         public int WindowHeight { get; set; } = 0;
         public int WindowX { get; set; } = 0;
         public int WindowY { get; set; } = 0;
-        public bool LockPosition { get; set; } = false;
+        public bool RestorePosition { get; set; } = false;
+        public bool RestoreSize { get; set; } = false;
         public bool BringToFocus { get; set; } = false;
         public TriggerMode TriggerMode { get; set; } = TriggerMode.OnPress;
         public string BatchDelay { get; set; } = "Delay (ms)";

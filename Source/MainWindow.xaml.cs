@@ -119,6 +119,18 @@ namespace TrueReplayer
                 bridge?.PushReplayChainUpdate(stack);
             });
 
+            // ── Pause action wiring ──
+            // ExecutePause raises these events; the bridge pushes them to React so the status
+            // bar shows "PAUSED — Press F4 or wait Ns" with a manual Resume button.
+            replayService.OnReplayPaused += (hotkey, timeoutMs) =>
+            {
+                bridge?.PushReplayPaused(hotkey, timeoutMs);
+            };
+            replayService.OnReplayResumed += () =>
+            {
+                bridge?.PushReplayResumed();
+            };
+
             this.Closed += (_, _) =>
             {
                 Services.DiagnosticLog.Info("Window closing — disposing bridge and controllers");
@@ -446,7 +458,8 @@ namespace TrueReplayer
                                 UserProfile.Current.WindowHeight,
                                 UserProfile.Current.WindowX,
                                 UserProfile.Current.WindowY,
-                                UserProfile.Current.LockPosition);
+                                UserProfile.Current.RestorePosition,
+                                UserProfile.Current.RestoreSize);
                         }
                     }
                     else if (key.StartsWith("PROFILE::") || key.StartsWith("PROFILE_HOLD::") || key.StartsWith("PROFILE_TOGGLE::"))
@@ -501,7 +514,8 @@ namespace TrueReplayer
                                 UserProfile.Current.WindowHeight,
                                 UserProfile.Current.WindowX,
                                 UserProfile.Current.WindowY,
-                                UserProfile.Current.LockPosition,
+                                UserProfile.Current.RestorePosition,
+                                UserProfile.Current.RestoreSize,
                                 forceInfiniteLoop);
 
                             // Post-start safety net for WhilePressed: if the user released the

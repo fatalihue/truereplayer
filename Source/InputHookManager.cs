@@ -80,6 +80,27 @@ namespace TrueReplayer
 
         public static bool IsReplayingAction { get; set; } = false;
 
+        // Single-use hotkey listener for Pause action: when ExecutePause is awaiting, the registered
+        // hotkey resumes replay. Volatile so the hook thread sees writes from the replay thread
+        // immediately. Cleared in finally block of ExecutePause.
+        private static volatile string? _pauseResumeHotkey;
+        private static volatile Action? _pauseResumeCallback;
+
+        public static void SetReplayPauseListener(string hotkey, Action onPress)
+        {
+            _pauseResumeHotkey = hotkey;
+            _pauseResumeCallback = onPress;
+        }
+
+        public static void ClearReplayPauseListener()
+        {
+            _pauseResumeHotkey = null;
+            _pauseResumeCallback = null;
+        }
+
+        // Manual resume from UI button — fires the same callback the hotkey would.
+        public static void TriggerReplayPauseListener() => _pauseResumeCallback?.Invoke();
+
         public static string? LastTriggerHotkey { get; set; }
 
         public static bool IgnoreProfileHotkeys { get; set; } = false;
@@ -587,6 +608,15 @@ namespace TrueReplayer
                 bool isRepeat = isDown && _vkCodesCurrentlyDown.Contains(vkCode);
                 if (isDown) _vkCodesCurrentlyDown.Add(vkCode);
                 else _vkCodesCurrentlyDown.Remove(vkCode);
+
+                // Pause action resume: when a Pause action is awaiting, swallow the configured
+                // resume hotkey and fire the callback. ExecutePause clears the listener via finally.
+                if (isDown && !isRepeat && _pauseResumeHotkey != null && key == _pauseResumeHotkey)
+                {
+                    var cb = _pauseResumeCallback;
+                    cb?.Invoke();
+                    return (IntPtr)1;
+                }
 
                 // Unconditional swallow for the physical main key of an active WhilePressed hold
                 // or a pending OnRelease. If we don't do this here, any code path that decides

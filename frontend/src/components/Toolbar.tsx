@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ChevronUp, ChevronDown, ScanSearch, Plus, Mouse, Keyboard, ArrowUp, ArrowDown, Globe, Workflow } from 'lucide-react';
+import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ChevronUp, ChevronDown, ScanSearch, Plus, Mouse, Keyboard, ArrowUp, ArrowDown, Globe, Workflow, Pause } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -106,6 +106,33 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
     window.addEventListener('cmd:sendtext', handler);
     return () => window.removeEventListener('cmd:sendtext', handler);
   }, []);
+
+  useEffect(() => {
+    const handler = () => setShowThemeEditor(prev => !prev);
+    window.addEventListener('cmd:themeeditor', handler);
+    return () => window.removeEventListener('cmd:themeeditor', handler);
+  }, []);
+
+  useEffect(() => {
+    const handler = () => setShowRunProfileDialog(true);
+    window.addEventListener('cmd:runprofile', handler);
+    return () => window.removeEventListener('cmd:runprofile', handler);
+  }, []);
+
+  // Global keyboard shortcuts forwarded from App.tsx (which has no bridge access)
+  useEffect(() => {
+    const onSave = () => send({ type: 'profile:save', payload: {} });
+    const onUndo = () => send({ type: 'actions:undo', payload: {} });
+    const onRedo = () => send({ type: 'actions:redo', payload: {} });
+    window.addEventListener('cmd:save', onSave);
+    window.addEventListener('cmd:undo', onUndo);
+    window.addEventListener('cmd:redo', onRedo);
+    return () => {
+      window.removeEventListener('cmd:save', onSave);
+      window.removeEventListener('cmd:undo', onUndo);
+      window.removeEventListener('cmd:redo', onRedo);
+    };
+  }, [send]);
 
   // Close dropdowns on outside click or Escape
   useEffect(() => {
@@ -341,6 +368,21 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             <Workflow size={14} />
           </button>
 
+          {/* Pause */}
+          <button
+            tabIndex={-1}
+            onClick={() => {
+              const sel = selectionRef.current;
+              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+              send({ type: 'actions:insertAction', payload: { actionType: 'Pause', insertIndex } });
+            }}
+            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip="Pause"
+          >
+            <Pause size={14} />
+          </button>
+
           {/* Browser Actions */}
           <div className="relative" ref={browserMenuRef}>
             <button
@@ -390,9 +432,16 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
           {/* Copy / Paste / Clear */}
           <button
             tabIndex={-1}
-            onClick={() => send({ type: 'actions:copy', payload: {} })}
+            onClick={() => {
+              const sel = selectionRef.current;
+              if (sel.size > 0) {
+                send({ type: 'actions:copyInternal', payload: { indices: Array.from(sel) } });
+              } else if (actions.length > 0) {
+                send({ type: 'actions:copyInternal', payload: { indices: actions.map((_, i) => i) } });
+              }
+            }}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-            data-tip="Copy Actions"
+            data-tip="Copy Actions (Ctrl+C)"
           >
             <Copy size={14} />
           </button>

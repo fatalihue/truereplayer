@@ -24,10 +24,14 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>(defaultColumnVisibility);
 
-  // Global keyboard handler: Ctrl+K for command palette + block UI interaction keys
+  // Global keyboard handler: Ctrl+K for command palette, Ctrl+S to save profile,
+  // Ctrl+Z/Y for undo/redo + block UI interaction keys.
+  // Bridge-bound actions (save/undo/redo) fire as custom events; Toolbar (which has
+  // useBridge access) listens and forwards to C#.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      const ctrlOrMeta = e.ctrlKey || e.metaKey;
+      if (ctrlOrMeta && e.key === 'k') {
         e.preventDefault();
         setCmdPaletteOpen(prev => !prev);
         return;
@@ -35,7 +39,27 @@ export default function App() {
 
       // Allow keys inside inputs/textareas (user is actively typing)
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+      const inEditable = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable;
+
+      if (ctrlOrMeta && !inEditable) {
+        if (e.key === 's' || e.key === 'S') {
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent('cmd:save'));
+          return;
+        }
+        if ((e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent('cmd:undo'));
+          return;
+        }
+        if (e.key === 'y' || e.key === 'Y' || ((e.key === 'z' || e.key === 'Z') && e.shiftKey)) {
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent('cmd:redo'));
+          return;
+        }
+      }
+
+      if (inEditable) return;
 
       // Block Tab, Space, Enter, arrows from interacting with UI elements
       if (['Tab', ' ', 'Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
@@ -56,6 +80,13 @@ export default function App() {
 
   const handleToggleSidebar = useCallback(() => {
     setSidebarCollapsed(prev => !prev);
+  }, []);
+
+  // Command palette triggers — sidebar toggle is in App state, so listen here
+  useEffect(() => {
+    const handler = () => setSidebarCollapsed(prev => !prev);
+    window.addEventListener('cmd:togglesidebar', handler);
+    return () => window.removeEventListener('cmd:togglesidebar', handler);
   }, []);
 
   return (

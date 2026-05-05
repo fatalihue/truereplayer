@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Play } from 'lucide-react';
+import { Play, Pause as PauseIcon } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
+import { useBridge } from '../bridge/BridgeContext';
 
 export function StatusBar() {
-  const { statusBar, status, highlightedActionIndex, replayChain } = useAppState();
+  const { statusBar, status, highlightedActionIndex, replayChain, pauseState } = useAppState();
+  const { send } = useBridge();
   const isReplaying = status === 'replaying';
   // The engine's stack already includes the root profile at index 0, so we only
   // render "Running ..." when the chain has at least 2 entries (root + a sub-call).
@@ -35,6 +37,18 @@ export function StatusBar() {
   const pct = total > 0 ? Math.round((current / total) * 100) : 0;
   const minutes = Math.floor(elapsed / 60);
   const seconds = String(elapsed % 60).padStart(2, '0');
+
+  // Tick once per second while paused so the countdown text refreshes.
+  const [, setNowTick] = useState(0);
+  useEffect(() => {
+    if (!pauseState.isPaused || pauseState.timeoutMs <= 0) return;
+    const id = setInterval(() => setNowTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [pauseState.isPaused, pauseState.timeoutMs]);
+
+  const pauseRemainingSec = pauseState.timeoutMs > 0
+    ? Math.max(0, Math.ceil((pauseState.timeoutMs - (Date.now() - pauseState.startedAt)) / 1000))
+    : 0;
 
   return (
     <div className="flex items-center h-[26px] px-4 bg-bg-base border-t border-border-subtle shrink-0">
@@ -74,6 +88,25 @@ export function StatusBar() {
                 </span>
               </>
             )}
+            {pauseState.isPaused && (
+              <>
+                <div className="w-px h-3 bg-border-subtle shrink-0" />
+                <PauseIcon size={10} className="shrink-0" style={{ color: 'var(--color-action-pause-fg)' }} fill="currentColor" />
+                <span className="text-[11px] font-medium whitespace-nowrap" style={{ color: 'var(--color-action-pause-fg)' }}>
+                  PAUSED
+                  {pauseState.hotkey && ` — Press ${pauseState.hotkey}`}
+                  {pauseState.hotkey && pauseState.timeoutMs > 0 ? ' or ' : pauseState.timeoutMs > 0 ? ' — ' : ''}
+                  {pauseState.timeoutMs > 0 && `wait ${pauseRemainingSec}s`}
+                </span>
+                <button
+                  onClick={() => send({ type: 'replay:resume', payload: {} })}
+                  className="px-2 py-0.5 text-[10px] font-medium rounded border border-border-default text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors shrink-0"
+                  title="Resume replay"
+                >
+                  Resume
+                </button>
+              </>
+            )}
           </div>
         </>
       )}
@@ -82,7 +115,7 @@ export function StatusBar() {
           uses flex-1, so a second flex-1 here would split available space and squeeze the
           chain label. */}
       {!isReplaying && <div className="flex-1" />}
-      <span className="text-[11px] text-text-disabled shrink-0 ml-3">v1.9.47</span>
+      <span className="text-[11px] text-text-disabled shrink-0 ml-3">v1.9.48</span>
     </div>
   );
 }

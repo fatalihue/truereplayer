@@ -146,7 +146,8 @@ namespace TrueReplayer.Controllers
                     WindowHeight = UserProfile.Current.WindowHeight,
                     WindowX = UserProfile.Current.WindowX,
                     WindowY = UserProfile.Current.WindowY,
-                    LockPosition = UserProfile.Current.LockPosition,
+                    RestorePosition = UserProfile.Current.RestorePosition,
+                    RestoreSize = UserProfile.Current.RestoreSize,
                     BringToFocus = UserProfile.Current.BringToFocus,
                     TriggerMode = UserProfile.Current.TriggerMode,
                     IsDisabled = UserProfile.Current.IsDisabled,
@@ -286,7 +287,8 @@ namespace TrueReplayer.Controllers
                             WindowTargetTitleMatchMode = profile.TargetWindow?.TitleMatchMode ?? "contains",
                             UseRelativeCoordinates = profile.UseRelativeCoordinates,
                             BringToFocus = profile.BringToFocus,
-                            LockPosition = profile.LockPosition,
+                            RestorePosition = profile.RestorePosition,
+                            RestoreSize = profile.RestoreSize,
                             TriggerMode = profile.TriggerMode,
                             IsDisabled = profile.IsDisabled
                         });
@@ -651,7 +653,8 @@ namespace TrueReplayer.Controllers
                     WindowHeight = profile.WindowHeight,
                     WindowX = profile.WindowX,
                     WindowY = profile.WindowY,
-                    LockPosition = profile.LockPosition,
+                    RestorePosition = profile.RestorePosition,
+                    RestoreSize = profile.RestoreSize,
                     BringToFocus = profile.BringToFocus,
                     TriggerMode = profile.TriggerMode,
                     BatchDelay = profile.BatchDelay,
@@ -720,6 +723,7 @@ namespace TrueReplayer.Controllers
             if (fileName == null) return (0, 0, true, false);
 
             var json = await File.ReadAllTextAsync(fileName);
+            json = SettingsManager.MigrateProfileJson(json);  // Renomeia lockPosition→restorePosition em envelopes pré-rename
             var options = new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -799,11 +803,13 @@ namespace TrueReplayer.Controllers
                     WindowHeight = entry.WindowHeight,
                     WindowX = entry.WindowX,
                     WindowY = entry.WindowY,
-                    LockPosition = entry.LockPosition,
+                    RestorePosition = entry.RestorePosition,
+                    RestoreSize = entry.RestoreSize,
                     BringToFocus = entry.BringToFocus,
                     TriggerMode = entry.TriggerMode,
                     BatchDelay = entry.BatchDelay ?? "Delay (ms)"
                 };
+                SettingsManager.MigrateRestoreSize(profile);
 
                 await SettingsManager.SaveProfileAsync(targetPath, profile);
 

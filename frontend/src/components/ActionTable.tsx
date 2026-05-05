@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Copy, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Workflow } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Workflow, Pause, Code2, Files } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -22,6 +22,7 @@ function ActionIcon({ actionType }: { actionType: string }) {
   if (actionType === 'SendText') return <Type size={size} />;
   if (actionType === 'WaitImage') return <ScanSearch size={size} />;
   if (actionType === 'RunProfile') return <Workflow size={size} />;
+  if (actionType === 'Pause') return <Pause size={size} />;
   return <Zap size={size} />;
 }
 
@@ -596,7 +597,16 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                 ? ''
                 : action.actionType === 'RunProfile'
                   ? (action.repeatCount && action.repeatCount > 1 ? `${action.key} ×${action.repeatCount}` : action.key)
-                  : getDisplayKey(action.key);
+                  : action.actionType === 'Pause'
+                    ? (() => {
+                        const hasHotkey = !!action.key;
+                        const hasTimeout = (action.timeout ?? 0) > 0;
+                        if (hasHotkey && hasTimeout) return `${action.key} / ${Math.round((action.timeout ?? 0) / 1000)}s`;
+                        if (hasHotkey) return action.key;
+                        if (hasTimeout) return `${Math.round((action.timeout ?? 0) / 1000)}s`;
+                        return '—';
+                      })()
+                    : getDisplayKey(action.key);
               const displayX = getDisplayX(action);
               const displayY = getDisplayY(action);
               const canEditXY = isMouseAction(action.actionType);
@@ -677,6 +687,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         : action.actionType === 'BrowserWaitElement' ? 'Wait'
                         : action.actionType === 'BrowserNavigate' ? 'Navigate'
                         : action.actionType === 'RunProfile' ? 'Run Profile'
+                        : action.actionType === 'Pause' ? 'Pause'
                         : action.actionType}
                     </span>
                   </td>
@@ -1001,7 +1012,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               }}
               className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
             >
-              <Copy size={13} className="text-text-tertiary" />
+              <Code2 size={13} className="text-text-tertiary" />
               Copy Selector
             </button>
           )}
@@ -1012,7 +1023,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             onClick={handleDuplicate}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
-            <Copy size={13} className="text-text-tertiary" />
+            <Files size={13} className="text-text-tertiary" />
             Duplicate
           </button>
 

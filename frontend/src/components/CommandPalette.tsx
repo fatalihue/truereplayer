@@ -1,11 +1,14 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Search, Circle, Play, Square, Type, Save, FolderOpen, RotateCcw, FilePlus,
-  Copy, Trash2, PinOff, Pin, Download, Upload, MonitorDown, Shield, Minimize2, RefreshCw,
+  Trash2, PinOff, Pin, Download, Upload, MonitorDown, Shield, Minimize2, RefreshCw,
+  Pause, ScanSearch, Workflow, Undo2, Redo2, ClipboardPaste, Files, Replace,
+  FolderPlus, Palette, PanelLeft, DownloadCloud, Table2,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
+import { useSelectionRef } from '../state/SelectionContext';
 import { KbdTag } from './common/KbdTag';
 
 interface CommandPaletteProps {
@@ -29,9 +32,17 @@ interface CommandGroup {
 }
 
 export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
-  const { profiles, activeProfile, settings, buttonStates } = useAppState();
+  const { profiles, activeProfile, settings, buttonStates, actions } = useAppState();
   const { send } = useBridge();
+  const selectionRef = useSelectionRef();
   const [query, setQuery] = useState('');
+
+  // Insert position helper: matches the toolbar's behavior — after the last selected
+  // action, or at the end of the list when nothing is selected.
+  const computeInsertIndex = useCallback(() => {
+    const sel = selectionRef.current;
+    return sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+  }, [actions.length, selectionRef]);
   const [focusedIndex, setFocusedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -83,29 +94,54 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             },
           },
           {
+            id: 'undo', label: 'Undo', shortcut: 'Ctrl+Z',
+            icon: <Undo2 size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:undo', payload: {} }); onClose(); },
+          },
+          {
+            id: 'redo', label: 'Redo', shortcut: 'Ctrl+Y',
+            icon: <Redo2 size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:redo', payload: {} }); onClose(); },
+          },
+          {
             id: 'sendtext', label: 'Insert Send Text',
             icon: <Type size={14} className="text-text-secondary" />,
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:sendtext')); },
           },
           {
-            id: 'save', label: 'Save Profile', shortcut: 'Ctrl+S',
-            icon: <Save size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'profile:save', payload: {} }); onClose(); },
+            id: 'waitimage', label: 'Insert Wait for Image',
+            icon: <ScanSearch size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'WaitImage', insertIndex: computeInsertIndex() } }); onClose(); },
           },
           {
-            id: 'load', label: 'Load Profile',
-            icon: <FolderOpen size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'profile:load', payload: {} }); onClose(); },
+            id: 'pause', label: 'Insert Pause',
+            icon: <Pause size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'Pause', insertIndex: computeInsertIndex() } }); onClose(); },
           },
           {
-            id: 'reset', label: 'Reset Profile',
-            icon: <RotateCcw size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'profile:reset', payload: {} }); onClose(); },
+            id: 'runprofile', label: 'Insert Run Profile',
+            icon: <Workflow size={14} className="text-text-secondary" />,
+            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:runprofile')); },
           },
           {
-            id: 'copyactions', label: 'Copy Selected Actions',
-            icon: <Copy size={14} className="text-text-secondary" />,
+            id: 'copyactions', label: 'Copy as Table',
+            icon: <Table2 size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:copy', payload: {} }); onClose(); },
+          },
+          {
+            id: 'pasteactions', label: 'Paste Actions',
+            icon: <ClipboardPaste size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:paste', payload: { insertIndex: computeInsertIndex() } }); onClose(); },
+          },
+          {
+            id: 'convertrelative', label: 'Convert Coordinates to Relative',
+            icon: <Replace size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'profile:convertCoordinates', payload: { direction: 'toRelative' } }); onClose(); },
+          },
+          {
+            id: 'convertabsolute', label: 'Convert Coordinates to Absolute',
+            icon: <Replace size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'profile:convertCoordinates', payload: { direction: 'toAbsolute' } }); onClose(); },
           },
           {
             id: 'clearactions', label: 'Clear All Actions',
@@ -123,9 +159,29 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             icon: <FilePlus size={14} className="text-text-secondary" />,
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:newprofile')); },
           },
+          {
+            id: 'newfolder', label: 'New Folder',
+            icon: <FolderPlus size={14} className="text-text-secondary" />,
+            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:newfolder')); },
+          },
+          {
+            id: 'save', label: 'Save Profile', shortcut: 'Ctrl+S',
+            icon: <Save size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'profile:save', payload: {} }); onClose(); },
+          },
+          {
+            id: 'load', label: 'Load Profile',
+            icon: <FolderOpen size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'profile:load', payload: {} }); onClose(); },
+          },
+          {
+            id: 'reset', label: 'Reset Profile',
+            icon: <RotateCcw size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'profile:reset', payload: {} }); onClose(); },
+          },
           ...(activeProfile ? [{
             id: 'duplicateprofile', label: 'Duplicate Profile',
-            icon: <Copy size={14} className="text-text-secondary" />,
+            icon: <Files size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:duplicate', payload: { name: activeProfile } }); onClose(); },
           }] : []),
           {
@@ -137,6 +193,27 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             id: 'exportall', label: 'Export All Profiles',
             icon: <Upload size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:export', payload: { names: profiles.map(p => p.name), includeOrganization: true } }); onClose(); },
+          },
+        ],
+      },
+      {
+        id: 'view',
+        title: 'VIEW',
+        items: [
+          {
+            id: 'themeeditor', label: 'Open Theme Editor',
+            icon: <Palette size={14} className="text-text-secondary" />,
+            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:themeeditor')); },
+          },
+          {
+            id: 'togglesidebar', label: 'Toggle Sidebar',
+            icon: <PanelLeft size={14} className="text-text-secondary" />,
+            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:togglesidebar')); },
+          },
+          {
+            id: 'reloadui', label: 'Reload UI',
+            icon: <RefreshCw size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'window:reloadUI', payload: {} }); onClose(); },
           },
         ],
       },
@@ -176,16 +253,21 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             icon: <Shield size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'settings:change', payload: { key: 'runAsAdmin', value: !settings.runAsAdmin } }); onClose(); },
           },
+        ],
+      },
+      {
+        id: 'updates',
+        title: 'UPDATES',
+        items: [
           {
-            id: 'reloadui',
-            label: 'Reload UI',
-            icon: <RefreshCw size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'window:reloadUI', payload: {} }); onClose(); },
+            id: 'checkupdates', label: 'Check for Updates',
+            icon: <DownloadCloud size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'update:check', payload: {} }); onClose(); },
           },
         ],
       },
     ];
-  }, [profiles, activeProfile, settings, buttonStates, send, onClose]);
+  }, [profiles, activeProfile, settings, buttonStates, send, onClose, computeInsertIndex]);
 
   // Filter
   const filteredGroups = useMemo(() => {

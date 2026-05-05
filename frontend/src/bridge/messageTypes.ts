@@ -57,7 +57,8 @@ export interface ProfileEntry {
   windowTargetTitleMatchMode: string;
   useRelativeCoordinates: boolean;
   bringToFocus: boolean;
-  lockPosition: boolean;
+  restorePosition: boolean;
+  restoreSize: boolean;
   triggerMode: TriggerMode;
   isDisabled: boolean;
 }
@@ -148,6 +149,17 @@ export interface AppState {
    * "Running A → B" while a sub-profile executes.
    */
   replayChain: string[];
+  /**
+   * Pause action state. isPaused=true while the replay is awaiting either the
+   * configured resume hotkey or timeout expiry. The status bar renders
+   * "PAUSED — Press X or wait Ns" + a manual Resume button while active.
+   */
+  pauseState: {
+    isPaused: boolean;
+    hotkey: string;
+    timeoutMs: number;
+    startedAt: number;
+  };
 }
 
 // ── Messages C# → JS ──
@@ -167,6 +179,8 @@ export type IncomingMessage =
   | { type: 'windowTarget:detectState'; payload: { detecting: boolean } }
   | { type: 'clipboard:content'; payload: { text: string } }
   | { type: 'replay:chain'; payload: { stack: string[] } }
+  | { type: 'replay:paused'; payload: { hotkey: string; timeoutMs: number } }
+  | { type: 'replay:resumed'; payload: Record<string, never> }
   | { type: 'update:available'; payload: { version: string; currentVersion: string; notes: string[] } }
   | { type: 'update:progress'; payload: { percent: number } }
   | { type: 'update:ready'; payload: Record<string, never> }
@@ -183,6 +197,7 @@ export type OutgoingMessage =
   | { type: 'ui:ready'; payload: Record<string, never> }
   | { type: 'recording:toggle'; payload: { insertIndex?: number } }
   | { type: 'replay:toggle'; payload: { loopEnabled: boolean; loopCount: string; intervalEnabled: boolean; intervalText: string } }
+  | { type: 'replay:resume'; payload: Record<string, never> }
   | { type: 'actions:clear'; payload: Record<string, never> }
   | { type: 'actions:undo'; payload: Record<string, never> }
   | { type: 'actions:redo'; payload: Record<string, never> }
@@ -201,12 +216,13 @@ export type OutgoingMessage =
   | { type: 'profile:removeHotkey'; payload: { name: string } }
   | { type: 'profile:assignHotstring'; payload: { name: string; sequence: string; instant: boolean } }
   | { type: 'profile:removeHotstring'; payload: { name: string } }
-  | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean; lockPosition?: boolean; keepInheritedTarget?: boolean } }
+  | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean; restorePosition?: boolean; restoreSize?: boolean; keepInheritedTarget?: boolean } }
   | { type: 'profile:setRelativeCoordinates'; payload: { name: string; enabled: boolean } }
   | { type: 'profile:convertCoordinates'; payload: { direction: 'toRelative' | 'toAbsolute' } }
   | { type: 'profile:updateWindowSize'; payload: { name?: string; processName?: string; windowTitle?: string; titleMatchMode?: string } }
   | { type: 'profile:setBringToFocus'; payload: { name: string; enabled: boolean } }
-  | { type: 'profile:setLockPosition'; payload: { name: string; enabled: boolean } }
+  | { type: 'profile:setRestorePosition'; payload: { name: string; enabled: boolean } }
+  | { type: 'profile:setRestoreSize'; payload: { name: string; enabled: boolean } }
   | { type: 'profile:setTriggerMode'; payload: { name: string; mode: TriggerMode } }
   | { type: 'profile:removeWindowTarget'; payload: { name: string } }
   | { type: 'profile:setFolderWindowTarget'; payload: { folderName: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean } }

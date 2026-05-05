@@ -99,6 +99,60 @@ namespace TrueReplayer.Services
             File.WriteAllBytes(fullPath, Convert.FromBase64String(base64Data));
         }
 
+        /// <summary>
+        /// Copies a reference image from one profile to another (or within the same profile)
+        /// under a new GUID filename. Returns the new filename, or null if the source doesn't exist.
+        /// </summary>
+        public static string? CloneReferenceImage(string srcProfile, string srcImagePath, string dstProfile)
+        {
+            if (string.IsNullOrEmpty(srcImagePath)) return null;
+
+            string srcFullPath = Path.Combine(GetImageDirectory(srcProfile), srcImagePath);
+            if (!File.Exists(srcFullPath)) return null;
+
+            string dstDir = GetImageDirectory(dstProfile);
+            Directory.CreateDirectory(dstDir);
+
+            string newFilename = $"wait-{Guid.NewGuid():N}.png";
+            string dstFullPath = Path.Combine(dstDir, newFilename);
+            try
+            {
+                File.Copy(srcFullPath, dstFullPath, overwrite: false);
+                return newFilename;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Renames a profile's image directory. No-op if the old directory doesn't exist
+        /// or the new directory already exists.
+        /// </summary>
+        public static void RenameProfileDirectory(string oldProfileName, string newProfileName)
+        {
+            string oldDir = GetImageDirectory(oldProfileName);
+            string newDir = GetImageDirectory(newProfileName);
+
+            if (string.Equals(oldDir, newDir, StringComparison.OrdinalIgnoreCase)) return;
+            if (!Directory.Exists(oldDir)) return;
+            if (Directory.Exists(newDir)) return;
+
+            try { Directory.Move(oldDir, newDir); }
+            catch { /* best effort */ }
+        }
+
+        /// <summary>
+        /// Deletes a profile's entire image directory. Best-effort.
+        /// </summary>
+        public static void DeleteProfileDirectory(string profileName)
+        {
+            string dir = GetImageDirectory(profileName);
+            try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
+            catch { /* best effort */ }
+        }
+
         private static string SanitizeFolderName(string name)
         {
             foreach (char c in Path.GetInvalidFileNameChars())

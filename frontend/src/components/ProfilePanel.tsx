@@ -49,7 +49,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [titleMatchMode, setTitleMatchMode] = useState<'contains' | 'regex'>('contains');
   const [targetRelativeCoords, setTargetRelativeCoords] = useState(false);
   const [targetBringToFocus, setTargetBringToFocus] = useState(false);
-  const [targetLockPosition, setTargetLockPosition] = useState(false);
+  const [targetRestorePosition, setTargetRestorePosition] = useState(false);
+  const [targetRestoreSize, setTargetRestoreSize] = useState(false);
   // Tracks whether the user has explicitly edited the target fields (process/title/match mode or
   // detected a new window) since opening the dialog. When false for a profile that inherits its
   // target from a folder, "Set Target" will keep the inheritance and only save the flags.
@@ -263,11 +264,21 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setShowCreateDialog(true);
   }, []);
 
-  // Listen for command palette trigger
+  // Listen for command palette triggers
   useEffect(() => {
     window.addEventListener('cmd:newprofile', handleCreate);
     return () => window.removeEventListener('cmd:newprofile', handleCreate);
   }, [handleCreate]);
+
+  useEffect(() => {
+    const handler = () => {
+      setFolderDialogName('');
+      setFolderDialogColor('#60CDFF');
+      setShowCreateFolderDialog(true);
+    };
+    window.addEventListener('cmd:newfolder', handler);
+    return () => window.removeEventListener('cmd:newfolder', handler);
+  }, []);
 
   const handleRename = (name: string) => {
     setContextMenu(null);
@@ -352,7 +363,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setTitleMatchMode((hasOwnTarget ? (existing?.windowTargetTitleMatchMode ?? 'contains') : (folder?.windowTargetTitleMatchMode ?? 'contains')) as 'contains' | 'regex');
     setTargetRelativeCoords(hasOwnTarget ? (existing?.useRelativeCoordinates ?? false) : (folder?.useRelativeCoordinates ?? false));
     setTargetBringToFocus(hasOwnTarget ? (existing?.bringToFocus ?? false) : (folder?.bringToFocus ?? false));
-    setTargetLockPosition(existing?.lockPosition ?? false);
+    setTargetRestorePosition(existing?.restorePosition ?? false);
+    setTargetRestoreSize(existing?.restoreSize ?? false);
     setTargetExplicitlyEdited(false);
     setIsDetecting(false);
     setShowWindowTargetDialog(name);
@@ -388,7 +400,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         titleMatchMode,
         relativeCoordinates: targetRelativeCoords,
         bringToFocus: targetBringToFocus,
-        lockPosition: targetLockPosition,
+        restorePosition: targetRestorePosition,
+        restoreSize: targetRestoreSize,
         keepInheritedTarget,
       }
     });
@@ -491,7 +504,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   // Subscribe to window target detect events so the dialog receives the captured window info.
   // Note: the dialog is NOT auto-closed on profiles:updated anymore — closing happens only via
   // explicit user action (Cancel, Set Target, Remove), so the user can tweak multiple flags
-  // (Relative Coords / Bring to Focus / Lock Position / Update Window Size) without the dialog
+  // (Relative Coords / Bring to Focus / Restore Position / Restore Size / Update Window Size) without the dialog
   // snapping shut in the middle of configuration.
   useEffect(() => {
     if (!showWindowTargetDialog && !showFolderTargetDialog) return;
@@ -1010,6 +1023,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 const hasVisibleProfiles = folder.profiles.length > 0;
                 const isDragOver = dropTarget === folder.name && dragProfile !== null;
                 const isFolderDragging = dragFolder === folder.name && folderDragActive.current;
+                // Visually mark the folder as disabled when every profile inside is disabled,
+                // matching the dimmed look of disabled profiles. Empty folders stay normal.
+                const folderAllDisabled = folder.items.length > 0
+                  && folder.items.every(n => profileMap.get(n)?.isDisabled);
                 const showDropBefore = dragFolder && dropFolderIndex === folderIdx && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder);
                 const showDropAfter = dragFolder && dropFolderIndex === folderIdx + 1 && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder) && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder) + 1;
                 return (
@@ -1038,8 +1055,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         >
                           {folder.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
                         </span>
-                        <FolderOpen size={12} style={{ color: folder.color }} className="shrink-0" />
-                        <span className="text-xs font-medium text-text-secondary flex-1 truncate">{folder.name}</span>
+                        <FolderOpen size={12} style={{ color: folder.color }} className={`shrink-0 ${folderAllDisabled ? 'opacity-40' : ''}`} />
+                        <span className={`text-xs font-medium flex-1 truncate ${folderAllDisabled ? 'text-text-disabled' : 'text-text-secondary'}`}>{folder.name}</span>
                         {folder.hasWindowTarget && (
                           <span
                             className="group/ftarget shrink-0 relative"
@@ -1110,7 +1127,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
             >
               <Pin size={13} className="text-text-tertiary" />
-              Pin to Top
+              Pin
             </button>
           )}
 
@@ -1124,7 +1141,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
             >
               <ArrowRightFromLine size={13} className="text-text-tertiary" />
-              Move to Folder
+              Folder
               <ChevronRight size={11} className="ml-auto text-text-tertiary" />
             </button>
             {showMoveToFolderMenu === contextMenu.profileName && (
@@ -1184,21 +1201,21 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Keyboard size={13} className="text-text-tertiary" />
-            {profile?.hotkey ? 'Edit Hotkey' : 'Assign Hotkey'}
+            Hotkey
           </button>
           <button
             onClick={() => handleAssignHotstring(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Type size={13} className="text-text-tertiary" />
-            {profile?.hotstring ? 'Edit Hotstring' : 'Assign Hotstring'}
+            Hotstrings
           </button>
           <button
             onClick={() => handleSetWindowTarget(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Crosshair size={13} className="text-text-tertiary" />
-            {profile?.hasWindowTarget ? 'Edit Target' : 'Set Target'}
+            Target
           </button>
           <div className="my-1 border-t border-border-subtle" />
           <button
@@ -1223,7 +1240,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Pencil size={13} className="text-text-tertiary" />
-            Rename Folder
+            Rename
           </button>
           <div
             className="relative"
@@ -1234,7 +1251,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
             >
               <Palette size={13} className="text-text-tertiary" />
-              Change Color
+              Color
               <ChevronRight size={11} className="ml-auto text-text-tertiary" />
             </button>
             {showFolderColorPicker === folderContextMenu.folderName && (
@@ -1270,7 +1287,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Crosshair size={13} className="text-text-tertiary" />
-            {(profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName)?.hasWindowTarget ? 'Edit Target' : 'Set Target'}
+            Target
           </button>
           <button
             onClick={() => {
@@ -1284,7 +1301,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               const folder = (profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName);
               const items = folder?.items ?? [];
               const allDisabled = items.length > 0 && items.every(n => profiles.find(p => p.name === n)?.isDisabled);
-              return allDisabled ? 'Enable All Profiles' : 'Disable All Profiles';
+              return allDisabled ? 'Enable' : 'Disable';
             })()}
           </button>
           <div className="my-1 border-t border-border-subtle" />
@@ -1863,8 +1880,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 <Toggle isOn={targetBringToFocus} onChange={setTargetBringToFocus} />
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-text-secondary" title="Restore the target window to its saved position before replay">Lock Position</span>
-                <Toggle isOn={targetLockPosition} onChange={setTargetLockPosition} />
+                <span className="text-xs text-text-secondary" title="Restore the target window to its saved position before replay">Restore Position</span>
+                <Toggle isOn={targetRestorePosition} onChange={setTargetRestorePosition} />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-text-secondary" title="Restore the target window to its saved size before replay (un-maximizes if needed)">Restore Size</span>
+                <Toggle isOn={targetRestoreSize} onChange={setTargetRestoreSize} />
               </div>
               {/* Convert coordinates */}
               <div className="flex gap-2 pt-1">

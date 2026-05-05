@@ -45,6 +45,7 @@ export interface ThemeUISettings {
   actionWaitImageColor: string;
   actionBrowserColor: string;
   actionRunProfileColor: string;
+  actionPauseColor: string;
   fontMono: string;
 }
 
@@ -64,6 +65,8 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   // True blue, picked to be distinct from Key cyan (#60cdff) and Mouse purple
   // (#a78bfa). Carries the "control flow / chain call" semantic.
   actionRunProfileColor: '#3b82f6',
+  // Amber — semantic "wait/attention" for the Pause action.
+  actionPauseColor: '#fbbf24',
   fontMono: 'Consolas',
 };
 
@@ -770,6 +773,8 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   root.style.setProperty('--color-action-browser-bg', `color-mix(in srgb, ${uiSettings.actionBrowserColor} 10%, transparent)`);
   root.style.setProperty('--color-action-runprofile-fg', uiSettings.actionRunProfileColor);
   root.style.setProperty('--color-action-runprofile-bg', `color-mix(in srgb, ${uiSettings.actionRunProfileColor} 10%, transparent)`);
+  root.style.setProperty('--color-action-pause-fg', uiSettings.actionPauseColor);
+  root.style.setProperty('--color-action-pause-bg', `color-mix(in srgb, ${uiSettings.actionPauseColor} 10%, transparent)`);
   // Font
   root.style.setProperty('--font-mono', `'${uiSettings.fontMono}', 'Courier New', monospace`);
 }

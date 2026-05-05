@@ -174,6 +174,9 @@ namespace TrueReplayer.Interop
         public static extern bool IsIconic(IntPtr hWnd); // true if minimized
 
         [DllImport("user32.dll")]
+        public static extern bool IsZoomed(IntPtr hWnd); // true if maximized
+
+        [DllImport("user32.dll")]
         public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
         public const uint SWP_NOSIZE = 0x0001;
