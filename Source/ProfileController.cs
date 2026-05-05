@@ -31,6 +31,10 @@ namespace TrueReplayer.Controllers
 
         public ObservableCollection<ProfileEntry> ProfileEntries { get; } = new();
         private Dictionary<string, WindowTarget> _cachedWindowTargets = new();
+        // Built during LoadProfileListAsync — maps sanitized profile folder name → set of
+        // ImagePath filenames referenced by WaitImage actions. Used by ImageStorageService
+        // .CleanupOrphanImages at startup to delete unreferenced PNGs.
+        private Dictionary<string, HashSet<string>> _referencedImagesByProfile = new();
         private string? _activeProfileName;
         private ProfileOrderData _profileOrder = new();
         private readonly SemaphoreSlim _profileOrderLock = new(1, 1);
@@ -261,6 +265,7 @@ namespace TrueReplayer.Controllers
 
             ProfileEntries.Clear();
             _cachedWindowTargets.Clear();
+            _referencedImagesByProfile.Clear();
 
             foreach (var file in files)
             {
@@ -295,6 +300,15 @@ namespace TrueReplayer.Controllers
 
                         if (hasTarget)
                             _cachedWindowTargets[name] = profile.TargetWindow!;
+
+                        // Collect WaitImage references for orphan-PNG cleanup at startup.
+                        var refs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var a in profile.Actions)
+                        {
+                            if (a.ActionType == "WaitImage" && !string.IsNullOrEmpty(a.ImagePath))
+                                refs.Add(a.ImagePath);
+                        }
+                        _referencedImagesByProfile[ImageStorageService.GetSanitizedProfileFolder(name)] = refs;
                     }
                 }
                 catch (Exception ex)
@@ -312,6 +326,10 @@ namespace TrueReplayer.Controllers
             var hotstringMap = GetProfileHotstrings();
             InputHookManager.RegisterProfileHotstrings(hotstringMap);
         }
+
+        // Snapshot of WaitImage ImagePath references built during the last LoadProfileListAsync.
+        // Consumed by the startup orphan-cleanup pass in MainWindow.
+        public IReadOnlyDictionary<string, HashSet<string>> ReferencedImagesByProfile => _referencedImagesByProfile;
 
         public async Task RefreshProfileListAsync(bool suppressWatcher = false)
         {

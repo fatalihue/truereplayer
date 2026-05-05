@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 
 namespace TrueReplayer.Services
 {
@@ -152,6 +154,59 @@ namespace TrueReplayer.Services
             try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
             catch { /* best effort */ }
         }
+
+        /// <summary>
+        /// Sweep at app startup: deletes PNGs in each profile's image directory that aren't
+        /// referenced by any action across all profiles. Runs before any user-driven undo can
+        /// happen so we never delete a file the in-memory undo stack still expects.
+        /// referencedByProfile maps profileName → set of ImagePath filenames that should be kept.
+        /// Profiles without an entry have all their PNGs deleted (and the dir if it ends up empty).
+        /// </summary>
+        public static int CleanupOrphanImages(IReadOnlyDictionary<string, HashSet<string>> referencedByProfile)
+        {
+            int deleted = 0;
+            string baseDir = GetBaseDirectory();
+            if (!Directory.Exists(baseDir)) return 0;
+
+            foreach (var profileDir in Directory.EnumerateDirectories(baseDir))
+            {
+                string profileFolder = Path.GetFileName(profileDir);
+                // profileFolder is sanitized; map back is not exact, but referencedByProfile keys
+                // are sanitized via the same SanitizeFolderName used to write, so equivalent lookup.
+                referencedByProfile.TryGetValue(profileFolder, out var referenced);
+                referenced ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                try
+                {
+                    foreach (var file in Directory.EnumerateFiles(profileDir, "*.png"))
+                    {
+                        string name = Path.GetFileName(file);
+                        if (!referenced.Contains(name))
+                        {
+                            try { File.Delete(file); deleted++; }
+                            catch { /* best effort */ }
+                        }
+                    }
+                    // Remove empty profile directories left behind by deleted profiles whose
+                    // referencedByProfile entry was missing entirely.
+                    if (!referencedByProfile.ContainsKey(profileFolder)
+                        && !Directory.EnumerateFileSystemEntries(profileDir).Any())
+                    {
+                        try { Directory.Delete(profileDir); }
+                        catch { /* best effort */ }
+                    }
+                }
+                catch { /* best effort */ }
+            }
+            return deleted;
+        }
+
+        /// <summary>
+        /// Returns the sanitized folder name actually used on disk for a profile. Useful when
+        /// building the referenced-image map for CleanupOrphanImages so the keys line up with
+        /// the directory names returned by enumeration.
+        /// </summary>
+        public static string GetSanitizedProfileFolder(string profileName) => SanitizeFolderName(profileName);
 
         private static string SanitizeFolderName(string name)
         {

@@ -1099,16 +1099,14 @@ namespace TrueReplayer
                 .OrderByDescending(i => i)
                 .ToList();
 
-            string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
+            // We intentionally don't delete the PNG of WaitImage actions here so undo can restore
+            // the action with its original reference image still on disk. Orphan PNGs (those no
+            // longer referenced by any action in any profile) are cleaned up at app startup by
+            // ImageStorageService.CleanupOrphanImages.
             foreach (var idx in indices)
             {
                 if (idx >= 0 && idx < actions.Count)
-                {
-                    var action = actions[idx];
-                    if (action.ActionType == "WaitImage" && !string.IsNullOrEmpty(action.ImagePath))
-                        ImageStorageService.DeleteReferenceImage(profileName, action.ImagePath);
                     actions.RemoveAt(idx);
-                }
             }
 
             HasUnsavedChanges = true;
@@ -1585,13 +1583,10 @@ namespace TrueReplayer
 
             if (selection == null) return;
 
-            // Delete old image
+            // Save new image. We intentionally keep the old PNG on disk so undo can restore the
+            // previous reference image. Orphan PNGs are cleaned up at app startup by
+            // ImageStorageService.CleanupOrphanImages.
             string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
-            var oldPath = actions[index].ImagePath;
-            if (!string.IsNullOrEmpty(oldPath))
-                ImageStorageService.DeleteReferenceImage(profileName, oldPath);
-
-            // Save new image
             string newImagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, profileName);
             selection.CroppedImage.Dispose();
 

@@ -291,6 +291,11 @@ namespace TrueReplayer
             {
                 await profileController.RefreshProfileListAsync(true);
 
+                // Sweep WaitImage PNGs that aren't referenced by any action across all profiles.
+                // Runs once at startup (before user can trigger any undo) so we never delete a
+                // file the in-memory undo stack would still need.
+                ImageStorageService.CleanupOrphanImages(profileController.ReferencedImagesByProfile);
+
                 var defaultProfile = await SettingsManager.LoadProfileAsync();
                 if (defaultProfile != null)
                 {
