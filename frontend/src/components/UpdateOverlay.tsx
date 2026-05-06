@@ -8,12 +8,24 @@ type Phase =
   | { step: 'installing'; version: string; currentVersion: string }
   | { step: 'complete'; version: string; currentVersion: string };
 
+// Master switch for the user-facing update overlay.
+//   false → silent auto-update: the backend downloads + applies the update on its own
+//           after detection; this component stays mounted but renders nothing.
+//   true  → user-confirmation flow: show "Update available" → progress → complete.
+// Flip to true to bring the confirmation UI back. The full UI code below is preserved
+// so re-enabling is just this one line.
+const UPDATE_OVERLAY_ENABLED = false;
+
 export function UpdateOverlay() {
   const { send, subscribe } = useBridge();
   const [phase, setPhase] = useState<Phase>({ step: 'hidden' });
 
   useEffect(() => {
     return subscribe((msg) => {
+      // When disabled, swallow every update event so the overlay never appears.
+      // The backend will trigger download + apply automatically.
+      if (!UPDATE_OVERLAY_ENABLED) return;
+
       switch (msg.type) {
         case 'update:available':
           // Show confirmation screen — user decides when to download

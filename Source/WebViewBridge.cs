@@ -800,6 +800,13 @@ namespace TrueReplayer
             _ = CheckForUpdateAsync();
         }
 
+        // Master switch for silent auto-update.
+        //   true  → after detection, immediately download + apply + restart with no UI gate.
+        //   false → only notify the frontend (legacy "Update available" overlay decides).
+        // Frontend overlay is currently disabled (see UpdateOverlay.tsx UPDATE_OVERLAY_ENABLED);
+        // flipping this to false alone would leave updates undetectable to the user.
+        private const bool AutoApplyUpdates = true;
+
         private async Task CheckForUpdateAsync()
         {
             try
@@ -816,6 +823,14 @@ namespace TrueReplayer
                         currentVersion = UpdateService.CurrentVersion ?? "unknown",
                         notes = notes
                     });
+
+                    if (AutoApplyUpdates)
+                    {
+                        // Silent auto-update: kick off download + apply + restart immediately,
+                        // skipping the user-confirmation overlay. Fire-and-forget — failures
+                        // bubble out of HandleUpdateApply via "update:error" already.
+                        _ = HandleUpdateApply();
+                    }
                 }
                 else
                 {
