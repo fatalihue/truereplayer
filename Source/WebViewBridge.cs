@@ -261,7 +261,7 @@ namespace TrueReplayer
                     case "actions:addBrowserAction": HandleAddBrowserAction(payload); break;
                     case "browser:toggleRecording": HandleBrowserToggleRecording(payload); break;
                     case "browser:pickElement": HandlePickElement(); break;
-                    case "browser:testAction": HandleBrowserTestAction(payload); break;
+                    case "browser:testAction": _ = HandleBrowserTestAction(payload); break;
                     case "profile:click": HandleProfileClick(payload); break;
                     case "profile:create": HandleProfileCreate(payload); break;
                     case "profile:rename": HandleProfileRename(payload); break;
@@ -1724,28 +1724,30 @@ namespace TrueReplayer
         }
 
         // #3 — Test action: execute a one-shot browser command from the editor without saving the profile.
-        private async void HandleBrowserTestAction(JsonElement payload)
+        // async Task (not async void) so the caller can observe failures and so unhandled exceptions
+        // don't crash the SynchronizationContext. Caller discards the task with `_ = …`.
+        private async Task HandleBrowserTestAction(JsonElement payload)
         {
+            // Extract requestId first — it must be echoed back on every response branch so the
+            // frontend can match the result to its pending request.
             string requestId = payload.TryGetProperty("requestId", out var idEl) ? idEl.GetString() ?? "" : "";
 
             if (browserBridge == null || !browserBridge.IsConnected)
             {
-                SendMessage("browser:testResult", new
-                {
-                    requestId,
-                    success = false,
-                    error = new { code = "EXTENSION_DISCONNECTED", message = "Browser extension is not connected.", tip = "Open Chrome with the TrueReplayer extension installed." },
-                });
+                TrySendTestResult(requestId, success: false, durationMs: 0,
+                    code: "EXTENSION_DISCONNECTED",
+                    message: "Browser extension is not connected.",
+                    tip: "Open Chrome with the TrueReplayer extension installed.");
                 return;
             }
 
             try
             {
-                var actionType = payload.GetProperty("actionType").GetString() ?? "";
+                var actionType = payload.TryGetProperty("actionType", out var atEl) ? atEl.GetString() ?? "" : "";
                 var key = payload.TryGetProperty("key", out var kEl) ? kEl.GetString() ?? "" : "";
                 var browserText = payload.TryGetProperty("browserText", out var btEl) ? btEl.GetString() : null;
                 var newTab = payload.TryGetProperty("newTab", out var ntEl) && ntEl.GetBoolean();
-                var timeoutMs = payload.TryGetProperty("timeout", out var toEl) ? toEl.GetInt32() : 5000;
+                var timeoutMs = payload.TryGetProperty("timeout", out var toEl) && toEl.ValueKind == JsonValueKind.Number ? toEl.GetInt32() : 5000;
                 var waitMode = payload.TryGetProperty("waitMode", out var wmEl) ? wmEl.GetString() : null;
                 var urlWaitPattern = payload.TryGetProperty("urlWaitPattern", out var uwEl) ? uwEl.GetString() : null;
                 var postNavigateSelector = payload.TryGetProperty("postNavigateSelector", out var pnEl) ? pnEl.GetString() : null;
@@ -1753,11 +1755,20 @@ namespace TrueReplayer
                 var typePaste = payload.TryGetProperty("typePaste", out var tpEl) && tpEl.GetBoolean();
                 int? typeDelay = payload.TryGetProperty("typeDelay", out var tdEl) && tdEl.ValueKind == JsonValueKind.Number ? tdEl.GetInt32() : (int?)null;
 
+                // Resolve {clipboard[:mods]}, {date}, {time}, {datetime} the same way the regular
+                // replay path does — without this, Test Action would type the literal placeholder
+                // instead of the substituted value.
+                string? resolvedText = browserText;
+                if (actionType == "BrowserType" && !string.IsNullOrEmpty(browserText))
+                    resolvedText = await ActionReplayer.ResolveBrowserTextPlaceholdersAsync(browserText, dispatcherQueue);
+
+                // The 1000 ms floor here mirrors the minimum the editor allows. The Timeout field
+                // isn't shown for BrowserType, so this is a safety net for older payloads only.
                 var temp = new ActionItem
                 {
                     ActionType = actionType,
                     Key = key,
-                    BrowserText = browserText,
+                    BrowserText = resolvedText,
                     NewTab = newTab,
                     Timeout = Math.Max(1000, timeoutMs),
                     WaitMode = waitMode,
@@ -1769,28 +1780,46 @@ namespace TrueReplayer
                 };
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                await browserBridge.TestActionAsync(temp, CancellationToken.None, browserText);
+                await browserBridge.TestActionAsync(temp, CancellationToken.None, resolvedText);
                 sw.Stop();
 
-                SendMessage("browser:testResult", new { requestId, success = true, durationMs = sw.ElapsedMilliseconds });
+                TrySendTestResult(requestId, success: true, durationMs: sw.ElapsedMilliseconds, code: null, message: null, tip: null);
             }
             catch (TrueReplayer.Services.BrowserActionException bex)
             {
-                SendMessage("browser:testResult", new
-                {
-                    requestId,
-                    success = false,
-                    error = new { code = bex.Code ?? "UNKNOWN_ERROR", message = bex.Message, tip = bex.Tip },
-                });
+                TrySendTestResult(requestId, success: false, durationMs: 0,
+                    code: bex.Code ?? "UNKNOWN_ERROR", message: bex.Message, tip: bex.Tip);
             }
             catch (Exception ex)
             {
-                SendMessage("browser:testResult", new
+                TrySendTestResult(requestId, success: false, durationMs: 0,
+                    code: "UNKNOWN_ERROR", message: ex.Message, tip: null);
+            }
+        }
+
+        // Wrapper that swallows exceptions thrown from SendMessage itself so a failed reply never
+        // bubbles up and crashes the synchronization context.
+        private void TrySendTestResult(string requestId, bool success, long durationMs, string? code, string? message, string? tip)
+        {
+            try
+            {
+                if (success)
                 {
-                    requestId,
-                    success = false,
-                    error = new { code = "UNKNOWN_ERROR", message = ex.Message, tip = (string?)null },
-                });
+                    SendMessage("browser:testResult", new { requestId, success = true, durationMs });
+                }
+                else
+                {
+                    SendMessage("browser:testResult", new
+                    {
+                        requestId,
+                        success = false,
+                        error = new { code, message, tip },
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[WebViewBridge] Failed to send testResult: {ex.Message}");
             }
         }
 

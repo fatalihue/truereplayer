@@ -727,10 +727,11 @@
   }
 
   /**
-   * Dispatch a special key (Enter/Tab/Esc/etc.) on an element.
-   * For Enter on form inputs, also calls form.requestSubmit() when no handler
-   * called preventDefault — makes traditional <form> submission work, since
-   * synthetic events don't trigger the browser's default form-submit action.
+   * Dispatch a special key (Enter/Esc/Backspace/etc.) on an element.
+   * Synthetic KeyboardEvents only notify JS handlers — they do NOT trigger the browser's
+   * default action (delete a char, move caret, change focus). For keys whose default is
+   * essential, we apply the effect ourselves after the dispatch, unless a handler called
+   * preventDefault on keydown.
    */
   function dispatchSpecialKey(el, name) {
     const meta = KEY_CHIP_MAP[name];
@@ -745,12 +746,66 @@
     el.dispatchEvent(new KeyboardEvent('keypress', opts));
     el.dispatchEvent(new KeyboardEvent('keyup', opts));
 
+    if (downEvt.defaultPrevented) return;
+
+    if (name === 'backspace') {
+      applyEditDelete(el, -1);
+      return;
+    }
+    if (name === 'delete') {
+      applyEditDelete(el, +1);
+      return;
+    }
+
     // Enter form-submit fallback (synthetic events skip the browser's default submit)
-    if (name === 'enter' && !downEvt.defaultPrevented && el.tagName !== 'TEXTAREA') {
+    if (name === 'enter' && el.tagName !== 'TEXTAREA') {
       const form = el.form || (el.closest && el.closest('form'));
       if (form && typeof form.requestSubmit === 'function') {
         try { form.requestSubmit(); } catch { /* ignore */ }
       }
+    }
+  }
+
+  /**
+   * Apply the effect of Backspace (dir = -1) or Delete (dir = +1) on a text input,
+   * textarea, or contentEditable element. Mirrors the browser's default behaviour:
+   *   - If there's a selection, remove it (regardless of direction).
+   *   - Otherwise, remove one char before/after the caret.
+   * Fires a native 'input' event so frameworks (React/Vue/etc.) sync their state.
+   */
+  function applyEditDelete(el, dir) {
+    if ('value' in el && typeof el.value === 'string') {
+      const value = el.value;
+      let start = typeof el.selectionStart === 'number' ? el.selectionStart : value.length;
+      let end = typeof el.selectionEnd === 'number' ? el.selectionEnd : start;
+      if (start > end) { const tmp = start; start = end; end = tmp; }
+
+      let newValue = value;
+      let newCaret = start;
+      if (start !== end) {
+        newValue = value.slice(0, start) + value.slice(end);
+        newCaret = start;
+      } else if (dir < 0 && start > 0) {
+        newValue = value.slice(0, start - 1) + value.slice(start);
+        newCaret = start - 1;
+      } else if (dir > 0 && end < value.length) {
+        newValue = value.slice(0, start) + value.slice(start + 1);
+        newCaret = start;
+      } else {
+        return; // nothing to delete (caret at start for backspace, or at end for delete)
+      }
+
+      el.value = newValue;
+      try { el.setSelectionRange(newCaret, newCaret); } catch { /* unsupported on some types */ }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
+
+    if (el.isContentEditable) {
+      try {
+        document.execCommand(dir < 0 ? 'delete' : 'forwardDelete');
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      } catch { /* legacy execCommand may throw in some envs */ }
     }
   }
 

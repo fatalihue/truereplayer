@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, RefreshCw, Crosshair, ShieldCheck, ShieldAlert, ShieldQuestion, PlayCircle, Check, X } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
@@ -109,6 +109,16 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   // #3 — test action state
   const [testRequestId, setTestRequestId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<BrowserTestResult | null>(null);
+  // Safety timeout — if the bridge response is lost, recover the UI instead of hanging "Running…".
+  // Backend pipeTimeout is the action timeout (~5s default); we double it plus 5s overhead.
+  const testTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearTestTimeout = useCallback(() => {
+    if (testTimeoutRef.current) {
+      clearTimeout(testTimeoutRef.current);
+      testTimeoutRef.current = null;
+    }
+  }, []);
+  useEffect(() => () => clearTestTimeout(), [clearTestTimeout]);
 
   // Listen for pick element result + test result from extension
   useEffect(() => {
@@ -132,12 +142,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
         const r = msg.payload as BrowserTestResult;
         // Only react if it's the test we triggered
         if (testRequestId && r.requestId === testRequestId) {
+          clearTestTimeout();
           setTestResult(r);
           setTestRequestId(null);
         }
       }
     });
-  }, [subscribe, testRequestId]);
+  }, [subscribe, testRequestId, clearTestTimeout]);
 
   // Sync local state from action
   useEffect(() => {
@@ -314,6 +325,27 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     const effectiveKey = textMatch.trim() ? buildTextSelector(textMode, textMatch.trim()) : key;
     const timeoutMs = Math.max(1, parseFloat(timeout) || 5) * 1000;
     const tdParsed = typeDelay.trim() === '' ? null : parseInt(typeDelay, 10);
+
+    // Safety timeout — recover the UI if the bridge never responds (extension crash, pipe drop).
+    // Wait the full backend timeout plus 5 s overhead before giving up.
+    clearTestTimeout();
+    testTimeoutRef.current = setTimeout(() => {
+      testTimeoutRef.current = null;
+      setTestRequestId(prev => {
+        if (prev !== requestId) return prev;
+        setTestResult({
+          requestId,
+          success: false,
+          error: {
+            code: 'NO_RESPONSE',
+            message: 'No response from the browser extension.',
+            tip: 'Check that Chrome and the TrueReplayer extension are still running.',
+          },
+        });
+        return null;
+      });
+    }, timeoutMs + 5000);
+
     send({
       type: 'browser:testAction',
       payload: {
@@ -331,7 +363,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
         typeDelay: tdParsed != null && !isNaN(tdParsed) ? tdParsed : null,
       },
     });
-  }, [actionIndex, action, actionType, key, textMatch, textMode, timeout, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, send]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, timeout, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, send, clearTestTimeout]);
 
   if (actionIndex == null) return null;
 
@@ -717,16 +749,17 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   </button>
                 ))}
               </div>
-              {/* Action keys — dispatched as keydown/keyup at this position. After {tab},
-                  subsequent text goes into the new focused element. */}
+              {/* Action keys — dispatched as keydown/keyup at this position.
+                  Only keys with a reliable effect in browser inputs are exposed:
+                  Enter (native form submit fallback), Esc (no default), Backspace/Delete
+                  (we apply the edit ourselves). Tab, arrows, etc. are intentionally omitted —
+                  synthetic key events don't trigger the browser's default focus/caret moves. */}
               <div className="flex flex-wrap gap-1 mt-1">
                 {[
                   { var: '{enter}', label: 'Enter' },
-                  { var: '{tab}', label: 'Tab' },
                   { var: '{esc}', label: 'Esc' },
                   { var: '{backspace}', label: '⌫' },
-                  { var: '{up}', label: '↑' },
-                  { var: '{down}', label: '↓' },
+                  { var: '{delete}', label: 'Del' },
                 ].map(item => (
                   <button
                     key={item.var}

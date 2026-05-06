@@ -1360,8 +1360,16 @@ namespace TrueReplayer.Services
         /// Replaces every {clipboard[:mods]} token in <paramref name="text"/> with the
         /// clipboard content transformed by the given modifiers. Reads the clipboard only once.
         /// If <paramref name="clipboardOverride"/> is non-null it is used instead of reading the OS clipboard.
+        /// When <paramref name="escapeBracesInSubstitution"/> is true, '{' / '}' in substituted
+        /// values are replaced with sentinels so ParseSendTextSegments does not re-interpret them
+        /// as another placeholder — used for the Win32 SendText path.
         /// </summary>
-        private async Task<string> ResolveClipboardTokens(string text, string? clipboardOverride = null)
+        private Task<string> ResolveClipboardTokens(string text, string? clipboardOverride = null, bool escapeBracesInSubstitution = false)
+        {
+            return ResolveClipboardTokensAsync(text, dispatcherQueue, clipboardOverride, escapeBracesInSubstitution);
+        }
+
+        internal static async Task<string> ResolveClipboardTokensAsync(string text, DispatcherQueue dispatcherQueue, string? clipboardOverride = null, bool escapeBracesInSubstitution = false)
         {
             if (string.IsNullOrEmpty(text)) return text;
             if (!ClipboardTokenRegex.IsMatch(text)) return text;
@@ -1395,15 +1403,25 @@ namespace TrueReplayer.Services
             return ClipboardTokenRegex.Replace(text, m =>
             {
                 var mods = m.Groups[1].Success ? m.Groups[1].Value : null;
-                return ApplyClipboardModifiers(raw, mods);
+                var resolved = ApplyClipboardModifiers(raw, mods);
+                return escapeBracesInSubstitution ? EscapeBracesForParser(resolved) : resolved;
             });
         }
 
-        private async Task<string> ResolveBrowserTextPlaceholders(string text)
+        private Task<string> ResolveBrowserTextPlaceholders(string text)
+            => ResolveBrowserTextPlaceholdersAsync(text, dispatcherQueue);
+
+        /// <summary>
+        /// Resolves data placeholders ({clipboard[:mods]}, {datetime}, {date}, {time}) for
+        /// BrowserType actions. Special-key placeholders ({enter}, {tab}, …) are left untouched —
+        /// they are interpreted by the Chrome extension's own parser. Static so the Test Action
+        /// path can call it without an ActionReplayer instance.
+        /// </summary>
+        internal static async Task<string> ResolveBrowserTextPlaceholdersAsync(string text, DispatcherQueue dispatcherQueue)
         {
             if (string.IsNullOrEmpty(text)) return text;
 
-            text = await ResolveClipboardTokens(text);
+            text = await ResolveClipboardTokensAsync(text, dispatcherQueue);
 
             var now = DateTime.Now;
             if (text.Contains("{datetime}", StringComparison.OrdinalIgnoreCase))
@@ -1446,7 +1464,9 @@ namespace TrueReplayer.Services
 
             // Resolve {clipboard[:mods]} placeholders using the saved clipboard content
             // so that subsequent writes to the clipboard (for pasting) don't affect token resolution.
-            text = await ResolveClipboardTokens(text, originalClipboard ?? string.Empty);
+            // Escape '{' / '}' in the substituted value so clipboard content like "{enter}" is
+            // pasted as text instead of being re-interpreted as a key press.
+            text = await ResolveClipboardTokens(text, originalClipboard ?? string.Empty, escapeBracesInSubstitution: true);
 
             // Resolve {datetime} before {date}/{time} to avoid partial matches
             var now = DateTime.Now;
@@ -1457,34 +1477,49 @@ namespace TrueReplayer.Services
             if (text.Contains("{time}", StringComparison.OrdinalIgnoreCase))
                 text = text.Replace("{time}", now.ToString("HH:mm:ss"), StringComparison.OrdinalIgnoreCase);
 
-            if (string.IsNullOrEmpty(text) || token.IsCancellationRequested) return;
+            if (string.IsNullOrEmpty(text) || token.IsCancellationRequested)
+            {
+                RestoreOriginalClipboard(originalClipboard);
+                return;
+            }
 
             // Parse text into segments: plain text + special key placeholders
             var segments = ParseSendTextSegments(text);
 
-            foreach (var segment in segments)
+            try
             {
-                if (token.IsCancellationRequested) break;
+                foreach (var segment in segments)
+                {
+                    if (token.IsCancellationRequested) break;
 
-                if (segment.DelayMs.HasValue)
-                {
-                    // Explicit delay: pause during replay
-                    await Task.Delay(segment.DelayMs.Value, token);
-                }
-                else if (segment.VkCode.HasValue)
-                {
-                    // Special key: simulate key down + up
-                    SimulateKeyPress(segment.VkCode.Value);
-                    await Task.Delay(30, token);
-                }
-                else if (!string.IsNullOrEmpty(segment.Text))
-                {
-                    // Text: paste via clipboard
-                    await PasteTextViaClipboard(segment.Text, token);
+                    if (segment.DelayMs.HasValue)
+                    {
+                        // Explicit delay: pause during replay
+                        await Task.Delay(segment.DelayMs.Value, token);
+                    }
+                    else if (segment.VkCode.HasValue)
+                    {
+                        // Special key: simulate key down + up
+                        SimulateKeyPress(segment.VkCode.Value);
+                        await Task.Delay(30, token);
+                    }
+                    else if (!string.IsNullOrEmpty(segment.Text))
+                    {
+                        // Text: paste via clipboard. Restore '{' / '}' that the resolver escaped.
+                        var literal = UnescapeBraceSentinels(segment.Text);
+                        await PasteTextViaClipboard(literal, token);
+                    }
                 }
             }
+            finally
+            {
+                // Always restore the user's original clipboard, even if cancelled mid-paste.
+                RestoreOriginalClipboard(originalClipboard);
+            }
+        }
 
-            // Restore original clipboard content on UI thread
+        private void RestoreOriginalClipboard(string? originalClipboard)
+        {
             dispatcherQueue.TryEnqueue(() =>
             {
                 try
@@ -1572,6 +1607,7 @@ namespace TrueReplayer.Services
             ["{backspace}"] = 0x08,  // VK_BACK
             ["{delete}"] = 0x2E,     // VK_DELETE
             ["{escape}"] = 0x1B,     // VK_ESCAPE
+            ["{esc}"] = 0x1B,        // alias for {escape} — matches BrowserType chip naming
             ["{home}"] = 0x24,       // VK_HOME
             ["{end}"] = 0x23,        // VK_END
             ["{pageup}"] = 0x21,     // VK_PRIOR
@@ -1581,6 +1617,12 @@ namespace TrueReplayer.Services
             ["{left}"] = 0x25,       // VK_LEFT
             ["{right}"] = 0x27,      // VK_RIGHT
         };
+
+        // Sentinels used to mark literal '{' / '}' produced by placeholder substitution
+        // (e.g. clipboard content). Stops ParseSendTextSegments from re-interpreting them
+        // as another placeholder. Stripped back to '{' / '}' when text segments are emitted.
+        private const char OpenBraceSentinel = '';
+        private const char CloseBraceSentinel = '';
 
         private struct SendTextSegment
         {
@@ -1596,42 +1638,73 @@ namespace TrueReplayer.Services
 
             while (i < text.Length)
             {
-                if (text[i] == '{')
+                char ch = text[i];
+
+                // Sentinels stand in for literal '{' / '}' that came from placeholder substitution
+                // (e.g. clipboard content). Emit as plain text — never re-parse as a placeholder.
+                if (ch == OpenBraceSentinel)
                 {
-                    // Find closing brace
-                    int closeBrace = text.IndexOf('}', i + 1);
+                    AppendTextChar(segments, '{');
+                    i++;
+                    continue;
+                }
+                if (ch == CloseBraceSentinel)
+                {
+                    AppendTextChar(segments, '}');
+                    i++;
+                    continue;
+                }
+
+                if (ch == '{')
+                {
+                    // Find closing brace (skip sentinel close-braces — they belong to substituted text)
+                    int closeBrace = -1;
+                    for (int j = i + 1; j < text.Length; j++)
+                    {
+                        if (text[j] == '}') { closeBrace = j; break; }
+                        if (text[j] == OpenBraceSentinel || text[j] == CloseBraceSentinel)
+                        {
+                            // Sentinel inside what looked like a placeholder — bail out, treat '{' as literal
+                            break;
+                        }
+                    }
                     if (closeBrace == -1)
                     {
-                        AppendTextChar(segments, text[i]);
+                        AppendTextChar(segments, ch);
                         i++;
                         continue;
                     }
 
                     string inner = text.Substring(i + 1, closeBrace - i - 1); // e.g. "enter", "enter:5", "delay:500"
                     string name = inner;
-                    int repeatOrParam = 1;
                     int colonIdx = inner.IndexOf(':');
+                    bool hasValidParam = false;
+                    int paramValue = 0;
                     if (colonIdx >= 0)
                     {
                         name = inner.Substring(0, colonIdx);
                         if (int.TryParse(inner.Substring(colonIdx + 1), out int n) && n > 0)
-                            repeatOrParam = n;
+                        {
+                            hasValidParam = true;
+                            paramValue = n;
+                        }
                     }
 
-                    // {delay:N} — pause during replay
+                    // {delay:N} — pause during replay. Invalid/missing N → treat as default (500 ms),
+                    // not as a 1 ms no-op. Cap at 60 s.
                     if (name.Equals("delay", StringComparison.OrdinalIgnoreCase))
                     {
-                        int delayMs = colonIdx >= 0 ? Math.Min(repeatOrParam, 60000) : 500;
+                        int delayMs = hasValidParam ? Math.Min(paramValue, 60000) : 500;
                         segments.Add(new SendTextSegment { DelayMs = delayMs });
                         i = closeBrace + 1;
                         continue;
                     }
 
-                    // {key} or {key:N} — special key with optional repeat
+                    // {key} or {key:N} — special key with optional repeat. Invalid N → 1 press. Cap at 100.
                     string keyPlaceholder = "{" + name + "}";
                     if (SpecialKeyPlaceholders.TryGetValue(keyPlaceholder, out ushort vk))
                     {
-                        int count = colonIdx >= 0 ? Math.Min(repeatOrParam, 100) : 1;
+                        int count = hasValidParam ? Math.Min(paramValue, 100) : 1;
                         for (int r = 0; r < count; r++)
                             segments.Add(new SendTextSegment { VkCode = vk });
                         i = closeBrace + 1;
@@ -1639,12 +1712,12 @@ namespace TrueReplayer.Services
                     }
 
                     // Unknown placeholder, treat '{' as regular text
-                    AppendTextChar(segments, text[i]);
+                    AppendTextChar(segments, ch);
                     i++;
                 }
                 else
                 {
-                    AppendTextChar(segments, text[i]);
+                    AppendTextChar(segments, ch);
                     i++;
                 }
             }
@@ -1664,6 +1737,23 @@ namespace TrueReplayer.Services
             {
                 segments.Add(new SendTextSegment { Text = c.ToString() });
             }
+        }
+
+        // Escape '{' and '}' in substituted placeholder values so the parser does not re-interpret
+        // them as another placeholder (e.g. clipboard content "{enter}" should stay as text).
+        private static string EscapeBracesForParser(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return value ?? string.Empty;
+            if (value.IndexOf('{') < 0 && value.IndexOf('}') < 0) return value;
+            return value.Replace('{', OpenBraceSentinel).Replace('}', CloseBraceSentinel);
+        }
+
+        // Inverse of EscapeBracesForParser — restore real '{' / '}' before any further use of the text.
+        internal static string UnescapeBraceSentinels(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return value ?? string.Empty;
+            if (value.IndexOf(OpenBraceSentinel) < 0 && value.IndexOf(CloseBraceSentinel) < 0) return value;
+            return value.Replace(OpenBraceSentinel, '{').Replace(CloseBraceSentinel, '}');
         }
 
         private static readonly HashSet<ushort> ExtendedVkCodes = new()
