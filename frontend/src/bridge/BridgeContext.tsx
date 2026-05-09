@@ -68,6 +68,13 @@ export function BridgeProvider({ children }: { children: ReactNode }) {
       window.chrome.webview.addEventListener('message', onMessage);
       return () => window.chrome?.webview?.removeEventListener('message', onMessage);
     }
+    // Dev-only fallback: when running in a plain browser (no WebView2), accept window.postMessage
+    // so visual states can be simulated via `window.postMessage({type, payload}, '*')` from devtools.
+    if (import.meta.env.DEV) {
+      const handler = (e: MessageEvent) => onMessage({ data: e.data });
+      window.addEventListener('message', handler);
+      return () => window.removeEventListener('message', handler);
+    }
   }, []);
 
   // Send ui:ready once the bridge is initialized

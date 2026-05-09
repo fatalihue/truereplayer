@@ -361,10 +361,20 @@ namespace TrueReplayer
                 {
                     if (key == UserProfile.Current.ProfileKeyToggleHotkey)
                     {
-                        UserProfile.Current.ProfileKeyEnabled = !UserProfile.Current.ProfileKeyEnabled;
+                        bool newValue = !UserProfile.Current.ProfileKeyEnabled;
+                        UserProfile.Current.ProfileKeyEnabled = newValue;
+
+                        // Persist immediately. Without this, AppSettingsManager.ApplyGlobalSettings
+                        // (called whenever a profile is loaded — including the next profile-hotkey
+                        // press) reads the still-stale disk value and overwrites the in-memory toggle,
+                        // making the hotkey appear to "auto-revert" right after running a profile.
+                        var saved = AppSettingsManager.Load();
+                        saved.ProfileKeyEnabled = newValue;
+                        AppSettingsManager.Save(saved);
+
                         if (bridge != null)
                         {
-                            bridge.ProfileKeyEnabled = UserProfile.Current.ProfileKeyEnabled;
+                            bridge.ProfileKeyEnabled = newValue;
                             bridge.PushSettingsLoaded();
                         }
                         mainController.SetLastHotkeyPressed(key);
@@ -394,6 +404,17 @@ namespace TrueReplayer
                     if (isProfileTrigger && (!UserProfile.Current.ProfileKeyEnabled || mainController.IsRecording()))
                     {
                         return;
+                    }
+
+                    // Clicker mode is exclusive: profile triggers (PROFILE/HOLD/TOGGLE) and the
+                    // Recording hotkey are suppressed. PROFILE_STOP is intentionally NOT suppressed
+                    // (handled earlier above) so a WhilePressed key released after a mid-replay mode
+                    // switch still cancels its replay. The Replay hotkey (handled below), the
+                    // ProfileKeyToggle hotkey, and the Foreground hotkey continue to work normally.
+                    if (bridge?.UseCursorClick == true)
+                    {
+                        if (isProfileTrigger || key == UserProfile.Current.RecordingHotkey)
+                            return;
                     }
 
                     // Re-triggering OnPress / OnRelease during an active replay stops it —
@@ -439,7 +460,8 @@ namespace TrueReplayer
                             int delay = int.TryParse(bridge?.CustomDelay ?? "100", out var cd) ? cd : 100;
                             bool useJitter = bridge?.UseDelayVariation ?? false;
                             int jitterPercent = int.TryParse(bridge?.DelayVariation ?? "20", out var jp) ? jp : 20;
-                            int loops = (bridge?.EnableLoop ?? false) && int.TryParse(bridge?.LoopCount ?? "0", out var lc) ? lc : 0;
+                            // Match regular replay: loop OFF → 1 iteration; loop ON + count=0 → infinite (engine convention).
+                            int loops = (bridge?.EnableLoop ?? false) && int.TryParse(bridge?.LoopCount ?? "1", out var lc) && lc >= 0 ? lc : 1;
                             int interval = (bridge?.LoopIntervalEnabled ?? false) && int.TryParse(bridge?.LoopInterval ?? "0", out var li) ? li : 0;
                             mainController.ToggleCursorClickReplay(delay, useJitter, jitterPercent, loops, interval, bridge?.CursorClickButton ?? "Left");
                         }

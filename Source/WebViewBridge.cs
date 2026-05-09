@@ -547,12 +547,14 @@ namespace TrueReplayer
         {
             SendMessage("button:states", new
             {
-                recordEnabled = true,
-                replayEnabled = actions.Count > 0,
+                // Recording is meaningless in Clicker mode (ignores recorded actions). Replay button
+                // doubles as the "Click" trigger in Clicker mode, so it's enabled even with 0 actions.
+                recordEnabled = !UseCursorClick,
+                replayEnabled = UseCursorClick || actions.Count > 0,
                 recordingActive = recordingService.IsRecording,
                 replayActive = replayService.IsReplaying,
                 recordButtonText = recordingService.IsRecording ? "Pause" : "Recording",
-                replayButtonText = replayService.IsReplaying ? "Stop" : "Replay",
+                replayButtonText = replayService.IsReplaying ? "Stop" : (UseCursorClick ? "Click" : "Replay"),
                 canUndo = CanUndo,
                 copiedCount = _copiedActions?.Count ?? 0,
                 canRedo = CanRedo
@@ -780,12 +782,12 @@ namespace TrueReplayer
                 },
                 buttonStates = new
                 {
-                    recordEnabled = true,
-                    replayEnabled = actions.Count > 0,
+                    recordEnabled = !UseCursorClick,
+                    replayEnabled = UseCursorClick || actions.Count > 0,
                     recordingActive = false,
                     replayActive = false,
                     recordButtonText = "Recording",
-                    replayButtonText = "Replay",
+                    replayButtonText = UseCursorClick ? "Click" : "Replay",
                     canUndo = CanUndo,
                     canRedo = CanRedo,
                     copiedCount = _copiedActions?.Count ?? 0
@@ -929,6 +931,10 @@ namespace TrueReplayer
 
         private void HandleRecordingToggle(JsonElement payload)
         {
+            // Recording is suppressed in Clicker mode — the UI button is disabled, but a hotkey
+            // forwarded through this handler shouldn't bypass that.
+            if (UseCursorClick) return;
+
             int? insertIndex = null;
             if (payload.TryGetProperty("insertIndex", out var idxEl) && idxEl.ValueKind == JsonValueKind.Number)
                 insertIndex = idxEl.GetInt32();
@@ -944,7 +950,8 @@ namespace TrueReplayer
                 int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
                 bool useJitter = UseDelayVariation;
                 int jitterPercent = int.TryParse(DelayVariation, out var jp) ? jp : 20;
-                int loops = EnableLoop && int.TryParse(LoopCount, out var lc) ? lc : 0;
+                // Match regular replay: loop OFF → 1 iteration; loop ON + count=0 → infinite (engine convention).
+                int loops = EnableLoop && int.TryParse(LoopCount, out var lc) && lc >= 0 ? lc : 1;
                 int interval = LoopIntervalEnabled && int.TryParse(LoopInterval, out var li) ? li : 0;
                 mainController.ToggleCursorClickReplay(delay, useJitter, jitterPercent, loops, interval, CursorClickButton);
                 return;
@@ -3397,6 +3404,13 @@ namespace TrueReplayer
                     break;
                 case "useCursorClick":
                     UseCursorClick = valueElement.GetBoolean();
+                    // Switching modes mid-execution: cancel anything currently running so the
+                    // app's "active" state matches the new mode. Recording is also stopped — Clicker
+                    // ignores recorded actions, and switching back to Replay mid-recording is unusual.
+                    if (replayService.IsReplaying)
+                        mainController.StopReplayIfRunning();
+                    if (recordingService.IsRecording)
+                        recordingService.StopRecording();
                     break;
                 case "cursorClickButton":
                     CursorClickButton = valueElement.GetString() ?? "Left";
@@ -3447,6 +3461,12 @@ namespace TrueReplayer
 
             // Echo updated settings back to React so controlled components update
             PushSettingsLoaded();
+            // Mode change affects record/replay button enable/text and tray icon color.
+            if (key == "useCursorClick")
+            {
+                PushButtonStates();
+                TrayIconService.UpdateTrayIcon();
+            }
         }
 
         private void HandleAlwaysOnTop(JsonElement payload)

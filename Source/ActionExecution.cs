@@ -216,7 +216,10 @@ namespace TrueReplayer.Services
         {
             if (IsReplaying)
             {
-                _cursorClickCts?.Cancel();
+                // Stop whatever's running — could be either a regular replay (started by a profile
+                // hotkey before the user switched to Clicker mode) or our own click loop. StopReplay
+                // cancels both, so the Replay hotkey reliably acts as "stop" regardless of source.
+                StopReplay();
                 return;
             }
 

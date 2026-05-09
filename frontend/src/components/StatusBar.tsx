@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { Play, Pause as PauseIcon } from 'lucide-react';
+import { Play, Pause as PauseIcon, MousePointerClick } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 
 export function StatusBar() {
-  const { statusBar, status, highlightedActionIndex, replayChain, pauseState } = useAppState();
+  const { statusBar, status, highlightedActionIndex, replayChain, pauseState, settings } = useAppState();
   const { send } = useBridge();
   const isReplaying = status === 'replaying';
+  const isClicker = settings.useCursorClick;
   // The engine's stack already includes the root profile at index 0, so we only
   // render "Running ..." when the chain has at least 2 entries (root + a sub-call).
   // While running A alone, replayChain is ['A'] and we leave the chain hidden.
@@ -52,7 +53,14 @@ export function StatusBar() {
 
   return (
     <div className="flex items-center h-[26px] px-4 bg-bg-base border-t border-border-subtle shrink-0">
-      <span className="text-[11px] text-text-disabled">{statusBar.directory}</span>
+      {isClicker ? (
+        <span className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color: 'var(--color-clicker)' }}>
+          <MousePointerClick size={11} />
+          Clicker mode
+        </span>
+      ) : (
+        <span className="text-[11px] text-text-disabled">{statusBar.directory}</span>
+      )}
       <div className="w-px h-3 bg-border-subtle mx-3" />
       <span className="text-[11px] text-text-disabled">{statusBar.profileName ?? 'No profile'}</span>
       <div className="w-px h-3 bg-border-subtle mx-3" />

@@ -29,6 +29,9 @@
   --color-recording-bg: rgba(255, 107, 107, 0.1);
   --color-replay: #6bcb77;
   --color-replay-bg: rgba(107, 203, 119, 0.1);
+  --color-clicker: #c084fc;
+  --color-clicker-bg: rgba(192, 132, 252, 0.12);
+  --color-clicker-border: rgba(192, 132, 252, 0.3);
 
   /* Action type pills */
   --color-action-mouse-fg: #a78bfa;
