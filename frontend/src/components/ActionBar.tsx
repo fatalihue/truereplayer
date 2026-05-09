@@ -141,11 +141,13 @@ export function ActionBar() {
         </button>
       </div>
 
-      {/* Right: Ghost actions (Save + Load) */}
+      {/* Right: Ghost actions (Save + Load) — disabled in Clicker mode (profiles wrap recorded
+          actions, which Clicker doesn't use). Tooltip explains the disabled state to the user. */}
       <div className="flex items-center gap-1.5">
         <button
           onClick={() => send({ type: 'profile:save', payload: {} })}
           disabled={isClicker}
+          data-tip={isClicker ? 'Profiles are unavailable in Clicker mode' : undefined}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[13px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-tertiary"
         >
           <Save size={14} />
@@ -154,6 +156,7 @@ export function ActionBar() {
         <button
           onClick={() => send({ type: 'profile:load', payload: {} })}
           disabled={isClicker}
+          data-tip={isClicker ? 'Profiles are unavailable in Clicker mode' : undefined}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[13px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-tertiary"
         >
           <FolderOpen size={14} />

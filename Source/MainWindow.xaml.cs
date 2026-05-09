@@ -406,10 +406,11 @@ namespace TrueReplayer
                         return;
                     }
 
-                    // Clicker mode is exclusive: profile hotkeys, Recording hotkey, and PROFILE_STOP
-                    // releases are all suppressed. The user explicitly opted out of "replay actions"
-                    // semantics when they switched modes — only the Replay hotkey (handled below)
-                    // and the always-available Foreground/Mode toggles remain.
+                    // Clicker mode is exclusive: profile triggers (PROFILE/HOLD/TOGGLE) and the
+                    // Recording hotkey are suppressed. PROFILE_STOP is intentionally NOT suppressed
+                    // (handled earlier above) so a WhilePressed key released after a mid-replay mode
+                    // switch still cancels its replay. The Replay hotkey (handled below), the
+                    // ProfileKeyToggle hotkey, and the Foreground hotkey continue to work normally.
                     if (bridge?.UseCursorClick == true)
                     {
                         if (isProfileTrigger || key == UserProfile.Current.RecordingHotkey)
