@@ -72,7 +72,7 @@ function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-14', suf
         type="text"
         value={localValue}
         onChange={(e) => setLocalValue(e.target.value)}
-        onFocus={(e) => { isFocused.current = true; committedByEnter.current = false; e.target.select(); }}
+        onFocus={() => { isFocused.current = true; committedByEnter.current = false; }}
         onBlur={() => {
           isFocused.current = false;
           if (!committedByEnter.current) {
