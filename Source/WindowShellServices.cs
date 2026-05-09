@@ -68,9 +68,7 @@ namespace TrueReplayer.Services
             if (isInitialized)
                 Shell_NotifyIcon(NIM_DELETE, ref notifyIcon);
 
-            string iconPath = UserProfile.Current.ProfileKeyEnabled
-                ? Path.Combine(AppContext.BaseDirectory, "TrueReplayer.ico")
-                : Path.Combine(AppContext.BaseDirectory, "TrueReplayerRed.ico");
+            string iconPath = ResolveTrayIconPath();
 
             ReleaseCurrentIcon();
             currentIconHandle = LoadImage(IntPtr.Zero, iconPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
@@ -83,7 +81,7 @@ namespace TrueReplayer.Services
                 uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP,
                 uCallbackMessage = WM_USER + 1,
                 hIcon = currentIconHandle,
-                szTip = "TrueReplayer"
+                szTip = ResolveTooltip()
             };
 
             Shell_NotifyIcon(NIM_ADD, ref notifyIcon);
@@ -96,14 +94,13 @@ namespace TrueReplayer.Services
 
         public static void UpdateTrayIcon()
         {
-            string iconPath = UserProfile.Current.ProfileKeyEnabled
-                ? Path.Combine(AppContext.BaseDirectory, "TrueReplayer.ico")
-                : Path.Combine(AppContext.BaseDirectory, "TrueReplayerRed.ico");
+            string iconPath = ResolveTrayIconPath();
 
             ReleaseCurrentIcon();
             currentIconHandle = LoadImage(IntPtr.Zero, iconPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
 
             notifyIcon.hIcon = currentIconHandle;
+            notifyIcon.szTip = ResolveTooltip();
             Shell_NotifyIcon(NIM_MODIFY, ref notifyIcon);
         }
 
@@ -132,6 +129,32 @@ namespace TrueReplayer.Services
                 ReleaseCurrentIcon();
                 isInitialized = false;
             }
+        }
+
+        // Tray icon priority: Clicker mode (purple) > profile keys paused (red) > running (green).
+        // Clicker is checked first so it overrides the "paused" state — in Clicker mode profile-key
+        // semantics don't apply at all, so showing red there would be misleading.
+        private static string ResolveTrayIconPath()
+        {
+            string fileName;
+            if (AppSettingsManager.Load().UseCursorClick)
+                fileName = "TrueReplayerPurple.ico";
+            else if (UserProfile.Current.ProfileKeyEnabled)
+                fileName = "TrueReplayer.ico";
+            else
+                fileName = "TrueReplayerRed.ico";
+            return Path.Combine(AppContext.BaseDirectory, fileName);
+        }
+
+        // Tooltip mirrors the icon-resolution priority so the hover label always matches the color.
+        // Capped at 127 chars + null terminator to fit the szTip buffer used by the shell.
+        private static string ResolveTooltip()
+        {
+            if (AppSettingsManager.Load().UseCursorClick)
+                return "TrueReplayer — Clicker mode";
+            if (!UserProfile.Current.ProfileKeyEnabled)
+                return "TrueReplayer — Replay mode (profile keys paused)";
+            return "TrueReplayer — Replay mode";
         }
 
         private static void ReleaseCurrentIcon()

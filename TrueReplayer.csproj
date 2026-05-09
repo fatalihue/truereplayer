@@ -7,6 +7,9 @@
 		<Compile Remove="ChromeExtension\**" />
 		<None Remove="ChromeExtension\**" />
 		<Content Remove="ChromeExtension\**" />
+		<Compile Remove="tools\**" />
+		<None Remove="tools\**" />
+		<Content Remove="tools\**" />
 	</ItemGroup>
 
 	<PropertyGroup>
@@ -169,6 +172,9 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="TrueReplayerRed.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="TrueReplayerPurple.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

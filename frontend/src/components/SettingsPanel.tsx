@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, Download, MousePointerClick } from 'lucide-react';
+import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { Toggle } from './common/Toggle';
-import { Radio } from './Radio';
 
 function Section({ icon: Icon, iconColor, title, children, defaultOpen = true }: {
   icon: React.ElementType;
@@ -227,36 +226,6 @@ export function SettingsPanel() {
       <div className="flex-1 overflow-y-auto space-y-1 p-1">
         {activeTab === 'profile' ? (
           <>
-            {/* Execution */}
-            {/* Mode — what the Replay button does. Mutually exclusive radio.
-                Auto-clicker substitui o replay padrão por cliques repetidos no cursor;
-                ainda usa Delay/Jitter/Loops/Interval definidos em Execution abaixo. */}
-            <Section icon={MousePointerClick} iconColor="#c084fc" title="Mode">
-              <Radio
-                selected={!settings.useCursorClick}
-                onSelect={() => changeSetting('useCursorClick', false)}
-                label="Replay actions"
-                title="Run the recorded actions in order"
-              />
-              <Radio
-                selected={settings.useCursorClick}
-                onSelect={() => changeSetting('useCursorClick', true)}
-                label="Clicker"
-                title="Click repeatedly at cursor position. Uses Delay/Jitter/Loops from Execution. Ignores recorded actions."
-              >
-                <select
-                  value={settings.cursorClickButton}
-                  onChange={(e) => changeSetting('cursorClickButton', e.target.value)}
-                  disabled={!settings.useCursorClick}
-                  className="w-[80px] h-7 px-1.5 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary text-center outline-none focus:border-accent-solid disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <option value="Left">Left</option>
-                  <option value="Right">Right</option>
-                  <option value="Middle">Middle</option>
-                </select>
-              </Radio>
-            </Section>
-
             <Section icon={Timer} iconColor="#ffd93d" title="Execution">
               <SettingRow label="Delay" tooltip="Fixed delay between actions (ms)">
                 <SettingInput
