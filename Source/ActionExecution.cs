@@ -1312,6 +1312,24 @@ namespace TrueReplayer.Services
                         result = result.ToLowerInvariant();
                         i++;
                         break;
+                    case "sentence":
+                        if (result.Length > 0)
+                            result = char.ToUpperInvariant(result[0]) + result.Substring(1);
+                        i++;
+                        break;
+                    case "title":
+                        {
+                            var sb = new System.Text.StringBuilder(result.Length);
+                            bool atWordStart = true;
+                            foreach (var ch in result)
+                            {
+                                if (char.IsWhiteSpace(ch)) { sb.Append(ch); atWordStart = true; }
+                                else { sb.Append(atWordStart ? char.ToUpperInvariant(ch) : ch); atWordStart = false; }
+                            }
+                            result = sb.ToString();
+                        }
+                        i++;
+                        break;
                     case "trim":
                         result = result.Trim();
                         i++;

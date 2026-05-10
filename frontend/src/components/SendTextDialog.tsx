@@ -42,7 +42,7 @@ const VARIABLE_GROUPS: VarGroup[] = [
     label: 'Clipboard',
     items: [
       { var: '{clipboard}', label: 'Clipboard' },
-      { var: '__transform__', label: 'Transform', action: 'transform' },
+      { var: '__transform__', label: 'Advanced', action: 'transform' },
     ],
   },
   {
@@ -144,7 +144,7 @@ function renderHighlightedText(text: string): React.ReactNode[] {
 
 // ── Clipboard Transform builder ──
 
-type CaseTransform = 'none' | 'upper' | 'lower';
+type CaseTransform = 'none' | 'upper' | 'lower' | 'sentence' | 'title';
 type Extract = 'none' | 'line' | 'word';
 type Limit = 'none' | 'first' | 'last';
 
@@ -177,6 +177,8 @@ function buildClipboardToken(s: TransformState): string {
   else if (s.limit === 'last') parts.push('last', String(s.limitN));
   if (s.case === 'upper') parts.push('upper');
   else if (s.case === 'lower') parts.push('lower');
+  else if (s.case === 'sentence') parts.push('sentence');
+  else if (s.case === 'title') parts.push('title');
   return '{' + parts.join(':') + '}';
 }
 
@@ -195,6 +197,8 @@ function applyTransformPreview(raw: string, s: TransformState): string {
   else if (s.limit === 'last') r = s.limitN <= 0 ? '' : r.slice(-s.limitN);
   if (s.case === 'upper') r = r.toUpperCase();
   else if (s.case === 'lower') r = r.toLowerCase();
+  else if (s.case === 'sentence') r = r.length > 0 ? r[0].toUpperCase() + r.slice(1) : r;
+  else if (s.case === 'title') r = r.replace(/(^|\s)(\S)/g, (_, ws, ch) => ws + ch.toUpperCase());
   return r;
 }
 
@@ -236,7 +240,7 @@ function ClipboardTransformPopover({ onInsert, onClose }: ClipboardTransformPopo
   const token = useMemo(() => buildClipboardToken(state), [state]);
   const preview = useMemo(() => applyTransformPreview(clipRaw, state), [clipRaw, state]);
 
-  const toggleCase = (v: 'upper' | 'lower') =>
+  const toggleCase = (v: 'upper' | 'lower' | 'sentence' | 'title') =>
     setState((s) => ({ ...s, case: s.case === v ? 'none' : v }));
 
   const setExtract = (v: Extract) => setState((s) => ({ ...s, extract: v }));
@@ -272,7 +276,7 @@ function ClipboardTransformPopover({ onInsert, onClose }: ClipboardTransformPopo
       {/* Header (pinned) */}
       <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-border-subtle bg-bg-card shrink-0">
         <Wand2 size={14} className="text-accent-light shrink-0" />
-        <div className="text-xs font-semibold text-text-primary flex-1">Transform Clipboard</div>
+        <div className="text-xs font-semibold text-text-primary flex-1">Advanced Clipboard</div>
         <button
           type="button"
           onClick={onClose}
@@ -287,23 +291,38 @@ function ClipboardTransformPopover({ onInsert, onClose }: ClipboardTransformPopo
           can grow to fill any leftover height — keeps the popover seamless). */}
       <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
 
-      {/* Transform case */}
+      {/* Transform case — 2-col grid (column-flow) so 5 options fit the available
+          width without growing the popover. Case options share a single radio-style
+          state, so combinations like UPPERCASE + Capitalize are impossible by
+          construction. Trim is orthogonal (whitespace, not case). */}
       <Section label="Transform">
-        <CheckRow
-          checked={state.trim}
-          onChange={() => setState((s) => ({ ...s, trim: !s.trim }))}
-          label="Trim whitespace"
-        />
-        <CheckRow
-          checked={state.case === 'upper'}
-          onChange={() => toggleCase('upper')}
-          label="UPPERCASE"
-        />
-        <CheckRow
-          checked={state.case === 'lower'}
-          onChange={() => toggleCase('lower')}
-          label="lowercase"
-        />
+        <div className="grid grid-flow-col grid-rows-3 gap-x-3">
+          <CheckRow
+            checked={state.trim}
+            onChange={() => setState((s) => ({ ...s, trim: !s.trim }))}
+            label="Trim"
+          />
+          <CheckRow
+            checked={state.case === 'upper'}
+            onChange={() => toggleCase('upper')}
+            label="UPPERCASE"
+          />
+          <CheckRow
+            checked={state.case === 'lower'}
+            onChange={() => toggleCase('lower')}
+            label="lowercase"
+          />
+          <CheckRow
+            checked={state.case === 'sentence'}
+            onChange={() => toggleCase('sentence')}
+            label="Sentence case"
+          />
+          <CheckRow
+            checked={state.case === 'title'}
+            onChange={() => toggleCase('title')}
+            label="Title Case"
+          />
+        </div>
       </Section>
 
       {/* Extract */}
