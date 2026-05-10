@@ -114,9 +114,12 @@ function renderHighlightedText(text: string): React.ReactNode[] {
     parts.push(
       <span
         key={`v${match.index}`}
+        // No padding/margin: any horizontal box affecting layout would push the
+        // highlight overlay out of sync with the textarea caret beneath it. The
+        // background + rounded corners already give a clear visual cue.
         className={
           isValid
-            ? 'text-[#f0abfc] bg-[#d946ef]/15 rounded-sm px-[1px]'
+            ? 'text-[#f0abfc] bg-[#d946ef]/15 rounded-sm'
             : 'text-text-primary'
         }
       >
@@ -588,8 +591,10 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
   }, [insertAtCursor]);
 
   const handleConfirm = () => {
-    const trimmed = text.trim();
-    if (trimmed) onConfirm(trimmed);
+    // Don't trim — leading/trailing spaces are intentional ("oi " ≠ "oi"). Only
+    // block submit when the field is entirely whitespace (trim used as emptiness check).
+    if (!text.trim()) return;
+    onConfirm(text);
   };
 
   const selectPanel = (panel: PanelType) => {
