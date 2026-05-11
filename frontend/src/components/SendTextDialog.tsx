@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Smile, Clock, BookmarkPlus, Trash2, ChevronRight, ChevronLeft, Wand2 } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { Smile, Clock, BookmarkPlus, Trash2, ChevronRight, ChevronLeft, Wand2, Pencil, Search, Check, X } from 'lucide-react';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { LexicalTokenEditor, type LexicalEditorHandle } from './lexical/LexicalTokenEditor';
@@ -39,6 +39,69 @@ function saveSnippets(snippets: Snippet[]) {
   localStorage.setItem(SNIPPETS_KEY, JSON.stringify(snippets));
 }
 
+// Inline edit form for an existing snippet — rendered in place of the row so
+// the user can adjust name and text without leaving the panel.
+function SnippetEditForm({
+  snippet,
+  onSave,
+  onCancel,
+}: {
+  snippet: Snippet;
+  onSave: (name: string, text: string) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(snippet.name);
+  const [text, setText] = useState(snippet.text);
+  const canSave = name.trim().length > 0 && text.trim().length > 0;
+
+  return (
+    <div className="px-3 py-3 bg-bg-card border-b border-border-subtle space-y-2">
+      <div className="text-[10px] uppercase tracking-wide font-semibold text-text-tertiary">
+        Edit snippet
+      </div>
+      <input
+        type="text"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancel(); }
+        }}
+        placeholder="Snippet name..."
+        autoFocus
+        className="w-full h-7 px-2 text-xs text-text-primary bg-bg-input border border-border-subtle rounded outline-none focus:border-accent-solid placeholder:text-text-disabled"
+      />
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          // Let Ctrl+Enter still confirm the parent dialog; Escape cancels the edit.
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancel(); }
+        }}
+        placeholder="Snippet text..."
+        rows={5}
+        className="w-full px-2 py-1.5 text-[11px] font-mono text-text-primary bg-bg-input border border-border-subtle rounded outline-none focus:border-accent-solid resize-none placeholder:text-text-disabled"
+      />
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => canSave && onSave(name, text)}
+          disabled={!canSave}
+          className="px-3 py-1 text-[11px] font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-2 py-1 text-[11px] text-text-tertiary hover:text-text-primary transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Variable definitions (organized by group, all chip/grid style) ──
 
 interface VarChipItem { var: string; label: string; action?: 'transform'; breakAfter?: boolean }
@@ -57,10 +120,10 @@ const VARIABLE_GROUPS: VarGroup[] = [
     items: [
       { var: '{enter}', label: 'Enter' },
       { var: '{tab}', label: 'Tab' },
-      { var: '{space}', label: 'Space' },
-      { var: '{backspace}', label: 'Bksp' },
-      { var: '{delete}', label: 'Del' },
-      { var: '{escape}', label: 'Esc' },
+      { var: '{space}', label: 'Space', breakAfter: true },
+      { var: '{backspace}', label: 'Backspace' },
+      { var: '{delete}', label: 'Delete' },
+      { var: '{escape}', label: 'Escape' },
     ],
   },
   {
@@ -77,12 +140,12 @@ const VARIABLE_GROUPS: VarGroup[] = [
     items: [
       { var: '{home}', label: 'Home' },
       { var: '{end}', label: 'End' },
-      { var: '{pageup}', label: 'PgUp' },
-      { var: '{pagedown}', label: 'PgDn', breakAfter: true },
-      { var: '{up}', label: '↑' },
-      { var: '{down}', label: '↓' },
-      { var: '{left}', label: '←' },
-      { var: '{right}', label: '→' },
+      { var: '{pageup}', label: 'PageUp' },
+      { var: '{pagedown}', label: 'PageDown', breakAfter: true },
+      { var: '{up}', label: 'Up' },
+      { var: '{down}', label: 'Down' },
+      { var: '{left}', label: 'Left' },
+      { var: '{right}', label: 'Right' },
     ],
   },
 ];
@@ -190,6 +253,9 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
   const [snippets, setSnippets] = useState<Snippet[]>(loadSnippets);
   const [snippetName, setSnippetName] = useState('');
   const [savingSnippet, setSavingSnippet] = useState(false);
+  const [editingSnippetId, setEditingSnippetId] = useState<string | null>(null);
+  const [deletingSnippetId, setDeletingSnippetId] = useState<string | null>(null);
+  const [snippetFilter, setSnippetFilter] = useState('');
   const [transformOpen, setTransformOpen] = useState(false);
   const lexicalApiRef = useRef<LexicalEditorHandle | null>(null);
 
@@ -230,7 +296,29 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
     const updated = snippets.filter(s => s.id !== id);
     setSnippets(updated);
     saveSnippets(updated);
+    if (editingSnippetId === id) setEditingSnippetId(null);
+    setDeletingSnippetId(null);
+  }, [snippets, editingSnippetId]);
+
+  const handleUpdateSnippet = useCallback((id: string, newName: string, newText: string) => {
+    const trimmedName = newName.trim();
+    const trimmedText = newText.trim();
+    if (!trimmedName || !trimmedText) return;
+    const updated = snippets.map(s =>
+      s.id === id ? { ...s, name: trimmedName, text: trimmedText } : s,
+    );
+    setSnippets(updated);
+    saveSnippets(updated);
+    setEditingSnippetId(null);
   }, [snippets]);
+
+  const filteredSnippets = useMemo(() => {
+    const q = snippetFilter.trim().toLowerCase();
+    if (!q) return snippets;
+    return snippets.filter(s =>
+      s.name.toLowerCase().includes(q) || s.text.toLowerCase().includes(q),
+    );
+  }, [snippets, snippetFilter]);
 
   const handleInsertSnippet = useCallback((snippetText: string) => {
     insertAtCursor(snippetText);
@@ -257,6 +345,10 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
       e.preventDefault();
       if (savingSnippet) {
         setSavingSnippet(false);
+      } else if (deletingSnippetId !== null) {
+        setDeletingSnippetId(null);
+      } else if (editingSnippetId !== null) {
+        setEditingSnippetId(null);
       } else if (!panelCollapsed) {
         setPanelCollapsed(true);
       } else {
@@ -395,9 +487,9 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                       </div>
                     </div>
                   ))}
-                  {/* Repeat syntax tip */}
-                  <div className="px-3 py-2 text-[10px] text-text-tertiary border-t border-border-subtle">
-                    Tip: add <code className="text-accent-light">:N</code> to repeat — e.g. <code className="text-accent-light">{'{enter:5}'}</code> presses Enter 5×
+                  {/* Tip */}
+                  <div className="px-3 py-2 text-[10px] text-text-tertiary border-t border-border-subtle leading-relaxed">
+                    Tip: click any chip in the editor to edit its parameters — repeat count, delay ms, clipboard modifiers.
                   </div>
 
                   {/* Transform popover (overlays the panel) */}
@@ -459,37 +551,102 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                     )}
                   </div>
 
+                  {/* Search (only when there are snippets) */}
+                  {snippets.length > 0 && (
+                    <div className="px-3 py-2 border-b border-border-subtle shrink-0">
+                      <div className="relative">
+                        <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-text-tertiary pointer-events-none" />
+                        <input
+                          type="text"
+                          value={snippetFilter}
+                          onChange={(e) => setSnippetFilter(e.target.value)}
+                          placeholder="Search snippets..."
+                          className="w-full h-7 pl-6 pr-2 text-[11px] text-text-primary bg-bg-input border border-border-subtle rounded outline-none focus:border-accent-solid placeholder:text-text-disabled"
+                        />
+                      </div>
+                    </div>
+                  )}
+
                   {/* Snippet list */}
                   <div className="flex-1 overflow-y-auto">
                     {snippets.length === 0 ? (
                       <div className="px-3 py-4 text-center text-[11px] text-text-disabled">
                         No saved snippets yet
                       </div>
+                    ) : filteredSnippets.length === 0 ? (
+                      <div className="px-3 py-4 text-center text-[11px] text-text-disabled">
+                        No snippets match “{snippetFilter}”
+                      </div>
                     ) : (
-                      snippets.map((s) => (
-                        <div
-                          key={s.id}
-                          className="flex items-center gap-2 px-3 py-2 hover:bg-bg-card transition-colors group border-b border-border-subtle last:border-b-0"
-                        >
-                          <button
-                            type="button"
-                            onClick={() => handleInsertSnippet(s.text)}
-                            className="flex-1 text-left min-w-0"
-                            title="Insert at cursor"
+                      filteredSnippets.map((s) =>
+                        editingSnippetId === s.id ? (
+                          <SnippetEditForm
+                            key={s.id}
+                            snippet={s}
+                            onSave={(name, snippetText) => handleUpdateSnippet(s.id, name, snippetText)}
+                            onCancel={() => setEditingSnippetId(null)}
+                          />
+                        ) : (
+                          <div
+                            key={s.id}
+                            className={`flex items-center gap-1 px-3 py-2 transition-colors group border-b border-border-subtle last:border-b-0 ${
+                              deletingSnippetId === s.id ? 'bg-red-500/10' : 'hover:bg-bg-card'
+                            }`}
                           >
-                            <div className="text-xs font-medium text-text-primary truncate">{s.name}</div>
-                            <div className="text-[11px] text-text-tertiary truncate mt-0.5">{s.text}</div>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteSnippet(s.id)}
-                            className="shrink-0 p-1 text-text-disabled hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
-                            title="Delete snippet"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                      ))
+                            <button
+                              type="button"
+                              onClick={() => handleInsertSnippet(s.text)}
+                              disabled={deletingSnippetId === s.id}
+                              className="flex-1 text-left min-w-0 disabled:cursor-default"
+                              title={deletingSnippetId === s.id ? '' : 'Insert at cursor'}
+                            >
+                              <div className="text-xs font-medium text-text-primary truncate">{s.name}</div>
+                              <div className="text-[11px] text-text-tertiary truncate mt-0.5">{s.text}</div>
+                            </button>
+                            {deletingSnippetId === s.id ? (
+                              <>
+                                <span className="text-[10px] text-red-300 mr-1 shrink-0">Delete?</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteSnippet(s.id)}
+                                  className="shrink-0 p-1 rounded text-red-300 bg-red-500/20 hover:bg-red-500/35 border border-red-500/40 transition-colors"
+                                  title="Confirm delete"
+                                  autoFocus
+                                >
+                                  <Check size={12} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeletingSnippetId(null)}
+                                  className="shrink-0 p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-surface transition-colors"
+                                  title="Cancel"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingSnippetId(s.id)}
+                                  className="shrink-0 p-1 text-text-disabled hover:text-accent-light transition-colors opacity-0 group-hover:opacity-100"
+                                  title="Edit snippet"
+                                >
+                                  <Pencil size={12} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeletingSnippetId(s.id)}
+                                  className="shrink-0 p-1 text-text-disabled hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                                  title="Delete snippet"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        ),
+                      )
                     )}
                   </div>
                 </div>

@@ -26,9 +26,9 @@ int[] sizes = { 16, 24, 32, 48, 64, 128, 256 };
 // Strength = 0 keeps the original art untouched (only the circular mask is applied).
 // Higher strength pushes the image further toward the tint color.
 (string Name, double R, double G, double B, double Strength)[] variants = {
-    ("TrueReplayer",       1.00, 1.00, 1.00, 0.00),  // original colors  — running, profile keys enabled
-    ("TrueReplayerRed",    1.00, 0.18, 0.18, 0.85),  // saturated red    — profile keys paused
-    ("TrueReplayerPurple", 0.78, 0.45, 1.05, 0.85),  // saturated purple — clicker mode (#c084fc)
+    ("TrueReplayer",       1.00, 1.00, 1.00, 0.00),  // original colors    — running, profile keys enabled
+    ("TrueReplayerRed",    1.30, 0.05, 0.05, 0.95),  // aggressive red     — profile keys paused
+    ("TrueReplayerPurple", 0.70, 0.10, 1.30, 0.95),  // electric violet    — clicker mode
 };
 
 foreach (var v in variants)

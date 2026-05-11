@@ -33,10 +33,21 @@ function Section({ icon: Icon, iconColor, title, children, defaultOpen = true }:
   );
 }
 
-function SettingRow({ label, tooltip, children }: { label: string; tooltip?: string; children: React.ReactNode }) {
+function SettingRow({ label, tooltip, children, danger }: { label: string; tooltip?: string; children: React.ReactNode; danger?: boolean }) {
+  // `danger` paints the row in a loud red so a disabled-but-critical toggle
+  // (e.g. Profile Keys OFF) is impossible to miss when glancing at the panel.
   return (
-    <div className="flex items-center justify-between py-1" title={tooltip}>
-      <span className="text-ui text-text-secondary">{label}</span>
+    <div
+      className={
+        danger
+          ? 'flex items-center justify-between py-1 px-2 -mx-1 rounded bg-red-500/20 border border-red-500/60 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.25)]'
+          : 'flex items-center justify-between py-1'
+      }
+      title={tooltip}
+    >
+      <span className={danger ? 'text-ui font-semibold text-red-200' : 'text-ui text-text-secondary'}>
+        {label}
+      </span>
       <div className="flex items-center gap-2.5">
         {children}
       </div>
@@ -299,7 +310,7 @@ export function SettingsPanel() {
               <SettingRow label="Keyboard">
                 <Toggle isOn={settings.recordKeyboard} onChange={(v) => changeSetting('recordKeyboard', v)} />
               </SettingRow>
-              <SettingRow label="Profile Keys">
+              <SettingRow label="Profile Keys" danger={!settings.profileKeyEnabled}>
                 <Toggle isOn={settings.profileKeyEnabled} onChange={(v) => changeSetting('profileKeyEnabled', v)} />
               </SettingRow>
               <SettingRow label="Browser Actions" tooltip="Record CSS selectors from Chrome instead of mouse coordinates">
