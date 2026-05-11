@@ -9,6 +9,7 @@ import {
   type TransformState,
 } from './clipboardModifiers';
 import { NumInput, Section } from './popoverAtoms';
+import { normalizeToken } from './tokenNormalize';
 
 // Tokens that accept a `:N` repeat count (e.g. {enter:5}).
 const REPEATABLE_TOKEN_NAMES = new Set([
@@ -77,12 +78,15 @@ export function TokenChipPopover({
   const popRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   // Local state so the header can show the live token; mirror to onLiveChange
-  // so the parent's commit-on-close has the latest value to apply.
-  const [liveToken, setLiveToken] = useState(token);
+  // so the parent's commit-on-close has the latest value to apply. We normalise
+  // here so the header preview matches the eventual chip display character-by-
+  // character (the chip itself re-normalises on setToken — belt and suspenders).
+  const [liveToken, setLiveToken] = useState(() => normalizeToken(token));
   const updateLive = useCallback(
     (next: string) => {
-      setLiveToken(next);
-      onLiveChange(next);
+      const normalized = normalizeToken(next);
+      setLiveToken(normalized);
+      onLiveChange(normalized);
     },
     [onLiveChange],
   );

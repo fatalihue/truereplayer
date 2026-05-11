@@ -7,6 +7,7 @@ import {
   type Spread,
 } from 'lexical';
 import { TokenChip } from './TokenChip';
+import { normalizeToken } from './tokenNormalize';
 
 type SerializedTokenNode = Spread<
   { token: string; type: 'token'; version: 1 },
@@ -21,7 +22,7 @@ export class TokenNode extends DecoratorNode<ReactNode> {
 
   constructor(token: string, key?: NodeKey) {
     super(key);
-    this.__token = token;
+    this.__token = normalizeToken(token);
   }
 
   static getType(): string {
@@ -43,7 +44,7 @@ export class TokenNode extends DecoratorNode<ReactNode> {
   // Mutates the node's token in place. Must be called inside editor.update().
   setToken(token: string): void {
     const writable = this.getWritable();
-    writable.__token = token;
+    writable.__token = normalizeToken(token);
   }
 
   createDOM(): HTMLElement {
