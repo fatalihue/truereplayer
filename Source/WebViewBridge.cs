@@ -261,6 +261,7 @@ namespace TrueReplayer
                     case "waitimage:configureSearchRegion": _ = HandleConfigureSearchRegionAsync(payload); break;
                     case "waitimage:cropReference": HandleCropReference(payload); break;
                     case "image:testMatch": _ = HandleTestMatchAsync(payload); break;
+                    case "mouse:pickPosition": _ = HandleMousePickPositionAsync(payload); break;
                     case "actions:addBrowserAction": HandleAddBrowserAction(payload); break;
                     case "browser:toggleRecording": HandleBrowserToggleRecording(payload); break;
                     case "browser:pickElement": HandlePickElement(); break;
@@ -1781,6 +1782,63 @@ namespace TrueReplayer
             action.ImagePath = newPath;
             HasUnsavedChanges = true;
             PushActionsUpdate();
+        }
+
+        // Lets the user click anywhere on screen to set the X/Y of a mouse click action.
+        // Reuses the existing overlay in "pointPick" mode — single click returns immediately,
+        // no rect dragging needed.
+        private async Task HandleMousePickPositionAsync(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
+
+            var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
+            await Task.Delay(400);
+
+            System.Drawing.Bitmap screenshot;
+            try
+            {
+                screenshot = ScreenCaptureService.CaptureVirtualScreen();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[MousePick] Screenshot failed: {ex.Message}");
+                dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+                SendMessage("mouse:positionPicked", new { requestId, cancelled = true });
+                return;
+            }
+
+            RegionSelectionResult? selection = null;
+            var thread = new Thread(() =>
+            {
+                System.Windows.Forms.Application.EnableVisualStyles();
+                using var overlay = new ScreenOverlayForm(
+                    screenshot,
+                    regionOnly: false,
+                    pointPick: true,
+                    hintText: "Click anywhere on screen to set X/Y  •  ESC to cancel");
+                overlay.ShowDialog();
+                selection = overlay.GetSelectionAsync().Result;
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            await Task.Run(() => thread.Join());
+
+            dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+
+            if (selection == null)
+            {
+                SendMessage("mouse:positionPicked", new { requestId, cancelled = true });
+                return;
+            }
+
+            SendMessage("mouse:positionPicked", new
+            {
+                requestId,
+                cancelled = false,
+                x = selection.ScreenX,
+                y = selection.ScreenY
+            });
         }
 
         // Lets the user draw a search ROI for an existing WaitImage. Behaves like the recapture

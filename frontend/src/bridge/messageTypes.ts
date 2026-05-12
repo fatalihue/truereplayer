@@ -199,7 +199,8 @@ export type IncomingMessage =
   | { type: 'browser:testResult'; payload: BrowserTestResult }
   | { type: 'browser:extensionOutdated'; payload: { currentVersion: string; expectedVersion: string } }
   | { type: 'image:testMatchResult'; payload: { requestId: string; found: boolean; score: number; x: number; y: number; w: number; h: number; error?: string } }
-  | { type: 'waitimage:searchRegionSet'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; w?: number; h?: number } };
+  | { type: 'waitimage:searchRegionSet'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; w?: number; h?: number } }
+  | { type: 'mouse:positionPicked'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number } };
 
 // ── Messages JS → C# ──
 
@@ -268,6 +269,7 @@ export type OutgoingMessage =
   | { type: 'waitimage:configureSearchRegion'; payload: { requestId: string } }
   | { type: 'waitimage:cropReference'; payload: { index: number; x: number; y: number; w: number; h: number } }
   | { type: 'image:testMatch'; payload: { requestId: string; imagePath: string; confidence: number; searchRegion?: { x: number; y: number; w: number; h: number } } }
+  | { type: 'mouse:pickPosition'; payload: { requestId: string } }
   | { type: 'selection:changed'; payload: { indices: number[] } }
   | { type: 'window:alwaysOnTop'; payload: { enabled: boolean } }
   | { type: 'window:minimizeToTray'; payload: { enabled: boolean } }

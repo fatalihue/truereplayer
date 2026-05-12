@@ -22,6 +22,7 @@ namespace TrueReplayer.Services
     {
         private readonly Bitmap _screenshot;
         private readonly bool _regionOnly;
+        private readonly bool _pointPick;
         private readonly string _hintText;
         private readonly TaskCompletionSource<RegionSelectionResult?> _tcs = new();
 
@@ -33,11 +34,18 @@ namespace TrueReplayer.Services
         // <paramref name="regionOnly"/>: when true, the overlay returns just the rect coords
         // without producing a cropped Bitmap. Used to configure the search ROI of an existing
         // WaitImage action — no new reference image is being captured.
-        public ScreenOverlayForm(Bitmap screenshot, bool regionOnly = false, string? hintText = null)
+        //
+        // <paramref name="pointPick"/>: when true, a single mouse click returns immediately as
+        // a zero-size "region" — used by Pick Position on click actions to set X/Y from a
+        // direct screen click without dragging a rect.
+        public ScreenOverlayForm(Bitmap screenshot, bool regionOnly = false, bool pointPick = false, string? hintText = null)
         {
             _screenshot = screenshot;
             _regionOnly = regionOnly;
-            _hintText = hintText ?? "Click and drag to select a region  •  ESC to cancel";
+            _pointPick = pointPick;
+            _hintText = hintText ?? (pointPick
+                ? "Click anywhere to pick a position  •  ESC to cancel"
+                : "Click and drag to select a region  •  ESC to cancel");
 
             // Virtual screen bounds (all monitors)
             int vx = NativeMethods.GetSystemMetrics(76);
@@ -143,6 +151,23 @@ namespace TrueReplayer.Services
         {
             if (e.Button == MouseButtons.Left)
             {
+                if (_pointPick)
+                {
+                    // Single-click capture — no drag needed. Width/Height stay 0 to mark this
+                    // result as a point rather than a region; callers index off ScreenX/ScreenY.
+                    int vx = NativeMethods.GetSystemMetrics(76);
+                    int vy = NativeMethods.GetSystemMetrics(77);
+                    _tcs.TrySetResult(new RegionSelectionResult
+                    {
+                        CroppedImage = null,
+                        ScreenX = e.Location.X + vx,
+                        ScreenY = e.Location.Y + vy,
+                        Width = 0,
+                        Height = 0,
+                    });
+                    Close();
+                    return;
+                }
                 _startPoint = e.Location;
                 _currentPoint = e.Location;
                 _isDragging = true;

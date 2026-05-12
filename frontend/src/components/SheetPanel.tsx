@@ -12,16 +12,31 @@ interface SheetPanelProps {
   onClose: () => void;
 }
 
-const actionTypes = [
-  { value: 'LeftClick', label: 'Left Click' },
-  { value: 'RightClick', label: 'Right Click' },
-  { value: 'MiddleClick', label: 'Mid Click' },
-  { value: 'KeyDown', label: 'KeyDown' },
-  { value: 'KeyUp', label: 'KeyUp' },
-  { value: 'ScrollUp', label: 'ScrollUp ↑' },
-  { value: 'ScrollDown', label: 'ScrollDown ↓' },
-  { value: 'SendText', label: 'Text' },
-];
+// Action types organised by FAMILY — the picker only offers conversions that stay within
+// a family because cross-family transforms produce semantically broken actions (e.g. a
+// Click→KeyDown swap loses the X/Y context and leaves an empty key field). Users who really
+// want a different action type record a new one. Within a family, the swaps are meaningful:
+// Left Click ↔ Right Click ↔ Mid Click (same coord, different button), KeyDown ↔ KeyUp
+// (same key, different phase), ScrollUp ↔ ScrollDown (toggle direction).
+type ActionFamily = 'click' | 'key' | 'scroll' | 'text';
+const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
+  click: [
+    { value: 'LeftClick', label: 'Left Click' },
+    { value: 'RightClick', label: 'Right Click' },
+    { value: 'MiddleClick', label: 'Mid Click' },
+  ],
+  key: [
+    { value: 'KeyDown', label: 'KeyDown' },
+    { value: 'KeyUp', label: 'KeyUp' },
+  ],
+  scroll: [
+    { value: 'ScrollUp', label: 'ScrollUp ↑' },
+    { value: 'ScrollDown', label: 'ScrollDown ↓' },
+  ],
+  text: [
+    { value: 'SendText', label: 'Text' },
+  ],
+};
 
 const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'Pause']);
 
@@ -119,6 +134,9 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   // Crop reference image modal — opens on thumbnail click; commit replaces the action's
   // ImagePath with a tighter cropped PNG via the bridge.
   const [cropperOpen, setCropperOpen] = useState(false);
+
+  // Pick position — when active, the next 'mouse:positionPicked' message updates X/Y.
+  const [pickPositionRequestId, setPickPositionRequestId] = useState<string | null>(null);
   const testMatchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearTestMatchTimeout = useCallback(() => {
     if (testMatchTimeoutRef.current) {
@@ -186,9 +204,18 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
         if (!r.cancelled && r.w && r.h && r.w > 0 && r.h > 0) {
           setWaitImageSearchRegion({ x: r.x ?? 0, y: r.y ?? 0, w: r.w, h: r.h });
         }
+      } else if (msg.type === 'mouse:positionPicked') {
+        const r = msg.payload as { requestId: string; cancelled: boolean; x?: number; y?: number };
+        if (pickPositionRequestId && r.requestId === pickPositionRequestId) {
+          if (!r.cancelled && r.x != null && r.y != null) {
+            setX(String(r.x));
+            setY(String(r.y));
+          }
+          setPickPositionRequestId(null);
+        }
       }
     });
-  }, [subscribe, testRequestId, clearTestTimeout, testMatchRequestId, clearTestMatchTimeout]);
+  }, [subscribe, testRequestId, clearTestTimeout, testMatchRequestId, clearTestMatchTimeout, pickPositionRequestId]);
 
   // Sync local state from action. This is intentionally an effect-driven seed: keeping
   // local state lets the user edit freely before saving, while the dependency on `action`
@@ -495,6 +522,15 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     setCropperOpen(false);
   }, [actionIndex, send]);
 
+  // Pick position: minimise the app, show the screen-overlay in pointPick mode, the next
+  // click anywhere on screen fills X/Y. Much faster than typing or re-recording the action
+  // just to nudge a coord.
+  const handlePickPosition = useCallback(() => {
+    const requestId = Math.random().toString(36).slice(2, 10);
+    setPickPositionRequestId(requestId);
+    send({ type: 'mouse:pickPosition', payload: { requestId } });
+  }, [send]);
+
   if (actionIndex == null) return null;
 
   const isKeyAction = actionType === 'KeyDown' || actionType === 'KeyUp';
@@ -507,6 +543,31 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const isBrowserWait = actionType === 'BrowserWaitElement';
   const showKey = isKeyAction || isSendText;
   const showCoords = !noCoordTypes.has(actionType);
+
+  // Mouse clicks are stored as paired Down/Up events (LeftClickDown, LeftClickUp, etc.).
+  // The Action Type picker only offers the unsuffixed names; baseActionType strips the
+  // Down/Up suffix so the picker can match-highlight the right button, and clickHalfSuffix
+  // lets us preserve the press/release half when the user switches between click types.
+  const clickHalfMatch = actionType.match(/^((?:Left|Right|Middle)Click)(Down|Up)$/);
+  const isClickHalf = clickHalfMatch !== null;
+  const clickHalfBase = clickHalfMatch ? clickHalfMatch[1] : null;
+  const clickHalfSuffix = clickHalfMatch ? (clickHalfMatch[2] as 'Down' | 'Up') : null;
+  const baseActionType = clickHalfBase ?? actionType;
+
+  // Detect which family the current action belongs to, so the picker can offer only
+  // meaningful in-family transitions (see familyTypes comment).
+  const currentFamily: ActionFamily | null = isClickHalf
+    ? 'click'
+    : (actionType === 'KeyDown' || actionType === 'KeyUp')
+      ? 'key'
+      : (actionType === 'ScrollUp' || actionType === 'ScrollDown')
+        ? 'scroll'
+        : actionType === 'SendText'
+          ? 'text'
+          : null;
+  // Skip rendering the picker when there's nothing useful to switch to (single-option family).
+  const familyOptions = currentFamily ? familyTypes[currentFamily] : [];
+  const showTypePicker = familyOptions.length > 1;
 
   // #2 — Tier shield for current selector (priority: textMatch > key)
   const selectorForTier = textMatch.trim() ? buildTextSelector(textMode, textMatch.trim()) : key;
@@ -533,38 +594,65 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           </button>
           <div>
             <div className="text-sm font-semibold text-text-primary">Edit Action</div>
-            <div className="text-[11px] text-text-tertiary mt-0.5">
-              Action #{(actionIndex ?? 0) + 1} — {isWaitImage ? 'Wait Image'
-                : actionType === 'BrowserClick' ? 'Left Click'
-                : actionType === 'BrowserRightClick' ? 'Right Click'
-                : actionType === 'BrowserType' ? 'Input Text'
-                : actionType === 'BrowserWaitElement' ? 'Wait'
-                : actionType === 'BrowserNavigate' ? 'Navigate'
-                : actionType}
+            <div className="text-[11px] text-text-tertiary mt-0.5 flex items-center gap-1.5 flex-wrap">
+              <span>
+                Action #{(actionIndex ?? 0) + 1} — {isWaitImage ? 'Wait Image'
+                  : actionType === 'BrowserClick' ? 'Left Click'
+                  : actionType === 'BrowserRightClick' ? 'Right Click'
+                  : actionType === 'BrowserType' ? 'Input Text'
+                  : actionType === 'BrowserWaitElement' ? 'Wait'
+                  : actionType === 'BrowserNavigate' ? 'Navigate'
+                  : isClickHalf
+                    ? `${(clickHalfBase ?? '').replace('Click', '')} Click`
+                    : actionType}
+              </span>
+              {clickHalfSuffix && (
+                <span
+                  className="px-1.5 py-[1px] rounded text-[10px] font-medium border bg-bg-card text-text-secondary border-border-default"
+                  title={clickHalfSuffix === 'Down' ? 'Button pressed down' : 'Button released'}
+                >
+                  {clickHalfSuffix === 'Down' ? '↓ press' : '↑ release'}
+                </span>
+              )}
             </div>
           </div>
         </div>
 
         {/* Body */}
         <div className="p-4 space-y-4 flex-1 min-h-0 overflow-y-auto">
-          {/* Action Type — hide for WaitImage, Browser, and Pause */}
-          {!isWaitImage && !isBrowser && !isPause && (
+          {/* Action Type — only shown when the family has >1 meaningful option. Hidden for
+              SendText (single option), WaitImage / Browser / Pause (each has its own editor
+              shape). Cross-family conversions aren't offered: users who want to swap families
+              record a new action — it's faster and avoids leaving half-filled fields behind. */}
+          {!isWaitImage && !isBrowser && !isPause && showTypePicker && (
           <div>
             <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">ACTION TYPE</label>
             <div className="flex flex-wrap gap-1.5">
-              {actionTypes.map(t => (
-                <button
-                  key={t.value}
-                  onClick={() => setActionType(t.value)}
-                  className={`px-2.5 py-1 rounded text-[11px] font-medium border transition-colors ${
-                    actionType === t.value
-                      ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
-                      : 'text-text-secondary border-border-default bg-bg-elevated hover:bg-bg-card'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
+              {familyOptions.map(t => {
+                // When editing a click half (LeftClickDown / LeftClickUp / etc.), picking
+                // another click type must preserve the suffix so the engine still dispatches
+                // the action — `RightClick` alone is silently skipped by the replay switch.
+                const isClickPick = /^(?:Left|Right|Middle)Click$/.test(t.value);
+                const nextValue = isClickPick && clickHalfSuffix
+                  ? `${t.value}${clickHalfSuffix}`
+                  : t.value;
+                // Highlight on the base type so users editing a Down/Up half see the right
+                // chip lit up (the raw actionType `LeftClickDown` would never match `LeftClick`).
+                const isActive = baseActionType === t.value;
+                return (
+                  <button
+                    key={t.value}
+                    onClick={() => setActionType(nextValue)}
+                    className={`px-2.5 py-1 rounded text-[11px] font-medium border transition-colors ${
+                      isActive
+                        ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
+                        : 'text-text-secondary border-border-default bg-bg-elevated hover:bg-bg-card'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
           )}
@@ -1169,7 +1257,9 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           </div>
           )}
 
-          {/* X / Y */}
+          {/* X / Y — Pick button (only on click halves, since scroll actions don't really
+              use X/Y but happen to live in showCoords). Lets the user click somewhere on
+              screen to fill both coords without manual typing or re-recording. */}
           {showCoords && (
             <div className="flex gap-2.5">
               <div className="flex-1">
@@ -1192,6 +1282,20 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   placeholder="—"
                 />
               </div>
+              {isClickHalf && (
+                <div className="flex flex-col justify-end">
+                  <button
+                    type="button"
+                    onClick={handlePickPosition}
+                    disabled={pickPositionRequestId != null}
+                    className="h-8 flex items-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Click anywhere on screen to set X/Y"
+                  >
+                    <Crosshair size={12} />
+                    {pickPositionRequestId != null ? 'Picking…' : 'Pick'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
