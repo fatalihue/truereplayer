@@ -702,7 +702,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         type="text"
                         value=""
                         readOnly
-                        placeholder="Press a key..."
+                        placeholder="New key..."
                         onKeyDown={handleKeyCaptureKeyDown}
                         onBlur={cancelEdit}
                         className="w-[92px] h-6 px-1 text-xs font-mono text-accent-light bg-bg-input border border-accent-solid rounded outline-none placeholder:text-accent-light/50 animate-pulse"

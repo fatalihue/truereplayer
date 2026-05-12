@@ -132,7 +132,10 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
 
     const modifierKeys = new Set(['Control', 'Alt', 'Shift', 'Meta']);
     if (modifierKeys.has(e.key)) {
-      setLocalValue(modifiers.join('+') || '...');
+      // Keep the placeholder visible (empty string) while only a modifier is held — the
+      // pulse + accent border already signal "still listening". Showing "..." here was
+      // dead weight that conflicted with the placeholder.
+      setLocalValue(modifiers.join('+'));
       return;
     }
 
@@ -162,20 +165,25 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
     (e.target as HTMLInputElement).blur();
   };
 
+  // Unified "capture mode" UX — same as the grid Key column edit and the SheetPanel /
+  // ProfilePanel hotkey inputs. While focused, the field shows the live combo (or empty +
+  // "New key..." placeholder if nothing held yet) with an accent border and a soft pulse
+  // so it's obvious the input is waiting. Idle state shows the stored value in accent text
+  // on a default border. Single visual language across every key-capture surface.
   return (
     <input
       type="text"
       readOnly
-      value={isFocused ? (localValue || '...') : localValue}
-      onFocus={() => { setIsFocused(true); setLocalValue('...'); onFocusChange?.(true); send({ type: 'hotkey:suppress', payload: { enabled: true } }); }}
+      value={localValue}
+      onFocus={() => { setIsFocused(true); setLocalValue(''); onFocusChange?.(true); send({ type: 'hotkey:suppress', payload: { enabled: true } }); }}
       onBlur={() => { setIsFocused(false); setLocalValue(value); onFocusChange?.(false); send({ type: 'hotkey:suppress', payload: { enabled: false } }); }}
       onKeyDown={handleKeyDown}
-      className={`w-[110px] h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer ${
+      className={`w-[110px] h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
         isFocused
-          ? 'text-white border-accent-solid'
+          ? 'text-accent-light border-accent-solid animate-pulse'
           : 'text-accent border-border-default'
       }`}
-      placeholder="Press a key..."
+      placeholder="New key..."
     />
   );
 }

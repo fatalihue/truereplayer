@@ -138,6 +138,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
 
   // Pick position — when active, the next 'mouse:positionPicked' message updates X/Y.
   const [pickPositionRequestId, setPickPositionRequestId] = useState<string | null>(null);
+
+  // Pause action's Resume Hotkey capture state — same UX as KeyDown/KeyUp's keyFieldFocused
+  // and the Settings / Profile / grid inputs: focus → empty + "New key..." + accent pulse.
+  const [pauseHotkeyFocused, setPauseHotkeyFocused] = useState(false);
   const testMatchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearTestMatchTimeout = useCallback(() => {
     if (testMatchTimeoutRef.current) {
@@ -904,8 +908,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               <input
                 type="text"
                 readOnly
-                value={key || ''}
-                placeholder="Click to capture"
+                value={pauseHotkeyFocused ? '' : (key || '')}
+                placeholder="New key..."
+                onFocus={() => setPauseHotkeyFocused(true)}
+                onBlur={() => setPauseHotkeyFocused(false)}
                 onKeyDown={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
@@ -915,7 +921,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   if (e.altKey) modifiers.push('Alt');
                   if (e.shiftKey) modifiers.push('Shift');
                   if (modifierKeys.has(e.key)) return;
-                  if (e.key === 'Escape') { setKey(''); return; }
+                  if (e.key === 'Escape') { setKey(''); (e.target as HTMLInputElement).blur(); return; }
                   let mainKey = e.key;
                   if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter') {
                     const numpadMap: Record<string, string> = {
@@ -935,11 +941,16 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   else if (mainKey === 'ArrowRight') mainKey = 'Right';
                   if (!modifiers.includes(mainKey)) modifiers.push(mainKey);
                   setKey(modifiers.join('+'));
+                  (e.target as HTMLInputElement).blur();
                 }}
-                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                className={`w-full h-8 px-2 text-ui font-mono bg-bg-input border rounded outline-none cursor-pointer placeholder:text-accent-light/50 ${
+                  pauseHotkeyFocused
+                    ? 'text-accent-light border-accent-solid animate-pulse'
+                    : 'text-text-primary border-border-default'
+                }`}
               />
               <div className="text-[10px] text-text-tertiary mt-1">
-                Press a key combo. Esc clears.
+                Click the field and press a key combo. Esc clears.
               </div>
             </div>
             <div>
@@ -1283,19 +1294,24 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               {isSendText ? 'TEXT' : 'KEY'}
             </label>
             {isKeyAction ? (
+              // Capture-mode visual matches the grid's Key column edit, the SettingsPanel
+              // global hotkey inputs, and the ProfilePanel Assign Hotkey dialog. While
+              // focused: empty value + "New key..." placeholder + accent border + animate-
+              // pulse, so it's unmistakeable that the next key press lands here. On blur,
+              // restores the human-readable value (via getDisplayKey).
               <input
                 type="text"
                 readOnly
-                value={keyFieldFocused ? '...' : getDisplayKey(key)}
+                value={keyFieldFocused ? '' : getDisplayKey(key)}
                 onFocus={() => setKeyFieldFocused(true)}
                 onBlur={() => setKeyFieldFocused(false)}
                 onKeyDown={handleKeyCapture}
-                className={`w-full h-8 px-2 text-ui font-mono bg-bg-input border rounded outline-none cursor-pointer ${
+                placeholder="New key..."
+                className={`w-full h-8 px-2 text-ui font-mono bg-bg-input border rounded outline-none cursor-pointer placeholder:text-accent-light/50 ${
                   keyFieldFocused
-                    ? 'text-white border-accent-solid'
+                    ? 'text-accent-light border-accent-solid animate-pulse'
                     : 'text-text-primary border-border-default'
                 }`}
-                placeholder="—"
               />
             ) : (
               <input
