@@ -1024,10 +1024,69 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 step="1"
                 className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
               />
+              {/* Quick presets — covers the 90% of real-world pauses (a second, a few seconds,
+                  a minute, a few minutes, indefinite wait). The Manual input above still
+                  works for anything in between. Active preset is highlighted to show which
+                  value is currently set. */}
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {([
+                  { label: '1s', secs: 1 },
+                  { label: '5s', secs: 5 },
+                  { label: '30s', secs: 30 },
+                  { label: '1m', secs: 60 },
+                  { label: '5m', secs: 300 },
+                  { label: '∞', secs: 0 },
+                ] as const).map(p => {
+                  const parsed = parseFloat(timeout);
+                  const currentSecs = isNaN(parsed) ? 0 : parsed;
+                  const isActive = currentSecs === p.secs;
+                  return (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => setTimeout_(String(p.secs))}
+                      className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                        isActive
+                          ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
+                          : 'text-text-tertiary border-border-default bg-bg-elevated hover:text-text-secondary hover:bg-bg-card'
+                      }`}
+                      title={p.secs === 0 ? 'Wait forever (resume hotkey only)' : `Wait ${p.label}`}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
               <div className="text-[10px] text-text-tertiary mt-1">
                 Auto-resumes if the hotkey isn't pressed in time.
               </div>
             </div>
+
+            {/* Foot-gun warning — if neither a resume hotkey nor a timeout is set, the
+                Pause is silently skipped at replay time (ExecutePause early-returns). Save
+                still works (legacy actions may rely on this), but the user gets a heads-up
+                that the action will be a no-op. */}
+            {(() => {
+              const parsedSecs = parseFloat(timeout);
+              const effectiveSecs = isNaN(parsedSecs) ? 0 : parsedSecs;
+              const hasNoTrigger = !key.trim() && effectiveSecs <= 0;
+              if (!hasNoTrigger) return null;
+              return (
+                <div
+                  className="flex items-start gap-2 px-3 py-2 rounded border text-[11px]"
+                  style={{
+                    color: 'var(--color-delay)',
+                    borderColor: 'color-mix(in srgb, var(--color-delay) 35%, transparent)',
+                    backgroundColor: 'color-mix(in srgb, var(--color-delay) 10%, transparent)',
+                  }}
+                >
+                  <ShieldAlert size={13} className="shrink-0 mt-px" />
+                  <span>
+                    No resume hotkey and no timeout — this Pause will be skipped at replay time.
+                  </span>
+                </div>
+              );
+            })()}
           </>
           )}
 

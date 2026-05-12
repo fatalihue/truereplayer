@@ -37,7 +37,7 @@ interface ActionTableProps {
 }
 
 export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps) {
-  const { actions, highlightedActionIndex, buttonStates, activeProfile } = useAppState();
+  const { actions, highlightedActionIndex, buttonStates, activeProfile, pauseState } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -619,6 +619,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             {actions.map((action, idx) => {
               const colors = getActionTypeColors(action.actionType);
               const isHighlighted = highlightedActionIndex === idx;
+              // While the replay engine is awaiting a Pause action's resume condition, the
+              // highlighted row IS the paused action — flag it so the row treatment can swap
+              // from the accent-blue "running" tint to the pause-purple "waiting" tint. This
+              // is the only "where am I?" cue the user needs without leaving the grid.
+              const isPausedHere = isHighlighted && pauseState.isPaused && action.actionType === 'Pause';
               const isSelected = selectedIndices.has(idx);
               const displayKey = action.actionType === 'WaitImage'
                 ? ''
@@ -650,18 +655,24 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   onMouseDown={(e) => handleRowMouseDown(idx, e)}
                   onClick={(e) => handleRowClick(idx, e)}
                   onContextMenu={(e) => handleRowContextMenu(idx, e)}
+                  // Paused rows use the pause-action colour (purple by default) instead of
+                  // the accent-blue "running" tint, plus a soft pulse to mirror the status-bar
+                  // PAUSED indicator. Other highlight states fall back to the existing rules.
+                  style={isPausedHere ? { backgroundColor: 'color-mix(in srgb, var(--color-action-pause-fg) 18%, transparent)' } : undefined}
                   className={`group h-row border-b border-border-subtle transition-colors cursor-default relative ${
                     isDragged ? 'opacity-40' : ''
                   } ${
                     isSkipped ? 'opacity-40 [&_td]:line-through [&_td]:decoration-text-disabled [&_td]:decoration-[1px]' : ''
                   } ${
-                    isHighlighted
-                      ? 'bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)]'
-                      : isSelected
-                        ? 'bg-[rgba(96,205,255,0.08)]'
-                        : idx % 2 === 0
-                          ? 'bg-bg-surface'
-                          : 'bg-[rgba(255,255,255,0.02)]'
+                    isPausedHere
+                      ? 'animate-pulse'
+                      : isHighlighted
+                        ? 'bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)]'
+                        : isSelected
+                          ? 'bg-[rgba(96,205,255,0.08)]'
+                          : idx % 2 === 0
+                            ? 'bg-bg-surface'
+                            : 'bg-[rgba(255,255,255,0.02)]'
                   } hover:bg-bg-elevated`}
                 >
                   {/* Drop indicator lines */}
