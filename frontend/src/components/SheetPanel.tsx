@@ -59,7 +59,7 @@ function estimateTier(selector: string): 'S' | 'A' | 'B' | 'C' {
   if (!selector) return 'C';
   const s = selector.trim();
   if (s.startsWith('text=') || s.startsWith('text*=') || s.startsWith('text~=') || s.startsWith('text/')) return 'B';
-  if (/^#[A-Za-z_][\w\-]*$/.test(s)) return 'S';
+  if (/^#[A-Za-z_][\w-]*$/.test(s)) return 'S';
   if (/\[data-(testid|test|cy|qa)=/.test(s)) return 'S';
   if (/\[(name|aria-label|placeholder)=/.test(s)) return 'A';
   if (s.includes(':nth-') || s.includes(' > ')) return 'C';
@@ -190,7 +190,11 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     });
   }, [subscribe, testRequestId, clearTestTimeout, testMatchRequestId, clearTestMatchTimeout]);
 
-  // Sync local state from action
+  // Sync local state from action. This is intentionally an effect-driven seed: keeping
+  // local state lets the user edit freely before saving, while the dependency on `action`
+  // means external changes (undo/redo, sibling-action updates) still flow into the panel
+  // even when it stays open. A key-based remount would lose that liveness.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (action) {
       setActionType(action.actionType);
@@ -244,6 +248,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       setTestMatchRequestId(null);
     }
   }, [action]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
 
   const handleSave = useCallback(() => {
