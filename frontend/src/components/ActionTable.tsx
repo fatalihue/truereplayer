@@ -7,6 +7,7 @@ import { useSelectionRef } from '../state/SelectionContext';
 import { useToast } from '../state/ToastContext';
 import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors } from '../utils/displayUtils';
 import { SendTextDialog } from './SendTextDialog';
+import { SendTextPreview } from './SendTextPreview';
 import { RunProfileDialog } from './RunProfileDialog';
 import { BulkActionBar } from './BulkActionBar';
 import { Checkbox, CheckboxBox } from './Checkbox';
@@ -764,7 +765,14 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           }
                         }}
                       >
-                        {displayKey}
+                        {/* SendText payloads can contain `{Enter}` / `{delay:500}` /
+                            `{Clipboard:...}` tokens. Render them as the same pink chips
+                            used in the Lexical-based Edit Text dialog so the cell mirrors
+                            what the editor shows. Other action types keep the plain
+                            displayKey text — they don't have token syntax. */}
+                        {action.actionType === 'SendText'
+                          ? <SendTextPreview text={action.key} />
+                          : displayKey}
                       </span>
                     ) : null}
                   </td>
