@@ -1503,7 +1503,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 if (e.key === 'Enter') { e.preventDefault(); confirmHotstring(); }
                 else if (e.key === 'Escape') { e.preventDefault(); setShowHotstringDialog(null); }
               }}
-              placeholder="example: id /id -ad .sg ,de =ds ;mk"
+              placeholder="e.g. /id"
               maxLength={32}
               className="w-full h-9 px-3 text-sm font-mono text-accent bg-bg-input border border-accent-solid rounded outline-none"
             />
