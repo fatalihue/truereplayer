@@ -1057,9 +1057,6 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   );
                 })}
               </div>
-              <div className="text-[10px] text-text-tertiary mt-1">
-                Auto-resumes if the hotkey isn't pressed in time.
-              </div>
             </div>
 
             {/* Foot-gun warning — if neither a resume hotkey nor a timeout is set, the
