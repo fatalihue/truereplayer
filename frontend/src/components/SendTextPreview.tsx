@@ -49,7 +49,7 @@ export function SendTextPreview({ text }: SendTextPreviewProps) {
           // user selects the row.
           <span
             key={idx}
-            className="inline-flex items-center px-1.5 py-[1px] mx-[1px] text-[12px] font-mono rounded text-[#f0abfc] bg-[#d946ef]/15 border border-[#d946ef]/40 select-none align-middle"
+            className="inline-flex items-center px-1.5 py-[1px] mx-[1px] text-[12px] font-mono rounded text-[var(--color-action-sendtext-fg)] bg-[var(--color-action-sendtext-fg)]/15 border border-[var(--color-action-sendtext-fg)]/40 select-none align-middle"
             title={segment.value}
           >
             {segment.value.slice(1, -1)}

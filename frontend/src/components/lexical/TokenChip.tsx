@@ -63,8 +63,12 @@ export function TokenChip({ nodeKey, token }: { nodeKey: NodeKey; token: string 
         contentEditable={false}
         onClick={handleClick}
         onMouseDown={(e) => e.stopPropagation()}
-        className={`inline-flex items-center px-1.5 py-[1px] mx-[1px] text-[12px] font-mono rounded text-[#f0abfc] bg-[#d946ef]/15 border border-[#d946ef]/40 select-none cursor-pointer hover:bg-[#d946ef]/25 transition-colors ${
-          open ? 'ring-1 ring-[#d946ef]/60' : ''
+        // Chip palette tracks the SendText action colour (--color-action-sendtext-fg).
+        // Pairing the editor chip with the grid chip and the action-type badge gives the
+        // user a single colour language for everything SendText-related — see also
+        // SendTextPreview.tsx which uses the exact same opacity ramp.
+        className={`inline-flex items-center px-1.5 py-[1px] mx-[1px] text-[12px] font-mono rounded text-[var(--color-action-sendtext-fg)] bg-[var(--color-action-sendtext-fg)]/15 border border-[var(--color-action-sendtext-fg)]/40 select-none cursor-pointer hover:bg-[var(--color-action-sendtext-fg)]/25 transition-colors ${
+          open ? 'ring-1 ring-[var(--color-action-sendtext-fg)]/60' : ''
         }`}
         title={token}
       >
