@@ -961,23 +961,30 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           <>
             <div>
               <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">RESUME HOTKEY</label>
+              {/* Same capture pattern as the KeyDown/KeyUp Key field (and the grid / Settings
+                  hotkeys): focus → empty + "New key..." + accent pulse; Esc is a regular
+                  captured key (users CAN bind Pause-resume to Escape); cancel is click-away
+                  or the 4 s idle timer. Reuses keyFieldRef + the shared arm/disarm helpers —
+                  the Pause input and the KeyDown/KeyUp input are gated on different action
+                  types so they're never rendered simultaneously. */}
               <input
+                ref={keyFieldRef}
                 type="text"
                 readOnly
                 value={pauseHotkeyFocused ? '' : (key || '')}
                 placeholder="New key..."
-                onFocus={() => setPauseHotkeyFocused(true)}
-                onBlur={() => setPauseHotkeyFocused(false)}
+                onFocus={() => { setPauseHotkeyFocused(true); armKeyCaptureTimer(); }}
+                onBlur={() => { setPauseHotkeyFocused(false); disarmKeyCaptureTimer(); }}
                 onKeyDown={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
+                  armKeyCaptureTimer();
                   const modifierKeys = new Set(['Control', 'Alt', 'Shift', 'Meta']);
                   const modifiers: string[] = [];
                   if (e.ctrlKey) modifiers.push('Ctrl');
                   if (e.altKey) modifiers.push('Alt');
                   if (e.shiftKey) modifiers.push('Shift');
                   if (modifierKeys.has(e.key)) return;
-                  if (e.key === 'Escape') { setKey(''); (e.target as HTMLInputElement).blur(); return; }
                   let mainKey = e.key;
                   if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter') {
                     const numpadMap: Record<string, string> = {
@@ -997,6 +1004,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   else if (mainKey === 'ArrowRight') mainKey = 'Right';
                   if (!modifiers.includes(mainKey)) modifiers.push(mainKey);
                   setKey(modifiers.join('+'));
+                  disarmKeyCaptureTimer();
                   (e.target as HTMLInputElement).blur();
                 }}
                 className={`w-full h-8 px-2 text-ui font-mono bg-bg-input border rounded outline-none cursor-pointer placeholder:text-accent-light/50 ${
@@ -1005,9 +1013,6 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     : 'text-text-primary border-border-default'
                 }`}
               />
-              <div className="text-[10px] text-text-tertiary mt-1">
-                Click the field and press a key combo. Esc clears.
-              </div>
             </div>
             <div>
               <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s) — 0 = infinite</label>
