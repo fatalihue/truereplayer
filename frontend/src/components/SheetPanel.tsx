@@ -453,6 +453,23 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     (e.target as HTMLInputElement).blur();
   }, [armKeyCaptureTimer, disarmKeyCaptureTimer]);
 
+  // Esc-to-close — global listener that closes the panel when the user presses Escape
+  // outside of any capture mode. Key capture handlers (KeyDown/KeyUp Key field, Pause
+  // Resume Hotkey, the grid Key column edit, Settings global hotkeys) all call
+  // `e.preventDefault()` on every key, including Escape. That flips `defaultPrevented`
+  // on the underlying native event, so we just check it here and skip the close when an
+  // inner handler already consumed the press. Listener is only active while the panel is
+  // mounted with a non-null actionIndex.
+  useEffect(() => {
+    if (actionIndex == null) return;
+    const onDocKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      onClose();
+    };
+    document.addEventListener('keydown', onDocKeyDown);
+    return () => document.removeEventListener('keydown', onDocKeyDown);
+  }, [actionIndex, onClose]);
+
   // Reset the capture state whenever the panel switches to a different action (including
   // closing — actionIndex going null). Without this, focusing the field, closing the
   // panel, then reopening leaves the field stuck in capture mode because the input was
