@@ -35,7 +35,7 @@ export function ActionBar() {
 
   // Color rules — "busy/stop" states all converge on the blue accent so the user has a
   // single, unambiguous visual cue for "click here to stop":
-  //   Replay mode  Recording idle  → red       (start recording)
+  //   Macro mode   Recording idle  → red       (start recording)
   //                Pause (busy)    → blue      (stop recording)
   //                Replay idle     → green     (start replay)
   //                Stop (busy)     → blue      (stop replay)
@@ -73,7 +73,7 @@ export function ActionBar() {
             data-tip="Run the recorded actions in order"
           >
             <Play size={11} fill={!isClicker ? 'currentColor' : 'none'} />
-            Replay
+            Macro
           </button>
           <button
             role="tab"
