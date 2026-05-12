@@ -135,6 +135,8 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
       captureTimerRef.current = null;
     }
   }, []);
+  // Unmount cleanup — same defensive pattern as ActionTable / SheetPanel.
+  useEffect(() => disarmCaptureTimer, [disarmCaptureTimer]);
 
   useEffect(() => {
     if (!isFocused) setLocalValue(value);

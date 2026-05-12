@@ -35,6 +35,10 @@ namespace TrueReplayer.Services
         // committing. Updated on every MouseMove regardless of drag state.
         private Point _cursorPoint;
         private bool _hasCursor;
+        // Last painted label rect, used to do a targeted invalidate (old ∪ new) instead of
+        // a full-form invalidate on every MouseMove — that would mean repainting a virtual-
+        // screen-sized bitmap at mouse-event frequency, which is brutal on multi-monitor.
+        private Rectangle _lastCursorLabelRect = Rectangle.Empty;
         // Cached virtual-screen origin so the cursor label can show absolute screen coords
         // (matching the values the action will end up storing). The form already uses these
         // to compute its size; reading them once in the ctor avoids re-querying on every paint.
@@ -175,13 +179,11 @@ namespace TrueReplayer.Services
                 {
                     // Single-click capture — no drag needed. Width/Height stay 0 to mark this
                     // result as a point rather than a region; callers index off ScreenX/ScreenY.
-                    int vx = NativeMethods.GetSystemMetrics(76);
-                    int vy = NativeMethods.GetSystemMetrics(77);
                     _tcs.TrySetResult(new RegionSelectionResult
                     {
                         CroppedImage = null,
-                        ScreenX = e.Location.X + vx,
-                        ScreenY = e.Location.Y + vy,
+                        ScreenX = e.Location.X + _virtualOriginX,
+                        ScreenY = e.Location.Y + _virtualOriginY,
                         Width = 0,
                         Height = 0,
                     });
@@ -200,13 +202,50 @@ namespace TrueReplayer.Services
             // Track cursor for the live "(x, y)" label even when not dragging. Without this
             // the user has no idea where on screen they're about to click in pointPick mode,
             // and in rect mode they can't preview the start point before pressing.
+            if (e.Location == _cursorPoint && _hasCursor && !_isDragging) return;  // no-op move
             _cursorPoint = e.Location;
             _hasCursor = true;
+
             if (_isDragging)
             {
                 _currentPoint = e.Location;
+                // Drag is already a full-form gesture (rect + dim label changes); a full
+                // invalidate is the simplest correct option here.
+                Invalidate();
+                return;
             }
-            Invalidate();
+
+            // Not dragging — only the cursor coord HUD changed. Invalidate just the union
+            // of the old and new label rects so we redraw a few hundred px instead of the
+            // entire virtual-screen-sized form.
+            var newRect = ComputeCursorLabelRect();
+            var dirty = _lastCursorLabelRect.IsEmpty ? newRect : Rectangle.Union(_lastCursorLabelRect, newRect);
+            // Inflate by 1 to guarantee anti-aliased edges aren't left behind.
+            dirty.Inflate(1, 1);
+            _lastCursorLabelRect = newRect;
+            Invalidate(dirty);
+        }
+
+        // Mirrors the geometry in DrawCursorCoords so the dirty-rect logic in OnMouseMove
+        // stays in sync. Uses a fixed font metric estimate to avoid creating a Graphics
+        // context outside paint — close enough since the inflate(1) absorbs sub-pixel drift.
+        private Rectangle ComputeCursorLabelRect()
+        {
+            if (!_hasCursor) return Rectangle.Empty;
+            int absX = _cursorPoint.X + _virtualOriginX;
+            int absY = _cursorPoint.Y + _virtualOriginY;
+            string text = $"{absX}, {absY}";
+            // Approximation: Segoe UI 9.5 averages ~6.5 px/char wide, ~14 px tall. Add the
+            // pad (6 horizontal, 3 vertical * 2) used in DrawCursorCoords.
+            int labelW = (int)Math.Ceiling(text.Length * 6.5f) + 12;
+            int labelH = 14 + 6;
+            int lx = _cursorPoint.X + 16;
+            int ly = _cursorPoint.Y + 16;
+            if (lx + labelW > ClientRectangle.Width)  lx = _cursorPoint.X - 16 - labelW;
+            if (ly + labelH > ClientRectangle.Height) ly = _cursorPoint.Y - 16 - labelH;
+            if (lx < 0) lx = 0;
+            if (ly < 0) ly = 0;
+            return new Rectangle(lx, ly, labelW, labelH);
         }
 
         // Renders an "(x, y)" callout near the cursor showing the absolute virtual-screen

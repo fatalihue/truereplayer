@@ -18,8 +18,10 @@ interface SheetPanelProps {
 // Click→KeyDown swap loses the X/Y context and leaves an empty key field). Users who really
 // want a different action type record a new one. Within a family, the swaps are meaningful:
 // Left Click ↔ Right Click ↔ Mid Click (same coord, different button), KeyDown ↔ KeyUp
-// (same key, different phase), ScrollUp ↔ ScrollDown (toggle direction).
-type ActionFamily = 'click' | 'key' | 'scroll' | 'text';
+// (same key, different phase), ScrollUp ↔ ScrollDown (toggle direction). SendText has no
+// family because it's the only "text" action — picker would be a single chip with nothing
+// to switch to, so currentFamily simply returns null for it.
+type ActionFamily = 'click' | 'key' | 'scroll';
 const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
   click: [
     { value: 'LeftClick', label: 'Left Click' },
@@ -33,9 +35,6 @@ const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
   scroll: [
     { value: 'ScrollUp', label: 'ScrollUp ↑' },
     { value: 'ScrollDown', label: 'ScrollDown ↓' },
-  ],
-  text: [
-    { value: 'SendText', label: 'Text' },
   ],
 };
 
@@ -458,12 +457,26 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   // closing — actionIndex going null). Without this, focusing the field, closing the
   // panel, then reopening leaves the field stuck in capture mode because the input was
   // unmounted before its blur could fire. Also tear down any pending idle-cancel timer
-  // so it doesn't fire against a stale input ref after the panel reopens.
+  // so it doesn't fire against a stale input ref after the panel reopens. Finally drop
+  // any in-flight pickPosition request: if the user opens action A, clicks Pick, closes
+  // the panel, then opens action B, the overlay's reply would otherwise land on B.
   useEffect(() => {
     setKeyFieldFocused(false);
     setPauseHotkeyFocused(false);
     disarmKeyCaptureTimer();
+    setPickPositionRequestId(null);
   }, [actionIndex, disarmKeyCaptureTimer]);
+
+  // Unmount cleanup — any pending timers must be torn down so they don't fire against
+  // refs to gone DOM nodes (would warn in React strict-mode dev, harmless in prod but
+  // still worth doing).
+  useEffect(() => {
+    return () => {
+      disarmKeyCaptureTimer();
+      if (coordCopyFlashTimerRef.current) clearTimeout(coordCopyFlashTimerRef.current);
+      if (coordPasteErrorTimerRef.current) clearTimeout(coordPasteErrorTimerRef.current);
+    };
+  }, [disarmKeyCaptureTimer]);
 
   // #1 — Validate regex pattern when in regex mode
   const regexError = useMemo(() => {
@@ -581,31 +594,43 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   // naturally write down.
   const [coordCopyFlash, setCoordCopyFlash] = useState(false);
   const [coordPasteError, setCoordPasteError] = useState(false);
+  // Refs hold the in-flight flash timers so we can cancel them when the panel switches
+  // actions or unmounts — otherwise the setTimeout callback fires `setCoordCopyFlash(false)`
+  // on a stale component and React warns about state-updates-after-unmount.
+  const coordCopyFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const coordPasteErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleCopyCoords = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(`${x},${y}`);
       setCoordCopyFlash(true);
-      setTimeout(() => setCoordCopyFlash(false), 900);
+      if (coordCopyFlashTimerRef.current) clearTimeout(coordCopyFlashTimerRef.current);
+      coordCopyFlashTimerRef.current = setTimeout(() => {
+        setCoordCopyFlash(false);
+        coordCopyFlashTimerRef.current = null;
+      }, 900);
     } catch {
       // Clipboard write can fail in some WebView2 sandbox configs — fall back silently.
     }
   }, [x, y]);
   const handlePasteCoords = useCallback(async () => {
+    const showError = () => {
+      setCoordPasteError(true);
+      if (coordPasteErrorTimerRef.current) clearTimeout(coordPasteErrorTimerRef.current);
+      coordPasteErrorTimerRef.current = setTimeout(() => {
+        setCoordPasteError(false);
+        coordPasteErrorTimerRef.current = null;
+      }, 1200);
+    };
     try {
       const text = await navigator.clipboard.readText();
       // Accept "x,y", "x, y", or whitespace-separated "x y" so users can also paste from
       // a manual note. Reject anything that doesn't yield two integers.
       const match = text.trim().match(/^(-?\d+)\s*[,\s]\s*(-?\d+)$/);
-      if (!match) {
-        setCoordPasteError(true);
-        setTimeout(() => setCoordPasteError(false), 1200);
-        return;
-      }
+      if (!match) { showError(); return; }
       setX(match[1]);
       setY(match[2]);
     } catch {
-      setCoordPasteError(true);
-      setTimeout(() => setCoordPasteError(false), 1200);
+      showError();
     }
   }, []);
 
@@ -633,16 +658,15 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const baseActionType = clickHalfBase ?? actionType;
 
   // Detect which family the current action belongs to, so the picker can offer only
-  // meaningful in-family transitions (see familyTypes comment).
+  // meaningful in-family transitions (see familyTypes comment). SendText returns null —
+  // it's the only "text" action so there's nothing to switch to.
   const currentFamily: ActionFamily | null = isClickHalf
     ? 'click'
     : (actionType === 'KeyDown' || actionType === 'KeyUp')
       ? 'key'
       : (actionType === 'ScrollUp' || actionType === 'ScrollDown')
         ? 'scroll'
-        : actionType === 'SendText'
-          ? 'text'
-          : null;
+        : null;
   // Skip rendering the picker when there's nothing useful to switch to (single-option family).
   const familyOptions = currentFamily ? familyTypes[currentFamily] : [];
   const showTypePicker = familyOptions.length > 1;

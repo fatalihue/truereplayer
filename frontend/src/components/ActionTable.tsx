@@ -64,6 +64,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       keyCaptureTimerRef.current = null;
     }
   }, []);
+  // Unmount cleanup so the idle-cancel timer can't fire against a stale editInputRef
+  // (e.g. profile switch wipes the rows while a Key cell is being edited).
+  useEffect(() => disarmKeyCaptureTimer, [disarmKeyCaptureTimer]);
   const lastClickedIndex = useRef<number | null>(null);
   const prevActionsLength = useRef(actions.length);
   const prevProfileRef = useRef(activeProfile);
