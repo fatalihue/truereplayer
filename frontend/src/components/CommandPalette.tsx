@@ -71,7 +71,12 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
               ? <Square size={14} className="text-recording" />
               : <Circle size={14} className="text-recording" />,
             shortcut: settings.recordingHotkey,
-            onAction: () => { send({ type: 'recording:toggle', payload: {} }); onClose(); },
+            onAction: () => {
+              // Match the toolbar/ActionBar — when toggling Recording ON, hint the backend
+              // where new actions should land. The hint is ignored when toggling Recording OFF.
+              send({ type: 'recording:toggle', payload: { insertIndex: computeInsertIndex() } });
+              onClose();
+            },
           },
           {
             id: 'replay',

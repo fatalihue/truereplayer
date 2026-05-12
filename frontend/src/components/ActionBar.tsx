@@ -9,7 +9,7 @@ import { useSelectionRef } from '../state/SelectionContext';
 const PRIMARY_BTN = 'min-w-[120px] justify-center';
 
 export function ActionBar() {
-  const { buttonStates, settings } = useAppState();
+  const { buttonStates, settings, actions } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
   const isClicker = settings.useCursorClick;
@@ -113,7 +113,10 @@ export function ActionBar() {
           <button
             onClick={() => {
               const sel = selectionRef.current;
-              const insertIndex = sel.size > 0 ? Math.min(...sel) : undefined;
+              // Match the toolbar's add-action behaviour: insert AFTER the last selected
+              // row (so new recordings flow downward, not above the selection), or append
+              // to the end when nothing is selected.
+              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
               send({ type: 'recording:toggle', payload: { insertIndex } });
             }}
             disabled={!buttonStates.recordEnabled}
