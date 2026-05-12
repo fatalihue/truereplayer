@@ -403,7 +403,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     onClose();
   }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, send, onClose]);
 
-  // Key capture handler
+  // Key capture handler — mirrors SettingsPanel.HotkeyInput's focus-driven flow: focusing
+  // the field switches it to capture mode (showing "..."), the next non-modifier key is
+  // stored, and the input auto-blurs so the user sees the resolved value immediately.
+  const [keyFieldFocused, setKeyFieldFocused] = useState(false);
   const handleKeyCapture = useCallback((e: React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -421,6 +424,9 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     else if (mainKey === 'Escape') { onClose(); return; }
 
     setKey(mainKey);
+    // Drop focus so the user sees the captured value rendered (instead of "..." still).
+    // Matches SettingsPanel.HotkeyInput behaviour.
+    (e.target as HTMLInputElement).blur();
   }, [onClose]);
 
   // #1 — Validate regex pattern when in regex mode
@@ -1277,19 +1283,20 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               {isSendText ? 'TEXT' : 'KEY'}
             </label>
             {isKeyAction ? (
-              <>
-                <input
-                  type="text"
-                  readOnly
-                  value={getDisplayKey(key)}
-                  onKeyDown={handleKeyCapture}
-                  className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid cursor-pointer"
-                  placeholder="—"
-                />
-                <p className="mt-1 text-[11px] text-text-tertiary italic">
-                  Click the field and press any key to update
-                </p>
-              </>
+              <input
+                type="text"
+                readOnly
+                value={keyFieldFocused ? '...' : getDisplayKey(key)}
+                onFocus={() => setKeyFieldFocused(true)}
+                onBlur={() => setKeyFieldFocused(false)}
+                onKeyDown={handleKeyCapture}
+                className={`w-full h-8 px-2 text-ui font-mono bg-bg-input border rounded outline-none cursor-pointer ${
+                  keyFieldFocused
+                    ? 'text-white border-accent-solid'
+                    : 'text-text-primary border-border-default'
+                }`}
+                placeholder="—"
+              />
             ) : (
               <input
                 type="text"
