@@ -1277,19 +1277,19 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               {isSendText ? 'TEXT' : 'KEY'}
             </label>
             {isKeyAction ? (
-              <div className="flex items-center gap-2.5">
+              <>
                 <input
                   type="text"
                   readOnly
                   value={getDisplayKey(key)}
                   onKeyDown={handleKeyCapture}
-                  className="w-1/2 h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid cursor-pointer"
+                  className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid cursor-pointer"
                   placeholder="—"
                 />
-                <span className="text-[11px] text-text-tertiary italic">
+                <p className="mt-1 text-[11px] text-text-tertiary italic">
                   Click the field and press any key to update
-                </span>
-              </div>
+                </p>
+              </>
             ) : (
               <input
                 type="text"
