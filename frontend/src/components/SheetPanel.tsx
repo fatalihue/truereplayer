@@ -407,13 +407,19 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     onClose();
   }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, send, onClose]);
 
-  // Key capture handler — mirrors SettingsPanel.HotkeyInput's focus-driven flow: focusing
-  // the field switches it to capture mode (showing "..."), the next non-modifier key is
-  // stored, and the input auto-blurs so the user sees the resolved value immediately.
+  // Key capture handler — focusing the field switches it to capture mode (empty + "New
+  // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so the
+  // user sees the resolved value immediately. Esc cancels capture (blurs the field) — it
+  // does NOT close the SheetPanel; closing is left to the X button.
   const [keyFieldFocused, setKeyFieldFocused] = useState(false);
   const handleKeyCapture = useCallback((e: React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
+
+    // Esc inside the capture field = cancel capture only. Falling through to onClose here
+    // was confusing: users hit Esc expecting "stop listening" and lost their place in the
+    // panel. Now Esc just blurs; onBlur clears keyFieldFocused.
+    if (e.key === 'Escape') { (e.target as HTMLInputElement).blur(); return; }
 
     const modifierKeys = new Set(['Control', 'Alt', 'Shift', 'Meta']);
     if (modifierKeys.has(e.key)) return;
@@ -425,13 +431,21 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     else if (mainKey === 'ArrowDown') mainKey = 'Down';
     else if (mainKey === 'ArrowLeft') mainKey = 'Left';
     else if (mainKey === 'ArrowRight') mainKey = 'Right';
-    else if (mainKey === 'Escape') { onClose(); return; }
 
     setKey(mainKey);
-    // Drop focus so the user sees the captured value rendered (instead of "..." still).
-    // Matches SettingsPanel.HotkeyInput behaviour.
+    // Drop focus so the user sees the captured value rendered instead of staying in
+    // capture mode.
     (e.target as HTMLInputElement).blur();
-  }, [onClose]);
+  }, []);
+
+  // Reset the capture state whenever the panel switches to a different action (including
+  // closing — actionIndex going null). Without this, focusing the field, closing the
+  // panel, then reopening leaves the field stuck in capture mode because the input was
+  // unmounted before its blur could fire.
+  useEffect(() => {
+    setKeyFieldFocused(false);
+    setPauseHotkeyFocused(false);
+  }, [actionIndex]);
 
   // #1 — Validate regex pattern when in regex mode
   const regexError = useMemo(() => {

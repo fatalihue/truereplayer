@@ -38,7 +38,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [showRenameDialog, setShowRenameDialog] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showHotkeyDialog, setShowHotkeyDialog] = useState<string | null>(null);
-  const [hotkeyCapture, setHotkeyCapture] = useState('');
+  const [hotkeyCapture, setHotkeyCapture] = useState('...');
   const [hotkeyTriggerMode, setHotkeyTriggerMode] = useState<'onPress' | 'onRelease' | 'whilePressed' | 'toggle'>('onPress');
   const [showHotstringDialog, setShowHotstringDialog] = useState<string | null>(null);
   const [hotstringValue, setHotstringValue] = useState('');
@@ -316,10 +316,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const handleAssignHotkey = (name: string) => {
     setContextMenu(null);
     const existing = profiles.find(p => p.name === name);
-    // Pre-fill hotkey with existing so user can change just the trigger mode without re-
-    // capturing. Empty string (instead of the old "..." sentinel) lets the placeholder
-    // "New key..." show through, matching the grid / Settings / SheetPanel pattern.
-    setHotkeyCapture(existing?.hotkey ?? '');
+    // Pre-fill hotkey with existing so user can change just the trigger mode without re-capturing.
+    setHotkeyCapture(existing?.hotkey || '...');
     setHotkeyTriggerMode(existing?.triggerMode || 'onPress');
     setShowHotkeyDialog(name);
     send({ type: 'hotkey:suppress', payload: { enabled: true } });
@@ -424,9 +422,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
     const modifierKeys = new Set(['Control', 'Alt', 'Shift', 'Meta']);
     if (modifierKeys.has(e.key)) {
-      // Empty value when only modifiers are held lets the "New key..." placeholder show
-      // through — pulse + accent border already convey that the input is still listening.
-      setHotkeyCapture(modifiers.join('+'));
+      setHotkeyCapture(modifiers.join('+') || '...');
       return;
     }
 
@@ -465,7 +461,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   };
 
   const confirmHotkey = () => {
-    if (showHotkeyDialog && hotkeyCapture && hotkeyCapture.trim() !== '') {
+    if (showHotkeyDialog && hotkeyCapture && hotkeyCapture !== '...') {
       send({ type: 'profile:assignHotkey', payload: { name: showHotkeyDialog, hotkey: hotkeyCapture, mode: hotkeyTriggerMode } });
       // Don't close dialog here — wait for profiles:updated (success) or alert:show (conflict)
     }
@@ -1418,11 +1414,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             <p className="text-xs text-text-secondary mb-3">
               Press a key combination for <span className="text-text-primary font-medium">'{showHotkeyDialog}'</span>
             </p>
-            {/* Capture input — same visual language as ActionTable Key column edit,
-                SettingsPanel global hotkeys, and SheetPanel KeyDown/KeyUp: empty + "New
-                key..." placeholder, accent border, soft pulse so it's obvious the input
-                is listening. As modifiers are held, the partial combo appears in place of
-                the placeholder. */}
             <input
               ref={hotkeyInputRef}
               type="text"
@@ -1430,8 +1421,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               value={hotkeyCapture}
               onKeyDown={handleHotkeyCapture}
               onWheel={handleHotkeyWheel}
-              placeholder="New key..."
-              className="w-full h-9 px-3 text-sm font-mono text-accent-light bg-bg-input border border-accent-solid rounded text-center outline-none placeholder:text-accent-light/50 animate-pulse"
+              className="w-full h-9 px-3 text-sm font-mono text-accent bg-bg-input border border-accent-solid rounded text-center outline-none"
             />
 
             {/* Trigger Mode */}
@@ -1485,7 +1475,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 </button>
                 <button
                   onClick={confirmHotkey}
-                  disabled={hotkeyCapture.trim() === ''}
+                  disabled={hotkeyCapture === '...'}
                   className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
                 >
                   Assign
