@@ -30,6 +30,16 @@ namespace TrueReplayer.Services
         private Point _currentPoint;
         private bool _isDragging;
         private bool _hasSelection;
+        // Live cursor position used to render an "(x, y)" label next to the mouse — like
+        // ShareX / Greenshot. Lets the user see the exact coords they'll capture before
+        // committing. Updated on every MouseMove regardless of drag state.
+        private Point _cursorPoint;
+        private bool _hasCursor;
+        // Cached virtual-screen origin so the cursor label can show absolute screen coords
+        // (matching the values the action will end up storing). The form already uses these
+        // to compute its size; reading them once in the ctor avoids re-querying on every paint.
+        private readonly int _virtualOriginX;
+        private readonly int _virtualOriginY;
 
         // <paramref name="regionOnly"/>: when true, the overlay returns just the rect coords
         // without producing a cropped Bitmap. Used to configure the search ROI of an existing
@@ -52,6 +62,8 @@ namespace TrueReplayer.Services
             int vy = NativeMethods.GetSystemMetrics(77);
             int vw = NativeMethods.GetSystemMetrics(78);
             int vh = NativeMethods.GetSystemMetrics(79);
+            _virtualOriginX = vx;
+            _virtualOriginY = vy;
 
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
@@ -127,6 +139,14 @@ namespace TrueReplayer.Services
                 using var textBrush = new SolidBrush(Color.White);
                 g.DrawString(hint, font, textBrush, hx, hy);
             }
+
+            // Cursor coord callout — drawn last so it sits above the overlay tint and any
+            // selection rect. Skipped once a selection is committed (hasSelection && !drag)
+            // because the click already landed and the value is captured.
+            if (!_hasSelection || _isDragging)
+            {
+                DrawCursorCoords(g);
+            }
         }
 
         private Rectangle GetSelectionRect()
@@ -177,11 +197,45 @@ namespace TrueReplayer.Services
 
         private void OnMouseMove(object? sender, MouseEventArgs e)
         {
+            // Track cursor for the live "(x, y)" label even when not dragging. Without this
+            // the user has no idea where on screen they're about to click in pointPick mode,
+            // and in rect mode they can't preview the start point before pressing.
+            _cursorPoint = e.Location;
+            _hasCursor = true;
             if (_isDragging)
             {
                 _currentPoint = e.Location;
-                Invalidate();
             }
+            Invalidate();
+        }
+
+        // Renders an "(x, y)" callout near the cursor showing the absolute virtual-screen
+        // coordinates (i.e. what the action will actually store). Inspired by ShareX /
+        // Greenshot — small, high-contrast, follows the cursor, flips to the opposite side
+        // when too close to an edge so it never gets clipped.
+        private void DrawCursorCoords(Graphics g)
+        {
+            if (!_hasCursor) return;
+            int absX = _cursorPoint.X + _virtualOriginX;
+            int absY = _cursorPoint.Y + _virtualOriginY;
+            string text = $"{absX}, {absY}";
+            using var font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
+            var size = g.MeasureString(text, font);
+            // Default offset: 16px down-right of cursor (out of the way of the click target).
+            // Flip horizontally / vertically if we'd run off the form.
+            float padX = 6, padY = 3;
+            float labelW = size.Width + padX * 2;
+            float labelH = size.Height + padY * 2;
+            float lx = _cursorPoint.X + 16;
+            float ly = _cursorPoint.Y + 16;
+            if (lx + labelW > ClientRectangle.Width)  lx = _cursorPoint.X - 16 - labelW;
+            if (ly + labelH > ClientRectangle.Height) ly = _cursorPoint.Y - 16 - labelH;
+            if (lx < 0) lx = 0;
+            if (ly < 0) ly = 0;
+            using var bg = new SolidBrush(Color.FromArgb(220, 0, 0, 0));
+            g.FillRoundedRectangle(bg, lx, ly, labelW, labelH, 4);
+            using var fg = new SolidBrush(Color.FromArgb(255, 96, 205, 255)); // #60CDFF accent
+            g.DrawString(text, font, fg, lx + padX, ly + padY);
         }
 
         private void OnMouseUp(object? sender, MouseEventArgs e)

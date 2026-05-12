@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, RefreshCw, Crosshair, ShieldCheck, ShieldAlert, ShieldQuestion, PlayCircle, Check, X } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Crosshair, Copy, ClipboardPaste, ShieldCheck, ShieldAlert, ShieldQuestion, PlayCircle, Check, X } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
 import type { SelectorAlternative, BrowserTestResult } from '../bridge/messageTypes';
 import { Checkbox } from './Checkbox';
 import { ImageCropper } from './ImageCropper';
+import { getDisplayKey } from '../utils/displayUtils';
 
 interface SheetPanelProps {
   actionIndex: number | null;
@@ -530,6 +531,41 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     setPickPositionRequestId(requestId);
     send({ type: 'mouse:pickPosition', payload: { requestId } });
   }, [send]);
+
+  // Copy/Paste X,Y — supports the common workflow of picking a position on one click half
+  // (e.g. LeftClickDown) and reusing it on the matching half (LeftClickUp) without picking
+  // again. Uses the system clipboard so the value survives navigating between actions and
+  // even across app restarts. Format is "x,y" (e.g. "1240,530"), matching what users would
+  // naturally write down.
+  const [coordCopyFlash, setCoordCopyFlash] = useState(false);
+  const [coordPasteError, setCoordPasteError] = useState(false);
+  const handleCopyCoords = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(`${x},${y}`);
+      setCoordCopyFlash(true);
+      setTimeout(() => setCoordCopyFlash(false), 900);
+    } catch {
+      // Clipboard write can fail in some WebView2 sandbox configs — fall back silently.
+    }
+  }, [x, y]);
+  const handlePasteCoords = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      // Accept "x,y", "x, y", or whitespace-separated "x y" so users can also paste from
+      // a manual note. Reject anything that doesn't yield two integers.
+      const match = text.trim().match(/^(-?\d+)\s*[,\s]\s*(-?\d+)$/);
+      if (!match) {
+        setCoordPasteError(true);
+        setTimeout(() => setCoordPasteError(false), 1200);
+        return;
+      }
+      setX(match[1]);
+      setY(match[2]);
+    } catch {
+      setCoordPasteError(true);
+      setTimeout(() => setCoordPasteError(false), 1200);
+    }
+  }, []);
 
   if (actionIndex == null) return null;
 
@@ -1231,21 +1267,29 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           </>
           )}
 
-          {/* Key — only for KeyDown/KeyUp and SendText */}
+          {/* Key — only for KeyDown/KeyUp and SendText. For KeyDown/KeyUp the input is
+              read-only and consumes keydown events to capture the key directly; the visible
+              value goes through getDisplayKey() so it matches the grid's display rules
+              (e.g. raw `D3` shows as `3`, raw `162` shows as `Ctrl`). */}
           {showKey && (
           <div>
             <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">
               {isSendText ? 'TEXT' : 'KEY'}
             </label>
             {isKeyAction ? (
-              <input
-                type="text"
-                readOnly
-                value={key}
-                onKeyDown={handleKeyCapture}
-                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid cursor-pointer"
-                placeholder="Click and press a key..."
-              />
+              <div className="flex items-center gap-2.5">
+                <input
+                  type="text"
+                  readOnly
+                  value={getDisplayKey(key)}
+                  onKeyDown={handleKeyCapture}
+                  className="w-1/2 h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid cursor-pointer"
+                  placeholder="—"
+                />
+                <span className="text-[11px] text-text-tertiary italic">
+                  Click the field and press any key to update
+                </span>
+              </div>
             ) : (
               <input
                 type="text"
@@ -1283,17 +1327,45 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 />
               </div>
               {isClickHalf && (
-                <div className="flex flex-col justify-end">
-                  <button
-                    type="button"
-                    onClick={handlePickPosition}
-                    disabled={pickPositionRequestId != null}
-                    className="h-8 flex items-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Click anywhere on screen to set X/Y"
-                  >
-                    <Crosshair size={12} />
-                    {pickPositionRequestId != null ? 'Picking…' : 'Pick'}
-                  </button>
+                <div className="flex flex-col justify-end gap-1">
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={handlePickPosition}
+                      disabled={pickPositionRequestId != null}
+                      className="h-8 flex items-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Click anywhere on screen to set X/Y"
+                    >
+                      <Crosshair size={12} />
+                      {pickPositionRequestId != null ? 'Picking…' : 'Pick'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCopyCoords}
+                      style={coordCopyFlash ? { borderColor: 'var(--color-replay)', color: 'var(--color-replay)', backgroundColor: 'var(--color-replay-bg)' } : undefined}
+                      className={`h-8 w-8 flex items-center justify-center border rounded transition-colors ${
+                        coordCopyFlash
+                          ? ''
+                          : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
+                      }`}
+                      title={coordCopyFlash ? 'Copied!' : 'Copy X,Y to clipboard'}
+                    >
+                      {coordCopyFlash ? <Check size={12} /> : <Copy size={12} />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handlePasteCoords}
+                      style={coordPasteError ? { borderColor: 'var(--color-recording)', color: 'var(--color-recording)', backgroundColor: 'var(--color-recording-bg)' } : undefined}
+                      className={`h-8 w-8 flex items-center justify-center border rounded transition-colors ${
+                        coordPasteError
+                          ? ''
+                          : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
+                      }`}
+                      title={coordPasteError ? 'Clipboard does not contain valid coords' : 'Paste X,Y from clipboard'}
+                    >
+                      {coordPasteError ? <X size={12} /> : <ClipboardPaste size={12} />}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
