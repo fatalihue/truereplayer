@@ -989,6 +989,15 @@ namespace TrueReplayer.Services
                 return;
             }
 
+            // Disabled sub-profiles are skipped at replay time — same rule as direct hotkey
+            // triggering (ProfileController.GetProfileHotkeys filters disabled). Running a
+            // profile the user has explicitly turned off would surprise more than help.
+            if (subProfile.IsDisabled)
+            {
+                DiagnosticLog.Info($"[Chain] Profile '{targetName}' is disabled, skipping.");
+                return;
+            }
+
             // Push and update chain status BEFORE applying sub context so the user sees the
             // chain even during the focus/lock setup phase.
             _callStack.Add(targetName);

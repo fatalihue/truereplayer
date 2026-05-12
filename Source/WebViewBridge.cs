@@ -2321,14 +2321,95 @@ namespace TrueReplayer
                 }
                 await profileController.RenameProfileInOrderAsync(oldName, actualNewName);
                 await profileController.RefreshProfileListAsync(true);
+
+                // Rewrite RunProfile references in every OTHER profile that points to the
+                // renamed name — otherwise those references become silent no-ops at replay
+                // time. Touches profiles on disk + the active in-memory action list.
+                int refsUpdated = await ScanRunProfileReferencesAsync(oldName, actualNewName);
+
                 PushProfilesUpdate();
                 PushToolbarUpdate();
                 PushStatusBarUpdate();
+
+                if (refsUpdated > 0)
+                {
+                    string plural = refsUpdated == 1 ? "reference" : "references";
+                    SendMessage("alert:show", new { message = $"Renamed to '{actualNewName}' and updated {refsUpdated} {plural} in other profiles." });
+                }
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[Bridge] Rename error: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Walks every profile (on disk + the active in-memory action list) and counts
+        /// RunProfile references whose Key matches <paramref name="targetName"/>. When
+        /// <paramref name="rewriteTo"/> is non-null, also rewrites the Key in-place and
+        /// persists. Returns the total number of references touched.
+        ///
+        /// Used by HandleProfileRename (rewrite mode) and HandleProfileDelete (count-only)
+        /// to keep cross-profile RunProfile references from going stale.
+        /// </summary>
+        private async Task<int> ScanRunProfileReferencesAsync(string targetName, string? rewriteTo)
+        {
+            int total = 0;
+
+            // 1. Every other profile on disk. Skip the renamed/deleted profile itself and the
+            //    active one (whose source of truth is the in-memory `actions` list — saving
+            //    the on-disk copy would clobber unsaved edits).
+            foreach (var entry in profileController.ProfileEntries.ToList())
+            {
+                if (string.Equals(entry.Name, targetName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (string.Equals(entry.Name, CurrentProfileName, StringComparison.OrdinalIgnoreCase)) continue;
+
+                try
+                {
+                    var profile = await profileController.LoadProfileByNameAsync(entry.Name);
+                    if (profile == null) continue;
+                    int hits = 0;
+                    foreach (var act in profile.Actions)
+                    {
+                        if (!string.Equals(act.ActionType, "RunProfile", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!string.Equals(act.Key, targetName, StringComparison.OrdinalIgnoreCase)) continue;
+                        hits++;
+                        if (rewriteTo != null) act.Key = rewriteTo;
+                    }
+                    if (hits > 0 && rewriteTo != null)
+                    {
+                        await profileController.SaveProfileByNameAsync(entry.Name, profile);
+                    }
+                    total += hits;
+                }
+                catch (Exception ex)
+                {
+                    Services.DiagnosticLog.Info($"[Chain] Scan refs in '{entry.Name}' failed: {ex.Message}");
+                }
+            }
+
+            // 2. The active in-memory profile's actions, which may carry unsaved edits.
+            //    Skip if the active profile IS the renamed/deleted one (it's already being
+            //    handled by the rename/delete path itself).
+            if (!string.Equals(CurrentProfileName, targetName, StringComparison.OrdinalIgnoreCase))
+            {
+                int inMemory = 0;
+                foreach (var act in actions)
+                {
+                    if (!string.Equals(act.ActionType, "RunProfile", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!string.Equals(act.Key, targetName, StringComparison.OrdinalIgnoreCase)) continue;
+                    inMemory++;
+                    if (rewriteTo != null) act.Key = rewriteTo;
+                }
+                if (inMemory > 0 && rewriteTo != null)
+                {
+                    HasUnsavedChanges = true;
+                    PushActionsUpdate();
+                }
+                total += inMemory;
+            }
+
+            return total;
         }
 
         private async void HandleProfileDelete(JsonElement payload)
@@ -2338,6 +2419,14 @@ namespace TrueReplayer
 
             var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
             if (entry == null) return;
+
+            // Count RunProfile references BEFORE deletion so the user gets a heads-up that
+            // those references will become silent no-ops. We deliberately don't auto-clear
+            // them — the user might want to fix them by hand or rename a replacement profile
+            // to the deleted name.
+            int danglingRefs = 0;
+            try { danglingRefs = await ScanRunProfileReferencesAsync(name, null); }
+            catch (Exception ex) { Services.DiagnosticLog.Info($"[Chain] Pre-delete scan failed: {ex.Message}"); }
 
             try
             {
@@ -2368,6 +2457,12 @@ namespace TrueReplayer
                 PushToolbarUpdate();
                 PushStatusBarUpdate();
                 TrayIconService.UpdateTrayIcon();
+
+                if (danglingRefs > 0)
+                {
+                    string plural = danglingRefs == 1 ? "reference" : "references";
+                    SendMessage("alert:show", new { message = $"Deleted '{name}'. {danglingRefs} dangling {plural} in other profiles will silently no-op at replay." });
+                }
             }
             catch (Exception ex)
             {

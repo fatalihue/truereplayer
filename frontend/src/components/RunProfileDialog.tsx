@@ -24,12 +24,17 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
   const [repeatCount, setRepeatCount] = useState(initial?.repeatCount ?? 1);
   const selectRef = useRef<HTMLSelectElement>(null);
 
-  // Drop self-references and disabled profiles from the picker. Disabled
-  // profiles can still technically be invoked, but it would be confusing UX
-  // to chain to one that the user has explicitly turned off.
+  // Drop self-references and disabled profiles from the picker. Disabled profiles are
+  // skipped at replay time anyway (HandleRunProfile early-returns), so hiding them here
+  // avoids the foot-gun of picking one that won't run. Exception: keep the currently-
+  // selected target visible even if it's disabled, so edit mode shows what's stored.
   const eligibleProfiles = useMemo(() => {
-    return profiles.filter(p => p.name !== excludeProfileName);
-  }, [profiles, excludeProfileName]);
+    return profiles.filter(p => {
+      if (p.name === excludeProfileName) return false;
+      if (p.isDisabled && p.name !== initial?.profileName) return false;
+      return true;
+    });
+  }, [profiles, excludeProfileName, initial?.profileName]);
 
   // Pre-select the first eligible profile if none chosen yet.
   useEffect(() => {
@@ -130,9 +135,10 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
               </div>
 
               <div className="text-[11px] text-text-tertiary leading-relaxed bg-bg-card border border-border-subtle rounded px-2.5 py-2">
-                The selected profile's actions will run inline at this point.
-                Cycles (A → B → A) and chains deeper than 5 levels are blocked
-                automatically.
+                The selected profile's actions run inline at this point. Its own
+                Loops / Interval settings are ignored — use the Repeat field above
+                instead. Disabled profiles are skipped. Cycles (A → B → A) and
+                chains deeper than 5 levels are blocked automatically.
               </div>
             </>
           )}
