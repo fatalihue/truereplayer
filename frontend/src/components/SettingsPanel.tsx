@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -116,6 +116,25 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
   const { send } = useBridge();
   const [localValue, setLocalValue] = useState(value);
   const [isFocused, setIsFocused] = useState(false);
+  // Idle-cancel timer — without an explicit Esc-to-cancel rule (so users can capture
+  // Escape as a hotkey if they want), the only way out of capture mode is to click away
+  // or wait this many ms. Resets on every keypress so an actively engaged user is never
+  // surprised mid-press.
+  const inputRef = useRef<HTMLInputElement>(null);
+  const captureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const KEY_CAPTURE_TIMEOUT_MS = 4000;
+  const armCaptureTimer = useCallback(() => {
+    if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
+    captureTimerRef.current = setTimeout(() => {
+      inputRef.current?.blur();
+    }, KEY_CAPTURE_TIMEOUT_MS);
+  }, []);
+  const disarmCaptureTimer = useCallback(() => {
+    if (captureTimerRef.current) {
+      clearTimeout(captureTimerRef.current);
+      captureTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (!isFocused) setLocalValue(value);
@@ -124,6 +143,9 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    // Push the idle-cancel timer further out on every key event — even modifiers — so a
+    // user mid-combo is never cut off.
+    armCaptureTimer();
 
     const modifiers: string[] = [];
     if (e.ctrlKey) modifiers.push('Ctrl');
@@ -156,12 +178,15 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
     else if (mainKey === 'ArrowDown') mainKey = 'Down';
     else if (mainKey === 'ArrowLeft') mainKey = 'Left';
     else if (mainKey === 'ArrowRight') mainKey = 'Right';
+    // Escape falls through to here unchanged → captured as "Escape", which C# KeyUtils
+    // resolves to VK 0x1B. Users CAN bind Escape as a hotkey if they want.
 
     if (!modifiers.includes(mainKey)) modifiers.push(mainKey);
     const combo = modifiers.join('+');
 
     setLocalValue(combo);
     onChange(settingKey, combo);
+    disarmCaptureTimer();
     (e.target as HTMLInputElement).blur();
   };
 
@@ -172,11 +197,12 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
   // on a default border. Single visual language across every key-capture surface.
   return (
     <input
+      ref={inputRef}
       type="text"
       readOnly
       value={localValue}
-      onFocus={() => { setIsFocused(true); setLocalValue(''); onFocusChange?.(true); send({ type: 'hotkey:suppress', payload: { enabled: true } }); }}
-      onBlur={() => { setIsFocused(false); setLocalValue(value); onFocusChange?.(false); send({ type: 'hotkey:suppress', payload: { enabled: false } }); }}
+      onFocus={() => { setIsFocused(true); setLocalValue(''); onFocusChange?.(true); send({ type: 'hotkey:suppress', payload: { enabled: true } }); armCaptureTimer(); }}
+      onBlur={() => { setIsFocused(false); setLocalValue(value); onFocusChange?.(false); send({ type: 'hotkey:suppress', payload: { enabled: false } }); disarmCaptureTimer(); }}
       onKeyDown={handleKeyDown}
       className={`w-[110px] h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
         isFocused

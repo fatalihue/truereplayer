@@ -46,6 +46,24 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
   const [editValue, setEditValue] = useState('');
   const editInputRef = useRef<HTMLInputElement>(null);
+  // Idle-cancel timer for the Key column capture. Without an explicit "Esc cancels" rule
+  // (so the user CAN actually assign Escape as a hotkey), the only way out is to click
+  // away or let the field time out. Reset on every keypress so an active user is never
+  // surprised by a sudden cancel mid-press.
+  const keyCaptureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const KEY_CAPTURE_TIMEOUT_MS = 4000;
+  const armKeyCaptureTimer = useCallback(() => {
+    if (keyCaptureTimerRef.current) clearTimeout(keyCaptureTimerRef.current);
+    keyCaptureTimerRef.current = setTimeout(() => {
+      editInputRef.current?.blur();
+    }, KEY_CAPTURE_TIMEOUT_MS);
+  }, []);
+  const disarmKeyCaptureTimer = useCallback(() => {
+    if (keyCaptureTimerRef.current) {
+      clearTimeout(keyCaptureTimerRef.current);
+      keyCaptureTimerRef.current = null;
+    }
+  }, []);
   const lastClickedIndex = useRef<number | null>(null);
   const prevActionsLength = useRef(actions.length);
   const prevProfileRef = useRef(activeProfile);
@@ -318,12 +336,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     }
   }, [commitEdit, cancelEdit]);
 
-  // Key capture for editing the Key column — captures the pressed key name (like recording)
+  // Key capture for editing the Key column — captures the pressed key name (like recording).
+  // Esc is intentionally allowed through as a capturable key; cancelling the capture is done
+  // by clicking away or letting the idle timer fire (see armKeyCaptureTimer above).
   const handleKeyCaptureKeyDown = useCallback((e: React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
-
-    if (e.key === 'Escape') { cancelEdit(); return; }
+    // Any keypress (even a modifier on the way) means the user is still engaged — push
+    // the idle-cancel timeout further out.
+    armKeyCaptureTimer();
 
     // Map the pressed key to the internal key name used by C# KeyUtils
     let keyName: string;
@@ -356,6 +377,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     else if (e.key === 'End') keyName = 'End';
     else if (e.key === 'PageUp') keyName = 'Prior';
     else if (e.key === 'PageDown') keyName = 'Next';
+    else if (e.key === 'Escape') keyName = 'Escape';
     else if (e.key === 'F1') keyName = 'F1';
     else if (e.key.startsWith('F') && e.key.length <= 3 && !isNaN(Number(e.key.slice(1)))) keyName = e.key;
     else if (e.key === 'Meta') return; // Ignore Win key
@@ -379,7 +401,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     }
 
     setEditValue(keyName);
-    // Auto-commit after capture
+    // Auto-commit after capture; also tear down the idle-cancel timer since the field is
+    // about to unmount.
+    disarmKeyCaptureTimer();
     if (editingCell) {
       send({
         type: 'actions:edit',
@@ -387,7 +411,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       });
       setEditingCell(null);
     }
-  }, [cancelEdit, editingCell, send]);
+  }, [armKeyCaptureTimer, disarmKeyCaptureTimer, editingCell, send]);
 
   // Drag & drop via mouse events (HTML5 drag API doesn't work in WebView2)
   const isDraggable = !buttonStates.recordingActive && !buttonStates.replayActive && !editingCell;
@@ -703,8 +727,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         value=""
                         readOnly
                         placeholder="New key..."
+                        onFocus={armKeyCaptureTimer}
                         onKeyDown={handleKeyCaptureKeyDown}
-                        onBlur={cancelEdit}
+                        onBlur={() => { disarmKeyCaptureTimer(); cancelEdit(); }}
                         className="w-[92px] h-6 px-1 text-xs font-mono text-accent-light bg-bg-input border border-accent-solid rounded outline-none placeholder:text-accent-light/50 animate-pulse"
                       />
                     ) : displayKey ? (

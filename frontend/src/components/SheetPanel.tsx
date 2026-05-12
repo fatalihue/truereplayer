@@ -408,18 +408,33 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, send, onClose]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
-  // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so the
-  // user sees the resolved value immediately. Esc cancels capture (blurs the field) — it
-  // does NOT close the SheetPanel; closing is left to the X button.
+  // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
+  // the user sees the resolved value immediately. Esc is intentionally NOT a cancel key
+  // any more — the user might legitimately want to assign Escape as a hotkey. Cancelling
+  // is done by clicking away or letting the idle timer fire (see armKeyCaptureTimer).
   const [keyFieldFocused, setKeyFieldFocused] = useState(false);
+  const keyFieldRef = useRef<HTMLInputElement>(null);
+  const keyCaptureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const KEY_CAPTURE_TIMEOUT_MS = 4000;
+  const armKeyCaptureTimer = useCallback(() => {
+    if (keyCaptureTimerRef.current) clearTimeout(keyCaptureTimerRef.current);
+    keyCaptureTimerRef.current = setTimeout(() => {
+      keyFieldRef.current?.blur();
+    }, KEY_CAPTURE_TIMEOUT_MS);
+  }, []);
+  const disarmKeyCaptureTimer = useCallback(() => {
+    if (keyCaptureTimerRef.current) {
+      clearTimeout(keyCaptureTimerRef.current);
+      keyCaptureTimerRef.current = null;
+    }
+  }, []);
+
   const handleKeyCapture = useCallback((e: React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
-
-    // Esc inside the capture field = cancel capture only. Falling through to onClose here
-    // was confusing: users hit Esc expecting "stop listening" and lost their place in the
-    // panel. Now Esc just blurs; onBlur clears keyFieldFocused.
-    if (e.key === 'Escape') { (e.target as HTMLInputElement).blur(); return; }
+    // Push out the idle-cancel timer on every keypress — even modifiers — so an actively
+    // engaged user is never surprised by a sudden cancel mid-combo.
+    armKeyCaptureTimer();
 
     const modifierKeys = new Set(['Control', 'Alt', 'Shift', 'Meta']);
     if (modifierKeys.has(e.key)) return;
@@ -433,19 +448,22 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     else if (mainKey === 'ArrowRight') mainKey = 'Right';
 
     setKey(mainKey);
+    disarmKeyCaptureTimer();
     // Drop focus so the user sees the captured value rendered instead of staying in
     // capture mode.
     (e.target as HTMLInputElement).blur();
-  }, []);
+  }, [armKeyCaptureTimer, disarmKeyCaptureTimer]);
 
   // Reset the capture state whenever the panel switches to a different action (including
   // closing — actionIndex going null). Without this, focusing the field, closing the
   // panel, then reopening leaves the field stuck in capture mode because the input was
-  // unmounted before its blur could fire.
+  // unmounted before its blur could fire. Also tear down any pending idle-cancel timer
+  // so it doesn't fire against a stale input ref after the panel reopens.
   useEffect(() => {
     setKeyFieldFocused(false);
     setPauseHotkeyFocused(false);
-  }, [actionIndex]);
+    disarmKeyCaptureTimer();
+  }, [actionIndex, disarmKeyCaptureTimer]);
 
   // #1 — Validate regex pattern when in regex mode
   const regexError = useMemo(() => {
@@ -1314,11 +1332,12 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               // pulse, so it's unmistakeable that the next key press lands here. On blur,
               // restores the human-readable value (via getDisplayKey).
               <input
+                ref={keyFieldRef}
                 type="text"
                 readOnly
                 value={keyFieldFocused ? '' : getDisplayKey(key)}
-                onFocus={() => setKeyFieldFocused(true)}
-                onBlur={() => setKeyFieldFocused(false)}
+                onFocus={() => { setKeyFieldFocused(true); armKeyCaptureTimer(); }}
+                onBlur={() => { setKeyFieldFocused(false); disarmKeyCaptureTimer(); }}
                 onKeyDown={handleKeyCapture}
                 placeholder="New key..."
                 className={`w-full h-8 px-2 text-ui font-mono bg-bg-input border rounded outline-none cursor-pointer placeholder:text-accent-light/50 ${
