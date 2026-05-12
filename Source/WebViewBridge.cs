@@ -1111,7 +1111,15 @@ namespace TrueReplayer
                 case "y": if (int.TryParse(value, out int y)) action.Y = y; break;
                 case "delay": if (int.TryParse(value, out int delay)) action.Delay = Math.Max(0, delay); break;
                 case "comment": action.Comment = value; break;
-                case "timeout": if (int.TryParse(value, out int timeout)) action.Timeout = Math.Max(1000, timeout); break;
+                case "timeout":
+                    if (int.TryParse(value, out int timeout))
+                    {
+                        // Pause uses 0 as the "wait forever" sentinel — clamping would silently
+                        // rewrite it to 1s. Other actions (Browser, WaitImage) need a positive
+                        // timeout to make sense, so they still get clamped to 1 s minimum.
+                        action.Timeout = action.ActionType == "Pause" ? Math.Max(0, timeout) : Math.Max(1000, timeout);
+                    }
+                    break;
                 case "confidence": if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double conf)) action.Confidence = Math.Clamp(conf, 0.1, 1.0); break;
                 case "browserText": action.BrowserText = value; break;
                 case "newTab": action.NewTab = value == "true"; break;
