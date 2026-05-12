@@ -27,6 +27,14 @@ export interface ActionItem {
   typeAppend?: boolean;
   typePaste?: boolean;
   typeDelay?: number | null;
+  // WaitImage extras (all default-safe). null/undefined = current behaviour preserved.
+  waitImageOnTimeout?: string | null;
+  waitImageInvert?: boolean;
+  waitImageClickOnMatch?: boolean;
+  waitImageSearchX?: number | null;
+  waitImageSearchY?: number | null;
+  waitImageSearchW?: number | null;
+  waitImageSearchH?: number | null;
 }
 
 // #2 — Selector alternative returned by the picker
@@ -189,7 +197,9 @@ export type IncomingMessage =
   | { type: 'browser:status'; payload: { connected: boolean } }
   | { type: 'browser:pickResult'; payload: { selector: string | null; alternatives?: SelectorAlternative[]; error?: string } }
   | { type: 'browser:testResult'; payload: BrowserTestResult }
-  | { type: 'browser:extensionOutdated'; payload: { currentVersion: string; expectedVersion: string } };
+  | { type: 'browser:extensionOutdated'; payload: { currentVersion: string; expectedVersion: string } }
+  | { type: 'image:testMatchResult'; payload: { requestId: string; found: boolean; score: number; x: number; y: number; w: number; h: number; error?: string } }
+  | { type: 'waitimage:searchRegionSet'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; w?: number; h?: number } };
 
 // ── Messages JS → C# ──
 
@@ -255,6 +265,9 @@ export type OutgoingMessage =
   | { type: 'actions:addRunProfile'; payload: { profileName: string; repeatCount: number; insertIndex?: number } }
   | { type: 'actions:editRunProfile'; payload: { index: number; profileName: string; repeatCount: number } }
   | { type: 'waitimage:recapture'; payload: { index: number } }
+  | { type: 'waitimage:configureSearchRegion'; payload: { requestId: string } }
+  | { type: 'waitimage:cropReference'; payload: { index: number; x: number; y: number; w: number; h: number } }
+  | { type: 'image:testMatch'; payload: { requestId: string; imagePath: string; confidence: number; searchRegion?: { x: number; y: number; w: number; h: number } } }
   | { type: 'selection:changed'; payload: { indices: number[] } }
   | { type: 'window:alwaysOnTop'; payload: { enabled: boolean } }
   | { type: 'window:minimizeToTray'; payload: { enabled: boolean } }

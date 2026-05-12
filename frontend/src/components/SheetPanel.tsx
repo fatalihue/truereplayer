@@ -5,6 +5,7 @@ import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
 import type { SelectorAlternative, BrowserTestResult } from '../bridge/messageTypes';
 import { Checkbox } from './Checkbox';
+import { ImageCropper } from './ImageCropper';
 
 interface SheetPanelProps {
   actionIndex: number | null;
@@ -102,6 +103,31 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const [typePaste, setTypePaste] = useState(false);
   const [typeDelay, setTypeDelay] = useState('');
 
+  // WaitImage extras (timeout branching, disappear toggle, click-on-match, ROI).
+  // Stored locally during edit; persisted via actions:edit on Save. Default "StopReplay"
+  // matches the dropdown's default option — a clean stop without a noisy error popup.
+  const [waitImageOnTimeout, setWaitImageOnTimeout] = useState<string>('StopReplay'); // 'Continue' | 'StopReplay'
+  const [waitImageInvert, setWaitImageInvert] = useState(false);
+  const [waitImageClickOnMatch, setWaitImageClickOnMatch] = useState(false);
+  const [waitImageSearchRegion, setWaitImageSearchRegion] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+
+  // Test match button — fires a single MatchOnce on the live screen and shows the score.
+  // Result is transient (cleared on close/save/recapture); no persistence.
+  const [testMatchRequestId, setTestMatchRequestId] = useState<string | null>(null);
+  const [testMatchResult, setTestMatchResult] = useState<{ found: boolean; score: number; x: number; y: number; w: number; h: number; error?: string } | null>(null);
+
+  // Crop reference image modal — opens on thumbnail click; commit replaces the action's
+  // ImagePath with a tighter cropped PNG via the bridge.
+  const [cropperOpen, setCropperOpen] = useState(false);
+  const testMatchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearTestMatchTimeout = useCallback(() => {
+    if (testMatchTimeoutRef.current) {
+      clearTimeout(testMatchTimeoutRef.current);
+      testMatchTimeoutRef.current = null;
+    }
+  }, []);
+  useEffect(() => () => clearTestMatchTimeout(), [clearTestMatchTimeout]);
+
   // #2 — picker alternatives popover
   const [alternatives, setAlternatives] = useState<SelectorAlternative[]>([]);
   const [showAlternatives, setShowAlternatives] = useState(false);
@@ -146,9 +172,23 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           setTestResult(r);
           setTestRequestId(null);
         }
+      } else if (msg.type === 'image:testMatchResult') {
+        const r = msg.payload as { requestId: string; found: boolean; score: number; x: number; y: number; w: number; h: number; error?: string };
+        if (testMatchRequestId && r.requestId === testMatchRequestId) {
+          clearTestMatchTimeout();
+          setTestMatchResult({ found: r.found, score: r.score, x: r.x, y: r.y, w: r.w, h: r.h, error: r.error });
+          setTestMatchRequestId(null);
+        }
+      } else if (msg.type === 'waitimage:searchRegionSet') {
+        const r = msg.payload as { requestId: string; cancelled: boolean; x?: number; y?: number; w?: number; h?: number };
+        // We only ever have one configure-region session at a time per panel instance;
+        // accepting any non-cancelled result is safe.
+        if (!r.cancelled && r.w && r.h && r.w > 0 && r.h > 0) {
+          setWaitImageSearchRegion({ x: r.x ?? 0, y: r.y ?? 0, w: r.w, h: r.h });
+        }
       }
     });
-  }, [subscribe, testRequestId, clearTestTimeout]);
+  }, [subscribe, testRequestId, clearTestTimeout, testMatchRequestId, clearTestMatchTimeout]);
 
   // Sync local state from action
   useEffect(() => {
@@ -182,9 +222,26 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       setTypeAppend(action.typeAppend || false);
       setTypePaste(action.typePaste || false);
       setTypeDelay(action.typeDelay != null ? String(action.typeDelay) : '');
+      // Default "StopReplay" handles null / empty / legacy values gracefully.
+      setWaitImageOnTimeout(action.waitImageOnTimeout === 'Continue' ? 'Continue' : 'StopReplay');
+      setWaitImageInvert(action.waitImageInvert || false);
+      setWaitImageClickOnMatch(action.waitImageClickOnMatch || false);
+      if (action.waitImageSearchW != null && action.waitImageSearchH != null
+          && action.waitImageSearchW > 0 && action.waitImageSearchH > 0) {
+        setWaitImageSearchRegion({
+          x: action.waitImageSearchX || 0,
+          y: action.waitImageSearchY || 0,
+          w: action.waitImageSearchW,
+          h: action.waitImageSearchH,
+        });
+      } else {
+        setWaitImageSearchRegion(null);
+      }
       setAlternatives([]);
       setShowAlternatives(false);
       setTestResult(null);
+      setTestMatchResult(null);
+      setTestMatchRequestId(null);
     }
   }, [action]);
 
@@ -225,6 +282,30 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       const newConfidence = Math.min(100, Math.max(10, parseInt(confidence, 10) || 80)) / 100;
       if (newConfidence !== (action.confidence || 0.8)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'confidence', value: String(newConfidence) } });
+      }
+      // Only "Continue" is persisted explicitly; "StopReplay" is the default and stays null
+      // on disk to keep saved JSON minimal.
+      const persistedTimeoutMode = waitImageOnTimeout === 'Continue' ? 'Continue' : '';
+      const currentTimeoutMode = action.waitImageOnTimeout === 'Continue' ? 'Continue' : '';
+      if (persistedTimeoutMode !== currentTimeoutMode) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'waitImageOnTimeout', value: persistedTimeoutMode } });
+      }
+      if (!!waitImageInvert !== !!(action.waitImageInvert)) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'waitImageInvert', value: String(waitImageInvert) } });
+      }
+      if (!!waitImageClickOnMatch !== !!(action.waitImageClickOnMatch)) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'waitImageClickOnMatch', value: String(waitImageClickOnMatch) } });
+      }
+      // Search region — serialised as "x,y,w,h" or empty string. Compare against the action's
+      // current rect to avoid no-op edits (which would still bump the undo stack).
+      const currentRect = (action.waitImageSearchW && action.waitImageSearchH)
+        ? `${action.waitImageSearchX || 0},${action.waitImageSearchY || 0},${action.waitImageSearchW},${action.waitImageSearchH}`
+        : '';
+      const newRect = waitImageSearchRegion
+        ? `${waitImageSearchRegion.x},${waitImageSearchRegion.y},${waitImageSearchRegion.w},${waitImageSearchRegion.h}`
+        : '';
+      if (newRect !== currentRect) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'waitImageSearchRegion', value: newRect } });
       }
     }
 
@@ -287,7 +368,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     }
 
     onClose();
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, send, onClose]);
 
   // Key capture handler
   const handleKeyCapture = useCallback((e: React.KeyboardEvent) => {
@@ -364,6 +445,50 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       },
     });
   }, [actionIndex, action, actionType, key, textMatch, textMode, timeout, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, send, clearTestTimeout]);
+
+  // WaitImage: capture screen now and report best confidence + matched rect against the reference
+  // image. Doesn't run the replay — pure calibration helper.
+  const handleTestMatch = useCallback(() => {
+    if (!action || !action.imagePath) return;
+    const requestId = Math.random().toString(36).slice(2, 10);
+    setTestMatchRequestId(requestId);
+    setTestMatchResult(null);
+    const conf = Math.min(100, Math.max(10, parseInt(confidence, 10) || 80)) / 100;
+    clearTestMatchTimeout();
+    testMatchTimeoutRef.current = setTimeout(() => {
+      testMatchTimeoutRef.current = null;
+      setTestMatchRequestId(prev => {
+        if (prev !== requestId) return prev;
+        setTestMatchResult({ found: false, score: 0, x: 0, y: 0, w: 0, h: 0, error: 'No response from backend.' });
+        return null;
+      });
+    }, 8000);
+    send({
+      type: 'image:testMatch',
+      payload: {
+        requestId,
+        imagePath: action.imagePath,
+        confidence: conf,
+        searchRegion: waitImageSearchRegion ?? undefined,
+      },
+    });
+  }, [action, confidence, waitImageSearchRegion, send, clearTestMatchTimeout]);
+
+  // WaitImage: launch the screen overlay in region-only mode so the user can draw an ROI.
+  // Result arrives via the 'waitimage:searchRegionSet' message handled above.
+  const handleConfigureSearchRegion = useCallback(() => {
+    const requestId = Math.random().toString(36).slice(2, 10);
+    send({ type: 'waitimage:configureSearchRegion', payload: { requestId } });
+  }, [send]);
+
+  // Crop save: send the rect (image-pixel coords) to the backend, which clones the existing
+  // PNG and updates action.ImagePath. The new imageBase64 arrives via the next actions:updated
+  // push so the thumbnail refreshes automatically.
+  const handleCropSave = useCallback((rect: { x: number; y: number; w: number; h: number }) => {
+    if (actionIndex == null) return;
+    send({ type: 'waitimage:cropReference', payload: { index: actionIndex, ...rect } });
+    setCropperOpen(false);
+  }, [actionIndex, send]);
 
   if (actionIndex == null) return null;
 
@@ -442,10 +567,17 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           {/* WaitImage Settings */}
           {isWaitImage && (
           <>
-            {/* Thumbnail */}
+            {/* Thumbnail + Recapture + Test match — thumbnail is clickable to open the cropper
+                for fine-tuning the reference (no need to revisit the screen state). */}
             <div>
               <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">REFERENCE IMAGE</label>
-              <div className="rounded border border-border-default bg-bg-elevated overflow-hidden">
+              <button
+                type="button"
+                onClick={() => action?.imageBase64 && setCropperOpen(true)}
+                disabled={!action?.imageBase64}
+                title={action?.imageBase64 ? 'Click to crop the reference image' : ''}
+                className="w-full rounded border border-border-default bg-bg-elevated overflow-hidden block hover:border-accent-solid/60 transition-colors disabled:cursor-default disabled:hover:border-border-default"
+              >
                 {action?.imageBase64 ? (
                   <img
                     src={`data:image/png;base64,${action.imageBase64}`}
@@ -457,21 +589,104 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     No image captured
                   </div>
                 )}
-              </div>
-              <button
-                onClick={() => {
-                  send({ type: 'waitimage:recapture', payload: { index: actionIndex } });
-                  onClose();
-                }}
-                className="mt-2 w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
-                title="Recapture reference image"
-              >
-                <RefreshCw size={12} />
-                Recapture
               </button>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => {
+                    send({ type: 'waitimage:recapture', payload: { index: actionIndex } });
+                    onClose();
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
+                  title="Recapture reference image"
+                >
+                  <RefreshCw size={12} />
+                  Recapture
+                </button>
+                <button
+                  onClick={handleTestMatch}
+                  disabled={!action?.imagePath || testMatchRequestId != null}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Capture the screen now and report the match score"
+                >
+                  <PlayCircle size={12} />
+                  {testMatchRequestId != null ? 'Testing…' : 'Test match'}
+                </button>
+              </div>
+              {/* Test match result — coloured by whether the score clears the tolerance threshold.
+                  Plus a quick-action to convert the found match into the search region (the easiest
+                  way to set an ROI accurately, since the user no longer has to eyeball it). */}
+              {testMatchResult && !testMatchRequestId && (
+                <div
+                  className={`mt-2 px-2 py-1.5 rounded text-[11px] font-mono border ${
+                    testMatchResult.error
+                      ? 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#C42B1C]'
+                      : testMatchResult.found
+                      ? 'border-[#0E7A0D]/40 bg-[#0E7A0D]/10 text-[#6bcb77]'
+                      : 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#ff6b6b]'
+                  }`}
+                >
+                  {testMatchResult.error ? (
+                    testMatchResult.error
+                  ) : (
+                    <>
+                      <div>
+                        Best match: {Math.round(testMatchResult.score * 100)}% at ({testMatchResult.x}, {testMatchResult.y})
+                        {testMatchResult.found ? ' ✓' : ' — below tolerance'}
+                      </div>
+                      {testMatchResult.found && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // 80px margin around the match — wide enough to tolerate small UI
+                            // shifts (resizing, anti-aliasing) without wasting CPU on full-screen.
+                            const margin = 80;
+                            setWaitImageSearchRegion({
+                              x: Math.max(0, testMatchResult.x - margin),
+                              y: Math.max(0, testMatchResult.y - margin),
+                              w: testMatchResult.w + margin * 2,
+                              h: testMatchResult.h + margin * 2,
+                            });
+                          }}
+                          className="mt-1.5 text-[10px] underline decoration-dotted hover:text-text-primary transition-colors"
+                          title="Auto-set the Search Region to a rect around this match"
+                        >
+                          → Use as search region (with 80px margin)
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* Timeout / Confidence */}
+            {/* Wait Until + On Timeout — both options in each select are self-explanatory now
+                that ON TIMEOUT is collapsed to just two values, so no help line needed. */}
+            <div className="flex gap-2.5">
+              <div className="flex-1">
+                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">WAIT UNTIL</label>
+                <select
+                  value={waitImageInvert ? 'disappears' : 'appears'}
+                  onChange={(e) => setWaitImageInvert(e.target.value === 'disappears')}
+                  className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                >
+                  <option value="appears">Image appears</option>
+                  <option value="disappears">Image disappears</option>
+                </select>
+              </div>
+              <div className="flex-1">
+                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">ON TIMEOUT</label>
+                <select
+                  value={waitImageOnTimeout}
+                  onChange={(e) => setWaitImageOnTimeout(e.target.value)}
+                  className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                >
+                  <option value="StopReplay">Stop replay</option>
+                  <option value="Continue">Continue to next</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Timeout / Tolerance */}
             <div className="flex gap-2.5">
               <div className="flex-1">
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
@@ -497,6 +712,52 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 />
               </div>
             </div>
+
+            {/* Search Region (ROI) — label + display row carry the meaning; explanation line
+                would be redundant. Configure button's title attribute keeps the discovery hint
+                on hover for users who pause over it. */}
+            <div>
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">SEARCH REGION</label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 px-2 py-1.5 text-[11px] font-mono bg-bg-input border border-border-default rounded text-text-secondary">
+                  {waitImageSearchRegion
+                    ? `${waitImageSearchRegion.x}, ${waitImageSearchRegion.y}  ·  ${waitImageSearchRegion.w} × ${waitImageSearchRegion.h}`
+                    : <span className="text-text-disabled italic">Full screen (default)</span>}
+                </div>
+                <button
+                  onClick={handleConfigureSearchRegion}
+                  className="px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
+                  title="Draw a sub-rectangle of the screen to limit where the match runs. Reduces CPU and false positives."
+                >
+                  Configure…
+                </button>
+                {waitImageSearchRegion && (
+                  <button
+                    onClick={() => setWaitImageSearchRegion(null)}
+                    className="px-2 py-1.5 rounded text-xs text-text-tertiary hover:text-[#C42B1C] hover:bg-bg-card transition-colors"
+                    title="Clear search region (revert to full screen)"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* After Match — header kept for visual consistency with the other sections, but
+                the checkbox label already describes the behaviour; tooltip on hover carries the
+                longer explanation for users who linger. */}
+            {!waitImageInvert && (
+              <div>
+                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">AFTER MATCH</label>
+                <label
+                  className="flex items-center gap-2 cursor-pointer"
+                  title="Left-clicks the centre of the matched region as soon as it's found."
+                >
+                  <Checkbox checked={waitImageClickOnMatch} onChange={setWaitImageClickOnMatch} />
+                  <span className="text-ui text-text-secondary">Click on found location</span>
+                </label>
+              </div>
+            )}
           </>
           )}
 
@@ -969,6 +1230,16 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           </button>
         </div>
       </div>
+
+      {/* Crop modal — only mounted when explicitly opened; portals to body so it sits above
+          the side panel even though it's rendered from inside this component tree. */}
+      {cropperOpen && action?.imageBase64 && (
+        <ImageCropper
+          imageBase64={action.imageBase64}
+          onSave={handleCropSave}
+          onCancel={() => setCropperOpen(false)}
+        />
+      )}
     </>,
     document.body
   );

@@ -18,6 +18,32 @@ namespace TrueReplayer.Models
         public int Timeout { get; set; } = 5000;
         public double Confidence { get; set; } = 0.8;
 
+        // WaitImage extras (all default-safe; existing actions deserialize identical).
+        // OnTimeout: "Halt" (default) — throws and stops replay (legacy behaviour);
+        //            "Continue"     — swallows the timeout and moves to next action;
+        //            "StopReplay"   — ends the replay cleanly (all loops).
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? WaitImageOnTimeout { get; set; }
+
+        // false = wait for the image to appear (default); true = wait for it to disappear.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool WaitImageInvert { get; set; }
+
+        // When true, simulate a left click at the centre of the matched region after a successful match.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool WaitImageClickOnMatch { get; set; }
+
+        // Optional search region (sub-rect of the screen). null = full virtual screen.
+        // Stored as 4 nullable ints for trivial JSON round-trip; treated as a unit.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? WaitImageSearchX { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? WaitImageSearchY { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? WaitImageSearchW { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? WaitImageSearchH { get; set; }
+
         // Browser action properties
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? BrowserText { get; set; }

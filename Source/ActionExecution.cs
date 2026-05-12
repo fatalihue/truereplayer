@@ -1568,23 +1568,89 @@ namespace TrueReplayer.Services
             var referenceImage = ImageStorageService.LoadReferenceImage(profileName, action.ImagePath);
             if (referenceImage == null) return;
 
+            // Compose the optional ROI from the four nullable ints stored on the action.
+            System.Drawing.Rectangle? searchRegion = null;
+            if (action.WaitImageSearchW is int sw && action.WaitImageSearchH is int sh && sw > 0 && sh > 0)
+            {
+                int sx = action.WaitImageSearchX ?? 0;
+                int sy = action.WaitImageSearchY ?? 0;
+                searchRegion = new System.Drawing.Rectangle(sx, sy, sw, sh);
+            }
+
             try
             {
+                int timeoutMs = action.Timeout > 0 ? action.Timeout : 30000;
+                double confidence = action.Confidence > 0 ? action.Confidence : 0.8;
+
                 var matchResult = await ImageMatchingService.WaitForImageAsync(
                     referenceImage,
-                    action.Confidence > 0 ? action.Confidence : 0.8,
-                    action.Timeout > 0 ? action.Timeout : 30000,
-                    token);
+                    confidence,
+                    timeoutMs,
+                    token,
+                    waitForDisappear: action.WaitImageInvert,
+                    searchRegion: searchRegion);
 
-                if (matchResult == null && !token.IsCancellationRequested)
+                if (matchResult == null)
                 {
-                    var seconds = (action.Timeout > 0 ? action.Timeout : 30000) / 1000;
-                    throw new TimeoutException($"Wait for Image timed out after {seconds}s. Make sure the target image is visible on screen and the confidence threshold is not too high.");
+                    if (token.IsCancellationRequested) return;
+                    HandleWaitImageTimeout(action);
+                    return;
+                }
+
+                // Click center of the matched region when the user opted in. The match coords are
+                // absolute virtual-screen positions even when a search region was used, so we just
+                // add half the template W/H to land on the centre. Uses SimulateMouse which already
+                // normalises to the virtual desktop (Raw Input compatible — see CLAUDE.md).
+                if (action.WaitImageClickOnMatch && !action.WaitImageInvert)
+                {
+                    int cx = matchResult.X + matchResult.W / 2;
+                    int cy = matchResult.Y + matchResult.H / 2;
+                    SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_LEFTDOWN);
+                    SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_LEFTUP);
                 }
             }
             finally
             {
                 referenceImage.Dispose();
+            }
+        }
+
+        // Two branches: explicit "Continue" silently moves on to the next action; everything
+        // else (null default / "StopReplay" / anything legacy) cancels the shared CTS so the
+        // replay halts cleanly mid-iteration, equivalent to pressing the Stop button. A debug
+        // screenshot is dumped to %APPDATA%\TrueReplayer\Debug\ regardless, so the user can
+        // diagnose why the match failed.
+        private void HandleWaitImageTimeout(ActionItem action)
+        {
+            SaveTimeoutScreenshot(action);
+
+            if (action.WaitImageOnTimeout == "Continue")
+            {
+                return;
+            }
+            _cts?.Cancel();
+        }
+
+        private void SaveTimeoutScreenshot(ActionItem action)
+        {
+            // Diagnostic-only — never let a screenshot failure bubble up and break the replay.
+            try
+            {
+                var dir = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "TrueReplayer", "Debug");
+                System.IO.Directory.CreateDirectory(dir);
+
+                var refName = System.IO.Path.GetFileNameWithoutExtension(action.ImagePath ?? "unknown");
+                var ts = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+                using var screen = ScreenCaptureService.CaptureVirtualScreen();
+                var outPath = System.IO.Path.Combine(dir, $"waitimage-timeout-{refName}-{ts}.png");
+                screen.Save(outPath, System.Drawing.Imaging.ImageFormat.Png);
+                DiagnosticLog.Info($"[WaitImage] Timeout screenshot saved: {outPath}");
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Info($"[WaitImage] Failed to save timeout screenshot: {ex.Message}");
             }
         }
 

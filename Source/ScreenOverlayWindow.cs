@@ -9,7 +9,9 @@ namespace TrueReplayer.Services
 {
     public class RegionSelectionResult
     {
-        public Bitmap CroppedImage { get; set; } = null!;
+        // Null when the form was constructed in region-only mode (e.g. configuring a WaitImage
+        // search ROI) — only the rect coordinates matter, no reference image is being captured.
+        public Bitmap? CroppedImage { get; set; }
         public int ScreenX { get; set; }
         public int ScreenY { get; set; }
         public int Width { get; set; }
@@ -19,6 +21,8 @@ namespace TrueReplayer.Services
     public class ScreenOverlayForm : Form
     {
         private readonly Bitmap _screenshot;
+        private readonly bool _regionOnly;
+        private readonly string _hintText;
         private readonly TaskCompletionSource<RegionSelectionResult?> _tcs = new();
 
         private Point _startPoint;
@@ -26,9 +30,14 @@ namespace TrueReplayer.Services
         private bool _isDragging;
         private bool _hasSelection;
 
-        public ScreenOverlayForm(Bitmap screenshot)
+        // <paramref name="regionOnly"/>: when true, the overlay returns just the rect coords
+        // without producing a cropped Bitmap. Used to configure the search ROI of an existing
+        // WaitImage action — no new reference image is being captured.
+        public ScreenOverlayForm(Bitmap screenshot, bool regionOnly = false, string? hintText = null)
         {
             _screenshot = screenshot;
+            _regionOnly = regionOnly;
+            _hintText = hintText ?? "Click and drag to select a region  •  ESC to cancel";
 
             // Virtual screen bounds (all monitors)
             int vx = NativeMethods.GetSystemMetrics(76);
@@ -99,7 +108,7 @@ namespace TrueReplayer.Services
             // Instruction text at top center
             if (!_isDragging && !_hasSelection)
             {
-                string hint = "Click and drag to select a region  •  ESC to cancel";
+                string hint = _hintText;
                 using var font = new Font("Segoe UI", 13f, FontStyle.Regular);
                 var size = g.MeasureString(hint, font);
                 float hx = (ClientRectangle.Width - size.Width) / 2;
@@ -167,16 +176,17 @@ namespace TrueReplayer.Services
                     return;
                 }
 
-                // Crop the selected region from the original screenshot
-                var cropped = new Bitmap(rect.Width, rect.Height);
-                using (var g = Graphics.FromImage(cropped))
-                {
-                    g.DrawImage(_screenshot, 0, 0, rect, GraphicsUnit.Pixel);
-                }
-
                 // Account for virtual screen offset
                 int vx = NativeMethods.GetSystemMetrics(76);
                 int vy = NativeMethods.GetSystemMetrics(77);
+
+                Bitmap? cropped = null;
+                if (!_regionOnly)
+                {
+                    cropped = new Bitmap(rect.Width, rect.Height);
+                    using var g = Graphics.FromImage(cropped);
+                    g.DrawImage(_screenshot, 0, 0, rect, GraphicsUnit.Pixel);
+                }
 
                 var result = new RegionSelectionResult
                 {

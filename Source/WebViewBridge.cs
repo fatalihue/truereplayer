@@ -258,6 +258,9 @@ namespace TrueReplayer
                     case "actions:addRunProfile": HandleAddRunProfile(payload); break;
                     case "actions:editRunProfile": HandleEditRunProfile(payload); break;
                     case "waitimage:recapture": HandleWaitImageRecapture(payload); break;
+                    case "waitimage:configureSearchRegion": _ = HandleConfigureSearchRegionAsync(payload); break;
+                    case "waitimage:cropReference": HandleCropReference(payload); break;
+                    case "image:testMatch": _ = HandleTestMatchAsync(payload); break;
                     case "actions:addBrowserAction": HandleAddBrowserAction(payload); break;
                     case "browser:toggleRecording": HandleBrowserToggleRecording(payload); break;
                     case "browser:pickElement": HandlePickElement(); break;
@@ -384,6 +387,14 @@ namespace TrueReplayer
                 imageBase64 = a.ActionType == "WaitImage" && !string.IsNullOrEmpty(a.ImagePath)
                     ? ImageStorageService.ReadAsBase64(profileName, a.ImagePath) ?? ""
                     : "",
+                // WaitImage extras (forwarded so the editor restores their state)
+                waitImageOnTimeout = a.WaitImageOnTimeout,
+                waitImageInvert = a.WaitImageInvert,
+                waitImageClickOnMatch = a.WaitImageClickOnMatch,
+                waitImageSearchX = a.WaitImageSearchX,
+                waitImageSearchY = a.WaitImageSearchY,
+                waitImageSearchW = a.WaitImageSearchW,
+                waitImageSearchH = a.WaitImageSearchH,
                 browserText = a.BrowserText ?? "",
                 newTab = a.NewTab,
                 isSkipped = a.IsSkipped,
@@ -1107,6 +1118,39 @@ namespace TrueReplayer
                     if (string.IsNullOrEmpty(value)) action.TypeDelay = null;
                     else if (int.TryParse(value, out int td)) action.TypeDelay = Math.Max(0, td);
                     break;
+                case "waitImageOnTimeout":
+                    // Only "Continue" needs to be persisted; "StopReplay" is the default and stays
+                    // null on disk to keep the JSON minimal and self-explanatory.
+                    action.WaitImageOnTimeout = value == "Continue" ? "Continue" : null;
+                    break;
+                case "waitImageInvert":
+                    action.WaitImageInvert = value == "true";
+                    break;
+                case "waitImageClickOnMatch":
+                    action.WaitImageClickOnMatch = value == "true";
+                    break;
+                case "waitImageSearchRegion":
+                    // Value format: "x,y,w,h" (all ints) — or empty string to clear.
+                    if (string.IsNullOrEmpty(value)) {
+                        action.WaitImageSearchX = null;
+                        action.WaitImageSearchY = null;
+                        action.WaitImageSearchW = null;
+                        action.WaitImageSearchH = null;
+                    } else {
+                        var parts = value.Split(',');
+                        if (parts.Length == 4
+                            && int.TryParse(parts[0], out int sx)
+                            && int.TryParse(parts[1], out int sy)
+                            && int.TryParse(parts[2], out int sw)
+                            && int.TryParse(parts[3], out int sh)
+                            && sw > 0 && sh > 0) {
+                            action.WaitImageSearchX = sx;
+                            action.WaitImageSearchY = sy;
+                            action.WaitImageSearchW = sw;
+                            action.WaitImageSearchH = sh;
+                        }
+                    }
+                    break;
             }
 
             HasUnsavedChanges = true;
@@ -1532,7 +1576,7 @@ namespace TrueReplayer
                 NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
             });
 
-            if (selection == null) return; // Cancelled
+            if (selection?.CroppedImage == null) return; // Cancelled or region-only (no image)
 
             // Save the cropped image
             string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
@@ -1603,7 +1647,7 @@ namespace TrueReplayer
                 NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
             });
 
-            if (selection == null) return;
+            if (selection?.CroppedImage == null) return; // Cancelled
 
             // Save new image. We intentionally keep the old PNG on disk so undo can restore the
             // previous reference image. Orphan PNGs are cleaned up at app startup by
@@ -1620,6 +1664,174 @@ namespace TrueReplayer
                     HasUnsavedChanges = true;
                     PushActionsUpdate();
                 }
+            });
+        }
+
+        // Single-shot match against the current screen — powers the "Test match" calibration
+        // button in the WaitImage editor. Pure round-trip: request carries imagePath + tolerance
+        // + optional search region; response carries the best score and matched rect.
+        private async Task HandleTestMatchAsync(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
+            string imagePath = payload.TryGetProperty("imagePath", out var ipEl) ? (ipEl.GetString() ?? "") : "";
+            double confidence = payload.TryGetProperty("confidence", out var cEl) && cEl.ValueKind == JsonValueKind.Number ? cEl.GetDouble() : 0.8;
+
+            System.Drawing.Rectangle? searchRegion = null;
+            if (payload.TryGetProperty("searchRegion", out var srEl) && srEl.ValueKind == JsonValueKind.Object)
+            {
+                int sx = srEl.GetProperty("x").GetInt32();
+                int sy = srEl.GetProperty("y").GetInt32();
+                int sw = srEl.GetProperty("w").GetInt32();
+                int sh = srEl.GetProperty("h").GetInt32();
+                if (sw > 0 && sh > 0)
+                    searchRegion = new System.Drawing.Rectangle(sx, sy, sw, sh);
+            }
+
+            try
+            {
+                string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
+                using var refImage = ImageStorageService.LoadReferenceImage(profileName, imagePath);
+                if (refImage == null)
+                {
+                    SendMessage("image:testMatchResult", new
+                    {
+                        requestId,
+                        found = false,
+                        score = 0.0,
+                        x = 0, y = 0, w = 0, h = 0,
+                        error = "Reference image not found on disk."
+                    });
+                    return;
+                }
+
+                // Defer to thread pool — MatchTemplate is CPU-bound and we don't want to block the dispatcher.
+                var result = await Task.Run(() => ImageMatchingService.MatchOnce(refImage, searchRegion));
+                SendMessage("image:testMatchResult", new
+                {
+                    requestId,
+                    found = result.Score >= confidence,
+                    score = result.Score,
+                    x = result.X, y = result.Y, w = result.W, h = result.H
+                });
+            }
+            catch (Exception ex)
+            {
+                SendMessage("image:testMatchResult", new
+                {
+                    requestId,
+                    found = false,
+                    score = 0.0,
+                    x = 0, y = 0, w = 0, h = 0,
+                    error = $"Test failed: {ex.Message}"
+                });
+            }
+        }
+
+        // Tightens an existing WaitImage reference image to a sub-rect (no recapture needed).
+        // Saves the cropped result as a NEW PNG so the old one stays on disk for undo; orphan
+        // cleanup at app startup removes unreferenced PNGs eventually.
+        private void HandleCropReference(JsonElement payload)
+        {
+            int index = payload.GetProperty("index").GetInt32();
+            int x = payload.GetProperty("x").GetInt32();
+            int y = payload.GetProperty("y").GetInt32();
+            int w = payload.GetProperty("w").GetInt32();
+            int h = payload.GetProperty("h").GetInt32();
+            if (index < 0 || index >= actions.Count) return;
+
+            var action = actions[index];
+            if (action.ActionType != "WaitImage" || string.IsNullOrEmpty(action.ImagePath)) return;
+            if (w < 10 || h < 10) return;
+
+            string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
+            using var current = ImageStorageService.LoadReferenceImage(profileName, action.ImagePath);
+            if (current == null) return;
+
+            // Clamp the requested rect to the image bounds — the frontend already clamps but
+            // belt-and-suspenders avoids an AOOR exception on Bitmap.Clone if anything is off.
+            x = Math.Max(0, Math.Min(current.Width - 1, x));
+            y = Math.Max(0, Math.Min(current.Height - 1, y));
+            w = Math.Min(current.Width - x, w);
+            h = Math.Min(current.Height - y, h);
+            if (w < 10 || h < 10) return;
+            // Reject a no-op crop (full image) — nothing to save, no visible change.
+            if (x == 0 && y == 0 && w == current.Width && h == current.Height) return;
+
+            // Run the crop/save FIRST so we never push an undo state for a failed operation
+            // (which would also blow away the redo stack for nothing).
+            string newPath;
+            try
+            {
+                var rect = new System.Drawing.Rectangle(x, y, w, h);
+                using var cropped = current.Clone(rect, current.PixelFormat);
+                newPath = ImageStorageService.SaveReferenceImage(cropped, profileName);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[WaitImage] Crop failed: {ex.Message}");
+                return;
+            }
+
+            PushUndoState();
+            action.ImagePath = newPath;
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+        }
+
+        // Lets the user draw a search ROI for an existing WaitImage. Behaves like the recapture
+        // flow but in "region-only" mode — no PNG is saved, just the rect is reported back.
+        private async Task HandleConfigureSearchRegionAsync(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
+
+            var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
+            await Task.Delay(400);
+
+            System.Drawing.Bitmap screenshot;
+            try
+            {
+                screenshot = ScreenCaptureService.CaptureVirtualScreen();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[WaitImage] Configure-region screenshot failed: {ex.Message}");
+                dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+                SendMessage("waitimage:searchRegionSet", new { requestId, cancelled = true });
+                return;
+            }
+
+            RegionSelectionResult? selection = null;
+            var thread = new Thread(() =>
+            {
+                System.Windows.Forms.Application.EnableVisualStyles();
+                using var overlay = new ScreenOverlayForm(
+                    screenshot,
+                    regionOnly: true,
+                    hintText: "Drag to set the search area for this Wait Image  •  ESC to cancel");
+                overlay.ShowDialog();
+                selection = overlay.GetSelectionAsync().Result;
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            await Task.Run(() => thread.Join());
+
+            dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+
+            if (selection == null)
+            {
+                SendMessage("waitimage:searchRegionSet", new { requestId, cancelled = true });
+                return;
+            }
+
+            SendMessage("waitimage:searchRegionSet", new
+            {
+                requestId,
+                cancelled = false,
+                x = selection.ScreenX,
+                y = selection.ScreenY,
+                w = selection.Width,
+                h = selection.Height
             });
         }
 
@@ -1662,6 +1874,13 @@ namespace TrueReplayer
                         ImagePath = clonedImagePath,
                         Timeout = original.Timeout,
                         Confidence = original.Confidence,
+                        WaitImageOnTimeout = original.WaitImageOnTimeout,
+                        WaitImageInvert = original.WaitImageInvert,
+                        WaitImageClickOnMatch = original.WaitImageClickOnMatch,
+                        WaitImageSearchX = original.WaitImageSearchX,
+                        WaitImageSearchY = original.WaitImageSearchY,
+                        WaitImageSearchW = original.WaitImageSearchW,
+                        WaitImageSearchH = original.WaitImageSearchH,
                         BrowserText = original.BrowserText,
                         NewTab = original.NewTab,
                         IsSkipped = original.IsSkipped,
