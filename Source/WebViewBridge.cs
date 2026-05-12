@@ -926,13 +926,18 @@ namespace TrueReplayer
         {
             if (payload.TryGetProperty("indices", out var arr) && arr.ValueKind == JsonValueKind.Array)
             {
-                int? min = null;
+                // Pick MAX index — the global Recording hotkey reads this to know where to drop
+                // new actions, and the convention everywhere else (toolbar add-action, ActionBar
+                // Record button) is "insert AFTER the last selected row". Min was the wrong end:
+                // it pushed existing rows down instead of flowing the new ones below the selection.
+                // Null when no selection → recorder treats it as "append at end".
+                int? max = null;
                 foreach (var el in arr.EnumerateArray())
                 {
                     int val = el.GetInt32();
-                    if (min == null || val < min) min = val;
+                    if (max == null || val > max) max = val;
                 }
-                SelectedInsertIndex = min;
+                SelectedInsertIndex = max == null ? null : max + 1;
             }
             else
             {
