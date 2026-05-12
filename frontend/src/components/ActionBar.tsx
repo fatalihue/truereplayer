@@ -1,4 +1,4 @@
-import { Circle, Play, Square, Save, FolderOpen, MousePointerClick } from 'lucide-react';
+import { Circle, Play, Square, Save, FolderOpen, MousePointerClick, ListOrdered } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -72,7 +72,10 @@ export function ActionBar() {
             }`}
             data-tip="Run the recorded actions in order"
           >
-            <Play size={11} fill={!isClicker ? 'currentColor' : 'none'} />
+            {/* ListOrdered (not Play) so the mode pill doesn't visually duplicate the Replay
+                action button. Both pills now use a "type" icon (Macro = ordered list, Clicker
+                = cursor click), keeping the segmented control conceptually uniform. */}
+            <ListOrdered size={11} />
             Macro
           </button>
           <button
