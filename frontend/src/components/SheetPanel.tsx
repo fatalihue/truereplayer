@@ -1241,7 +1241,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   value={textMatch}
                   onChange={(e) => setTextMatch(e.target.value)}
                   className="flex-1 h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-                  placeholder={textMode === 'regex' ? '^Salvar.*' : 'Save Changes'}
+                  placeholder={textMode === 'regex' ? 'e.g. ^Sign in$' : 'e.g. Sign in'}
                 />
               </div>
               {regexError && (
