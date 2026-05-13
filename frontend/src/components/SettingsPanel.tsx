@@ -150,25 +150,6 @@ function ClickerSection({
     }
   };
 
-  // Fixed-width columns so every row aligns:
-  //   input (64) · unit (40) · toggle/spacer (40) = 144 px right block.
-  // The unit column is wide enough to fit either the "/s ▾" select on the Rate row OR
-  // a short suffix like "ms" / "%" / "px" on the other rows. The toggle column always
-  // reserves the Toggle's footprint (w-10 / 40 px), so rows without a toggle still
-  // line up with rows that have one.
-  const row = (label: string, input: React.ReactNode, unit: React.ReactNode, toggle?: { isOn: boolean; onChange: (v: boolean) => void }) => (
-    <div className="flex items-center justify-between py-1">
-      <span className="text-ui text-text-secondary">{label}</span>
-      <div className="flex items-center gap-2">
-        <div className="w-[64px] flex justify-end">{input}</div>
-        <div className="w-10 flex justify-center text-[11px] text-text-disabled">{unit}</div>
-        <div className="w-10 flex justify-end">
-          {toggle ? <Toggle isOn={toggle.isOn} onChange={toggle.onChange} /> : null}
-        </div>
-      </div>
-    </div>
-  );
-
   return (
     <div
       className="bg-bg-surface rounded-ui overflow-hidden"
@@ -187,62 +168,49 @@ function ClickerSection({
       </button>
       {isOpen && (
         <div className="px-3 pb-3 space-y-1">
-          <div className="text-[10px] text-text-disabled italic mb-1">Settings dedicados — independentes do profile</div>
-
-          {/* Rate row uses the same column layout as every other row — the unit slot
-              just happens to contain a <select> instead of a suffix string. */}
-          {row(
-            'Rate',
+          {/* Layout mirrors the Execution panel exactly: label | input | toggle. The Rate
+              row puts the /s ↔ ms <select> in the toggle column so the column always lines
+              up across rows. Hold has no toggle (0 ms is a valid value, no on/off needed)
+              so we render a w-10 spacer to keep the input vertically aligned with the others. */}
+          <SettingRow label="Rate">
             <SettingInput
-              key={`rate-${unit}-${delayMs}`} /* re-mount on unit change so the input reflects the new display value */
+              key={`rate-${unit}-${delayMs}`}
               value={displayValue}
               onCommit={commitRate}
-              width="w-[64px]"
-            />,
+              width="w-[80px]"
+            />
             <select
               value={unit}
               onChange={(e) => setUnit(e.target.value as 'ms' | 'cps')}
-              className="w-full h-6 px-1 text-[11px] text-text-secondary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid font-mono cursor-pointer text-center"
+              className="w-10 h-5 pl-1 text-[11px] text-text-secondary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid font-mono cursor-pointer"
               title="Unit"
             >
               <option value="cps">/s</option>
               <option value="ms">ms</option>
-            </select>,
-            undefined,
-          )}
-
-          {row(
-            'Jitter',
-            <SettingInput value={rateJitter} onCommit={(v) => onChange('cursorClickDelayJitter', v)} width="w-[64px]" />,
-            '%',
-            { isOn: useRateJitter, onChange: (v) => onChange('cursorClickUseJitter', v) },
-          )}
-          {row(
-            'Hold',
-            <SettingInput value={hold} onCommit={(v) => onChange('cursorClickHold', v)} width="w-[64px]" />,
-            'ms',
-            // Hold is always applied (no on/off toggle) — 0 ms is a valid value if the user
-            // wants the absolute minimum gap between down/up.
-            undefined,
-          )}
-          {row(
-            'Position',
-            <SettingInput value={positionJitter} onCommit={(v) => onChange('cursorClickPositionJitter', v)} width="w-[64px]" />,
-            'px',
-            { isOn: usePositionJitter, onChange: (v) => onChange('cursorClickUsePositionJitter', v) },
-          )}
-          {row(
-            'Loops',
-            <SettingInput value={loops} onCommit={(v) => onChange('cursorClickLoops', v)} width="w-[64px]" />,
-            '',
-            { isOn: useLoops, onChange: (v) => onChange('cursorClickUseLoops', v) },
-          )}
-          {row(
-            'Interval',
-            <SettingInput value={interval} onCommit={(v) => onChange('cursorClickInterval', v)} width="w-[64px]" />,
-            'ms',
-            { isOn: useInterval, onChange: (v) => onChange('cursorClickUseInterval', v) },
-          )}
+            </select>
+          </SettingRow>
+          <SettingRow label="Jitter">
+            <SettingInput value={rateJitter} onCommit={(v) => onChange('cursorClickDelayJitter', v)} width="w-[80px]" />
+            <Toggle isOn={useRateJitter} onChange={(v) => onChange('cursorClickUseJitter', v)} />
+          </SettingRow>
+          <SettingRow label="Hold">
+            <SettingInput value={hold} onCommit={(v) => onChange('cursorClickHold', v)} width="w-[80px]" />
+            {/* Hold has no on/off — 0 ms is a valid value. Spacer keeps the input column
+                aligned with the rows that do have a toggle (matches Toggle's w-10 footprint). */}
+            <div className="w-10" />
+          </SettingRow>
+          <SettingRow label="Position">
+            <SettingInput value={positionJitter} onCommit={(v) => onChange('cursorClickPositionJitter', v)} width="w-[80px]" />
+            <Toggle isOn={usePositionJitter} onChange={(v) => onChange('cursorClickUsePositionJitter', v)} />
+          </SettingRow>
+          <SettingRow label="Loops">
+            <SettingInput value={loops} onCommit={(v) => onChange('cursorClickLoops', v)} width="w-[80px]" />
+            <Toggle isOn={useLoops} onChange={(v) => onChange('cursorClickUseLoops', v)} />
+          </SettingRow>
+          <SettingRow label="Interval">
+            <SettingInput value={interval} onCommit={(v) => onChange('cursorClickInterval', v)} width="w-[80px]" />
+            <Toggle isOn={useInterval} onChange={(v) => onChange('cursorClickUseInterval', v)} />
+          </SettingRow>
         </div>
       )}
     </div>
