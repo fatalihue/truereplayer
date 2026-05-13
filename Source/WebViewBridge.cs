@@ -196,17 +196,24 @@ namespace TrueReplayer
                 // session reloads since option text is what the user sees). Strips out
                 // any stray BrowserClick on the same selector that may have slipped
                 // through (content.js already skips clicks on SELECT, but defensive).
-                // Bracketing events around a native <select> interaction. The flag-based
-                // suppression in InputHookManager filters native clicks BEFORE they reach
-                // the recorder, so we don't need any post-hoc cleanup based on time windows.
-                // Slow users are handled correctly because the flag stays on for the entire
-                // interaction (open → read → pick), regardless of duration.
+                // Bracketing events around a native <select> interaction.
+                //
+                // The OS-level mouse hook fires BEFORE the content.js mousedown listener can
+                // notify the bridge — that's ~50-200 ms of round-trip (DOM event → chrome
+                // runtime → native pipe → C# bridge → InputHookManager flag). So even with
+                // suppression, the very first LeftClickDown leaks into the recorder. We
+                // track the interaction's start timestamp (back-dated by a 500 ms buffer to
+                // cover the race window) and wipe everything recorded after it when the
+                // change/end signal arrives. Duration-independent — works for users that
+                // take 30 s between open and pick.
                 System.Threading.Timer? selectInteractionTimer = null;
+                DateTime? selectInteractionStart = null;
                 void EndSelectInteraction()
                 {
                     InputHookManager.SuppressMouseRecording = false;
                     selectInteractionTimer?.Dispose();
                     selectInteractionTimer = null;
+                    selectInteractionStart = null;
                 }
                 browserBridge.SelectInteractionStarted += () =>
                 {
@@ -214,6 +221,9 @@ namespace TrueReplayer
                     {
                         if (!recordingService.IsRecording) return;
                         InputHookManager.SuppressMouseRecording = true;
+                        // Back-date the start by 500 ms so the race-leaked LeftClickDown
+                        // is inside our cleanup window when change fires.
+                        selectInteractionStart = DateTime.UtcNow.AddMilliseconds(-500);
                         // 15 s safety net — if for any reason the end signal is lost (page
                         // navigated away mid-pick, content script crashed, etc.) the flag
                         // clears itself so subsequent recording isn't permanently broken.
@@ -233,18 +243,20 @@ namespace TrueReplayer
                 {
                     dispatcherQueue.TryEnqueue(() =>
                     {
-                        // Always clear the suppression flag — change is one of the canonical
-                        // "interaction over" signals (the other being blur).
+                        // Snapshot the start time before EndSelectInteraction nulls it out.
+                        // Without the snapshot the cleanup below would fall back to a 3 s
+                        // window, defeating the whole point of the interaction-bounded fix.
+                        var interactionStart = selectInteractionStart;
                         EndSelectInteraction();
 
                         if (!recordingService.IsRecording) return;
 
-                        // The suppression flag should have prevented any native click rows
-                        // from being recorded during this interaction. The cleanup below is
-                        // defensive belt-and-suspenders: if the start event was lost (e.g.
-                        // user clicked the select before the recording started fully), nuke
-                        // any stray native clicks from the last 3 s on the same selector.
-                        var cutoff = DateTime.UtcNow.AddMilliseconds(-3000);
+                        // Wipe native click rows recorded since the interaction started.
+                        // Covers the OS-hook race-window leak (the LeftClickDown that
+                        // beat our flag by ~50-200 ms). When start wasn't seen for some
+                        // reason, fall back to a 3 s window — same behaviour as before
+                        // the bracketing events were added.
+                        var cutoff = interactionStart ?? DateTime.UtcNow.AddMilliseconds(-3000);
                         for (int i = actions.Count - 1; i >= 0 && i >= actions.Count - 8; i--)
                         {
                             var a = actions[i];
