@@ -216,7 +216,7 @@ function ClickerSection({
               <option value="ms">ms</option>
             </select>
           </SettingRow>
-          <SettingRow label="Jitter" tooltip="Random ±% applied to each click delay (anti-detection)">
+          <SettingRow label="Jitter" tooltip="Random ±% applied to each delay (anti-cheat detection)">
             <SettingInput
               value={rateJitter}
               onCommit={(v) => onChange('cursorClickDelayJitter', v)}
@@ -231,7 +231,7 @@ function ClickerSection({
                 aligned with the rows that do have a toggle (matches Toggle's w-10 footprint). */}
             <div className="w-10" />
           </SettingRow>
-          <SettingRow label="Position" tooltip="Random ±px offset around the cursor for each click (anti-detection)">
+          <SettingRow label="Position" tooltip="Random ±px offset around the cursor (anti-cheat detection)">
             <SettingInput
               value={positionJitter}
               onCommit={(v) => onChange('cursorClickPositionJitter', v)}
@@ -472,7 +472,7 @@ export function SettingsPanel() {
                 />
                 <Toggle isOn={settings.useCustomDelay} onChange={(v) => changeSetting('useCustomDelay', v)} />
               </SettingRow>
-              <SettingRow label="Jitter" tooltip="Random ±% applied to each delay for natural timing">
+              <SettingRow label="Jitter" tooltip="Random ±% applied to each delay (anti-cheat detection)">
                 <SettingInput
                   value={settings.delayVariation}
                   onCommit={(v) => changeSetting('delayVariation', v)}
@@ -485,7 +485,7 @@ export function SettingsPanel() {
                 />
                 <Toggle isOn={settings.useDelayVariation} onChange={(v) => changeSetting('useDelayVariation', v)} />
               </SettingRow>
-              <SettingRow label="Loops" tooltip="Number of times to repeat">
+              <SettingRow label="Loops" tooltip="Number of times to repeat. 0 = infinite">
                 <SettingInput
                   value={settings.loopCount}
                   onCommit={(v) => changeSetting('loopCount', v)}
@@ -498,7 +498,7 @@ export function SettingsPanel() {
                 />
                 <Toggle isOn={settings.enableLoop} onChange={(v) => changeSetting('enableLoop', v)} />
               </SettingRow>
-              <SettingRow label="Interval" tooltip="Delay between each loop (ms)">
+              <SettingRow label="Interval" tooltip="Pause between loop (ms)">
                 <SettingInput
                   value={settings.loopInterval}
                   onCommit={(v) => changeSetting('loopInterval', v)}
