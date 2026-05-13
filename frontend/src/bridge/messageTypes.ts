@@ -297,6 +297,11 @@ export type OutgoingMessage =
   | { type: 'actions:toggleSkip'; payload: { indices: number[] } }
   | { type: 'actions:reorder'; payload: { indices: number[]; targetIndex: number } }
   | { type: 'actions:insertAction'; payload: { actionType: string; insertIndex: number } }
+  // Insert a KeyDown + KeyUp pair using a pre-captured key name (no OS capture mode).
+  // The frontend captures the keystroke in KeyCaptureDialog via JS keyboard events and
+  // sends the resulting internal name (e.g. "Return", "Tab", "A") — the backend turns
+  // that into two ActionItems back-to-back at insertIndex.
+  | { type: 'actions:insertKey'; payload: { key: string; insertIndex: number } }
   | { type: 'actions:duplicate'; payload: { indices: number[] } }
   | { type: 'actions:addRunProfile'; payload: { profileName: string; repeatCount: number; insertIndex?: number } }
   | { type: 'actions:editRunProfile'; payload: { index: number; profileName: string; repeatCount: number } }

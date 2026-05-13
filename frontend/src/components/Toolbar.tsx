@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ArrowUpToLine, ArrowDownToLine, ScanSearch, Plus, Mouse, Keyboard, ArrowUp, ArrowDown, Globe, Repeat2, Hourglass } from 'lucide-react';
+import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ArrowUpToLine, ArrowDownToLine, ScanSearch, Plus, Keyboard, ArrowUp, ArrowDown, Globe, Repeat2, Hourglass } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -7,6 +7,7 @@ import { ThemeEditor } from './ThemeEditor';
 import { SendTextDialog } from './SendTextDialog';
 import { RunProfileDialog } from './RunProfileDialog';
 import { NavigateDialog } from './NavigateDialog';
+import { KeyCaptureDialog } from './KeyCaptureDialog';
 
 export interface ColumnVisibility {
   action: boolean;
@@ -108,6 +109,11 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
   const [showBrowserMenu, setShowBrowserMenu] = useState(false);
   const [showNavigateDialog, setShowNavigateDialog] = useState(false);
   const [showRunProfileDialog, setShowRunProfileDialog] = useState(false);
+  // Send Key… opens this dialog (captures one key via JS events, dispatches an
+  // insert-pair message). Replaces the old "Key Press" item that entered OS-level
+  // capture mode silently with no visual prompt or commit step.
+  const [showKeyCapture, setShowKeyCapture] = useState(false);
+  const keyCaptureInsertIndex = useRef<number>(0);
   const colDropdownRef = useRef<HTMLDivElement>(null);
   const addActionsRef = useRef<HTMLDivElement>(null);
   const browserMenuRef = useRef<HTMLDivElement>(null);
@@ -347,20 +353,21 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                 style={{ animation: 'fade-in 0.12s ease-out', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
               >
                 {/* Two-section dropdown:
-                    - "Add action" for input emulation (clicks / keys / scrolls)
-                    - "Wait / Flow" for control-flow inserts (delays / image wait / sub-macro)
-                    Wait/Flow items used to be standalone toolbar buttons but they're low-
-                    frequency enough that pulling them into this dropdown declutters the
-                    toolbar without burying them. RunProfile is the one item that opens a
-                    dialog instead of inserting directly — handled in the onClick branch. */}
+                    - "Insert"      → keystroke + scroll, the things recording can't easily
+                                       capture in isolation (or that need a quick one-off
+                                       insert without entering recording mode)
+                    - "Wait / Flow" → control-flow inserts (delays / image wait / sub-macro)
+                    Click x3 was removed: recording captures real coords automatically, and
+                    the old "Left/Right/Middle Click" items entered an OS capture mode that
+                    required a physical click on screen — the same physical action recording
+                    does, but without the rest of the recording context. Strictly worse.
+                    "Send Key…" replaces the old "Key Press" item with a visible capture
+                    dialog (KeyCaptureDialog) so the user sees what was captured before commit. */}
                 {([
                   {
-                    label: 'Add action',
+                    label: 'Insert',
                     items: [
-                      { type: 'LeftClick', label: 'Left Click', icon: Mouse },
-                      { type: 'RightClick', label: 'Right Click', icon: Mouse },
-                      { type: 'MiddleClick', label: 'Middle Click', icon: Mouse },
-                      { type: 'KeyPress', label: 'Key Press', icon: Keyboard },
+                      { type: 'SendKey', label: 'Send Key…', icon: Keyboard },
                       { type: 'ScrollUp', label: 'Scroll Up', icon: ArrowUp },
                       { type: 'ScrollDown', label: 'Scroll Down', icon: ArrowDown },
                     ],
@@ -384,14 +391,20 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                         key={item.type}
                         onClick={() => {
                           setShowAddActions(false);
-                          // Run Profile needs the profile picker dialog; everything else
-                          // is a direct insert with the actionType as the payload.
+                          const sel = selectionRef.current;
+                          const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                          // Three special cases that don't fit the generic insertAction
+                          // pattern: Run Profile opens a picker dialog, Send Key opens the
+                          // KeyCaptureDialog (which dispatches actions:insertKey on commit).
                           if (item.type === 'RunProfile') {
                             setShowRunProfileDialog(true);
                             return;
                           }
-                          const sel = selectionRef.current;
-                          const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                          if (item.type === 'SendKey') {
+                            keyCaptureInsertIndex.current = insertIndex;
+                            setShowKeyCapture(true);
+                            return;
+                          }
                           send({ type: 'actions:insertAction', payload: { actionType: item.type, insertIndex } });
                         }}
                         className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
@@ -402,6 +415,13 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                     ))}
                   </div>
                 ))}
+                {/* Footer tip nudges users to Recording for click sequences and multi-key
+                    combos — the things the dropdown no longer covers since Click x3 was
+                    removed. Without this, "where's Left Click?" becomes a support question. */}
+                <div className="h-px bg-border-subtle my-1" />
+                <div className="px-2.5 py-2 text-[10px] text-text-tertiary leading-relaxed">
+                  💡 For clicks or key sequences, use <span className="text-text-secondary font-semibold">Recording</span> — it captures real coordinates and key combos automatically.
+                </div>
               </div>
             )}
           </div>
@@ -613,6 +633,19 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             setShowNavigateDialog(false);
           }}
           onClose={() => setShowNavigateDialog(false)}
+        />
+      )}
+
+      {/* Send Key… capture dialog. The insertIndex is stashed in a ref at the
+          moment the user clicks the dropdown item, because by the time they've
+          pressed a key the selection may have changed. */}
+      {showKeyCapture && (
+        <KeyCaptureDialog
+          onConfirm={(key) => {
+            send({ type: 'actions:insertKey', payload: { key, insertIndex: keyCaptureInsertIndex.current } });
+            setShowKeyCapture(false);
+          }}
+          onClose={() => setShowKeyCapture(false)}
         />
       )}
     </>

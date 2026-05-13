@@ -390,6 +390,7 @@ namespace TrueReplayer
                     case "actions:toggleSkip": HandleActionsToggleSkip(payload); break;
                     case "actions:reorder": HandleActionsReorder(payload); break;
                     case "actions:insertAction": HandleInsertAction(payload); break;
+                    case "actions:insertKey": HandleInsertKey(payload); break;
                     case "actions:duplicate": HandleDuplicateActions(payload); break;
                     case "actions:addRunProfile": HandleAddRunProfile(payload); break;
                     case "actions:editRunProfile": HandleEditRunProfile(payload); break;
@@ -1742,6 +1743,41 @@ namespace TrueReplayer
                 HasUnsavedChanges = true;
                 mainController.UpdateButtonStates();
             });
+        }
+
+        // Insert a KeyDown + KeyUp pair from a key name pre-captured by the frontend's
+        // KeyCaptureDialog. Unlike HandleInsertAction with "KeyPress" (which enters
+        // OS-level capture mode and waits for a physical keystroke), this is fully
+        // declarative — the key is already known, so we just emit the two actions
+        // back-to-back at the requested index. The KeyUp lands at insertIndex+1 because
+        // the KeyDown was just inserted at insertIndex, bumping everything after it.
+        private void HandleInsertKey(JsonElement payload)
+        {
+            var key = payload.GetProperty("key").GetString();
+            var insertIndex = payload.GetProperty("insertIndex").GetInt32();
+            if (string.IsNullOrEmpty(key)) return;
+            if (insertIndex < 0 || insertIndex > actions.Count) insertIndex = actions.Count;
+
+            int delay = int.TryParse(CustomDelay, out var pd) ? pd : 100;
+            actions.Insert(insertIndex, new ActionItem
+            {
+                ActionType = "KeyDown",
+                Key = key,
+                Delay = delay,
+            });
+            // KeyUp gets a tiny delay (0) — the pair represents "tap this key once",
+            // not "hold for N ms". Users who want a hold can edit the KeyUp's delay.
+            actions.Insert(insertIndex + 1, new ActionItem
+            {
+                ActionType = "KeyUp",
+                Key = key,
+                Delay = 0,
+            });
+            for (int i = 0; i < actions.Count; i++)
+                actions[i].RowNumber = i + 1;
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+            mainController.UpdateButtonStates();
         }
 
         private async Task HandleInsertWaitImageAsync(int insertIndex)
