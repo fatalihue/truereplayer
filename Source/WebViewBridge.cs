@@ -202,14 +202,22 @@ namespace TrueReplayer
                     {
                         if (!recordingService.IsRecording) return;
 
-                        // Defensive dedup — remove a BrowserClick on the same select that
-                        // was just recorded (in case the content.js SELECT-skip didn't fire,
-                        // or a synthetic test path queued one).
-                        var cutoff = DateTime.UtcNow.AddMilliseconds(-500);
-                        for (int i = actions.Count - 1; i >= 0 && i >= actions.Count - 4; i--)
+                        // Wipe the native click pairs the OS-level mouse hook recorded while the
+                        // user was interacting with the <select>. Unlike BrowserClick (one pair,
+                        // <500 ms), a <select> interaction produces TWO pairs separated by
+                        // reading time: (a) click on the <select> to open the OS popup, (b)
+                        // click on the option to pick it. A 3 s window with an 8-action lookback
+                        // covers slow users without eating unrelated history. Also strips any
+                        // BrowserClick on the same selector that might have slipped through the
+                        // content.js SELECT skip.
+                        var cutoff = DateTime.UtcNow.AddMilliseconds(-3000);
+                        for (int i = actions.Count - 1; i >= 0 && i >= actions.Count - 8; i--)
                         {
                             var a = actions[i];
-                            if (a.ActionType == "BrowserClick" && a.Key == selector && a.RecordedAt >= cutoff)
+                            if (a.RecordedAt < cutoff) continue;
+                            if (a.ActionType is "LeftClickDown" or "LeftClickUp" or "RightClickDown" or "RightClickUp")
+                                actions.RemoveAt(i);
+                            else if (a.ActionType == "BrowserClick" && a.Key == selector)
                                 actions.RemoveAt(i);
                         }
 
