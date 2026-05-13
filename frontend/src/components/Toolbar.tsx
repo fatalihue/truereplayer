@@ -289,7 +289,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
               disabled={buttonStates.recordingActive || buttonStates.replayActive}
               className={`p-1.5 rounded transition-colors disabled:text-text-disabled ${
                 showAddActions
-                  ? 'bg-bg-elevated text-accent'
+                  ? 'bg-bg-elevated text-accent-light'
                   : 'hover:bg-bg-elevated text-text-tertiary hover:text-text-primary'
               }`}
               data-tip="Add Actions"
@@ -419,7 +419,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                       }
                     }}
                   >
-                    <Globe size={12} className="text-[#60cdff]" />
+                    <Globe size={12} className="text-accent-light" />
                     {item.label}
                   </button>
                 ))}
@@ -460,10 +460,14 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
               <ClipboardPaste size={14} />
             </button>
           )}
+          {/* Destructive hover (red text + faint red bg) mirrors BulkActionBar's
+              Delete pattern. Clear All wipes every action in the profile, so we
+              want users to pause before clicking — neutral gray hover let it
+              blend in with non-destructive controls. */}
           <button
             tabIndex={-1}
             onClick={() => send({ type: 'actions:clear', payload: {} })}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+            className="p-1.5 rounded text-text-tertiary hover:bg-recording-bg hover:text-recording transition-colors"
             data-tip="Clear All"
           >
             <Trash2 size={14} />
@@ -479,7 +483,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
               onClick={() => setShowColDropdown(prev => !prev)}
               className={`p-1.5 rounded transition-colors ${
                 showColDropdown
-                  ? 'bg-bg-elevated text-accent'
+                  ? 'bg-bg-elevated text-accent-light'
                   : 'hover:bg-bg-elevated text-text-tertiary hover:text-text-primary'
               }`}
               data-tip="Toggle Columns"
@@ -521,7 +525,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             onClick={() => setShowThemeEditor(prev => !prev)}
             className={`p-1.5 rounded transition-colors ${
               showThemeEditor
-                ? 'bg-bg-elevated text-accent'
+                ? 'bg-bg-elevated text-accent-light'
                 : 'hover:bg-bg-elevated text-text-tertiary hover:text-text-primary'
             }`}
             data-tip="Theme Editor"
