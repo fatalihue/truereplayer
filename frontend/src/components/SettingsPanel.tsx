@@ -418,8 +418,12 @@ export function SettingsPanel() {
 
   return (
     <div className="w-[220px] flex flex-col shrink-0 overflow-hidden bg-bg-surface border border-border-subtle rounded-ui">
-      {/* Tab Bar */}
-      <div className="flex gap-1 px-1.5 py-1.5 border-b border-border-subtle shrink-0">
+      {/* Tab Bar — explicit 44 px height (matches the Toolbar's measured rendered height in
+          the centre column) so the section header below this tab bar lines up vertically
+          with the action grid's column-header row in the centre. Without this, the tab
+          bar was ~39 px (default py-1.5 + 1 px border) vs the Toolbar's ~46 px, pulling
+          the entire right column up by ~7 px. */}
+      <div className="flex items-center gap-1 px-1.5 border-b border-border-subtle shrink-0 h-[47px]">
         <button
           onClick={() => setActiveTab('profile')}
           className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
