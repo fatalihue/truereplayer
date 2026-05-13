@@ -66,9 +66,12 @@ export function StatusBar() {
       <div className="w-px h-3 bg-border-subtle mx-3" />
       <span className="text-[11px] text-text-disabled">{statusBar.actionCount} actions</span>
 
-      {/* Clicker live stats — only while a Clicker run is active. Shows cumulative count,
-          average rate since the run started, and elapsed mm:ss. */}
-      {isClicker && clickerStats.active && (() => {
+      {/* Clicker live stats — shows during a Clicker run AND after it ends (so the user
+          can read the final total without it vanishing instantly). The reducer wipes
+          clickerStats only when a NEW run starts via status:changed → 'replaying',
+          which keeps post-run values intact. Gate: in Clicker mode + (currently running
+          OR a previous run actually clicked something). */}
+      {isClicker && (isReplaying || clickerStats.count > 0) && (() => {
         const sec = Math.max(0, Math.floor(clickerStats.elapsedMs / 1000));
         const mm = Math.floor(sec / 60);
         const ss = String(sec % 60).padStart(2, '0');
@@ -91,8 +94,11 @@ export function StatusBar() {
         );
       })()}
 
-      {/* Replay progress section */}
-      {isReplaying && (
+      {/* Replay progress section — Macro mode only. Clicker runs use the dedicated
+          "Clicked X · Y/s · MM:SS" block above (which carries the meaningful numbers
+          for that mode). Without this guard, Clicker runs would render BOTH blocks, plus
+          a meaningless "0 / 0" progress bar since Clicker has no recorded actions. */}
+      {!isClicker && isReplaying && (
         <>
           <div className="w-px h-3 bg-border-subtle mx-3" />
           <div className="flex items-center gap-2 flex-1 min-w-0">

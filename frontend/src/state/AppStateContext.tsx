@@ -14,18 +14,21 @@ const defaultSettings = {
   loopIntervalEnabled: false,
   useCursorClick: false,
   cursorClickButton: 'Left',
-  // Clicker v2 — defaults match the AppSettings backend (CursorClickHoldMs=10, others 0/off).
-  // Real values arrive from the bridge on settings:loaded after the post-upgrade migration
-  // (which copies the legacy profile-shared delay/jitter/loops/interval into these fields).
+  // Clicker v2 — defaults match the AppSettings backend (delay=100 ms, jitter=10 %,
+  // hold=10 ms, position=10 px, interval=200 ms; every switch starts off). Real values
+  // arrive on settings:loaded after the post-upgrade migration (which copies the legacy
+  // profile-shared delay/jitter/loops/interval into these fields). Keeping these in sync
+  // with AppSettings.cs avoids a one-frame "wrong default" flash before settings:loaded
+  // arrives on cold start.
   cursorClickDelay: '100',
-  cursorClickDelayJitter: '0',
+  cursorClickDelayJitter: '10',
   cursorClickUseJitter: false,
   cursorClickHold: '10',
-  cursorClickPositionJitter: '0',
+  cursorClickPositionJitter: '10',
   cursorClickUsePositionJitter: false,
   cursorClickLoops: '0',
   cursorClickUseLoops: false,
-  cursorClickInterval: '0',
+  cursorClickInterval: '200',
   cursorClickUseInterval: false,
   recordMouse: true,
   recordScroll: true,
@@ -78,15 +81,18 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
     case 'state:init':
       return { ...initialState, ...message.payload, profileOrder: message.payload.profileOrder ?? initialState.profileOrder };
     case 'status:changed':
-      // When the engine reports anything other than 'replaying', clear the Clicker counter
-      // so it doesn't linger after the run stops. Done here instead of via a dedicated
-      // bridge message to keep the protocol surface small.
+      // New run starting → reset Clicker counter to zero so we don't carry over the
+      // previous run's totals. Other transitions (replaying → ready, recording, etc.)
+      // KEEP the last stats so the user can read the final "Clicked X · Y/s · MM:SS"
+      // after the run ends. The StatusBar gates rendering on `isReplaying || count > 0`,
+      // so non-Clicker replays don't trigger the Clicker counter even though the reset
+      // path here is mode-agnostic.
       return {
         ...state,
         status: message.payload.status,
         clickerStats: message.payload.status === 'replaying'
-          ? state.clickerStats
-          : { active: false, count: 0, elapsedMs: 0 },
+          ? { active: true, count: 0, elapsedMs: 0 }
+          : state.clickerStats,
       };
     case 'actions:updated':
       return { ...state, actions: message.payload.actions, highlightedActionIndex: null };
