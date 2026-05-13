@@ -250,8 +250,14 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             row gets cramped (mirror measures the full string with suffix). */}
         <ResponsiveProfileName name={toolbar.profileName} actionCount={toolbar.actionCount} />
 
-        {/* Right: tools — prevent focus on click so Space/Enter can't re-trigger */}
-        <div className="flex items-center gap-1 shrink-0" onMouseDown={(e) => e.preventDefault()}>
+        {/* Right: tools — prevent focus on click so Space/Enter can't re-trigger.
+            Buttons are wrapped in subtle boxed groups (bg-white/[0.025] +
+            faint border) so the 15 icons read as 5 coherent clusters instead
+            of one undifferentiated row. The "Insert" group gets a faint
+            accent tint to mark it as the primary creation zone. */}
+        <div className="flex items-center gap-1.5 shrink-0" onMouseDown={(e) => e.preventDefault()}>
+          {/* History group */}
+          <div className="flex items-center gap-0.5 p-0.5 bg-white/[0.025] border border-white/[0.04] rounded">
           {/* Undo / Redo */}
           <button
             tabIndex={-1}
@@ -272,9 +278,10 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             <Redo2 size={14} />
           </button>
 
-          {/* Divider */}
-          <div className="w-px h-4 bg-border-subtle mx-1" />
+          </div>
 
+          {/* Reorder group */}
+          <div className="flex items-center gap-0.5 p-0.5 bg-white/[0.025] border border-white/[0.04] rounded">
           {/* Move Up / Move Down */}
           <button
             tabIndex={-1}
@@ -313,9 +320,11 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             <ArrowDownToLine size={14} />
           </button>
 
-          {/* Divider */}
-          <div className="w-px h-4 bg-border-subtle mx-1" />
+          </div>
 
+          {/* Insert / Creation group — primary actions get a faint accent tint
+              so the eye lands here first when scanning the toolbar. */}
+          <div className="flex items-center gap-0.5 p-0.5 bg-accent-solid/[0.04] border border-accent-solid/[0.10] rounded">
           {/* Add Actions */}
           <div className="relative" ref={addActionsRef}>
             <button
@@ -462,9 +471,10 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             )}
           </div>
 
-          {/* Divider */}
-          <div className="w-px h-4 bg-border-subtle mx-1" />
+          </div>
 
+          {/* Clipboard group */}
+          <div className="flex items-center gap-0.5 p-0.5 bg-white/[0.025] border border-white/[0.04] rounded">
           {/* Copy / Paste / Clear */}
           <button
             tabIndex={-1}
@@ -508,9 +518,10 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             <Trash2 size={14} />
           </button>
 
-          {/* Divider */}
-          <div className="w-px h-4 bg-border-subtle mx-1" />
+          </div>
 
+          {/* View group */}
+          <div className="flex items-center gap-0.5 p-0.5 bg-white/[0.025] border border-white/[0.04] rounded">
           {/* Toggle Columns */}
           <div className="relative" ref={colDropdownRef}>
             <button
@@ -567,6 +578,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
           >
             <Palette size={14} />
           </button>
+          </div>
         </div>
       </div>
 
