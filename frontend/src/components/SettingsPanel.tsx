@@ -204,7 +204,7 @@ function ClickerSection({
             <select
               value={button}
               onChange={(e) => onChange('cursorClickButton', e.target.value)}
-              className="w-[80px] h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid cursor-pointer"
+              className="w-[80px] h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid cursor-pointer text-center"
             >
               <option value="Left">Left</option>
               <option value="Right">Right</option>
