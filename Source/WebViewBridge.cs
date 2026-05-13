@@ -190,6 +190,45 @@ namespace TrueReplayer
                         mainController.UpdateButtonStates();
                     });
                 };
+
+                // Native <select> value changed during recording — auto-create a
+                // BrowserSelectOption action with "text" match mode (most stable across
+                // session reloads since option text is what the user sees). Strips out
+                // any stray BrowserClick on the same selector that may have slipped
+                // through (content.js already skips clicks on SELECT, but defensive).
+                browserBridge.SelectChanged += (selector, description, selectedText, _selectedValue) =>
+                {
+                    dispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (!recordingService.IsRecording) return;
+
+                        // Defensive dedup — remove a BrowserClick on the same select that
+                        // was just recorded (in case the content.js SELECT-skip didn't fire,
+                        // or a synthetic test path queued one).
+                        var cutoff = DateTime.UtcNow.AddMilliseconds(-500);
+                        for (int i = actions.Count - 1; i >= 0 && i >= actions.Count - 4; i--)
+                        {
+                            var a = actions[i];
+                            if (a.ActionType == "BrowserClick" && a.Key == selector && a.RecordedAt >= cutoff)
+                                actions.RemoveAt(i);
+                        }
+
+                        int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
+                        actions.Add(new ActionItem
+                        {
+                            ActionType = "BrowserSelectOption",
+                            Key = selector,
+                            BrowserText = selectedText,
+                            Comment = description,
+                            // SelectMatchMode stays null = "text" default (most readable; option
+                            // text is what the user clicked on visually).
+                            Delay = delay,
+                            Timeout = 5000
+                        });
+                        HasUnsavedChanges = true;
+                        mainController.UpdateButtonStates();
+                    });
+                };
             }
 
             // Watch for actions collection changes

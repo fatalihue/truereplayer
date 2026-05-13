@@ -14,7 +14,7 @@ namespace TrueReplayer.Services
     public class BrowserBridgeService : IDisposable
     {
         private const string PipeName = "TrueReplayerBridge";
-        public const string ExpectedExtensionVersion = "1.4.0";
+        public const string ExpectedExtensionVersion = "1.4.1";
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
         private NamedPipeServerStream? _pipeServer;
         private StreamReader? _reader;
@@ -32,6 +32,10 @@ namespace TrueReplayer.Services
         public event Action<string, string, string?, string?, string?, bool>? ElementClicked; // selector, description, url, tagName, button, isInput
         // #10 — typingCaptured(selector, text, isAppend)
         public event Action<string, string, bool>? TypingCaptured;
+        // Fired when a native <select>'s value changed during recording. Carries the
+        // selector for the <select> and the picked option's text/value so the bridge
+        // can create a BrowserSelectOption action.
+        public event Action<string, string, string, string>? SelectChanged; // selector, description, selectedText, selectedValue
 
         public void Start()
         {
@@ -148,6 +152,16 @@ namespace TrueReplayer.Services
                             var typedText = root.TryGetProperty("text", out var ttEl) ? ttEl.GetString() ?? "" : "";
                             var typedAppend = root.TryGetProperty("isAppend", out var taEl) && taEl.GetBoolean();
                             TypingCaptured?.Invoke(typeSelector, typedText, typedAppend);
+                            break;
+
+                        case "browser:selectChanged":
+                            // Native <select> value changed during recording — auto-create
+                            // a BrowserSelectOption action (Phase 2 of the feature).
+                            var selSelector = root.GetProperty("selector").GetString() ?? "";
+                            var selDescription = root.TryGetProperty("description", out var sdEl) ? sdEl.GetString() ?? "" : "";
+                            var selText = root.TryGetProperty("selectedText", out var stEl) ? stEl.GetString() ?? "" : "";
+                            var selValue = root.TryGetProperty("selectedValue", out var svEl) ? svEl.GetString() ?? "" : "";
+                            SelectChanged?.Invoke(selSelector, selDescription, selText, selValue);
                             break;
 
                         case "browser:commandResult":

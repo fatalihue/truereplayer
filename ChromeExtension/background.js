@@ -343,6 +343,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       isAppend: !!msg.isAppend,
     });
     sendResponse({ ok: true });
+  } else if (msg.type === 'selectChanged' && isRecording) {
+    // Native <select> value changed during recording — bridge creates a
+    // BrowserSelectOption action targeting the select with the picked option's text.
+    sendToNative({
+      type: 'browser:selectChanged',
+      selector: msg.selector,
+      description: msg.description || '',
+      selectedValue: msg.selectedValue || '',
+      selectedText: msg.selectedText || '',
+      selectedIndex: msg.selectedIndex ?? 0,
+      url: sender.tab?.url || '',
+    });
+    sendResponse({ ok: true });
   } else if (msg.type === 'commandResult') {
     sendToNative({
       type: 'browser:commandResult',

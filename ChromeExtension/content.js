@@ -72,6 +72,11 @@
     const el = e.target;
     if (!el) return;
 
+    // Native <select> clicks just open the OS dropdown popup. The meaningful action
+    // is the value change, captured by onSelectChange below — recording the click
+    // here would produce a redundant (and broken at replay) BrowserClick.
+    if (el.tagName === 'SELECT') return;
+
     const selector = generateSelector?.(el);
     if (!selector) return;
 
@@ -212,6 +217,37 @@
     });
   }
 
+  // Captures changes to native <select> dropdowns. The companion to the SELECT skip
+  // in onClick: clicking the <select> opens the OS popup (not recordable), but the
+  // resulting value change is captured here as a BrowserSelectOption action.
+  function onSelectChange(e) {
+    if (!recording) return;
+    const el = e.target;
+    if (!el || el.tagName !== 'SELECT') return;
+
+    const selector = generateSelector?.(el);
+    if (!selector) return;
+
+    const opt = el.options[el.selectedIndex];
+    if (!opt) return;
+
+    chrome.runtime.sendMessage({
+      type: 'selectChanged',
+      selector,
+      description: getElementDescription?.(el) || '',
+      selectedValue: opt.value,
+      selectedText: (opt.text || '').trim(),
+      selectedIndex: el.selectedIndex,
+    });
+
+    // Visual feedback: flash green (matches onClick's affordance)
+    if (highlightEl) {
+      highlightEl.style.background = 'rgba(14, 122, 13, 0.25)';
+      highlightEl.style.borderColor = 'rgba(14, 122, 13, 0.8)';
+      setTimeout(removeHighlight, 300);
+    }
+  }
+
   function startRecording() {
     if (!isMainFrame) return; // Only record in main frame — iframes cause multiplied handlers
     recording = true;
@@ -219,6 +255,7 @@
     document.addEventListener('mouseout', onMouseOut, true);
     document.addEventListener('click', onClick, true);
     document.addEventListener('contextmenu', onContextMenu, true);
+    document.addEventListener('change', onSelectChange, true);
   }
 
   function stopRecording() {
@@ -229,6 +266,7 @@
     document.removeEventListener('mouseout', onMouseOut, true);
     document.removeEventListener('click', onClick, true);
     document.removeEventListener('contextmenu', onContextMenu, true);
+    document.removeEventListener('change', onSelectChange, true);
   }
 
   // ── Pick Element Mode (single-pick for edit panel) ──
