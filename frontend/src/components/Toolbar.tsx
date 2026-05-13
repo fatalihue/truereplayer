@@ -343,33 +343,64 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
 
             {showAddActions && (
               <div
-                className="absolute right-0 top-[calc(100%+4px)] min-w-[160px] p-1 bg-bg-card border border-border-default rounded-lg z-50"
+                className="absolute right-0 top-[calc(100%+4px)] min-w-[200px] p-1 bg-bg-card border border-border-default rounded-lg z-50"
                 style={{ animation: 'fade-in 0.12s ease-out', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
               >
-                <div className="px-2.5 py-1.5 text-[11px] font-semibold text-text-tertiary">
-                  Add action
-                </div>
+                {/* Two-section dropdown:
+                    - "Add action" for input emulation (clicks / keys / scrolls)
+                    - "Wait / Flow" for control-flow inserts (delays / image wait / sub-macro)
+                    Wait/Flow items used to be standalone toolbar buttons but they're low-
+                    frequency enough that pulling them into this dropdown declutters the
+                    toolbar without burying them. RunProfile is the one item that opens a
+                    dialog instead of inserting directly — handled in the onClick branch. */}
                 {([
-                  { type: 'LeftClick', label: 'Left Click', icon: Mouse },
-                  { type: 'RightClick', label: 'Right Click', icon: Mouse },
-                  { type: 'MiddleClick', label: 'Middle Click', icon: Mouse },
-                  { type: 'KeyPress', label: 'Key Press', icon: Keyboard },
-                  { type: 'ScrollUp', label: 'Scroll Up', icon: ArrowUp },
-                  { type: 'ScrollDown', label: 'Scroll Down', icon: ArrowDown },
-                ] as const).map(item => (
-                  <button
-                    key={item.type}
-                    onClick={() => {
-                      const sel = selectionRef.current;
-                      const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-                      send({ type: 'actions:insertAction', payload: { actionType: item.type, insertIndex } });
-                      setShowAddActions(false);
-                    }}
-                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
-                  >
-                    <item.icon size={12} className="shrink-0" />
-                    {item.label}
-                  </button>
+                  {
+                    label: 'Add action',
+                    items: [
+                      { type: 'LeftClick', label: 'Left Click', icon: Mouse },
+                      { type: 'RightClick', label: 'Right Click', icon: Mouse },
+                      { type: 'MiddleClick', label: 'Middle Click', icon: Mouse },
+                      { type: 'KeyPress', label: 'Key Press', icon: Keyboard },
+                      { type: 'ScrollUp', label: 'Scroll Up', icon: ArrowUp },
+                      { type: 'ScrollDown', label: 'Scroll Down', icon: ArrowDown },
+                    ],
+                  },
+                  {
+                    label: 'Wait / Flow',
+                    items: [
+                      { type: 'Pause', label: 'Pause', icon: Hourglass },
+                      { type: 'WaitImage', label: 'Wait for Image', icon: ScanSearch },
+                      { type: 'RunProfile', label: 'Run Profile', icon: Repeat2 },
+                    ],
+                  },
+                ] as const).map((group, gi) => (
+                  <div key={group.label}>
+                    {gi > 0 && <div className="h-px bg-border-subtle my-1" />}
+                    <div className="px-2.5 py-1.5 text-[11px] font-semibold text-text-tertiary">
+                      {group.label}
+                    </div>
+                    {group.items.map(item => (
+                      <button
+                        key={item.type}
+                        onClick={() => {
+                          setShowAddActions(false);
+                          // Run Profile needs the profile picker dialog; everything else
+                          // is a direct insert with the actionType as the payload.
+                          if (item.type === 'RunProfile') {
+                            setShowRunProfileDialog(true);
+                            return;
+                          }
+                          const sel = selectionRef.current;
+                          const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                          send({ type: 'actions:insertAction', payload: { actionType: item.type, insertIndex } });
+                        }}
+                        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
+                      >
+                        <item.icon size={12} className="shrink-0" />
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
                 ))}
               </div>
             )}
@@ -386,46 +417,9 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             <Type size={14} />
           </button>
 
-          {/* Wait for Image */}
-          <button
-            tabIndex={-1}
-            onClick={() => {
-              const sel = selectionRef.current;
-              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-              send({ type: 'actions:insertAction', payload: { actionType: 'WaitImage', insertIndex } });
-            }}
-            disabled={buttonStates.recordingActive || buttonStates.replayActive}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Insert Wait for Image action"
-          >
-            <ScanSearch size={14} />
-          </button>
-
-          {/* Run Profile (chain) */}
-          <button
-            tabIndex={-1}
-            onClick={() => setShowRunProfileDialog(true)}
-            disabled={buttonStates.recordingActive || buttonStates.replayActive}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Insert Run Profile action (calls another profile as a sub-macro)"
-          >
-            <Repeat2 size={14} />
-          </button>
-
-          {/* Pause */}
-          <button
-            tabIndex={-1}
-            onClick={() => {
-              const sel = selectionRef.current;
-              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-              send({ type: 'actions:insertAction', payload: { actionType: 'Pause', insertIndex } });
-            }}
-            disabled={buttonStates.recordingActive || buttonStates.replayActive}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Insert Pause action (delay between actions — not the same as pausing replay)"
-          >
-            <Hourglass size={14} />
-          </button>
+          {/* Wait for Image / Run Profile / Pause moved into the Add Action dropdown
+              under "Wait / Flow" — they're low-frequency inserts that didn't earn
+              their own real estate on the main toolbar. */}
 
           {/* Browser Actions */}
           <div className="relative" ref={browserMenuRef}>
