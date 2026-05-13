@@ -127,7 +127,9 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
       };
     case 'clicker:stats':
       // Set active = true on every stats push (covers the case where the user clicks Run
-      // and the very first stats batch arrives). Cleared by status:changed → 'ready' above.
+      // and the very first stats batch arrives). status:changed → 'replaying' (a new run
+      // starting) is the only transition that wipes clickerStats; 'ready' preserves the
+      // final count so the user can read the total after the run ends.
       return {
         ...state,
         clickerStats: { active: true, count: message.payload.count, elapsedMs: message.payload.elapsedMs },

@@ -67,6 +67,11 @@ namespace TrueReplayer.Services
             IsRecording = false;
             onButtonStateChanged?.Invoke("Recording", false);
             recorder.Stop();
+            // Clear the <select>-interaction suppression flag in case the user hit Stop
+            // mid-interaction. Without this the flag would persist up to 15 s before the
+            // safety timer cleared it — and any clicks recorded in the next session
+            // (or via a different code path) would be silently dropped.
+            InputHookManager.SuppressMouseRecording = false;
             onStatusChanged?.Invoke("ready");
         }
 
@@ -882,9 +887,13 @@ namespace TrueReplayer.Services
                         case "BrowserSelectOption":
                             if (_browserBridge != null)
                             {
-                                // Resolve {clipboard}, {date}, {time}, {datetime} in BrowserText without mutating original
+                                // Resolve {clipboard}, {date}, {time}, {datetime} in BrowserText without
+                                // mutating original. Applies to BrowserType AND BrowserSelectOption
+                                // (where a user might want to pick an option dynamically by clipboard
+                                // content, e.g. clipboard holds "Option 1" → select matches that).
                                 string? resolvedText = null;
-                                if (action.ActionType == "BrowserType" && !string.IsNullOrEmpty(action.BrowserText))
+                                if ((action.ActionType == "BrowserType" || action.ActionType == "BrowserSelectOption")
+                                    && !string.IsNullOrEmpty(action.BrowserText))
                                     resolvedText = await ResolveBrowserTextPlaceholders(action.BrowserText);
                                 await _browserBridge.ExecuteBrowserCommandAsync(action, token, action.Timeout > 0 ? action.Timeout : 5000, resolvedText);
                             }

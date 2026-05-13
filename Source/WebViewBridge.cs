@@ -314,8 +314,10 @@ namespace TrueReplayer
                 saved.CursorClickUseLoops = saved.EnableLoop;
                 saved.CursorClickIntervalMs = saved.LoopInterval;
                 saved.CursorClickUseInterval = saved.LoopIntervalEnabled;
-                // CursorClickHoldMs already defaults to 10ms (matches old hardcoded value).
-                // CursorClickPositionJitter stays 0 (new feature, off by default).
+                // CursorClickHoldMs, CursorClickDelayJitterPct, CursorClickPositionJitter, and
+                // CursorClickIntervalMs keep their AppSettings field defaults (10 ms / 10 % /
+                // 10 px / 200 ms) — these are sensible starting values that don't take effect
+                // until their companion switch is turned ON.
                 AppSettingsManager.Save(saved);
             }
             CursorClickDelay = saved.CursorClickDelayMs.ToString();
@@ -2257,6 +2259,8 @@ namespace TrueReplayer
                 var typeAppend = payload.TryGetProperty("typeAppend", out var taEl) && taEl.GetBoolean();
                 var typePaste = payload.TryGetProperty("typePaste", out var tpEl) && tpEl.GetBoolean();
                 int? typeDelay = payload.TryGetProperty("typeDelay", out var tdEl) && tdEl.ValueKind == JsonValueKind.Number ? tdEl.GetInt32() : (int?)null;
+                // BrowserSelectOption match mode — null falls back to "text" inside the extension.
+                var selectMatchMode = payload.TryGetProperty("selectMatchMode", out var smEl) ? smEl.GetString() : null;
 
                 // Resolve {clipboard[:mods]}, {date}, {time}, {datetime} the same way the regular
                 // replay path does — without this, Test Action would type the literal placeholder
@@ -2280,6 +2284,7 @@ namespace TrueReplayer
                     TypeAppend = typeAppend,
                     TypePaste = typePaste,
                     TypeDelay = typeDelay,
+                    SelectMatchMode = selectMatchMode,
                 };
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();

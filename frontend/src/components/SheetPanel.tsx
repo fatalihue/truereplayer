@@ -574,9 +574,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
         typeAppend,
         typePaste,
         typeDelay: tdParsed != null && !isNaN(tdParsed) ? tdParsed : null,
+        // BrowserSelectOption — forward the match mode so Test Action picks the same
+        // option the actual replay would. Without this, value/index modes silently fell
+        // back to text on the test path.
+        selectMatchMode: actionType === 'BrowserSelectOption' ? selectMatchMode : null,
       },
     });
-  }, [actionIndex, action, actionType, key, textMatch, textMode, timeout, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, send, clearTestTimeout]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, timeout, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, send, clearTestTimeout]);
 
   // WaitImage: capture screen now and report best confidence + matched rect against the reference
   // image. Doesn't run the replay — pure calibration helper.
