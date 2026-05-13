@@ -113,9 +113,10 @@ function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-14', suf
 // identity: purple header + subtle purple border so the user immediately sees "I'm
 // configuring Clicker, not the macro profile".
 function ClickerSection({
-  rate, rateJitter, useRateJitter, hold, positionJitter, usePositionJitter,
+  button, rate, rateJitter, useRateJitter, hold, positionJitter, usePositionJitter,
   loops, useLoops, interval, useInterval, onChange,
 }: {
+  button: string;
   rate: string;
   rateJitter: string;
   useRateJitter: boolean;
@@ -196,6 +197,21 @@ function ClickerSection({
               row puts the /s ↔ ms <select> in the toggle column so the column always lines
               up across rows. Hold has no toggle (0 ms is a valid value, no on/off needed)
               so we render a w-10 spacer to keep the input vertically aligned with the others. */}
+          {/* Mouse button picker — moved here from the ActionBar so the panel is the single
+              source of truth for "every Clicker setting". Left/Right/Middle, no on/off
+              switch (always applied). Spacer matches the toggle column on the other rows. */}
+          <SettingRow label="Button" tooltip="Mouse button to click">
+            <select
+              value={button}
+              onChange={(e) => onChange('cursorClickButton', e.target.value)}
+              className="w-[80px] h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid cursor-pointer"
+            >
+              <option value="Left">Left</option>
+              <option value="Right">Right</option>
+              <option value="Middle">Middle</option>
+            </select>
+            <div className="w-10" />
+          </SettingRow>
           <SettingRow label="Rate" tooltip="Click rate (clicks per second) vs (delay)">
             <SettingInput
               /* Key is based on (unit, localDelayMs) so the input remounts with the right
@@ -437,6 +453,7 @@ export function SettingsPanel() {
                 /* Remount on reset so the local /s ↔ ms unit toggle goes back to its
                    default ('ms'). Backend stays the source of truth for everything else. */
                 key={settingsResetEpoch}
+                button={settings.cursorClickButton}
                 rate={settings.cursorClickDelay}
                 rateJitter={settings.cursorClickDelayJitter}
                 useRateJitter={settings.cursorClickUseJitter}

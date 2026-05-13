@@ -94,19 +94,8 @@ export function ActionBar() {
           </button>
         </div>
 
-        {/* Cursor button picker (Clicker mode only) */}
-        {isClicker && (
-          <select
-            value={settings.cursorClickButton}
-            onChange={(e) => send({ type: 'settings:change', payload: { key: 'cursorClickButton', value: e.target.value } })}
-            className="h-8 px-2 text-[12px] font-mono bg-bg-input border border-[var(--color-clicker-border)] rounded text-[var(--color-clicker)] outline-none focus:border-[var(--color-clicker)] cursor-pointer"
-            data-tip="Mouse button to click"
-          >
-            <option value="Left">Left</option>
-            <option value="Right">Right</option>
-            <option value="Middle">Middle</option>
-          </select>
-        )}
+        {/* Button picker used to live here — moved to the ClickerSection in the side
+            panel so the panel is the single source of truth for every Clicker setting. */}
 
         {/* Divider */}
         <div className="w-px h-6 bg-border-subtle mx-1" />
