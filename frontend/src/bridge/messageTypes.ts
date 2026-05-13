@@ -191,6 +191,13 @@ export interface AppState {
     count: number;
     elapsedMs: number;
   };
+  /**
+   * Increments on every explicit "reset to defaults" action. Used as a `key` prop on
+   * settings panels that hold non-persistent local UI state (e.g. ClickerSection's
+   * /s ↔ ms unit toggle), forcing a remount so the local state goes back to its
+   * default. Cheap signal that doesn't bloat AppSettings with display-only prefs.
+   */
+  settingsResetEpoch: number;
 }
 
 // ── Messages C# → JS ──
@@ -213,6 +220,7 @@ export type IncomingMessage =
   | { type: 'replay:paused'; payload: { hotkey: string; timeoutMs: number } }
   | { type: 'replay:resumed'; payload: Record<string, never> }
   | { type: 'clicker:stats'; payload: { count: number; elapsedMs: number } }
+  | { type: 'settings:reset'; payload: Record<string, never> }
   | { type: 'update:available'; payload: { version: string; currentVersion: string; notes: string[] } }
   | { type: 'update:progress'; payload: { percent: number } }
   | { type: 'update:ready'; payload: Record<string, never> }

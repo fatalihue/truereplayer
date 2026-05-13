@@ -3752,6 +3752,11 @@ namespace TrueReplayer
             CurrentProfilePath = null;
             HasUnsavedChanges = false;
             PushSettingsLoaded();
+            // Distinct signal for "the user explicitly reset everything" — used by the
+            // Clicker panel to bounce its local UI state (e.g. the /s ↔ ms unit toggle)
+            // back to its default. Plain settings:loaded fires too often (every profile
+            // switch, mode toggle, etc.) so a dedicated message keeps the protocol clear.
+            SendMessage("settings:reset", new { });
             PushProfilesUpdate();
             PushToolbarUpdate();
             PushStatusBarUpdate();

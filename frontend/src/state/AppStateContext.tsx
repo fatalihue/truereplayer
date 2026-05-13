@@ -70,6 +70,7 @@ const initialState: AppState = {
   // during a Clicker run. The StatusBar renders "Clicked X · Y/s · MM:SS" from these.
   // `active` flips on first stats push and back off when the replay engine resets state.
   clickerStats: { active: false, count: 0, elapsedMs: 0 },
+  settingsResetEpoch: 0,
 };
 
 function appStateReducer(state: AppState, message: IncomingMessage): AppState {
@@ -125,6 +126,11 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
         ...state,
         clickerStats: { active: true, count: message.payload.count, elapsedMs: message.payload.elapsedMs },
       };
+    case 'settings:reset':
+      // Increments on every explicit reset. SettingsPanel uses this as a `key` on
+      // ClickerSection so its non-persistent UI state (e.g. /s ↔ ms unit toggle) goes
+      // back to default by way of a React remount.
+      return { ...state, settingsResetEpoch: state.settingsResetEpoch + 1 };
     default:
       return state;
   }

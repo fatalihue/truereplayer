@@ -131,7 +131,9 @@ function ClickerSection({
   const [isOpen, setIsOpen] = useState(true);
   // Unit toggle for the Rate row: 'ms' shows the raw delay; '/s' shows clicks per second
   // computed from delay (1000 / ms). Backend always stores ms — the toggle is display-only.
-  const [unit, setUnit] = useState<'ms' | 'cps'>('cps');
+  // Default is 'ms' (more conventional for typical users); reset bounces this back to 'ms'
+  // via a React remount triggered by settingsResetEpoch in SettingsPanel.
+  const [unit, setUnit] = useState<'ms' | 'cps'>('ms');
 
   const delayMs = Math.max(10, parseInt(rate, 10) || 100);
   const cpsFromMs = (ms: number) => {
@@ -172,7 +174,7 @@ function ClickerSection({
               row puts the /s ↔ ms <select> in the toggle column so the column always lines
               up across rows. Hold has no toggle (0 ms is a valid value, no on/off needed)
               so we render a w-10 spacer to keep the input vertically aligned with the others. */}
-          <SettingRow label="Rate" tooltip="Click rate. Toggle unit between /s (clicks per second) and ms (delay between clicks).">
+          <SettingRow label="Rate" tooltip="Click rate (clicks per second) vs (delay)">
             <SettingInput
               key={`rate-${unit}-${delayMs}`}
               value={displayValue}
@@ -189,25 +191,25 @@ function ClickerSection({
               <option value="ms">ms</option>
             </select>
           </SettingRow>
-          <SettingRow label="Jitter" tooltip="Random ±% applied to each click delay for natural timing (anti-detection)">
+          <SettingRow label="Jitter" tooltip="Random ±% applied to each click delay (anti-detection)">
             <SettingInput value={rateJitter} onCommit={(v) => onChange('cursorClickDelayJitter', v)} width="w-[80px]" />
             <Toggle isOn={useRateJitter} onChange={(v) => onChange('cursorClickUseJitter', v)} />
           </SettingRow>
-          <SettingRow label="Hold" tooltip="How long the button stays pressed between down and up (ms). 10 = normal click; 50-200 = slow click or drag.">
+          <SettingRow label="Hold" tooltip="How long button stays pressed (ms). 10 = normal click; 50-200 = slow click">
             <SettingInput value={hold} onCommit={(v) => onChange('cursorClickHold', v)} width="w-[80px]" />
             {/* Hold has no on/off — 0 ms is a valid value. Spacer keeps the input column
                 aligned with the rows that do have a toggle (matches Toggle's w-10 footprint). */}
             <div className="w-10" />
           </SettingRow>
-          <SettingRow label="Position" tooltip="Random ±px offset around the cursor for each click (anti-detection, human-like positioning)">
+          <SettingRow label="Position" tooltip="Random ±px offset around the cursor for each click (anti-detection)">
             <SettingInput value={positionJitter} onCommit={(v) => onChange('cursorClickPositionJitter', v)} width="w-[80px]" />
             <Toggle isOn={usePositionJitter} onChange={(v) => onChange('cursorClickUsePositionJitter', v)} />
           </SettingRow>
-          <SettingRow label="Loops" tooltip="Number of clicks per run. 0 = infinite (stop via the Replay hotkey)">
+          <SettingRow label="Loops" tooltip="Number of clicks per run. 0 = infinite">
             <SettingInput value={loops} onCommit={(v) => onChange('cursorClickLoops', v)} width="w-[80px]" />
             <Toggle isOn={useLoops} onChange={(v) => onChange('cursorClickUseLoops', v)} />
           </SettingRow>
-          <SettingRow label="Interval" tooltip="Pause between loop iterations (ms). Separate from Rate, which is the delay between individual clicks.">
+          <SettingRow label="Interval" tooltip="Pause between loop (ms)">
             <SettingInput value={interval} onCommit={(v) => onChange('cursorClickInterval', v)} width="w-[80px]" />
             <Toggle isOn={useInterval} onChange={(v) => onChange('cursorClickUseInterval', v)} />
           </SettingRow>
@@ -327,7 +329,7 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
 }
 
 export function SettingsPanel() {
-  const { settings } = useAppState();
+  const { settings, settingsResetEpoch } = useAppState();
   const { send, subscribe } = useBridge();
   const selectionRef = useSelectionRef();
   const [activeTab, setActiveTab] = useState<'profile' | 'global'>('profile');
@@ -387,6 +389,9 @@ export function SettingsPanel() {
                 Macro mode keeps the existing layout untouched. */}
             {settings.useCursorClick ? (
               <ClickerSection
+                /* Remount on reset so the local /s ↔ ms unit toggle goes back to its
+                   default ('ms'). Backend stays the source of truth for everything else. */
+                key={settingsResetEpoch}
                 rate={settings.cursorClickDelay}
                 rateJitter={settings.cursorClickDelayJitter}
                 useRateJitter={settings.cursorClickUseJitter}
