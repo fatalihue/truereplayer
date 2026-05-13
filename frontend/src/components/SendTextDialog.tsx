@@ -458,13 +458,18 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                         {group.items.map((item) => (
                           <React.Fragment key={item.var}>
                             {item.action === 'transform' ? (
+                              // Advanced is a toggle — when the popover is open it keeps an
+                              // accent-blue "active" state so the user can spot which chip
+                              // opened the panel. When inactive it visually matches its
+                              // siblings (neutral surface + gold hover) so the palette reads
+                              // as a single cohesive control.
                               <button
                                 type="button"
                                 onClick={() => setTransformOpen((v) => !v)}
                                 className={`flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono border rounded transition-colors ${
                                   transformOpen
                                     ? 'text-accent-light bg-accent-solid/15 border-accent-solid/50'
-                                    : 'text-accent-light bg-accent-solid/8 border-accent-solid/30 hover:bg-accent-solid/15'
+                                    : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40'
                                 }`}
                                 title="Build a {clipboard:...} transform"
                               >
@@ -474,9 +479,6 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                             ) : (
                               // Gold hover (#FFC107) mirrors the BrowserType chip palette in
                               // SheetPanel so users see the same affordance across both editors.
-                              // The Advanced/transform button above keeps the accent-blue style
-                              // because it's a toggle (active when the popover is open), not a
-                              // one-shot insert — different semantics, different hover.
                               <button
                                 type="button"
                                 onClick={() => handleVarInsert(item.var)}
