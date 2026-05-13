@@ -400,6 +400,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                   { type: 'BrowserClick', label: 'Left Click' },
                   { type: 'BrowserRightClick', label: 'Right Click' },
                   { type: 'BrowserType', label: 'Input Text' },
+                  { type: 'BrowserSelectOption', label: 'Select Option' },
                   { type: 'BrowserWaitElement', label: 'Wait' },
                   { type: 'BrowserNavigate', label: 'Navigate' },
                 ] as const).map((item) => (

@@ -14,7 +14,7 @@ namespace TrueReplayer.Services
     public class BrowserBridgeService : IDisposable
     {
         private const string PipeName = "TrueReplayerBridge";
-        public const string ExpectedExtensionVersion = "1.3.1";
+        public const string ExpectedExtensionVersion = "1.4.0";
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
         private NamedPipeServerStream? _pipeServer;
         private StreamReader? _reader;
@@ -320,12 +320,15 @@ namespace TrueReplayer.Services
                 case "BrowserNavigate":
                     command = "navigate";
                     break;
+                case "BrowserSelectOption":
+                    command = "selectOption";
+                    break;
                 default:
                     _pendingCommands.TryRemove(commandId, out _);
                     throw new ArgumentException($"Unknown browser action type: {action.ActionType}");
             }
 
-            var timeout = (action.ActionType == "BrowserWaitElement" || action.ActionType == "BrowserClick" || action.ActionType == "BrowserRightClick") && action.Timeout > 0
+            var timeout = (action.ActionType == "BrowserWaitElement" || action.ActionType == "BrowserClick" || action.ActionType == "BrowserRightClick" || action.ActionType == "BrowserSelectOption") && action.Timeout > 0
                 ? action.Timeout
                 : timeoutMs;
 
@@ -348,7 +351,9 @@ namespace TrueReplayer.Services
                 postNavigateSelector = action.PostNavigateSelector,
                 typeAppend = action.TypeAppend,
                 typePaste = action.TypePaste,
-                typeDelay = action.TypeDelay
+                typeDelay = action.TypeDelay,
+                // BrowserSelectOption (extension bump) — defaults to "text" when null.
+                selectMatchMode = action.SelectMatchMode ?? "text"
             });
 
             using var timeoutCts = new CancellationTokenSource(pipeTimeout);
@@ -400,6 +405,7 @@ namespace TrueReplayer.Services
                 "type" => $"Input Text timed out after {seconds}s. Target field not found or not visible.",
                 "waitElement" => $"Wait timed out after {seconds}s. Element not found on the page.",
                 "navigate" => $"Page didn't finish loading after {seconds}s.",
+                "selectOption" => $"Select Option timed out after {seconds}s. The <select> element wasn't found.",
                 _ => $"Browser action timed out after {seconds}s."
             };
         }
@@ -413,6 +419,7 @@ namespace TrueReplayer.Services
                 "type" => "Refine the CSS selector or pick the element with the crosshair.",
                 "waitElement" => "Use the Text Match field or increase the timeout.",
                 "navigate" => "Check the URL and your internet connection.",
+                "selectOption" => "Verify the CSS selector points to a native <select> and that the option's text/value matches exactly.",
                 _ => "Make sure the page is fully loaded."
             };
         }

@@ -814,6 +814,7 @@
       command, commandId, selector, text, url, timeout = 30000,
       waitMode, urlWaitPattern, postNavigateSelector,
       typeAppend, typePaste, typeDelay,
+      selectMatchMode,
     } = msg;
 
     let actionEl = null;
@@ -1090,6 +1091,57 @@
             window.addEventListener('popstate', check);
             const intv = setInterval(check, 200);
           });
+        }
+
+        case 'selectOption': {
+          // Native <select> dropdowns can't be opened programmatically (browser
+          // blocks .click()), and their <option> children fail visibility checks.
+          // The standard automation pattern is to set `.value` directly and
+          // dispatch `change` / `input` events. This command exposes that path.
+          const el = await waitForElement(selector, timeout, 'appears');
+          actionEl = el;
+
+          if (el.tagName !== 'SELECT') {
+            throw mkError('NOT_A_SELECT',
+              `Element ${selector} isn't a native <select> (tagName=${el.tagName}).`,
+              'Use BrowserClick for div-based dropdowns (React-Select, ant.d, Select2, etc.).');
+          }
+
+          const mode = selectMatchMode || 'text';
+          const target = (text || '').trim();
+          let option = null;
+          if (mode === 'value') {
+            option = Array.from(el.options).find(o => o.value === target);
+          } else if (mode === 'index') {
+            const i = parseInt(target, 10);
+            if (!isNaN(i) && i >= 0 && i < el.options.length) option = el.options[i];
+          } else {
+            // 'text' or unknown → default to text match (trimmed both sides)
+            option = Array.from(el.options).find(o => o.text.trim() === target);
+          }
+
+          if (!option) {
+            throw mkError('OPTION_NOT_FOUND',
+              `No <option> matched "${target}" (mode=${mode}).`,
+              'Check Match Mode and the exact option label/value.');
+          }
+          if (option.disabled) {
+            throw mkError('OPTION_DISABLED',
+              `The matched <option> "${option.text.trim()}" is disabled.`,
+              'Wait for the option to become enabled, or pick a different one.');
+          }
+
+          el.value = option.value;
+          // Dispatch both change and input — different libs / frameworks listen to one or the other.
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          flashHighlight(el, 'success', 200);
+
+          return {
+            success: true,
+            selectedValue: option.value,
+            selectedText: option.text.trim(),
+          };
         }
 
         default:

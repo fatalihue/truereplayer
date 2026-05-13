@@ -447,7 +447,9 @@ namespace TrueReplayer
                 postNavigateSelector = a.PostNavigateSelector,
                 typeAppend = a.TypeAppend,
                 typePaste = a.TypePaste,
-                typeDelay = a.TypeDelay
+                typeDelay = a.TypeDelay,
+                // BrowserSelectOption — match mode for choosing the <option>
+                selectMatchMode = a.SelectMatchMode
             }).ToArray();
 
             SendMessage("actions:updated", new { actions = actionsList });
@@ -786,7 +788,8 @@ namespace TrueReplayer
                     postNavigateSelector = a.PostNavigateSelector,
                     typeAppend = a.TypeAppend,
                     typePaste = a.TypePaste,
-                    typeDelay = a.TypeDelay
+                    typeDelay = a.TypeDelay,
+                    selectMatchMode = a.SelectMatchMode
                 }).ToArray(),
                 highlightedActionIndex = (int?)null,
                 profiles = profileController.ProfileEntries.Select(p => new
@@ -1214,6 +1217,10 @@ namespace TrueReplayer
                 case "typeDelay":
                     if (string.IsNullOrEmpty(value)) action.TypeDelay = null;
                     else if (int.TryParse(value, out int td)) action.TypeDelay = Math.Max(0, td);
+                    break;
+                case "selectMatchMode":
+                    // Default "text" stays null on disk; only "value" or "index" are persisted explicitly.
+                    action.SelectMatchMode = (string.IsNullOrEmpty(value) || value == "text") ? null : value;
                     break;
                 case "waitImageOnTimeout":
                     // Only "Continue" needs to be persisted; "StopReplay" is the default and stays

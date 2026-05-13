@@ -723,6 +723,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         : action.actionType === 'BrowserClick' ? 'Left Click'
                         : action.actionType === 'BrowserRightClick' ? 'Right Click'
                         : action.actionType === 'BrowserType' ? 'Input Text'
+                        : action.actionType === 'BrowserSelectOption' ? 'Select Option'
                         : action.actionType === 'BrowserWaitElement' ? 'Wait'
                         : action.actionType === 'BrowserNavigate' ? 'Navigate'
                         : action.actionType === 'RunProfile' ? 'Run Profile'

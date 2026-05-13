@@ -75,6 +75,12 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public int? TypeDelay { get; set; }
 
+        // BrowserSelectOption: how to match the option in the native <select>.
+        // "text" (default) = match by option.text, "value" = match by option.value, "index" = 0-based index.
+        // null = use the default "text" mode (saves space on disk for the common case).
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? SelectMatchMode { get; set; }
+
         // When true, the action is retained in the list but skipped during replay.
         // Persisted so users can load a profile with actions pre-disabled.
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
@@ -142,6 +148,7 @@ namespace TrueReplayer.Models
         {
             "KeyDown", "KeyUp", "ScrollUp", "ScrollDown", "SendText", "WaitImage",
             "BrowserClick", "BrowserRightClick", "BrowserType", "BrowserWaitElement", "BrowserNavigate",
+            "BrowserSelectOption",
             "RunProfile", "Pause"
         };
 

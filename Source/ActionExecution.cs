@@ -879,6 +879,7 @@ namespace TrueReplayer.Services
                         case "BrowserType":
                         case "BrowserWaitElement":
                         case "BrowserNavigate":
+                        case "BrowserSelectOption":
                             if (_browserBridge != null)
                             {
                                 // Resolve {clipboard}, {date}, {time}, {datetime} in BrowserText without mutating original

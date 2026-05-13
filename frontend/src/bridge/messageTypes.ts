@@ -27,6 +27,9 @@ export interface ActionItem {
   typeAppend?: boolean;
   typePaste?: boolean;
   typeDelay?: number | null;
+  // BrowserSelectOption: how to match the option in a native <select>.
+  // null/undefined = "text" mode (default). Other values: "value" | "index".
+  selectMatchMode?: string | null;
   // WaitImage extras (all default-safe). null/undefined = current behaviour preserved.
   waitImageOnTimeout?: string | null;
   waitImageInvert?: boolean;

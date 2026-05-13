@@ -38,7 +38,7 @@ const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
   ],
 };
 
-const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'Pause']);
+const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'Pause']);
 
 // #1 — Text matching modes mapped to selector prefixes
 type TextMode = 'exact' | 'contains' | 'icontains' | 'regex';
@@ -117,6 +117,9 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const [typeAppend, setTypeAppend] = useState(false);
   const [typePaste, setTypePaste] = useState(false);
   const [typeDelay, setTypeDelay] = useState('');
+  // BrowserSelectOption — how to match the <option> inside the <select>. Default 'text'.
+  // Stored as null on disk when 'text' (the default); 'value' or 'index' otherwise.
+  const [selectMatchMode, setSelectMatchMode] = useState<'text' | 'value' | 'index'>('text');
 
   // WaitImage extras (timeout branching, disappear toggle, click-on-match, ROI).
   // Stored locally during edit; persisted via actions:edit on Save. Default "StopReplay"
@@ -257,6 +260,12 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       setTypeAppend(action.typeAppend || false);
       setTypePaste(action.typePaste || false);
       setTypeDelay(action.typeDelay != null ? String(action.typeDelay) : '');
+      // null/undefined/'text' all collapse to the default 'text' display.
+      setSelectMatchMode(
+        action.selectMatchMode === 'value' ? 'value'
+          : action.selectMatchMode === 'index' ? 'index'
+          : 'text'
+      );
       // Default "StopReplay" handles null / empty / legacy values gracefully.
       setWaitImageOnTimeout(action.waitImageOnTimeout === 'Continue' ? 'Continue' : 'StopReplay');
       setWaitImageInvert(action.waitImageInvert || false);
@@ -403,8 +412,26 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       }
     }
 
+    // BrowserSelectOption — match mode + browserText hold the option label/value/index.
+    // browserText is already saved by the BrowserType branch above when actionType matches —
+    // here we just persist the selectMatchMode separately. 'text' is the default and stays
+    // null on disk; the backend rewrites it to null when receiving 'text' or empty.
+    if (actionType === 'BrowserSelectOption') {
+      // Persist BrowserText for the select target too (BrowserType-branch only covers BrowserType).
+      if (browserText !== (action.browserText || '')) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'browserText', value: browserText } });
+      }
+      // Persist the match mode if it differs from what's on disk.
+      const currentMode = action.selectMatchMode === 'value' ? 'value'
+        : action.selectMatchMode === 'index' ? 'index'
+        : 'text';
+      if (selectMatchMode !== currentMode) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'selectMatchMode', value: selectMatchMode } });
+      }
+    }
+
     onClose();
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, send, onClose]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
@@ -661,6 +688,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const isBrowserType = actionType === 'BrowserType';
   const isBrowserNavigate = actionType === 'BrowserNavigate';
   const isBrowserWait = actionType === 'BrowserWaitElement';
+  const isBrowserSelect = actionType === 'BrowserSelectOption';
   const showKey = isKeyAction || isSendText;
   const showCoords = !noCoordTypes.has(actionType);
 
@@ -721,6 +749,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   : actionType === 'BrowserType' ? 'Input Text'
                   : actionType === 'BrowserWaitElement' ? 'Wait'
                   : actionType === 'BrowserNavigate' ? 'Navigate'
+                  : actionType === 'BrowserSelectOption' ? 'Select Option'
                   : isClickHalf
                     ? `${(clickHalfBase ?? '').replace('Click', '')} Click`
                     : actionType}
@@ -1181,8 +1210,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               )}
             </div>
 
-            {/* #1 — Text Match — alternative to CSS selector for Click/RightClick/Wait */}
-            {!isBrowserNavigate && !isBrowserType && (
+            {/* #1 — Text Match — alternative to CSS selector for Click/RightClick/Wait.
+                Hidden for BrowserType, BrowserNavigate, and BrowserSelectOption (which uses
+                its own "OPTION" field below for the value to match inside the <select>). */}
+            {!isBrowserNavigate && !isBrowserType && !isBrowserSelect && (
             <div>
               <label
                 className="block text-[11px] font-semibold text-text-tertiary mb-1.5"
@@ -1347,6 +1378,40 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             </div>
             )}
 
+            {/* Select Option — for BrowserSelectOption only. The OPTION field reuses the
+                shared `browserText` state (saved as action.BrowserText on disk); the MATCH BY
+                dropdown picks how the extension interprets that value when looking for an
+                option inside the <select>. */}
+            {isBrowserSelect && (
+            <>
+              <div>
+                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">OPTION</label>
+                <input
+                  type="text"
+                  value={browserText}
+                  onChange={(e) => setBrowserText(e.target.value)}
+                  className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                  placeholder={selectMatchMode === 'index' ? '0' : selectMatchMode === 'value' ? 'option-value' : 'Option label'}
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">MATCH BY</label>
+                <select
+                  value={selectMatchMode}
+                  onChange={(e) => setSelectMatchMode(e.target.value as 'text' | 'value' | 'index')}
+                  className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                >
+                  <option value="text">Text (visible label, default)</option>
+                  <option value="value">Value (option's value attribute)</option>
+                  <option value="index">Index (0-based)</option>
+                </select>
+                <div className="text-[10px] text-text-tertiary mt-1 leading-tight">
+                  Only works on native &lt;select&gt; elements. For React-Select / Select2 use BrowserClick.
+                </div>
+              </div>
+            </>
+            )}
+
             {/* #6 — WaitElement mode */}
             {isBrowserWait && (
             <div>
@@ -1386,7 +1451,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 five command types (ActionExecution.cs in the Browser switch arm), so the
                 editor should expose it consistently. Previously BrowserType was the only
                 one hidden, silently locking it to the 5 s default. */}
-            {(isBrowserWait || actionType === 'BrowserClick' || actionType === 'BrowserRightClick' || isBrowserType || isBrowserNavigate) && (
+            {(isBrowserWait || actionType === 'BrowserClick' || actionType === 'BrowserRightClick' || isBrowserType || isBrowserNavigate || isBrowserSelect) && (
             <div className="w-1/2">
               <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
               <input
