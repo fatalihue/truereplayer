@@ -113,6 +113,13 @@ namespace TrueReplayer
         /// Used during capture mode to capture coordinates without performing the actual click.
         public static bool SuppressMouseClick { get; set; } = false;
 
+        /// When true, mouse click events are NOT recorded (but still pass through to the target
+        /// app). Bridge flips this on while a native <select> dropdown is being interacted with,
+        /// so the OS-level click pairs (open popup + pick option) don't end up in the macro grid
+        /// alongside the BrowserSelectOption action that already captures the semantic event.
+        /// Cleared on change / blur / 15 s safety timeout — see WebViewBridge SelectInteraction*.
+        public static bool SuppressMouseRecording { get; set; } = false;
+
         public static void Start()
         {
             if (_mouseHookId == IntPtr.Zero)
@@ -501,8 +508,13 @@ namespace TrueReplayer
 
                     // Snapshot suppress state before invoking event (callback may clear the flag)
                     bool shouldSuppress = SuppressMouseClick && button != "Scroll";
+                    // Suppress recording during a native <select> interaction so the open
+                    // popup + pick option clicks don't bleed into the macro alongside the
+                    // BrowserSelectOption action that semantically captures the change.
+                    bool skipRecording = SuppressMouseRecording && button != "Scroll";
 
-                    OnMouseEvent?.Invoke(button, hookStruct.pt.x, hookStruct.pt.y, isDown, scrollDelta);
+                    if (!skipRecording)
+                        OnMouseEvent?.Invoke(button, hookStruct.pt.x, hookStruct.pt.y, isDown, scrollDelta);
 
                     // In capture mode, swallow mouse clicks so they don't reach the target app
                     if (shouldSuppress)

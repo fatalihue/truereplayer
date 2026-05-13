@@ -217,6 +217,26 @@
     });
   }
 
+  // mousedown on a native <select> — tells the backend that an interaction is starting.
+  // Backend flips a flag that makes the OS-level mouse hook skip recording native clicks
+  // until either the matching change fires (option picked) or the <select> blurs (cancel)
+  // or the 15-second safety timeout elapses. Without this, slow users (>3 s between open
+  // and pick) would leave orphan click pairs in the action grid.
+  function onSelectMouseDown(e) {
+    if (!recording) return;
+    if (!e.target || e.target.tagName !== 'SELECT') return;
+    chrome.runtime.sendMessage({ type: 'selectInteractionStart' });
+  }
+
+  // blur on a <select> — covers the "user opened then cancelled" path (Esc or click
+  // outside the popup without picking). Without this, the suppress flag would only clear
+  // via the safety timeout, eating any unrelated clicks the user makes immediately after.
+  function onSelectBlur(e) {
+    if (!recording) return;
+    if (!e.target || e.target.tagName !== 'SELECT') return;
+    chrome.runtime.sendMessage({ type: 'selectInteractionEnd' });
+  }
+
   // Captures changes to native <select> dropdowns. The companion to the SELECT skip
   // in onClick: clicking the <select> opens the OS popup (not recordable), but the
   // resulting value change is captured here as a BrowserSelectOption action.
@@ -256,6 +276,8 @@
     document.addEventListener('click', onClick, true);
     document.addEventListener('contextmenu', onContextMenu, true);
     document.addEventListener('change', onSelectChange, true);
+    document.addEventListener('mousedown', onSelectMouseDown, true);
+    document.addEventListener('blur', onSelectBlur, true);
   }
 
   function stopRecording() {
@@ -267,6 +289,8 @@
     document.removeEventListener('click', onClick, true);
     document.removeEventListener('contextmenu', onContextMenu, true);
     document.removeEventListener('change', onSelectChange, true);
+    document.removeEventListener('mousedown', onSelectMouseDown, true);
+    document.removeEventListener('blur', onSelectBlur, true);
   }
 
   // ── Pick Element Mode (single-pick for edit panel) ──

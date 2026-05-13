@@ -343,6 +343,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       isAppend: !!msg.isAppend,
     });
     sendResponse({ ok: true });
+  } else if (msg.type === 'selectInteractionStart' && isRecording) {
+    // Tells the bridge to suppress native click recording until end / change / timeout.
+    sendToNative({ type: 'browser:selectInteractionStart' });
+    sendResponse({ ok: true });
+  } else if (msg.type === 'selectInteractionEnd' && isRecording) {
+    // <select> blurred without firing change — user cancelled the interaction.
+    sendToNative({ type: 'browser:selectInteractionEnd' });
+    sendResponse({ ok: true });
   } else if (msg.type === 'selectChanged' && isRecording) {
     // Native <select> value changed during recording — bridge creates a
     // BrowserSelectOption action targeting the select with the picked option's text.

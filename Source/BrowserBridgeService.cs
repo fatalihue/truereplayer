@@ -14,7 +14,7 @@ namespace TrueReplayer.Services
     public class BrowserBridgeService : IDisposable
     {
         private const string PipeName = "TrueReplayerBridge";
-        public const string ExpectedExtensionVersion = "1.4.1";
+        public const string ExpectedExtensionVersion = "1.4.2";
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
         private NamedPipeServerStream? _pipeServer;
         private StreamReader? _reader;
@@ -36,6 +36,12 @@ namespace TrueReplayer.Services
         // selector for the <select> and the picked option's text/value so the bridge
         // can create a BrowserSelectOption action.
         public event Action<string, string, string, string>? SelectChanged; // selector, description, selectedText, selectedValue
+        // Bracket events around a native <select> interaction: backend uses them to gate
+        // the OS-level mouse hook so clicks during the dropdown's open/pick lifecycle
+        // never reach the recorder. Started by mousedown on a <select>, ended by either
+        // blur or the matching SelectChanged.
+        public event Action? SelectInteractionStarted;
+        public event Action? SelectInteractionEnded;
 
         public void Start()
         {
@@ -152,6 +158,14 @@ namespace TrueReplayer.Services
                             var typedText = root.TryGetProperty("text", out var ttEl) ? ttEl.GetString() ?? "" : "";
                             var typedAppend = root.TryGetProperty("isAppend", out var taEl) && taEl.GetBoolean();
                             TypingCaptured?.Invoke(typeSelector, typedText, typedAppend);
+                            break;
+
+                        case "browser:selectInteractionStart":
+                            SelectInteractionStarted?.Invoke();
+                            break;
+
+                        case "browser:selectInteractionEnd":
+                            SelectInteractionEnded?.Invoke();
                             break;
 
                         case "browser:selectChanged":
