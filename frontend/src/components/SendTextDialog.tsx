@@ -472,10 +472,15 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                 {item.label}
                               </button>
                             ) : (
+                              // Gold hover (#FFC107) mirrors the BrowserType chip palette in
+                              // SheetPanel so users see the same affordance across both editors.
+                              // The Advanced/transform button above keeps the accent-blue style
+                              // because it's a toggle (active when the popover is open), not a
+                              // one-shot insert — different semantics, different hover.
                               <button
                                 type="button"
                                 onClick={() => handleVarInsert(item.var)}
-                                className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-accent-light hover:border-accent-solid/30 transition-colors"
+                                className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
                                 title={item.var}
                               >
                                 {item.label}

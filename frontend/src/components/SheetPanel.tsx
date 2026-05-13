@@ -1321,7 +1321,9 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               {/* Data placeholders — replaced with values before typing. Names match the
                   SendText dialog's chip palette so users don't have to learn two vocabularies.
                   insertText() drops the token at the cursor inside the Lexical editor; the
-                  TokenAutoTransformPlugin immediately converts it into a chip. */}
+                  TokenAutoTransformPlugin immediately converts it into a chip. Gold hover
+                  is shared across every chip button (data + action + arrows) so the palette
+                  reads as one cohesive control instead of three different categories. */}
               <div className="flex flex-wrap gap-1 mt-2">
                 {[
                   { var: '{Clipboard}', label: 'Clipboard' },
@@ -1333,7 +1335,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     key={item.var}
                     type="button"
                     onClick={() => browserTextEditorRef.current?.insertText(item.var)}
-                    className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-accent-light hover:border-accent-solid/30 transition-colors"
+                    className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
                     title={`Inserts the ${item.label.toLowerCase()} value at this position`}
                   >
                     {item.label}
