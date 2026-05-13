@@ -1361,11 +1361,32 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 <option value="enabled">Enabled</option>
                 <option value="text-match">Text matches (uses Text Match field)</option>
               </select>
+              {/* Foot-gun warning: text-match mode needs an actual Text Match string.
+                  Without it, the effective selector falls back to the raw CSS key
+                  (handleSave / handleTestAction both call buildTextSelector only when
+                  textMatch is non-empty) — extension then receives waitMode='text-match'
+                  on a plain selector and the action times out silently. */}
+              {waitMode === 'text-match' && !textMatch.trim() && (
+                <div
+                  className="mt-1.5 flex items-start gap-2 px-3 py-2 rounded border text-[11px]"
+                  style={{
+                    color: 'var(--color-delay)',
+                    borderColor: 'color-mix(in srgb, var(--color-delay) 35%, transparent)',
+                    backgroundColor: 'color-mix(in srgb, var(--color-delay) 10%, transparent)',
+                  }}
+                >
+                  <ShieldAlert size={13} className="shrink-0 mt-px" />
+                  <span>Text-match mode needs a value in the Text Match field. Otherwise this Wait will time out.</span>
+                </div>
+              )}
             </div>
             )}
 
-            {/* Timeout — for BrowserClick / RightClick / Wait / Navigate */}
-            {(isBrowserWait || actionType === 'BrowserClick' || actionType === 'BrowserRightClick' || isBrowserNavigate) && (
+            {/* Timeout — every browser action. The engine reads action.Timeout for all
+                five command types (ActionExecution.cs in the Browser switch arm), so the
+                editor should expose it consistently. Previously BrowserType was the only
+                one hidden, silently locking it to the 5 s default. */}
+            {(isBrowserWait || actionType === 'BrowserClick' || actionType === 'BrowserRightClick' || isBrowserType || isBrowserNavigate) && (
             <div className="w-1/2">
               <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
               <input

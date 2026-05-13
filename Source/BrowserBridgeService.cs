@@ -409,7 +409,8 @@ namespace TrueReplayer.Services
             return command switch
             {
                 "click" or "rightClick" => "Use the Text Match field to match by visible text, or pick the element with the crosshair.",
-                "type" => "Use the Text Match field or pick the element with the crosshair.",
+                // BrowserType has no Text Match field in the editor — only CSS selector + crosshair.
+                "type" => "Refine the CSS selector or pick the element with the crosshair.",
                 "waitElement" => "Use the Text Match field or increase the timeout.",
                 "navigate" => "Check the URL and your internet connection.",
                 _ => "Make sure the page is fully loaded."

@@ -765,10 +765,28 @@ namespace TrueReplayer
                     imageBase64 = a.ActionType == "WaitImage" && !string.IsNullOrEmpty(a.ImagePath)
                         ? ImageStorageService.ReadAsBase64(stateInitProfileName, a.ImagePath) ?? ""
                         : "",
+                    // WaitImage extras — must match PushActionsUpdate so the editor restores
+                    // the right state on cold start. Without these, the editor saw undefined
+                    // for these fields and silently wiped them on the next save.
+                    waitImageOnTimeout = a.WaitImageOnTimeout,
+                    waitImageInvert = a.WaitImageInvert,
+                    waitImageClickOnMatch = a.WaitImageClickOnMatch,
+                    waitImageSearchX = a.WaitImageSearchX,
+                    waitImageSearchY = a.WaitImageSearchY,
+                    waitImageSearchW = a.WaitImageSearchW,
+                    waitImageSearchH = a.WaitImageSearchH,
                     browserText = a.BrowserText ?? "",
                     newTab = a.NewTab,
                     isSkipped = a.IsSkipped,
-                    repeatCount = a.RepeatCount
+                    repeatCount = a.RepeatCount,
+                    // Browser action extras (Wait mode, Navigate post-checks, Type options) —
+                    // same fix as the WaitImage extras above.
+                    waitMode = a.WaitMode,
+                    urlWaitPattern = a.UrlWaitPattern,
+                    postNavigateSelector = a.PostNavigateSelector,
+                    typeAppend = a.TypeAppend,
+                    typePaste = a.TypePaste,
+                    typeDelay = a.TypeDelay
                 }).ToArray(),
                 highlightedActionIndex = (int?)null,
                 profiles = profileController.ProfileEntries.Select(p => new

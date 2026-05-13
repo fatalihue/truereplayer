@@ -754,7 +754,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             ? 'cursor-text hover:text-accent-light'
                             : ''
                         }`}
-                        title={action.actionType === 'SendText' ? action.key : action.actionType === 'RunProfile' ? `Run profile "${action.key}"` : undefined}
+                        title={
+                          action.actionType === 'SendText' ? action.key
+                          : action.actionType === 'RunProfile' ? `Run profile "${action.key}"`
+                          // Browser actions can have long CSS selectors / URLs that
+                          // get truncated at 92 px. Exposing the full string on hover
+                          // saves the user from opening the editor just to read it.
+                          : action.actionType.startsWith('Browser') ? action.key
+                          : undefined
+                        }
                         onDoubleClick={() => {
                           if (action.actionType === 'SendText') {
                             setSendTextEdit({ index: idx, text: action.key });
