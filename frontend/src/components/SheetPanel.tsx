@@ -6,7 +6,7 @@ import { useAppState } from '../state/AppStateContext';
 import type { SelectorAlternative, BrowserTestResult } from '../bridge/messageTypes';
 import { Checkbox } from './Checkbox';
 import { ImageCropper } from './ImageCropper';
-import { SendTextPreview } from './SendTextPreview';
+import { LexicalTokenEditor, type LexicalEditorHandle } from './lexical/LexicalTokenEditor';
 import { getDisplayKey } from '../utils/displayUtils';
 
 interface SheetPanelProps {
@@ -106,6 +106,9 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const [timeout, setTimeout_] = useState('');
   const [confidence, setConfidence] = useState('');
   const [browserText, setBrowserText] = useState('');
+  // Imperative handle to the Lexical-based BrowserType editor — used by the chip
+  // buttons to insertText at the current cursor position instead of always appending.
+  const browserTextEditorRef = useRef<LexicalEditorHandle | null>(null);
   const [textMatch, setTextMatch] = useState('');
   const [textMode, setTextMode] = useState<TextMode>('exact');
   const [newTab, setNewTab] = useState(false);
@@ -1296,30 +1299,29 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             </>
             )}
 
-            {/* Text — only for BrowserType */}
+            {/* Text — only for BrowserType. Uses the same Lexical-based editor as the
+                SendText dialog so tokens (`{Enter}`, `{Clipboard}`, etc.) render as
+                inline chips directly inside the input — no separate preview row needed.
+                Chip buttons below insert at the cursor via the imperative handle. */}
             {isBrowserType && (
             <div>
               <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TEXT TO TYPE</label>
-              <input
-                type="text"
-                value={browserText}
-                onChange={(e) => setBrowserText(e.target.value)}
-                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-                placeholder="Hello{Enter}"
-              />
-              {/* Live chip preview — same SendTextPreview the grid uses so the user sees
-                  the chipified version of what they're typing without leaving the editor.
-                  Read-only: editing happens in the input above; this only renders. */}
-              {browserText && (
-                <div
-                  className="mt-1.5 px-2 py-1 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary leading-relaxed break-all"
-                  title="Live preview of the chipified text"
-                >
-                  <SendTextPreview text={browserText} />
-                </div>
-              )}
+              <div className="min-h-8 bg-bg-input border border-border-default rounded focus-within:border-accent-solid text-ui font-mono">
+                <LexicalTokenEditor
+                  /* Key by actionIndex so opening a different action re-initialises the
+                     editor with that action's text. Without this the Lexical state
+                     would persist across action switches and the displayed content
+                     wouldn't match the action's browserText. */
+                  key={actionIndex ?? -1}
+                  initialText={browserText}
+                  onChange={setBrowserText}
+                  apiRef={browserTextEditorRef}
+                />
+              </div>
               {/* Data placeholders — replaced with values before typing. Names match the
-                  SendText dialog's chip palette so users don't have to learn two vocabularies. */}
+                  SendText dialog's chip palette so users don't have to learn two vocabularies.
+                  insertText() drops the token at the cursor inside the Lexical editor; the
+                  TokenAutoTransformPlugin immediately converts it into a chip. */}
               <div className="flex flex-wrap gap-1 mt-2">
                 {[
                   { var: '{Clipboard}', label: 'Clipboard' },
@@ -1330,7 +1332,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   <button
                     key={item.var}
                     type="button"
-                    onClick={() => setBrowserText(prev => prev + item.var)}
+                    onClick={() => browserTextEditorRef.current?.insertText(item.var)}
                     className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-accent-light hover:border-accent-solid/30 transition-colors"
                     title={`Inserts the ${item.label.toLowerCase()} value at this position`}
                   >
@@ -1338,10 +1340,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   </button>
                 ))}
               </div>
-              {/* Action keys — dispatched as keydown/keyup at this position. Names use the
-                  full word (no abbreviations) to match the SendText dialog's vocabulary.
-                  Set is what the extension's BrowserType command actually supports:
-                  enter / tab / escape / backspace / delete / up / down / left / right. */}
+              {/* Action keys — dispatched as keydown/keyup at this position. Full words to
+                  match the SendText vocabulary. Set is what the extension's BrowserType
+                  command actually supports (enter / tab / escape / backspace / delete /
+                  up / down / left / right). */}
               <div className="flex flex-wrap gap-1 mt-1">
                 {[
                   { var: '{Enter}', label: 'Enter' },
@@ -1353,7 +1355,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   <button
                     key={item.var}
                     type="button"
-                    onClick={() => setBrowserText(prev => prev + item.var)}
+                    onClick={() => browserTextEditorRef.current?.insertText(item.var)}
                     className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
                     title={`Press ${item.label} key at this position`}
                   >
@@ -1374,7 +1376,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   <button
                     key={item.var}
                     type="button"
-                    onClick={() => setBrowserText(prev => prev + item.var)}
+                    onClick={() => browserTextEditorRef.current?.insertText(item.var)}
                     className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
                     title={`Press ${item.label} arrow key at this position`}
                   >
