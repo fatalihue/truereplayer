@@ -201,10 +201,31 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
         const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
         send({ type: 'actions:paste', payload: { insertIndex } });
       }
+      // Alt+↑/↓ to reorder the selected rows. Mirrors the Move Up/Move Down
+      // toolbar buttons exactly — same payload, same selection update event.
+      // Skipped during recording/replay so a stray Alt+arrow doesn't reshape
+      // the actions list while data is being captured or executed.
+      if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        const sel = selectionRef.current;
+        if (sel.size === 0) return;
+        e.preventDefault();
+        const indices = Array.from(sel).sort((a, b) => a - b);
+        if (e.key === 'ArrowUp') {
+          const minIdx = indices[0];
+          if (minIdx <= 0) return;
+          send({ type: 'actions:reorder', payload: { indices, targetIndex: minIdx - 1 } });
+          window.dispatchEvent(new CustomEvent('selection:set', { detail: indices.map(i => i - 1) }));
+        } else {
+          const maxIdx = indices[indices.length - 1];
+          if (maxIdx >= actions.length - 1) return;
+          send({ type: 'actions:reorder', payload: { indices, targetIndex: maxIdx + 2 } });
+          window.dispatchEvent(new CustomEvent('selection:set', { detail: indices.map(i => i + 1) }));
+        }
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [send]);
+  }, [send, actions.length]);
 
   const toggleColumn = (key: keyof ColumnVisibility) => {
     onColumnVisibilityChange({ ...columnVisibility, [key]: !columnVisibility[key] });
@@ -269,7 +290,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             }}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Move Up"
+            data-tip="Move selection up (Alt+↑)"
           >
             <ArrowUpToLine size={14} />
           </button>
@@ -287,7 +308,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             }}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Move Down"
+            data-tip="Move selection down (Alt+↓)"
           >
             <ArrowDownToLine size={14} />
           </button>
@@ -351,7 +372,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             onClick={() => setShowSendTextDialog(true)}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Send Text"
+            data-tip="Insert Send Text action"
           >
             <Type size={14} />
           </button>
@@ -366,7 +387,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             }}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Wait for Image"
+            data-tip="Insert Wait for Image action"
           >
             <ScanSearch size={14} />
           </button>
@@ -377,7 +398,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             onClick={() => setShowRunProfileDialog(true)}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Run Profile"
+            data-tip="Insert Run Profile action (calls another profile as a sub-macro)"
           >
             <Repeat2 size={14} />
           </button>
@@ -392,7 +413,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             }}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Pause"
+            data-tip="Insert Pause action (delay between actions — not the same as pausing replay)"
           >
             <Hourglass size={14} />
           </button>
@@ -482,7 +503,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             tabIndex={-1}
             onClick={() => send({ type: 'actions:clear', payload: {} })}
             className="p-1.5 rounded text-text-tertiary hover:bg-recording-bg hover:text-recording transition-colors"
-            data-tip="Clear All"
+            data-tip="Clear all actions in this profile"
           >
             <Trash2 size={14} />
           </button>
