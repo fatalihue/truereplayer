@@ -53,7 +53,7 @@ namespace TrueReplayer
         public bool UseDelayVariation { get; set; } = false;
         public string LoopCount { get; set; } = "0";
         public bool EnableLoop { get; set; } = false;
-        public string LoopInterval { get; set; } = "1000";
+        public string LoopInterval { get; set; } = "200";
         public bool LoopIntervalEnabled { get; set; } = false;
         public bool UseCursorClick { get; set; } = false;
         public string CursorClickButton { get; set; } = "Left";
@@ -3778,7 +3778,7 @@ namespace TrueReplayer
                 EnableLoop = EnableLoop,
                 LoopCount = int.TryParse(LoopCount, out var c) ? c : 0,
                 LoopIntervalEnabled = LoopIntervalEnabled,
-                LoopInterval = int.TryParse(LoopInterval, out var li) ? li : 1000,
+                LoopInterval = int.TryParse(LoopInterval, out var li) ? li : 200,
                 UseCursorClick = UseCursorClick,
                 CursorClickButton = CursorClickButton,
                 // Clicker v2 — persist the dedicated Clicker settings alongside the legacy ones.
@@ -3904,7 +3904,7 @@ namespace TrueReplayer
                     EnableLoop = valueElement.GetBoolean();
                     break;
                 case "loopInterval":
-                    LoopInterval = valueElement.GetString() ?? "1000";
+                    LoopInterval = valueElement.GetString() ?? "200";
                     break;
                 case "loopIntervalEnabled":
                     LoopIntervalEnabled = valueElement.GetBoolean();

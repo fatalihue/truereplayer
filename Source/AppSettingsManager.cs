@@ -24,7 +24,7 @@ namespace TrueReplayer.Services
             public bool EnableLoop { get; set; } = false;
             public int LoopCount { get; set; } = 0;
             public bool LoopIntervalEnabled { get; set; } = false;
-            public int LoopInterval { get; set; } = 1000;
+            public int LoopInterval { get; set; } = 200;
             public bool UseCursorClick { get; set; } = false;
             public string CursorClickButton { get; set; } = "Left";
             // Clicker v2 — dedicated Clicker settings, independent of the active profile.

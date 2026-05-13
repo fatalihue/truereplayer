@@ -10,7 +10,7 @@ const defaultSettings = {
   useDelayVariation: false,
   loopCount: '0',
   enableLoop: false,
-  loopInterval: '1000',
+  loopInterval: '200',
   loopIntervalEnabled: false,
   useCursorClick: false,
   cursorClickButton: 'Left',

@@ -59,7 +59,7 @@ namespace TrueReplayer.Models
         [JsonIgnore]
         public bool LoopIntervalEnabled { get; set; } = false;
         [JsonIgnore]
-        public int LoopInterval { get; set; } = 1000;
+        public int LoopInterval { get; set; } = 200;
 
         [JsonIgnore]
         public bool AlwaysOnTop { get; set; } = false;
@@ -104,7 +104,7 @@ namespace TrueReplayer.Models
             EnableLoop = false,
             LoopCount = 0,
             LoopIntervalEnabled = false,
-            LoopInterval = 1000,
+            LoopInterval = 200,
             ProfileKeyEnabled = true,
             Actions = new ObservableCollection<ActionItem>(),
             BatchDelay = "Delay (ms)",
