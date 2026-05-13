@@ -57,6 +57,19 @@ namespace TrueReplayer
         public bool LoopIntervalEnabled { get; set; } = false;
         public bool UseCursorClick { get; set; } = false;
         public string CursorClickButton { get; set; } = "Left";
+        // Clicker v2 — dedicated Clicker settings, fully decoupled from the active profile.
+        // Stored in AppSettings; mirrored here for fast access. Strings (not ints) to mirror
+        // the existing pattern for delay/loop/interval which use textbox-backed values.
+        public string CursorClickDelay { get; set; } = "100";
+        public string CursorClickDelayJitter { get; set; } = "0";
+        public bool CursorClickUseJitter { get; set; } = false;
+        public string CursorClickHold { get; set; } = "10";
+        public string CursorClickPositionJitter { get; set; } = "0";
+        public bool CursorClickUsePositionJitter { get; set; } = false;
+        public string CursorClickLoops { get; set; } = "0";
+        public bool CursorClickUseLoops { get; set; } = false;
+        public string CursorClickInterval { get; set; } = "0";
+        public bool CursorClickUseInterval { get; set; } = false;
         public bool RecordMouse { get; set; } = true;
         public bool RecordScroll { get; set; } = true;
         public bool RecordKeyboard { get; set; } = true;
@@ -194,6 +207,34 @@ namespace TrueReplayer
             LoopIntervalEnabled = saved.LoopIntervalEnabled;
             UseCursorClick = saved.UseCursorClick;
             CursorClickButton = saved.CursorClickButton;
+            // Clicker v2 — migrate from the legacy "Clicker reuses profile settings" behaviour
+            // on first launch after upgrade. The sentinel CursorClickDelayMs == -1 means
+            // "fresh appsettings.json or freshly upgraded from v1.9.53 or earlier" — copy the
+            // active profile's customDelay / jitter / loops / interval so users feel zero
+            // change. Persist immediately so the migration only runs once.
+            if (saved.CursorClickDelayMs < 0)
+            {
+                saved.CursorClickDelayMs = saved.CustomDelay;
+                saved.CursorClickDelayJitterPct = saved.DelayVariation;
+                saved.CursorClickUseJitter = saved.UseDelayVariation;
+                saved.CursorClickLoops = saved.LoopCount;
+                saved.CursorClickUseLoops = saved.EnableLoop;
+                saved.CursorClickIntervalMs = saved.LoopInterval;
+                saved.CursorClickUseInterval = saved.LoopIntervalEnabled;
+                // CursorClickHoldMs already defaults to 10ms (matches old hardcoded value).
+                // CursorClickPositionJitter stays 0 (new feature, off by default).
+                AppSettingsManager.Save(saved);
+            }
+            CursorClickDelay = saved.CursorClickDelayMs.ToString();
+            CursorClickDelayJitter = saved.CursorClickDelayJitterPct.ToString();
+            CursorClickUseJitter = saved.CursorClickUseJitter;
+            CursorClickHold = saved.CursorClickHoldMs.ToString();
+            CursorClickPositionJitter = saved.CursorClickPositionJitter.ToString();
+            CursorClickUsePositionJitter = saved.CursorClickUsePositionJitter;
+            CursorClickLoops = saved.CursorClickLoops.ToString();
+            CursorClickUseLoops = saved.CursorClickUseLoops;
+            CursorClickInterval = saved.CursorClickIntervalMs.ToString();
+            CursorClickUseInterval = saved.CursorClickUseInterval;
             RecordMouse = saved.RecordMouse;
             RecordScroll = saved.RecordScroll;
             RecordKeyboard = saved.RecordKeyboard;
@@ -537,6 +578,16 @@ namespace TrueReplayer
                     loopIntervalEnabled = LoopIntervalEnabled,
                     useCursorClick = UseCursorClick,
                     cursorClickButton = CursorClickButton,
+                    cursorClickDelay = CursorClickDelay,
+                    cursorClickDelayJitter = CursorClickDelayJitter,
+                    cursorClickUseJitter = CursorClickUseJitter,
+                    cursorClickHold = CursorClickHold,
+                    cursorClickPositionJitter = CursorClickPositionJitter,
+                    cursorClickUsePositionJitter = CursorClickUsePositionJitter,
+                    cursorClickLoops = CursorClickLoops,
+                    cursorClickUseLoops = CursorClickUseLoops,
+                    cursorClickInterval = CursorClickInterval,
+                    cursorClickUseInterval = CursorClickUseInterval,
                     recordMouse = RecordMouse,
                     recordScroll = RecordScroll,
                     recordKeyboard = RecordKeyboard,
@@ -770,6 +821,16 @@ namespace TrueReplayer
                     loopIntervalEnabled = LoopIntervalEnabled,
                     useCursorClick = UseCursorClick,
                     cursorClickButton = CursorClickButton,
+                    cursorClickDelay = CursorClickDelay,
+                    cursorClickDelayJitter = CursorClickDelayJitter,
+                    cursorClickUseJitter = CursorClickUseJitter,
+                    cursorClickHold = CursorClickHold,
+                    cursorClickPositionJitter = CursorClickPositionJitter,
+                    cursorClickUsePositionJitter = CursorClickUsePositionJitter,
+                    cursorClickLoops = CursorClickLoops,
+                    cursorClickUseLoops = CursorClickUseLoops,
+                    cursorClickInterval = CursorClickInterval,
+                    cursorClickUseInterval = CursorClickUseInterval,
                     recordMouse = RecordMouse,
                     recordScroll = RecordScroll,
                     recordKeyboard = RecordKeyboard,
@@ -964,13 +1025,17 @@ namespace TrueReplayer
         {
             if (UseCursorClick)
             {
-                int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
-                bool useJitter = UseDelayVariation;
-                int jitterPercent = int.TryParse(DelayVariation, out var jp) ? jp : 20;
-                // Match regular replay: loop OFF → 1 iteration; loop ON + count=0 → infinite (engine convention).
-                int loops = EnableLoop && int.TryParse(LoopCount, out var lc) && lc >= 0 ? lc : 1;
-                int interval = LoopIntervalEnabled && int.TryParse(LoopInterval, out var li) ? li : 0;
-                mainController.ToggleCursorClickReplay(delay, useJitter, jitterPercent, loops, interval, CursorClickButton);
+                // Clicker v2 — read from the dedicated CursorClick* fields (sourced from
+                // AppSettings) instead of the profile's CustomDelay/Jitter/Loop. This makes
+                // Clicker truly mode-of-the-app, no longer mode-of-active-profile.
+                int delay = int.TryParse(CursorClickDelay, out var d) ? d : 100;
+                int jitterPercent = int.TryParse(CursorClickDelayJitter, out var jp) ? jp : 0;
+                int holdMs = int.TryParse(CursorClickHold, out var h) ? h : 10;
+                int positionJitter = CursorClickUsePositionJitter && int.TryParse(CursorClickPositionJitter, out var pj) ? pj : 0;
+                // Loop convention: loops disabled → 1 iteration; loops enabled + count=0 → infinite.
+                int loops = CursorClickUseLoops && int.TryParse(CursorClickLoops, out var lc) && lc >= 0 ? lc : 1;
+                int interval = CursorClickUseInterval && int.TryParse(CursorClickInterval, out var li) ? li : 0;
+                mainController.ToggleCursorClickReplay(delay, CursorClickUseJitter, jitterPercent, loops, interval, CursorClickButton, holdMs, positionJitter);
                 return;
             }
 
@@ -1453,6 +1518,14 @@ namespace TrueReplayer
         public void PushReplayResumed()
         {
             SendMessage("replay:resumed", new { });
+        }
+
+        // Clicker v2 — push live click stats to the React StatusBar. Called from ReplayService
+        // on a ~4 Hz cadence (throttled inside the click loop) so we don't flood the WebView2
+        // message channel for high-rate clickers. The frontend computes CPS from count/elapsed.
+        public void PushClickerStats(long count, long elapsedMs)
+        {
+            SendMessage("clicker:stats", new { count, elapsedMs });
         }
 
         // Manual resume from the status-bar Resume button. Forwards to the replay service which
@@ -3670,6 +3743,17 @@ namespace TrueReplayer
                 LoopInterval = int.TryParse(LoopInterval, out var li) ? li : 1000,
                 UseCursorClick = UseCursorClick,
                 CursorClickButton = CursorClickButton,
+                // Clicker v2 — persist the dedicated Clicker settings alongside the legacy ones.
+                CursorClickDelayMs = int.TryParse(CursorClickDelay, out var ccd) ? ccd : 100,
+                CursorClickDelayJitterPct = int.TryParse(CursorClickDelayJitter, out var ccdj) ? ccdj : 0,
+                CursorClickUseJitter = CursorClickUseJitter,
+                CursorClickHoldMs = int.TryParse(CursorClickHold, out var cch) ? cch : 10,
+                CursorClickPositionJitter = int.TryParse(CursorClickPositionJitter, out var ccpj) ? ccpj : 0,
+                CursorClickUsePositionJitter = CursorClickUsePositionJitter,
+                CursorClickLoops = int.TryParse(CursorClickLoops, out var ccl) ? ccl : 0,
+                CursorClickUseLoops = CursorClickUseLoops,
+                CursorClickIntervalMs = int.TryParse(CursorClickInterval, out var cci) ? cci : 0,
+                CursorClickUseInterval = CursorClickUseInterval,
                 RecordMouse = RecordMouse,
                 RecordScroll = RecordScroll,
                 RecordKeyboard = RecordKeyboard,
@@ -3799,6 +3883,37 @@ namespace TrueReplayer
                     break;
                 case "cursorClickButton":
                     CursorClickButton = valueElement.GetString() ?? "Left";
+                    break;
+                // ── Clicker v2 settings (dedicated, decoupled from profile) ──
+                case "cursorClickDelay":
+                    CursorClickDelay = valueElement.GetString() ?? "100";
+                    break;
+                case "cursorClickDelayJitter":
+                    CursorClickDelayJitter = valueElement.GetString() ?? "0";
+                    break;
+                case "cursorClickUseJitter":
+                    CursorClickUseJitter = valueElement.GetBoolean();
+                    break;
+                case "cursorClickHold":
+                    CursorClickHold = valueElement.GetString() ?? "10";
+                    break;
+                case "cursorClickPositionJitter":
+                    CursorClickPositionJitter = valueElement.GetString() ?? "0";
+                    break;
+                case "cursorClickUsePositionJitter":
+                    CursorClickUsePositionJitter = valueElement.GetBoolean();
+                    break;
+                case "cursorClickLoops":
+                    CursorClickLoops = valueElement.GetString() ?? "0";
+                    break;
+                case "cursorClickUseLoops":
+                    CursorClickUseLoops = valueElement.GetBoolean();
+                    break;
+                case "cursorClickInterval":
+                    CursorClickInterval = valueElement.GetString() ?? "0";
+                    break;
+                case "cursorClickUseInterval":
+                    CursorClickUseInterval = valueElement.GetBoolean();
                     break;
                 case "recordMouse":
                     RecordMouse = valueElement.GetBoolean();

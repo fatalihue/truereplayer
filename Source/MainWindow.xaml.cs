@@ -131,6 +131,14 @@ namespace TrueReplayer
                 bridge?.PushReplayResumed();
             };
 
+            // Clicker v2 — forward click stats (count + elapsedMs) to the React StatusBar so
+            // the user sees "Clicked 1,234 · 8.3/s · 02:14" live during Clicker runs. Throttled
+            // to ~4 Hz inside ToggleCursorClickReplay so this isn't called every click.
+            replayService.OnClickerStats = (count, elapsedMs) =>
+            {
+                bridge?.PushClickerStats(count, elapsedMs);
+            };
+
             this.Closed += (_, _) =>
             {
                 Services.DiagnosticLog.Info("Window closing — disposing bridge and controllers");

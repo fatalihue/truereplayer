@@ -4,7 +4,7 @@ import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 
 export function StatusBar() {
-  const { statusBar, status, highlightedActionIndex, replayChain, pauseState, settings } = useAppState();
+  const { statusBar, status, highlightedActionIndex, replayChain, pauseState, settings, clickerStats } = useAppState();
   const { send } = useBridge();
   const isReplaying = status === 'replaying';
   const isClicker = settings.useCursorClick;
@@ -65,6 +65,31 @@ export function StatusBar() {
       <span className="text-[11px] text-text-disabled">{statusBar.profileName ?? 'No profile'}</span>
       <div className="w-px h-3 bg-border-subtle mx-3" />
       <span className="text-[11px] text-text-disabled">{statusBar.actionCount} actions</span>
+
+      {/* Clicker live stats — only while a Clicker run is active. Shows cumulative count,
+          average rate since the run started, and elapsed mm:ss. */}
+      {isClicker && clickerStats.active && (() => {
+        const sec = Math.max(0, Math.floor(clickerStats.elapsedMs / 1000));
+        const mm = Math.floor(sec / 60);
+        const ss = String(sec % 60).padStart(2, '0');
+        const rate = clickerStats.elapsedMs > 0
+          ? (clickerStats.count * 1000 / clickerStats.elapsedMs)
+          : 0;
+        const rateLabel = rate >= 10 ? rate.toFixed(0) : rate.toFixed(1);
+        return (
+          <>
+            <div className="w-px h-3 bg-border-subtle mx-3" />
+            <span className="flex items-center gap-2 text-[11px] font-mono" style={{ color: 'var(--color-clicker)' }}>
+              <span className="text-text-secondary">Clicked</span>
+              <strong className="text-text-primary">{clickerStats.count.toLocaleString()}</strong>
+              <span className="text-text-disabled">·</span>
+              <strong className="text-text-primary">{rateLabel}/s</strong>
+              <span className="text-text-disabled">·</span>
+              <strong className="text-text-primary">{mm}:{ss}</strong>
+            </span>
+          </>
+        );
+      })()}
 
       {/* Replay progress section */}
       {isReplaying && (

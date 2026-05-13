@@ -59,12 +59,12 @@ namespace TrueReplayer.Controllers
             replayService.ToggleReplay(loopEnabled, loopCountText, intervalEnabled, intervalText, useDelayVariation, delayVariationPercent, useRelativeCoords, windowTarget, bringToFocus, lockWidth, lockHeight, lockX, lockY, restorePosition, restoreSize, forceInfiniteLoop);
         }
 
-        public void ToggleCursorClickReplay(int delay, bool useJitter, int jitterPercent, int loopCount, int loopInterval, string button = "Left")
+        public void ToggleCursorClickReplay(int delay, bool useJitter, int jitterPercent, int loopCount, int loopInterval, string button = "Left", int holdMs = 10, int positionJitter = 0)
         {
             if (recordingService.IsRecording)
                 recordingService.ToggleRecording();
 
-            replayService.ToggleCursorClickReplay(delay, useJitter, jitterPercent, loopCount, loopInterval, button);
+            replayService.ToggleCursorClickReplay(delay, useJitter, jitterPercent, loopCount, loopInterval, button, holdMs, positionJitter);
         }
 
         public void CancelInsertMode()

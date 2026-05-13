@@ -212,7 +212,12 @@ namespace TrueReplayer.Services
 
         private CancellationTokenSource? _cursorClickCts;
 
-        public void ToggleCursorClickReplay(int delay, bool useJitter, int jitterPercent, int loopCount, int loopInterval, string button = "Left")
+        // Bridge callback for click counter / CPS / elapsed updates. Set by MainWindow on init.
+        // Throttled to ~4 Hz inside the loop so the WebView2 message channel isn't flooded
+        // (a 100 Hz clicker would otherwise spam 100 messages/s).
+        public Action<long, long>? OnClickerStats; // (count, elapsedMs)
+
+        public void ToggleCursorClickReplay(int delay, bool useJitter, int jitterPercent, int loopCount, int loopInterval, string button = "Left", int holdMs = 10, int positionJitter = 0)
         {
             if (IsReplaying)
             {
@@ -232,10 +237,14 @@ namespace TrueReplayer.Services
 
             _ = Task.Factory.StartNew(async () =>
             {
+                long clickCount = 0;
+                var startedAt = DateTime.UtcNow;
+                long lastStatsPushMs = 0;
                 try
                 {
                     // Wait for hotkey release
                     await Task.Delay(200, token);
+                    startedAt = DateTime.UtcNow;  // reset after the grace delay so CPS isn't skewed
 
                     int iteration = 0;
                     bool isInfinite = loopCount == 0;
@@ -254,18 +263,35 @@ namespace TrueReplayer.Services
                         _ => NativeMethods.MOUSEEVENTF_LEFTUP,
                     };
 
+                    // Clamp hold to a reasonable range so a typo can't lock things up.
+                    int safeHold = Math.Clamp(holdMs, 0, 2000);
+                    // Position jitter is treated as a radius in px on each axis. Stored value
+                    // is already validated >= 0 by the UI, but defensive-clamp anyway.
+                    int jitterRadius = Math.Max(0, positionJitter);
+
                     while (!token.IsCancellationRequested && (isInfinite || iteration < loopCount))
                     {
                         iteration++;
 
                         NativeMethods.GetCursorPos(out var pos);
 
+                        // Apply position jitter to the raw cursor coords, BEFORE normalising
+                        // to the virtual-desktop 0-65535 range. Keeps the jitter measured in
+                        // pixels (what the user dialled in) rather than abstract 0-65535 units.
+                        int jitteredX = pos.x;
+                        int jitteredY = pos.y;
+                        if (jitterRadius > 0)
+                        {
+                            jitteredX += Random.Shared.Next(-jitterRadius, jitterRadius + 1);
+                            jitteredY += Random.Shared.Next(-jitterRadius, jitterRadius + 1);
+                        }
+
                         int vx = NativeMethods.GetSystemMetrics(76);
                         int vy = NativeMethods.GetSystemMetrics(77);
                         int vw = NativeMethods.GetSystemMetrics(78);
                         int vh = NativeMethods.GetSystemMetrics(79);
-                        int absX = (int)(((double)(pos.x - vx) * 65535) / (vw - 1));
-                        int absY = (int)(((double)(pos.y - vy) * 65535) / (vh - 1));
+                        int absX = (int)(((double)(jitteredX - vx) * 65535) / (vw - 1));
+                        int absY = (int)(((double)(jitteredY - vy) * 65535) / (vh - 1));
                         uint posFlags = NativeMethods.MOUSEEVENTF_MOVE | NativeMethods.MOUSEEVENTF_ABSOLUTE | NativeMethods.MOUSEEVENTF_VIRTUALDESK;
                         int inputSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.INPUT));
 
@@ -283,7 +309,10 @@ namespace TrueReplayer.Services
                         };
                         NativeMethods.SendInput(1, new[] { downInput }, inputSize);
 
-                        await Task.Delay(10, token);
+                        // Hold duration — was hardcoded 10ms; now user-configurable. Skipped
+                        // when 0 (some apps need it to register a click cleanly though, hence
+                        // the default of 10).
+                        if (safeHold > 0) await Task.Delay(safeHold, token);
 
                         var upInput = new NativeMethods.INPUT
                         {
@@ -298,6 +327,20 @@ namespace TrueReplayer.Services
                             }
                         };
                         NativeMethods.SendInput(1, new[] { upInput }, inputSize);
+
+                        clickCount++;
+
+                        // Push click stats to the UI every ~250ms. Comparing against elapsed
+                        // (not iteration count) makes the cadence stable across slow/fast
+                        // configurations.
+                        var elapsedMs = (long)(DateTime.UtcNow - startedAt).TotalMilliseconds;
+                        if (elapsedMs - lastStatsPushMs >= 250)
+                        {
+                            lastStatsPushMs = elapsedMs;
+                            var snapshotCount = clickCount;
+                            var snapshotElapsed = elapsedMs;
+                            dispatcherQueue.TryEnqueue(() => OnClickerStats?.Invoke(snapshotCount, snapshotElapsed));
+                        }
 
                         // Apply delay + jitter
                         int safeDelay = Math.Max(10, delay);
@@ -317,7 +360,15 @@ namespace TrueReplayer.Services
                 catch (OperationCanceledException) { }
                 finally
                 {
-                    dispatcherQueue.TryEnqueue(() => ResetReplayState());
+                    // Final stats push so the UI sees the exact final count + elapsed even if
+                    // the loop ended between throttled pushes.
+                    var finalCount = clickCount;
+                    var finalElapsed = (long)(DateTime.UtcNow - startedAt).TotalMilliseconds;
+                    dispatcherQueue.TryEnqueue(() =>
+                    {
+                        OnClickerStats?.Invoke(finalCount, finalElapsed);
+                        ResetReplayState();
+                    });
                 }
             }, token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
         }

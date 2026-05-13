@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, Download } from 'lucide-react';
+import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, Download, MousePointerClick } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -104,6 +104,144 @@ function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-14', suf
       />
       {suffix && <span className="text-[11px] text-text-disabled w-4">{suffix}</span>}
     </>
+  );
+}
+
+// Clicker v2 — dedicated section that replaces Execution + Recording in the Profile tab
+// when useCursorClick is on. Reads/writes the cursorClick* fields directly via settings:change,
+// so it's fully decoupled from the active profile's Delay/Jitter/Loop settings. Visual
+// identity: purple header + subtle purple border so the user immediately sees "I'm
+// configuring Clicker, not the macro profile".
+function ClickerSection({
+  rate, rateJitter, useRateJitter, hold, positionJitter, usePositionJitter,
+  loops, useLoops, interval, useInterval, onChange,
+}: {
+  rate: string;
+  rateJitter: string;
+  useRateJitter: boolean;
+  hold: string;
+  positionJitter: string;
+  usePositionJitter: boolean;
+  loops: string;
+  useLoops: boolean;
+  interval: string;
+  useInterval: boolean;
+  onChange: (key: string, value: string | boolean) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(true);
+  // Unit toggle for the Rate row: 'ms' shows the raw delay; '/s' shows clicks per second
+  // computed from delay (1000 / ms). Backend always stores ms — the toggle is display-only.
+  const [unit, setUnit] = useState<'ms' | 'cps'>('cps');
+
+  const delayMs = Math.max(10, parseInt(rate, 10) || 100);
+  const cpsFromMs = (ms: number) => {
+    const v = 1000 / ms;
+    return v >= 10 ? v.toFixed(0) : v.toFixed(1);
+  };
+  const displayValue = unit === 'cps' ? cpsFromMs(delayMs) : String(delayMs);
+  const commitRate = (raw: string) => {
+    const num = parseFloat(raw);
+    if (isNaN(num) || num <= 0) return;
+    if (unit === 'cps') {
+      const ms = Math.max(10, Math.round(1000 / num));
+      onChange('cursorClickDelay', String(ms));
+    } else {
+      onChange('cursorClickDelay', String(Math.max(10, Math.round(num))));
+    }
+  };
+
+  // Inline row helper so each setting is a single readable JSX block.
+  const row = (label: string, input: React.ReactNode, suffix?: string, toggle?: { isOn: boolean; onChange: (v: boolean) => void }) => (
+    <div className="flex items-center justify-between py-1">
+      <span className="text-ui text-text-secondary">{label}</span>
+      <div className="flex items-center gap-2.5">
+        {input}
+        <span className="text-[11px] text-text-disabled w-4">{suffix ?? ''}</span>
+        {toggle
+          ? <Toggle isOn={toggle.isOn} onChange={toggle.onChange} />
+          : <div className="w-[28px]" />  /* spacer keeps columns aligned across rows */}
+      </div>
+    </div>
+  );
+
+  return (
+    <div
+      className="bg-bg-surface rounded-ui overflow-hidden"
+      style={{
+        border: '1px solid color-mix(in srgb, var(--color-clicker) 35%, transparent)',
+        boxShadow: '0 0 0 1px color-mix(in srgb, var(--color-clicker) 12%, transparent) inset',
+      }}
+    >
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-bg-card transition-colors"
+      >
+        <MousePointerClick size={14} style={{ color: 'var(--color-clicker)' }} />
+        <span className="text-ui font-semibold flex-1 text-left" style={{ color: 'var(--color-clicker)' }}>Clicker</span>
+        {isOpen ? <ChevronDown size={14} className="text-text-tertiary" /> : <ChevronRight size={14} className="text-text-tertiary" />}
+      </button>
+      {isOpen && (
+        <div className="px-3 pb-3 space-y-1">
+          <div className="text-[10px] text-text-disabled italic mb-1">Settings dedicados — independentes do profile</div>
+
+          {/* Rate row with unit toggle (ms ↔ /s). Stored value is always ms; toggle is UI-only. */}
+          <div className="flex items-center justify-between py-1">
+            <span className="text-ui text-text-secondary">Rate</span>
+            <div className="flex items-center gap-2.5">
+              <SettingInput
+                key={`rate-${unit}-${delayMs}`}  /* re-mount on unit change so the input reflects the new display value */
+                value={displayValue}
+                onCommit={commitRate}
+                width="w-[60px]"
+              />
+              <select
+                value={unit}
+                onChange={(e) => setUnit(e.target.value as 'ms' | 'cps')}
+                className="h-7 px-1.5 text-[11px] text-text-secondary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid font-mono cursor-pointer"
+                title="Unit"
+              >
+                <option value="cps">/s</option>
+                <option value="ms">ms</option>
+              </select>
+              <div className="w-[28px]" />
+            </div>
+          </div>
+
+          {row(
+            'Jitter',
+            <SettingInput value={rateJitter} onCommit={(v) => onChange('cursorClickDelayJitter', v)} width="w-[80px]" />,
+            '%',
+            { isOn: useRateJitter, onChange: (v) => onChange('cursorClickUseJitter', v) },
+          )}
+          {row(
+            'Hold',
+            <SettingInput value={hold} onCommit={(v) => onChange('cursorClickHold', v)} width="w-[80px]" />,
+            'ms',
+            // Hold is always applied (no on/off toggle) — 0 ms is a valid value if the user
+            // wants the absolute minimum gap between down/up.
+            undefined,
+          )}
+          {row(
+            'Position',
+            <SettingInput value={positionJitter} onCommit={(v) => onChange('cursorClickPositionJitter', v)} width="w-[80px]" />,
+            'px',
+            { isOn: usePositionJitter, onChange: (v) => onChange('cursorClickUsePositionJitter', v) },
+          )}
+          {row(
+            'Loops',
+            <SettingInput value={loops} onCommit={(v) => onChange('cursorClickLoops', v)} width="w-[80px]" />,
+            '',
+            { isOn: useLoops, onChange: (v) => onChange('cursorClickUseLoops', v) },
+          )}
+          {row(
+            'Interval',
+            <SettingInput value={interval} onCommit={(v) => onChange('cursorClickInterval', v)} width="w-[80px]" />,
+            'ms',
+            { isOn: useInterval, onChange: (v) => onChange('cursorClickUseInterval', v) },
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -273,6 +411,24 @@ export function SettingsPanel() {
       <div className="flex-1 overflow-y-auto space-y-1 p-1">
         {activeTab === 'profile' ? (
           <>
+            {/* Clicker mode swaps the Execution + Recording stack for a dedicated panel.
+                Macro mode keeps the existing layout untouched. */}
+            {settings.useCursorClick ? (
+              <ClickerSection
+                rate={settings.cursorClickDelay}
+                rateJitter={settings.cursorClickDelayJitter}
+                useRateJitter={settings.cursorClickUseJitter}
+                hold={settings.cursorClickHold}
+                positionJitter={settings.cursorClickPositionJitter}
+                usePositionJitter={settings.cursorClickUsePositionJitter}
+                loops={settings.cursorClickLoops}
+                useLoops={settings.cursorClickUseLoops}
+                interval={settings.cursorClickInterval}
+                useInterval={settings.cursorClickUseInterval}
+                onChange={changeSetting}
+              />
+            ) : (
+              <>
             <Section icon={Timer} iconColor="#ffd93d" title="Execution">
               <SettingRow label="Delay" tooltip="Fixed delay between actions (ms)">
                 <SettingInput
@@ -353,7 +509,8 @@ export function SettingsPanel() {
                 <Toggle isOn={settings.browserSelectorEnabled ?? true} onChange={(v) => changeSetting('browserSelectorEnabled', v)} />
               </SettingRow>
             </Section>
-
+              </>
+            )}
 
           </>
         ) : (

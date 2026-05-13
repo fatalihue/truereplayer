@@ -27,6 +27,20 @@ namespace TrueReplayer.Services
             public int LoopInterval { get; set; } = 1000;
             public bool UseCursorClick { get; set; } = false;
             public string CursorClickButton { get; set; } = "Left";
+            // Clicker v2 — dedicated Clicker settings, independent of the active profile.
+            // The -1 sentinel on the delay field marks "not yet migrated"; on first load the
+            // bridge will copy the active profile's customDelay/jitter/loops/interval into
+            // these fields so upgrading users see no behavioural change.
+            public int CursorClickDelayMs { get; set; } = -1;
+            public int CursorClickDelayJitterPct { get; set; } = 0;
+            public bool CursorClickUseJitter { get; set; } = false;
+            public int CursorClickHoldMs { get; set; } = 10;
+            public int CursorClickPositionJitter { get; set; } = 0;
+            public bool CursorClickUsePositionJitter { get; set; } = false;
+            public int CursorClickLoops { get; set; } = 0;
+            public bool CursorClickUseLoops { get; set; } = false;
+            public int CursorClickIntervalMs { get; set; } = 0;
+            public bool CursorClickUseInterval { get; set; } = false;
             // Recording
             public bool RecordMouse { get; set; } = true;
             public bool RecordScroll { get; set; } = true;

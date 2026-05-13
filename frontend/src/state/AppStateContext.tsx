@@ -14,6 +14,19 @@ const defaultSettings = {
   loopIntervalEnabled: false,
   useCursorClick: false,
   cursorClickButton: 'Left',
+  // Clicker v2 — defaults match the AppSettings backend (CursorClickHoldMs=10, others 0/off).
+  // Real values arrive from the bridge on settings:loaded after the post-upgrade migration
+  // (which copies the legacy profile-shared delay/jitter/loops/interval into these fields).
+  cursorClickDelay: '100',
+  cursorClickDelayJitter: '0',
+  cursorClickUseJitter: false,
+  cursorClickHold: '10',
+  cursorClickPositionJitter: '0',
+  cursorClickUsePositionJitter: false,
+  cursorClickLoops: '0',
+  cursorClickUseLoops: false,
+  cursorClickInterval: '0',
+  cursorClickUseInterval: false,
   recordMouse: true,
   recordScroll: true,
   recordKeyboard: true,
@@ -53,6 +66,10 @@ const initialState: AppState = {
   },
   replayChain: [],
   pauseState: { isPaused: false, hotkey: '', timeoutMs: 0, startedAt: 0 },
+  // Clicker v2 — live click counter + elapsed pushed from the backend on a ~4 Hz cadence
+  // during a Clicker run. The StatusBar renders "Clicked X · Y/s · MM:SS" from these.
+  // `active` flips on first stats push and back off when the replay engine resets state.
+  clickerStats: { active: false, count: 0, elapsedMs: 0 },
 };
 
 function appStateReducer(state: AppState, message: IncomingMessage): AppState {
@@ -60,7 +77,16 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
     case 'state:init':
       return { ...initialState, ...message.payload, profileOrder: message.payload.profileOrder ?? initialState.profileOrder };
     case 'status:changed':
-      return { ...state, status: message.payload.status };
+      // When the engine reports anything other than 'replaying', clear the Clicker counter
+      // so it doesn't linger after the run stops. Done here instead of via a dedicated
+      // bridge message to keep the protocol surface small.
+      return {
+        ...state,
+        status: message.payload.status,
+        clickerStats: message.payload.status === 'replaying'
+          ? state.clickerStats
+          : { active: false, count: 0, elapsedMs: 0 },
+      };
     case 'actions:updated':
       return { ...state, actions: message.payload.actions, highlightedActionIndex: null };
     case 'actions:highlight':
@@ -91,6 +117,13 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
       return {
         ...state,
         pauseState: { isPaused: false, hotkey: '', timeoutMs: 0, startedAt: 0 },
+      };
+    case 'clicker:stats':
+      // Set active = true on every stats push (covers the case where the user clicks Run
+      // and the very first stats batch arrives). Cleared by status:changed → 'ready' above.
+      return {
+        ...state,
+        clickerStats: { active: true, count: message.payload.count, elapsedMs: message.payload.elapsedMs },
       };
     default:
       return state;

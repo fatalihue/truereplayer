@@ -103,6 +103,18 @@ export interface SettingsState {
   loopIntervalEnabled: boolean;
   useCursorClick: boolean;
   cursorClickButton: string;
+  // Clicker v2 — dedicated Clicker settings, decoupled from the active profile. Stored
+  // server-side in AppSettings (global), edited through the new ClickerPanel.
+  cursorClickDelay: string;
+  cursorClickDelayJitter: string;
+  cursorClickUseJitter: boolean;
+  cursorClickHold: string;
+  cursorClickPositionJitter: string;
+  cursorClickUsePositionJitter: boolean;
+  cursorClickLoops: string;
+  cursorClickUseLoops: boolean;
+  cursorClickInterval: string;
+  cursorClickUseInterval: boolean;
   recordMouse: boolean;
   recordScroll: boolean;
   recordKeyboard: boolean;
@@ -168,6 +180,17 @@ export interface AppState {
     timeoutMs: number;
     startedAt: number;
   };
+  /**
+   * Clicker v2 — live click counter pushed from the backend during a Clicker run
+   * (~4 Hz cadence, throttled in the loop). StatusBar renders "Clicked X · Y/s ·
+   * MM:SS" from these. `active` flips on first push, off on status:changed (any
+   * status other than 'replaying').
+   */
+  clickerStats: {
+    active: boolean;
+    count: number;
+    elapsedMs: number;
+  };
 }
 
 // ── Messages C# → JS ──
@@ -189,6 +212,7 @@ export type IncomingMessage =
   | { type: 'replay:chain'; payload: { stack: string[] } }
   | { type: 'replay:paused'; payload: { hotkey: string; timeoutMs: number } }
   | { type: 'replay:resumed'; payload: Record<string, never> }
+  | { type: 'clicker:stats'; payload: { count: number; elapsedMs: number } }
   | { type: 'update:available'; payload: { version: string; currentVersion: string; notes: string[] } }
   | { type: 'update:progress'; payload: { percent: number } }
   | { type: 'update:ready'; payload: Record<string, never> }
