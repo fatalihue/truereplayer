@@ -141,22 +141,28 @@ function ClickerSection({
   // reset, profile load, external settings change). Without this, typing "200" in ms then
   // toggling to /s could briefly show the OLD value (from stale `rate` prop) before the
   // bridge echo arrived — feeling like the typed value got "lost".
-  const [localDelayMs, setLocalDelayMs] = useState(() => Math.max(10, parseInt(rate, 10) || 100));
+  //
+  // Lower bound is 1 ms (not 10): user-typed values <10 ms are honoured in the UI even
+  // though the replay engine clamps the actual click cadence to 10 ms minimum at runtime
+  // for safety. Without this, typing "1" would silently snap to "10" — and if the user
+  // typed "1" a SECOND time, the on-screen input would visually show "1" while the stored
+  // value was still 10, because identical commits don't trigger a key-driven remount.
+  const [localDelayMs, setLocalDelayMs] = useState(() => Math.max(1, parseInt(rate, 10) || 100));
   useEffect(() => {
-    setLocalDelayMs(Math.max(10, parseInt(rate, 10) || 100));
+    setLocalDelayMs(Math.max(1, parseInt(rate, 10) || 100));
   }, [rate]);
 
-  const cpsFromMs = (ms: number) => {
-    const v = 1000 / ms;
-    return v >= 10 ? v.toFixed(0) : v.toFixed(1);
-  };
+  // Strip trailing ".0" so whole-number CPS shows as "1" not "1.0", "5" not "5.0", etc.
+  // Non-integer rates (e.g. 6.99/s when delay = 143 ms) keep one decimal: "7.0" → "7"
+  // after rounding, "6.5" stays "6.5".
+  const cpsFromMs = (ms: number) => (1000 / ms).toFixed(1).replace(/\.0$/, '');
   const displayValue = unit === 'cps' ? cpsFromMs(localDelayMs) : String(localDelayMs);
   const commitRate = (raw: string) => {
     const num = parseFloat(raw);
     if (isNaN(num) || num <= 0) return;
     const ms = unit === 'cps'
-      ? Math.max(10, Math.round(1000 / num))
-      : Math.max(10, Math.round(num));
+      ? Math.max(1, Math.round(1000 / num))
+      : Math.max(1, Math.round(num));
     setLocalDelayMs(ms);              // optimistic — keeps the input stable on next render
     onChange('cursorClickDelay', String(ms));
   };

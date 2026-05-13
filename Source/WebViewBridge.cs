@@ -3697,14 +3697,14 @@ namespace TrueReplayer
                 UseCursorClick = preserveCursorMode,
                 CursorClickButton = preserveCursorButton,
                 CursorClickDelayMs = 100,
-                CursorClickDelayJitterPct = 0,
+                CursorClickDelayJitterPct = 10,
                 CursorClickUseJitter = false,
                 CursorClickHoldMs = 10,
-                CursorClickPositionJitter = 0,
+                CursorClickPositionJitter = 10,
                 CursorClickUsePositionJitter = false,
                 CursorClickLoops = 0,
                 CursorClickUseLoops = false,
-                CursorClickIntervalMs = 0,
+                CursorClickIntervalMs = 200,
                 CursorClickUseInterval = false,
             };
             AppSettingsManager.Save(defaults);

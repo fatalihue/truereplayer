@@ -32,14 +32,14 @@ namespace TrueReplayer.Services
             // bridge will copy the active profile's customDelay/jitter/loops/interval into
             // these fields so upgrading users see no behavioural change.
             public int CursorClickDelayMs { get; set; } = -1;
-            public int CursorClickDelayJitterPct { get; set; } = 0;
+            public int CursorClickDelayJitterPct { get; set; } = 10;
             public bool CursorClickUseJitter { get; set; } = false;
             public int CursorClickHoldMs { get; set; } = 10;
-            public int CursorClickPositionJitter { get; set; } = 0;
+            public int CursorClickPositionJitter { get; set; } = 10;
             public bool CursorClickUsePositionJitter { get; set; } = false;
             public int CursorClickLoops { get; set; } = 0;
             public bool CursorClickUseLoops { get; set; } = false;
-            public int CursorClickIntervalMs { get; set; } = 0;
+            public int CursorClickIntervalMs { get; set; } = 200;
             public bool CursorClickUseInterval { get; set; } = false;
             // Recording
             public bool RecordMouse { get; set; } = true;
