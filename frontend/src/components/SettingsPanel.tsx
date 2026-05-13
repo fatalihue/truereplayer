@@ -135,21 +135,37 @@ function ClickerSection({
   // via a React remount triggered by settingsResetEpoch in SettingsPanel.
   const [unit, setUnit] = useState<'ms' | 'cps'>('ms');
 
-  const delayMs = Math.max(10, parseInt(rate, 10) || 100);
+  // Optimistic local copy of the current delay (ms). Updated immediately on commit so the
+  // Rate input doesn't flicker while waiting for the bridge to echo back the new value via
+  // settings:loaded. Synced back from the `rate` prop whenever the prop changes (covers
+  // reset, profile load, external settings change). Without this, typing "200" in ms then
+  // toggling to /s could briefly show the OLD value (from stale `rate` prop) before the
+  // bridge echo arrived — feeling like the typed value got "lost".
+  const [localDelayMs, setLocalDelayMs] = useState(() => Math.max(10, parseInt(rate, 10) || 100));
+  useEffect(() => {
+    setLocalDelayMs(Math.max(10, parseInt(rate, 10) || 100));
+  }, [rate]);
+
   const cpsFromMs = (ms: number) => {
     const v = 1000 / ms;
     return v >= 10 ? v.toFixed(0) : v.toFixed(1);
   };
-  const displayValue = unit === 'cps' ? cpsFromMs(delayMs) : String(delayMs);
+  const displayValue = unit === 'cps' ? cpsFromMs(localDelayMs) : String(localDelayMs);
   const commitRate = (raw: string) => {
     const num = parseFloat(raw);
     if (isNaN(num) || num <= 0) return;
-    if (unit === 'cps') {
-      const ms = Math.max(10, Math.round(1000 / num));
-      onChange('cursorClickDelay', String(ms));
-    } else {
-      onChange('cursorClickDelay', String(Math.max(10, Math.round(num))));
-    }
+    const ms = unit === 'cps'
+      ? Math.max(10, Math.round(1000 / num))
+      : Math.max(10, Math.round(num));
+    setLocalDelayMs(ms);              // optimistic — keeps the input stable on next render
+    onChange('cursorClickDelay', String(ms));
+  };
+
+  // Helper: turn a toggle ON if it isn't already. Used by onEnter on each row that has a
+  // companion switch, so typing a value + Enter activates the switch automatically (same
+  // affordance as the Execution panel's Delay / Jitter / Loops / Interval rows).
+  const activateIfOff = (currentlyOn: boolean, settingKey: string) => {
+    if (!currentlyOn) onChange(settingKey, true);
   };
 
   return (
@@ -176,7 +192,10 @@ function ClickerSection({
               so we render a w-10 spacer to keep the input vertically aligned with the others. */}
           <SettingRow label="Rate" tooltip="Click rate (clicks per second) vs (delay)">
             <SettingInput
-              key={`rate-${unit}-${delayMs}`}
+              /* Key is based on (unit, localDelayMs) so the input remounts with the right
+                 displayValue whenever either changes — including when the user toggles the
+                 unit after typing a value, since commitRate updates localDelayMs optimistically. */
+              key={`rate-${unit}-${localDelayMs}`}
               value={displayValue}
               onCommit={commitRate}
               width="w-[80px]"
@@ -192,7 +211,12 @@ function ClickerSection({
             </select>
           </SettingRow>
           <SettingRow label="Jitter" tooltip="Random ±% applied to each click delay (anti-detection)">
-            <SettingInput value={rateJitter} onCommit={(v) => onChange('cursorClickDelayJitter', v)} width="w-[80px]" />
+            <SettingInput
+              value={rateJitter}
+              onCommit={(v) => onChange('cursorClickDelayJitter', v)}
+              onEnter={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
+              width="w-[80px]"
+            />
             <Toggle isOn={useRateJitter} onChange={(v) => onChange('cursorClickUseJitter', v)} />
           </SettingRow>
           <SettingRow label="Hold" tooltip="How long button stays pressed (ms). 10 = normal click; 50-200 = slow click">
@@ -202,15 +226,30 @@ function ClickerSection({
             <div className="w-10" />
           </SettingRow>
           <SettingRow label="Position" tooltip="Random ±px offset around the cursor for each click (anti-detection)">
-            <SettingInput value={positionJitter} onCommit={(v) => onChange('cursorClickPositionJitter', v)} width="w-[80px]" />
+            <SettingInput
+              value={positionJitter}
+              onCommit={(v) => onChange('cursorClickPositionJitter', v)}
+              onEnter={() => activateIfOff(usePositionJitter, 'cursorClickUsePositionJitter')}
+              width="w-[80px]"
+            />
             <Toggle isOn={usePositionJitter} onChange={(v) => onChange('cursorClickUsePositionJitter', v)} />
           </SettingRow>
           <SettingRow label="Loops" tooltip="Number of clicks per run. 0 = infinite">
-            <SettingInput value={loops} onCommit={(v) => onChange('cursorClickLoops', v)} width="w-[80px]" />
+            <SettingInput
+              value={loops}
+              onCommit={(v) => onChange('cursorClickLoops', v)}
+              onEnter={() => activateIfOff(useLoops, 'cursorClickUseLoops')}
+              width="w-[80px]"
+            />
             <Toggle isOn={useLoops} onChange={(v) => onChange('cursorClickUseLoops', v)} />
           </SettingRow>
           <SettingRow label="Interval" tooltip="Pause between loop (ms)">
-            <SettingInput value={interval} onCommit={(v) => onChange('cursorClickInterval', v)} width="w-[80px]" />
+            <SettingInput
+              value={interval}
+              onCommit={(v) => onChange('cursorClickInterval', v)}
+              onEnter={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
+              width="w-[80px]"
+            />
             <Toggle isOn={useInterval} onChange={(v) => onChange('cursorClickUseInterval', v)} />
           </SettingRow>
         </div>
