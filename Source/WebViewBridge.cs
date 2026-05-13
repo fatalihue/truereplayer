@@ -3683,8 +3683,30 @@ namespace TrueReplayer
                 InputHookManager.SuppressAllHotkeys = false;
             }
 
-            // Reset ALL global settings to defaults and save
-            var defaults = new AppSettingsManager.AppSettings();
+            // Reset ALL global settings to defaults and save.
+            // — Preserve the current mode (Macro/Clicker): the reset is "restore values",
+            //   not "switch modes". Users in Clicker mode shouldn't get bounced back to
+            //   Macro just because they reset.
+            // — Use real Clicker defaults (delay=100 ms, hold=10 ms, everything else 0/off)
+            //   instead of the -1 migration sentinel, so a reset doesn't re-trigger the
+            //   one-shot first-run migration from the active profile.
+            bool preserveCursorMode = UseCursorClick;
+            string preserveCursorButton = CursorClickButton;
+            var defaults = new AppSettingsManager.AppSettings
+            {
+                UseCursorClick = preserveCursorMode,
+                CursorClickButton = preserveCursorButton,
+                CursorClickDelayMs = 100,
+                CursorClickDelayJitterPct = 0,
+                CursorClickUseJitter = false,
+                CursorClickHoldMs = 10,
+                CursorClickPositionJitter = 0,
+                CursorClickUsePositionJitter = false,
+                CursorClickLoops = 0,
+                CursorClickUseLoops = false,
+                CursorClickIntervalMs = 0,
+                CursorClickUseInterval = false,
+            };
             AppSettingsManager.Save(defaults);
 
             profileController.ResetProfile();
@@ -3698,8 +3720,19 @@ namespace TrueReplayer
             EnableLoop = defaults.EnableLoop;
             LoopInterval = defaults.LoopInterval.ToString();
             LoopIntervalEnabled = defaults.LoopIntervalEnabled;
-            UseCursorClick = defaults.UseCursorClick;
-            CursorClickButton = defaults.CursorClickButton;
+            UseCursorClick = defaults.UseCursorClick;       // preserved above
+            CursorClickButton = defaults.CursorClickButton; // preserved above
+            // Reset Clicker v2 settings to real defaults
+            CursorClickDelay = defaults.CursorClickDelayMs.ToString();
+            CursorClickDelayJitter = defaults.CursorClickDelayJitterPct.ToString();
+            CursorClickUseJitter = defaults.CursorClickUseJitter;
+            CursorClickHold = defaults.CursorClickHoldMs.ToString();
+            CursorClickPositionJitter = defaults.CursorClickPositionJitter.ToString();
+            CursorClickUsePositionJitter = defaults.CursorClickUsePositionJitter;
+            CursorClickLoops = defaults.CursorClickLoops.ToString();
+            CursorClickUseLoops = defaults.CursorClickUseLoops;
+            CursorClickInterval = defaults.CursorClickIntervalMs.ToString();
+            CursorClickUseInterval = defaults.CursorClickUseInterval;
             RecordMouse = defaults.RecordMouse;
             RecordScroll = defaults.RecordScroll;
             RecordKeyboard = defaults.RecordKeyboard;

@@ -172,7 +172,7 @@ function ClickerSection({
               row puts the /s ↔ ms <select> in the toggle column so the column always lines
               up across rows. Hold has no toggle (0 ms is a valid value, no on/off needed)
               so we render a w-10 spacer to keep the input vertically aligned with the others. */}
-          <SettingRow label="Rate">
+          <SettingRow label="Rate" tooltip="Click rate. Toggle unit between /s (clicks per second) and ms (delay between clicks).">
             <SettingInput
               key={`rate-${unit}-${delayMs}`}
               value={displayValue}
@@ -189,25 +189,25 @@ function ClickerSection({
               <option value="ms">ms</option>
             </select>
           </SettingRow>
-          <SettingRow label="Jitter">
+          <SettingRow label="Jitter" tooltip="Random ±% applied to each click delay for natural timing (anti-detection)">
             <SettingInput value={rateJitter} onCommit={(v) => onChange('cursorClickDelayJitter', v)} width="w-[80px]" />
             <Toggle isOn={useRateJitter} onChange={(v) => onChange('cursorClickUseJitter', v)} />
           </SettingRow>
-          <SettingRow label="Hold">
+          <SettingRow label="Hold" tooltip="How long the button stays pressed between down and up (ms). 10 = normal click; 50-200 = slow click or drag.">
             <SettingInput value={hold} onCommit={(v) => onChange('cursorClickHold', v)} width="w-[80px]" />
             {/* Hold has no on/off — 0 ms is a valid value. Spacer keeps the input column
                 aligned with the rows that do have a toggle (matches Toggle's w-10 footprint). */}
             <div className="w-10" />
           </SettingRow>
-          <SettingRow label="Position">
+          <SettingRow label="Position" tooltip="Random ±px offset around the cursor for each click (anti-detection, human-like positioning)">
             <SettingInput value={positionJitter} onCommit={(v) => onChange('cursorClickPositionJitter', v)} width="w-[80px]" />
             <Toggle isOn={usePositionJitter} onChange={(v) => onChange('cursorClickUsePositionJitter', v)} />
           </SettingRow>
-          <SettingRow label="Loops">
+          <SettingRow label="Loops" tooltip="Number of clicks per run. 0 = infinite (stop via the Replay hotkey)">
             <SettingInput value={loops} onCommit={(v) => onChange('cursorClickLoops', v)} width="w-[80px]" />
             <Toggle isOn={useLoops} onChange={(v) => onChange('cursorClickUseLoops', v)} />
           </SettingRow>
-          <SettingRow label="Interval">
+          <SettingRow label="Interval" tooltip="Pause between loop iterations (ms). Separate from Rate, which is the delay between individual clicks.">
             <SettingInput value={interval} onCommit={(v) => onChange('cursorClickInterval', v)} width="w-[80px]" />
             <Toggle isOn={useInterval} onChange={(v) => onChange('cursorClickUseInterval', v)} />
           </SettingRow>
