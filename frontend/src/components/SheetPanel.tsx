@@ -6,6 +6,7 @@ import { useAppState } from '../state/AppStateContext';
 import type { SelectorAlternative, BrowserTestResult } from '../bridge/messageTypes';
 import { Checkbox } from './Checkbox';
 import { ImageCropper } from './ImageCropper';
+import { SendTextPreview } from './SendTextPreview';
 import { getDisplayKey } from '../utils/displayUtils';
 
 interface SheetPanelProps {
@@ -1304,15 +1305,27 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 value={browserText}
                 onChange={(e) => setBrowserText(e.target.value)}
                 className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-                placeholder="Hello{enter}"
+                placeholder="Hello{Enter}"
               />
-              {/* Data placeholders — replaced with values before typing */}
+              {/* Live chip preview — same SendTextPreview the grid uses so the user sees
+                  the chipified version of what they're typing without leaving the editor.
+                  Read-only: editing happens in the input above; this only renders. */}
+              {browserText && (
+                <div
+                  className="mt-1.5 px-2 py-1 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary leading-relaxed break-all"
+                  title="Live preview of the chipified text"
+                >
+                  <SendTextPreview text={browserText} />
+                </div>
+              )}
+              {/* Data placeholders — replaced with values before typing. Names match the
+                  SendText dialog's chip palette so users don't have to learn two vocabularies. */}
               <div className="flex flex-wrap gap-1 mt-2">
                 {[
-                  { var: '{clipboard}', label: 'Clipboard' },
-                  { var: '{date}', label: 'Date' },
-                  { var: '{time}', label: 'Time' },
-                  { var: '{datetime}', label: 'DateTime' },
+                  { var: '{Clipboard}', label: 'Clipboard' },
+                  { var: '{Date}', label: 'Date' },
+                  { var: '{Time}', label: 'Time' },
+                  { var: '{DateTime}', label: 'DateTime' },
                 ].map(item => (
                   <button
                     key={item.var}
@@ -1325,24 +1338,45 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   </button>
                 ))}
               </div>
-              {/* Action keys — dispatched as keydown/keyup at this position.
-                  Only keys with a reliable effect in browser inputs are exposed:
-                  Enter (native form submit fallback), Esc (no default), Backspace/Delete
-                  (we apply the edit ourselves). Tab, arrows, etc. are intentionally omitted —
-                  synthetic key events don't trigger the browser's default focus/caret moves. */}
+              {/* Action keys — dispatched as keydown/keyup at this position. Names use the
+                  full word (no abbreviations) to match the SendText dialog's vocabulary.
+                  Set is what the extension's BrowserType command actually supports:
+                  enter / tab / escape / backspace / delete / up / down / left / right. */}
               <div className="flex flex-wrap gap-1 mt-1">
                 {[
-                  { var: '{enter}', label: 'Enter' },
-                  { var: '{esc}', label: 'Esc' },
-                  { var: '{backspace}', label: '⌫' },
-                  { var: '{delete}', label: 'Del' },
+                  { var: '{Enter}', label: 'Enter' },
+                  { var: '{Tab}', label: 'Tab' },
+                  { var: '{Escape}', label: 'Escape' },
+                  { var: '{Backspace}', label: 'Backspace' },
+                  { var: '{Delete}', label: 'Delete' },
                 ].map(item => (
                   <button
                     key={item.var}
                     type="button"
                     onClick={() => setBrowserText(prev => prev + item.var)}
                     className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
-                    title={`Press ${item.label} key at this position. After Tab, focus moves and remaining text goes there.`}
+                    title={`Press ${item.label} key at this position`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              {/* Arrow keys — second row so the chip set doesn't sprawl. The extension
+                  supports them; useful for inputs that respond to arrow navigation
+                  (sliders, listboxes, date pickers). */}
+              <div className="flex flex-wrap gap-1 mt-1">
+                {[
+                  { var: '{Up}', label: 'Up' },
+                  { var: '{Down}', label: 'Down' },
+                  { var: '{Left}', label: 'Left' },
+                  { var: '{Right}', label: 'Right' },
+                ].map(item => (
+                  <button
+                    key={item.var}
+                    type="button"
+                    onClick={() => setBrowserText(prev => prev + item.var)}
+                    className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
+                    title={`Press ${item.label} arrow key at this position`}
                   >
                     {item.label}
                   </button>
@@ -1357,8 +1391,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               <Checkbox
                 checked={typeAppend}
                 onChange={setTypeAppend}
-                label="Append"
-                title="Append text to existing field value instead of replacing it"
+                label="Keep existing text"
+                title="Add the new text to the end of whatever is already in the field. When unchecked (default), the field is cleared before typing."
               />
               <Checkbox
                 checked={typePaste}
