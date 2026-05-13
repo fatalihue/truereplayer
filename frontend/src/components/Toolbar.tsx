@@ -40,11 +40,19 @@ interface ToolbarProps {
  * Width is measured via a hidden mirror element so we always know the
  * NATURAL width at base size, regardless of which class is currently
  * applied to the visible span.
+ *
+ * `actionCount` is optional — renders as a faded "· N action(s)" suffix
+ * after the name. The status bar shows it too, but having it inline
+ * reinforces context when the user is glancing at the toolbar without
+ * looking down. The mirror element below includes the suffix so the
+ * size detection accounts for it.
  */
-function ResponsiveProfileName({ name }: { name: string }) {
+function ResponsiveProfileName({ name, actionCount }: { name: string; actionCount?: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   const [size, setSize] = useState<'base' | 'sm'>('base');
+  const showCount = typeof actionCount === 'number' && actionCount > 0;
+  const countLabel = showCount ? `${actionCount} ${actionCount === 1 ? 'action' : 'actions'}` : '';
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -62,24 +70,28 @@ function ResponsiveProfileName({ name }: { name: string }) {
     const ro = new ResizeObserver(update);
     ro.observe(container);
     return () => ro.disconnect();
-  }, [name]);
+  }, [name, countLabel]);
 
   return (
     <div ref={containerRef} className="flex-1 min-w-0 relative">
       <span
         className={`block font-semibold text-text-primary truncate ${size === 'sm' ? 'text-sm' : 'text-base'}`}
-        title={name}
+        title={showCount ? `${name} · ${countLabel}` : name}
       >
         {name}
+        {showCount && (
+          <span className="ml-1.5 font-normal text-text-tertiary">· {countLabel}</span>
+        )}
       </span>
       {/* Off-screen mirror used only to measure the unconstrained natural width
-          at base size. Kept aria-hidden so screen readers don't see it twice. */}
+          at base size. Kept aria-hidden so screen readers don't see it twice.
+          Mirror INCLUDES the count suffix so width detection is accurate. */}
       <span
         ref={measureRef}
         className="absolute -left-[9999px] top-0 font-semibold text-base whitespace-nowrap pointer-events-none"
         aria-hidden="true"
       >
-        {name}
+        {name}{showCount && <span className="ml-1.5 font-normal">· {countLabel}</span>}
       </span>
     </div>
   );
@@ -210,10 +222,12 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
   return (
     <>
       <div className="flex items-center gap-3 px-4 py-2.5 bg-bg-surface border border-border-subtle rounded-ui">
-        {/* Left: profile name (responsive font + truncation when very long).
-            Action count is intentionally omitted here — the status bar shows
-            it discreetly, which is sufficient. */}
-        <ResponsiveProfileName name={toolbar.profileName} />
+        {/* Left: profile name with inline action count (e.g. "Demo · 5 actions").
+            The status bar still shows the count, but having it next to the name
+            reinforces context without making the user look down. Responsive
+            font + truncation handle long names; the count drops first if the
+            row gets cramped (mirror measures the full string with suffix). */}
+        <ResponsiveProfileName name={toolbar.profileName} actionCount={toolbar.actionCount} />
 
         {/* Right: tools — prevent focus on click so Space/Enter can't re-trigger */}
         <div className="flex items-center gap-1 shrink-0" onMouseDown={(e) => e.preventDefault()}>
