@@ -1111,11 +1111,20 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
       {/* Context Menu */}
       {contextMenu && menuPos && (
+        // Profile row context menu — organised into 4 groups (mirrors the
+        // ActionTable row menu pass):
+        //   - State toggles     → Pin / Unpin · Disable / Enable
+        //   - Organization      → Move to folder ▸ · Rename · Duplicate · Open in Explorer
+        //   - Triggers          → Assign hotkey… · Assign hotstring… · Window target…
+        //   - Destructive       → Delete
+        // Trailing ellipsis on "Assign… / Window target…" follows the standard
+        // convention that the label opens a dialog rather than acting inline.
         <div
           ref={contextMenuRef}
           className="fixed z-50 min-w-[180px] py-1 bg-bg-card border border-border-default rounded-md shadow-lg"
           style={{ left: menuPos.x, top: menuPos.y }}
         >
+          {/* ── Group 1: State toggles ── */}
           {/* Pin / Unpin */}
           {isPinned(contextMenu.profileName) ? (
             <button
@@ -1135,7 +1144,18 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             </button>
           )}
 
-          {/* Move to Folder */}
+          <button
+            onClick={() => handleToggleDisable(contextMenu.profileName)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Ban size={13} className="text-text-tertiary" />
+            {profile?.isDisabled ? 'Enable' : 'Disable'}
+          </button>
+
+          <div className="my-1 border-t border-border-subtle" />
+
+          {/* ── Group 2: Organization ── */}
+          {/* Move to Folder submenu */}
           <div
             className="relative"
             onMouseEnter={() => setShowMoveToFolderMenu(contextMenu.profileName)}
@@ -1145,7 +1165,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
             >
               <ArrowRightFromLine size={13} className="text-text-tertiary" />
-              Folder
+              Move to folder
               <ChevronRight size={11} className="ml-auto text-text-tertiary" />
             </button>
             {showMoveToFolderMenu === contextMenu.profileName && (
@@ -1171,7 +1191,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
                     >
                       <FolderMinus size={11} className="text-text-tertiary" />
-                      Remove
+                      Remove from folder
                     </button>
                   </>
                 )}
@@ -1183,15 +1203,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             )}
           </div>
 
-          <div className="my-1 border-t border-border-subtle" />
-
-          <button
-            onClick={() => handleToggleDisable(contextMenu.profileName)}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-          >
-            <Ban size={13} className="text-text-tertiary" />
-            {profile?.isDisabled ? 'Enable' : 'Disable'}
-          </button>
           <button
             onClick={() => handleRename(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
@@ -1199,46 +1210,85 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             <Pencil size={13} className="text-text-tertiary" />
             Rename
           </button>
+
+          {/* Duplicate — mirrors the toolbar header button. Per-row entry point is
+              useful when the user wants to duplicate a profile that isn't currently
+              the active one. */}
+          <button
+            onClick={() => handleDuplicate(contextMenu.profileName)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Copy size={13} className="text-text-tertiary" />
+            Duplicate
+          </button>
+
+          {/* Open in Explorer — opens the profile's .json file in the Windows
+              Explorer. Mirrors the toolbar header button but works for any
+              profile, not just the active one. */}
+          <button
+            onClick={() => { handleOpenFolder(contextMenu.profileName); setContextMenu(null); }}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <ExternalLink size={13} className="text-text-tertiary" />
+            Open in Explorer
+          </button>
+
           <div className="my-1 border-t border-border-subtle" />
+
+          {/* ── Group 3: Trigger dialogs ── */}
           <button
             onClick={() => handleAssignHotkey(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Keyboard size={13} className="text-text-tertiary" />
-            Hotkey
+            Assign hotkey…
           </button>
           <button
             onClick={() => handleAssignHotstring(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Type size={13} className="text-text-tertiary" />
-            Hotstrings
+            Assign hotstring…
           </button>
           <button
             onClick={() => handleSetWindowTarget(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Crosshair size={13} className="text-text-tertiary" />
-            Target
+            Window target…
           </button>
+
           <div className="my-1 border-t border-border-subtle" />
+
+          {/* ── Destructive ── */}
           <button
             onClick={() => handleDelete(contextMenu.profileName)}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-recording hover:bg-bg-elevated transition-colors"
+            className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-recording hover:bg-bg-elevated transition-colors"
           >
-            <Trash2 size={13} />
-            Delete
+            <span className="flex items-center gap-2.5">
+              <Trash2 size={13} />
+              Delete
+            </span>
+            <span className="text-[10px] text-text-disabled font-mono">Del</span>
           </button>
         </div>
       )}
 
       {/* Folder Context Menu */}
       {folderContextMenu && (
+        // Folder context menu — mirrors the profile menu's grouping pattern at
+        // a smaller scale:
+        //   - Identity     → Rename · Color ▸
+        //   - Triggers     → Window target… · Disable / Enable
+        //   - Destructive  → Delete Folder
+        // Folders are virtual organisation buckets (not file-system folders),
+        // so they have no "Open in Explorer" / "Duplicate" equivalent.
         <div
           ref={folderMenuRef}
           className="fixed z-50 min-w-[160px] py-1 bg-bg-card border border-border-default rounded-md shadow-lg"
           style={{ left: folderContextMenu.x, top: folderContextMenu.y }}
         >
+          {/* ── Identity ── */}
           <button
             onClick={() => handleRenameFolder(folderContextMenu.folderName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
@@ -1277,6 +1327,11 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             )}
           </div>
           <div className="my-1 border-t border-border-subtle" />
+
+          {/* ── Triggers / state ── */}
+          {/* "Window target…" — inherited by every profile inside the folder
+              unless that profile overrides it. The trailing ellipsis indicates
+              a dialog opens (matches the profile menu's "Assign hotkey…" etc). */}
           <button
             onClick={() => {
               const folder = (profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName);
@@ -1291,7 +1346,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
             <Crosshair size={13} className="text-text-tertiary" />
-            Target
+            Window target…
           </button>
           <button
             onClick={() => {
@@ -1305,16 +1360,19 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               const folder = (profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName);
               const items = folder?.items ?? [];
               const allDisabled = items.length > 0 && items.every(n => profiles.find(p => p.name === n)?.isDisabled);
-              return allDisabled ? 'Enable' : 'Disable';
+              return allDisabled ? 'Enable all' : 'Disable all';
             })()}
           </button>
+
           <div className="my-1 border-t border-border-subtle" />
+
+          {/* ── Destructive ── */}
           <button
             onClick={() => handleDeleteFolder(folderContextMenu.folderName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-recording hover:bg-bg-elevated transition-colors"
           >
             <Trash2 size={13} />
-            Delete Folder
+            Delete folder
           </button>
         </div>
       )}
