@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Search, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowUpDown, Type, Ban, ChevronsLeft, ChevronsRight, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot } from 'lucide-react';
+import { Search, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink } from 'lucide-react';
 import type { ProfileEntry } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -947,7 +947,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
               data-tip="Open profile file in Explorer"
             >
-              <FolderOpen size={14} />
+              <ExternalLink size={14} />
             </button>
             <button
               onClick={() => activeProfile && handleDuplicate(activeProfile)}
@@ -962,7 +962,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
               data-tip="Import or export profiles"
             >
-              <ArrowUpDown size={14} />
+              <ArrowLeftRight size={14} />
             </button>
             <button
               onClick={handleCreateFolder}
