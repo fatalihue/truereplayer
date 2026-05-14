@@ -127,13 +127,17 @@ export function KeyCaptureDialog({ onConfirm, onClose }: KeyCaptureDialogProps) 
       onClose();
       return;
     }
-    // Don't capture pure modifier presses on their own — wait for the actual key.
-    // (e.g. user pressing Ctrl on their way to Ctrl+A: ignore the Ctrl event.) This
-    // means we DO capture Ctrl/Shift/Alt as standalone if they're released, but the
-    // 99% case is they're typing a real key.
-    if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
     e.preventDefault();
     e.stopPropagation();
+    // Modifiers (Ctrl/Shift/Alt) ARE captureable on their own — they're useful as
+    // single-key actions for "hold Ctrl while clicking" type sequences. If the user
+    // presses Ctrl on the way to Ctrl+A, the Ctrl gets captured first (briefly),
+    // then the A keydown overwrites it. Final state is "A" which is what they
+    // intended — the brief flash is fine. An earlier version skipped modifiers
+    // entirely on keydown, which made it impossible to insert a bare Ctrl press.
+    //
+    // Meta (Win key) still returns null from mapKeyEvent because JS keyboard
+    // events on Windows often don't fire for it (OS intercepts).
     const name = mapKeyEvent(e.nativeEvent);
     if (name) setCaptured(name);
   }, [captured, onClose]);
