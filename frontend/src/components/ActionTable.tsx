@@ -1203,10 +1203,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             }
 
             // Clicks: copy the coordinate pair as "x, y" for quick reuse / debugging.
-            // Native LeftClick/RightClick/MiddleClick always carry coords from the
-            // recording hook; the entry is unconditional on actionType so it's
-            // consistent even in edge cases where x/y might be 0 or unset.
-            if (row.actionType === 'LeftClick' || row.actionType === 'RightClick' || row.actionType === 'MiddleClick') {
+            // Native clicks are recorded as DOWN/UP pairs — actionType is one of
+            // LeftClickDown, LeftClickUp, RightClickDown, RightClickUp, MiddleClickDown,
+            // MiddleClickUp (NOT the unsuffixed "LeftClick" form, which only exists in
+            // the SheetPanel's family-switcher dropdown — never as a stored action).
+            // An earlier draft checked the unsuffixed names and silently missed every
+            // real click row; user reported "Copy Coordinates doesn't appear for clicks"
+            // because of this. The regex accepts the optional suffix so legacy or
+            // synthesized data without Down/Up still works too.
+            if (/^(Left|Right|Middle)Click(Down|Up)?$/.test(row.actionType ?? '')) {
               return (
                 <button
                   onMouseEnter={onMouse}
