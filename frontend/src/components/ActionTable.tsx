@@ -79,6 +79,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const wasRecording = useRef(false);
   const [sendTextEdit, setSendTextEdit] = useState<{ index: number; text: string } | null>(null);
   const [runProfileEdit, setRunProfileEdit] = useState<{ index: number; profileName: string; repeatCount: number } | null>(null);
+  // Editing a Keystroke action = re-capturing it. There's no other state to tweak
+  // (no body text like SendText, no profile target like RunProfile, no coords) —
+  // the captured combo IS the action. So Edit reopens KeystrokeCaptureDialog rather
+  // than dropping the user into the generic SheetPanel.
+  const [keystrokeEdit, setKeystrokeEdit] = useState<{ index: number } | null>(null);
   const [dragIndices, setDragIndices] = useState<number[] | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null);
 
@@ -830,6 +835,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             setSendTextEdit({ index: idx, text: action.key });
                           } else if (action.actionType === 'RunProfile') {
                             setRunProfileEdit({ index: idx, profileName: action.key, repeatCount: action.repeatCount ?? 1 });
+                          } else if (action.actionType === 'Keystroke') {
+                            // Keystroke double-click → recapture dialog. The inline single-
+                            // key edit path used by KeyDown/KeyUp below would let the user
+                            // overwrite the combo with a single key (e.g. replace "Alt+Tab"
+                            // with just "T") and silently lose the modifiers — wrong shape
+                            // for a Keystroke action.
+                            setKeystrokeEdit({ index: idx });
                           } else if (action.actionType.startsWith('Key')) {
                             startEdit(idx, 'key', action.key);
                           }
@@ -990,6 +1002,19 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         />
       )}
 
+      {keystrokeEdit && (
+        <KeystrokeCaptureDialog
+          onConfirm={(keystroke) => {
+            // No dedicated "editKeystroke" bridge message — just rewrite the .key field
+            // via the generic edit channel. The action's actionType stays "Keystroke",
+            // and the replay parser handles whatever combo string lands in .key.
+            send({ type: 'actions:edit', payload: { index: keystrokeEdit.index, field: 'key', value: keystroke } });
+            setKeystrokeEdit(null);
+          }}
+          onClose={() => setKeystrokeEdit(null)}
+        />
+      )}
+
       {runProfileEdit && (
         <RunProfileDialog
           initial={{ profileName: runProfileEdit.profileName, repeatCount: runProfileEdit.repeatCount }}
@@ -1122,8 +1147,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
           <div className="my-1 border-t border-border-subtle" />
 
-          {/* Edit — specialized dialogs for SendText / RunProfile; others fall back
-              to the generic sheet panel which only edits delay/comment/X/Y/key. */}
+          {/* Edit — specialized dialogs for SendText / RunProfile / Keystroke
+              (which all carry a single primary payload that has its own capture flow);
+              others fall back to the generic sheet panel which edits delay / comment /
+              X / Y / key as separate fields. */}
           <button
             onMouseEnter={() => setActiveSubmenu(null)}
             onClick={() => {
@@ -1136,6 +1163,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   profileName: rowAction.key,
                   repeatCount: rowAction.repeatCount ?? 1,
                 });
+              } else if (rowAction?.actionType === 'Keystroke') {
+                setKeystrokeEdit({ index: contextMenu.rowIndex });
               } else {
                 onOpenSheet?.(contextMenu.rowIndex);
               }
@@ -1255,27 +1284,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             // and there's nowhere useful to paste a bare key name. Removed after
             // user feedback that the option felt purposeless.
 
-            // Keystroke: copy the combo string ("Alt+Tab", "Ctrl+Shift+T", etc.).
-            // Unlike a bare key name, the combo notation IS useful outside the app —
-            // documenting macros, sharing in chat, pasting into help / issue
-            // threads. Same icon as Copy Selector (Code2) since both are "copy a
-            // structured string identifier".
-            if (row.actionType === 'Keystroke' && row.key) {
-              return (
-                <button
-                  onMouseEnter={onMouse}
-                  onClick={() => {
-                    navigator.clipboard.writeText(row.key);
-                    showToast(`Copied "${row.key}"`, 'success');
-                    closeContextMenu();
-                  }}
-                  className={cls}
-                >
-                  <Code2 size={13} className="text-text-tertiary" />
-                  Copy Keystroke
-                </button>
-              );
-            }
+            // Keystroke intentionally has no type-specific entry. Edit IS recapture
+            // (opens the same dialog as insert), so there's nothing to surface in this
+            // slot. An earlier draft added Copy Keystroke here but it didn't earn its
+            // place — the combo string is already visible in the Key cell.
 
             // RunProfile: jump to the referenced profile. Reuses profile:click which
             // toggles selection on click; since we're targeting a DIFFERENT profile

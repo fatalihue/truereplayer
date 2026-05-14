@@ -7,7 +7,6 @@ import type { SelectorAlternative, BrowserTestResult } from '../bridge/messageTy
 import { Checkbox } from './Checkbox';
 import { ImageCropper } from './ImageCropper';
 import { LexicalTokenEditor, type LexicalEditorHandle } from './lexical/LexicalTokenEditor';
-import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
 import { getDisplayKey } from '../utils/displayUtils';
 
 interface SheetPanelProps {
@@ -114,10 +113,6 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const [textMode, setTextMode] = useState<TextMode>('exact');
   const [newTab, setNewTab] = useState(false);
   const [isPicking, setIsPicking] = useState(false);
-  // Reopens KeystrokeCaptureDialog over the sheet panel so the user can replace the
-  // existing combo without leaving the editor. The captured value writes into the
-  // local `key` state; the Save button persists it via the existing bulkUpdate flow.
-  const [showKeystrokeRecapture, setShowKeystrokeRecapture] = useState(false);
 
   // #6, #7, #5 — new browser fields
   const [waitMode, setWaitMode] = useState<string>('appears');
@@ -694,7 +689,6 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   if (actionIndex == null) return null;
 
   const isKeyAction = actionType === 'KeyDown' || actionType === 'KeyUp';
-  const isKeystroke = actionType === 'Keystroke';
   const isSendText = actionType === 'SendText';
   const isWaitImage = actionType === 'WaitImage';
   const isPause = actionType === 'Pause';
@@ -1593,54 +1587,6 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           </div>
           )}
 
-          {/* Keystroke editor — the combo is displayed as styled kbd chips (parsed by
-              splitting the stored "+"-joined key string) plus a Recapture button that
-              opens the same KeystrokeCaptureDialog used at insert time. Unlike the
-              generic KEY field for KeyDown/KeyUp, the user CANNOT type a combo as raw
-              text here — capturing through a real keypress is the only path, because
-              free-typing a combo string is fragile (no validation, easy to typo
-              modifier names, layout-dependent for the target key). */}
-          {isKeystroke && (
-          <div>
-            <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">KEYSTROKE</label>
-            <div className="flex items-center gap-2 px-3 py-2.5 bg-bg-input border border-border-default rounded">
-              <div className="flex-1 flex items-center justify-center gap-1 flex-wrap">
-                {key
-                  ? key.split('+').map((part, idx, arr) => {
-                      // Display "VK_93" as "Menu" for the context-menu key — same friendly
-                      // mapping the capture dialog uses, so what the user saw on capture is
-                      // what they see in the editor.
-                      const label = part === 'VK_93' ? 'Menu' : part;
-                      return (
-                        <span key={`${part}-${idx}`} className="inline-flex items-center gap-1">
-                          <kbd
-                            className="inline-block px-2.5 py-1 bg-bg-elevated border border-border-default rounded font-mono text-[13px] font-semibold text-[#FFC107]"
-                            style={{ boxShadow: '0 2px 0 rgba(0,0,0,0.3)' }}
-                          >
-                            {label}
-                          </kbd>
-                          {idx < arr.length - 1 && <span className="text-text-tertiary text-[12px]">+</span>}
-                        </span>
-                      );
-                    })
-                  : <span className="text-text-disabled text-[12px]">No combo captured</span>}
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowKeystrokeRecapture(true)}
-                className="shrink-0 px-2.5 py-1 text-[11px] font-medium text-text-secondary bg-bg-card border border-border-subtle rounded hover:text-text-primary hover:bg-bg-elevated transition-colors"
-                title="Open the capture dialog to record a new combo"
-              >
-                Recapture…
-              </button>
-            </div>
-            <p className="mt-1.5 text-[10px] text-text-tertiary leading-relaxed">
-              At replay: presses modifiers in canonical order, taps the key, then releases
-              modifiers in reverse order. Re-capture replaces the combo entirely.
-            </p>
-          </div>
-          )}
-
           {/* X / Y — Pick button (only on click halves, since scroll actions don't really
               use X/Y but happen to live in showCoords). Lets the user click somewhere on
               screen to fill both coords without manual typing or re-recording. */}
@@ -1759,19 +1705,6 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           imageBase64={action.imageBase64}
           onSave={handleCropSave}
           onCancel={() => setCropperOpen(false)}
-        />
-      )}
-
-      {/* Keystroke recapture — opens over the SheetPanel so the user can replace the
-          current combo without leaving the editor. On confirm, writes into local `key`
-          state; the Save button persists it via the existing edit flow. */}
-      {showKeystrokeRecapture && (
-        <KeystrokeCaptureDialog
-          onConfirm={(keystroke) => {
-            setKey(keystroke);
-            setShowKeystrokeRecapture(false);
-          }}
-          onClose={() => setShowKeystrokeRecapture(false)}
         />
       )}
     </>,
