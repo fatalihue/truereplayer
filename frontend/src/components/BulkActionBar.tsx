@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Clock, Copy, Clipboard, Trash2, X, Crosshair, MessageSquare, Eye, EyeOff } from 'lucide-react';
+import { Clock, Copy, Trash2, X, Crosshair, MessageSquare, Eye, EyeOff } from 'lucide-react';
 
 interface BulkActionBarProps {
   selectedCount: number;
@@ -11,7 +11,6 @@ interface BulkActionBarProps {
   onSetDelay: (delay: number) => void;
   onSetCoord: (axis: 'x' | 'y', value: string) => void;
   onSetComment: (comment: string) => void;
-  onCopyActions: () => void;
   onToggleSkip: () => void;
 }
 
@@ -24,7 +23,6 @@ export function BulkActionBar({
   onDuplicate,
   onSetDelay,
   onSetCoord,
-  onCopyActions,
   onSetComment,
   onToggleSkip,
 }: BulkActionBarProps) {
@@ -151,15 +149,11 @@ export function BulkActionBar({
 
             <div className="w-px h-3.5 bg-border-subtle mx-0.5" />
 
-            {/* Copy (internal clipboard) */}
-            <button
-              onClick={onCopyActions}
-              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
-              title="Copy actions (Ctrl+C) — paste in any profile with Ctrl+V"
-            >
-              <Clipboard size={11} />
-              Copy
-            </button>
+            {/* Copy was removed here — redundant with the toolbar's Copy button
+                which is always visible and already does "copy selection if any,
+                else copy all". Having two Copy buttons on screen at the same time
+                while rows were selected just added clutter. Ctrl+C still works
+                from anywhere. */}
 
             {/* Duplicate */}
             <button
