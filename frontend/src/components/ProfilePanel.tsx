@@ -930,77 +930,58 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           </>
         ) : (
           <>
-        {/* Header — 3 boxed groups mirroring the Toolbar redesign:
-              [Collapse] · [Profile-context: Open / Duplicate] · [Creation: I/O / New folder / New profile]
-            The profile-context group picks up a faint accent tint (bg-accent-solid/[0.04])
-            when activeProfile is non-null, signalling "these two buttons just lit up
-            because you have a selection". Stays neutral otherwise. */}
+        {/* Header — flat row of 6 icon buttons. An earlier draft wrapped them in
+            three boxed-group containers mirroring the toolbar redesign, but the
+            panel is narrow (~247 px) and the extra padding/borders made the row
+            feel crowded for not much semantic gain. The icon swaps + tooltips
+            from the same pass DID land. */}
         <div className="flex items-center justify-between px-3 pt-2 pb-1">
           <span className="text-xs font-semibold text-text-tertiary tracking-wider">PROFILES</span>
-          {/* gap-1 between groups (4 px) instead of the toolbar's gap-1.5 (6 px) because
-              the panel is narrow (~247 px) — the wider gap would push the last button
-              off the right edge. Inner padding p-0 for the same reason; the group's
-              border + bg alone provide enough visual containment at this scale. */}
-          <div className="flex items-center gap-1">
-            {/* Panel control */}
-            <div className="flex items-center gap-0.5 bg-white/[0.025] border border-white/[0.04] rounded">
-              <button
-                onClick={onToggleCollapse}
-                className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-                data-tip="Collapse profiles panel"
-              >
-                <ChevronsLeft size={14} />
-              </button>
-            </div>
-            {/* Profile-context group — depends on activeProfile; tinted blue when ready. */}
-            <div
-              className={`flex items-center gap-0.5 border rounded transition-colors ${
-                activeProfile
-                  ? 'bg-accent-solid/[0.04] border-accent-solid/[0.10]'
-                  : 'bg-white/[0.025] border-white/[0.04]'
-              }`}
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={onToggleCollapse}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+              data-tip="Collapse profiles panel"
             >
-              <button
-                onClick={() => activeProfile && handleOpenFolder(activeProfile)}
-                disabled={!activeProfile}
-                className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-                data-tip="Open profile file in Explorer"
-              >
-                <ExternalLink size={14} />
-              </button>
-              <button
-                onClick={() => activeProfile && handleDuplicate(activeProfile)}
-                disabled={!activeProfile}
-                className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-                data-tip="Duplicate active profile"
-              >
-                <Copy size={14} />
-              </button>
-            </div>
-            {/* Creation / I/O group */}
-            <div className="flex items-center gap-0.5 bg-white/[0.025] border border-white/[0.04] rounded">
-              <button
-                onClick={handleExportClick}
-                className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-                data-tip="Import or export profiles"
-              >
-                <ArrowLeftRight size={14} />
-              </button>
-              <button
-                onClick={handleCreateFolder}
-                className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-                data-tip="New folder"
-              >
-                <FolderPlus size={14} />
-              </button>
-              <button
-                onClick={handleCreate}
-                className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-                data-tip="New profile" data-tip-pos="end"
-              >
-                <FilePlus size={14} />
-              </button>
-            </div>
+              <ChevronsLeft size={14} />
+            </button>
+            <button
+              onClick={() => activeProfile && handleOpenFolder(activeProfile)}
+              disabled={!activeProfile}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+              data-tip="Open profile file in Explorer"
+            >
+              <ExternalLink size={14} />
+            </button>
+            <button
+              onClick={() => activeProfile && handleDuplicate(activeProfile)}
+              disabled={!activeProfile}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+              data-tip="Duplicate active profile"
+            >
+              <Copy size={14} />
+            </button>
+            <button
+              onClick={handleExportClick}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+              data-tip="Import or export profiles"
+            >
+              <ArrowLeftRight size={14} />
+            </button>
+            <button
+              onClick={handleCreateFolder}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+              data-tip="New folder"
+            >
+              <FolderPlus size={14} />
+            </button>
+            <button
+              onClick={handleCreate}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+              data-tip="New profile" data-tip-pos="end"
+            >
+              <FilePlus size={14} />
+            </button>
           </div>
         </div>
 
