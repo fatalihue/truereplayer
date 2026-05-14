@@ -35,9 +35,12 @@ namespace TrueReplayer.Services
         // committing. Updated on every MouseMove regardless of drag state.
         private Point _cursorPoint;
         private bool _hasCursor;
-        // Last painted label rect, used to do a targeted invalidate (old ∪ new) instead of
-        // a full-form invalidate on every MouseMove — that would mean repainting a virtual-
-        // screen-sized bitmap at mouse-event frequency, which is brutal on multi-monitor.
+        // Last painted label rect, captured from inside OnPaint after the actual MeasureString
+        // ran. Used to invalidate (lastPainted ∪ newApprox) on cursor move so the previous
+        // label is cleared. An earlier draft computed this rect twice — once approximated in
+        // OnMouseMove, again actually in OnPaint — and the approximation under-estimated the
+        // real width, leaving a smeared trail of label pixels along the cursor path. Tracking
+        // the truth from OnPaint avoids the divergence.
         private Rectangle _lastCursorLabelRect = Rectangle.Empty;
         // Cached virtual-screen origin so the cursor label can show absolute screen coords
         // (matching the values the action will end up storing). The form already uses these
@@ -215,29 +218,32 @@ namespace TrueReplayer.Services
                 return;
             }
 
-            // Not dragging — only the cursor coord HUD changed. Invalidate just the union
-            // of the old and new label rects so we redraw a few hundred px instead of the
-            // entire virtual-screen-sized form.
+            // Not dragging — only the cursor coord HUD changed. Invalidate the union of the
+            // PREVIOUSLY-PAINTED label rect (captured at the end of OnPaint, so it reflects
+            // the real MeasureString width and any edge-flip that happened) and a generous
+            // approximation of where the new label will land. Inflated by 8 px on each axis
+            // to absorb font-metric drift between the estimate and the actual paint result —
+            // the earlier 1-px inflate left a smeared trail when the cursor moved fast across
+            // wide-digit coordinate strings.
             var newRect = ComputeCursorLabelRect();
             var dirty = _lastCursorLabelRect.IsEmpty ? newRect : Rectangle.Union(_lastCursorLabelRect, newRect);
-            // Inflate by 1 to guarantee anti-aliased edges aren't left behind.
-            dirty.Inflate(1, 1);
-            _lastCursorLabelRect = newRect;
+            dirty.Inflate(8, 8);
             Invalidate(dirty);
         }
 
-        // Mirrors the geometry in DrawCursorCoords so the dirty-rect logic in OnMouseMove
-        // stays in sync. Uses a fixed font metric estimate to avoid creating a Graphics
-        // context outside paint — close enough since the inflate(1) absorbs sub-pixel drift.
+        // Approximates where the label WILL be drawn on the next paint. Used by
+        // OnMouseMove to know what area to invalidate. Over-estimates width (9 px/char
+        // instead of the empirical ~7 px/char) so the dirty rect always covers what
+        // MeasureString will eventually produce — under-estimating leaves a trail.
+        // The actual paint rect is captured back into _lastCursorLabelRect inside
+        // DrawCursorCoords, which is the source of truth on the next move.
         private Rectangle ComputeCursorLabelRect()
         {
             if (!_hasCursor) return Rectangle.Empty;
             int absX = _cursorPoint.X + _virtualOriginX;
             int absY = _cursorPoint.Y + _virtualOriginY;
             string text = $"{absX}, {absY}";
-            // Approximation: Segoe UI 9.5 averages ~6.5 px/char wide, ~14 px tall. Add the
-            // pad (6 horizontal, 3 vertical * 2) used in DrawCursorCoords.
-            int labelW = (int)Math.Ceiling(text.Length * 6.5f) + 12;
+            int labelW = (int)Math.Ceiling(text.Length * 9f) + 12;  // generous overshoot
             int labelH = 14 + 6;
             int lx = _cursorPoint.X + 16;
             int ly = _cursorPoint.Y + 16;
@@ -251,7 +257,9 @@ namespace TrueReplayer.Services
         // Renders an "(x, y)" callout near the cursor showing the absolute virtual-screen
         // coordinates (i.e. what the action will actually store). Inspired by ShareX /
         // Greenshot — small, high-contrast, follows the cursor, flips to the opposite side
-        // when too close to an edge so it never gets clipped.
+        // when too close to an edge so it never gets clipped. Writes the actual rendered
+        // rect back to _lastCursorLabelRect so the next OnMouseMove invalidates the exact
+        // pixels we drew (not an approximation).
         private void DrawCursorCoords(Graphics g)
         {
             if (!_hasCursor) return;
@@ -275,6 +283,13 @@ namespace TrueReplayer.Services
             g.FillRoundedRectangle(bg, lx, ly, labelW, labelH, 4);
             using var fg = new SolidBrush(Color.FromArgb(255, 96, 205, 255)); // #60CDFF accent
             g.DrawString(text, font, fg, lx + padX, ly + padY);
+
+            // Source of truth for the next move's dirty-rect calc. Captured AFTER the
+            // actual MeasureString + edge-flip, so we know exactly which pixels were
+            // touched. The approximation in ComputeCursorLabelRect is only used for the
+            // FIRST move (when this hasn't been set yet) or when the rect rebound from a
+            // flip — the inflate(8,8) in OnMouseMove absorbs that drift.
+            _lastCursorLabelRect = new Rectangle((int)lx, (int)ly, (int)Math.Ceiling(labelW), (int)Math.Ceiling(labelH));
         }
 
         private void OnMouseUp(object? sender, MouseEventArgs e)
