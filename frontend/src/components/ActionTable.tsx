@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Workflow, Pause, Code2, Files } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Workflow, Pause, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -9,6 +9,7 @@ import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors } from '..
 import { SendTextDialog } from './SendTextDialog';
 import { SendTextPreview } from './SendTextPreview';
 import { RunProfileDialog } from './RunProfileDialog';
+import { KeyCaptureDialog } from './KeyCaptureDialog';
 import { BulkActionBar } from './BulkActionBar';
 import { Checkbox, CheckboxBox } from './Checkbox';
 import type { ColumnVisibility } from './Toolbar';
@@ -84,6 +85,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const [submenuFlip, setSubmenuFlip] = useState(false);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const [sendTextInsert, setSendTextInsert] = useState<{ insertIndex: number } | null>(null);
+  const [runProfileInsert, setRunProfileInsert] = useState<{ insertIndex: number } | null>(null);
+  const [keyCaptureInsert, setKeyCaptureInsert] = useState<{ insertIndex: number } | null>(null);
   const { showToast } = useToast();
   const contextMenuEnabled = !buttonStates.recordingActive && !buttonStates.replayActive;
 
@@ -539,6 +542,25 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const handleInsertAction = useCallback((actionType: string) => {
     if (!contextMenu) return;
     const insertIndex = contextMenu.rowIndex + 1;
+    // Special-case the three actions that need a dialog before they can produce
+    // a real action: SendText needs body text, SendKey needs the captured key,
+    // RunProfile needs the target profile name + repeat count. Plain inserts
+    // (Pause, WaitImage) go through the generic insertAction path.
+    if (actionType === 'SendText') {
+      setSendTextInsert({ insertIndex });
+      closeContextMenu();
+      return;
+    }
+    if (actionType === 'SendKey') {
+      setKeyCaptureInsert({ insertIndex });
+      closeContextMenu();
+      return;
+    }
+    if (actionType === 'RunProfile') {
+      setRunProfileInsert({ insertIndex });
+      closeContextMenu();
+      return;
+    }
     send({ type: 'actions:insertAction', payload: { actionType, insertIndex } });
     closeContextMenu();
   }, [contextMenu, send, closeContextMenu]);
@@ -564,14 +586,19 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     closeContextMenu();
   }, [contextMenu, selectedIndices, send, closeContextMenu]);
 
-  // Submenu items definition (mouse, keyboard, scroll only — other actions available in toolbar)
+  // Submenu items — mirrors the toolbar's Add Action dropdown so users see the
+  // same vocabulary regardless of entry point. Click x3 + KeyPress + Scrolls were
+  // removed in the toolbar pass because recording captures them natively; same
+  // reasoning here. The remaining 5 are exactly what the toolbar exposes:
+  //   - Send Text / Send Key open capture dialogs
+  //   - Run Profile opens the profile picker
+  //   - Pause / Wait for Image insert directly
   const submenuItems = [
-    { type: 'LeftClick', label: 'Left Click', icon: Mouse },
-    { type: 'RightClick', label: 'Right Click', icon: Mouse },
-    { type: 'MiddleClick', label: 'Middle Click', icon: Mouse },
-    { type: 'KeyPress', label: 'Key Press', icon: Keyboard },
-    { type: 'ScrollUp', label: 'Scroll Up', icon: ArrowUp },
-    { type: 'ScrollDown', label: 'Scroll Down', icon: ArrowDown },
+    { type: 'SendText', label: 'Send Text…', icon: Type },
+    { type: 'SendKey', label: 'Send Key…', icon: Keyboard },
+    { type: 'Pause', label: 'Pause', icon: Hourglass },
+    { type: 'WaitImage', label: 'Wait for Image', icon: ScanSearch },
+    { type: 'RunProfile', label: 'Run Profile', icon: Repeat2 },
   ] as const;
 
   return (
@@ -961,6 +988,31 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         />
       )}
 
+      {/* Insert-flow dialogs for the context menu's Insert Action submenu. Same
+          three special-cases as the toolbar's Add Action dropdown — Send Text,
+          Send Key (capture), Run Profile (picker) — each needs a dialog before
+          a concrete action can be inserted. */}
+      {runProfileInsert && (
+        <RunProfileDialog
+          excludeProfileName={activeProfile ?? undefined}
+          onConfirm={(profileName, repeatCount) => {
+            send({ type: 'actions:addRunProfile', payload: { profileName, repeatCount, insertIndex: runProfileInsert.insertIndex } });
+            setRunProfileInsert(null);
+          }}
+          onClose={() => setRunProfileInsert(null)}
+        />
+      )}
+
+      {keyCaptureInsert && (
+        <KeyCaptureDialog
+          onConfirm={(key) => {
+            send({ type: 'actions:insertKey', payload: { key, insertIndex: keyCaptureInsert.insertIndex } });
+            setKeyCaptureInsert(null);
+          }}
+          onClose={() => setKeyCaptureInsert(null)}
+        />
+      )}
+
       {/* Bulk Action Bar — inline at bottom */}
       {selectedIndices.size > 0 && !buttonStates.recordingActive && !buttonStates.replayActive && (
         <BulkActionBar
@@ -1074,24 +1126,113 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             Edit
           </button>
 
-          {/* Copy Selector — only for Browser actions */}
-          {actions[contextMenu.rowIndex]?.actionType?.startsWith('Browser') && actions[contextMenu.rowIndex]?.key && (
-            <button
-              onMouseEnter={() => setActiveSubmenu(null)}
-              onClick={() => {
-                const selector = actions[contextMenu.rowIndex]?.key;
-                if (selector) {
-                  navigator.clipboard.writeText(selector);
-                  showToast('Selector copied', 'success');
-                }
-                closeContextMenu();
-              }}
-              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-            >
-              <Code2 size={13} className="text-text-tertiary" />
-              Copy Selector
-            </button>
-          )}
+          {/* Type-specific quick action — only ONE of these renders, based on the
+              right-clicked row's actionType. Keeps the menu height predictable
+              regardless of what was clicked. */}
+          {(() => {
+            const row = actions[contextMenu.rowIndex];
+            if (!row) return null;
+            const onMouse = () => setActiveSubmenu(null);
+            const cls = "w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors";
+
+            // Browser*: copy the selector string (CSS / XPath / text=). Useful for
+            // pasting into devtools or another action.
+            if (row.actionType?.startsWith('Browser') && row.key) {
+              return (
+                <button
+                  onMouseEnter={onMouse}
+                  onClick={() => {
+                    navigator.clipboard.writeText(row.key);
+                    showToast('Selector copied', 'success');
+                    closeContextMenu();
+                  }}
+                  className={cls}
+                >
+                  <Code2 size={13} className="text-text-tertiary" />
+                  Copy Selector
+                </button>
+              );
+            }
+
+            // SendText: copy the text body (placeholders + tokens included verbatim).
+            if (row.actionType === 'SendText' && row.key) {
+              return (
+                <button
+                  onMouseEnter={onMouse}
+                  onClick={() => {
+                    navigator.clipboard.writeText(row.key);
+                    showToast('Text copied', 'success');
+                    closeContextMenu();
+                  }}
+                  className={cls}
+                >
+                  <Code2 size={13} className="text-text-tertiary" />
+                  Copy Text
+                </button>
+              );
+            }
+
+            // Clicks: copy the coordinate pair as "x, y" for quick reuse / debugging.
+            if (
+              (row.actionType === 'LeftClick' || row.actionType === 'RightClick' || row.actionType === 'MiddleClick') &&
+              row.x != null && row.y != null
+            ) {
+              return (
+                <button
+                  onMouseEnter={onMouse}
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${row.x}, ${row.y}`);
+                    showToast(`Copied ${row.x}, ${row.y}`, 'success');
+                    closeContextMenu();
+                  }}
+                  className={cls}
+                >
+                  <Crosshair size={13} className="text-text-tertiary" />
+                  Copy Coordinates
+                </button>
+              );
+            }
+
+            // KeyDown / KeyUp: copy just the key name (e.g. "Enter", "Ctrl", "A").
+            if ((row.actionType === 'KeyDown' || row.actionType === 'KeyUp') && row.key) {
+              return (
+                <button
+                  onMouseEnter={onMouse}
+                  onClick={() => {
+                    navigator.clipboard.writeText(row.key);
+                    showToast(`Copied "${row.key}"`, 'success');
+                    closeContextMenu();
+                  }}
+                  className={cls}
+                >
+                  <Keyboard size={13} className="text-text-tertiary" />
+                  Copy Key
+                </button>
+              );
+            }
+
+            // RunProfile: jump to the referenced profile. Reuses profile:click which
+            // toggles selection on click; since we're targeting a DIFFERENT profile
+            // than the active one, this loads that profile (with the unsaved-changes
+            // guard from HandleProfileClick).
+            if (row.actionType === 'RunProfile' && row.key) {
+              return (
+                <button
+                  onMouseEnter={onMouse}
+                  onClick={() => {
+                    send({ type: 'profile:click', payload: { name: row.key } });
+                    closeContextMenu();
+                  }}
+                  className={cls}
+                >
+                  <ExternalLink size={13} className="text-text-tertiary" />
+                  Open Profile
+                </button>
+              );
+            }
+
+            return null;
+          })()}
 
           {/* Duplicate */}
           <button
@@ -1123,6 +1264,41 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             <CheckCheck size={13} className="text-text-tertiary" />
             Select Similar
           </button>
+
+          {/* Skip / Enable — toggles isSkipped on the right-clicked row (or the
+              selected rows if the right-clicked one is in the selection, matching
+              the Duplicate/Delete pattern above). Skipped actions stay in the
+              list but are bypassed during replay; visually rendered with line-
+              through + reduced opacity in the table. Universal — applies to any
+              action type. */}
+          {(() => {
+            const row = actions[contextMenu.rowIndex];
+            if (!row) return null;
+            const indices = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
+              ? Array.from(selectedIndices)
+              : [contextMenu.rowIndex];
+            // Use the right-clicked row's state as the toggle reference: if it's
+            // currently skipped, the action says "Enable"; otherwise "Skip".
+            const isSkipped = !!row.isSkipped;
+            return (
+              <button
+                onMouseEnter={() => setActiveSubmenu(null)}
+                onClick={() => {
+                  send({ type: 'actions:toggleSkip', payload: { indices } });
+                  closeContextMenu();
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+              >
+                {isSkipped
+                  ? <Eye size={13} className="text-text-tertiary" />
+                  : <EyeOff size={13} className="text-text-tertiary" />
+                }
+                {isSkipped ? 'Enable' : 'Skip during replay'}
+              </button>
+            );
+          })()}
+
+          <div className="my-1 border-t border-border-subtle" />
 
           {/* Delete */}
           <button
