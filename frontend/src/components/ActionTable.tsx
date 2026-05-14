@@ -1135,15 +1135,25 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             const onMouse = () => setActiveSubmenu(null);
             const cls = "w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors";
 
+            // Entries are gated on actionType ONLY (no truthy check on row.key /
+            // row.x / row.y). Earlier the gate also required the payload to be
+            // populated, but that meant a freshly-inserted browser action with
+            // no selector yet — or a click action that somehow had null coords —
+            // would silently skip its menu entry. Users reported "Copy Selector
+            // doesn't appear for some Browser rows" because of this. Now the
+            // entry is always present for the right action type; copying an
+            // empty value to clipboard is a non-issue (worst case: toast says
+            // "Selector copied" with empty string).
+
             // BrowserNavigate: row.key holds the URL (not a CSS selector). Must come
             // BEFORE the generic Browser* branch below so it wins the dispatch — both
             // would match otherwise and the user would see "Copy Selector" copying a URL.
-            if (row.actionType === 'BrowserNavigate' && row.key) {
+            if (row.actionType === 'BrowserNavigate') {
               return (
                 <button
                   onMouseEnter={onMouse}
                   onClick={() => {
-                    navigator.clipboard.writeText(row.key);
+                    navigator.clipboard.writeText(row.key ?? '');
                     showToast('URL copied', 'success');
                     closeContextMenu();
                   }}
@@ -1157,12 +1167,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
             // Other Browser*: copy the CSS selector. Covers BrowserClick / BrowserRightClick
             // / BrowserType / BrowserSelectOption / BrowserWaitElement.
-            if (row.actionType?.startsWith('Browser') && row.key) {
+            if (row.actionType?.startsWith('Browser')) {
               return (
                 <button
                   onMouseEnter={onMouse}
                   onClick={() => {
-                    navigator.clipboard.writeText(row.key);
+                    navigator.clipboard.writeText(row.key ?? '');
                     showToast('Selector copied', 'success');
                     closeContextMenu();
                   }}
@@ -1175,12 +1185,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             }
 
             // SendText: copy the text body (placeholders + tokens included verbatim).
-            if (row.actionType === 'SendText' && row.key) {
+            if (row.actionType === 'SendText') {
               return (
                 <button
                   onMouseEnter={onMouse}
                   onClick={() => {
-                    navigator.clipboard.writeText(row.key);
+                    navigator.clipboard.writeText(row.key ?? '');
                     showToast('Text copied', 'success');
                     closeContextMenu();
                   }}
@@ -1193,16 +1203,16 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             }
 
             // Clicks: copy the coordinate pair as "x, y" for quick reuse / debugging.
-            if (
-              (row.actionType === 'LeftClick' || row.actionType === 'RightClick' || row.actionType === 'MiddleClick') &&
-              row.x != null && row.y != null
-            ) {
+            // Native LeftClick/RightClick/MiddleClick always carry coords from the
+            // recording hook; the entry is unconditional on actionType so it's
+            // consistent even in edge cases where x/y might be 0 or unset.
+            if (row.actionType === 'LeftClick' || row.actionType === 'RightClick' || row.actionType === 'MiddleClick') {
               return (
                 <button
                   onMouseEnter={onMouse}
                   onClick={() => {
-                    navigator.clipboard.writeText(`${row.x}, ${row.y}`);
-                    showToast(`Copied ${row.x}, ${row.y}`, 'success');
+                    navigator.clipboard.writeText(`${row.x ?? 0}, ${row.y ?? 0}`);
+                    showToast(`Copied ${row.x ?? 0}, ${row.y ?? 0}`, 'success');
                     closeContextMenu();
                   }}
                   className={cls}
@@ -1222,7 +1232,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             // RunProfile: jump to the referenced profile. Reuses profile:click which
             // toggles selection on click; since we're targeting a DIFFERENT profile
             // than the active one, this loads that profile (with the unsaved-changes
-            // guard from HandleProfileClick).
+            // guard from HandleProfileClick). Only show when row.key is set — a
+            // RunProfile pointing at no profile has nothing to open.
             if (row.actionType === 'RunProfile' && row.key) {
               return (
                 <button
