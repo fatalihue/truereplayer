@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Clock, Copy, Clipboard, Trash2, X, Hash, MessageSquare, Ban } from 'lucide-react';
+import { Clock, Copy, Clipboard, Trash2, X, Crosshair, MessageSquare, Eye, EyeOff } from 'lucide-react';
 
 interface BulkActionBarProps {
   selectedCount: number;
@@ -60,13 +60,16 @@ export function BulkActionBar({
 
   return (
     <div className="flex items-center h-8 px-3 border-t border-accent-solid/20 shrink-0 bg-[rgba(96,205,255,0.04)]">
-      {/* Left: selection info + clear */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold text-accent">{selectedCount} selected</span>
+      {/* Left: selection info + clear. shrink-0 + whitespace-nowrap make sure the
+          "N selected" text stays on one line even if the right-side button cluster
+          grows enough to compress the flex layout — without these, narrow window
+          widths would wrap "N" and "selected" onto two lines. */}
+      <div className="flex items-center gap-2 shrink-0">
+        <span className="text-xs font-semibold text-accent-light whitespace-nowrap">{selectedCount} selected</span>
         <button
           onClick={onClearSelection}
           className="p-0.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-          title="Clear selection"
+          title="Clear selection (Esc)"
         >
           <X size={11} />
         </button>
@@ -115,23 +118,24 @@ export function BulkActionBar({
               Delay
             </button>
 
-            {/* Set X */}
+            {/* Set X / Y — Crosshair icon mirrors the Copy Coordinates entry in the row
+                context menu, so coord-related UI uses the same glyph across the app
+                (previously Hash, which reads as "number / tag" not "coordinate"). */}
             <button
               onClick={() => openInput('x')}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
               title="Set X for selected (use +/- for offset)"
             >
-              <Hash size={11} />
+              <Crosshair size={11} />
               X
             </button>
 
-            {/* Set Y */}
             <button
               onClick={() => openInput('y')}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
               title="Set Y for selected (use +/- for offset)"
             >
-              <Hash size={11} />
+              <Crosshair size={11} />
               Y
             </button>
 
@@ -167,27 +171,35 @@ export function BulkActionBar({
               Duplicate
             </button>
 
-            {/* Skip / Unskip */}
+            {/* Skip / Enable — Eye / EyeOff mirrors the row context menu's Skip toggle
+                so the same visual vocabulary travels across both surfaces. Active
+                colour standardised to text-accent-light (matches the toolbar's
+                active dropdown state); the previous text-accent (solid) was the
+                lone holdout from the active-state cleanup pass. */}
             <button
               onClick={onToggleSkip}
               className={`flex items-center gap-1 h-6 px-2 rounded text-[11px] transition-colors ${
                 allSelectedSkipped
-                  ? 'text-accent hover:text-accent hover:bg-accent-solid/10'
+                  ? 'text-accent-light hover:text-accent-light hover:bg-accent-solid/10'
                   : 'text-text-tertiary hover:text-text-primary hover:bg-bg-elevated'
               }`}
               title={allSelectedSkipped ? 'Enable selected (include in replay)' : 'Skip selected (exclude from replay)'}
             >
-              <Ban size={11} />
+              {allSelectedSkipped ? <Eye size={11} /> : <EyeOff size={11} />}
               {allSelectedSkipped ? 'Enable' : 'Skip'}
             </button>
 
             <div className="w-px h-3.5 bg-border-subtle mx-0.5" />
 
-            {/* Delete */}
+            {/* Delete — kbd hint kept in the tooltip only; inline "Del" badge made
+                the bar overflow at narrower window widths and bumped the "N selected"
+                text into wrapping. Tooltip is enough — the row context menu's "Del"
+                badge has a justify-between layout that absorbs it cleanly; this bar
+                is denser. */}
             <button
               onClick={onDelete}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-recording hover:text-recording/80 hover:bg-recording-bg transition-colors"
-              title="Delete selected"
+              title="Delete selected (Del)"
             >
               <Trash2 size={11} />
               Delete
