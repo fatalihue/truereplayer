@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Workflow } from 'lucide-react';
+import { Repeat2 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 
 export interface RunProfileDialogProps {
@@ -78,7 +78,7 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
       >
         {/* Header */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
-          <Workflow size={16} className="shrink-0" style={{ color: 'var(--color-action-runprofile-fg)' }} />
+          <Repeat2 size={16} className="shrink-0" style={{ color: 'var(--color-action-runprofile-fg)' }} />
           <h3 className="text-sm font-semibold text-text-primary flex-1">
             {initial ? 'Edit Run Profile' : 'Add Run Profile'}
           </h3>

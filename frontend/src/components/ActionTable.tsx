@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Workflow, Pause, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -23,8 +23,11 @@ function ActionIcon({ actionType }: { actionType: string }) {
   if (actionType.startsWith('Key')) return <Keyboard size={size} />;
   if (actionType === 'SendText') return <Type size={size} />;
   if (actionType === 'WaitImage') return <ScanSearch size={size} />;
-  if (actionType === 'RunProfile') return <Workflow size={size} />;
-  if (actionType === 'Pause') return <Pause size={size} />;
+  // Match the toolbar's redesigned icons so the chip in the table reads the same
+  // as the entry that inserts the action: Hourglass (not Pause-glyph) for the
+  // delay action, Repeat2 (not Workflow) for sub-macro calls.
+  if (actionType === 'RunProfile') return <Repeat2 size={size} />;
+  if (actionType === 'Pause') return <Hourglass size={size} />;
   return <Zap size={size} />;
 }
 

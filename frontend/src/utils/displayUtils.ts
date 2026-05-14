@@ -61,7 +61,7 @@ export function getActionTypeIcon(actionType: string): string {
   if (actionType.startsWith('Key')) return 'Keyboard';
   if (actionType === 'SendText') return 'Type';
   if (actionType === 'WaitImage') return 'ScanSearch';
-  if (actionType === 'RunProfile') return 'Workflow';
-  if (actionType === 'Pause') return 'Pause';
+  if (actionType === 'RunProfile') return 'Repeat2';
+  if (actionType === 'Pause') return 'Hourglass';
   return 'Zap';
 }

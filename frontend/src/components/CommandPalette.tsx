@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   Search, Circle, Play, Square, Type, Save, FolderOpen, RotateCcw, FilePlus,
   Trash2, PinOff, Pin, Download, Upload, MonitorDown, Shield, Minimize2, RefreshCw,
-  Pause, ScanSearch, Workflow, Undo2, Redo2, ClipboardPaste, Files, Replace,
+  Hourglass, ScanSearch, Repeat2, Undo2, Redo2, ClipboardPaste, Files, Replace,
   FolderPlus, Palette, PanelLeft, DownloadCloud, Table2,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
@@ -120,12 +120,12 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           },
           {
             id: 'pause', label: 'Insert Pause',
-            icon: <Pause size={14} className="text-text-secondary" />,
+            icon: <Hourglass size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'Pause', insertIndex: computeInsertIndex() } }); onClose(); },
           },
           {
             id: 'runprofile', label: 'Insert Run Profile',
-            icon: <Workflow size={14} className="text-text-secondary" />,
+            icon: <Repeat2 size={14} className="text-text-secondary" />,
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:runprofile')); },
           },
           {
