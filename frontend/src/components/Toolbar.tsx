@@ -248,7 +248,11 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
 
   return (
     <>
-      <div className="flex items-center gap-3 px-4 py-2.5 bg-bg-surface border border-border-subtle rounded-ui">
+      {/* Explicit h-[47px] so the toolbar's bottom edge lines up with the right panel's
+          Profile/Global tab strip (also h-[47px]). Earlier the toolbar used py-2.5 which
+          worked when the contents were flat (~46px), but the boxed-group containers
+          added in the redesign bumped the row to ~52px and broke the alignment. */}
+      <div className="flex items-center gap-3 px-4 h-[47px] bg-bg-surface border border-border-subtle rounded-ui">
         {/* Left: deselect button + profile name with inline action count.
             The X only appears when a profile is actually active — at the
             "No Profile" baseline there's nothing to deselect. Status bar still
@@ -526,20 +530,42 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
           >
             <Copy size={14} />
           </button>
-          {buttonStates.copiedCount > 0 && (
-            <button
-              tabIndex={-1}
-              onClick={() => {
-                const sel = selectionRef.current;
-                const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-                send({ type: 'actions:paste', payload: { insertIndex } });
-              }}
-              className="relative p-1.5 rounded hover:bg-bg-elevated text-accent-light hover:text-accent transition-colors"
-              data-tip={`Paste ${buttonStates.copiedCount} action(s) (Ctrl+V)`}
-            >
-              <ClipboardPaste size={14} />
-            </button>
-          )}
+          {/* Paste is ALWAYS rendered (symmetry with Copy, which is also always-on) but
+              disabled while the internal copy buffer is empty. Earlier this button was
+              conditionally rendered when copiedCount > 0 — which made it pop in on the
+              first copy and then never disappear (the clipboard never auto-empties on
+              paste, so copiedCount stays > 0 for the rest of the session). The "appears
+              and stays" pattern read as buggy; always-visible + disabled is the standard
+              toolbar convention and lets users learn the button is there before they
+              need it. The badge count is the indicator of clipboard state. */}
+          <button
+            tabIndex={-1}
+            onClick={() => {
+              const sel = selectionRef.current;
+              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+              send({ type: 'actions:paste', payload: { insertIndex } });
+            }}
+            disabled={buttonStates.copiedCount === 0}
+            className={`relative p-1.5 rounded transition-colors ${
+              buttonStates.copiedCount > 0
+                ? 'text-accent-light hover:bg-bg-elevated hover:text-accent'
+                : 'text-text-disabled hover:bg-transparent cursor-not-allowed'
+            }`}
+            data-tip={
+              buttonStates.copiedCount > 0
+                ? `Paste ${buttonStates.copiedCount} action(s) (Ctrl+V)`
+                : 'Paste actions (Ctrl+V) — copy something first'
+            }
+          >
+            <ClipboardPaste size={14} />
+            {buttonStates.copiedCount > 0 && (
+              // Count badge — communicates "there are N actions in the clipboard ready".
+              // Hidden in disabled state because zero would just be noise.
+              <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 flex items-center justify-center bg-accent-solid text-white text-[9px] font-bold leading-none rounded-full">
+                {buttonStates.copiedCount}
+              </span>
+            )}
+          </button>
           {/* Destructive hover (red text + faint red bg) mirrors BulkActionBar's
               Delete pattern. Clear All wipes every action in the profile, so we
               want users to pause before clicking — neutral gray hover let it
