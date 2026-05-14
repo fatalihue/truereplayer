@@ -161,10 +161,13 @@ export function KeyCaptureDialog({ onConfirm, onClose }: KeyCaptureDialogProps) 
         </div>
 
         {/* Body — the gold-dashed box is the focal point: gives the user a visual
-            "drop zone" that says 'press now'. Captured state is reflected by
-            swapping the placeholder text for the kbd badge. */}
+            "drop zone" that says 'press now'. Captured state swaps the placeholder
+            for the kbd badge. min-h-[136px] sized so both states fit without the
+            dialog growing on capture (placeholder is shorter than captured state);
+            flex-col + justify-center keeps each state vertically centered inside
+            the fixed-height box. */}
         <div className="px-5 py-5">
-          <div className="bg-bg-input border border-dashed border-[#FFC107]/40 rounded-md py-5 px-4 text-center">
+          <div className="bg-bg-input border border-dashed border-[#FFC107]/40 rounded-md py-5 px-4 text-center min-h-[136px] flex flex-col justify-center">
             {captured === null ? (
               <>
                 <div className="text-[12px] text-text-tertiary mb-1">Press any key…</div>
@@ -175,7 +178,7 @@ export function KeyCaptureDialog({ onConfirm, onClose }: KeyCaptureDialogProps) 
             ) : (
               <>
                 <kbd
-                  className="inline-block px-3 py-1.5 bg-bg-elevated border border-border-default rounded font-mono text-[14px] font-semibold text-[#FFC107]"
+                  className="inline-block self-center px-3 py-1.5 bg-bg-elevated border border-border-default rounded font-mono text-[14px] font-semibold text-[#FFC107]"
                   style={{ boxShadow: '0 2px 0 rgba(0,0,0,0.3)' }}
                 >
                   {keyDisplayLabel(captured)}
@@ -185,7 +188,7 @@ export function KeyCaptureDialog({ onConfirm, onClose }: KeyCaptureDialogProps) 
                   {' + '}
                   <span className="text-text-secondary font-semibold">KeyUp</span> pair
                 </div>
-                <div className="mt-2 text-[10px] text-text-disabled">
+                <div className="mt-1 text-[10px] text-text-disabled">
                   Press another key to replace, or click Insert below
                 </div>
               </>
