@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ArrowUpToLine, ArrowDownToLine, ScanSearch, Plus, Keyboard, ArrowUp, ArrowDown, Globe, Repeat2, Hourglass, X } from 'lucide-react';
+import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ArrowUpToLine, ArrowDownToLine, ScanSearch, Plus, Keyboard, Globe, Repeat2, Hourglass, X } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -383,23 +383,23 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                 style={{ animation: 'fade-in 0.12s ease-out', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
               >
                 {/* Two-section dropdown:
-                    - "Insert"      → keystroke + scroll, the things recording can't easily
-                                       capture in isolation (or that need a quick one-off
-                                       insert without entering recording mode)
+                    - "Keyboard"    → one-off keystroke inserts that need a capture flow
+                                       (Send Key today; a future "Keystroke" combo recorder
+                                       lives next to it)
                     - "Wait / Flow" → control-flow inserts (delays / image wait / sub-macro)
-                    Click x3 was removed: recording captures real coords automatically, and
-                    the old "Left/Right/Middle Click" items entered an OS capture mode that
-                    required a physical click on screen — the same physical action recording
-                    does, but without the rest of the recording context. Strictly worse.
-                    "Send Key…" replaces the old "Key Press" item with a visible capture
-                    dialog (KeyCaptureDialog) so the user sees what was captured before commit. */}
+                    Click x3 was removed first: recording captures real coords automatically,
+                    and the old menu items entered an OS capture mode that required a physical
+                    click — strictly worse than recording.
+                    Scroll Up/Down removed next for the same principle: recording captures
+                    scrolls natively, and the manual-insert path produced an action identical
+                    to a recorded one with extra clicks. "Send Key…" replaces the old "Key Press"
+                    item with a visible capture dialog (KeyCaptureDialog) so the user sees
+                    what was captured before commit. */}
                 {([
                   {
-                    label: 'Insert',
+                    label: 'Keyboard',
                     items: [
                       { type: 'SendKey', label: 'Send Key…', icon: Keyboard },
-                      { type: 'ScrollUp', label: 'Scroll Up', icon: ArrowUp },
-                      { type: 'ScrollDown', label: 'Scroll Down', icon: ArrowDown },
                     ],
                   },
                   {
@@ -445,12 +445,12 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                     ))}
                   </div>
                 ))}
-                {/* Footer tip nudges users to Recording for click sequences and multi-key
-                    combos — the things the dropdown no longer covers since Click x3 was
-                    removed. Without this, "where's Left Click?" becomes a support question. */}
+                {/* Footer tip nudges users to Recording for the things the dropdown no longer
+                    covers (clicks, scrolls, multi-key sequences). Without this, "where's Left
+                    Click?" or "where's Scroll?" becomes a support question. */}
                 <div className="h-px bg-border-subtle my-1" />
                 <div className="px-2.5 py-2 text-[10px] text-text-tertiary leading-relaxed">
-                  💡 For clicks or key sequences, use <span className="text-text-secondary font-semibold">Recording</span> — it captures real coordinates and key combos automatically.
+                  💡 For clicks, scrolls or key sequences, use <span className="text-text-secondary font-semibold">Recording</span> — it captures real coordinates and key combos automatically.
                 </div>
               </div>
             )}
