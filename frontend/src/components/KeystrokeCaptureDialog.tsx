@@ -71,10 +71,18 @@ function mapKeyPart(e: KeyboardEvent): string | null {
     };
     return deadCodeMap[e.code] ?? null;
   }
+  // Digit and letter keys — use e.code (physical position, layout-independent and
+  // shift-immune) instead of e.key (logical character, which becomes a SHIFTED symbol
+  // when Shift is held: Shift+1 → e.key="!" but e.code="Digit1"). Saving the shifted
+  // symbol broke replay because there's no VK code for "!" on its own — "!" requires
+  // Shift+VK_1. Using e.code captures the base key; the modifier list captures Shift
+  // separately, so the replay engine reconstructs the combo correctly.
+  if (/^Digit[0-9]$/.test(e.code)) return e.code.slice(5);
+  if (/^Key[A-Z]$/.test(e.code)) return e.code.slice(3);
   if (e.key.length === 1) {
-    const c = e.key.toUpperCase();
-    if (/\d/.test(c)) return c;
-    if (/[A-Z]/.test(c)) return c;
+    // Fallback for symbols / punctuation not covered by Digit*/Key* codes
+    // (`, [, ], -, =, ;, ', ,, ., /, ç on ABNT2, etc.). e.key here is already the
+    // base character because no modifier is producing a shift mapping for these.
     return e.key;
   }
   return null;

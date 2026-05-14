@@ -439,6 +439,14 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       };
       mainKey = numpadMap[e.code] ?? e.code;
     } else if (mainKey === ' ') mainKey = 'Space';
+    // Digit and letter keys via e.code (physical position) — shift-immune. e.key
+    // returns the SHIFTED character when Shift is held (Shift+1 → "!"), which then
+    // fails to resolve at hotkey-trigger time because the backend looks up VK codes
+    // by the captured name and there's no VK for bare "!". e.code stays "Digit1"
+    // regardless of shift state, so we get the base "1" and the Shift modifier is
+    // captured separately in the modifiers list above.
+    else if (/^Digit[0-9]$/.test(e.code)) mainKey = e.code.slice(5);
+    else if (/^Key[A-Z]$/.test(e.code)) mainKey = e.code.slice(3);
     else if (mainKey.length === 1) mainKey = mainKey.toUpperCase();
     else if (mainKey === 'ArrowUp') mainKey = 'Up';
     else if (mainKey === 'ArrowDown') mainKey = 'Down';

@@ -102,13 +102,14 @@ function mapKeyEvent(e: KeyboardEvent): string | null {
     };
     return deadCodeMap[e.code] ?? null;
   }
+  // Digit and letter keys via e.code (physical position) — shift-immune. If the user
+  // captures Shift+1 in this dialog (unlikely since Send Key only inserts one key, but
+  // possible), e.key would be "!" while e.code stays "Digit1". Saving "!" doesn't
+  // resolve at replay because "!" requires Shift+1 on US layout — there's no bare VK
+  // for it. e.code gives us the base "1" reliably.
+  if (/^Digit[0-9]$/.test(e.code)) return e.code.slice(5);
+  if (/^Key[A-Z]$/.test(e.code)) return e.code.slice(3);
   if (e.key.length === 1) {
-    const c = e.key.toUpperCase();
-    // Digits: KeyUtils.NormalizeKeyName uses bare "0"-"9" (not "D0"-"D9"). The old
-    // "D5" form happened to resolve via ConsoleKey.D5 fallback but produced ugly
-    // non-canonical strings in the Key column.
-    if (/\d/.test(c)) return c;
-    if (/[A-Z]/.test(c)) return c;
     // Symbol keys: emit the literal character (`, [, ç, ., etc.). KeyUtils' replay path
     // step 4 (CharToVkCurrentLayout / VkKeyScanEx) resolves single chars against the
     // CURRENT keyboard layout, which is what recording produces too. Layout-portable.

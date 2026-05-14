@@ -420,14 +420,16 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       keyName = deadCodeMap[e.code];
       if (!keyName) return;
     }
+    // Digit / letter keys via e.code (physical position, shift-immune). If we used
+    // e.key here, capturing Shift+1 would store "!" — fine for display, but the row
+    // edit usually happens because the user wants to PAIR this with a Shift KeyDown
+    // earlier in the macro, and "!" doesn't resolve to a VK on its own at replay.
+    else if (/^Digit[0-9]$/.test(e.code)) keyName = e.code.slice(5);
+    else if (/^Key[A-Z]$/.test(e.code)) keyName = e.code.slice(3);
     else if (e.key.length === 1) {
-      // Single character: letters → uppercase, digits → bare "0"-"9" (was "D5" via
-      // ConsoleKey fallback — works but non-canonical), symbols → literal char
-      // (matches KeyUtils' VkToCharCurrentLayout / VkKeyScanEx layout-portable path).
-      const c = e.key.toUpperCase();
-      if (/\d/.test(c)) keyName = c;
-      else if (/[A-Z]/.test(c)) keyName = c;
-      else keyName = e.key;
+      // Symbols / punctuation — emit literal char (KeyUtils.VkKeyScanEx resolves
+      // against the current keyboard layout, so this is layout-portable).
+      keyName = e.key;
     } else {
       return; // Unknown key, ignore
     }
