@@ -81,6 +81,27 @@ function mapKeyEvent(e: KeyboardEvent): string | null {
   if (e.key === 'Escape') return 'Escape';
   if (e.key.startsWith('F') && e.key.length <= 3 && !isNaN(Number(e.key.slice(1)))) return e.key;
   if (e.key === 'Meta') return null; // Win key — OS intercepts before browser sees keydown
+  // Dead keys (´ ` ^ ~ ¨ etc. on ABNT2 / AZERTY / QWERTZ). The browser fires
+  // `e.key === 'Dead'` for these because it's waiting to compose with the next
+  // keystroke ('+a → á). length 4, so the single-char branch below would miss
+  // them and we'd return null. Recover the intended char by reading e.code,
+  // which is LAYOUT-INDEPENDENT (always reports the physical key in US-key
+  // terms — Backquote, Quote, BracketLeft, etc.). The literal char returned
+  // here resolves at replay via KeyUtils' CharToVkCurrentLayout step, which
+  // uses VkKeyScanEx against the user's current layout. Matches recording's
+  // semantics close enough for the realistic ABNT2 / AZERTY cases.
+  if (e.key === 'Dead') {
+    const deadCodeMap: Record<string, string> = {
+      Backquote: '`',
+      Quote: "'",
+      BracketLeft: '[',
+      BracketRight: ']',
+      Minus: '-',
+      Equal: '=',
+      Digit6: '^',   // ^ is shift+6 on US, dead key on some layouts
+    };
+    return deadCodeMap[e.code] ?? null;
+  }
   if (e.key.length === 1) {
     const c = e.key.toUpperCase();
     // Digits: KeyUtils.NormalizeKeyName uses bare "0"-"9" (not "D0"-"D9"). The old

@@ -401,6 +401,17 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     else if (e.key === 'F1') keyName = 'F1';
     else if (e.key.startsWith('F') && e.key.length <= 3 && !isNaN(Number(e.key.slice(1)))) keyName = e.key;
     else if (e.key === 'Meta') return; // Ignore Win key
+    // Dead keys (´`^~¨ on ABNT2/AZERTY/QWERTZ) — browser fires e.key === 'Dead'
+    // because it's waiting to compose with the next char ('+a → á). Recover the
+    // intended char from e.code (layout-independent physical position).
+    else if (e.key === 'Dead') {
+      const deadCodeMap: Record<string, string> = {
+        Backquote: '`', Quote: "'", BracketLeft: '[', BracketRight: ']',
+        Minus: '-', Equal: '=', Digit6: '^',
+      };
+      keyName = deadCodeMap[e.code];
+      if (!keyName) return;
+    }
     else if (e.key.length === 1) {
       // Single character: letters → uppercase, digits → bare "0"-"9" (was "D5" via
       // ConsoleKey fallback — works but non-canonical), symbols → literal char
