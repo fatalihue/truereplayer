@@ -937,7 +937,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             <button
               onClick={onToggleCollapse}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              data-tip="Collapse"
+              data-tip="Collapse profiles panel"
             >
               <ChevronsLeft size={14} />
             </button>
@@ -945,7 +945,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               onClick={() => activeProfile && handleOpenFolder(activeProfile)}
               disabled={!activeProfile}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-              data-tip="Open Folder"
+              data-tip="Open profile file in Explorer"
             >
               <FolderOpen size={14} />
             </button>
@@ -953,28 +953,28 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               onClick={() => activeProfile && handleDuplicate(activeProfile)}
               disabled={!activeProfile}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-              data-tip="Duplicate"
+              data-tip="Duplicate active profile"
             >
               <Copy size={14} />
             </button>
             <button
               onClick={handleExportClick}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              data-tip="Import / Export"
+              data-tip="Import or export profiles"
             >
               <ArrowUpDown size={14} />
             </button>
             <button
               onClick={handleCreateFolder}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              data-tip="New Folder"
+              data-tip="New folder"
             >
               <FolderPlus size={14} />
             </button>
             <button
               onClick={handleCreate}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              data-tip="Create Profile" data-tip-pos="end"
+              data-tip="New profile" data-tip-pos="end"
             >
               <FilePlus size={14} />
             </button>
