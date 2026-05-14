@@ -391,6 +391,7 @@ namespace TrueReplayer
                     case "actions:reorder": HandleActionsReorder(payload); break;
                     case "actions:insertAction": HandleInsertAction(payload); break;
                     case "actions:insertKey": HandleInsertKey(payload); break;
+                    case "actions:insertKeystroke": HandleInsertKeystroke(payload); break;
                     case "actions:duplicate": HandleDuplicateActions(payload); break;
                     case "actions:addRunProfile": HandleAddRunProfile(payload); break;
                     case "actions:editRunProfile": HandleEditRunProfile(payload); break;
@@ -1774,6 +1775,32 @@ namespace TrueReplayer
             {
                 ActionType = "KeyUp",
                 Key = key,
+                Delay = delay,
+            });
+            for (int i = 0; i < actions.Count; i++)
+                actions[i].RowNumber = i + 1;
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+            mainController.UpdateButtonStates();
+        }
+
+        private void HandleInsertKeystroke(JsonElement payload)
+        {
+            var keystroke = payload.GetProperty("keystroke").GetString();
+            var insertIndex = payload.GetProperty("insertIndex").GetInt32();
+            if (string.IsNullOrEmpty(keystroke)) return;
+            if (insertIndex < 0 || insertIndex > actions.Count) insertIndex = actions.Count;
+
+            int delay = int.TryParse(CustomDelay, out var pd) ? pd : 100;
+            // ONE row with the whole combo. ExecuteKeystroke in ActionExecution parses
+            // the "+"-joined string at replay time and emits the proper modifier-down →
+            // key-down → key-up → modifier-up sequence. Keeping the combo atomic in
+            // storage matches the user's intent ("I want Alt+Tab") and keeps the action
+            // grid compact (one row per combo instead of four).
+            actions.Insert(insertIndex, new ActionItem
+            {
+                ActionType = "Keystroke",
+                Key = keystroke,
                 Delay = delay,
             });
             for (int i = 0; i < actions.Count; i++)

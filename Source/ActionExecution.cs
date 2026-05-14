@@ -867,6 +867,7 @@ namespace TrueReplayer.Services
                     {
                         case "KeyDown": SimulateKey(action.Key, true); break;
                         case "KeyUp": SimulateKey(action.Key, false); break;
+                        case "Keystroke": SimulateKeystroke(action.Key); break;
                         case "LeftClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN); _simLeftDown = true; break;
                         case "LeftClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP); _simLeftDown = false; break;
                         case "RightClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTDOWN); _simRightDown = true; break;
@@ -1975,6 +1976,56 @@ namespace TrueReplayer.Services
 
             NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
             await Task.Delay(50, token);
+        }
+
+        // Replay handler for the Keystroke action type. Parses a "+"-joined combo like
+        // "Ctrl+Shift+T" or "Alt+Tab" and emits the proper modifier-down → key-down →
+        // key-up → modifier-up sequence. The modifiers are released in REVERSE order
+        // (last-pressed-first-released) which is what physical typing produces and what
+        // Windows shortcut handlers expect.
+        //
+        // A short Thread.Sleep(10) sits between the modifier-down chain and the key tap
+        // so the target app has a frame to register the modifier state before the key
+        // event arrives. Without it, fast apps (some games, terminals) can drop the
+        // modifier from their state machine and treat the keystroke as if only the key
+        // was pressed bare. 10 ms is below human-perceptible latency.
+        private void SimulateKeystroke(string keystroke)
+        {
+            if (string.IsNullOrWhiteSpace(keystroke)) return;
+            var parts = keystroke.Split('+');
+            if (parts.Length == 0) return;
+
+            // The LAST part is the target key; everything before it is a modifier.
+            // Order matters at replay time, but for the modifier set we don't need to
+            // preserve incoming order (Ctrl+Shift and Shift+Ctrl are semantically the
+            // same modifier set; we always emit in our canonical order: Ctrl, Shift, Alt).
+            var modifiers = new System.Collections.Generic.List<string>();
+            string target = parts[^1].Trim();
+            for (int i = 0; i < parts.Length - 1; i++)
+            {
+                var m = parts[i].Trim();
+                if (m == "Ctrl" || m == "Shift" || m == "Alt") modifiers.Add(m);
+                // Silently skip unknown modifiers — keystroke replay is best-effort.
+            }
+
+            // Modifiers down (in stable order so a Ctrl+Shift+T replay always presses
+            // Ctrl first, Shift second, regardless of which order the user pressed them
+            // during capture).
+            foreach (var m in new[] { "Ctrl", "Shift", "Alt" })
+                if (modifiers.Contains(m)) SimulateKey(m, true);
+
+            Thread.Sleep(10); // let target app's input system register the modifier set
+
+            // Key tap (down → up)
+            SimulateKey(target, true);
+            SimulateKey(target, false);
+
+            // Modifiers up in REVERSE order. Mirrors physical typing — release the last-
+            // pressed first. Some apps watch for transient modifier states; doing this
+            // out of order can leave them in a stuck modifier state until the user
+            // physically presses + releases the same modifier themselves.
+            foreach (var m in new[] { "Alt", "Shift", "Ctrl" })
+                if (modifiers.Contains(m)) SimulateKey(m, false);
         }
 
         private void SimulateKey(string key, bool isDown)

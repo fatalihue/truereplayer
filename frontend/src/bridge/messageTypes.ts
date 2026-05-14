@@ -302,6 +302,12 @@ export type OutgoingMessage =
   // sends the resulting internal name (e.g. "Return", "Tab", "A") — the backend turns
   // that into two ActionItems back-to-back at insertIndex.
   | { type: 'actions:insertKey'; payload: { key: string; insertIndex: number } }
+  // Insert a single Keystroke action (atomic combo like "Alt+Tab", "Ctrl+Shift+T").
+  // Unlike insertKey which expands a single tap into a KeyDown+KeyUp pair, insertKeystroke
+  // creates ONE row holding the whole combo as a "+"-joined string. The replay engine
+  // expands it to the proper modifier-down → key-down → key-up → modifier-up sequence at
+  // run time. Captured by KeystrokeCaptureDialog from a real keypress.
+  | { type: 'actions:insertKeystroke'; payload: { keystroke: string; insertIndex: number } }
   | { type: 'actions:duplicate'; payload: { indices: number[] } }
   | { type: 'actions:addRunProfile'; payload: { profileName: string; repeatCount: number; insertIndex?: number } }
   | { type: 'actions:editRunProfile'; payload: { index: number; profileName: string; repeatCount: number } }

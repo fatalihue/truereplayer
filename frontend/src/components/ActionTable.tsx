@@ -10,6 +10,7 @@ import { SendTextDialog } from './SendTextDialog';
 import { SendTextPreview } from './SendTextPreview';
 import { RunProfileDialog } from './RunProfileDialog';
 import { KeyCaptureDialog } from './KeyCaptureDialog';
+import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
 import { BulkActionBar } from './BulkActionBar';
 import { Checkbox, CheckboxBox } from './Checkbox';
 import type { ColumnVisibility } from './Toolbar';
@@ -90,6 +91,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const [sendTextInsert, setSendTextInsert] = useState<{ insertIndex: number } | null>(null);
   const [runProfileInsert, setRunProfileInsert] = useState<{ insertIndex: number } | null>(null);
   const [keyCaptureInsert, setKeyCaptureInsert] = useState<{ insertIndex: number } | null>(null);
+  const [keystrokeCaptureInsert, setKeystrokeCaptureInsert] = useState<{ insertIndex: number } | null>(null);
   const { showToast } = useToast();
   const contextMenuEnabled = !buttonStates.recordingActive && !buttonStates.replayActive;
 
@@ -545,10 +547,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const handleInsertAction = useCallback((actionType: string) => {
     if (!contextMenu) return;
     const insertIndex = contextMenu.rowIndex + 1;
-    // Special-case the three actions that need a dialog before they can produce
-    // a real action: SendText needs body text, SendKey needs the captured key,
-    // RunProfile needs the target profile name + repeat count. Plain inserts
-    // (Pause, WaitImage) go through the generic insertAction path.
+    // Four special cases that need a dialog before they can produce a real action:
+    // SendText needs body text, SendKey needs a single captured key, SendKeystroke
+    // needs a captured combo, RunProfile needs the target profile name + repeat
+    // count. Plain inserts (Pause, WaitImage) go through the generic insertAction
+    // path.
     if (actionType === 'SendText') {
       setSendTextInsert({ insertIndex });
       closeContextMenu();
@@ -556,6 +559,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     }
     if (actionType === 'SendKey') {
       setKeyCaptureInsert({ insertIndex });
+      closeContextMenu();
+      return;
+    }
+    if (actionType === 'SendKeystroke') {
+      setKeystrokeCaptureInsert({ insertIndex });
       closeContextMenu();
       return;
     }
@@ -599,6 +607,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const submenuItems = [
     { type: 'SendText', label: 'Send Text…', icon: Type },
     { type: 'SendKey', label: 'Send Key…', icon: Keyboard },
+    { type: 'SendKeystroke', label: 'Send Keystroke…', icon: Keyboard },
     { type: 'Pause', label: 'Pause', icon: Hourglass },
     { type: 'WaitImage', label: 'Wait for Image', icon: ScanSearch },
     { type: 'RunProfile', label: 'Run Profile', icon: Repeat2 },
@@ -1013,6 +1022,16 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             setKeyCaptureInsert(null);
           }}
           onClose={() => setKeyCaptureInsert(null)}
+        />
+      )}
+
+      {keystrokeCaptureInsert && (
+        <KeystrokeCaptureDialog
+          onConfirm={(keystroke) => {
+            send({ type: 'actions:insertKeystroke', payload: { keystroke, insertIndex: keystrokeCaptureInsert.insertIndex } });
+            setKeystrokeCaptureInsert(null);
+          }}
+          onClose={() => setKeystrokeCaptureInsert(null)}
         />
       )}
 

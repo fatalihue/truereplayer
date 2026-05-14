@@ -8,6 +8,7 @@ import { SendTextDialog } from './SendTextDialog';
 import { RunProfileDialog } from './RunProfileDialog';
 import { NavigateDialog } from './NavigateDialog';
 import { KeyCaptureDialog } from './KeyCaptureDialog';
+import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
 
 export interface ColumnVisibility {
   action: boolean;
@@ -114,6 +115,8 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
   // capture mode silently with no visual prompt or commit step.
   const [showKeyCapture, setShowKeyCapture] = useState(false);
   const keyCaptureInsertIndex = useRef<number>(0);
+  const [showKeystrokeCapture, setShowKeystrokeCapture] = useState(false);
+  const keystrokeCaptureInsertIndex = useRef<number>(0);
   const colDropdownRef = useRef<HTMLDivElement>(null);
   const addActionsRef = useRef<HTMLDivElement>(null);
   const browserMenuRef = useRef<HTMLDivElement>(null);
@@ -395,6 +398,13 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                     label: 'Keyboard',
                     items: [
                       { type: 'SendKey', label: 'Send Key…', icon: Keyboard },
+                      // Send Keystroke captures a full combo (Alt+Tab, Ctrl+Shift+T,
+                      // Alt+F4) as ONE atomic action. Unlike SendKey which inserts a
+                      // KeyDown+KeyUp pair (and gets called "tap a single key"), this
+                      // inserts a single Keystroke row whose .key is the "+"-joined
+                      // combo string; the replay engine expands it to the proper
+                      // modifier-down → key-tap → modifier-up sequence at run time.
+                      { type: 'SendKeystroke', label: 'Send Keystroke…', icon: Keyboard },
                     ],
                   },
                   {
@@ -418,9 +428,11 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                           setShowAddActions(false);
                           const sel = selectionRef.current;
                           const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-                          // Three special cases that don't fit the generic insertAction
+                          // Four special cases that don't fit the generic insertAction
                           // pattern: Run Profile opens a picker dialog, Send Key opens the
-                          // KeyCaptureDialog (which dispatches actions:insertKey on commit).
+                          // single-key capture dialog (dispatches actions:insertKey on
+                          // commit), Send Keystroke opens the combo capture dialog
+                          // (dispatches actions:insertKeystroke).
                           if (item.type === 'RunProfile') {
                             setShowRunProfileDialog(true);
                             return;
@@ -428,6 +440,11 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                           if (item.type === 'SendKey') {
                             keyCaptureInsertIndex.current = insertIndex;
                             setShowKeyCapture(true);
+                            return;
+                          }
+                          if (item.type === 'SendKeystroke') {
+                            keystrokeCaptureInsertIndex.current = insertIndex;
+                            setShowKeystrokeCapture(true);
                             return;
                           }
                           send({ type: 'actions:insertAction', payload: { actionType: item.type, insertIndex } });
@@ -688,6 +705,19 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             setShowKeyCapture(false);
           }}
           onClose={() => setShowKeyCapture(false)}
+        />
+      )}
+
+      {/* Send Keystroke… combo capture dialog. Same insertIndex-stashing pattern as
+          Send Key above. Produces a single Keystroke action holding the "+"-joined
+          combo string; the replay engine expands it at run time. */}
+      {showKeystrokeCapture && (
+        <KeystrokeCaptureDialog
+          onConfirm={(keystroke) => {
+            send({ type: 'actions:insertKeystroke', payload: { keystroke, insertIndex: keystrokeCaptureInsertIndex.current } });
+            setShowKeystrokeCapture(false);
+          }}
+          onClose={() => setShowKeystrokeCapture(false)}
         />
       )}
     </>
