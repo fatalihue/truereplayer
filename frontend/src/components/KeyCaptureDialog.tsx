@@ -40,14 +40,18 @@ function mapKeyEvent(e: KeyboardEvent): string | null {
     Numpad8: 'Num8', Numpad9: 'Num9',
     NumpadMultiply: 'NumMultiply', NumpadDivide: 'NumDivide',
     NumpadAdd: 'NumAdd', NumpadSubtract: 'NumSubtract',
-    NumpadDecimal: 'NumDecimal',
   };
-  if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter') {
+  // NumpadDecimal and NumpadEnter intentionally NOT in the map — KeyUtils doesn't
+  // have a canonical "NumDecimal" entry, and recording emits the literal char "."
+  // (via VkToCharCurrentLayout) for VK_DECIMAL. Fall through to the single-char
+  // handler so we produce "." here too — match recording exactly. NumpadEnter
+  // shares VK with regular Enter, so falling through to e.key==='Enter' is right.
+  if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter' && e.code !== 'NumpadDecimal') {
     return numpadMap[e.code] ?? e.code;
   }
   if (e.key === ' ') return 'Space';
-  if (e.key === 'Enter') return 'Enter';        // was 'Return' (WinForms Keys enum) — doesn't resolve in KeyUtils
-  if (e.key === 'Backspace') return 'Backspace'; // was 'Back'   — same problem
+  if (e.key === 'Enter') return 'Enter';
+  if (e.key === 'Backspace') return 'Backspace';
   if (e.key === 'ArrowUp') return 'Up';
   if (e.key === 'ArrowDown') return 'Down';
   if (e.key === 'ArrowLeft') return 'Left';
@@ -55,20 +59,28 @@ function mapKeyEvent(e: KeyboardEvent): string | null {
   // Modifiers: KeyUtils maps both L/R variants to the same VK but the static map only
   // includes the canonical "Ctrl"/"Shift"/"Alt" — using those instead of numeric codes
   // (which previously worked via the int-fallback path but were non-canonical).
+  // AltGraph is the AltGr key on international layouts (ABNT2, AZERTY, etc.) — Windows
+  // implements it as Ctrl+Alt internally, so we map it to "Alt" here; recording produces
+  // a Ctrl + Alt pair for the same press, which matches close enough for macros.
   if (e.key === 'Control') return 'Ctrl';
   if (e.key === 'Shift') return 'Shift';
-  if (e.key === 'Alt') return 'Alt';
+  if (e.key === 'Alt' || e.key === 'AltGraph') return 'Alt';
   if (e.key === 'Tab') return 'Tab';
-  if (e.key === 'CapsLock') return 'CapsLock';   // was 'Capital'
+  if (e.key === 'CapsLock') return 'CapsLock';
+  if (e.key === 'NumLock') return 'NumLock';
+  if (e.key === 'ScrollLock') return 'ScrollLock';
+  if (e.key === 'Pause') return 'Pause';        // VK_PAUSE — the Pause/Break key
+  if (e.key === 'PrintScreen') return 'PrintScreen'; // ⚠ Chrome/Firefox often only fire keyup for PrtScn — keydown may never reach us. Still mapped so the keyup path (if ever wired) works.
+  if (e.key === 'ContextMenu') return 'VK_93';  // Menu key (VK_APPS). No canonical name in KeyUtils; recording produces "VK_93" via the SafeConsoleKeyName fallback, so match that.
   if (e.key === 'Delete') return 'Delete';
   if (e.key === 'Insert') return 'Insert';
   if (e.key === 'Home') return 'Home';
   if (e.key === 'End') return 'End';
-  if (e.key === 'PageUp') return 'PageUp';       // was 'Prior'
-  if (e.key === 'PageDown') return 'PageDown';   // was 'Next'
+  if (e.key === 'PageUp') return 'PageUp';
+  if (e.key === 'PageDown') return 'PageDown';
   if (e.key === 'Escape') return 'Escape';
   if (e.key.startsWith('F') && e.key.length <= 3 && !isNaN(Number(e.key.slice(1)))) return e.key;
-  if (e.key === 'Meta') return null; // Ignore Win key
+  if (e.key === 'Meta') return null; // Win key — OS intercepts before browser sees keydown
   if (e.key.length === 1) {
     const c = e.key.toUpperCase();
     // Digits: KeyUtils.NormalizeKeyName uses bare "0"-"9" (not "D0"-"D9"). The old
@@ -76,7 +88,7 @@ function mapKeyEvent(e: KeyboardEvent): string | null {
     // non-canonical strings in the Key column.
     if (/\d/.test(c)) return c;
     if (/[A-Z]/.test(c)) return c;
-    // Symbol keys: emit the literal character (`, [, ç, etc.). KeyUtils' replay path
+    // Symbol keys: emit the literal character (`, [, ç, ., etc.). KeyUtils' replay path
     // step 4 (CharToVkCurrentLayout / VkKeyScanEx) resolves single chars against the
     // CURRENT keyboard layout, which is what recording produces too. Layout-portable.
     return e.key;
@@ -94,6 +106,7 @@ function keyDisplayLabel(internalName: string): string {
     Capital: 'CapsLock',
     Prior: 'PageUp',
     Next: 'PageDown',
+    VK_93: 'Menu',   // ContextMenu / VK_APPS — the keyboard menu key
     Oem3: '`',
     OemMinus: '-',
     OemPlus: '=',

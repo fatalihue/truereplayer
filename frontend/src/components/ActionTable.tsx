@@ -358,8 +358,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       Numpad8: 'Num8', Numpad9: 'Num9',
       NumpadMultiply: 'NumMultiply', NumpadDivide: 'NumDivide',
       NumpadAdd: 'NumAdd', NumpadSubtract: 'NumSubtract',
-      NumpadDecimal: 'NumDecimal',
     };
+    // NumpadDecimal/NumpadEnter excluded — they fall through to the single-char and
+    // 'Enter' branches respectively, matching what recording produces (literal "."
+    // and "Enter" since they share VK codes with regular . and Enter).
 
     // Canonical names matching KeyUtils.NormalizeKeyName in the C# backend. Earlier
     // versions of this map used WinForms Keys-enum names ("Return", "Back", "Prior",
@@ -367,26 +369,34 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     // KeyUtils.VirtualKeyMap and aren't valid ConsoleKey members — so a value
     // entered via this capture path resolved to "key not found" at replay time and
     // the action silently no-op'd. Fixed to use the same names recording produces.
-    if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter') {
+    if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter' && e.code !== 'NumpadDecimal') {
       keyName = numpadMap[e.code] ?? e.code;
     } else if (e.key === ' ') keyName = 'Space';
-    else if (e.key === 'Enter') keyName = 'Enter';         // was 'Return'
-    else if (e.key === 'Backspace') keyName = 'Backspace'; // was 'Back'
+    else if (e.key === 'Enter') keyName = 'Enter';
+    else if (e.key === 'Backspace') keyName = 'Backspace';
     else if (e.key === 'ArrowUp') keyName = 'Up';
     else if (e.key === 'ArrowDown') keyName = 'Down';
     else if (e.key === 'ArrowLeft') keyName = 'Left';
     else if (e.key === 'ArrowRight') keyName = 'Right';
-    else if (e.key === 'Control') keyName = 'Ctrl';        // was '162'/'163'
-    else if (e.key === 'Shift') keyName = 'Shift';         // was '160'/'161'
-    else if (e.key === 'Alt') keyName = 'Alt';             // was '164'/'165'
+    else if (e.key === 'Control') keyName = 'Ctrl';
+    else if (e.key === 'Shift') keyName = 'Shift';
+    // AltGraph (AltGr on ABNT2/AZERTY/etc.) is Ctrl+Alt internally; tag it as Alt
+    // here — recording produces a Ctrl+Alt pair, this single Alt is the closer
+    // approximation for a manual insert.
+    else if (e.key === 'Alt' || e.key === 'AltGraph') keyName = 'Alt';
     else if (e.key === 'Tab') keyName = 'Tab';
-    else if (e.key === 'CapsLock') keyName = 'CapsLock';   // was 'Capital'
+    else if (e.key === 'CapsLock') keyName = 'CapsLock';
+    else if (e.key === 'NumLock') keyName = 'NumLock';
+    else if (e.key === 'ScrollLock') keyName = 'ScrollLock';
+    else if (e.key === 'Pause') keyName = 'Pause';
+    else if (e.key === 'PrintScreen') keyName = 'PrintScreen'; // ⚠ Chrome/Firefox usually only fire keyup for PrtScn — capture here is best-effort
+    else if (e.key === 'ContextMenu') keyName = 'VK_93'; // Menu key (VK_APPS) — recording produces "VK_93" via the SafeConsoleKeyName fallback
     else if (e.key === 'Delete') keyName = 'Delete';
     else if (e.key === 'Insert') keyName = 'Insert';
     else if (e.key === 'Home') keyName = 'Home';
     else if (e.key === 'End') keyName = 'End';
-    else if (e.key === 'PageUp') keyName = 'PageUp';       // was 'Prior'
-    else if (e.key === 'PageDown') keyName = 'PageDown';   // was 'Next'
+    else if (e.key === 'PageUp') keyName = 'PageUp';
+    else if (e.key === 'PageDown') keyName = 'PageDown';
     else if (e.key === 'Escape') keyName = 'Escape';
     else if (e.key === 'F1') keyName = 'F1';
     else if (e.key.startsWith('F') && e.key.length <= 3 && !isNaN(Number(e.key.slice(1)))) keyName = e.key;
