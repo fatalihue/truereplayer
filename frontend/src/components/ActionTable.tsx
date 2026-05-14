@@ -1255,6 +1255,28 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             // and there's nowhere useful to paste a bare key name. Removed after
             // user feedback that the option felt purposeless.
 
+            // Keystroke: copy the combo string ("Alt+Tab", "Ctrl+Shift+T", etc.).
+            // Unlike a bare key name, the combo notation IS useful outside the app —
+            // documenting macros, sharing in chat, pasting into help / issue
+            // threads. Same icon as Copy Selector (Code2) since both are "copy a
+            // structured string identifier".
+            if (row.actionType === 'Keystroke' && row.key) {
+              return (
+                <button
+                  onMouseEnter={onMouse}
+                  onClick={() => {
+                    navigator.clipboard.writeText(row.key);
+                    showToast(`Copied "${row.key}"`, 'success');
+                    closeContextMenu();
+                  }}
+                  className={cls}
+                >
+                  <Code2 size={13} className="text-text-tertiary" />
+                  Copy Keystroke
+                </button>
+              );
+            }
+
             // RunProfile: jump to the referenced profile. Reuses profile:click which
             // toggles selection on click; since we're targeting a DIFFERENT profile
             // than the active one, this loads that profile (with the unsaved-changes
