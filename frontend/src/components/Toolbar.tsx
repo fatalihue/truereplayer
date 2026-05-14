@@ -273,7 +273,12 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
               onClick={() => send({ type: 'profile:click', payload: { name: activeProfile } })}
               disabled={buttonStates.recordingActive || buttonStates.replayActive}
               data-tip="Deselect profile"
-              className="shrink-0 p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:text-text-disabled disabled:hover:bg-transparent"
+              // -ml-[13px] pulls the icon LEFT into the toolbar's own px-4 padding so the
+              // X's vertical line matches the checkbox column center in the table below
+              // (measured 12.7px gap before this fix). Purely cosmetic — the hover/click
+              // hitbox still sits comfortably inside the toolbar; we're just escaping
+              // the padding for one specific icon.
+              className="shrink-0 -ml-[13px] p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:text-text-disabled disabled:hover:bg-transparent"
             >
               <X size={14} />
             </button>
