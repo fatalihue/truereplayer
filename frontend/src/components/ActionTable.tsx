@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Workflow, Pause, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Workflow, Pause, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -1135,8 +1135,28 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             const onMouse = () => setActiveSubmenu(null);
             const cls = "w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors";
 
-            // Browser*: copy the selector string (CSS / XPath / text=). Useful for
-            // pasting into devtools or another action.
+            // BrowserNavigate: row.key holds the URL (not a CSS selector). Must come
+            // BEFORE the generic Browser* branch below so it wins the dispatch — both
+            // would match otherwise and the user would see "Copy Selector" copying a URL.
+            if (row.actionType === 'BrowserNavigate' && row.key) {
+              return (
+                <button
+                  onMouseEnter={onMouse}
+                  onClick={() => {
+                    navigator.clipboard.writeText(row.key);
+                    showToast('URL copied', 'success');
+                    closeContextMenu();
+                  }}
+                  className={cls}
+                >
+                  <Link size={13} className="text-text-tertiary" />
+                  Copy URL
+                </button>
+              );
+            }
+
+            // Other Browser*: copy the CSS selector. Covers BrowserClick / BrowserRightClick
+            // / BrowserType / BrowserSelectOption / BrowserWaitElement.
             if (row.actionType?.startsWith('Browser') && row.key) {
               return (
                 <button
@@ -1193,23 +1213,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               );
             }
 
-            // KeyDown / KeyUp: copy just the key name (e.g. "Enter", "Ctrl", "A").
-            if ((row.actionType === 'KeyDown' || row.actionType === 'KeyUp') && row.key) {
-              return (
-                <button
-                  onMouseEnter={onMouse}
-                  onClick={() => {
-                    navigator.clipboard.writeText(row.key);
-                    showToast(`Copied "${row.key}"`, 'success');
-                    closeContextMenu();
-                  }}
-                  className={cls}
-                >
-                  <Keyboard size={13} className="text-text-tertiary" />
-                  Copy Key
-                </button>
-              );
-            }
+            // KeyDown / KeyUp intentionally have no quick-copy entry. Copying just
+            // the key name (e.g. "Enter") was added in the first pass but provides
+            // no meaningful workflow — the key is already visible in the table cell
+            // and there's nowhere useful to paste a bare key name. Removed after
+            // user feedback that the option felt purposeless.
 
             // RunProfile: jump to the referenced profile. Reuses profile:click which
             // toggles selection on click; since we're targeting a DIFFERENT profile
