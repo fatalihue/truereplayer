@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ArrowUpToLine, ArrowDownToLine, ScanSearch, Plus, Keyboard, ArrowUp, ArrowDown, Globe, Repeat2, Hourglass } from 'lucide-react';
+import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ArrowUpToLine, ArrowDownToLine, ScanSearch, Plus, Keyboard, ArrowUp, ArrowDown, Globe, Repeat2, Hourglass, X } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -249,12 +249,33 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
   return (
     <>
       <div className="flex items-center gap-3 px-4 py-2.5 bg-bg-surface border border-border-subtle rounded-ui">
-        {/* Left: profile name with inline action count (e.g. "Demo · 5 actions").
-            The status bar still shows the count, but having it next to the name
-            reinforces context without making the user look down. Responsive
-            font + truncation handle long names; the count drops first if the
-            row gets cramped (mirror measures the full string with suffix). */}
-        <ResponsiveProfileName name={toolbar.profileName} actionCount={toolbar.actionCount} />
+        {/* Left: deselect button + profile name with inline action count.
+            The X only appears when a profile is actually active — at the
+            "No Profile" baseline there's nothing to deselect. Status bar still
+            shows the count too; having it next to the name reinforces context
+            without making the user look down. Responsive font + truncation
+            handle long names; the count drops first if the row gets cramped
+            (mirror measures the full string with suffix). */}
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+          {activeProfile && (
+            // Deselect = sending profile:click with the currently-active name re-uses
+            // the existing toggle path in the backend (HandleProfileClick line 2382:
+            // "if CurrentProfileName == name → deselect"). No new bridge message needed,
+            // and the unsaved-changes guard fires automatically through that path.
+            // Disabled during record/replay so a stray click can't yank the profile
+            // out from under an in-progress capture or playback.
+            <button
+              tabIndex={-1}
+              onClick={() => send({ type: 'profile:click', payload: { name: activeProfile } })}
+              disabled={buttonStates.recordingActive || buttonStates.replayActive}
+              data-tip="Deselect profile"
+              className="shrink-0 p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:text-text-disabled disabled:hover:bg-transparent"
+            >
+              <X size={14} />
+            </button>
+          )}
+          <ResponsiveProfileName name={toolbar.profileName} actionCount={toolbar.actionCount} />
+        </div>
 
         {/* Right: tools — prevent focus on click so Space/Enter can't re-trigger.
             Buttons are wrapped in subtle boxed groups (bg-white/[0.025] +
