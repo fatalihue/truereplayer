@@ -125,6 +125,35 @@
     <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0.20241108" />
   </ItemGroup>
 
+  <!-- Frontend sources that trigger an incremental rebuild of frontend/dist.
+       Defined at project scope (not inside the Target) because BuildFrontend's
+       Inputs="..." attribute is evaluated by MSBuild BEFORE the target body
+       runs — an ItemGroup inside the target wouldn't be visible yet. -->
+  <ItemGroup>
+    <FrontendSources Include="frontend\src\**\*.ts" />
+    <FrontendSources Include="frontend\src\**\*.tsx" />
+    <FrontendSources Include="frontend\src\**\*.css" />
+  </ItemGroup>
+
+  <!-- Run "npm run build" before the dist→wwwroot copy when any frontend source
+       (TS/TSX/CSS) or build config is newer than the existing dist output.
+       Inputs/Outputs gives MSBuild an incremental-build cache: if nothing changed
+       since the last npm build, this target is skipped (zero cost — preserves
+       fast C#-only iteration). Adds ~3s when the frontend actually needs
+       rebuilding, which is the explicit trade-off the user signed up for to
+       avoid the "preview shows changes, VS doesn't" stale-dist gotcha. -->
+  <Target Name="BuildFrontend"
+          BeforeTargets="CopyFrontendDist;CopyFrontendDistPublish"
+          Condition="Exists('frontend\package.json')"
+          Inputs="frontend\package.json;frontend\package-lock.json;frontend\vite.config.ts;frontend\tsconfig.json;frontend\tsconfig.app.json;frontend\tsconfig.node.json;frontend\index.html;@(FrontendSources)"
+          Outputs="frontend\dist\index.html">
+    <Message Text="Frontend sources changed — running 'npm run build' in frontend/..." Importance="high" />
+    <!-- cmd /c is required on Windows because npm is a .cmd shim, not a real exe.
+         The MSBuild Exec task on Linux/macOS would still resolve `npm` directly
+         via PATH; the prefix is harmless there. -->
+    <Exec Command="cmd /c npm run build" WorkingDirectory="frontend" />
+  </Target>
+
   <!-- Copy React build output to wwwroot in binary output directory -->
   <Target Name="CopyFrontendDist" AfterTargets="Build" Condition="Exists('frontend\dist')">
     <ItemGroup>
