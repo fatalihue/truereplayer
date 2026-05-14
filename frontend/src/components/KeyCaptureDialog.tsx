@@ -23,12 +23,16 @@ interface KeyCaptureDialogProps {
  * Print Screen, or system-reserved combos. For those, recording is the right
  * path — and the dropdown tip below the items already nudges users that way.
  *
- * The key-name mapping mirrors ActionTable.tsx's handleKeyCaptureKeyDown so that
- * a Send Key insert produces the same Key string as recording would. (Sharing
- * the mapping in a utility would be cleaner long-term; not extracted yet because
- * the dialog inlines a slightly trimmed subset — no auto-commit timer needed
- * here since the user explicitly confirms with the Insert button.)
- */
+ * The key-name mapping produces the same canonical names that `KeyUtils.NormalizeKeyName`
+ * in the C# backend emits during recording. This is critical — replay only resolves
+ * names that appear in `KeyUtils.VirtualKeyMap` (or in the ConsoleKey enum, but several
+ * canonical Win32 names like "Enter", "Backspace", "PageUp" are NOT in ConsoleKey, so
+ * mismatches silently no-op at replay time).
+ *
+ * Older code in ActionTable.tsx's edit-key flow used WinForms Keys-enum names like
+ * "Return", "Back", "Prior", "Next", "Capital" — those DON'T resolve and broke
+ * inserted actions. This dialog uses the canonical names instead so a Send Key
+ * insert is replay-identical to a recorded keystroke. */
 function mapKeyEvent(e: KeyboardEvent): string | null {
   const numpadMap: Record<string, string> = {
     Numpad0: 'Num0', Numpad1: 'Num1', Numpad2: 'Num2', Numpad3: 'Num3',
@@ -42,38 +46,40 @@ function mapKeyEvent(e: KeyboardEvent): string | null {
     return numpadMap[e.code] ?? e.code;
   }
   if (e.key === ' ') return 'Space';
-  if (e.key === 'Enter') return 'Return';
-  if (e.key === 'Backspace') return 'Back';
+  if (e.key === 'Enter') return 'Enter';        // was 'Return' (WinForms Keys enum) — doesn't resolve in KeyUtils
+  if (e.key === 'Backspace') return 'Backspace'; // was 'Back'   — same problem
   if (e.key === 'ArrowUp') return 'Up';
   if (e.key === 'ArrowDown') return 'Down';
   if (e.key === 'ArrowLeft') return 'Left';
   if (e.key === 'ArrowRight') return 'Right';
-  if (e.key === 'Control') return e.code === 'ControlRight' ? '163' : '162';
-  if (e.key === 'Shift') return e.code === 'ShiftRight' ? '161' : '160';
-  if (e.key === 'Alt') return e.code === 'AltRight' ? '165' : '164';
+  // Modifiers: KeyUtils maps both L/R variants to the same VK but the static map only
+  // includes the canonical "Ctrl"/"Shift"/"Alt" — using those instead of numeric codes
+  // (which previously worked via the int-fallback path but were non-canonical).
+  if (e.key === 'Control') return 'Ctrl';
+  if (e.key === 'Shift') return 'Shift';
+  if (e.key === 'Alt') return 'Alt';
   if (e.key === 'Tab') return 'Tab';
-  if (e.key === 'CapsLock') return 'Capital';
+  if (e.key === 'CapsLock') return 'CapsLock';   // was 'Capital'
   if (e.key === 'Delete') return 'Delete';
   if (e.key === 'Insert') return 'Insert';
   if (e.key === 'Home') return 'Home';
   if (e.key === 'End') return 'End';
-  if (e.key === 'PageUp') return 'Prior';
-  if (e.key === 'PageDown') return 'Next';
+  if (e.key === 'PageUp') return 'PageUp';       // was 'Prior'
+  if (e.key === 'PageDown') return 'PageDown';   // was 'Next'
   if (e.key === 'Escape') return 'Escape';
   if (e.key.startsWith('F') && e.key.length <= 3 && !isNaN(Number(e.key.slice(1)))) return e.key;
   if (e.key === 'Meta') return null; // Ignore Win key
   if (e.key.length === 1) {
     const c = e.key.toUpperCase();
-    if (/\d/.test(c)) return `D${c}`;
+    // Digits: KeyUtils.NormalizeKeyName uses bare "0"-"9" (not "D0"-"D9"). The old
+    // "D5" form happened to resolve via ConsoleKey.D5 fallback but produced ugly
+    // non-canonical strings in the Key column.
+    if (/\d/.test(c)) return c;
     if (/[A-Z]/.test(c)) return c;
-    // Symbol keys — map by code
-    const symbolMap: Record<string, string> = {
-      Backquote: 'Oem3', Minus: 'OemMinus', Equal: 'OemPlus',
-      BracketLeft: 'Oem4', BracketRight: 'Oem6', Backslash: 'Oem5',
-      Semicolon: 'Oem1', Quote: 'Oem7', Comma: 'OemComma',
-      Period: 'OemPeriod', Slash: 'Oem2',
-    };
-    return symbolMap[e.code] ?? c;
+    // Symbol keys: emit the literal character (`, [, ç, etc.). KeyUtils' replay path
+    // step 4 (CharToVkCurrentLayout / VkKeyScanEx) resolves single chars against the
+    // CURRENT keyboard layout, which is what recording produces too. Layout-portable.
+    return e.key;
   }
   return null;
 }

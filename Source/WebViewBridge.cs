@@ -1765,13 +1765,16 @@ namespace TrueReplayer
                 Key = key,
                 Delay = delay,
             });
-            // KeyUp gets a tiny delay (0) — the pair represents "tap this key once",
-            // not "hold for N ms". Users who want a hold can edit the KeyUp's delay.
+            // Both KeyDown and KeyUp get the same delay — that's what recording produces
+            // when the fixed custom delay is on (GetDelayForNewAction returns the same
+            // value for every recorded keystroke). An earlier draft used 0 for KeyUp on
+            // the theory that "this is a tap" but it diverged from recording behaviour
+            // and broke users' macros that relied on consistent per-step timing.
             actions.Insert(insertIndex + 1, new ActionItem
             {
                 ActionType = "KeyUp",
                 Key = key,
-                Delay = 0,
+                Delay = delay,
             });
             for (int i = 0; i < actions.Count; i++)
                 actions[i].RowNumber = i + 1;

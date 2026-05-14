@@ -361,45 +361,44 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       NumpadDecimal: 'NumDecimal',
     };
 
+    // Canonical names matching KeyUtils.NormalizeKeyName in the C# backend. Earlier
+    // versions of this map used WinForms Keys-enum names ("Return", "Back", "Prior",
+    // "Next", "Capital", numeric codes for modifiers) which don't appear in
+    // KeyUtils.VirtualKeyMap and aren't valid ConsoleKey members — so a value
+    // entered via this capture path resolved to "key not found" at replay time and
+    // the action silently no-op'd. Fixed to use the same names recording produces.
     if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter') {
       keyName = numpadMap[e.code] ?? e.code;
     } else if (e.key === ' ') keyName = 'Space';
-    else if (e.key === 'Enter') keyName = 'Return';
-    else if (e.key === 'Backspace') keyName = 'Back';
+    else if (e.key === 'Enter') keyName = 'Enter';         // was 'Return'
+    else if (e.key === 'Backspace') keyName = 'Backspace'; // was 'Back'
     else if (e.key === 'ArrowUp') keyName = 'Up';
     else if (e.key === 'ArrowDown') keyName = 'Down';
     else if (e.key === 'ArrowLeft') keyName = 'Left';
     else if (e.key === 'ArrowRight') keyName = 'Right';
-    else if (e.key === 'Control') keyName = e.code === 'ControlRight' ? '163' : '162';
-    else if (e.key === 'Shift') keyName = e.code === 'ShiftRight' ? '161' : '160';
-    else if (e.key === 'Alt') keyName = e.code === 'AltRight' ? '165' : '164';
+    else if (e.key === 'Control') keyName = 'Ctrl';        // was '162'/'163'
+    else if (e.key === 'Shift') keyName = 'Shift';         // was '160'/'161'
+    else if (e.key === 'Alt') keyName = 'Alt';             // was '164'/'165'
     else if (e.key === 'Tab') keyName = 'Tab';
-    else if (e.key === 'CapsLock') keyName = 'Capital';
+    else if (e.key === 'CapsLock') keyName = 'CapsLock';   // was 'Capital'
     else if (e.key === 'Delete') keyName = 'Delete';
     else if (e.key === 'Insert') keyName = 'Insert';
     else if (e.key === 'Home') keyName = 'Home';
     else if (e.key === 'End') keyName = 'End';
-    else if (e.key === 'PageUp') keyName = 'Prior';
-    else if (e.key === 'PageDown') keyName = 'Next';
+    else if (e.key === 'PageUp') keyName = 'PageUp';       // was 'Prior'
+    else if (e.key === 'PageDown') keyName = 'PageDown';   // was 'Next'
     else if (e.key === 'Escape') keyName = 'Escape';
     else if (e.key === 'F1') keyName = 'F1';
     else if (e.key.startsWith('F') && e.key.length <= 3 && !isNaN(Number(e.key.slice(1)))) keyName = e.key;
     else if (e.key === 'Meta') return; // Ignore Win key
     else if (e.key.length === 1) {
-      // Single character: letters → uppercase, digits → "D" prefix for top-row
+      // Single character: letters → uppercase, digits → bare "0"-"9" (was "D5" via
+      // ConsoleKey fallback — works but non-canonical), symbols → literal char
+      // (matches KeyUtils' VkToCharCurrentLayout / VkKeyScanEx layout-portable path).
       const c = e.key.toUpperCase();
-      if (/\d/.test(c)) keyName = `D${c}`;
+      if (/\d/.test(c)) keyName = c;
       else if (/[A-Z]/.test(c)) keyName = c;
-      else {
-        // Symbol keys — map by e.code
-        const symbolMap: Record<string, string> = {
-          Backquote: 'Oem3', Minus: 'OemMinus', Equal: 'OemPlus',
-          BracketLeft: 'Oem4', BracketRight: 'Oem6', Backslash: 'Oem5',
-          Semicolon: 'Oem1', Quote: 'Oem7', Comma: 'OemComma',
-          Period: 'OemPeriod', Slash: 'Oem2',
-        };
-        keyName = symbolMap[e.code] ?? c;
-      }
+      else keyName = e.key;
     } else {
       return; // Unknown key, ignore
     }
