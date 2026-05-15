@@ -480,12 +480,15 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      {/* 2-column grid: editor body on the left, persistent Live Preview on the right.
+          Header and Tabs span both columns; body+footer share the left column;
+          the preview pane spans the body+footer rows on the right. */}
       <div
         ref={panelRef}
-        className="w-[520px] h-[95vh] bg-bg-surface border border-border-default rounded-lg shadow-2xl overflow-hidden flex flex-col"
+        className="w-[860px] h-[95vh] bg-bg-surface border border-border-default rounded-lg shadow-2xl overflow-hidden grid grid-cols-[1fr_360px] grid-rows-[auto_auto_1fr_auto]"
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-subtle shrink-0">
+        {/* Header — spans both columns */}
+        <div className="col-span-2 flex items-center justify-between px-5 py-3.5 border-b border-border-subtle">
           <span className="text-sm font-semibold text-text-primary">Theme Editor</span>
           <button
             onClick={onClose}
@@ -495,8 +498,8 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
           </button>
         </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-border-subtle shrink-0">
+        {/* Tabs — spans both columns */}
+        <div className="col-span-2 flex border-b border-border-subtle">
           {TABS.map(tab => (
             <button
               key={tab.id}
@@ -512,8 +515,8 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
           ))}
         </div>
 
-        {/* Tab Content */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Tab Content — left column. Border-r separates it from the Live Preview pane. */}
+        <div className="overflow-y-auto border-r border-border-subtle min-w-0">
 
           {/* ═══ Tab 1: Presets ═══ */}
           {activeTab === 'presets' && (() => {
@@ -1152,9 +1155,9 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
         </div>
 
         {/* Fixed footer — single home for the "undo everything" / "export current" /
-            "close" actions. Replaces the per-tab Reset buttons that used to live
-            scattered at the bottom of Colors and Appearance. */}
-        <div className="shrink-0 border-t border-border-subtle bg-bg-card px-4 py-2 flex items-center gap-2">
+            "close" actions. Sits in the left column (under the body), so the right-side
+            Live Preview pane spans the full body+footer height. */}
+        <div className="border-t border-r border-border-subtle bg-bg-card px-4 py-2 flex items-center gap-2">
           <button
             onClick={() => { clearAllOverrides(); resetUISettings(); }}
             disabled={!hasOverrides && JSON.stringify(config.uiSettings) === JSON.stringify(DEFAULT_UI_SETTINGS)}
@@ -1181,30 +1184,199 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
           </button>
         </div>
 
-        {/* Live Preview — mini-mockup of an app row + buttons. Uses the same CSS vars
-            the rest of the app reads, so it updates in real time as the user mexe in
-            any tab. Lets the user see the effect without closing the editor. */}
-        <div className="shrink-0 border-t border-border-subtle bg-bg-base px-4 py-2.5">
-          <div className="text-[9px] font-semibold text-text-disabled tracking-wider mb-1.5">LIVE PREVIEW</div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 px-1.5 py-0.5 rounded text-xs bg-bg-card" style={{ borderRadius: 'var(--ui-border-radius)' }}>
-              <span className="font-mono text-[10px] text-text-tertiary w-4">1</span>
-              <span className="px-1.5 py-px rounded text-[10px] font-mono border" style={{ background: 'var(--color-action-key-bg)', color: 'var(--color-action-key-fg)', borderColor: 'color-mix(in srgb, var(--color-action-key-fg) 30%, transparent)' }}>KeyDown</span>
-              <span className="flex-1 text-text-secondary">Ctrl+S</span>
-              <span className="px-1.5 py-px text-[10px] font-mono rounded border" style={{ background: 'var(--color-hotkey-bg)', color: 'var(--color-hotkey-fg)', borderColor: 'var(--color-hotkey-border)' }}>Ctrl S</span>
-            </div>
-            <div className="flex items-center gap-2 px-1.5 py-0.5 rounded text-xs bg-bg-card" style={{ borderRadius: 'var(--ui-border-radius)' }}>
-              <span className="font-mono text-[10px] text-text-tertiary w-4">2</span>
-              <span className="px-1.5 py-px rounded text-[10px] font-mono border" style={{ background: 'var(--color-action-mouse-bg)', color: 'var(--color-action-mouse-fg)', borderColor: 'color-mix(in srgb, var(--color-action-mouse-fg) 30%, transparent)' }}>LeftClickDown</span>
-              <span className="flex-1 text-text-secondary">at (320, 180)</span>
-              <span className="font-mono text-[10px]" style={{ color: 'var(--color-delay)' }}>50 ms</span>
+        {/* Live Preview — right-side column spanning body+footer rows. Mocks a dense
+            slice of the app (profile row, action table with all 8 pill types, buttons,
+            tabs, form, text hierarchy, status bar) so the user can see practically every
+            theme token at once. Uses the same CSS vars the rest of the app reads, so it
+            updates in real time as the user mexe in any tab.
+
+            The pane's content is non-interactive (pointer-events: none) since the buttons
+            and inputs inside are mock — clicking would do nothing and confuse the user.
+            The header label and "Active" chip are static text, so this is harmless. */}
+        <div className="col-start-2 row-start-3 row-span-2 bg-bg-base p-3 overflow-y-auto flex flex-col gap-3 select-none [&_button]:pointer-events-none [&_input]:pointer-events-none">
+          {/* Header */}
+          <div className="flex items-center justify-between pb-2 border-b border-border-subtle">
+            <span className="text-[10px] font-semibold text-text-tertiary tracking-wider">LIVE PREVIEW</span>
+            <span
+              className="inline-flex items-center gap-1 px-1.5 py-px rounded-full text-[9px] border"
+              style={{
+                background: 'var(--color-replay-bg)',
+                color: 'var(--color-replay)',
+                borderColor: 'color-mix(in srgb, var(--color-replay) 30%, transparent)',
+              }}
+            >
+              <span className="w-1 h-1 rounded-full" style={{ background: 'var(--color-replay)' }} />
+              Active
+            </span>
+          </div>
+
+          {/* Profile row */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[9px] font-semibold text-text-disabled tracking-wider">PROFILE</span>
+            <div className="flex items-center gap-2 px-2.5 py-1.5 bg-bg-card border border-border-subtle" style={{ borderRadius: 'var(--ui-border-radius)' }}>
+              <span className="flex-1 text-xs font-semibold text-accent">My Macro</span>
+              <span className="inline-block w-2.5 h-2.5 rounded-full border border-text-tertiary relative" title="Window target">
+                <span className="absolute inset-1 rounded-full bg-text-tertiary" />
+              </span>
+              <span
+                className="px-1.5 py-px rounded font-mono text-[10px] border"
+                style={{
+                  background: 'var(--color-hotkey-bg)',
+                  color: 'var(--color-hotkey-fg)',
+                  borderColor: 'var(--color-hotkey-border)',
+                }}
+              >Ctrl F8</span>
             </div>
           </div>
-          <div className="flex gap-1.5 mt-2">
-            <button className="px-2.5 py-1 text-[10px] rounded border" style={{ background: 'var(--color-recording-bg)', color: 'var(--color-recording)', borderColor: 'color-mix(in srgb, var(--color-recording) 30%, transparent)' }}>● Recording</button>
-            <button className="px-2.5 py-1 text-[10px] rounded border" style={{ background: 'var(--color-replay-bg)', color: 'var(--color-replay)', borderColor: 'color-mix(in srgb, var(--color-replay) 30%, transparent)' }}>▶ Replay</button>
-            <div className="flex-1" />
-            <button className="px-2.5 py-1 text-[10px] text-white bg-accent-solid rounded">Set Target</button>
+
+          {/* Action table — exercises every pill color */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[9px] font-semibold text-text-disabled tracking-wider">ACTIONS</span>
+            <div className="flex flex-col gap-[2px]">
+              {[
+                { n: 1, pill: 'KeyDown', label: 'Ctrl+S', delay: '50 ms', tone: ['--color-action-key-bg', '--color-action-key-fg'] },
+                { n: 2, pill: 'LeftClick', label: 'at (320, 180)', delay: '120 ms', tone: ['--color-action-mouse-bg', '--color-action-mouse-fg'], active: true },
+                { n: 3, pill: 'ScrollUp', label: '×3', delay: '80 ms', tone: ['--color-action-scroll-bg', '--color-action-scroll-fg'] },
+                { n: 4, pill: 'SendText', label: '"Hello {date}"', delay: '200 ms', tone: ['--color-action-sendtext-bg', '--color-action-sendtext-fg'] },
+                { n: 5, pill: 'WaitImage', label: 'btn-ok.png', delay: '—', tone: ['--color-action-waitimage-bg', '--color-action-waitimage-fg'] },
+                { n: 6, pill: 'Pause', label: 'until Ctrl+Space', delay: '—', tone: ['--color-action-pause-bg', '--color-action-pause-fg'] },
+                { n: 7, pill: 'RunProfile', label: 'Sub-flow ×2', delay: '—', tone: ['--color-action-runprofile-bg', '--color-action-runprofile-fg'] },
+                { n: 8, pill: 'BrowserClick', label: 'button.submit', delay: '100 ms', tone: ['--color-action-browser-bg', '--color-action-browser-fg'] },
+              ].map(row => (
+                <div
+                  key={row.n}
+                  className={`grid grid-cols-[16px_70px_1fr_auto] items-center gap-1.5 px-2 py-[3px] text-[11px] ${row.active ? 'bg-bg-elevated' : 'bg-bg-card'}`}
+                  style={{
+                    borderRadius: 'var(--ui-border-radius)',
+                    boxShadow: row.active ? 'inset 2px 0 0 var(--color-accent)' : undefined,
+                  }}
+                >
+                  <span className="font-mono text-[9px] text-text-tertiary text-right">{row.n}</span>
+                  <span
+                    className="px-1 py-px rounded font-mono text-[9px] text-center border"
+                    style={{
+                      background: `var(${row.tone[0]})`,
+                      color: `var(${row.tone[1]})`,
+                      borderColor: `color-mix(in srgb, var(${row.tone[1]}) 30%, transparent)`,
+                    }}
+                  >{row.pill}</span>
+                  <span className="text-text-secondary truncate">{row.label}</span>
+                  <span className="font-mono text-[9px]" style={{ color: row.delay === '—' ? 'var(--color-text-disabled)' : 'var(--color-delay)' }}>{row.delay}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Buttons — recording / replay / clicker + primary / ghost */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[9px] font-semibold text-text-disabled tracking-wider">BUTTONS</span>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                className="px-2.5 py-1 text-[10px] border"
+                style={{
+                  borderRadius: 'var(--ui-border-radius)',
+                  background: 'var(--color-recording-bg)',
+                  color: 'var(--color-recording)',
+                  borderColor: 'color-mix(in srgb, var(--color-recording) 30%, transparent)',
+                }}
+              >● Recording</button>
+              <button
+                className="px-2.5 py-1 text-[10px] border"
+                style={{
+                  borderRadius: 'var(--ui-border-radius)',
+                  background: 'var(--color-replay-bg)',
+                  color: 'var(--color-replay)',
+                  borderColor: 'color-mix(in srgb, var(--color-replay) 30%, transparent)',
+                }}
+              >▶ Replay</button>
+              <button
+                className="px-2.5 py-1 text-[10px] border"
+                style={{
+                  borderRadius: 'var(--ui-border-radius)',
+                  background: 'var(--color-clicker-bg)',
+                  color: 'var(--color-clicker)',
+                  borderColor: 'var(--color-clicker-border)',
+                }}
+              >⨯ Clicker</button>
+            </div>
+            <div className="flex gap-1.5">
+              <button
+                className="px-2.5 py-1 text-[10px] text-white bg-accent-solid border border-accent-solid"
+                style={{ borderRadius: 'var(--ui-border-radius)' }}
+              >Set Target</button>
+              <button
+                className="px-2.5 py-1 text-[10px] text-text-secondary bg-bg-elevated border border-border-default"
+                style={{ borderRadius: 'var(--ui-border-radius)' }}
+              >Cancel</button>
+            </div>
+          </div>
+
+          {/* Tabs + slider — exercises the accent-driven tab highlight and slider */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[9px] font-semibold text-text-disabled tracking-wider">TABS</span>
+            <div
+              className="bg-bg-card border border-border-subtle px-2"
+              style={{ borderRadius: 'var(--ui-border-radius)' }}
+            >
+              <div className="flex border-b border-border-subtle">
+                <div className="flex-1 text-center py-1 text-[10px] text-accent border-b-2 border-accent">Profile</div>
+                <div className="flex-1 text-center py-1 text-[10px] text-text-tertiary">Global</div>
+                <div className="flex-1 text-center py-1 text-[10px] text-text-tertiary">Shortcuts</div>
+              </div>
+              <div className="flex items-center gap-2 py-2">
+                <div className="flex-1 relative h-1 rounded-full bg-bg-elevated">
+                  <div className="absolute inset-y-0 left-0 w-[45%] rounded-full bg-accent-solid" />
+                  <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-accent" style={{ left: '45%' }} />
+                </div>
+                <span className="font-mono text-[9px] text-text-tertiary">45%</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Form — input + toggle on + toggle off */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[9px] font-semibold text-text-disabled tracking-wider">FORM</span>
+            <div className="bg-bg-card border border-border-subtle px-2.5 py-1.5" style={{ borderRadius: 'var(--ui-border-radius)' }}>
+              {[
+                { label: 'Delay', value: '100', on: true },
+                { label: 'Jitter', value: '20', on: false },
+              ].map(f => (
+                <div key={f.label} className="flex items-center gap-2 py-0.5 text-[11px]">
+                  <span className="flex-1 text-text-secondary">{f.label}</span>
+                  <input
+                    readOnly
+                    value={f.value}
+                    className="w-12 h-5 px-1.5 text-center text-[10px] font-mono text-text-primary bg-bg-input border border-border-default rounded"
+                  />
+                  <div className={`relative w-6 h-3 rounded-full border ${f.on ? 'bg-accent-solid border-accent-solid' : 'bg-bg-elevated border-border-default'}`}>
+                    <div className={`absolute top-0.5 w-2 h-2 rounded-full ${f.on ? 'left-[14px] bg-white' : 'left-0.5 bg-text-tertiary'}`} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Text hierarchy — 4 levels of foreground on bg-card */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[9px] font-semibold text-text-disabled tracking-wider">TEXT HIERARCHY</span>
+            <div className="bg-bg-card border border-border-subtle px-2.5 py-1.5 text-[11px] leading-snug" style={{ borderRadius: 'var(--ui-border-radius)' }}>
+              <div className="text-text-primary">Primary heading text</div>
+              <div className="text-text-secondary">Secondary body copy</div>
+              <div className="text-text-tertiary">Tertiary meta info</div>
+              <div className="text-text-disabled">Disabled state</div>
+            </div>
+          </div>
+
+          {/* Status bar */}
+          <div
+            className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-text-tertiary bg-bg-card border border-border-subtle mt-auto"
+            style={{ borderRadius: 'var(--ui-border-radius)' }}
+          >
+            <span>📁 ~/Macros</span>
+            <span className="text-text-disabled">·</span>
+            <span>8 actions</span>
+            <span className="text-text-disabled">·</span>
+            <span style={{ color: 'var(--color-replay)' }}>Ready</span>
           </div>
         </div>
       </div>
