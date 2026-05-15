@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X, ChevronDown } from 'lucide-react';
+import { X, ChevronDown, MoreHorizontal } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { Toggle } from './common/Toggle';
 
@@ -84,6 +84,11 @@ export function TargetConfigDialog({
   const [showProcessPicker, setShowProcessPicker] = useState(false);
   const [processFilter, setProcessFilter] = useState('');
 
+  // Overflow menu (⋯) in the dialog header — houses rarely-used actions like Convert
+  // Coordinates so they don't take vertical space inside the dialog body. Only meaningful
+  // entries today are profile-scoped (Convert), so the icon hides for folder scope.
+  const [showOverflowMenu, setShowOverflowMenu] = useState(false);
+
   const markEdited = () => { setEdited(true); setTestResult(null); };
 
   // Inline regex validation. We compile in the browser as a syntax check only — the backend
@@ -124,15 +129,17 @@ export function TargetConfigDialog({
     });
   }, [subscribe]);
 
-  // Esc priority (most specific → least): close process picker → cancel detection → close dialog.
-  // Always-on dialog Esc-close is the standard modal ergonomic; the picker and detection states
-  // get a chance to absorb the keystroke first so the user can dismiss them without losing
-  // their dialog work.
+  // Esc priority (most specific → least): close any open menu (overflow / picker) →
+  // cancel detection → close dialog. The transient overlays absorb Esc first so the user
+  // can dismiss them without losing the dialog work; the dialog itself only closes when
+  // there's nothing else to dismiss.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.stopPropagation();
-      if (showProcessPicker) {
+      if (showOverflowMenu) {
+        setShowOverflowMenu(false);
+      } else if (showProcessPicker) {
         setShowProcessPicker(false);
       } else if (isDetecting) {
         // Backend treats a second detectWindow message as toggle-off.
@@ -144,7 +151,7 @@ export function TargetConfigDialog({
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [isDetecting, showProcessPicker, send, onCancel]);
+  }, [isDetecting, showProcessPicker, showOverflowMenu, send, onCancel]);
 
   const handleDetect = () => {
     markEdited();
@@ -203,10 +210,50 @@ export function TargetConfigDialog({
     ? <>Configure target window for <span className="text-text-primary font-medium">'{targetLabel}'</span></>
     : <>Configure target for all profiles in <span className="text-text-primary font-medium">'{targetLabel}'</span>. Profiles with their own target override this.</>;
 
+  // Only show the overflow menu when there's something to put in it. Today that's
+  // Convert Coordinates (profile scope only). When folder scope grows its own advanced
+  // actions in the future, broaden this guard.
+  const hasOverflowActions = isProfile && !!onConvertCoordinates;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-[380px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
-        <h3 className="text-sm font-semibold text-text-primary mb-3">{header}</h3>
+        <div className="flex items-start justify-between mb-3 relative">
+          <h3 className="text-sm font-semibold text-text-primary">{header}</h3>
+          {hasOverflowActions && (
+            <div className="relative">
+              <button
+                onClick={() => setShowOverflowMenu(v => !v)}
+                title="More actions"
+                className={`p-1 -mr-1 rounded transition-colors ${
+                  showOverflowMenu
+                    ? 'text-accent bg-bg-elevated'
+                    : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-elevated'
+                }`}
+              >
+                <MoreHorizontal size={14} />
+              </button>
+              {showOverflowMenu && (
+                <div className="absolute top-full right-0 mt-1 min-w-[200px] bg-bg-card border border-border-default rounded shadow-lg z-20 p-1">
+                  <button
+                    onClick={() => { onConvertCoordinates?.('toRelative'); setShowOverflowMenu(false); }}
+                    className="w-full text-left px-2.5 py-1.5 text-[11px] rounded hover:bg-bg-elevated transition-colors"
+                  >
+                    <div className="text-accent">Convert coords → Relative</div>
+                    <div className="text-[10px] text-text-tertiary mt-0.5">Anchor clicks to the target window</div>
+                  </button>
+                  <button
+                    onClick={() => { onConvertCoordinates?.('toAbsolute'); setShowOverflowMenu(false); }}
+                    className="w-full text-left px-2.5 py-1.5 text-[11px] rounded hover:bg-bg-elevated transition-colors"
+                  >
+                    <div className="text-text-primary">Convert coords → Absolute</div>
+                    <div className="text-[10px] text-text-tertiary mt-0.5">Use screen coordinates regardless of target</div>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
         <p className="text-xs text-text-secondary mb-4">{description}</p>
 
         <div className="space-y-3">
@@ -414,18 +461,8 @@ export function TargetConfigDialog({
             <span className="text-xs text-text-secondary" title="Restore the target window to its saved size before replay (un-maximizes if needed)">Restore Size</span>
             <Toggle isOn={restoreSize} onChange={setRestoreSize} />
           </div>
-          {isProfile && onConvertCoordinates && (
-            <div className="flex gap-2 pt-1">
-              <button
-                onClick={() => onConvertCoordinates('toRelative')}
-                className="flex-1 h-7 text-[11px] text-accent border border-accent-solid/30 rounded hover:bg-accent-solid/10 transition-colors"
-              >Convert to Relative</button>
-              <button
-                onClick={() => onConvertCoordinates('toAbsolute')}
-                className="flex-1 h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors"
-              >Convert to Absolute</button>
-            </div>
-          )}
+          {/* Convert Coordinates moved to the header overflow menu (⋯) — rarely used and
+              didn't earn its vertical space here. See the dialog header above. */}
           {onUpdateGeometry && (
             <button
               onClick={() => onUpdateGeometry({
