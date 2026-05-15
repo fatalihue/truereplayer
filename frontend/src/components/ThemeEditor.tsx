@@ -1261,7 +1261,10 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                     }}
                   >{row.pill}</span>
                   <span className="text-text-secondary truncate">{row.label}</span>
-                  <span className="font-mono text-[9px]" style={{ color: row.delay === '—' ? 'var(--color-text-disabled)' : 'var(--color-delay)' }}>{row.delay}</span>
+                  {/* Delay column uses text-secondary (matches the real ActionTable). The
+                      derived --color-delay variable is a different concept — it's used as a
+                      warning tint elsewhere (e.g. "Pause without trigger" callout). */}
+                  <span className={`font-mono text-[9px] ${row.delay === '—' ? 'text-text-disabled' : 'text-text-secondary'}`}>{row.delay}</span>
                 </div>
               ))}
             </div>
