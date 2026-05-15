@@ -681,6 +681,46 @@ namespace TrueReplayer.Controllers
             return (folder.WindowX, folder.WindowY, folder.WindowWidth, folder.WindowHeight);
         }
 
+        /// <summary>
+        /// Folder-inherited execution context for a profile that has no target of its own.
+        /// Returns null when the profile already has its own target (caller should use the
+        /// profile's own values), or when no folder applies / the folder has no target.
+        /// Used by the RunProfile chaining path so a sub-profile inheriting from its folder
+        /// actually switches into the folder's context, instead of running against the
+        /// caller's window.
+        /// </summary>
+        public readonly record struct FolderInheritedContext(
+            WindowTarget Target,
+            bool UseRelativeCoordinates,
+            bool BringToFocus,
+            bool RestorePosition,
+            bool RestoreSize,
+            int X, int Y, int Width, int Height);
+
+        public FolderInheritedContext? GetFolderInheritedContext(string profileName)
+        {
+            // Profile has own target → no folder inheritance applies. Caller uses the profile's
+            // disk-loaded values directly.
+            if (_cachedWindowTargets.ContainsKey(profileName)) return null;
+            var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(profileName));
+            if (folder?.TargetWindow == null) return null;
+            if (string.IsNullOrEmpty(folder.TargetWindow.ProcessName)
+                && string.IsNullOrEmpty(folder.TargetWindow.WindowTitle)) return null;
+            // Geometry only forwarded when both dimensions are populated — same rule as
+            // GetFolderInheritedGeometry; SetWindowPos with zero size would be invalid.
+            bool hasGeom = folder.WindowWidth > 0 && folder.WindowHeight > 0;
+            return new FolderInheritedContext(
+                folder.TargetWindow,
+                folder.UseRelativeCoordinates,
+                folder.BringToFocus,
+                folder.RestorePosition,
+                folder.RestoreSize,
+                hasGeom ? folder.WindowX : 0,
+                hasGeom ? folder.WindowY : 0,
+                hasGeom ? folder.WindowWidth : 0,
+                hasGeom ? folder.WindowHeight : 0);
+        }
+
         public async Task SetFolderWindowTargetAsync(
             string folderName,
             WindowTarget target,

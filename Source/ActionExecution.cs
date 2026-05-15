@@ -158,6 +158,11 @@ namespace TrueReplayer.Services
             replayer.SetProfileLookup(lookup);
         }
 
+        public void SetFolderInheritedContextLookup(Func<string, Controllers.ProfileController.FolderInheritedContext?> lookup)
+        {
+            replayer.SetFolderInheritedContextLookup(lookup);
+        }
+
         public void SetChainChangedCallback(Action<List<string>> callback)
         {
             replayer.SetChainChangedCallback(callback);
@@ -636,6 +641,11 @@ namespace TrueReplayer.Services
         // ── Profile chaining ──
         // Async lookup that resolves a profile name into its UserProfile. Returns null when missing.
         private Func<string, Task<Models.UserProfile?>>? _profileLookup;
+        // Sync lookup for folder-inherited execution context (target + flags + geometry) when the
+        // sub-profile has no target of its own. Returns null when the profile already has its own
+        // target (caller uses subProfile.* directly) or no folder applies. Without this, a sub
+        // inheriting from its folder would silently run against the caller's window.
+        private Func<string, Controllers.ProfileController.FolderInheritedContext?>? _folderInheritedContextLookup;
         // Active call stack of profile names (excluding the root). Used for cycle detection
         // and for the status-bar "A → B → C" display.
         private readonly List<string> _callStack = new();
@@ -665,6 +675,11 @@ namespace TrueReplayer.Services
         public void SetProfileLookup(Func<string, Task<Models.UserProfile?>> lookup)
         {
             _profileLookup = lookup;
+        }
+
+        public void SetFolderInheritedContextLookup(Func<string, Controllers.ProfileController.FolderInheritedContext?> lookup)
+        {
+            _folderInheritedContextLookup = lookup;
         }
 
         public void SetChainChangedCallback(Action<List<string>> callback)
@@ -1074,19 +1089,54 @@ namespace TrueReplayer.Services
             var savedContext = SaveWindowContext();
             try
             {
-                // If sub has its own target, switch into its context. Otherwise inherit caller's.
+                // Resolve sub's effective context: own target wins, otherwise fall back to the
+                // folder it lives in. Without the folder fallback, a sub-profile that inherits
+                // its target from a folder would silently run against the caller's window.
+                Models.WindowTarget? subTarget = null;
+                bool subUseRel = false, subBringFocus = false, subRestorePos = false, subRestoreSz = false;
+                int subW = 0, subH = 0, subX = 0, subY = 0;
                 if (subProfile.TargetWindow != null)
                 {
-                    _windowTarget = subProfile.TargetWindow;
-                    _windowTargetTitleRegex = TrueReplayer.Helpers.WindowMatcher.CompileTitleRegex(subProfile.TargetWindow);
-                    _useRelativeCoordinates = subProfile.UseRelativeCoordinates;
-                    _bringToFocus = subProfile.BringToFocus;
-                    _restorePosition = subProfile.RestorePosition;
-                    _restoreSize = subProfile.RestoreSize;
-                    _lockWidth = subProfile.WindowWidth;
-                    _lockHeight = subProfile.WindowHeight;
-                    _lockX = subProfile.WindowX;
-                    _lockY = subProfile.WindowY;
+                    subTarget = subProfile.TargetWindow;
+                    subUseRel = subProfile.UseRelativeCoordinates;
+                    subBringFocus = subProfile.BringToFocus;
+                    subRestorePos = subProfile.RestorePosition;
+                    subRestoreSz = subProfile.RestoreSize;
+                    subW = subProfile.WindowWidth;
+                    subH = subProfile.WindowHeight;
+                    subX = subProfile.WindowX;
+                    subY = subProfile.WindowY;
+                }
+                else
+                {
+                    var inherited = _folderInheritedContextLookup?.Invoke(targetName);
+                    if (inherited.HasValue)
+                    {
+                        subTarget = inherited.Value.Target;
+                        subUseRel = inherited.Value.UseRelativeCoordinates;
+                        subBringFocus = inherited.Value.BringToFocus;
+                        subRestorePos = inherited.Value.RestorePosition;
+                        subRestoreSz = inherited.Value.RestoreSize;
+                        subW = inherited.Value.Width;
+                        subH = inherited.Value.Height;
+                        subX = inherited.Value.X;
+                        subY = inherited.Value.Y;
+                    }
+                    // else: no own target and no folder — keep the caller's context unchanged
+                    //       (sub runs against whatever the parent set up).
+                }
+                if (subTarget != null)
+                {
+                    _windowTarget = subTarget;
+                    _windowTargetTitleRegex = TrueReplayer.Helpers.WindowMatcher.CompileTitleRegex(subTarget);
+                    _useRelativeCoordinates = subUseRel;
+                    _bringToFocus = subBringFocus;
+                    _restorePosition = subRestorePos;
+                    _restoreSize = subRestoreSz;
+                    _lockWidth = subW;
+                    _lockHeight = subH;
+                    _lockX = subX;
+                    _lockY = subY;
                     await ApplyWindowContextAsync(token);
                 }
 

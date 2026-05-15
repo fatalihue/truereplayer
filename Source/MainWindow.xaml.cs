@@ -113,6 +113,10 @@ namespace TrueReplayer
             // ── Profile chaining wiring ──
             // Sub-profile resolver: RunProfile actions look up other profiles by name.
             replayService.SetProfileLookup(name => profileController.LoadProfileByNameAsync(name));
+            // Folder-inherited context resolver: when a sub-profile has no target of its own,
+            // HandleRunProfile needs the folder's target/flags/geometry so the sub actually
+            // switches into that context instead of running against the caller's window.
+            replayService.SetFolderInheritedContextLookup(name => profileController.GetFolderInheritedContext(name));
             // Chain-status callback: keeps the status bar's "Running A → B" display in sync.
             replayService.SetChainChangedCallback(stack =>
             {
