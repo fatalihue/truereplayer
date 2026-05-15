@@ -38,6 +38,9 @@ export interface ThemeUISettings {
   zoom: number;
   recordingColor: string;
   replayColor: string;
+  // Clicker mode has its own identity (used by the Clicker tab UI + repeating clicks);
+  // exposed as a customizable semantic color so it stays cohesive when the accent changes.
+  clickerColor: string;
   actionMouseColor: string;
   actionKeyColor: string;
   actionScrollColor: string;
@@ -47,6 +50,17 @@ export interface ThemeUISettings {
   actionRunProfileColor: string;
   actionPauseColor: string;
   fontMono: string;
+  // When true, auto-switch between darkPresetId / lightPresetId based on the OS
+  // prefers-color-scheme media query. ThemeContext listens to changes and updates
+  // the active preset live. Defaults: false so behaviour is unchanged for users
+  // who didn't opt in.
+  matchSystemTheme: boolean;
+  darkPresetId: string;
+  lightPresetId: string;
+  // Master toggle for UI transitions / micro-interactions. Stored here so users on
+  // low-end hardware or with reduced-motion preferences can switch them off
+  // independently of the theme palette.
+  enableAnimations: boolean;
 }
 
 export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
@@ -56,6 +70,7 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   zoom: 95,
   recordingColor: '#ff6b6b',
   replayColor: '#6bcb77',
+  clickerColor: '#c084fc',
   actionMouseColor: '#a78bfa',
   actionKeyColor: '#60cdff',
   actionScrollColor: '#6bcb77',
@@ -68,6 +83,10 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   // Amber — semantic "wait/attention" for the Pause action.
   actionPauseColor: '#fbbf24',
   fontMono: 'Consolas',
+  matchSystemTheme: false,
+  darkPresetId: 'one-dark-pro-night-flat',
+  lightPresetId: 'github-light',
+  enableAnimations: true,
 };
 
 export interface ThemeConfig {
@@ -949,6 +968,55 @@ export const themes: ThemePreset[] = [
 
 export const DEFAULT_THEME_ID = 'one-dark-pro-night-flat';
 
+// Filterable tags for the Themes tab — every preset is "dark" or "light", plus
+// optional style tags (vivid / pastel / monochrome) when those traits dominate.
+// Kept as a separate map (not inline on each preset) so adding a new tag dimension
+// later is a one-place change.
+export type ThemeTag = 'dark' | 'light' | 'vivid' | 'pastel' | 'monochrome';
+
+export const THEME_TAGS: Record<string, ThemeTag[]> = {
+  'carbon': ['dark', 'monochrome'],
+  'sakura': ['dark', 'pastel'],
+  'copper': ['dark', 'vivid'],
+  'amber': ['dark', 'vivid'],
+  'gruvbox-dark': ['dark', 'vivid'],
+  'minimal-kiwi': ['dark', 'monochrome'],
+  'monokai': ['dark', 'vivid'],
+  'dark-ever': ['dark', 'pastel'],
+  'green-beautiful-2': ['dark', 'vivid'],
+  'green-dark': ['dark', 'vivid'],
+  'hatsune-miku': ['dark', 'vivid'],
+  'ocean': ['dark', 'vivid'],
+  'ocean-deep': ['dark', 'vivid'],
+  'nord': ['dark', 'pastel'],
+  'midnight': ['dark'],
+  'one-dark-pro': ['dark'],
+  'one-dark-pro-night-flat': ['dark', 'monochrome'],
+  'tokyo-night': ['dark'],
+  'github-dark': ['dark'],
+  'github-dark-default': ['dark'],
+  'solarized-dark': ['dark'],
+  'kanagawa': ['dark', 'pastel'],
+  'kanagawa-dragon': ['dark', 'monochrome'],
+  'wuthering-waves': ['dark', 'vivid'],
+  'crimson-night': ['dark', 'vivid'],
+  'dracula': ['dark', 'vivid'],
+  'catppuccin-frappe': ['dark', 'pastel'],
+  'catppuccin-macchiato': ['dark', 'pastel'],
+  'catppuccin-mocha': ['dark', 'pastel'],
+  'rose-pine': ['dark', 'pastel'],
+  'violet-dusk': ['dark', 'vivid'],
+  'genshin-vibes': ['dark'],
+  'catppuccin-latte': ['light', 'pastel'],
+  'github-light': ['light'],
+  'solarized-light': ['light'],
+  'tokyo-night-light': ['light'],
+};
+
+export function getThemeTags(id: string): ThemeTag[] {
+  return THEME_TAGS[id] ?? ['dark'];
+}
+
 export function getThemeById(id: string): ThemePreset | undefined {
   return themes.find(t => t.id === id);
 }
@@ -1015,6 +1083,29 @@ export function withOriginalAlpha(newHex: string, originalColor: string): string
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+// ── WCAG contrast ──
+
+// Relative luminance per WCAG 2.1 — gamma-correct then weighted sum.
+function relativeLuminance(hex: string): number {
+  const { r, g, b } = hexToRGB(hex);
+  const channel = (v: number) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+
+/**
+ * WCAG 2.1 contrast ratio between two colors (hex). Returns 1.0–21.0.
+ * AA body-text wants ≥ 4.5; AA large/graphics wants ≥ 3; AAA wants ≥ 7.
+ */
+export function contrastRatio(fgHex: string, bgHex: string): number {
+  const l1 = relativeLuminance(toHex(fgHex));
+  const l2 = relativeLuminance(toHex(bgHex));
+  const [lighter, darker] = l1 > l2 ? [l1, l2] : [l2, l1];
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 // ── Accent Derivation ──
 
 export function deriveAccentVariants(accentHex: string): Pick<ThemeColors, 'accent' | 'accent-solid' | 'accent-hover'> {
@@ -1029,6 +1120,39 @@ export function deriveAccentVariants(accentHex: string): Pick<ThemeColors, 'acce
 // ── Theme Config Persistence ──
 
 const STORAGE_KEY = 'truereplay-theme';
+const CUSTOM_PRESETS_KEY = 'truereplay-custom-presets';
+
+/**
+ * User-saved presets — separate from the built-in presets array so they can be
+ * added/removed without affecting the curated list. Stored as JSON in localStorage
+ * under CUSTOM_PRESETS_KEY. Each entry uses the same shape as ThemePreset but with
+ * a `__custom: true` marker for UI distinction.
+ */
+export interface CustomThemePreset extends ThemePreset {
+  __custom: true;
+}
+
+export function loadCustomPresets(): CustomThemePreset[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_PRESETS_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(p => p && typeof p.id === 'string' && p.colors);
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomPresets(presets: CustomThemePreset[]): void {
+  localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(presets));
+}
+
+/** Generate a stable id from a user-supplied preset name. */
+export function makeCustomPresetId(name: string): string {
+  const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return `custom-${slug || Date.now()}`;
+}
 
 export function loadThemeConfig(): ThemeConfig {
   const raw = localStorage.getItem(STORAGE_KEY);
@@ -1063,8 +1187,13 @@ export function makeDefaultConfig(): ThemeConfig {
 
 // ── Theme Resolution ──
 
-export function resolveThemeColors(config: ThemeConfig): ThemeColors {
-  const base = getThemeById(config.baseThemeId) ?? themes[0];
+export function resolveThemeColors(config: ThemeConfig, customPresets: ThemePreset[] = []): ThemeColors {
+  // Custom presets take precedence over built-in ids — the user might intentionally
+  // override a built-in name. In practice ids should never collide thanks to the
+  // 'custom-' prefix from makeCustomPresetId, but the lookup order keeps user wins.
+  const base = customPresets.find(t => t.id === config.baseThemeId)
+    ?? getThemeById(config.baseThemeId)
+    ?? themes[0];
   return { ...base.colors, ...config.colorOverrides };
 }
 
@@ -1083,6 +1212,9 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   root.style.setProperty('--color-recording-bg', `color-mix(in srgb, ${uiSettings.recordingColor} 10%, transparent)`);
   root.style.setProperty('--color-replay', uiSettings.replayColor);
   root.style.setProperty('--color-replay-bg', `color-mix(in srgb, ${uiSettings.replayColor} 10%, transparent)`);
+  root.style.setProperty('--color-clicker', uiSettings.clickerColor);
+  root.style.setProperty('--color-clicker-bg', `color-mix(in srgb, ${uiSettings.clickerColor} 12%, transparent)`);
+  root.style.setProperty('--color-clicker-border', `color-mix(in srgb, ${uiSettings.clickerColor} 30%, transparent)`);
   // Action type pill colors + auto-derived backgrounds
   root.style.setProperty('--color-action-mouse-fg', uiSettings.actionMouseColor);
   root.style.setProperty('--color-action-mouse-bg', `color-mix(in srgb, ${uiSettings.actionMouseColor} 10%, transparent)`);
@@ -1102,6 +1234,9 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   root.style.setProperty('--color-action-pause-bg', `color-mix(in srgb, ${uiSettings.actionPauseColor} 10%, transparent)`);
   // Font
   root.style.setProperty('--font-mono', `'${uiSettings.fontMono}', 'Courier New', monospace`);
+  // Animations toggle — exposes a single data-attribute the CSS can hook into
+  // (e.g. `html[data-animations="true"] .some-thing { transition: ... }`).
+  root.setAttribute('data-animations', uiSettings.enableAnimations ? 'true' : 'false');
 }
 
 // ── Import/Export ──

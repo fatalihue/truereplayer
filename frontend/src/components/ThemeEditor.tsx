@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { X, Check, RotateCcw, Download, Upload, Clipboard, ClipboardPaste } from 'lucide-react';
+import { X, Check, RotateCcw, Download, Upload, Clipboard, ClipboardPaste, Pipette } from 'lucide-react';
 import {
   themes,
   DEFAULT_UI_SETTINGS,
   toHex,
   withOriginalAlpha,
   validateExportedTheme,
+  getThemeTags,
+  hexToHSL,
+  hslToHex,
+  contrastRatio,
 } from '../themes';
-import type { ThemeColors, ExportedTheme } from '../themes';
+import type { ThemeColors, ExportedTheme, ThemeTag, CustomThemePreset } from '../themes';
 import { useTheme } from '../state/ThemeContext';
 
 interface ThemeEditorProps {
@@ -50,70 +54,172 @@ const COLOR_LABELS: Record<keyof ThemeColors, string> = {
   'accent-hover': 'Hover',
 };
 
+// ── Eyedropper helper ──
+
+// Picks a color anywhere on screen using the EyeDropper API (Chromium 95+).
+// Returns the sRGBHex string or null if unsupported or cancelled. Available in
+// WebView2 since it ships with Chromium; pre-2021 builds fall through to null.
+async function pickFromScreen(): Promise<string | null> {
+  const Ctor = (window as unknown as { EyeDropper?: new () => { open: () => Promise<{ sRGBHex: string }> } }).EyeDropper;
+  if (!Ctor) return null;
+  try {
+    const result = await new Ctor().open();
+    return result.sRGBHex;
+  } catch {
+    return null;
+  }
+}
+
 // ── Reusable Color Row ──
 
-function ColorRow({ label, colorKey, value, baseValue, onChange, onReset }: {
+function ColorRow({ label, colorKey, value, baseValue, mode, contrastBg, onChange, onReset }: {
   label: string;
   colorKey: keyof ThemeColors;
   value: string;
   baseValue: string;
+  mode: 'hex' | 'hsl';
+  /** When set, show a small WCAG contrast chip comparing this color against the bg. */
+  contrastBg?: string;
   onChange: (key: keyof ThemeColors, value: string) => void;
   onReset: (key: keyof ThemeColors) => void;
 }) {
   const isOverridden = value !== baseValue;
   const hexValue = toHex(value);
+  const hasEyedropper = typeof (window as unknown as { EyeDropper?: unknown }).EyeDropper !== 'undefined';
+
+  // WCAG contrast chip — only displayed for keys with a meaningful bg reference
+  // (text-* keys against bg-surface). Threshold mirrors WCAG 2.1 AA body text.
+  const ratio = contrastBg ? contrastRatio(hexValue, contrastBg) : null;
 
   return (
-    <div className="flex items-center gap-2 py-0.5 group">
-      <div className="flex items-center gap-1.5 w-[90px]">
-        {isOverridden && <div className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
-        <span className={`text-xs ${isOverridden ? 'text-text-primary' : 'text-text-secondary'}`}>{label}</span>
-      </div>
+    <div className="py-0.5 group">
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 w-[90px]">
+          {isOverridden && <div className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />}
+          <span className={`text-xs ${isOverridden ? 'text-text-primary' : 'text-text-secondary'}`}>{label}</span>
+        </div>
 
-      <label className="relative w-6 h-6 rounded border border-border-default cursor-pointer shrink-0 overflow-hidden">
-        <div className="absolute inset-0" style={{ backgroundColor: value }} />
+        <label className="relative w-6 h-6 rounded border border-border-default cursor-pointer shrink-0 overflow-hidden">
+          <div className="absolute inset-0" style={{ backgroundColor: value }} />
+          <input
+            type="color"
+            value={hexValue}
+            onChange={(e) => {
+              const newHex = e.target.value;
+              onChange(colorKey, withOriginalAlpha(newHex, value));
+            }}
+            className="absolute inset-0 opacity-0 cursor-pointer"
+          />
+        </label>
+
         <input
-          type="color"
+          type="text"
           value={hexValue}
           onChange={(e) => {
-            const newHex = e.target.value;
-            onChange(colorKey, withOriginalAlpha(newHex, value));
+            const v = e.target.value;
+            if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+              onChange(colorKey, withOriginalAlpha(v, value));
+            }
           }}
-          className="absolute inset-0 opacity-0 cursor-pointer"
+          className="w-[80px] h-6 px-2 text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
         />
-      </label>
 
-      <input
-        type="text"
-        value={hexValue}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (/^#[0-9a-fA-F]{6}$/.test(v)) {
-            onChange(colorKey, withOriginalAlpha(v, value));
-          }
-        }}
-        className="w-[80px] h-6 px-2 text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
-      />
+        {hasEyedropper && (
+          <button
+            onClick={async () => {
+              const picked = await pickFromScreen();
+              if (picked) onChange(colorKey, withOriginalAlpha(picked, value));
+            }}
+            className="p-0.5 rounded text-text-disabled hover:text-accent hover:bg-bg-elevated transition-colors"
+            title="Pick color from screen"
+          >
+            <Pipette size={12} />
+          </button>
+        )}
 
-      <button
-        onClick={() => onReset(colorKey)}
-        className={`p-0.5 rounded text-text-disabled hover:text-text-primary hover:bg-bg-elevated transition-colors ${isOverridden ? 'visible' : 'invisible'}`}
-        title="Reset to base"
-      >
-        <RotateCcw size={12} />
-      </button>
+        {ratio !== null && (() => {
+          // WCAG 2.1 AA: 4.5 for body text, 3.0 for large text / graphics. Below 3
+          // is hard to read at any size. Three buckets keep the chip glanceable.
+          const tone =
+            ratio < 3 ? { bg: 'bg-recording/15', fg: 'text-recording', border: 'border-recording/40', icon: '⚠' }
+            : ratio < 4.5 ? { bg: 'bg-yellow-500/10', fg: 'text-yellow-400', border: 'border-yellow-500/30', icon: '⚠' }
+            : { bg: 'bg-replay/15', fg: 'text-replay', border: 'border-replay/40', icon: '✓' };
+          return (
+            <span
+              className={`px-1.5 py-px text-[9px] font-mono rounded border ${tone.bg} ${tone.fg} ${tone.border}`}
+              title={`Contrast ratio ${ratio.toFixed(1)}:1 — WCAG AA wants 4.5+ for body text`}
+            >
+              {tone.icon} {ratio.toFixed(1)}
+            </span>
+          );
+        })()}
+
+        <button
+          onClick={() => onReset(colorKey)}
+          className={`p-0.5 rounded text-text-disabled hover:text-text-primary hover:bg-bg-elevated transition-colors ${isOverridden ? 'visible' : 'invisible'}`}
+          title="Reset to base"
+        >
+          <RotateCcw size={12} />
+        </button>
+      </div>
+
+      {mode === 'hsl' && (() => {
+        const hsl = hexToHSL(hexValue);
+        const updateHSL = (h: number, s: number, l: number) => {
+          const newHex = hslToHex(h, s, l);
+          onChange(colorKey, withOriginalAlpha(newHex, value));
+        };
+        return (
+          <div className="ml-[98px] mt-1 mb-1 pl-2 border-l border-border-subtle space-y-1">
+            <HSLSlider label="H" max={360} value={Math.round(hsl.h)} unit="°" gradient="linear-gradient(to right, hsl(0,80%,50%), hsl(60,80%,50%), hsl(120,80%,50%), hsl(180,80%,50%), hsl(240,80%,50%), hsl(300,80%,50%), hsl(360,80%,50%))" onChange={(v) => updateHSL(v, hsl.s, hsl.l)} />
+            <HSLSlider label="S" max={100} value={Math.round(hsl.s)} unit="%" gradient={`linear-gradient(to right, hsl(${hsl.h},0%,${hsl.l}%), hsl(${hsl.h},100%,${hsl.l}%))`} onChange={(v) => updateHSL(hsl.h, v, hsl.l)} />
+            <HSLSlider label="L" max={100} value={Math.round(hsl.l)} unit="%" gradient={`linear-gradient(to right, hsl(${hsl.h},${hsl.s}%,0%), hsl(${hsl.h},${hsl.s}%,50%), hsl(${hsl.h},${hsl.s}%,100%))`} onChange={(v) => updateHSL(hsl.h, hsl.s, v)} />
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+function HSLSlider({ label, value, max, unit, gradient, onChange }: {
+  label: string;
+  value: number;
+  max: number;
+  unit: string;
+  gradient: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="font-mono text-[10px] text-text-tertiary w-3">{label}</span>
+      <div className="flex-1 relative h-3 rounded" style={{ background: gradient }}>
+        <input
+          type="range"
+          min={0}
+          max={max}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+        />
+        <div
+          className="absolute top-1/2 w-2.5 h-2.5 rounded-full bg-white border border-black/40 pointer-events-none"
+          style={{ left: `${(value / max) * 100}%`, transform: 'translate(-50%, -50%)' }}
+        />
+      </div>
+      <span className="font-mono text-[10px] text-text-tertiary w-7 text-right">{value}{unit}</span>
     </div>
   );
 }
 
 // ── Slider + Input ──
 
-function SliderSetting({ label, value, min, max, unit, onChange }: {
+function SliderSetting({ label, value, min, max, unit, defaultValue, onChange }: {
   label: string;
   value: number;
   min: number;
   max: number;
   unit: string;
+  defaultValue?: number;
   onChange: (v: number) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -136,17 +242,35 @@ function SliderSetting({ label, value, min, max, unit, onChange }: {
     return () => el.removeEventListener('wheel', handler);
   }, [min, max, onChange]);
 
+  // Position of the default-value tick along the range (0..100%). Only rendered when
+  // defaultValue is supplied and strictly inside the [min, max] interval (so edge
+  // values don't put the tick under the thumb at min/max position).
+  const defaultPct = defaultValue !== undefined && defaultValue > min && defaultValue < max
+    ? ((defaultValue - min) / (max - min)) * 100
+    : null;
+
   return (
     <div ref={containerRef} className="flex items-center gap-3 py-1" onMouseEnter={() => { hovering.current = true; }} onMouseLeave={() => { hovering.current = false; }}>
       <span className="text-xs text-text-secondary w-[100px]">{label}</span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="flex-1 h-1.5 accent-accent-solid"
-      />
+      <div className="flex-1 relative">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="w-full h-1.5 accent-accent-solid"
+        />
+        {defaultPct !== null && (
+          <div
+            className="absolute pointer-events-none"
+            style={{ left: `${defaultPct}%`, top: '50%', transform: 'translate(-50%, -50%)' }}
+            title={`Default: ${defaultValue}${unit}`}
+          >
+            <div className="w-0.5 h-2.5 bg-text-tertiary/60" />
+          </div>
+        )}
+      </div>
       <div className="flex items-center gap-1">
         <input
           type="number"
@@ -220,10 +344,11 @@ function AppearanceColorRow({ label, value, defaultValue, onChange }: {
 
 export function ThemeEditor({ onClose }: ThemeEditorProps) {
   const {
-    config, resolvedColors, selectPreset,
+    config, resolvedColors, customPresets, selectPreset,
     setColorOverride, clearColorOverride, clearAllOverrides,
     setAccentColor, setUISetting, resetUISettings,
     exportTheme, importTheme,
+    saveAsPreset, deleteCustomPreset,
   } = useTheme();
 
   const panelRef = useRef<HTMLDivElement>(null);
@@ -232,7 +357,28 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
   const [importError, setImportError] = useState('');
   const [copySuccess, setCopySuccess] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  // Preset tab — search + filter chip state. Persists across tab switches as long
+  // as the editor stays open.
+  const [presetSearch, setPresetSearch] = useState('');
+  const [presetFilter, setPresetFilter] = useState<'all' | ThemeTag>('all');
+  const [savePresetName, setSavePresetName] = useState('');
+  // Colors tab — Hex vs HSL picker mode and a transient palette of recently-used colors.
+  // Recent colors do not persist across editor opens; they're a within-session
+  // affordance for reusing the same color across multiple slots.
+  const [colorMode, setColorMode] = useState<'hex' | 'hsl'>('hex');
+  const [recentColors, setRecentColors] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Wraps setColorOverride to also push the chosen color onto the recent strip.
+  // Dedups (case-insensitive) and caps at 8 entries.
+  const trackedSetColorOverride = useCallback((key: keyof ThemeColors, val: string) => {
+    setColorOverride(key, val);
+    const hex = toHex(val).toLowerCase();
+    setRecentColors(prev => {
+      const filtered = prev.filter(c => c.toLowerCase() !== hex);
+      return [hex, ...filtered].slice(0, 8);
+    });
+  }, [setColorOverride]);
 
   const hasOverrides = Object.keys(config.colorOverrides).length > 0;
 
@@ -370,74 +516,225 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
         <div className="flex-1 overflow-y-auto">
 
           {/* ═══ Tab 1: Presets ═══ */}
-          {activeTab === 'presets' && (
-            <div className="p-4 space-y-4">
-              {/* Preset Grid */}
-              <div className="grid grid-cols-4 gap-3">
-                {themes.map((theme) => {
-                  const isActive = theme.id === config.baseThemeId && !hasOverrides;
-                  return (
+          {activeTab === 'presets' && (() => {
+            const filterChips: { id: 'all' | ThemeTag; label: string }[] = [
+              { id: 'all', label: 'All' },
+              { id: 'dark', label: 'Dark' },
+              { id: 'light', label: 'Light' },
+              { id: 'vivid', label: 'Vivid' },
+              { id: 'pastel', label: 'Pastel' },
+              { id: 'monochrome', label: 'Monochrome' },
+            ];
+            const q = presetSearch.trim().toLowerCase();
+            const matchesFilter = (id: string) => {
+              if (presetFilter === 'all') return true;
+              return getThemeTags(id).includes(presetFilter);
+            };
+            const matchesSearch = (name: string) => q.length === 0 || name.toLowerCase().includes(q);
+            const builtinList = themes.filter(t => matchesFilter(t.id) && matchesSearch(t.name));
+            const customList = customPresets.filter(t => matchesSearch(t.name));
+            // Custom presets aren't tagged by THEME_TAGS — show them only when filter is 'all'
+            // or 'dark'/'light' inferred from their bg-base luminance.
+            const filteredCustom = customList.filter(p => {
+              if (presetFilter === 'all') return true;
+              if (presetFilter === 'dark' || presetFilter === 'light') {
+                // Quick luminance check on bg-base
+                const hex = p.colors['bg-base'].replace('#', '');
+                if (hex.length < 6) return presetFilter === 'dark';
+                const r = parseInt(hex.substring(0, 2), 16);
+                const g = parseInt(hex.substring(2, 4), 16);
+                const b = parseInt(hex.substring(4, 6), 16);
+                const lum = (r * 299 + g * 587 + b * 114) / 1000;
+                return (lum > 128) === (presetFilter === 'light');
+              }
+              return false;
+            });
+
+            const renderCard = (theme: typeof themes[0] | CustomThemePreset) => {
+              const isActive = theme.id === config.baseThemeId && !hasOverrides;
+              const isCustom = '__custom' in theme;
+              return (
+                <div key={theme.id} className="group/card relative">
+                  <button
+                    onClick={() => selectPreset(theme.id)}
+                    className={`w-full flex flex-col rounded-lg overflow-hidden border transition-all cursor-pointer ${
+                      isActive
+                        ? 'border-accent ring-1 ring-accent/30'
+                        : 'border-border-subtle hover:border-border-strong'
+                    }`}
+                  >
+                    <div className="flex h-12">
+                      {theme.preview.map((color, i) => (
+                        <div key={i} className="flex-1" style={{ backgroundColor: color }} />
+                      ))}
+                    </div>
+                    <div
+                      className="flex items-center justify-between px-2.5 py-2"
+                      style={{ backgroundColor: theme.colors['bg-card'] }}
+                    >
+                      <span
+                        className="text-xs font-medium truncate"
+                        style={{ color: theme.colors['text-secondary'] }}
+                      >
+                        {theme.name}
+                      </span>
+                      {isActive && <Check size={12} style={{ color: theme.colors.accent }} />}
+                    </div>
+                  </button>
+                  {isCustom && (
                     <button
-                      key={theme.id}
-                      onClick={() => selectPreset(theme.id)}
-                      className={`group flex flex-col rounded-lg overflow-hidden border transition-all cursor-pointer ${
-                        isActive
-                          ? 'border-accent ring-1 ring-accent/30'
-                          : 'border-border-subtle hover:border-border-strong'
+                      onClick={(e) => { e.stopPropagation(); deleteCustomPreset(theme.id); }}
+                      className="absolute top-1 right-1 w-5 h-5 rounded bg-bg-base/80 text-text-tertiary hover:text-recording opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center justify-center"
+                      title="Delete this custom preset"
+                    >
+                      <X size={11} />
+                    </button>
+                  )}
+                </div>
+              );
+            };
+
+            return (
+              <div className="p-4 space-y-3">
+                {/* Search + filter chips */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={presetSearch}
+                    onChange={(e) => setPresetSearch(e.target.value)}
+                    placeholder="Search themes…"
+                    className="w-full h-7 pl-2.5 pr-7 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                  />
+                  {presetSearch && (
+                    <button
+                      onClick={() => setPresetSearch('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-primary"
+                    >
+                      <X size={11} />
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-1 flex-wrap">
+                  {filterChips.map(chip => (
+                    <button
+                      key={chip.id}
+                      onClick={() => setPresetFilter(chip.id)}
+                      className={`px-2.5 py-0.5 text-[10px] rounded-full border transition-colors ${
+                        presetFilter === chip.id
+                          ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
+                          : 'bg-transparent border-border-default text-text-tertiary hover:text-text-secondary'
                       }`}
                     >
-                      <div className="flex h-12">
-                        {theme.preview.map((color, i) => (
-                          <div key={i} className="flex-1" style={{ backgroundColor: color }} />
-                        ))}
-                      </div>
-                      <div
-                        className="flex items-center justify-between px-2.5 py-2"
-                        style={{ backgroundColor: theme.colors['bg-card'] }}
-                      >
-                        <span
-                          className="text-xs font-medium truncate"
-                          style={{ color: theme.colors['text-secondary'] }}
-                        >
-                          {theme.name}
-                        </span>
-                        {isActive && <Check size={12} style={{ color: theme.colors.accent }} />}
-                      </div>
+                      {chip.label}
                     </button>
-                  );
-                })}
-              </div>
+                  ))}
+                </div>
 
-              {/* Quick Accent Picker */}
-              <div className="flex items-center gap-3 pt-1">
-                <span className="text-xs text-text-secondary">Accent Color</span>
-                <label className="relative w-8 h-8 rounded-md border border-border-default cursor-pointer overflow-hidden">
-                  <div className="absolute inset-0" style={{ backgroundColor: currentAccentHex }} />
-                  <input
-                    type="color"
-                    value={currentAccentHex}
-                    onChange={(e) => setAccentColor(e.target.value)}
-                    className="absolute inset-0 opacity-0 cursor-pointer"
-                  />
-                </label>
-                <span className="text-xs font-mono text-text-tertiary">{currentAccentHex}</span>
-
-                {hasOverrides && (
-                  <button
-                    onClick={clearAllOverrides}
-                    className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-card border border-border-subtle transition-colors"
-                  >
-                    <RotateCcw size={12} />
-                    Reset customizations
-                  </button>
+                {/* Built-in presets */}
+                {builtinList.length === 0 && filteredCustom.length === 0 ? (
+                  <div className="text-xs text-text-tertiary text-center py-6">No themes match your search.</div>
+                ) : (
+                  <div className="grid grid-cols-4 gap-3">
+                    {builtinList.map(renderCard)}
+                  </div>
                 )}
+
+                {/* Custom presets section */}
+                {filteredCustom.length > 0 && (
+                  <>
+                    <div className="text-[10px] font-semibold text-text-disabled tracking-wider pt-1">MY THEMES</div>
+                    <div className="grid grid-cols-4 gap-3">
+                      {filteredCustom.map(renderCard)}
+                    </div>
+                  </>
+                )}
+
+                {/* Save as preset — only when the user has overrides on top of a preset
+                    (otherwise "saving" a built-in unchanged is just a duplicate). */}
+                {hasOverrides && (
+                  <div className="flex items-center gap-2 px-3 py-2 bg-bg-card border border-dashed border-border-default rounded">
+                    <input
+                      type="text"
+                      value={savePresetName}
+                      onChange={(e) => setSavePresetName(e.target.value)}
+                      placeholder="Name your customization…"
+                      className="flex-1 h-6 px-2 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && savePresetName.trim()) {
+                          saveAsPreset(savePresetName.trim());
+                          setSavePresetName('');
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        if (!savePresetName.trim()) return;
+                        saveAsPreset(savePresetName.trim());
+                        setSavePresetName('');
+                      }}
+                      disabled={!savePresetName.trim()}
+                      className="px-2.5 py-1 text-[11px] text-white bg-accent-solid rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      + Save as preset
+                    </button>
+                  </div>
+                )}
+
+                {/* Quick Accent Picker */}
+                <div className="flex items-center gap-3 pt-1">
+                  <span className="text-xs text-text-secondary">Accent Color</span>
+                  <label className="relative w-8 h-8 rounded-md border border-border-default cursor-pointer overflow-hidden">
+                    <div className="absolute inset-0" style={{ backgroundColor: currentAccentHex }} />
+                    <input
+                      type="color"
+                      value={currentAccentHex}
+                      onChange={(e) => setAccentColor(e.target.value)}
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                    />
+                  </label>
+                  <span className="text-xs font-mono text-text-tertiary">{currentAccentHex}</span>
+
+                  {hasOverrides && (
+                    <button
+                      onClick={clearAllOverrides}
+                      className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-card border border-border-subtle transition-colors"
+                    >
+                      <RotateCcw size={12} />
+                      Reset customizations
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* ═══ Tab 2: Colors ═══ */}
           {activeTab === 'colors' && (
             <div className="p-3 space-y-1">
+              {/* Hex/HSL toggle — global across all color sections. HSL is much better for
+                  fine-tuning lightness or saturation while locking hue. */}
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] font-semibold text-text-disabled tracking-wider">PICKER MODE</span>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => setColorMode('hex')}
+                    className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
+                      colorMode === 'hex'
+                        ? 'bg-accent-solid/15 text-accent border border-accent-solid/40'
+                        : 'text-text-tertiary border border-border-default hover:text-text-secondary'
+                    }`}
+                  >Hex</button>
+                  <button
+                    onClick={() => setColorMode('hsl')}
+                    className={`px-2 py-0.5 text-[10px] rounded transition-colors ${
+                      colorMode === 'hsl'
+                        ? 'bg-accent-solid/15 text-accent border border-accent-solid/40'
+                        : 'text-text-tertiary border border-border-default hover:text-text-secondary'
+                    }`}
+                  >HSL</button>
+                </div>
+              </div>
+
               {COLOR_SECTIONS.map(section => {
                 const isCollapsed = collapsedSections.has(section.title);
                 return (
@@ -458,7 +755,12 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                             colorKey={key}
                             value={resolvedColors[key]}
                             baseValue={basePreset.colors[key]}
-                            onChange={setColorOverride}
+                            mode={colorMode}
+                            // Contrast chip only for Text section — that's where WCAG body-text
+                            // thresholds apply. Background/border colors don't have a single
+                            // canonical "what is the foreground?" answer.
+                            contrastBg={section.title === 'Text' ? resolvedColors['bg-surface'] : undefined}
+                            onChange={trackedSetColorOverride}
                             onReset={clearColorOverride}
                           />
                         ))}
@@ -476,32 +778,101 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                 );
               })}
 
-              {hasOverrides && (
-                <div className="pt-2">
-                  <button
-                    onClick={clearAllOverrides}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-card border border-border-subtle transition-colors"
-                  >
-                    <RotateCcw size={12} />
-                    Reset all overrides
-                  </button>
+              {/* Recent colors — transient strip showing the last few chosen hex values
+                  so the user can paint several slots with the same color quickly. */}
+              {recentColors.length > 0 && (
+                <div className="flex items-center gap-1.5 px-1 pt-1">
+                  <span className="text-[10px] font-semibold text-text-disabled tracking-wider">RECENT</span>
+                  <div className="flex gap-1">
+                    {recentColors.map((c, i) => (
+                      <button
+                        key={i}
+                        onClick={() => {
+                          // Copy the hex to clipboard so the user can paste into any field.
+                          // Better than auto-applying because we don't know which slot to set.
+                          navigator.clipboard?.writeText(c).catch(() => { /* noop */ });
+                        }}
+                        className="w-4 h-4 rounded border border-border-default hover:scale-110 transition-transform"
+                        style={{ backgroundColor: c }}
+                        title={`${c} — click to copy`}
+                      />
+                    ))}
+                  </div>
                 </div>
               )}
+
+              {/* Reset moved to the fixed footer below — single source for "undo everything"
+                  so the user doesn't have to remember which Reset belongs to which tab. */}
             </div>
           )}
 
           {/* ═══ Tab 3: Appearance ═══ */}
           {activeTab === 'appearance' && (
             <div className="p-3 space-y-2">
-              {/* Layout */}
+              {/* Density presets — apply a coordinated bundle (fontSize + rowHeight + borderRadius)
+                  rather than asking the user to dial each slider individually. The fine-tune
+                  sliders below remain for users who want to drift away from a preset. */}
               <div>
-                <div className="text-[11px] font-semibold text-text-disabled mb-0.5">LAYOUT</div>
+                <div className="text-[11px] font-semibold text-text-disabled mb-1">DENSITY</div>
+                {(() => {
+                  const DENSITY_PRESETS = [
+                    { id: 'compact', name: 'Compact', fontSize: 12, rowHeight: 28, borderRadius: 2 },
+                    { id: 'normal', name: 'Normal', fontSize: 13, rowHeight: 34, borderRadius: 3 },
+                    { id: 'spacious', name: 'Spacious', fontSize: 14, rowHeight: 42, borderRadius: 4 },
+                  ];
+                  // Match a preset only when ALL three sliders match — drifting any of them
+                  // de-selects to avoid a misleading "active" highlight.
+                  const activePreset = DENSITY_PRESETS.find(p =>
+                    p.fontSize === config.uiSettings.fontSize &&
+                    p.rowHeight === config.uiSettings.rowHeight &&
+                    p.borderRadius === config.uiSettings.borderRadius
+                  );
+                  return (
+                    <div className="grid grid-cols-3 gap-2">
+                      {DENSITY_PRESETS.map(p => {
+                        const isActive = activePreset?.id === p.id;
+                        const lineCount = p.id === 'compact' ? 4 : p.id === 'normal' ? 3 : 2;
+                        const lineHeight = p.id === 'compact' ? 2 : p.id === 'normal' ? 3 : 5;
+                        return (
+                          <button
+                            key={p.id}
+                            onClick={() => {
+                              setUISetting('fontSize', p.fontSize);
+                              setUISetting('rowHeight', p.rowHeight);
+                              setUISetting('borderRadius', p.borderRadius);
+                            }}
+                            className={`flex flex-col items-stretch gap-1.5 px-2 py-2 rounded border transition-colors ${
+                              isActive
+                                ? 'border-accent bg-accent-solid/8'
+                                : 'border-border-default bg-bg-card hover:bg-bg-elevated'
+                            }`}
+                          >
+                            <span className={`text-[11px] font-medium ${isActive ? 'text-accent' : 'text-text-primary'}`}>
+                              {p.name}
+                            </span>
+                            <div className="flex flex-col gap-px">
+                              {Array.from({ length: lineCount }).map((_, i) => (
+                                <div key={i} style={{ height: lineHeight }} className="bg-text-disabled/50 rounded-sm" />
+                              ))}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Layout fine-tuners */}
+              <div>
+                <div className="text-[11px] font-semibold text-text-disabled mb-0.5">FINE-TUNE</div>
                 <SliderSetting
                   label="Font Size"
                   value={config.uiSettings.fontSize}
                   min={10}
                   max={18}
                   unit="px"
+                  defaultValue={DEFAULT_UI_SETTINGS.fontSize}
                   onChange={(v) => setUISetting('fontSize', v)}
                 />
                 <SliderSetting
@@ -510,6 +881,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                   min={0}
                   max={16}
                   unit="px"
+                  defaultValue={DEFAULT_UI_SETTINGS.borderRadius}
                   onChange={(v) => setUISetting('borderRadius', v)}
                 />
                 <SliderSetting
@@ -518,6 +890,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                   min={28}
                   max={48}
                   unit="px"
+                  defaultValue={DEFAULT_UI_SETTINGS.rowHeight}
                   onChange={(v) => setUISetting('rowHeight', v)}
                 />
                 <SliderSetting
@@ -526,6 +899,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                   min={50}
                   max={200}
                   unit="%"
+                  defaultValue={DEFAULT_UI_SETTINGS.zoom}
                   onChange={(v) => setUISetting('zoom', v)}
                 />
               </div>
@@ -544,6 +918,12 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                   value={config.uiSettings.replayColor}
                   defaultValue={DEFAULT_UI_SETTINGS.replayColor}
                   onChange={(v) => setUISetting('replayColor', v)}
+                />
+                <AppearanceColorRow
+                  label="Clicker"
+                  value={config.uiSettings.clickerColor}
+                  defaultValue={DEFAULT_UI_SETTINGS.clickerColor}
+                  onChange={(v) => setUISetting('clickerColor', v)}
                 />
               </div>
 
@@ -592,6 +972,12 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                   defaultValue={DEFAULT_UI_SETTINGS.actionRunProfileColor}
                   onChange={(v) => setUISetting('actionRunProfileColor', v)}
                 />
+                <AppearanceColorRow
+                  label="Pause"
+                  value={config.uiSettings.actionPauseColor}
+                  defaultValue={DEFAULT_UI_SETTINGS.actionPauseColor}
+                  onChange={(v) => setUISetting('actionPauseColor', v)}
+                />
               </div>
 
               {/* Font */}
@@ -622,17 +1008,74 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                 </div>
               </div>
 
-              {/* Reset */}
-              <div className="pt-1">
-                <button
-                  onClick={resetUISettings}
-                  disabled={JSON.stringify(config.uiSettings) === JSON.stringify(DEFAULT_UI_SETTINGS)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-card border border-border-subtle transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <RotateCcw size={12} />
-                  Reset to Defaults
-                </button>
+              {/* System */}
+              <div>
+                <div className="text-[11px] font-semibold text-text-disabled mb-0.5">SYSTEM</div>
+                <div className="flex items-center justify-between py-1.5">
+                  <div className="flex flex-col">
+                    <span className="text-xs text-text-secondary">Match Windows theme</span>
+                    <span className="text-[10px] text-text-tertiary">Auto-switch dark / light when the OS does</span>
+                  </div>
+                  <button
+                    onClick={() => setUISetting('matchSystemTheme', !config.uiSettings.matchSystemTheme)}
+                    className={`relative w-8 h-4 rounded-full transition-colors ${
+                      config.uiSettings.matchSystemTheme ? 'bg-accent-solid' : 'bg-bg-elevated border border-border-default'
+                    }`}
+                  >
+                    <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${
+                      config.uiSettings.matchSystemTheme ? 'left-[18px]' : 'left-0.5'
+                    }`} />
+                  </button>
+                </div>
+
+                {config.uiSettings.matchSystemTheme && (
+                  <div className="ml-3 pl-3 border-l border-border-subtle space-y-1.5 py-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-text-tertiary w-[100px]">Dark preset</span>
+                      <select
+                        value={config.uiSettings.darkPresetId}
+                        onChange={(e) => setUISetting('darkPresetId', e.target.value)}
+                        className="flex-1 h-6 px-2 text-[11px] text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid cursor-pointer"
+                      >
+                        {themes.filter(t => !getThemeTags(t.id).includes('light')).map(t => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-text-tertiary w-[100px]">Light preset</span>
+                      <select
+                        value={config.uiSettings.lightPresetId}
+                        onChange={(e) => setUISetting('lightPresetId', e.target.value)}
+                        className="flex-1 h-6 px-2 text-[11px] text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid cursor-pointer"
+                      >
+                        {themes.filter(t => getThemeTags(t.id).includes('light')).map(t => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between py-1.5">
+                  <div className="flex flex-col">
+                    <span className="text-xs text-text-secondary">Enable animations</span>
+                    <span className="text-[10px] text-text-tertiary">Theme switch transitions and hover effects</span>
+                  </div>
+                  <button
+                    onClick={() => setUISetting('enableAnimations', !config.uiSettings.enableAnimations)}
+                    className={`relative w-8 h-4 rounded-full transition-colors ${
+                      config.uiSettings.enableAnimations ? 'bg-accent-solid' : 'bg-bg-elevated border border-border-default'
+                    }`}
+                  >
+                    <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${
+                      config.uiSettings.enableAnimations ? 'left-[18px]' : 'left-0.5'
+                    }`} />
+                  </button>
+                </div>
               </div>
+
+              {/* Reset moved to the fixed footer — same rationale as the Colors tab. */}
             </div>
           )}
 
@@ -706,6 +1149,63 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Fixed footer — single home for the "undo everything" / "export current" /
+            "close" actions. Replaces the per-tab Reset buttons that used to live
+            scattered at the bottom of Colors and Appearance. */}
+        <div className="shrink-0 border-t border-border-subtle bg-bg-card px-4 py-2 flex items-center gap-2">
+          <button
+            onClick={() => { clearAllOverrides(); resetUISettings(); }}
+            disabled={!hasOverrides && JSON.stringify(config.uiSettings) === JSON.stringify(DEFAULT_UI_SETTINGS)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-surface border border-border-subtle transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Clear color overrides and reset all UI settings to defaults"
+          >
+            <RotateCcw size={11} />
+            Reset all
+          </button>
+          <button
+            onClick={handleExportFile}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-surface border border-border-subtle transition-colors"
+            title="Save the current theme as a JSON file"
+          >
+            <Download size={11} />
+            Export
+          </button>
+          <div className="flex-1" />
+          <button
+            onClick={onClose}
+            className="px-3 py-1 rounded text-[11px] text-white bg-accent-solid hover:bg-accent-solid/85 transition-colors"
+          >
+            Done
+          </button>
+        </div>
+
+        {/* Live Preview — mini-mockup of an app row + buttons. Uses the same CSS vars
+            the rest of the app reads, so it updates in real time as the user mexe in
+            any tab. Lets the user see the effect without closing the editor. */}
+        <div className="shrink-0 border-t border-border-subtle bg-bg-base px-4 py-2.5">
+          <div className="text-[9px] font-semibold text-text-disabled tracking-wider mb-1.5">LIVE PREVIEW</div>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 px-1.5 py-0.5 rounded text-xs bg-bg-card" style={{ borderRadius: 'var(--ui-border-radius)' }}>
+              <span className="font-mono text-[10px] text-text-tertiary w-4">1</span>
+              <span className="px-1.5 py-px rounded text-[10px] font-mono border" style={{ background: 'var(--color-action-key-bg)', color: 'var(--color-action-key-fg)', borderColor: 'color-mix(in srgb, var(--color-action-key-fg) 30%, transparent)' }}>KeyDown</span>
+              <span className="flex-1 text-text-secondary">Ctrl+S</span>
+              <span className="px-1.5 py-px text-[10px] font-mono rounded border" style={{ background: 'var(--color-hotkey-bg)', color: 'var(--color-hotkey-fg)', borderColor: 'var(--color-hotkey-border)' }}>Ctrl S</span>
+            </div>
+            <div className="flex items-center gap-2 px-1.5 py-0.5 rounded text-xs bg-bg-card" style={{ borderRadius: 'var(--ui-border-radius)' }}>
+              <span className="font-mono text-[10px] text-text-tertiary w-4">2</span>
+              <span className="px-1.5 py-px rounded text-[10px] font-mono border" style={{ background: 'var(--color-action-mouse-bg)', color: 'var(--color-action-mouse-fg)', borderColor: 'color-mix(in srgb, var(--color-action-mouse-fg) 30%, transparent)' }}>LeftClickDown</span>
+              <span className="flex-1 text-text-secondary">at (320, 180)</span>
+              <span className="font-mono text-[10px]" style={{ color: 'var(--color-delay)' }}>50 ms</span>
+            </div>
+          </div>
+          <div className="flex gap-1.5 mt-2">
+            <button className="px-2.5 py-1 text-[10px] rounded border" style={{ background: 'var(--color-recording-bg)', color: 'var(--color-recording)', borderColor: 'color-mix(in srgb, var(--color-recording) 30%, transparent)' }}>● Recording</button>
+            <button className="px-2.5 py-1 text-[10px] rounded border" style={{ background: 'var(--color-replay-bg)', color: 'var(--color-replay)', borderColor: 'color-mix(in srgb, var(--color-replay) 30%, transparent)' }}>▶ Replay</button>
+            <div className="flex-1" />
+            <button className="px-2.5 py-1 text-[10px] text-white bg-accent-solid rounded">Set Target</button>
+          </div>
         </div>
       </div>
     </div>

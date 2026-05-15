@@ -69,6 +69,25 @@
   box-sizing: border-box;
 }
 
+/* Animations toggle — when html[data-animations="true"] is set (default), opt key
+   surfaces into a short color/background transition so theme changes don't snap
+   harshly. Buttons keep their own per-component transitions; this rule is
+   intentionally narrow to avoid making large lists feel laggy. */
+html[data-animations="true"] body,
+html[data-animations="true"] body * {
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease;
+}
+/* Disable transitions inside dropdowns/menus/text inputs while typing — avoids
+   a perceived "lag" when characters paint. */
+html[data-animations="true"] input,
+html[data-animations="true"] textarea,
+html[data-animations="true"] select {
+  transition: border-color 180ms ease, background-color 180ms ease;
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
