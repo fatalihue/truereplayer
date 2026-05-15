@@ -2956,6 +2956,13 @@ namespace TrueReplayer
             var profile = await profileController.LoadProfileByNameAsync(name);
             if (profile != null)
             {
+                // When keepInheritedTarget is true the profile has no target of its own and the
+                // user is just toggling flags on top of the folder-inherited target. Persisting
+                // those flags would create dormant overrides: GetEffectiveBringToFocus and
+                // friends ignore entry-level values until the profile has its own target, so the
+                // user would see the toggle flip but the effective behaviour stays on the folder.
+                // Skip the writes — the toggles become real only after a profile-level target
+                // exists (i.e. when the user edits the process/title or clicks Detect).
                 if (!keepInheritedTarget)
                 {
                     profile.TargetWindow = new WindowTarget
@@ -2964,11 +2971,11 @@ namespace TrueReplayer
                         WindowTitle = string.IsNullOrWhiteSpace(windowTitle) ? null : windowTitle.Trim(),
                         TitleMatchMode = titleMatchMode
                     };
+                    profile.UseRelativeCoordinates = relativeCoordinates;
+                    profile.BringToFocus = bringToFocus;
+                    profile.RestorePosition = restorePosition;
+                    profile.RestoreSize = restoreSize;
                 }
-                profile.UseRelativeCoordinates = relativeCoordinates;
-                profile.BringToFocus = bringToFocus;
-                profile.RestorePosition = restorePosition;
-                profile.RestoreSize = restoreSize;
                 // If this is the active profile, the in-memory UserProfile.Current may hold
                 // fresher WindowX/Y/Width/Height (captured via "Update Window Size & Position"
                 // button since last save). Copy those across so Set Target doesn't overwrite them.
@@ -2980,10 +2987,9 @@ namespace TrueReplayer
                     profile.WindowHeight = UserProfile.Current.WindowHeight;
                 }
                 await profileController.SaveProfileByNameAsync(name, profile);
-                if (CurrentProfileName == name)
+                if (CurrentProfileName == name && !keepInheritedTarget)
                 {
-                    if (!keepInheritedTarget)
-                        UserProfile.Current.TargetWindow = profile.TargetWindow;
+                    UserProfile.Current.TargetWindow = profile.TargetWindow;
                     UserProfile.Current.UseRelativeCoordinates = relativeCoordinates;
                     UserProfile.Current.BringToFocus = bringToFocus;
                     UserProfile.Current.RestorePosition = restorePosition;

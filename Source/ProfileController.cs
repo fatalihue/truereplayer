@@ -673,8 +673,11 @@ namespace TrueReplayer.Controllers
             if (_cachedWindowTargets.ContainsKey(profileName)) return null;
             var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(profileName));
             if (folder == null) return null;
-            if (folder.WindowWidth == 0 && folder.WindowHeight == 0 && folder.WindowX == 0 && folder.WindowY == 0)
-                return null;
+            // Geometry is meaningful only when both dimensions are positive — a real window
+            // always has width > 0 and height > 0. Width/height of zero means "not captured
+            // yet" (or corrupted) and would yield an invalid SetWindowPos call downstream.
+            // X/Y can legitimately be zero (top-left of primary monitor), so don't check them.
+            if (folder.WindowWidth <= 0 || folder.WindowHeight <= 0) return null;
             return (folder.WindowX, folder.WindowY, folder.WindowWidth, folder.WindowHeight);
         }
 

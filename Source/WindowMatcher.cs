@@ -44,12 +44,13 @@ namespace TrueReplayer.Helpers
         /// Test whether <paramref name="hwnd"/> satisfies <paramref name="target"/>. Empty
         /// fields are wildcards (target with only ProcessName matches any window of that
         /// process; target with only WindowTitle matches any window with that title).
+        /// Null target returns false — caller treats "no target" as "no match".
         /// </summary>
         /// <param name="titleBuffer">Optional reusable buffer to avoid allocations on hot paths.</param>
         /// <param name="procBuffer">Optional reusable buffer to avoid allocations on hot paths.</param>
         public static bool Matches(
             IntPtr hwnd,
-            WindowTarget target,
+            WindowTarget? target,
             Regex? compiledTitleRegex,
             StringBuilder? titleBuffer = null,
             StringBuilder? procBuffer = null)

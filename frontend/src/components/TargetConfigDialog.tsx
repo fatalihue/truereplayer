@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { X, ChevronDown } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { Toggle } from './common/Toggle';
@@ -203,11 +203,9 @@ export function TargetConfigDialog({
     ? <>Configure target window for <span className="text-text-primary font-medium">'{targetLabel}'</span></>
     : <>Configure target for all profiles in <span className="text-text-primary font-medium">'{targetLabel}'</span>. Profiles with their own target override this.</>;
 
-  const dialogRef = useRef<HTMLDivElement>(null);
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div ref={dialogRef} className="w-[380px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
+      <div className="w-[380px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
         <h3 className="text-sm font-semibold text-text-primary mb-3">{header}</h3>
         <p className="text-xs text-text-secondary mb-4">{description}</p>
 
