@@ -919,6 +919,9 @@ export const themes: ThemePreset[] = [
   {
     // Solarized Light — Ethan Schoonover's light variant. base3 #fdf6e3 (canvas),
     // base2 #eee8d5, base01 #586e75 (body), blue #268bd2.
+    // text-primary nudged from base01 #586e75 to #4a6066 — same blue-gray tone but
+    // dark enough to clear WCAG AA (4.5:1) against bg-surface (#eee8d5). base01
+    // against base2 was 4.4:1, just below the threshold.
     id: 'solarized-light',
     name: 'Solarized Light',
     preview: ['#fdf6e3', '#eee8d5', '#d8d2bf', '#268bd2'],
@@ -931,7 +934,7 @@ export const themes: ThemePreset[] = [
       'border-subtle': 'rgba(88,110,117,0.08)',
       'border-default': 'rgba(88,110,117,0.15)',
       'border-strong': 'rgba(88,110,117,0.25)',
-      'text-primary': '#586e75',
+      'text-primary': '#4a6066',
       'text-secondary': '#657b83',
       'text-tertiary': '#93a1a1',
       'text-disabled': '#b5b09f',
