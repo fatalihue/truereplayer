@@ -680,6 +680,10 @@ namespace TrueReplayer.Services
 
         private bool _useRelativeCoordinates = false;
         private Models.WindowTarget? _windowTarget;
+        // Cached compiled regex for _windowTarget.WindowTitle. Recomputed whenever
+        // _windowTarget is reassigned (SetRelativeCoordinates or sub-profile context swap).
+        // Avoids recompiling every SimulateMouse call inside a long replay loop.
+        private System.Text.RegularExpressions.Regex? _windowTargetTitleRegex;
         private int _lockWidth = 0;
         private int _lockHeight = 0;
         private int _lockX = 0;
@@ -693,6 +697,7 @@ namespace TrueReplayer.Services
         {
             _useRelativeCoordinates = enabled;
             _windowTarget = target;
+            _windowTargetTitleRegex = TrueReplayer.Helpers.WindowMatcher.CompileTitleRegex(target);
             _lockWidth = lockWidth;
             _lockHeight = lockHeight;
             _lockX = lockX;
@@ -939,6 +944,7 @@ namespace TrueReplayer.Services
         {
             _useRelativeCoordinates = snap.UseRelativeCoordinates;
             _windowTarget = snap.WindowTarget;
+            _windowTargetTitleRegex = TrueReplayer.Helpers.WindowMatcher.CompileTitleRegex(snap.WindowTarget);
             _lockWidth = snap.LockWidth;
             _lockHeight = snap.LockHeight;
             _lockX = snap.LockX;
@@ -1072,6 +1078,7 @@ namespace TrueReplayer.Services
                 if (subProfile.TargetWindow != null)
                 {
                     _windowTarget = subProfile.TargetWindow;
+                    _windowTargetTitleRegex = TrueReplayer.Helpers.WindowMatcher.CompileTitleRegex(subProfile.TargetWindow);
                     _useRelativeCoordinates = subProfile.UseRelativeCoordinates;
                     _bringToFocus = subProfile.BringToFocus;
                     _restorePosition = subProfile.RestorePosition;
@@ -1255,35 +1262,7 @@ namespace TrueReplayer.Services
         }
 
         private IntPtr FindTargetWindow()
-        {
-            if (_windowTarget == null) return IntPtr.Zero;
-            // Enumerate all windows and find by process name
-            IntPtr result = IntPtr.Zero;
-            NativeMethods.EnumWindows((hwnd, lParam) =>
-            {
-                if (!NativeMethods.IsWindowVisible(hwnd)) return true;
-                NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
-                IntPtr hProcess = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-                if (hProcess == IntPtr.Zero) return true;
-                try
-                {
-                    var sb = new System.Text.StringBuilder(1024);
-                    uint len = NativeMethods.GetProcessImageFileName(hProcess, sb, (uint)sb.Capacity);
-                    if (len == 0) return true;
-                    string fullPath = sb.ToString();
-                    string fileName = fullPath.Substring(fullPath.LastIndexOf('\\') + 1);
-                    if (!string.IsNullOrEmpty(_windowTarget.ProcessName) &&
-                        fileName.Equals(_windowTarget.ProcessName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        result = hwnd;
-                        return false; // stop enumeration
-                    }
-                }
-                finally { NativeMethods.CloseHandle(hProcess); }
-                return true;
-            }, IntPtr.Zero);
-            return result;
-        }
+            => TrueReplayer.Helpers.WindowMatcher.FindWindow(_windowTarget, _windowTargetTitleRegex);
 
         private void SimulateMouse(int x, int y, uint mouseEvent, int mouseData = 0)
         {

@@ -66,6 +66,14 @@ export interface ProfileEntry {
   windowTargetProcessName: string | null;
   windowTargetWindowTitle: string | null;
   windowTargetTitleMatchMode: string;
+  // Effective target — what the hotkey gate uses. Differs from hasWindowTarget when the
+  // profile inherits from its folder. The UI uses this to render the inherited badge.
+  hasEffectiveTarget: boolean;
+  effectiveTargetSource: 'own' | 'folder' | null;
+  effectiveTargetFolderName: string | null;
+  effectiveTargetProcessName: string | null;
+  effectiveTargetWindowTitle: string | null;
+  effectiveTargetTitleMatchMode: string;
   useRelativeCoordinates: boolean;
   bringToFocus: boolean;
   restorePosition: boolean;
@@ -87,6 +95,14 @@ export interface ProfileFolder {
   windowTargetTitleMatchMode?: string;
   useRelativeCoordinates?: boolean;
   bringToFocus?: boolean;
+  // Inheritable Restore Position/Size + geometry. Profile inside the folder uses these unless
+  // it overrides at the profile level. Geometry zero-values mean "not captured yet".
+  restorePosition?: boolean;
+  restoreSize?: boolean;
+  windowX?: number;
+  windowY?: number;
+  windowWidth?: number;
+  windowHeight?: number;
 }
 
 export interface ProfileOrderData {
@@ -218,6 +234,8 @@ export type IncomingMessage =
   | { type: 'alert:show'; payload: { message: string } }
   | { type: 'windowTarget:detected'; payload: { processName: string; windowTitle: string } }
   | { type: 'windowTarget:detectState'; payload: { detecting: boolean } }
+  | { type: 'windowTarget:testResult'; payload: { matches: boolean; foregroundProcess: string; foregroundTitle: string; error?: string } }
+  | { type: 'process:list'; payload: { processes: { name: string; title: string }[] } }
   | { type: 'clipboard:content'; payload: { text: string } }
   | { type: 'replay:chain'; payload: { stack: string[] } }
   | { type: 'replay:paused'; payload: { hotkey: string; timeoutMs: number } }
@@ -265,15 +283,17 @@ export type OutgoingMessage =
   | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean; restorePosition?: boolean; restoreSize?: boolean; keepInheritedTarget?: boolean } }
   | { type: 'profile:setRelativeCoordinates'; payload: { name: string; enabled: boolean } }
   | { type: 'profile:convertCoordinates'; payload: { direction: 'toRelative' | 'toAbsolute' } }
-  | { type: 'profile:updateWindowSize'; payload: { name?: string; processName?: string; windowTitle?: string; titleMatchMode?: string } }
+  | { type: 'profile:updateWindowSize'; payload: { name?: string; folderName?: string; processName?: string; windowTitle?: string; titleMatchMode?: string } }
   | { type: 'profile:setBringToFocus'; payload: { name: string; enabled: boolean } }
   | { type: 'profile:setRestorePosition'; payload: { name: string; enabled: boolean } }
   | { type: 'profile:setRestoreSize'; payload: { name: string; enabled: boolean } }
   | { type: 'profile:setTriggerMode'; payload: { name: string; mode: TriggerMode } }
   | { type: 'profile:removeWindowTarget'; payload: { name: string } }
-  | { type: 'profile:setFolderWindowTarget'; payload: { folderName: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean } }
+  | { type: 'profile:setFolderWindowTarget'; payload: { folderName: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean; restorePosition?: boolean; restoreSize?: boolean } }
   | { type: 'profile:removeFolderWindowTarget'; payload: { folderName: string } }
   | { type: 'profile:detectWindow'; payload: Record<string, never> }
+  | { type: 'profile:testWindowMatch'; payload: { processName: string; windowTitle: string; titleMatchMode: string } }
+  | { type: 'process:list'; payload: Record<string, never> }
   | { type: 'profile:openFolder'; payload: { name: string } }
   | { type: 'profile:pin'; payload: { name: string } }
   | { type: 'profile:unpin'; payload: { name: string } }

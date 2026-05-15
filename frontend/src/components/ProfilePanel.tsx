@@ -4,8 +4,8 @@ import type { ProfileEntry } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { KbdTag } from './common/KbdTag';
-import { Toggle } from './common/Toggle';
 import { CheckboxBox } from './Checkbox';
+import { TargetConfigDialog } from './TargetConfigDialog';
 
 interface ContextMenuState {
   x: number;
@@ -43,19 +43,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [showHotstringDialog, setShowHotstringDialog] = useState<string | null>(null);
   const [hotstringValue, setHotstringValue] = useState('');
   const [hotstringInstant, setHotstringInstant] = useState(false);
+  // Target Configuration dialogs — the inputs/flags/detection state are now owned by
+  // <TargetConfigDialog>. ProfilePanel only tracks which profile/folder is being configured.
   const [showWindowTargetDialog, setShowWindowTargetDialog] = useState<string | null>(null);
-  const [targetProcessName, setTargetProcessName] = useState('');
-  const [targetWindowTitle, setTargetWindowTitle] = useState('');
-  const [titleMatchMode, setTitleMatchMode] = useState<'contains' | 'regex'>('contains');
-  const [targetRelativeCoords, setTargetRelativeCoords] = useState(false);
-  const [targetBringToFocus, setTargetBringToFocus] = useState(false);
-  const [targetRestorePosition, setTargetRestorePosition] = useState(false);
-  const [targetRestoreSize, setTargetRestoreSize] = useState(false);
-  // Tracks whether the user has explicitly edited the target fields (process/title/match mode or
-  // detected a new window) since opening the dialog. When false for a profile that inherits its
-  // target from a folder, "Set Target" will keep the inheritance and only save the flags.
-  const [targetExplicitlyEdited, setTargetExplicitlyEdited] = useState(false);
-  const [isDetecting, setIsDetecting] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportSelection, setExportSelection] = useState<Record<string, boolean>>({});
   const [exportSearch, setExportSearch] = useState('');
@@ -65,11 +55,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [folderDialogColor, setFolderDialogColor] = useState('#60CDFF');
   const [showRenameFolderDialog, setShowRenameFolderDialog] = useState<string | null>(null);
   const [showFolderTargetDialog, setShowFolderTargetDialog] = useState<string | null>(null);
-  const [folderTargetProcess, setFolderTargetProcess] = useState('');
-  const [folderTargetTitle, setFolderTargetTitle] = useState('');
-  const [folderTargetMatchMode, setFolderTargetMatchMode] = useState<'contains' | 'regex'>('contains');
-  const [folderTargetRelCoords, setFolderTargetRelCoords] = useState(false);
-  const [folderTargetBringToFocus, setFolderTargetBringToFocus] = useState(false);
   const [showMoveToFolderMenu, setShowMoveToFolderMenu] = useState<string | null>(null);
   const [folderContextMenu, setFolderContextMenu] = useState<{ x: number; y: number; folderName: string } | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
@@ -354,61 +339,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   const handleSetWindowTarget = (name: string) => {
     setContextMenu(null);
-    const existing = profiles.find(p => p.name === name);
-    const hasOwnTarget = existing?.hasWindowTarget ?? false;
-    // Resolve effective values: profile's own target > folder-inherited
-    const folder = !hasOwnTarget ? (profileOrder?.folders ?? []).find(f => f.items.includes(name)) : null;
-    setTargetProcessName(hasOwnTarget ? (existing?.windowTargetProcessName ?? '') : (folder?.windowTargetProcessName ?? ''));
-    setTargetWindowTitle(hasOwnTarget ? (existing?.windowTargetWindowTitle ?? '') : (folder?.windowTargetWindowTitle ?? ''));
-    setTitleMatchMode((hasOwnTarget ? (existing?.windowTargetTitleMatchMode ?? 'contains') : (folder?.windowTargetTitleMatchMode ?? 'contains')) as 'contains' | 'regex');
-    setTargetRelativeCoords(hasOwnTarget ? (existing?.useRelativeCoordinates ?? false) : (folder?.useRelativeCoordinates ?? false));
-    setTargetBringToFocus(hasOwnTarget ? (existing?.bringToFocus ?? false) : (folder?.bringToFocus ?? false));
-    setTargetRestorePosition(existing?.restorePosition ?? false);
-    setTargetRestoreSize(existing?.restoreSize ?? false);
-    setTargetExplicitlyEdited(false);
-    setIsDetecting(false);
     setShowWindowTargetDialog(name);
   };
 
   const handleRemoveWindowTarget = (name: string) => {
     setContextMenu(null);
     send({ type: 'profile:removeWindowTarget', payload: { name } });
-  };
-
-  const handleDetectWindow = () => {
-    setTargetExplicitlyEdited(true);
-    send({ type: 'profile:detectWindow', payload: {} });
-  };
-
-  const confirmWindowTarget = () => {
-    if (!showWindowTargetDialog) return;
-    const existing = profiles.find(p => p.name === showWindowTargetDialog);
-    const hasOwnTarget = existing?.hasWindowTarget ?? false;
-    // If the profile already has its own target, always save target.
-    // If it inherits from folder and the user didn't touch target fields, keep inheritance.
-    const keepInheritedTarget = !hasOwnTarget && !targetExplicitlyEdited;
-
-    // Guard: need at least a target when creating/updating profile-level target
-    if (!keepInheritedTarget && !targetProcessName.trim() && !targetWindowTitle.trim()) return;
-
-    send({
-      type: 'profile:setWindowTarget',
-      payload: {
-        name: showWindowTargetDialog,
-        processName: targetProcessName.trim(),
-        windowTitle: targetWindowTitle.trim(),
-        titleMatchMode,
-        relativeCoordinates: targetRelativeCoords,
-        bringToFocus: targetBringToFocus,
-        restorePosition: targetRestorePosition,
-        restoreSize: targetRestoreSize,
-        keepInheritedTarget,
-      }
-    });
-    // Close optimistically — the backend handler ends with PushProfilesUpdate which we no longer
-    // react to by auto-closing, so we close here on user confirmation.
-    setShowWindowTargetDialog(null);
-    setIsDetecting(false);
   };
 
   const handleHotkeyCapture = (e: React.KeyboardEvent) => {
@@ -509,37 +445,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     });
   }, [showHotstringDialog, subscribe]);
 
-  // Subscribe to window target detect events so the dialog receives the captured window info.
-  // Note: the dialog is NOT auto-closed on profiles:updated anymore — closing happens only via
-  // explicit user action (Cancel, Set Target, Remove), so the user can tweak multiple flags
-  // (Relative Coords / Bring to Focus / Restore Position / Restore Size / Update Window Size) without the dialog
-  // snapping shut in the middle of configuration.
-  useEffect(() => {
-    if (!showWindowTargetDialog && !showFolderTargetDialog) return;
-    return subscribe((msg) => {
-      if (msg.type === 'profiles:updated') {
-        // Only reset the detecting indicator — don't close the dialog.
-        setIsDetecting(false);
-      }
-      if (msg.type === 'windowTarget:detected') {
-        const p = msg.payload as { processName: string; windowTitle: string };
-        if (showFolderTargetDialog) {
-          setFolderTargetProcess(p.processName);
-          setFolderTargetTitle(p.windowTitle);
-        } else {
-          setTargetProcessName(p.processName);
-          setTargetWindowTitle(p.windowTitle);
-          // Detecting explicitly sets a new target → mark edited so Set Target creates profile-level target
-          setTargetExplicitlyEdited(true);
-        }
-        setIsDetecting(false);
-      }
-      if (msg.type === 'windowTarget:detectState') {
-        const p = msg.payload as { detecting: boolean };
-        setIsDetecting(p.detecting);
-      }
-    });
-  }, [showWindowTargetDialog, showFolderTargetDialog, subscribe]);
+  // Window target detection events (windowTarget:detected, windowTarget:detectState) are
+  // subscribed by <TargetConfigDialog> itself when one is mounted. Nothing to wire here.
 
   const confirmCreate = () => {
     const name = dialogValue.trim();
@@ -840,7 +747,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           {p.name}
         </span>
 
-        {p.hasWindowTarget && (
+        {p.hasWindowTarget ? (
           <span
             className="group/target shrink-0 relative"
             data-tip={p.windowTargetProcessName || p.windowTargetWindowTitle || 'Window target set'}
@@ -851,6 +758,18 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               onClick={(e) => { e.stopPropagation(); handleRemoveWindowTarget(p.name); }}
               className="hidden group-hover/target:inline-flex absolute top-0 right-0 w-full h-full items-center justify-center rounded-full bg-recording text-white text-[7px] font-bold leading-none hover:bg-red-500"
             >✕</button>
+          </span>
+        ) : p.hasEffectiveTarget && p.effectiveTargetSource === 'folder' && (
+          // Inherited from folder — show a faded crosshair so the user can see this profile
+          // IS gated even though it has no target of its own. No remove (✕) overlay because
+          // removal must happen from the folder, not the row. The folder ancestry is already
+          // visible in the tree, so the tooltip only carries the target identity.
+          <span
+            className="shrink-0 opacity-50"
+            data-tip={p.effectiveTargetProcessName || p.effectiveTargetWindowTitle || 'Window target'}
+            data-tip-pos="end"
+          >
+            <Crosshair size={11} className="text-text-tertiary" />
           </span>
         )}
 
@@ -1342,12 +1261,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               a dialog opens (matches the profile menu's "Assign hotkey…" etc). */}
           <button
             onClick={() => {
-              const folder = (profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName);
-              setFolderTargetProcess(folder?.windowTargetProcessName || '');
-              setFolderTargetTitle(folder?.windowTargetWindowTitle || '');
-              setFolderTargetMatchMode((folder?.windowTargetTitleMatchMode as 'contains' | 'regex') || 'contains');
-              setFolderTargetRelCoords(folder?.useRelativeCoordinates ?? false);
-              setFolderTargetBringToFocus(folder?.bringToFocus ?? false);
               setShowFolderTargetDialog(folderContextMenu.folderName);
               setFolderContextMenu(null);
             }}
@@ -1855,307 +1768,126 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         </div>
       )}
 
-      {/* Window Target Dialog */}
-      {showWindowTargetDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-[380px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
-            <h3 className="text-sm font-semibold text-text-primary mb-3">Target Configuration</h3>
-            <p className="text-xs text-text-secondary mb-4">
-              Configure target window for <span className="text-text-primary font-medium">'{showWindowTargetDialog}'</span>
-            </p>
+      {/* Window Target Dialog — profile scope */}
+      {showWindowTargetDialog && (() => {
+        const name = showWindowTargetDialog;
+        const existing = profiles.find(p => p.name === name);
+        const hasOwnTarget = existing?.hasWindowTarget ?? false;
+        // Resolve effective values: profile's own target > folder-inherited. The dialog uses
+        // these as initial input so toggling a flag on an inherited-target profile doesn't
+        // require re-typing the target.
+        const folder = !hasOwnTarget ? (profileOrder?.folders ?? []).find(f => f.items.includes(name)) : undefined;
+        const initial = {
+          processName: (hasOwnTarget ? existing?.windowTargetProcessName : folder?.windowTargetProcessName) ?? '',
+          windowTitle: (hasOwnTarget ? existing?.windowTargetWindowTitle : folder?.windowTargetWindowTitle) ?? '',
+          titleMatchMode: ((hasOwnTarget ? existing?.windowTargetTitleMatchMode : folder?.windowTargetTitleMatchMode) ?? 'contains') as 'contains' | 'regex',
+          relativeCoordinates: (hasOwnTarget ? existing?.useRelativeCoordinates : folder?.useRelativeCoordinates) ?? false,
+          bringToFocus: (hasOwnTarget ? existing?.bringToFocus : folder?.bringToFocus) ?? false,
+          // Same inheritance rule as the other flags: profile's own wins; otherwise show folder.
+          restorePosition: (hasOwnTarget ? existing?.restorePosition : folder?.restorePosition) ?? false,
+          restoreSize: (hasOwnTarget ? existing?.restoreSize : folder?.restoreSize) ?? false,
+        };
+        return (
+          <TargetConfigDialog
+            scope="profile"
+            targetLabel={name}
+            hasOwnTarget={hasOwnTarget}
+            inheritedFromFolder={!hasOwnTarget && !!folder}
+            initial={initial}
+            onSubmit={(payload) => {
+              send({
+                type: 'profile:setWindowTarget',
+                payload: {
+                  name,
+                  processName: payload.processName,
+                  windowTitle: payload.windowTitle,
+                  titleMatchMode: payload.titleMatchMode,
+                  relativeCoordinates: payload.relativeCoordinates,
+                  bringToFocus: payload.bringToFocus,
+                  restorePosition: payload.restorePosition,
+                  restoreSize: payload.restoreSize,
+                  keepInheritedTarget: payload.keepInheritedTarget,
+                },
+              });
+              setShowWindowTargetDialog(null);
+            }}
+            onRemove={() => {
+              handleRemoveWindowTarget(name);
+              setShowWindowTargetDialog(null);
+            }}
+            onCancel={() => setShowWindowTargetDialog(null)}
+            onUpdateGeometry={(fields) => send({
+              type: 'profile:updateWindowSize',
+              payload: {
+                name,
+                // Lets the user capture geometry BEFORE saving the target — backend uses these
+                // overrides to locate the window if the saved target is stale or empty.
+                processName: fields.processName || undefined,
+                windowTitle: fields.windowTitle || undefined,
+                titleMatchMode: fields.titleMatchMode,
+              },
+            })}
+            onConvertCoordinates={(direction) => send({
+              type: 'profile:convertCoordinates',
+              payload: { direction },
+            })}
+          />
+        );
+      })()}
 
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-text-tertiary mb-1">Process Name</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={targetProcessName}
-                    onChange={(e) => { setTargetProcessName(e.target.value); setTargetExplicitlyEdited(true); }}
-                    placeholder="e.g. chrome.exe"
-                    className="w-full h-8 px-3 pr-7 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
-                  />
-                  {targetProcessName && (
-                    <button onClick={() => { setTargetProcessName(''); setTargetExplicitlyEdited(true); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-disabled hover:text-text-secondary transition-colors">
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs text-text-tertiary mb-1">
-                  Window Title
-                  {titleMatchMode === 'contains' ? ' (partial match)' : ' (regex)'}
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={targetWindowTitle}
-                    onChange={(e) => { setTargetWindowTitle(e.target.value); setTargetExplicitlyEdited(true); }}
-                    placeholder={titleMatchMode === 'contains' ? 'e.g. Notepad' : 'e.g. (Crisp|Zendesk)'}
-                    className="w-full h-8 px-3 pr-7 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
-                  />
-                  {targetWindowTitle && (
-                    <button onClick={() => { setTargetWindowTitle(''); setTargetExplicitlyEdited(true); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-disabled hover:text-text-secondary transition-colors">
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5 mt-1.5">
-                  <button
-                    onClick={() => { setTitleMatchMode('contains'); setTargetExplicitlyEdited(true); }}
-                    className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
-                      titleMatchMode === 'contains'
-                        ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
-                        : 'bg-transparent border-border-default text-text-tertiary hover:text-text-secondary'
-                    }`}
-                  >
-                    Contains
-                  </button>
-                  <button
-                    onClick={() => { setTitleMatchMode('regex'); setTargetExplicitlyEdited(true); }}
-                    className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
-                      titleMatchMode === 'regex'
-                        ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
-                        : 'bg-transparent border-border-default text-text-tertiary hover:text-text-secondary'
-                    }`}
-                  >
-                    Regex
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <button
-              onClick={handleDetectWindow}
-              className={`mt-3 w-full h-8 text-xs border rounded transition-colors ${
-                isDetecting
-                  ? 'text-recording border-recording/40 bg-recording/10 hover:bg-recording/20'
-                  : 'text-accent border-accent-solid/40 hover:bg-accent-solid/10'
-              }`}
-            >
-              {isDetecting
-                ? 'Waiting for click... (click target window)'
-                : 'Detect Window (click on target)'}
-            </button>
-
-            {/* Options */}
-            <div className="mt-3 pt-3 border-t border-border-subtle space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-text-secondary">Relative Coordinates</span>
-                <Toggle isOn={targetRelativeCoords} onChange={setTargetRelativeCoords} />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-text-secondary">Bring to Focus</span>
-                <Toggle isOn={targetBringToFocus} onChange={setTargetBringToFocus} />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-text-secondary" title="Restore the target window to its saved position before replay">Restore Position</span>
-                <Toggle isOn={targetRestorePosition} onChange={setTargetRestorePosition} />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-text-secondary" title="Restore the target window to its saved size before replay (un-maximizes if needed)">Restore Size</span>
-                <Toggle isOn={targetRestoreSize} onChange={setTargetRestoreSize} />
-              </div>
-              {/* Convert coordinates */}
-              <div className="flex gap-2 pt-1">
-                <button
-                  onClick={() => send({ type: 'profile:convertCoordinates', payload: { direction: 'toRelative' } })}
-                  className="flex-1 h-7 text-[11px] text-accent border border-accent-solid/30 rounded hover:bg-accent-solid/10 transition-colors"
-                >
-                  Convert to Relative
-                </button>
-                <button
-                  onClick={() => send({ type: 'profile:convertCoordinates', payload: { direction: 'toAbsolute' } })}
-                  className="flex-1 h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors"
-                >
-                  Convert to Absolute
-                </button>
-              </div>
-              <button
-                onClick={() => send({
-                  type: 'profile:updateWindowSize',
-                  payload: {
-                    name: showWindowTargetDialog ?? undefined,
-                    // Use the dialog's current target fields so the user can capture geometry
-                    // BEFORE clicking Set Target — no need to save, reopen, and update.
-                    processName: targetProcessName.trim() || undefined,
-                    windowTitle: targetWindowTitle.trim() || undefined,
-                    titleMatchMode,
-                  }
-                })}
-                disabled={!targetProcessName.trim() && !targetWindowTitle.trim()}
-                className="w-full h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                title="Capture the current size and position of the target window matching the fields above"
-              >
-                Update Window Size &amp; Position
-              </button>
-            </div>
-
-            <div className="flex items-center mt-4">
-              {profiles.find(p => p.name === showWindowTargetDialog)?.hasWindowTarget && (
-                <button
-                  onClick={() => { if (isDetecting) send({ type: 'profile:detectWindow', payload: {} }); handleRemoveWindowTarget(showWindowTargetDialog!); setShowWindowTargetDialog(null); setIsDetecting(false); }}
-                  className="px-4 py-1.5 text-xs text-recording hover:text-recording/80 bg-bg-elevated rounded transition-colors"
-                >
-                  Remove
-                </button>
-              )}
-              <div className="flex-1" />
-              <div className="flex gap-2">
-                <button
-                  onClick={() => { if (isDetecting) send({ type: 'profile:detectWindow', payload: {} }); setShowWindowTargetDialog(null); setIsDetecting(false); }}
-                  className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={confirmWindowTarget}
-                  disabled={!targetProcessName.trim() && !targetWindowTitle.trim()}
-                  className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
-                >
-                  Set Target
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Folder Window Target Dialog */}
-      {showFolderTargetDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-[380px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
-            <h3 className="text-sm font-semibold text-text-primary mb-3">Folder Target Configuration</h3>
-            <p className="text-xs text-text-secondary mb-4">
-              Configure target for all profiles in <span className="text-text-primary font-medium">'{showFolderTargetDialog}'</span>. Profiles with their own target override this.
-            </p>
-
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-text-tertiary mb-1">Process Name</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={folderTargetProcess}
-                    onChange={(e) => setFolderTargetProcess(e.target.value)}
-                    placeholder="e.g. chrome.exe"
-                    className="w-full h-8 px-3 pr-7 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
-                  />
-                  {folderTargetProcess && (
-                    <button onClick={() => setFolderTargetProcess('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-disabled hover:text-text-secondary transition-colors">
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs text-text-tertiary mb-1">
-                  Window Title {folderTargetMatchMode === 'contains' ? '(partial match)' : '(regex)'}
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={folderTargetTitle}
-                    onChange={(e) => setFolderTargetTitle(e.target.value)}
-                    placeholder={folderTargetMatchMode === 'contains' ? 'e.g. Chrome' : 'e.g. (Chrome|Firefox)'}
-                    className="w-full h-8 px-3 pr-7 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
-                  />
-                  {folderTargetTitle && (
-                    <button onClick={() => setFolderTargetTitle('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-disabled hover:text-text-secondary transition-colors">
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5 mt-1.5">
-                  <button
-                    onClick={() => setFolderTargetMatchMode('contains')}
-                    className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
-                      folderTargetMatchMode === 'contains'
-                        ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
-                        : 'bg-transparent border-border-default text-text-tertiary hover:text-text-secondary'
-                    }`}
-                  >Contains</button>
-                  <button
-                    onClick={() => setFolderTargetMatchMode('regex')}
-                    className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
-                      folderTargetMatchMode === 'regex'
-                        ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
-                        : 'bg-transparent border-border-default text-text-tertiary hover:text-text-secondary'
-                    }`}
-                  >Regex</button>
-                </div>
-              </div>
-            </div>
-
-            <button
-              onClick={handleDetectWindow}
-              className={`mt-3 w-full h-8 text-xs border rounded transition-colors ${
-                isDetecting
-                  ? 'text-recording border-recording/40 bg-recording/10 hover:bg-recording/20'
-                  : 'text-accent border-accent-solid/40 hover:bg-accent-solid/10'
-              }`}
-            >
-              {isDetecting
-                ? 'Waiting for click... (click target window)'
-                : 'Detect Window (click on target)'}
-            </button>
-
-            {/* Options */}
-            <div className="mt-3 pt-3 border-t border-border-subtle space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-text-secondary">Relative Coordinates</span>
-                <Toggle isOn={folderTargetRelCoords} onChange={setFolderTargetRelCoords} />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-text-secondary">Bring to Focus</span>
-                <Toggle isOn={folderTargetBringToFocus} onChange={setFolderTargetBringToFocus} />
-              </div>
-            </div>
-
-            <div className="flex items-center mt-4">
-              {(profileOrder?.folders ?? []).find(f => f.name === showFolderTargetDialog)?.hasWindowTarget && (
-                <button
-                  onClick={() => {
-                    if (isDetecting) send({ type: 'profile:detectWindow', payload: {} });
-                    send({ type: 'profile:removeFolderWindowTarget', payload: { folderName: showFolderTargetDialog! } });
-                    setShowFolderTargetDialog(null);
-                    setIsDetecting(false);
-                  }}
-                  className="px-4 py-1.5 text-xs text-recording hover:text-recording/80 bg-bg-elevated rounded transition-colors"
-                >Remove</button>
-              )}
-              <div className="flex-1" />
-              <div className="flex gap-2">
-                <button
-                  onClick={() => { if (isDetecting) send({ type: 'profile:detectWindow', payload: {} }); setShowFolderTargetDialog(null); setIsDetecting(false); }}
-                  className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
-                >Cancel</button>
-                <button
-                  onClick={() => {
-                    if (isDetecting) send({ type: 'profile:detectWindow', payload: {} });
-                    send({
-                      type: 'profile:setFolderWindowTarget',
-                      payload: {
-                        folderName: showFolderTargetDialog!,
-                        processName: folderTargetProcess.trim(),
-                        windowTitle: folderTargetTitle.trim(),
-                        titleMatchMode: folderTargetMatchMode,
-                        relativeCoordinates: folderTargetRelCoords,
-                        bringToFocus: folderTargetBringToFocus,
-                      }
-                    });
-                    setShowFolderTargetDialog(null);
-                    setIsDetecting(false);
-                  }}
-                  disabled={!folderTargetProcess.trim() && !folderTargetTitle.trim()}
-                  className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
-                >Set Target</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Folder Target Dialog */}
+      {showFolderTargetDialog && (() => {
+        const folderName = showFolderTargetDialog;
+        const folder = (profileOrder?.folders ?? []).find(f => f.name === folderName);
+        const hasOwnTarget = !!folder?.hasWindowTarget;
+        const initial = {
+          processName: folder?.windowTargetProcessName ?? '',
+          windowTitle: folder?.windowTargetWindowTitle ?? '',
+          titleMatchMode: (folder?.windowTargetTitleMatchMode as 'contains' | 'regex') ?? 'contains',
+          relativeCoordinates: folder?.useRelativeCoordinates ?? false,
+          bringToFocus: folder?.bringToFocus ?? false,
+          restorePosition: folder?.restorePosition ?? false,
+          restoreSize: folder?.restoreSize ?? false,
+        };
+        return (
+          <TargetConfigDialog
+            scope="folder"
+            targetLabel={folderName}
+            hasOwnTarget={hasOwnTarget}
+            initial={initial}
+            onSubmit={(payload) => {
+              send({
+                type: 'profile:setFolderWindowTarget',
+                payload: {
+                  folderName,
+                  processName: payload.processName,
+                  windowTitle: payload.windowTitle,
+                  titleMatchMode: payload.titleMatchMode,
+                  relativeCoordinates: payload.relativeCoordinates,
+                  bringToFocus: payload.bringToFocus,
+                  restorePosition: payload.restorePosition,
+                  restoreSize: payload.restoreSize,
+                },
+              });
+              setShowFolderTargetDialog(null);
+            }}
+            onRemove={() => {
+              send({ type: 'profile:removeFolderWindowTarget', payload: { folderName } });
+              setShowFolderTargetDialog(null);
+            }}
+            onCancel={() => setShowFolderTargetDialog(null)}
+            onUpdateGeometry={(fields) => send({
+              type: 'profile:updateWindowSize',
+              payload: {
+                folderName,
+                processName: fields.processName || undefined,
+                windowTitle: fields.windowTitle || undefined,
+                titleMatchMode: fields.titleMatchMode,
+              },
+            })}
+          />
+        );
+      })()}
     </>
   );
 }

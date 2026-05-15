@@ -141,6 +141,16 @@ namespace TrueReplayer.Models
         public bool BringToFocus { get; set; }
         public bool RestorePosition { get; set; }
         public bool RestoreSize { get; set; }
+        // Effective target — what the hotkey gate actually uses for this profile. Differs from
+        // HasWindowTarget when the profile has no target of its own but inherits one from its
+        // folder. Lets the UI render an "inherited" badge so users can see the gating without
+        // having to open the dialog. Populated by ProfileController.LoadProfileListAsync.
+        public bool HasEffectiveTarget { get; set; }
+        public string? EffectiveTargetSource { get; set; }  // "own" | "folder" | null
+        public string? EffectiveTargetFolderName { get; set; }
+        public string? EffectiveTargetProcessName { get; set; }
+        public string? EffectiveTargetWindowTitle { get; set; }
+        public string EffectiveTargetTitleMatchMode { get; set; } = "contains";
         public TriggerMode TriggerMode { get; set; } = TriggerMode.OnPress;
         public bool IsDisabled { get; set; }
         public string Display => string.IsNullOrEmpty(Hotkey) ? Name : $"{Name} ({Hotkey})";
@@ -173,6 +183,15 @@ namespace TrueReplayer.Models
         public WindowTarget? TargetWindow { get; set; }
         public bool UseRelativeCoordinates { get; set; } = false;
         public bool BringToFocus { get; set; } = false;
+        // Restore Position/Size + window geometry are inheritable just like the target itself.
+        // A profile inside the folder uses these unless it overrides them at the profile level.
+        // Defaults keep pre-existing folders (saved before this field set) working unchanged.
+        public bool RestorePosition { get; set; } = false;
+        public bool RestoreSize { get; set; } = false;
+        public int WindowX { get; set; } = 0;
+        public int WindowY { get; set; } = 0;
+        public int WindowWidth { get; set; } = 0;
+        public int WindowHeight { get; set; } = 0;
     }
 
     public class ProfileOrderData

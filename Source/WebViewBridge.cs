@@ -424,6 +424,8 @@ namespace TrueReplayer
                     case "profile:setFolderWindowTarget": HandleSetFolderWindowTarget(payload); break;
                     case "profile:removeFolderWindowTarget": HandleRemoveFolderWindowTarget(payload); break;
                     case "profile:detectWindow": HandleProfileDetectWindow(); break;
+                    case "profile:testWindowMatch": HandleTestWindowMatch(payload); break;
+                    case "process:list": HandleProcessList(); break;
                     case "profile:openFolder": HandleProfileOpenFolder(payload); break;
                     case "profile:pin": HandleProfilePin(payload); break;
                     case "profile:unpin": HandleProfileUnpin(payload); break;
@@ -617,6 +619,10 @@ namespace TrueReplayer
 
         public void PushProfilesUpdate()
         {
+            // Refresh derived effective-target fields before serializing — handlers that mutate
+            // folder membership or folder targets don't always call RefreshProfileListAsync,
+            // and the UI relies on these fields to render the inherited-target badge.
+            profileController.PopulateEffectiveTargets();
             var profiles = profileController.ProfileEntries.Select(p => new
             {
                 name = p.Name,
@@ -629,6 +635,12 @@ namespace TrueReplayer
                 windowTargetProcessName = p.WindowTargetProcessName,
                 windowTargetWindowTitle = p.WindowTargetWindowTitle,
                 windowTargetTitleMatchMode = p.WindowTargetTitleMatchMode,
+                hasEffectiveTarget = p.HasEffectiveTarget,
+                effectiveTargetSource = p.EffectiveTargetSource,
+                effectiveTargetFolderName = p.EffectiveTargetFolderName,
+                effectiveTargetProcessName = p.EffectiveTargetProcessName,
+                effectiveTargetWindowTitle = p.EffectiveTargetWindowTitle,
+                effectiveTargetTitleMatchMode = p.EffectiveTargetTitleMatchMode,
                 useRelativeCoordinates = p.UseRelativeCoordinates,
                 bringToFocus = p.BringToFocus,
                 restorePosition = p.RestorePosition,
@@ -652,7 +664,13 @@ namespace TrueReplayer
                     windowTargetWindowTitle = f.TargetWindow?.WindowTitle,
                     windowTargetTitleMatchMode = f.TargetWindow?.TitleMatchMode ?? "contains",
                     useRelativeCoordinates = f.UseRelativeCoordinates,
-                    bringToFocus = f.BringToFocus
+                    bringToFocus = f.BringToFocus,
+                    restorePosition = f.RestorePosition,
+                    restoreSize = f.RestoreSize,
+                    windowX = f.WindowX,
+                    windowY = f.WindowY,
+                    windowWidth = f.WindowWidth,
+                    windowHeight = f.WindowHeight
                 }).ToArray(),
                 ungroupedOrder = order.UngroupedOrder
             };
@@ -901,6 +919,12 @@ namespace TrueReplayer
                     windowTargetProcessName = p.WindowTargetProcessName,
                     windowTargetWindowTitle = p.WindowTargetWindowTitle,
                     windowTargetTitleMatchMode = p.WindowTargetTitleMatchMode,
+                    hasEffectiveTarget = p.HasEffectiveTarget,
+                    effectiveTargetSource = p.EffectiveTargetSource,
+                    effectiveTargetFolderName = p.EffectiveTargetFolderName,
+                    effectiveTargetProcessName = p.EffectiveTargetProcessName,
+                    effectiveTargetWindowTitle = p.EffectiveTargetWindowTitle,
+                    effectiveTargetTitleMatchMode = p.EffectiveTargetTitleMatchMode,
                     useRelativeCoordinates = p.UseRelativeCoordinates,
                     bringToFocus = p.BringToFocus,
                     restorePosition = p.RestorePosition,
@@ -922,8 +946,14 @@ namespace TrueReplayer
                         windowTargetProcessName = f.TargetWindow?.ProcessName,
                         windowTargetWindowTitle = f.TargetWindow?.WindowTitle,
                         windowTargetTitleMatchMode = f.TargetWindow?.TitleMatchMode ?? "contains",
-                    useRelativeCoordinates = f.UseRelativeCoordinates,
-                    bringToFocus = f.BringToFocus
+                        useRelativeCoordinates = f.UseRelativeCoordinates,
+                        bringToFocus = f.BringToFocus,
+                        restorePosition = f.RestorePosition,
+                        restoreSize = f.RestoreSize,
+                        windowX = f.WindowX,
+                        windowY = f.WindowY,
+                        windowWidth = f.WindowWidth,
+                        windowHeight = f.WindowHeight
                     }).ToArray(),
                     ungroupedOrder = profileController.GetProfileOrder().UngroupedOrder
                 },
@@ -1164,10 +1194,28 @@ namespace TrueReplayer
 
             bool useVariation = UseDelayVariation;
             int variationPercent = int.TryParse(DelayVariation, out var vp) ? vp : 20;
-            var effTarget = CurrentProfileName != "No Profile" ? profileController.GetEffectiveWindowTarget(CurrentProfileName) : UserProfile.Current.TargetWindow;
-            var effRelCoords = CurrentProfileName != "No Profile" ? profileController.GetEffectiveRelativeCoordinates(CurrentProfileName) : UserProfile.Current.UseRelativeCoordinates;
-            var effBringFocus = CurrentProfileName != "No Profile" ? profileController.GetEffectiveBringToFocus(CurrentProfileName) : UserProfile.Current.BringToFocus;
-            mainController.ToggleReplay(loopEnabled, loopCount, intervalEnabled, intervalText, useVariation, variationPercent, effRelCoords, effTarget, effBringFocus, UserProfile.Current.WindowWidth, UserProfile.Current.WindowHeight, UserProfile.Current.WindowX, UserProfile.Current.WindowY, UserProfile.Current.RestorePosition, UserProfile.Current.RestoreSize);
+            bool hasCur = CurrentProfileName != "No Profile";
+            var effTarget = hasCur ? profileController.GetEffectiveWindowTarget(CurrentProfileName) : UserProfile.Current.TargetWindow;
+            var effRelCoords = hasCur ? profileController.GetEffectiveRelativeCoordinates(CurrentProfileName) : UserProfile.Current.UseRelativeCoordinates;
+            var effBringFocus = hasCur ? profileController.GetEffectiveBringToFocus(CurrentProfileName) : UserProfile.Current.BringToFocus;
+            var effRestorePos = hasCur ? profileController.GetEffectiveRestorePosition(CurrentProfileName) : UserProfile.Current.RestorePosition;
+            var effRestoreSz = hasCur ? profileController.GetEffectiveRestoreSize(CurrentProfileName) : UserProfile.Current.RestoreSize;
+            int effW = UserProfile.Current.WindowWidth;
+            int effH = UserProfile.Current.WindowHeight;
+            int effGX = UserProfile.Current.WindowX;
+            int effGY = UserProfile.Current.WindowY;
+            if (hasCur && effW == 0 && effH == 0)
+            {
+                var folderGeom = profileController.GetFolderInheritedGeometry(CurrentProfileName);
+                if (folderGeom.HasValue)
+                {
+                    effGX = folderGeom.Value.X;
+                    effGY = folderGeom.Value.Y;
+                    effW = folderGeom.Value.Width;
+                    effH = folderGeom.Value.Height;
+                }
+            }
+            mainController.ToggleReplay(loopEnabled, loopCount, intervalEnabled, intervalText, useVariation, variationPercent, effRelCoords, effTarget, effBringFocus, effW, effH, effGX, effGY, effRestorePos, effRestoreSz);
         }
 
         private void HandleActionsClear()
@@ -3027,36 +3075,13 @@ namespace TrueReplayer
             var target = CurrentProfileName != "No Profile"
                 ? profileController.GetEffectiveWindowTarget(CurrentProfileName)
                 : UserProfile.Current.TargetWindow;
-            if (target == null || string.IsNullOrEmpty(target.ProcessName))
+            if (target == null || (string.IsNullOrEmpty(target.ProcessName) && string.IsNullOrEmpty(target.WindowTitle)))
             {
                 SendMessage("alert:show", new { message = "Set a Window Target first (profile or folder)." });
                 return;
             }
 
-            // Find target window
-            IntPtr hwnd = IntPtr.Zero;
-            NativeMethods.EnumWindows((h, l) =>
-            {
-                if (!NativeMethods.IsWindowVisible(h)) return true;
-                NativeMethods.GetWindowThreadProcessId(h, out uint pid);
-                IntPtr hProcess = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-                if (hProcess == IntPtr.Zero) return true;
-                try
-                {
-                    var sb = new System.Text.StringBuilder(1024);
-                    uint len = NativeMethods.GetProcessImageFileName(hProcess, sb, (uint)sb.Capacity);
-                    if (len == 0) return true;
-                    string fullPath = sb.ToString();
-                    string fileName = fullPath.Substring(fullPath.LastIndexOf('\\') + 1);
-                    if (fileName.Equals(target.ProcessName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        hwnd = h;
-                        return false;
-                    }
-                }
-                finally { NativeMethods.CloseHandle(hProcess); }
-                return true;
-            }, IntPtr.Zero);
+            IntPtr hwnd = TrueReplayer.Helpers.WindowMatcher.FindWindow(target);
 
             if (hwnd == IntPtr.Zero)
             {
@@ -3119,6 +3144,7 @@ namespace TrueReplayer
             // reopen, update, and save again.
             string? dialogProcess = null, dialogTitle = null, dialogMatchMode = null;
             string? targetProfileName = null;
+            string? targetFolderName = null;
             if (payload.ValueKind == JsonValueKind.Object)
             {
                 if (payload.TryGetProperty("processName", out var pnEl) && pnEl.ValueKind == JsonValueKind.String)
@@ -3129,6 +3155,8 @@ namespace TrueReplayer
                     dialogMatchMode = mmEl.GetString();
                 if (payload.TryGetProperty("name", out var nEl) && nEl.ValueKind == JsonValueKind.String)
                     targetProfileName = nEl.GetString();
+                if (payload.TryGetProperty("folderName", out var fnEl) && fnEl.ValueKind == JsonValueKind.String)
+                    targetFolderName = fnEl.GetString();
             }
 
             // Resolve which target definition to search for:
@@ -3145,6 +3173,11 @@ namespace TrueReplayer
                     TitleMatchMode = string.IsNullOrWhiteSpace(dialogMatchMode) ? "contains" : dialogMatchMode!
                 };
             }
+            else if (!string.IsNullOrEmpty(targetFolderName))
+            {
+                var folder = profileController.GetProfileOrder().Folders.FirstOrDefault(f => f.Name == targetFolderName);
+                target = folder?.TargetWindow;
+            }
             else
             {
                 target = CurrentProfileName != "No Profile"
@@ -3158,55 +3191,7 @@ namespace TrueReplayer
                 return;
             }
 
-            // Compile regex once if needed
-            System.Text.RegularExpressions.Regex? titleRegex = null;
-            if (target.TitleMatchMode == "regex" && !string.IsNullOrWhiteSpace(target.WindowTitle))
-            {
-                try { titleRegex = new System.Text.RegularExpressions.Regex(target.WindowTitle.Trim()); }
-                catch { /* fall through to substring match */ }
-            }
-
-            // Find target window — matches by process name (if given) and/or title
-            IntPtr hwnd = IntPtr.Zero;
-            NativeMethods.EnumWindows((h, l) =>
-            {
-                if (!NativeMethods.IsWindowVisible(h)) return true;
-
-                // Process name check
-                bool procOk = string.IsNullOrEmpty(target.ProcessName);
-                if (!procOk)
-                {
-                    NativeMethods.GetWindowThreadProcessId(h, out uint pid);
-                    IntPtr hProcess = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-                    if (hProcess == IntPtr.Zero) return true;
-                    try
-                    {
-                        var sb = new System.Text.StringBuilder(1024);
-                        uint len = NativeMethods.GetProcessImageFileName(hProcess, sb, (uint)sb.Capacity);
-                        if (len == 0) return true;
-                        string fullPath = sb.ToString();
-                        string fileName = fullPath.Substring(fullPath.LastIndexOf('\\') + 1);
-                        procOk = fileName.Equals(target.ProcessName, StringComparison.OrdinalIgnoreCase);
-                    }
-                    finally { NativeMethods.CloseHandle(hProcess); }
-                }
-                if (!procOk) return true;
-
-                // Title check
-                bool titleOk = string.IsNullOrEmpty(target.WindowTitle);
-                if (!titleOk)
-                {
-                    var titleSb = new System.Text.StringBuilder(512);
-                    NativeMethods.GetWindowText(h, titleSb, titleSb.Capacity);
-                    string winTitle = titleSb.ToString();
-                    if (titleRegex != null) titleOk = titleRegex.IsMatch(winTitle);
-                    else titleOk = winTitle.IndexOf(target.WindowTitle!, StringComparison.OrdinalIgnoreCase) >= 0;
-                }
-                if (!titleOk) return true;
-
-                hwnd = h;
-                return false;
-            }, IntPtr.Zero);
+            IntPtr hwnd = TrueReplayer.Helpers.WindowMatcher.FindWindow(target);
 
             if (hwnd == IntPtr.Zero)
             {
@@ -3223,8 +3208,16 @@ namespace TrueReplayer
             int w = rect.Right - rect.Left;
             int hgt = rect.Bottom - rect.Top;
 
-            // Resolve the profile to save geometry into: explicit name from the dialog, or the
-            // currently active profile as fallback.
+            // Folder geometry takes priority when folderName is provided. Otherwise resolve the
+            // profile to save into: explicit name from the dialog, or the active profile.
+            if (!string.IsNullOrEmpty(targetFolderName))
+            {
+                await profileController.SetFolderGeometryAsync(targetFolderName, rect.Left, rect.Top, w, hgt);
+                PushProfilesUpdate();
+                SendMessage("alert:show", new { message = $"Folder geometry captured: {w}×{hgt} @ ({rect.Left}, {rect.Top})" });
+                return;
+            }
+
             string saveName = !string.IsNullOrEmpty(targetProfileName) ? targetProfileName : CurrentProfileName;
 
             if (saveName == CurrentProfileName && CurrentProfileName != "No Profile")
@@ -3363,6 +3356,8 @@ namespace TrueReplayer
                 ? tm.GetString() ?? "contains" : "contains";
             bool relativeCoordinates = payload.TryGetProperty("relativeCoordinates", out var rcProp) && rcProp.GetBoolean();
             bool bringToFocus = payload.TryGetProperty("bringToFocus", out var btfProp) && btfProp.GetBoolean();
+            bool restorePosition = payload.TryGetProperty("restorePosition", out var rpProp) && rpProp.GetBoolean();
+            bool restoreSize = payload.TryGetProperty("restoreSize", out var rsProp) && rsProp.GetBoolean();
 
             if (string.IsNullOrEmpty(folderName)) return;
 
@@ -3383,7 +3378,7 @@ namespace TrueReplayer
                 ProcessName = string.IsNullOrWhiteSpace(processName) ? null : processName.Trim(),
                 WindowTitle = string.IsNullOrWhiteSpace(windowTitle) ? null : windowTitle.Trim(),
                 TitleMatchMode = titleMatchMode
-            }, relativeCoordinates, bringToFocus);
+            }, relativeCoordinates, bringToFocus, restorePosition, restoreSize);
             InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
             PushProfilesUpdate();
         }
@@ -3547,6 +3542,169 @@ namespace TrueReplayer
             {
                 SendMessage("windowTarget:detectState", new { detecting = false });
             });
+        }
+
+        /// <summary>
+        /// Test whether a candidate target (process / title / mode) matches the foreground
+        /// window the user is looking at. The TR window itself is excluded (the dialog is
+        /// modal, so foreground would otherwise always be us). Result is sent back via
+        /// <c>windowTarget:testResult</c> for inline display in the dialog.
+        /// </summary>
+        private void HandleTestWindowMatch(JsonElement payload)
+        {
+            string processName = payload.TryGetProperty("processName", out var pProp) ? pProp.GetString() ?? "" : "";
+            string windowTitle = payload.TryGetProperty("windowTitle", out var tProp) ? tProp.GetString() ?? "" : "";
+            string titleMatchMode = payload.TryGetProperty("titleMatchMode", out var mProp) ? mProp.GetString() ?? "contains" : "contains";
+
+            if (string.IsNullOrWhiteSpace(processName) && string.IsNullOrWhiteSpace(windowTitle))
+            {
+                SendMessage("windowTarget:testResult", new {
+                    matches = false,
+                    error = "Fill at least one of Process Name or Window Title to test.",
+                    foregroundProcess = "",
+                    foregroundTitle = ""
+                });
+                return;
+            }
+
+            var target = new WindowTarget
+            {
+                ProcessName = string.IsNullOrWhiteSpace(processName) ? null : processName.Trim(),
+                WindowTitle = string.IsNullOrWhiteSpace(windowTitle) ? null : windowTitle.Trim(),
+                TitleMatchMode = titleMatchMode
+            };
+
+            var compiledRegex = TrueReplayer.Helpers.WindowMatcher.CompileTitleRegex(target);
+            if (titleMatchMode == "regex" && !string.IsNullOrWhiteSpace(windowTitle) && compiledRegex == null)
+            {
+                SendMessage("windowTarget:testResult", new {
+                    matches = false,
+                    error = "Invalid regex pattern.",
+                    foregroundProcess = "",
+                    foregroundTitle = ""
+                });
+                return;
+            }
+
+            // Pick the foreground window — but skip our own (the dialog is modal so foreground
+            // is us). If the apparent foreground IS us, walk the z-order via EnumWindows and
+            // take the first visible top-level with a title that isn't ours.
+            IntPtr ownHwnd = IntPtr.Zero;
+            try { ownHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window); } catch { }
+
+            IntPtr hwnd = NativeMethods.GetForegroundWindow();
+            if (hwnd == IntPtr.Zero || hwnd == ownHwnd)
+            {
+                IntPtr alt = IntPtr.Zero;
+                NativeMethods.EnumWindows((h, _) =>
+                {
+                    if (h == ownHwnd) return true;
+                    if (!NativeMethods.IsWindowVisible(h)) return true;
+                    var titleSb = new System.Text.StringBuilder(8);
+                    NativeMethods.GetWindowText(h, titleSb, titleSb.Capacity);
+                    if (titleSb.Length == 0) return true;  // skip system/utility windows
+                    alt = h;
+                    return false;
+                }, IntPtr.Zero);
+                hwnd = alt;
+            }
+
+            if (hwnd == IntPtr.Zero)
+            {
+                SendMessage("windowTarget:testResult", new {
+                    matches = false,
+                    error = "No foreground window detected.",
+                    foregroundProcess = "",
+                    foregroundTitle = ""
+                });
+                return;
+            }
+
+            // Capture identity of whatever we're testing against, so the UI can show what was sampled.
+            var titleBuf = new System.Text.StringBuilder(512);
+            NativeMethods.GetWindowText(hwnd, titleBuf, titleBuf.Capacity);
+            string fgTitle = titleBuf.ToString();
+
+            string fgProcess = "";
+            NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+            IntPtr hp = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            if (hp != IntPtr.Zero)
+            {
+                try
+                {
+                    var pnSb = new System.Text.StringBuilder(512);
+                    uint len = NativeMethods.GetProcessImageFileName(hp, pnSb, (uint)pnSb.Capacity);
+                    if (len > 0)
+                    {
+                        string full = pnSb.ToString();
+                        fgProcess = full.Substring(full.LastIndexOf('\\') + 1);
+                    }
+                }
+                finally { NativeMethods.CloseHandle(hp); }
+            }
+
+            bool matches = TrueReplayer.Helpers.WindowMatcher.Matches(hwnd, target, compiledRegex);
+
+            SendMessage("windowTarget:testResult", new {
+                matches,
+                foregroundProcess = fgProcess,
+                foregroundTitle = fgTitle
+            });
+        }
+
+        /// <summary>
+        /// Enumerate top-level visible windows and surface the processes behind them — used by
+        /// the dialog's process picker so the user doesn't have to free-text the .exe name. We
+        /// walk EnumWindows (not Process.GetProcesses + MainWindowHandle) because some modern
+        /// apps (UWP, Electron, Tauri) have MainWindowHandle == 0 even though their window is
+        /// visible. Deduplicated by lowercased process name; the first window's title is kept
+        /// as a hint so the list shows e.g. "chrome.exe — Inbox - Gmail".
+        /// </summary>
+        private void HandleProcessList()
+        {
+            IntPtr ownHwnd = IntPtr.Zero;
+            try { ownHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window); } catch { }
+
+            var seen = new Dictionary<string, (string Name, string Title)>(StringComparer.OrdinalIgnoreCase);
+            var titleBuf = new System.Text.StringBuilder(512);
+            var procBuf = new System.Text.StringBuilder(512);
+
+            NativeMethods.EnumWindows((hwnd, _) =>
+            {
+                if (hwnd == ownHwnd) return true;
+                if (!NativeMethods.IsWindowVisible(hwnd)) return true;
+
+                titleBuf.Clear();
+                NativeMethods.GetWindowText(hwnd, titleBuf, titleBuf.Capacity);
+                string title = titleBuf.ToString();
+                // Skip system/utility windows with no title — they're noise in the picker.
+                if (string.IsNullOrWhiteSpace(title)) return true;
+
+                NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+                IntPtr hp = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+                if (hp == IntPtr.Zero) return true;
+                try
+                {
+                    procBuf.Clear();
+                    uint len = NativeMethods.GetProcessImageFileName(hp, procBuf, (uint)procBuf.Capacity);
+                    if (len == 0) return true;
+                    string full = procBuf.ToString();
+                    string name = full.Substring(full.LastIndexOf('\\') + 1);
+                    if (string.IsNullOrEmpty(name)) return true;
+                    if (!seen.ContainsKey(name))
+                        seen[name] = (name, title);
+                }
+                finally { NativeMethods.CloseHandle(hp); }
+                return true;
+            }, IntPtr.Zero);
+
+            // Sort case-insensitively by process name so the picker is predictable.
+            var ordered = seen.Values
+                .OrderBy(v => v.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(v => new { name = v.Name, title = v.Title })
+                .ToArray();
+
+            SendMessage("process:list", new { processes = ordered });
         }
 
         private void HandleProfileOpenFolder(JsonElement payload)
@@ -4008,17 +4166,42 @@ namespace TrueReplayer
             ["foregroundHotkey"] = "Foreground",
         };
 
+        /// <summary>
+        /// True when targets A and B could plausibly match the same window at the same time
+        /// — i.e. their hotkeys/hotstrings would compete. Used to surface conflicts when
+        /// assigning/removing hotkeys. Empty fields (ProcessName or WindowTitle) act as
+        /// wildcards: <c>{Process=chrome.exe}</c> overlaps <c>{Process=chrome.exe, Title=GitHub}</c>
+        /// because the first matches every chrome window including the second's.
+        ///
+        /// We prefer false positives over false negatives — a spurious "may conflict" warning
+        /// is better than silently registering two competing hotkeys.
+        /// </summary>
         private static bool EffectiveTargetsOverlap(WindowTarget? a, WindowTarget? b)
         {
-            if (a == null && b == null) return true;     // both global
-            if (a == null || b == null) return true;     // one global = overlaps everything
+            if (a == null || b == null) return true;   // one is global → overlaps everything
 
-            bool sameProcess = string.Equals(
-                a.ProcessName ?? "", b.ProcessName ?? "", StringComparison.OrdinalIgnoreCase);
-            bool sameTitle = string.Equals(
-                a.WindowTitle ?? "", b.WindowTitle ?? "", StringComparison.OrdinalIgnoreCase);
+            // Process compatibility: empty on either side is a wildcard.
+            string aProc = (a.ProcessName ?? "").Trim();
+            string bProc = (b.ProcessName ?? "").Trim();
+            bool processCompatible = aProc.Length == 0 || bProc.Length == 0
+                || aProc.Equals(bProc, StringComparison.OrdinalIgnoreCase);
+            if (!processCompatible) return false;
 
-            return sameProcess && sameTitle;
+            // Title compatibility: empty on either side is a wildcard.
+            string aTitle = (a.WindowTitle ?? "").Trim();
+            string bTitle = (b.WindowTitle ?? "").Trim();
+            if (aTitle.Length == 0 || bTitle.Length == 0) return true;
+
+            string aMode = a.TitleMatchMode ?? "contains";
+            string bMode = b.TitleMatchMode ?? "contains";
+
+            // Mixed modes or any regex: regex intersection is non-trivial. Conflict check is
+            // the right place to err on the side of paranoia, so report overlap.
+            if (aMode != bMode || aMode == "regex") return true;
+
+            // Both contains: overlap if either substring contains the other (case-insensitive).
+            return aTitle.IndexOf(bTitle, StringComparison.OrdinalIgnoreCase) >= 0
+                || bTitle.IndexOf(aTitle, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private string? GetHotkeyConflict(string hotkey, string? excludeSettingKey, string? excludeProfileName = null, WindowTarget? effectiveTarget = null)

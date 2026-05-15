@@ -318,6 +318,7 @@ namespace TrueReplayer.Controllers
             }
 
             await LoadProfileOrderAsync();
+            PopulateEffectiveTargets();
 
             var map = GetProfileHotkeys();
             InputHookManager.RegisterProfileHotkeys(map);
@@ -325,6 +326,54 @@ namespace TrueReplayer.Controllers
             InputHookManager.RegisterProfileWindowTargets(GetProfileWindowTargets(), GetBringToFocusProfiles());
             var hotstringMap = GetProfileHotstrings();
             InputHookManager.RegisterProfileHotstrings(hotstringMap);
+        }
+
+        /// <summary>
+        /// Derives the effective target (own > folder-inherited > none) for every entry and
+        /// fills the EffectiveTarget* fields. Called after the profile order is loaded so
+        /// folder membership is known. Idempotent — safe to call repeatedly after order
+        /// changes (e.g. user moved profile into/out of a folder). Cheap (linear in
+        /// ProfileEntries.Count), so PushProfilesUpdate refreshes before serializing.
+        /// </summary>
+        public void PopulateEffectiveTargets()
+        {
+            foreach (var entry in ProfileEntries)
+            {
+                if (entry.HasWindowTarget)
+                {
+                    entry.HasEffectiveTarget = true;
+                    entry.EffectiveTargetSource = "own";
+                    entry.EffectiveTargetFolderName = null;
+                    entry.EffectiveTargetProcessName = entry.WindowTargetProcessName;
+                    entry.EffectiveTargetWindowTitle = entry.WindowTargetWindowTitle;
+                    entry.EffectiveTargetTitleMatchMode = entry.WindowTargetTitleMatchMode;
+                    continue;
+                }
+
+                var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(entry.Name));
+                var folderTarget = folder?.TargetWindow;
+                bool folderHasTarget = folderTarget != null
+                    && (!string.IsNullOrEmpty(folderTarget.ProcessName) || !string.IsNullOrEmpty(folderTarget.WindowTitle));
+
+                if (folderHasTarget)
+                {
+                    entry.HasEffectiveTarget = true;
+                    entry.EffectiveTargetSource = "folder";
+                    entry.EffectiveTargetFolderName = folder!.Name;
+                    entry.EffectiveTargetProcessName = folderTarget!.ProcessName;
+                    entry.EffectiveTargetWindowTitle = folderTarget.WindowTitle;
+                    entry.EffectiveTargetTitleMatchMode = folderTarget.TitleMatchMode;
+                }
+                else
+                {
+                    entry.HasEffectiveTarget = false;
+                    entry.EffectiveTargetSource = null;
+                    entry.EffectiveTargetFolderName = null;
+                    entry.EffectiveTargetProcessName = null;
+                    entry.EffectiveTargetWindowTitle = null;
+                    entry.EffectiveTargetTitleMatchMode = "contains";
+                }
+            }
         }
 
         // Snapshot of WaitImage ImagePath references built during the last LoadProfileListAsync.
@@ -585,7 +634,57 @@ namespace TrueReplayer.Controllers
             return folder?.BringToFocus ?? false;
         }
 
-        public async Task SetFolderWindowTargetAsync(string folderName, WindowTarget target, bool relativeCoordinates = false, bool bringToFocus = false)
+        // Effective Restore Position/Size + geometry. Profile's own values take priority when the
+        // profile has its own target; otherwise fall back to the folder. A profile that has no
+        // target and is not in a folder with a target gets defaults (false/0). The fall-through
+        // mirrors the BringToFocus/UseRelativeCoordinates pattern above.
+        public bool GetEffectiveRestorePosition(string profileName)
+        {
+            if (_cachedWindowTargets.ContainsKey(profileName))
+            {
+                var entry = ProfileEntries.FirstOrDefault(p => p.Name == profileName);
+                return entry?.RestorePosition ?? false;
+            }
+            var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(profileName));
+            return folder?.RestorePosition ?? false;
+        }
+
+        public bool GetEffectiveRestoreSize(string profileName)
+        {
+            if (_cachedWindowTargets.ContainsKey(profileName))
+            {
+                var entry = ProfileEntries.FirstOrDefault(p => p.Name == profileName);
+                return entry?.RestoreSize ?? false;
+            }
+            var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(profileName));
+            return folder?.RestoreSize ?? false;
+        }
+
+        /// <summary>
+        /// Effective geometry (WindowX/Y/Width/Height) for the given profile. The profile's own
+        /// geometry (kept on the UserProfile loaded from disk) is consulted by the caller —
+        /// this helper only returns folder-inherited values to use as a fallback when the
+        /// profile has no own target. Returns null when no folder geometry applies.
+        /// </summary>
+        public (int X, int Y, int Width, int Height)? GetFolderInheritedGeometry(string profileName)
+        {
+            // Only fall back to the folder when the profile has no target of its own. Profiles
+            // with own target are expected to carry their own geometry too.
+            if (_cachedWindowTargets.ContainsKey(profileName)) return null;
+            var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(profileName));
+            if (folder == null) return null;
+            if (folder.WindowWidth == 0 && folder.WindowHeight == 0 && folder.WindowX == 0 && folder.WindowY == 0)
+                return null;
+            return (folder.WindowX, folder.WindowY, folder.WindowWidth, folder.WindowHeight);
+        }
+
+        public async Task SetFolderWindowTargetAsync(
+            string folderName,
+            WindowTarget target,
+            bool relativeCoordinates = false,
+            bool bringToFocus = false,
+            bool restorePosition = false,
+            bool restoreSize = false)
         {
             var folder = _profileOrder.Folders.FirstOrDefault(f => f.Name == folderName);
             if (folder != null)
@@ -593,6 +692,21 @@ namespace TrueReplayer.Controllers
                 folder.TargetWindow = target;
                 folder.UseRelativeCoordinates = relativeCoordinates;
                 folder.BringToFocus = bringToFocus;
+                folder.RestorePosition = restorePosition;
+                folder.RestoreSize = restoreSize;
+                await SaveProfileOrderAsync();
+            }
+        }
+
+        public async Task SetFolderGeometryAsync(string folderName, int x, int y, int width, int height)
+        {
+            var folder = _profileOrder.Folders.FirstOrDefault(f => f.Name == folderName);
+            if (folder != null)
+            {
+                folder.WindowX = x;
+                folder.WindowY = y;
+                folder.WindowWidth = width;
+                folder.WindowHeight = height;
                 await SaveProfileOrderAsync();
             }
         }
@@ -625,9 +739,18 @@ namespace TrueReplayer.Controllers
             var folder = _profileOrder.Folders.FirstOrDefault(f => f.Name == folderName);
             if (folder != null)
             {
+                // Mirror HandleProfileRemoveWindowTarget on profiles: wipe everything dependent
+                // on the target so we don't leave dangling Restore Position/Size toggles or
+                // orphaned geometry. The user can re-set it later from scratch.
                 folder.TargetWindow = null;
                 folder.UseRelativeCoordinates = false;
                 folder.BringToFocus = false;
+                folder.RestorePosition = false;
+                folder.RestoreSize = false;
+                folder.WindowX = 0;
+                folder.WindowY = 0;
+                folder.WindowWidth = 0;
+                folder.WindowHeight = 0;
                 await SaveProfileOrderAsync();
             }
         }
@@ -699,7 +822,13 @@ namespace TrueReplayer.Controllers
                             Items = f.Items.Where(i => exportedNames.Contains(i)).ToList(),
                             TargetWindow = f.TargetWindow,
                             UseRelativeCoordinates = f.UseRelativeCoordinates,
-                            BringToFocus = f.BringToFocus
+                            BringToFocus = f.BringToFocus,
+                            RestorePosition = f.RestorePosition,
+                            RestoreSize = f.RestoreSize,
+                            WindowX = f.WindowX,
+                            WindowY = f.WindowY,
+                            WindowWidth = f.WindowWidth,
+                            WindowHeight = f.WindowHeight
                         }).ToList(),
                     UngroupedOrder = _profileOrder.UngroupedOrder.Where(n => exportedNames.Contains(n)).ToList()
                 };
@@ -886,7 +1015,13 @@ namespace TrueReplayer.Controllers
                         Items = importedFolder.Items,
                         TargetWindow = importedFolder.TargetWindow,
                         UseRelativeCoordinates = importedFolder.UseRelativeCoordinates,
-                        BringToFocus = importedFolder.BringToFocus
+                        BringToFocus = importedFolder.BringToFocus,
+                        RestorePosition = importedFolder.RestorePosition,
+                        RestoreSize = importedFolder.RestoreSize,
+                        WindowX = importedFolder.WindowX,
+                        WindowY = importedFolder.WindowY,
+                        WindowWidth = importedFolder.WindowWidth,
+                        WindowHeight = importedFolder.WindowHeight
                     });
                 }
 

@@ -493,9 +493,30 @@ namespace TrueReplayer
                         else
                         {
                             var curName = bridge?.CurrentProfileName ?? "";
-                            var effTarget = curName != "No Profile" ? profileController.GetEffectiveWindowTarget(curName) : UserProfile.Current.TargetWindow;
-                            var effRelCoords = curName != "No Profile" ? profileController.GetEffectiveRelativeCoordinates(curName) : UserProfile.Current.UseRelativeCoordinates;
-                            var effBringFocus = curName != "No Profile" ? profileController.GetEffectiveBringToFocus(curName) : UserProfile.Current.BringToFocus;
+                            bool hasCurName = curName != "No Profile" && !string.IsNullOrEmpty(curName);
+                            var effTarget = hasCurName ? profileController.GetEffectiveWindowTarget(curName) : UserProfile.Current.TargetWindow;
+                            var effRelCoords = hasCurName ? profileController.GetEffectiveRelativeCoordinates(curName) : UserProfile.Current.UseRelativeCoordinates;
+                            var effBringFocus = hasCurName ? profileController.GetEffectiveBringToFocus(curName) : UserProfile.Current.BringToFocus;
+                            // Geometry + Restore flags: profile's own takes priority when its target is set;
+                            // otherwise fall back to folder. Without this, a profile inheriting a folder
+                            // target but having no own geometry would replay against (0,0,0,0).
+                            var effRestorePos = hasCurName ? profileController.GetEffectiveRestorePosition(curName) : UserProfile.Current.RestorePosition;
+                            var effRestoreSz = hasCurName ? profileController.GetEffectiveRestoreSize(curName) : UserProfile.Current.RestoreSize;
+                            int effW = UserProfile.Current.WindowWidth;
+                            int effH = UserProfile.Current.WindowHeight;
+                            int effGX = UserProfile.Current.WindowX;
+                            int effGY = UserProfile.Current.WindowY;
+                            if (hasCurName && effW == 0 && effH == 0)
+                            {
+                                var folderGeom = profileController.GetFolderInheritedGeometry(curName);
+                                if (folderGeom.HasValue)
+                                {
+                                    effGX = folderGeom.Value.X;
+                                    effGY = folderGeom.Value.Y;
+                                    effW = folderGeom.Value.Width;
+                                    effH = folderGeom.Value.Height;
+                                }
+                            }
                             mainController.ToggleReplay(
                                 bridge?.EnableLoop ?? false,
                                 bridge?.LoopCount ?? "1",
@@ -506,12 +527,12 @@ namespace TrueReplayer
                                 effRelCoords,
                                 effTarget,
                                 effBringFocus,
-                                UserProfile.Current.WindowWidth,
-                                UserProfile.Current.WindowHeight,
-                                UserProfile.Current.WindowX,
-                                UserProfile.Current.WindowY,
-                                UserProfile.Current.RestorePosition,
-                                UserProfile.Current.RestoreSize);
+                                effW,
+                                effH,
+                                effGX,
+                                effGY,
+                                effRestorePos,
+                                effRestoreSz);
                         }
                     }
                     else if (key.StartsWith("PROFILE::") || key.StartsWith("PROFILE_HOLD::") || key.StartsWith("PROFILE_TOGGLE::"))
@@ -552,6 +573,24 @@ namespace TrueReplayer
                             var effectiveTarget = profileController.GetEffectiveWindowTarget(profileName);
                             var effectiveRelCoords = profileController.GetEffectiveRelativeCoordinates(profileName);
                             var effectiveBringToFocus = profileController.GetEffectiveBringToFocus(profileName);
+                            // Effective Restore + geometry — same fallback rule as the global Replay path.
+                            var effectiveRestorePos = profileController.GetEffectiveRestorePosition(profileName);
+                            var effectiveRestoreSz = profileController.GetEffectiveRestoreSize(profileName);
+                            int profW = UserProfile.Current.WindowWidth;
+                            int profH = UserProfile.Current.WindowHeight;
+                            int profGX = UserProfile.Current.WindowX;
+                            int profGY = UserProfile.Current.WindowY;
+                            if (profW == 0 && profH == 0)
+                            {
+                                var folderGeom = profileController.GetFolderInheritedGeometry(profileName);
+                                if (folderGeom.HasValue)
+                                {
+                                    profGX = folderGeom.Value.X;
+                                    profGY = folderGeom.Value.Y;
+                                    profW = folderGeom.Value.Width;
+                                    profH = folderGeom.Value.Height;
+                                }
+                            }
                             mainController.ToggleReplay(
                                 bridge.EnableLoop,
                                 bridge.LoopCount,
@@ -562,12 +601,12 @@ namespace TrueReplayer
                                 effectiveRelCoords,
                                 effectiveTarget,
                                 effectiveBringToFocus,
-                                UserProfile.Current.WindowWidth,
-                                UserProfile.Current.WindowHeight,
-                                UserProfile.Current.WindowX,
-                                UserProfile.Current.WindowY,
-                                UserProfile.Current.RestorePosition,
-                                UserProfile.Current.RestoreSize,
+                                profW,
+                                profH,
+                                profGX,
+                                profGY,
+                                effectiveRestorePos,
+                                effectiveRestoreSz,
                                 forceInfiniteLoop);
 
                             // Post-start safety net for WhilePressed: if the user released the

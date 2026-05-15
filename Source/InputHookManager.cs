@@ -220,19 +220,8 @@ namespace TrueReplayer
             var regexes = new Dictionary<string, Regex?>();
             foreach (var (name, target) in targets)
             {
-                if (target.TitleMatchMode == "regex" && !string.IsNullOrEmpty(target.WindowTitle))
-                {
-                    try
-                    {
-                        regexes[name] = new Regex(target.WindowTitle,
-                            RegexOptions.IgnoreCase | RegexOptions.Compiled,
-                            TimeSpan.FromMilliseconds(5));
-                    }
-                    catch
-                    {
-                        regexes[name] = null;
-                    }
-                }
+                var compiled = TrueReplayer.Helpers.WindowMatcher.CompileTitleRegex(target);
+                if (compiled != null) regexes[name] = compiled;
             }
             // Assign both atomically as a single snapshot
             _windowTargets = new WindowTargetSnapshot
@@ -262,69 +251,9 @@ namespace TrueReplayer
             if (hwnd == IntPtr.Zero)
                 return false;
 
-            if (!string.IsNullOrEmpty(target.WindowTitle))
-            {
-                _windowTextBuffer.Clear();
-                NativeMethods.GetWindowText(hwnd, _windowTextBuffer, _windowTextBuffer.Capacity);
-                string title = _windowTextBuffer.ToString();
-
-                if (target.TitleMatchMode == "regex")
-                {
-                    if (wt.CompiledRegexes.TryGetValue(profileName, out var regex) && regex != null)
-                    {
-                        try
-                        {
-                            if (!regex.IsMatch(title))
-                                return false;
-                        }
-                        catch (RegexMatchTimeoutException)
-                        {
-                            return false;
-                        }
-                    }
-                    else
-                    {
-                        return false;
-                    }
-                }
-                else
-                {
-                    if (title.IndexOf(target.WindowTitle, StringComparison.OrdinalIgnoreCase) < 0)
-                        return false;
-                }
-            }
-
-            if (!string.IsNullOrEmpty(target.ProcessName))
-            {
-                NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
-                IntPtr hProcess = NativeMethods.OpenProcess(
-                    NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-
-                if (hProcess == IntPtr.Zero)
-                    return false;
-
-                try
-                {
-                    _processNameBuffer.Clear();
-                    uint len = NativeMethods.GetProcessImageFileName(
-                        hProcess, _processNameBuffer, (uint)_processNameBuffer.Capacity);
-
-                    if (len == 0)
-                        return false;
-
-                    string fullPath = _processNameBuffer.ToString();
-                    string fileName = fullPath.Substring(fullPath.LastIndexOf('\\') + 1);
-
-                    if (!fileName.Equals(target.ProcessName, StringComparison.OrdinalIgnoreCase))
-                        return false;
-                }
-                finally
-                {
-                    NativeMethods.CloseHandle(hProcess);
-                }
-            }
-
-            return true;
+            wt.CompiledRegexes.TryGetValue(profileName, out var regex);
+            return TrueReplayer.Helpers.WindowMatcher.Matches(
+                hwnd, target, regex, _windowTextBuffer, _processNameBuffer);
         }
 
         #region Hotstring Helpers
