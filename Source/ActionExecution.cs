@@ -1943,22 +1943,35 @@ namespace TrueReplayer.Services
             return value.Replace(OpenBraceSentinel, '{').Replace(CloseBraceSentinel, '}');
         }
 
+        // VK codes that must carry KEYEVENTF_EXTENDEDKEY when replayed via SendInput. These keys
+        // share their scancode with a numpad twin (Delete↔Num. , Insert↔Num0, Home↔Num7, etc.);
+        // the E0 prefix — Windows' KEYEVENTF_EXTENDEDKEY flag — is what distinguishes them on
+        // hardware. Without it, Delete is delivered as scancode 0x53 with no E0 → Windows treats
+        // it as Numpad Decimal → produces "." instead of deleting. Same shape for the others.
+        // PrintScreen (0x2C) and Pause (0x13) have non-trivial scancode sequences and are
+        // intentionally omitted — replaying them via SendInput needs special handling.
         private static readonly HashSet<ushort> ExtendedVkCodes = new()
         {
             0x21, 0x22, 0x23, 0x24, // PgUp, PgDn, End, Home
             0x25, 0x26, 0x27, 0x28, // Left, Up, Right, Down
-            0x2D, 0x2E              // Insert, Delete
+            0x2D, 0x2E,             // Insert, Delete
+            0x5B, 0x5C, 0x5D,       // LWin, RWin, Apps (context menu)
+            0x6F,                   // NumDivide (numpad /)
+            0x90,                   // NumLock
+            0xA3, 0xA5              // RControl, RAlt (RMenu)
         };
 
         private void SimulateKeyPress(ushort vk)
         {
             ushort scan = (ushort)NativeMethods.MapVirtualKey(vk, 0);
             bool isExtended = ExtendedVkCodes.Contains(vk);
-            bool isDirectional = vk >= 0x25 && vk <= 0x28;
             uint downFlags = NativeMethods.KEYEVENTF_SCANCODE;
             if (isExtended) downFlags |= NativeMethods.KEYEVENTF_EXTENDEDKEY;
             uint upFlags = downFlags | NativeMethods.KEYEVENTF_KEYUP;
-            ushort effectiveVk = isDirectional ? (ushort)0 : vk;
+            // wVk is ignored when KEYEVENTF_SCANCODE is set, but kept populated for non-extended
+            // keys so any listener that ignores the flag still sees something sensible. Extended
+            // keys send 0 to mirror the long-standing arrow-key behaviour.
+            ushort effectiveVk = isExtended ? (ushort)0 : vk;
 
             var inputs = new NativeMethods.INPUT[]
             {
@@ -2060,8 +2073,12 @@ namespace TrueReplayer.Services
         private void SimulateKey(string key, bool isDown)
         {
             if (!Helpers.KeyUtils.TryResolveVirtualKeyCode(key, out ushort vk)) return;
-            bool isDirectionalKey = key is "Left" or "Right" or "Up" or "Down";
+            bool isExtended = ExtendedVkCodes.Contains(vk);
             ushort scan = (ushort)NativeMethods.MapVirtualKey(vk, 0);
+
+            uint flags = isDown ? 0u : NativeMethods.KEYEVENTF_KEYUP;
+            flags |= NativeMethods.KEYEVENTF_SCANCODE;
+            if (isExtended) flags |= NativeMethods.KEYEVENTF_EXTENDEDKEY;
 
             var input = new NativeMethods.INPUT
             {
@@ -2070,23 +2087,14 @@ namespace TrueReplayer.Services
                 {
                     ki = new NativeMethods.KEYBDINPUT
                     {
-                        wVk = isDirectionalKey ? (ushort)0 : vk,
+                        wVk = isExtended ? (ushort)0 : vk,
                         wScan = scan,
-                        dwFlags = isDown ? 0u : NativeMethods.KEYEVENTF_KEYUP,
+                        dwFlags = flags,
                         time = 0,
                         dwExtraInfo = IntPtr.Zero
                     }
                 }
             };
-
-            if (isDirectionalKey)
-            {
-                input.U.ki.dwFlags |= NativeMethods.KEYEVENTF_SCANCODE | NativeMethods.KEYEVENTF_EXTENDEDKEY;
-            }
-            else
-            {
-                input.U.ki.dwFlags |= NativeMethods.KEYEVENTF_SCANCODE;
-            }
 
             NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
         }
