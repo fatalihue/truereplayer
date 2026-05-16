@@ -4,7 +4,7 @@ import {
   Search, Circle, Play, Square, Type, Save, FolderOpen, RotateCcw, FilePlus,
   Trash2, PinOff, Pin, Download, Upload, MonitorDown, Shield, Minimize2, RefreshCw,
   Hourglass, ScanSearch, Repeat, Repeat2, Undo2, Redo2, ClipboardPaste, Files, Replace,
-  FolderPlus, Palette, PanelLeft, DownloadCloud, Table2, Keyboard,
+  FolderPlus, Palette, PanelLeft, DownloadCloud, Table2, Keyboard, Timer,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -129,6 +129,13 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             // for this action and stays visually distinct from Run Profile's Repeat2.
             icon: <Repeat size={14} className="text-text-secondary" />,
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:presskeyn')); },
+          },
+          {
+            id: 'holdkey', label: 'Insert Hold Key',
+            // Timer (stopwatch) matches the dialog header + toolbar entry — emphasises
+            // the "press for a duration" semantic, not just "press the key".
+            icon: <Timer size={14} className="text-text-secondary" />,
+            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:holdkey')); },
           },
           {
             id: 'waitimage', label: 'Insert Wait for Image',

@@ -887,6 +887,21 @@ namespace TrueReplayer.Services
                     {
                         case "KeyDown": SimulateKey(action.Key, true); break;
                         case "KeyUp": SimulateKey(action.Key, false); break;
+                        case "HoldKey": {
+                            // Send KEYDOWN, hold the configured duration, then KEYUP. The
+                            // SimulateKey tracker (Add on isDown / Remove on !isDown) keeps
+                            // the key in _simulatedKeysDown for the entire hold, so a Stop
+                            // mid-hold has ResetKeyState() release it cleanly instead of
+                            // leaving it stuck in the OS keyboard state.
+                            int duration = action.HoldDurationMs > 0
+                                ? Math.Max(10, Math.Min(60000, action.HoldDurationMs))
+                                : ActionItem.DefaultHoldDurationMs;
+                            SimulateKey(action.Key, true);
+                            try { await Task.Delay(duration, token); }
+                            catch (OperationCanceledException) { /* ResetKeyState releases */ }
+                            SimulateKey(action.Key, false);
+                            break;
+                        }
                         case "Keystroke": {
                             // RepeatCount > 1 → emit N consecutive press cycles with
                             // RepeatDelayMs gap between them. Clamped 1..999 (same range

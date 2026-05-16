@@ -33,7 +33,9 @@ interface KeyCaptureDialogProps {
  * "Return", "Back", "Prior", "Next", "Capital" — those DON'T resolve and broke
  * inserted actions. This dialog uses the canonical names instead so a Send Key
  * insert is replay-identical to a recorded keystroke. */
-function mapKeyEvent(e: KeyboardEvent): string | null {
+// Exported so the HoldKeyDialog (and any future single-key capture dialog) can reuse
+// the canonical-name resolution without duplicating the layout / dead-key / numpad logic.
+export function mapKeyEvent(e: KeyboardEvent): string | null {
   const numpadMap: Record<string, string> = {
     Numpad0: 'Num0', Numpad1: 'Num1', Numpad2: 'Num2', Numpad3: 'Num3',
     Numpad4: 'Num4', Numpad5: 'Num5', Numpad6: 'Num6', Numpad7: 'Num7',
@@ -119,7 +121,7 @@ function mapKeyEvent(e: KeyboardEvent): string | null {
 }
 
 /** Short, human-readable label for the captured key — what shows inside the kbd badge. */
-function keyDisplayLabel(internalName: string): string {
+export function keyDisplayLabel(internalName: string): string {
   // Internal names like "D5", "Return", "Back", "Oem3" → friendlier shorthand
   if (/^D\d$/.test(internalName)) return internalName.slice(1);
   const friendly: Record<string, string> = {

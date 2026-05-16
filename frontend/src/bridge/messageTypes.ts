@@ -22,6 +22,10 @@ export interface ActionItem {
   // null/undefined = use the global default (30 ms; matches ActionItem.DefaultRepeatDelayMs
   // on the C# side). Explicit 0 = back-to-back. Ignored when repeatCount == 1.
   repeatDelayMs?: number | null;
+  // HoldKey action: how long the key stays pressed before the matching KEYUP fires.
+  // 0/undefined = use the C# default (1000 ms; matches ActionItem.DefaultHoldDurationMs).
+  // Clamped 10..60000 ms on every edit surface (dialog, inline, bridge).
+  holdDurationMs?: number;
   // #6 — BrowserWaitElement: appears | disappears | enabled | text-match
   waitMode?: string | null;
   // #7 — BrowserNavigate: optional URL pattern + post-navigation selector
@@ -338,6 +342,10 @@ export type OutgoingMessage =
   // dispatches this message so the new row lands with RepeatCount preset; absent for
   // the regular "Send Keystroke" path which creates a single-press row (RepeatCount = 1).
   | { type: 'actions:insertKeystroke'; payload: { keystroke: string; insertIndex: number; repeat?: number; repeatDelayMs?: number } }
+  // HoldKey insert — captures a single key and a hold duration (ms). Replay
+  // engine emits KEYDOWN, waits holdDurationMs, then KEYUP. Default duration
+  // applied server-side when holdDurationMs is absent.
+  | { type: 'actions:insertHoldKey'; payload: { key: string; insertIndex: number; holdDurationMs?: number } }
   | { type: 'actions:duplicate'; payload: { indices: number[] } }
   // Atomic replace of a contiguous range — used by the "Collapse to × N" /
   // "Expand × N" flow so N rows in becomes M rows out under one undo step.

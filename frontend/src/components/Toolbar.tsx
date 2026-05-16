@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ArrowUpToLine, ArrowDownToLine, ScanSearch, Plus, Keyboard, Globe, Repeat, Repeat2, Hourglass, X } from 'lucide-react';
+import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ArrowUpToLine, ArrowDownToLine, ScanSearch, Plus, Keyboard, Globe, Repeat, Repeat2, Hourglass, Timer, X } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -9,6 +9,7 @@ import { RunProfileDialog } from './RunProfileDialog';
 import { NavigateDialog } from './NavigateDialog';
 import { KeyCaptureDialog } from './KeyCaptureDialog';
 import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
+import { HoldKeyDialog } from './HoldKeyDialog';
 
 export interface ColumnVisibility {
   action: boolean;
@@ -121,6 +122,8 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
   //   "press-n"   — opened by "Press Key × N"  (repeating combo, repeat = 5 default)
   const [keystrokeCaptureMode, setKeystrokeCaptureMode] = useState<'keystroke' | 'press-n'>('keystroke');
   const keystrokeCaptureInsertIndex = useRef<number>(0);
+  const [showHoldKeyDialog, setShowHoldKeyDialog] = useState(false);
+  const holdKeyInsertIndex = useRef<number>(0);
   const colDropdownRef = useRef<HTMLDivElement>(null);
   const addActionsRef = useRef<HTMLDivElement>(null);
   const browserMenuRef = useRef<HTMLDivElement>(null);
@@ -168,13 +171,20 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
       setKeystrokeCaptureMode('press-n');
       setShowKeystrokeCapture(true);
     };
+    const onHoldKey = () => {
+      const sel = selectionRef.current;
+      holdKeyInsertIndex.current = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+      setShowHoldKeyDialog(true);
+    };
     window.addEventListener('cmd:sendkey', onSendKey);
     window.addEventListener('cmd:sendkeystroke', onSendKeystroke);
     window.addEventListener('cmd:presskeyn', onPressKeyN);
+    window.addEventListener('cmd:holdkey', onHoldKey);
     return () => {
       window.removeEventListener('cmd:sendkey', onSendKey);
       window.removeEventListener('cmd:sendkeystroke', onSendKeystroke);
       window.removeEventListener('cmd:presskeyn', onPressKeyN);
+      window.removeEventListener('cmd:holdkey', onHoldKey);
     };
   }, [actions.length, selectionRef]);
 
@@ -450,6 +460,10 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                       // the single-arrow `Repeat` icon to stay distinct from RunProfile's
                       // double-arrow `Repeat2` below.
                       { type: 'PressKeyN', label: 'Press Key × N…', icon: Repeat },
+                      // Hold Key — single atomic row that presses, waits, and releases.
+                      // Timer icon ties the action visually to its stopwatch-style intent
+                      // and stays distinct from every other keyboard insert above.
+                      { type: 'HoldKey', label: 'Hold Key…', icon: Timer },
                     ],
                   },
                   {
@@ -497,6 +511,11 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                             keystrokeCaptureInsertIndex.current = insertIndex;
                             setKeystrokeCaptureMode('press-n');
                             setShowKeystrokeCapture(true);
+                            return;
+                          }
+                          if (item.type === 'HoldKey') {
+                            holdKeyInsertIndex.current = insertIndex;
+                            setShowHoldKeyDialog(true);
                             return;
                           }
                           send({ type: 'actions:insertAction', payload: { actionType: item.type, insertIndex } });
@@ -787,6 +806,20 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             setShowKeystrokeCapture(false);
           }}
           onClose={() => setShowKeystrokeCapture(false)}
+        />
+      )}
+
+      {/* Hold Key… single-key + duration capture. Same insertIndex-stash pattern as
+          the dialogs above. Produces a single HoldKey row whose replay sends KEYDOWN,
+          waits the configured ms, then KEYUP — stuck-key cleanup releases the key if
+          the user hits Stop mid-hold (see ResetKeyState on the C# side). */}
+      {showHoldKeyDialog && (
+        <HoldKeyDialog
+          onConfirm={(key, holdDurationMs) => {
+            send({ type: 'actions:insertHoldKey', payload: { key, insertIndex: holdKeyInsertIndex.current, holdDurationMs } });
+            setShowHoldKeyDialog(false);
+          }}
+          onClose={() => setShowHoldKeyDialog(false)}
         />
       )}
     </>

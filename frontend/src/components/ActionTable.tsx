@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronsDownUp, ChevronsUpDown, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Code2, Files, Hourglass, Repeat, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronsDownUp, ChevronsUpDown, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Code2, Files, Hourglass, Repeat, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical, Timer } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -13,6 +13,7 @@ import { SendTextPreview } from './SendTextPreview';
 import { RunProfileDialog } from './RunProfileDialog';
 import { KeyCaptureDialog } from './KeyCaptureDialog';
 import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
+import { HoldKeyDialog } from './HoldKeyDialog';
 import { BulkActionBar } from './BulkActionBar';
 import { Checkbox, CheckboxBox } from './Checkbox';
 import type { ColumnVisibility } from './Toolbar';
@@ -23,6 +24,9 @@ function ActionIcon({ actionType }: { actionType: string }) {
   if (actionType.includes('Click')) return <Mouse size={size} />;
   if (actionType === 'ScrollUp') return <ArrowUp size={size} />;
   if (actionType === 'ScrollDown') return <ArrowDown size={size} />;
+  // HoldKey uses Timer (stopwatch) instead of Keyboard so it reads at a glance as
+  // "this is a timed key" — matches the dialog/menu/palette icon for the same action.
+  if (actionType === 'HoldKey') return <Timer size={size} />;
   if (actionType.startsWith('Key')) return <Keyboard size={size} />;
   if (actionType === 'SendText') return <Type size={size} />;
   if (actionType === 'WaitImage') return <ScanSearch size={size} />;
@@ -86,6 +90,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   // the captured combo IS the action. So Edit reopens KeystrokeCaptureDialog rather
   // than dropping the user into the generic SheetPanel.
   const [keystrokeEdit, setKeystrokeEdit] = useState<{ index: number } | null>(null);
+  // HoldKey edit follows the same single-state pattern as keystrokeEdit — open the
+  // dedicated capture dialog with the row's current key + duration pre-filled.
+  const [holdKeyEdit, setHoldKeyEdit] = useState<{ index: number } | null>(null);
+  // Insert flow for HoldKey from the right-click submenu (mirrors keystrokeCaptureInsert).
+  const [holdKeyInsert, setHoldKeyInsert] = useState<{ insertIndex: number } | null>(null);
   const [dragIndices, setDragIndices] = useState<number[] | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null);
 
@@ -683,6 +692,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       closeContextMenu();
       return;
     }
+    if (actionType === 'HoldKey') {
+      setHoldKeyInsert({ insertIndex });
+      closeContextMenu();
+      return;
+    }
     if (actionType === 'RunProfile') {
       setRunProfileInsert({ insertIndex });
       closeContextMenu();
@@ -794,6 +808,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     // RunProfile's double-arrow `Repeat2`. Same dialog as SendKeystroke under
     // the hood; the mode prop flips the defaults and labels.
     { type: 'PressKeyN', label: 'Press Key × N…', icon: Repeat },
+    // Hold Key — single atomic row that presses, waits the configured duration,
+    // and releases. Replaces the legacy "KeyDown + KeyUp with manually-edited
+    // delay" workflow with one click. Timer icon connects to the dialog header.
+    { type: 'HoldKey', label: 'Hold Key…', icon: Timer },
     { type: 'Pause', label: 'Pause', icon: Hourglass },
     { type: 'WaitImage', label: 'Wait for Image', icon: ScanSearch },
     { type: 'RunProfile', label: 'Run Profile', icon: Repeat2 },
@@ -999,6 +1017,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         : action.actionType === 'BrowserNavigate' ? 'Navigate'
                         : action.actionType === 'RunProfile' ? 'Run Profile'
                         : action.actionType === 'Pause' ? 'Pause'
+                        : action.actionType === 'HoldKey' ? 'Hold Key'
                         : action.actionType}
                     </span>
                   </td>
@@ -1022,7 +1041,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     ) : displayKey ? (
                       <span
                         className={`inline-flex items-center translate-y-[-2px] px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input max-w-[92px] truncate ${
-                          action.actionType === 'SendText' || action.actionType.startsWith('Key') || action.actionType === 'RunProfile'
+                          action.actionType === 'SendText' || action.actionType.startsWith('Key') || action.actionType === 'HoldKey' || action.actionType === 'RunProfile'
                             ? 'cursor-text hover:text-accent-light'
                             : ''
                         }`}
@@ -1047,6 +1066,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             // with just "T") and silently lose the modifiers — wrong shape
                             // for a Keystroke action.
                             setKeystrokeEdit({ index: idx });
+                          } else if (action.actionType === 'HoldKey') {
+                            // HoldKey edits the key AND the duration together — single
+                            // dialog covers both. Inline edit on the key alone would lose
+                            // the duration context.
+                            setHoldKeyEdit({ index: idx });
                           } else if (action.actionType.startsWith('Key')) {
                             startEdit(idx, 'key', action.key);
                           }
@@ -1077,6 +1101,29 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             × {action.repeatCount}
                           </span>
                         )}
+                        {/* Hold-duration badge for HoldKey rows. Same visual treatment as
+                            the × N badge so the two repeat-flavoured key actions look like
+                            siblings. Click reopens HoldKeyDialog in edit mode (key +
+                            duration pre-filled). Format: "1s" for clean second multiples,
+                            "1.5s" for fractional, "500ms" for sub-second. */}
+                        {action.actionType === 'HoldKey' && (() => {
+                          const ms = action.holdDurationMs && action.holdDurationMs > 0 ? action.holdDurationMs : 1000;
+                          const label = ms >= 1000 && ms % 100 === 0
+                            ? `${(ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1)}s`
+                            : `${ms}ms`;
+                          return (
+                            <span
+                              className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold tabular-nums bg-[color-mix(in_srgb,var(--color-accent)_18%,transparent)] text-accent-light hover:bg-[color-mix(in_srgb,var(--color-accent)_28%,transparent)] cursor-pointer transition-colors"
+                              title={`Hold duration: ${ms} ms`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHoldKeyEdit({ index: idx });
+                              }}
+                            >
+                              · {label} hold
+                            </span>
+                          );
+                        })()}
                       </span>
                     ) : null}
                   </td>
@@ -1325,6 +1372,43 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         />
       )}
 
+      {/* HoldKey insert flow — invoked by submenu "Hold Key…" or palette command. */}
+      {holdKeyInsert && (
+        <HoldKeyDialog
+          onConfirm={(key, holdDurationMs) => {
+            send({ type: 'actions:insertHoldKey', payload: { key, insertIndex: holdKeyInsert.insertIndex, holdDurationMs } });
+            setHoldKeyInsert(null);
+          }}
+          onClose={() => setHoldKeyInsert(null)}
+        />
+      )}
+
+      {/* HoldKey edit flow — opens with the row's current key + duration so the
+          user can tweak either side without losing context. Edits fire as
+          separate actions:edit messages; unchanged fields are skipped to avoid
+          burning undo steps. */}
+      {holdKeyEdit && (() => {
+        const editing = actions[holdKeyEdit.index];
+        const curKey = editing?.key ?? '';
+        const curDuration = editing?.holdDurationMs && editing.holdDurationMs > 0 ? editing.holdDurationMs : 1000;
+        return (
+          <HoldKeyDialog
+            initialKey={curKey}
+            initialHoldDurationMs={curDuration}
+            onConfirm={(key, holdDurationMs) => {
+              if (key !== curKey) {
+                send({ type: 'actions:edit', payload: { index: holdKeyEdit.index, field: 'key', value: key } });
+              }
+              if (holdDurationMs !== curDuration) {
+                send({ type: 'actions:edit', payload: { index: holdKeyEdit.index, field: 'holdDurationMs', value: String(holdDurationMs) } });
+              }
+              setHoldKeyEdit(null);
+            }}
+            onClose={() => setHoldKeyEdit(null)}
+          />
+        );
+      })()}
+
       {/* Bulk Action Bar — inline at bottom */}
       {selectedIndices.size > 0 && !buttonStates.recordingActive && !buttonStates.replayActive && (
         <BulkActionBar
@@ -1428,6 +1512,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                 });
               } else if (rowAction?.actionType === 'Keystroke') {
                 setKeystrokeEdit({ index: contextMenu.rowIndex });
+              } else if (rowAction?.actionType === 'HoldKey') {
+                setHoldKeyEdit({ index: contextMenu.rowIndex });
               } else {
                 onOpenSheet?.(contextMenu.rowIndex);
               }

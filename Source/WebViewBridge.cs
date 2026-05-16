@@ -393,6 +393,7 @@ namespace TrueReplayer
                     case "actions:insertAction": HandleInsertAction(payload); break;
                     case "actions:insertKey": HandleInsertKey(payload); break;
                     case "actions:insertKeystroke": HandleInsertKeystroke(payload); break;
+                    case "actions:insertHoldKey": HandleInsertHoldKey(payload); break;
                     case "actions:duplicate": HandleDuplicateActions(payload); break;
                     case "actions:addRunProfile": HandleAddRunProfile(payload); break;
                     case "actions:editRunProfile": HandleEditRunProfile(payload); break;
@@ -1277,6 +1278,7 @@ namespace TrueReplayer
                         SelectMatchMode = a.SelectMatchMode,
                         RepeatCount = a.RepeatCount,
                         RepeatDelayMs = a.RepeatDelayMs,
+                        HoldDurationMs = a.HoldDurationMs,
                     });
                 }
             }
@@ -1337,6 +1339,7 @@ namespace TrueReplayer
                     SelectMatchMode = copied.SelectMatchMode,
                     RepeatCount = copied.RepeatCount,
                     RepeatDelayMs = copied.RepeatDelayMs,
+                    HoldDurationMs = copied.HoldDurationMs,
                     RowNumber = insertIndex + 1
                 };
                 actions.Insert(insertIndex, clone);
@@ -1411,6 +1414,13 @@ namespace TrueReplayer
                     // the range advertised by every editor surface (inline badge, dialogs).
                     if (int.TryParse(value, out int rep))
                         action.RepeatCount = Math.Max(1, Math.Min(999, rep));
+                    break;
+                case "holdDurationMs":
+                    // HoldKey: clamp 10..60000 ms. The inline editor / dialog enforce
+                    // the same range — duplicating here defends against malformed payloads
+                    // from an attacker / older frontend build.
+                    if (int.TryParse(value, out int hd))
+                        action.HoldDurationMs = Math.Max(10, Math.Min(60000, hd));
                     break;
                 case "repeatDelayMs":
                     // Empty → null (= "use the global default"). Explicit number → clamp
@@ -1946,6 +1956,37 @@ namespace TrueReplayer
             mainController.UpdateButtonStates();
         }
 
+        private void HandleInsertHoldKey(JsonElement payload)
+        {
+            var key = payload.GetProperty("key").GetString();
+            var insertIndex = payload.GetProperty("insertIndex").GetInt32();
+            if (string.IsNullOrEmpty(key)) return;
+            if (insertIndex < 0 || insertIndex > actions.Count) insertIndex = actions.Count;
+
+            // Optional hold duration — clamped 10..60000 (same range as the inline editor).
+            // 0 / omitted falls back to ActionItem.DefaultHoldDurationMs at replay time.
+            int holdDuration = ActionItem.DefaultHoldDurationMs;
+            if (payload.TryGetProperty("holdDurationMs", out var hd) && hd.ValueKind == JsonValueKind.Number)
+                holdDuration = Math.Max(10, Math.Min(60000, hd.GetInt32()));
+
+            int delay = int.TryParse(CustomDelay, out var pd) ? pd : 100;
+            // Single atomic HoldKey row. Replay engine treats this as: SimulateKey(key, true),
+            // wait holdDuration, SimulateKey(key, false). Compact alternative to the legacy
+            // 2-row KeyDown + KeyUp (delay = hold) representation.
+            actions.Insert(insertIndex, new ActionItem
+            {
+                ActionType = "HoldKey",
+                Key = key,
+                Delay = delay,
+                HoldDurationMs = holdDuration,
+            });
+            for (int i = 0; i < actions.Count; i++)
+                actions[i].RowNumber = i + 1;
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+            mainController.UpdateButtonStates();
+        }
+
         private async Task HandleInsertWaitImageAsync(int insertIndex)
         {
             // Minimize main window to get a clean screenshot
@@ -2359,6 +2400,7 @@ namespace TrueReplayer
                         SelectMatchMode = original.SelectMatchMode,
                         RepeatCount = original.RepeatCount,
                         RepeatDelayMs = original.RepeatDelayMs,
+                        HoldDurationMs = original.HoldDurationMs,
                     };
                     actions.Insert(insertPos, clone);
                     insertPos++;

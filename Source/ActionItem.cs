@@ -108,6 +108,19 @@ namespace TrueReplayer.Models
         // frontend dialog can all reference the same value via the messages they exchange.
         public const int DefaultRepeatDelayMs = 30;
 
+        // HoldKey action: how long the key stays pressed before the replay engine fires
+        // the matching KEYUP. Replaces the two-row "KeyDown + KeyUp (delay = hold)" pattern
+        // with a single atomic row whose Value column reads "W · 1.5s hold". 0 = use the
+        // global default. Clamped 10..60000 on edit. Stuck-key cleanup (ResetKeyState)
+        // safely releases the key if the replay is cancelled mid-hold.
+        // WhenWritingDefault keeps non-HoldKey rows schema-clean on disk.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public int HoldDurationMs { get; set; }
+
+        // Default hold duration used by HoldKey when HoldDurationMs == 0. Same sharing
+        // rationale as DefaultRepeatDelayMs above.
+        public const int DefaultHoldDurationMs = 1000;
+
         [System.Text.Json.Serialization.JsonIgnore]
         public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
 
@@ -163,7 +176,7 @@ namespace TrueReplayer.Models
 
         private static readonly HashSet<string> NoCoordinateActionTypes = new(StringComparer.OrdinalIgnoreCase)
         {
-            "KeyDown", "KeyUp", "ScrollUp", "ScrollDown", "SendText", "WaitImage",
+            "KeyDown", "KeyUp", "Keystroke", "HoldKey", "ScrollUp", "ScrollDown", "SendText", "WaitImage",
             "BrowserClick", "BrowserRightClick", "BrowserType", "BrowserWaitElement", "BrowserNavigate",
             "BrowserSelectOption",
             "RunProfile", "Pause"
