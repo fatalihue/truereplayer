@@ -31,18 +31,27 @@ export interface CollapseResult {
  * skipped row to preserve "skip" semantics (a folded row can't be partially
  * skipped).
  *
+ * Defensive against `undefined` entries: when the caller maps from indices
+ * (`indices.map(i => actions[i])`) a stale selection can yield holes. We
+ * detect those instead of dereferencing — keeps the function safe for the
+ * menu-render path and the handler path to share without filtering upstream.
+ *
  * Contiguity is the caller's responsibility — `rows` should already be the
  * actions at consecutive indices. We only validate the pair pattern.
  */
-export function canCollapse(rows: ActionItem[]): CollapseResult | null {
+export function canCollapse(rows: (ActionItem | undefined)[]): CollapseResult | null {
   if (rows.length < 2 || rows.length % 2 !== 0) return null;
-  if (rows.some(r => r.isSkipped)) return null;
-  const key = rows[0].key;
+  if (rows.some(r => !r)) return null;
+  // After the holes check, every entry is defined — narrow the type once so
+  // the rest of the function reads without `as ActionItem` casts.
+  const defined = rows as ActionItem[];
+  if (defined.some(r => r.isSkipped)) return null;
+  const key = defined[0].key;
   if (!key) return null;
 
-  for (let i = 0; i < rows.length; i += 2) {
-    if (rows[i].actionType !== 'KeyDown' || rows[i].key !== key) return null;
-    if (rows[i + 1].actionType !== 'KeyUp' || rows[i + 1].key !== key) return null;
+  for (let i = 0; i < defined.length; i += 2) {
+    if (defined[i].actionType !== 'KeyDown' || defined[i].key !== key) return null;
+    if (defined[i + 1].actionType !== 'KeyUp' || defined[i + 1].key !== key) return null;
   }
 
   // Average the pre-action delays on KeyDown rows from the 2nd cycle onwards —
@@ -50,15 +59,15 @@ export function canCollapse(rows: ActionItem[]): CollapseResult | null {
   // gap between cycles. The first KeyDown's delay is the row's overall wait
   // (carries over as the new Keystroke's `delay`, not its `repeatDelayMs`).
   const gaps: number[] = [];
-  for (let i = 2; i < rows.length; i += 2) gaps.push(rows[i].delay);
+  for (let i = 2; i < defined.length; i += 2) gaps.push(defined[i].delay);
   const avgGap = gaps.length > 0
     ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length)
     : 30;
 
   return {
     key,
-    count: rows.length / 2,
-    delay: rows[0].delay,
+    count: defined.length / 2,
+    delay: defined[0].delay,
     repeatDelayMs: Math.max(0, Math.min(5000, avgGap)),
   };
 }
@@ -66,8 +75,11 @@ export function canCollapse(rows: ActionItem[]): CollapseResult | null {
 /**
  * True when `row` is a single-key Keystroke with RepeatCount > 1.
  * Modifier combos (e.g. "Ctrl+A") are excluded in v1 — see top-of-file comment.
+ * Defensive against `undefined` so the menu-render path can pass `actions[i]`
+ * straight through without a guard at the call site.
  */
-export function canExpand(row: ActionItem): boolean {
+export function canExpand(row: ActionItem | undefined): boolean {
+  if (!row) return false;
   return row.actionType === 'Keystroke'
       && (row.repeatCount ?? 1) > 1
       && !row.key.includes('+');

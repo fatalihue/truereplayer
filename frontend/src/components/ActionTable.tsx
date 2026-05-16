@@ -1645,9 +1645,14 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             for (let i = 1; i < indices.length; i++) {
               if (indices[i] !== indices[i - 1] + 1) { contiguous = false; break; }
             }
-            const rows = indices.map(i => actions[i]).filter(Boolean);
-            const collapseOk = contiguous && rows.length > 0 && canCollapse(rows) !== null;
-            const expandOk = indices.length === 1 && rows.length === 1 && canExpand(rows[0]);
+            // No upstream .filter(Boolean): canCollapse / canExpand both reject
+            // undefined entries internally, so the menu-render and handler paths
+            // see the exact same `rows` shape. Drifting filters caused a subtle
+            // bug pre-audit where stale selection could enable the menu while
+            // the handler would have rejected.
+            const rows = indices.map(i => actions[i]);
+            const collapseOk = contiguous && canCollapse(rows) !== null;
+            const expandOk = indices.length === 1 && canExpand(rows[0]);
             return (
               <>
                 <button
