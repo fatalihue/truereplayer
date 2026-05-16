@@ -87,9 +87,19 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
       // after the run ends. The StatusBar gates rendering on `isReplaying || count > 0`,
       // so non-Clicker replays don't trigger the Clicker counter even though the reset
       // path here is mode-agnostic.
+      //
+      // Also drop the per-row highlight when leaving 'replaying'. Without this the
+      // last executed row stays tinted forever — confusing because nothing's running
+      // anymore, and especially wrong when the user switches profiles mid-replay
+      // (highlight from the old profile would survive onto a row index in the new
+      // one). 'recording' and 'ready' both transition through here and don't have
+      // a notion of "current action", so clearing is safe in both cases.
       return {
         ...state,
         status: message.payload.status,
+        highlightedActionIndex: message.payload.status === 'replaying'
+          ? state.highlightedActionIndex
+          : null,
         clickerStats: message.payload.status === 'replaying'
           ? { active: true, count: 0, elapsedMs: 0 }
           : state.clickerStats,
