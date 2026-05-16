@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ArrowUpToLine, ArrowDownToLine, ScanSearch, Plus, Keyboard, Globe, Repeat2, Hourglass, X } from 'lucide-react';
+import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ArrowUpToLine, ArrowDownToLine, ScanSearch, Plus, Keyboard, Globe, Repeat, Repeat2, Hourglass, X } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -412,8 +412,10 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                       // Press Key × N — same dialog as Send Keystroke but opens with
                       // Repeat = 5 and a header that signals the row will fire multiple
                       // press cycles. Saves the user from inserting and then editing
-                      // RepeatCount when "press Enter 5x" is the explicit intent.
-                      { type: 'PressKeyN', label: 'Press Key × N…', icon: Repeat2 },
+                      // RepeatCount when "press Enter 5x" is the explicit intent. Uses
+                      // the single-arrow `Repeat` icon to stay distinct from RunProfile's
+                      // double-arrow `Repeat2` below.
+                      { type: 'PressKeyN', label: 'Press Key × N…', icon: Repeat },
                     ],
                   },
                   {

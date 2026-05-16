@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronsDownUp, ChevronsUpDown, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronsDownUp, ChevronsUpDown, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Code2, Files, Hourglass, Repeat, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -98,7 +98,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const [sendTextInsert, setSendTextInsert] = useState<{ insertIndex: number } | null>(null);
   const [runProfileInsert, setRunProfileInsert] = useState<{ insertIndex: number } | null>(null);
   const [keyCaptureInsert, setKeyCaptureInsert] = useState<{ insertIndex: number } | null>(null);
-  const [keystrokeCaptureInsert, setKeystrokeCaptureInsert] = useState<{ insertIndex: number } | null>(null);
+  // `mode` mirrors the Toolbar's keystrokeCaptureMode state — distinguishes the
+  // classic "Send Keystroke" flow (single press, Repeat = 1) from the "Press × N"
+  // flow (Repeat defaults to 5, header says "Press Key × N times"). Both reuse
+  // the same KeystrokeCaptureDialog component via its `mode` prop.
+  const [keystrokeCaptureInsert, setKeystrokeCaptureInsert] = useState<{ insertIndex: number; mode: 'keystroke' | 'press-n' } | null>(null);
   const { showToast } = useToast();
   const contextMenuEnabled = !buttonStates.recordingActive && !buttonStates.replayActive;
 
@@ -670,7 +674,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       return;
     }
     if (actionType === 'SendKeystroke') {
-      setKeystrokeCaptureInsert({ insertIndex });
+      setKeystrokeCaptureInsert({ insertIndex, mode: 'keystroke' });
+      closeContextMenu();
+      return;
+    }
+    if (actionType === 'PressKeyN') {
+      setKeystrokeCaptureInsert({ insertIndex, mode: 'press-n' });
       closeContextMenu();
       return;
     }
@@ -781,6 +790,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     { type: 'SendText', label: 'Send Text…', icon: Type },
     { type: 'SendKey', label: 'Send Key…', icon: Keyboard },
     { type: 'SendKeystroke', label: 'Send Keystroke…', icon: Keyboard },
+    // Press Key × N — uses the single-arrow `Repeat` icon to stay distinct from
+    // RunProfile's double-arrow `Repeat2`. Same dialog as SendKeystroke under
+    // the hood; the mode prop flips the defaults and labels.
+    { type: 'PressKeyN', label: 'Press Key × N…', icon: Repeat },
     { type: 'Pause', label: 'Pause', icon: Hourglass },
     { type: 'WaitImage', label: 'Wait for Image', icon: ScanSearch },
     { type: 'RunProfile', label: 'Run Profile', icon: Repeat2 },
@@ -1294,6 +1307,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
       {keystrokeCaptureInsert && (
         <KeystrokeCaptureDialog
+          mode={keystrokeCaptureInsert.mode}
           onConfirm={(keystroke, repeat, repeatDelayMs) => {
             // Only attach repeat fields when they diverge from the implicit defaults
             // (1, 30 ms). Keeps the bridge payload minimal for the common case and
