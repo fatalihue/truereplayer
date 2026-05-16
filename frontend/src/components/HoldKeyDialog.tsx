@@ -155,9 +155,19 @@ export function HoldKeyDialog({
                 step={100}
                 value={holdMs}
                 onChange={(e) => {
-                  const n = parseInt(e.target.value, 10);
-                  setHoldMs(Number.isFinite(n) ? clamp(n) : MIN_HOLD_MS);
+                  // Don't clamp to MIN_HOLD_MS during typing — that broke free-form entry
+                  // because every digit-typed value below 10 (a transient state while the
+                  // user is reaching for, say, "5000") got snapped to 10 instantly, and the
+                  // input rewrote itself before the user could finish. Allow 0..MAX in the
+                  // state and let onBlur / handleConfirm enforce the lower bound on commit.
+                  const raw = e.target.value;
+                  if (raw === '') { setHoldMs(0); return; }
+                  const n = parseInt(raw, 10);
+                  if (Number.isFinite(n) && n >= 0) {
+                    setHoldMs(Math.min(MAX_HOLD_MS, n));
+                  }
                 }}
+                onBlur={() => setHoldMs(v => clamp(v))}
                 className="w-20 h-6 px-1 text-center text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid tabular-nums"
               />
               <button

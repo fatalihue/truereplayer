@@ -1105,7 +1105,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             the × N badge so the two repeat-flavoured key actions look like
                             siblings. Click reopens HoldKeyDialog in edit mode (key +
                             duration pre-filled). Format: "1s" for clean second multiples,
-                            "1.5s" for fractional, "500ms" for sub-second. */}
+                            "1.5s" for fractional, "500ms" for sub-second. No "hold" text —
+                            the row's pill ("Hold Key") + the Timer icon already convey
+                            the action; the badge just communicates the duration. */}
                         {action.actionType === 'HoldKey' && (() => {
                           const ms = action.holdDurationMs && action.holdDurationMs > 0 ? action.holdDurationMs : 1000;
                           const label = ms >= 1000 && ms % 100 === 0
@@ -1120,7 +1122,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                                 setHoldKeyEdit({ index: idx });
                               }}
                             >
-                              · {label} hold
+                              {label}
                             </span>
                           );
                         })()}
