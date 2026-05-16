@@ -75,18 +75,31 @@ export function canExpand(row: ActionItem): boolean {
 
 /**
  * Returns the N pairs of KeyDown/KeyUp that reproduce `row` row-for-row when
- * replayed. The first KeyDown keeps the original `delay` (so the Keystroke's
- * pre-action wait is preserved); subsequent KeyDowns get the recorded
- * `repeatDelayMs` (or its 30 ms default) as their delay; every KeyUp gets 0
- * (Keystroke replays Down→Up tightly, no programmatic hold).
+ * replayed.
  *
- * The returned rows are Partial<ActionItem> so the C# side can fill in
+ *   • First KeyDown keeps the original `delay` (pre-action wait carried over
+ *     from the collapsed Keystroke).
+ *   • Subsequent KeyDowns use `repeatDelayMs` (or its 30 ms default) — that
+ *     IS the recorded gap between cycles.
+ *   • Every KeyUp also uses `repeatDelayMs`. Earlier we hard-coded 0 here,
+ *     but that broke round-tripping in Fixed-Delay mode: a user recording
+ *     with CustomDelay = 100 ms gets ALL rows (Down AND Up) at 100 ms, so
+ *     collapse stores 100 ms in repeatDelayMs and expand needs to put it
+ *     back on the Ups too. Natural-delay recordings lose the per-row hold
+ *     time on collapse, but using repeatDelayMs is a sane approximation
+ *     (uniform rhythm rather than zeros).
+ *   • `isSkipped` propagates from the source so a skipped Keystroke × N
+ *     expands to N skipped pairs (otherwise expand silently un-skipped the
+ *     work, hiding the user's intent).
+ *
+ * The returned rows are Partial<ActionItem> so the C# side fills in
  * RowNumber/etc on deserialise — the caller passes them straight into the
  * `actions:replaceRange` payload.
  */
 export function expandKeystroke(row: ActionItem): Partial<ActionItem>[] {
   const count = row.repeatCount ?? 1;
   const gap = row.repeatDelayMs ?? 30;
+  const skip = !!row.isSkipped;
   const out: Partial<ActionItem>[] = [];
   for (let i = 0; i < count; i++) {
     out.push({
@@ -94,12 +107,14 @@ export function expandKeystroke(row: ActionItem): Partial<ActionItem>[] {
       key: row.key,
       delay: i === 0 ? row.delay : gap,
       comment: '',
+      isSkipped: skip,
     });
     out.push({
       actionType: 'KeyUp',
       key: row.key,
-      delay: 0,
+      delay: gap,
       comment: '',
+      isSkipped: skip,
     });
   }
   return out;
