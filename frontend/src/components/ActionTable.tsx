@@ -942,11 +942,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     </td>
                   )}
 
-                  {/* Checkbox — drag handle shows on row hover as an affordance, swapping
-                      in for the checkbox visually. Pure visual hint; the entire row is the
-                      actual drag target (handleRowMouseDown). */}
+                  {/* Checkbox — the entire row is the drag target (handleRowMouseDown);
+                      the cursor switches to grab/grabbing on hover/drag, which is
+                      affordance enough. An earlier draft swapped in a GripVertical icon
+                      on hover but it competed visually with the checkbox and added
+                      noise to a dense grid. */}
                   <td className="w-7">
-                    <div className="flex items-center justify-center relative">
+                    <div className="flex items-center justify-center">
                       <Checkbox
                         checked={isSelected}
                         stopPropagation
@@ -959,13 +961,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           });
                         }}
                       />
-                      {isDraggable && !isSelected && (
-                        <GripVertical
-                          size={12}
-                          className="absolute pointer-events-none text-text-disabled opacity-0 group-hover:opacity-70 transition-opacity bg-bg-elevated rounded"
-                          aria-hidden="true"
-                        />
-                      )}
                     </div>
                   </td>
 
