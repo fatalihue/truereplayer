@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -459,6 +459,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const dropTargetRef = useRef<number | null>(null);
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
   const DRAG_THRESHOLD = 5;
+  // Auto-scroll zone: when the cursor is within this many pixels of the scroll container's
+  // top or bottom edge during a drag, scroll the container automatically. Without this,
+  // reordering across long lists (50+ actions) is impossible without dropping and re-grabbing.
+  const AUTOSCROLL_ZONE = 40;
+  const AUTOSCROLL_MAX_SPEED = 14; // px per animation frame
+  const autoScrollRaf = useRef<number | null>(null);
+  const cursorY = useRef(0);
 
   const handleRowMouseDown = useCallback((idx: number, e: React.MouseEvent) => {
     if (!isDraggable || e.button !== 0) return;
@@ -473,6 +480,53 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   }, [isDraggable, selectedIndices]);
 
   useEffect(() => {
+    // Recompute drop target whenever the cursor moves OR the scroll container scrolls
+    // (auto-scroll changes which row is under the cursor without firing mousemove).
+    const recomputeDropTarget = (clientY: number) => {
+      if (!tbodyRef.current) return;
+      const rows = tbodyRef.current.querySelectorAll('tr');
+      let target: number | null = null;
+      for (let i = 0; i < rows.length; i++) {
+        const rect = rows[i].getBoundingClientRect();
+        if (clientY < rect.top + rect.height / 2) {
+          target = i;
+          break;
+        }
+        if (i === rows.length - 1) {
+          target = i + 1;
+        }
+      }
+      dropTargetRef.current = target;
+      setDropTarget(target);
+    };
+
+    // Auto-scroll loop — runs only while the cursor sits in a border zone of the
+    // scroll container. Speed ramps up the closer the cursor is to the edge.
+    const tickAutoScroll = () => {
+      const container = scrollRef.current;
+      if (!container || !dragState.current?.started) {
+        autoScrollRaf.current = null;
+        return;
+      }
+      const rect = container.getBoundingClientRect();
+      const y = cursorY.current;
+      let delta = 0;
+      if (y < rect.top + AUTOSCROLL_ZONE) {
+        const intensity = (rect.top + AUTOSCROLL_ZONE - y) / AUTOSCROLL_ZONE;
+        delta = -AUTOSCROLL_MAX_SPEED * Math.min(1, Math.max(0, intensity));
+      } else if (y > rect.bottom - AUTOSCROLL_ZONE) {
+        const intensity = (y - (rect.bottom - AUTOSCROLL_ZONE)) / AUTOSCROLL_ZONE;
+        delta = AUTOSCROLL_MAX_SPEED * Math.min(1, Math.max(0, intensity));
+      }
+      if (delta !== 0) {
+        container.scrollTop += delta;
+        recomputeDropTarget(y);
+        autoScrollRaf.current = requestAnimationFrame(tickAutoScroll);
+      } else {
+        autoScrollRaf.current = null;
+      }
+    };
+
     const handleMouseMove = (e: MouseEvent) => {
       if (!dragState.current || !tbodyRef.current) return;
       // Check threshold before starting drag
@@ -485,21 +539,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         setDragIndices(dragState.current.indices);
       }
       e.preventDefault(); // Prevent text selection while dragging
-      // Find which row the cursor is over
-      const rows = tbodyRef.current.querySelectorAll('tr');
-      let target: number | null = null;
-      for (let i = 0; i < rows.length; i++) {
-        const rect = rows[i].getBoundingClientRect();
-        if (e.clientY < rect.top + rect.height / 2) {
-          target = i;
-          break;
-        }
-        if (i === rows.length - 1) {
-          target = i + 1;
-        }
+      cursorY.current = e.clientY;
+      recomputeDropTarget(e.clientY);
+      // Kick off the auto-scroll loop if the cursor is near an edge and we aren't
+      // already scrolling. The loop self-terminates when the cursor leaves the zone.
+      if (autoScrollRaf.current === null) {
+        autoScrollRaf.current = requestAnimationFrame(tickAutoScroll);
       }
-      dropTargetRef.current = target;
-      setDropTarget(target);
     };
 
     const handleMouseUp = () => {
@@ -519,13 +565,38 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
       dragState.current = null;
       dropTargetRef.current = null;
+      if (autoScrollRaf.current !== null) {
+        cancelAnimationFrame(autoScrollRaf.current);
+        autoScrollRaf.current = null;
+      }
+    };
+
+    // Esc cancels an in-progress drag — reverts state without committing the reorder.
+    // Standard DnD ergonomic; without it the user is stuck until they release the button.
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !dragState.current?.started) return;
+      e.stopPropagation();
+      setDragIndices(null);
+      setDropTarget(null);
+      dragState.current = null;
+      dropTargetRef.current = null;
+      if (autoScrollRaf.current !== null) {
+        cancelAnimationFrame(autoScrollRaf.current);
+        autoScrollRaf.current = null;
+      }
     };
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('keydown', handleKeyDown, true);
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('keydown', handleKeyDown, true);
+      if (autoScrollRaf.current !== null) {
+        cancelAnimationFrame(autoScrollRaf.current);
+        autoScrollRaf.current = null;
+      }
     };
   }, [send]);
 
@@ -726,7 +797,16 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   // the accent-blue "running" tint, plus a soft pulse to mirror the status-bar
                   // PAUSED indicator. Other highlight states fall back to the existing rules.
                   style={isPausedHere ? { backgroundColor: 'color-mix(in srgb, var(--color-action-pause-fg) 18%, transparent)' } : undefined}
-                  className={`group h-row border-b border-border-subtle transition-colors cursor-default relative ${
+                  className={`group h-row border-b border-border-subtle transition-colors relative ${
+                    // Cursor signals draggability: grabbing during an active drag, grab on
+                    // hover when the row can be dragged, default otherwise (e.g. while
+                    // recording/replaying or editing a cell).
+                    dragIndices !== null
+                      ? 'cursor-grabbing'
+                      : isDraggable
+                        ? 'cursor-grab'
+                        : 'cursor-default'
+                  } ${
                     isDragged ? 'opacity-40' : ''
                   } ${
                     isSkipped ? 'opacity-40 [&_td]:line-through [&_td]:decoration-text-disabled [&_td]:decoration-[1px]' : ''
@@ -754,9 +834,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     </td>
                   )}
 
-                  {/* Checkbox */}
+                  {/* Checkbox — drag handle shows on row hover as an affordance, swapping
+                      in for the checkbox visually. Pure visual hint; the entire row is the
+                      actual drag target (handleRowMouseDown). */}
                   <td className="w-7">
-                    <div className="flex items-center justify-center">
+                    <div className="flex items-center justify-center relative">
                       <Checkbox
                         checked={isSelected}
                         stopPropagation
@@ -769,6 +851,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           });
                         }}
                       />
+                      {isDraggable && !isSelected && (
+                        <GripVertical
+                          size={12}
+                          className="absolute pointer-events-none text-text-disabled opacity-0 group-hover:opacity-70 transition-opacity bg-bg-elevated rounded"
+                          aria-hidden="true"
+                        />
+                      )}
                     </div>
                   </td>
 
