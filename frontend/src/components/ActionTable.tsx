@@ -1,6 +1,8 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronsDownUp, ChevronsUpDown, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical } from 'lucide-react';
+import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
+import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -701,6 +703,72 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     setSelectedIndices(new Set());
     closeContextMenu();
   }, [contextMenu, selectedIndices, send, closeContextMenu]);
+
+  // Resolve the "effective selection" for context-menu operations the same way
+  // Duplicate/Delete do: if the right-clicked row is part of the multi-select,
+  // operate on the whole selection; otherwise, just the right-clicked row. This
+  // keeps right-click and bulk-action behaviours consistent across the menu.
+  const contextSelectionIndices = useCallback((): number[] => {
+    if (!contextMenu) return [];
+    return selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
+      ? Array.from(selectedIndices).sort((a, b) => a - b)
+      : [contextMenu.rowIndex];
+  }, [contextMenu, selectedIndices]);
+
+  // Collapse: gather the contiguous-validated selection of Down/Up pairs and
+  // splice them into a single Keystroke × N row. Selection collapses to the
+  // resulting row index so the user sees the transformation result highlighted.
+  const handleCollapseToRepeat = useCallback(() => {
+    if (!contextMenu) return;
+    const indices = contextSelectionIndices();
+    // Contiguity is required so we can pass a single (start, count) range to
+    // replaceRange — gaps would force multiple operations and a confusing undo.
+    for (let i = 1; i < indices.length; i++) {
+      if (indices[i] !== indices[i - 1] + 1) return;
+    }
+    const rows = indices.map(i => actions[i]);
+    const result = canCollapse(rows);
+    if (!result) return;
+    const replacement: Partial<ActionItem>[] = [{
+      actionType: 'Keystroke',
+      key: result.key,
+      delay: result.delay,
+      repeatCount: result.count,
+      repeatDelayMs: result.repeatDelayMs,
+      comment: '',
+    }];
+    send({ type: 'actions:replaceRange', payload: {
+      startIndex: indices[0],
+      count: indices.length,
+      replacement,
+    }});
+    // Pin selection on the new single row. The actions:updated round-trip will
+    // re-render with the new layout in the next tick.
+    setSelectedIndices(new Set([indices[0]]));
+    closeContextMenu();
+  }, [contextMenu, contextSelectionIndices, actions, send, closeContextMenu]);
+
+  // Expand: only meaningful for a single-row selection of a Keystroke × N. The
+  // resulting N pairs become the new selection so the user can immediately
+  // operate on the expanded form (drag, edit, delete).
+  const handleExpandRepeat = useCallback(() => {
+    if (!contextMenu) return;
+    const indices = contextSelectionIndices();
+    if (indices.length !== 1) return;
+    const idx = indices[0];
+    const row = actions[idx];
+    if (!canExpand(row)) return;
+    const replacement = expandKeystroke(row);
+    send({ type: 'actions:replaceRange', payload: {
+      startIndex: idx,
+      count: 1,
+      replacement,
+    }});
+    const newSel = new Set<number>();
+    for (let i = 0; i < replacement.length; i++) newSel.add(idx + i);
+    setSelectedIndices(newSel);
+    closeContextMenu();
+  }, [contextMenu, contextSelectionIndices, actions, send, closeContextMenu]);
 
   // Submenu items — mirrors the toolbar's Add Action dropdown so users see the
   // same vocabulary regardless of entry point. Click x3 + KeyPress + Scrolls were
@@ -1560,6 +1628,55 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                 }
                 {isSkipped ? 'Enable' : 'Skip during replay'}
               </button>
+            );
+          })()}
+
+          {/* Collapse to × N / Expand × N — fold consecutive Down/Up pairs of the
+              same key into one Keystroke × N row (and back). Both items render
+              always, with disabled state styled cinza when the validators fail,
+              so users discover the feature even when their current selection
+              wouldn't qualify. v1 blocks modifier combos in the Expand path. */}
+          {(() => {
+            const indices = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
+              ? Array.from(selectedIndices).sort((a, b) => a - b)
+              : [contextMenu.rowIndex];
+            // Contiguity check — gaps in the multi-select disqualify collapse.
+            let contiguous = true;
+            for (let i = 1; i < indices.length; i++) {
+              if (indices[i] !== indices[i - 1] + 1) { contiguous = false; break; }
+            }
+            const rows = indices.map(i => actions[i]).filter(Boolean);
+            const collapseOk = contiguous && rows.length > 0 && canCollapse(rows) !== null;
+            const expandOk = indices.length === 1 && rows.length === 1 && canExpand(rows[0]);
+            return (
+              <>
+                <button
+                  onMouseEnter={() => setActiveSubmenu(null)}
+                  onClick={collapseOk ? handleCollapseToRepeat : undefined}
+                  disabled={!collapseOk}
+                  className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-xs transition-colors ${
+                    collapseOk
+                      ? 'text-text-primary hover:bg-bg-elevated cursor-pointer'
+                      : 'text-text-disabled cursor-default'
+                  }`}
+                >
+                  <ChevronsDownUp size={13} className={collapseOk ? 'text-text-tertiary' : 'text-text-disabled'} />
+                  Collapse to × N
+                </button>
+                <button
+                  onMouseEnter={() => setActiveSubmenu(null)}
+                  onClick={expandOk ? handleExpandRepeat : undefined}
+                  disabled={!expandOk}
+                  className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-xs transition-colors ${
+                    expandOk
+                      ? 'text-text-primary hover:bg-bg-elevated cursor-pointer'
+                      : 'text-text-disabled cursor-default'
+                  }`}
+                >
+                  <ChevronsUpDown size={13} className={expandOk ? 'text-text-tertiary' : 'text-text-disabled'} />
+                  Expand × N
+                </button>
+              </>
             );
           })()}
 

@@ -339,6 +339,11 @@ export type OutgoingMessage =
   // the regular "Send Keystroke" path which creates a single-press row (RepeatCount = 1).
   | { type: 'actions:insertKeystroke'; payload: { keystroke: string; insertIndex: number; repeat?: number; repeatDelayMs?: number } }
   | { type: 'actions:duplicate'; payload: { indices: number[] } }
+  // Atomic replace of a contiguous range — used by the "Collapse to × N" /
+  // "Expand × N" flow so N rows in becomes M rows out under one undo step.
+  // The bridge handler validates bounds; replacement is the new row(s) to splice
+  // in at startIndex after removing `count` existing rows.
+  | { type: 'actions:replaceRange'; payload: { startIndex: number; count: number; replacement: Partial<ActionItem>[] } }
   | { type: 'actions:addRunProfile'; payload: { profileName: string; repeatCount: number; insertIndex?: number } }
   | { type: 'actions:editRunProfile'; payload: { index: number; profileName: string; repeatCount: number } }
   | { type: 'waitimage:recapture'; payload: { index: number } }

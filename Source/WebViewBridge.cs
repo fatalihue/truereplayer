@@ -382,6 +382,7 @@ namespace TrueReplayer
                     case "actions:paste": HandleActionsPaste(payload); break;
                     case "actions:edit": HandleActionsEdit(payload); break;
                     case "actions:delete": HandleActionsDelete(payload); break;
+                    case "actions:replaceRange": HandleActionsReplaceRange(payload); break;
                     case "actions:addSendText": HandleAddSendText(payload); break;
                     case "actions:editSendText": HandleEditSendText(payload); break;
                     case "actions:bulkUpdateDelay": HandleBulkUpdateDelay(payload); break;
@@ -1465,6 +1466,37 @@ namespace TrueReplayer
             }
 
             HasUnsavedChanges = true;
+            mainController.UpdateButtonStates();
+        }
+
+        /// <summary>
+        /// Atomically replace a contiguous range of actions with a new list. Used by
+        /// the "Collapse to × N" / "Expand × N" flow on the frontend: N rows in
+        /// becomes M rows out under a single undo step. Splitting this into a delete
+        /// + insert would let the user Ctrl+Z to a partially-collapsed mid-state
+        /// (broken Down/Up alternation), so a single PushUndoState is essential.
+        /// </summary>
+        private void HandleActionsReplaceRange(JsonElement payload)
+        {
+            PushUndoState();
+            int start = payload.GetProperty("startIndex").GetInt32();
+            int count = payload.GetProperty("count").GetInt32();
+            var replacementEl = payload.GetProperty("replacement");
+
+            // Bounds — guard against malformed payloads. A bad start/count would
+            // either no-op (clamp to zero) or throw on RemoveAt; we no-op silently
+            // since the frontend has already validated the selection by this point.
+            if (start < 0 || count <= 0 || start + count > actions.Count) return;
+
+            var newItems = JsonSerializer.Deserialize<List<ActionItem>>(
+                replacementEl.GetRawText(), JsonOptions) ?? new List<ActionItem>();
+
+            for (int i = 0; i < count; i++) actions.RemoveAt(start);
+            for (int i = 0; i < newItems.Count; i++) actions.Insert(start + i, newItems[i]);
+
+            for (int i = 0; i < actions.Count; i++) actions[i].RowNumber = i + 1;
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
             mainController.UpdateButtonStates();
         }
 
