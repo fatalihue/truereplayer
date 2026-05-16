@@ -116,6 +116,10 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
   const [showKeyCapture, setShowKeyCapture] = useState(false);
   const keyCaptureInsertIndex = useRef<number>(0);
   const [showKeystrokeCapture, setShowKeystrokeCapture] = useState(false);
+  // `keystrokeCaptureMode` differentiates the two menu entries that share this dialog:
+  //   "keystroke" — opened by "Send Keystroke…" (single combo, repeat = 1)
+  //   "press-n"   — opened by "Press Key × N"  (repeating combo, repeat = 5 default)
+  const [keystrokeCaptureMode, setKeystrokeCaptureMode] = useState<'keystroke' | 'press-n'>('keystroke');
   const keystrokeCaptureInsertIndex = useRef<number>(0);
   const colDropdownRef = useRef<HTMLDivElement>(null);
   const addActionsRef = useRef<HTMLDivElement>(null);
@@ -405,6 +409,11 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                       // combo string; the replay engine expands it to the proper
                       // modifier-down → key-tap → modifier-up sequence at run time.
                       { type: 'SendKeystroke', label: 'Send Keystroke…', icon: Keyboard },
+                      // Press Key × N — same dialog as Send Keystroke but opens with
+                      // Repeat = 5 and a header that signals the row will fire multiple
+                      // press cycles. Saves the user from inserting and then editing
+                      // RepeatCount when "press Enter 5x" is the explicit intent.
+                      { type: 'PressKeyN', label: 'Press Key × N…', icon: Repeat2 },
                     ],
                   },
                   {
@@ -444,6 +453,13 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                           }
                           if (item.type === 'SendKeystroke') {
                             keystrokeCaptureInsertIndex.current = insertIndex;
+                            setKeystrokeCaptureMode('keystroke');
+                            setShowKeystrokeCapture(true);
+                            return;
+                          }
+                          if (item.type === 'PressKeyN') {
+                            keystrokeCaptureInsertIndex.current = insertIndex;
+                            setKeystrokeCaptureMode('press-n');
                             setShowKeystrokeCapture(true);
                             return;
                           }
@@ -710,11 +726,25 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
 
       {/* Send Keystroke… combo capture dialog. Same insertIndex-stashing pattern as
           Send Key above. Produces a single Keystroke action holding the "+"-joined
-          combo string; the replay engine expands it at run time. */}
+          combo string; the replay engine expands it at run time.
+
+          The same component renders "Press × N" via the `mode` prop — only the
+          defaults and labels differ; the bridge message is the same. We track the
+          chosen mode in state so both menu entries route through one mount. */}
       {showKeystrokeCapture && (
         <KeystrokeCaptureDialog
-          onConfirm={(keystroke) => {
-            send({ type: 'actions:insertKeystroke', payload: { keystroke, insertIndex: keystrokeCaptureInsertIndex.current } });
+          mode={keystrokeCaptureMode}
+          onConfirm={(keystroke, repeat, repeatDelayMs) => {
+            // Mirror the action-table insert: omit `repeat`/`repeatDelayMs` for the
+            // single-press default so the bridge payload stays minimal and the C#
+            // side leaves RepeatDelayMs as null (clean profile JSON).
+            const payload: { keystroke: string; insertIndex: number; repeat?: number; repeatDelayMs?: number } =
+              { keystroke, insertIndex: keystrokeCaptureInsertIndex.current };
+            if (repeat > 1) {
+              payload.repeat = repeat;
+              if (repeatDelayMs !== 30) payload.repeatDelayMs = repeatDelayMs;
+            }
+            send({ type: 'actions:insertKeystroke', payload });
             setShowKeystrokeCapture(false);
           }}
           onClose={() => setShowKeystrokeCapture(false)}

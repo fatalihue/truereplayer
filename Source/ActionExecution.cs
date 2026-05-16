@@ -887,7 +887,24 @@ namespace TrueReplayer.Services
                     {
                         case "KeyDown": SimulateKey(action.Key, true); break;
                         case "KeyUp": SimulateKey(action.Key, false); break;
-                        case "Keystroke": SimulateKeystroke(action.Key); break;
+                        case "Keystroke": {
+                            // RepeatCount > 1 → emit N consecutive press cycles with
+                            // RepeatDelayMs gap between them. Clamped 1..999 (same range
+                            // as RunProfile). Cancellation checked between iterations so
+                            // the user's Stop hotkey aborts a long "× 999" cleanly instead
+                            // of waiting for the whole burst to finish.
+                            int repeats = Math.Max(1, Math.Min(999, action.RepeatCount));
+                            int gap = Math.Max(0, Math.Min(5000, action.RepeatDelayMs ?? ActionItem.DefaultRepeatDelayMs));
+                            for (int r = 0; r < repeats; r++) {
+                                if (token.IsCancellationRequested) break;
+                                SimulateKeystroke(action.Key);
+                                if (r < repeats - 1 && gap > 0) {
+                                    try { await Task.Delay(gap, token); }
+                                    catch (OperationCanceledException) { break; }
+                                }
+                            }
+                            break;
+                        }
                         case "LeftClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN); _simLeftDown = true; break;
                         case "LeftClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP); _simLeftDown = false; break;
                         case "RightClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTDOWN); _simRightDown = true; break;

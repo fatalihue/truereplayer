@@ -18,6 +18,10 @@ export interface ActionItem {
   newTab: boolean;
   isSkipped: boolean;
   repeatCount?: number;
+  // Keystroke action: ms gap between consecutive press cycles when repeatCount > 1.
+  // null/undefined = use the global default (30 ms; matches ActionItem.DefaultRepeatDelayMs
+  // on the C# side). Explicit 0 = back-to-back. Ignored when repeatCount == 1.
+  repeatDelayMs?: number | null;
   // #6 — BrowserWaitElement: appears | disappears | enabled | text-match
   waitMode?: string | null;
   // #7 — BrowserNavigate: optional URL pattern + post-navigation selector
@@ -327,7 +331,10 @@ export type OutgoingMessage =
   // creates ONE row holding the whole combo as a "+"-joined string. The replay engine
   // expands it to the proper modifier-down → key-down → key-up → modifier-up sequence at
   // run time. Captured by KeystrokeCaptureDialog from a real keypress.
-  | { type: 'actions:insertKeystroke'; payload: { keystroke: string; insertIndex: number } }
+  // `repeat` / `repeatDelayMs` are optional — present when the "Press × N" insert flow
+  // dispatches this message so the new row lands with RepeatCount preset; absent for
+  // the regular "Send Keystroke" path which creates a single-press row (RepeatCount = 1).
+  | { type: 'actions:insertKeystroke'; payload: { keystroke: string; insertIndex: number; repeat?: number; repeatDelayMs?: number } }
   | { type: 'actions:duplicate'; payload: { indices: number[] } }
   | { type: 'actions:addRunProfile'; payload: { profileName: string; repeatCount: number; insertIndex?: number } }
   | { type: 'actions:editRunProfile'; payload: { index: number; profileName: string; repeatCount: number } }

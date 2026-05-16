@@ -87,9 +87,26 @@ namespace TrueReplayer.Models
         public bool IsSkipped { get; set; }
 
         // RunProfile action: how many times to invoke the called profile back-to-back.
-        // 1 means a single call. Default 1. Range enforced at edit time (1..999).
+        // Keystroke action: how many press-cycles (down→up) to emit consecutively, so a
+        // user can express "press Enter 5×" as ONE row instead of 5 Down/Up pairs.
+        // 1 means a single call/press. Default 1. Range enforced at edit time (1..999).
         // Always serialized so backward-load of old profiles uses the property's default of 1.
         public int RepeatCount { get; set; } = 1;
+
+        // Keystroke action with RepeatCount > 1: ms gap between consecutive press cycles.
+        // null = use the global default (DefaultRepeatDelayMs = 30 ms). Explicit 0 = back-
+        // to-back (apps may merge into a single perceived press). 30 ms is tuned as the
+        // natural rhythm so games/apps register each press separately. Clamped 0..5000
+        // on edit. Ignored when RepeatCount == 1 (no gap to apply).
+        // Nullable + WhenWritingNull keeps profiles written before this feature schema-clean
+        // AND lets us distinguish "user wants the default" from "user explicitly chose 30".
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? RepeatDelayMs { get; set; }
+
+        // Default gap between Keystroke repeat cycles when RepeatDelayMs is null/unset.
+        // Kept as a static so the replay engine, the WebViewBridge edit handler, and the
+        // frontend dialog can all reference the same value via the messages they exchange.
+        public const int DefaultRepeatDelayMs = 30;
 
         [System.Text.Json.Serialization.JsonIgnore]
         public DateTime RecordedAt { get; set; } = DateTime.UtcNow;

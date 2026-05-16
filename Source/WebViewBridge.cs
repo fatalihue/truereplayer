@@ -1378,6 +1378,19 @@ namespace TrueReplayer
                 case "waitImageClickOnMatch":
                     action.WaitImageClickOnMatch = value == "true";
                     break;
+                case "repeat":
+                    // Keystroke + RunProfile both use RepeatCount. Clamp 1..999 matches
+                    // the range advertised by every editor surface (inline badge, dialogs).
+                    if (int.TryParse(value, out int rep))
+                        action.RepeatCount = Math.Max(1, Math.Min(999, rep));
+                    break;
+                case "repeatDelayMs":
+                    // Empty → null (= "use the global default"). Explicit number → clamp
+                    // 0..5000 ms. Only Keystroke consults this field; RunProfile ignores
+                    // it but storing it is harmless (serializer skips when null).
+                    if (string.IsNullOrEmpty(value)) action.RepeatDelayMs = null;
+                    else if (int.TryParse(value, out int rd)) action.RepeatDelayMs = Math.Max(0, Math.Min(5000, rd));
+                    break;
                 case "waitImageSearchRegion":
                     // Value format: "x,y,w,h" (all ints) — or empty string to clear.
                     if (string.IsNullOrEmpty(value)) {
@@ -1839,6 +1852,17 @@ namespace TrueReplayer
             if (string.IsNullOrEmpty(keystroke)) return;
             if (insertIndex < 0 || insertIndex > actions.Count) insertIndex = actions.Count;
 
+            // Optional repeat fields — present when the "Press × N" insert flow is used,
+            // omitted by the regular "Send Keystroke" path which keeps RepeatCount = 1.
+            // Clamped to the same range the inline editor enforces (1..999 for count,
+            // 0..5000 for the gap) so a malformed payload can't bypass the UI limits.
+            int repeat = 1;
+            if (payload.TryGetProperty("repeat", out var rEl) && rEl.ValueKind == JsonValueKind.Number)
+                repeat = Math.Max(1, Math.Min(999, rEl.GetInt32()));
+            int? repeatDelay = null;
+            if (payload.TryGetProperty("repeatDelayMs", out var dEl) && dEl.ValueKind == JsonValueKind.Number)
+                repeatDelay = Math.Max(0, Math.Min(5000, dEl.GetInt32()));
+
             int delay = int.TryParse(CustomDelay, out var pd) ? pd : 100;
             // ONE row with the whole combo. ExecuteKeystroke in ActionExecution parses
             // the "+"-joined string at replay time and emits the proper modifier-down →
@@ -1850,6 +1874,11 @@ namespace TrueReplayer
                 ActionType = "Keystroke",
                 Key = keystroke,
                 Delay = delay,
+                RepeatCount = repeat,
+                // Only persist the gap when the user actually wants repeats — keeps the
+                // single-press case schema-clean (the WhenWritingNull JSON ignore drops
+                // it from the serialized profile when it's null).
+                RepeatDelayMs = repeat > 1 ? repeatDelay : null,
             });
             for (int i = 0; i < actions.Count; i++)
                 actions[i].RowNumber = i + 1;

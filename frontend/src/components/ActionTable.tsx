@@ -984,6 +984,23 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         {action.actionType === 'SendText'
                           ? <SendTextPreview text={action.key} />
                           : displayKey}
+                        {/* × N badge for Keystroke actions with repeatCount > 1.
+                            Click opens the recapture dialog so the user can adjust the
+                            count (and gap, under Advanced) without leaving the grid.
+                            stopPropagation prevents the parent span's double-click handler
+                            from also firing — single click on the badge is enough. */}
+                        {action.actionType === 'Keystroke' && (action.repeatCount ?? 1) > 1 && (
+                          <span
+                            className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold tabular-nums bg-[color-mix(in_srgb,var(--color-accent)_18%,transparent)] text-accent-light hover:bg-[color-mix(in_srgb,var(--color-accent)_28%,transparent)] cursor-pointer transition-colors"
+                            title={`Press cycles: ${action.repeatCount}${action.repeatDelayMs != null ? ` · ${action.repeatDelayMs} ms gap` : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setKeystrokeEdit({ index: idx });
+                            }}
+                          >
+                            × {action.repeatCount}
+                          </span>
+                        )}
                       </span>
                     ) : null}
                   </td>
@@ -1146,18 +1163,33 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         />
       )}
 
-      {keystrokeEdit && (
-        <KeystrokeCaptureDialog
-          onConfirm={(keystroke) => {
-            // No dedicated "editKeystroke" bridge message — just rewrite the .key field
-            // via the generic edit channel. The action's actionType stays "Keystroke",
-            // and the replay parser handles whatever combo string lands in .key.
-            send({ type: 'actions:edit', payload: { index: keystrokeEdit.index, field: 'key', value: keystroke } });
-            setKeystrokeEdit(null);
-          }}
-          onClose={() => setKeystrokeEdit(null)}
-        />
-      )}
+      {keystrokeEdit && (() => {
+        const editing = actions[keystrokeEdit.index];
+        const curRepeat = editing?.repeatCount ?? 1;
+        const curDelay = editing?.repeatDelayMs ?? 30;
+        return (
+          <KeystrokeCaptureDialog
+            initialRepeat={curRepeat}
+            initialRepeatDelayMs={curDelay}
+            onConfirm={(keystroke, repeat, repeatDelayMs) => {
+              // Three independent edits routed through the generic actions:edit channel.
+              // Only emit changes — saves an undo step per untouched field and avoids
+              // marking the profile dirty when the user just confirmed without changes.
+              if (keystroke !== editing?.key) {
+                send({ type: 'actions:edit', payload: { index: keystrokeEdit.index, field: 'key', value: keystroke } });
+              }
+              if (repeat !== curRepeat) {
+                send({ type: 'actions:edit', payload: { index: keystrokeEdit.index, field: 'repeat', value: String(repeat) } });
+              }
+              if (repeatDelayMs !== curDelay) {
+                send({ type: 'actions:edit', payload: { index: keystrokeEdit.index, field: 'repeatDelayMs', value: String(repeatDelayMs) } });
+              }
+              setKeystrokeEdit(null);
+            }}
+            onClose={() => setKeystrokeEdit(null)}
+          />
+        );
+      })()}
 
       {runProfileEdit && (
         <RunProfileDialog
@@ -1198,8 +1230,17 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
       {keystrokeCaptureInsert && (
         <KeystrokeCaptureDialog
-          onConfirm={(keystroke) => {
-            send({ type: 'actions:insertKeystroke', payload: { keystroke, insertIndex: keystrokeCaptureInsert.insertIndex } });
+          onConfirm={(keystroke, repeat, repeatDelayMs) => {
+            // Only attach repeat fields when they diverge from the implicit defaults
+            // (1, 30 ms). Keeps the bridge payload minimal for the common case and
+            // mirrors what HandleInsertKeystroke does on the C# side with WhenWritingNull.
+            const payload: { keystroke: string; insertIndex: number; repeat?: number; repeatDelayMs?: number } =
+              { keystroke, insertIndex: keystrokeCaptureInsert.insertIndex };
+            if (repeat > 1) {
+              payload.repeat = repeat;
+              if (repeatDelayMs !== 30) payload.repeatDelayMs = repeatDelayMs;
+            }
+            send({ type: 'actions:insertKeystroke', payload });
             setKeystrokeCaptureInsert(null);
           }}
           onClose={() => setKeystrokeCaptureInsert(null)}

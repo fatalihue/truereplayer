@@ -1,10 +1,26 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Keyboard } from 'lucide-react';
+import { Keyboard, Minus, Plus } from 'lucide-react';
 
 interface KeystrokeCaptureDialogProps {
-  onConfirm: (keystroke: string) => void;
+  // `mode` controls the dialog flavour:
+  //   "keystroke" — classic "Send Keystroke…" flow, Repeat defaults to 1 and is collapsed
+  //                 under an "Advanced" toggle so the common case stays uncluttered.
+  //   "press-n"   — "Press × N" insert flow, Repeat defaults to 5 and is rendered
+  //                 prominently so the count is the first thing the user sees.
+  // Both modes commit to the SAME `actions:insertKeystroke` message — they only differ
+  // in defaults and UI emphasis.
+  mode?: 'keystroke' | 'press-n';
+  // Initial values used when re-opening the dialog to edit an existing Keystroke row
+  // (recapture flow in ActionTable). Omitted on insert flows — defaults apply.
+  initialRepeat?: number;
+  initialRepeatDelayMs?: number;
+  onConfirm: (keystroke: string, repeat: number, repeatDelayMs: number) => void;
   onClose: () => void;
 }
+
+const DEFAULT_REPEAT_DELAY_MS = 30; // mirrors ActionItem.DefaultRepeatDelayMs on the C# side
+const MAX_REPEAT = 999;             // mirrors the clamp range in HandleActionsEdit/InsertKeystroke
+const MAX_REPEAT_DELAY = 5000;
 
 /**
  * Captures a keyboard combo (e.g. "Ctrl+Alt+T", "Alt+Tab", "Shift+F10") and reports it
@@ -105,15 +121,40 @@ function keystrokeDisplay(keystroke: string): string {
   return keystroke.replace(/\bVK_93\b/, 'Menu');
 }
 
-export function KeystrokeCaptureDialog({ onConfirm, onClose }: KeystrokeCaptureDialogProps) {
+export function KeystrokeCaptureDialog({
+  mode = 'keystroke',
+  initialRepeat,
+  initialRepeatDelayMs,
+  onConfirm,
+  onClose,
+}: KeystrokeCaptureDialogProps) {
+  const isPressN = mode === 'press-n';
   const [captured, setCaptured] = useState<string | null>(null);
+  // Initial value priority: explicit `initialRepeat` (edit flow) > mode default
+  // (press-n = 5 to make the feature obvious, classic keystroke = 1).
+  const [repeat, setRepeat] = useState<number>(initialRepeat ?? (isPressN ? 5 : 1));
+  // Delay between cycles. Starts at the action's stored value (edit) or the C#
+  // default (insert). Always rendered — the input is disabled when repeat == 1
+  // since there's nothing to space against, but staying visible keeps the dialog
+  // a fixed size.
+  const [repeatDelay, setRepeatDelay] = useState<number>(initialRepeatDelayMs ?? DEFAULT_REPEAT_DELAY_MS);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     containerRef.current?.focus();
   }, []);
 
+  // Clamp helper used by both the spinner buttons and the direct numeric inputs so
+  // pasting / typing a wild value (-99, 50000, NaN) lands in the legal range.
+  const clampRepeat = (v: number) => Math.max(1, Math.min(MAX_REPEAT, Math.floor(v)));
+  const clampDelay = (v: number) => Math.max(0, Math.min(MAX_REPEAT_DELAY, Math.floor(v)));
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // If focus is on a numeric input, let it process keystrokes normally — we shouldn't
+    // hijack digit presses to "capture" them as a key combo. Stops the case where typing
+    // "5" in the Repeat field would re-commit the captured combo with key "5".
+    const target = e.target as HTMLElement;
+    if (target?.tagName === 'INPUT') return;
     // Escape closes the dialog if no combo is captured yet. Once a combo is captured,
     // pressing Escape RE-captures (replaces with a new combo) — same as KeyCaptureDialog.
     if (e.key === 'Escape' && captured === null) {
@@ -140,7 +181,7 @@ export function KeystrokeCaptureDialog({ onConfirm, onClose }: KeystrokeCaptureD
   }, [captured, onClose]);
 
   const handleConfirm = () => {
-    if (captured) onConfirm(captured);
+    if (captured) onConfirm(captured, clampRepeat(repeat), clampDelay(repeatDelay));
   };
 
   return (
@@ -151,29 +192,33 @@ export function KeystrokeCaptureDialog({ onConfirm, onClose }: KeystrokeCaptureD
       <div
         ref={containerRef}
         tabIndex={-1}
-        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[400px] max-w-[90vw] flex flex-col outline-none"
+        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[420px] max-w-[90vw] flex flex-col outline-none"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
-        {/* Header */}
+        {/* Header — title shifts to "Press Key × N" when mode === 'press-n' so the user
+            understands at a glance that this flow creates a repeating row. */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
           <Keyboard size={14} className="text-accent-light" />
-          <h3 className="text-sm font-semibold text-text-primary">Capture Keystroke</h3>
+          <h3 className="text-sm font-semibold text-text-primary">
+            {isPressN ? 'Press Key × N times' : 'Capture Keystroke'}
+          </h3>
         </div>
 
-        {/* Body — fixed-height so the dialog doesn't grow between placeholder / captured
-            states (same trick as KeyCaptureDialog). 156 px sized for the captured state
-            which is taller (chips + 2 hint lines). */}
-        <div className="px-5 py-5">
+        {/* Body — fixed layout. Capture pad has a stable 156 px min-height so it doesn't
+            jump between placeholder / captured states; the Repeat and Delay rows below
+            are always rendered (no collapse toggle) so the dialog never resizes. */}
+        <div className="px-5 py-5 flex flex-col gap-4">
+          {/* Capture pad */}
           <div className="bg-bg-input border border-dashed border-[#FFC107]/40 rounded-md py-5 px-4 text-center min-h-[156px] flex flex-col justify-center">
             {captured === null ? (
               <>
-                <div className="text-[12px] text-text-tertiary mb-1">Press a key combo…</div>
+                <div className="text-[12px] text-text-tertiary mb-1">Press any key combination</div>
                 <div className="text-[10px] text-text-disabled">
-                  E.g. Alt+Tab, Ctrl+Shift+T, Alt+F4
+                  E.g. Alt+Tab · Ctrl+Shift+T · Alt+F4
                 </div>
                 <div className="text-[10px] text-text-disabled mt-1">
-                  Esc cancels
+                  Esc to cancel
                 </div>
               </>
             ) : (
@@ -192,13 +237,86 @@ export function KeystrokeCaptureDialog({ onConfirm, onClose }: KeystrokeCaptureD
                   ))}
                 </div>
                 <div className="mt-3 text-[10px] text-text-tertiary">
-                  Will insert as a single <span className="text-text-secondary font-semibold">Keystroke</span> action
+                  {repeat > 1
+                    ? <>Inserts <span className="text-text-secondary font-semibold">1 row · {repeat} press cycles</span></>
+                    : <>Inserts <span className="text-text-secondary font-semibold">1 Keystroke row</span></>}
                 </div>
                 <div className="mt-1 text-[10px] text-text-disabled">
-                  Press another combo to replace, or click Insert below
+                  Press another combo to replace
                 </div>
               </>
             )}
+          </div>
+
+          {/* Settings — always visible. Both rows share the same right-aligned column
+              for inputs so the eye tracks a clean vertical line. */}
+          <div className="flex flex-col gap-2.5">
+            {/* Repeat */}
+            <div className="flex items-center justify-between gap-3">
+              <label className="text-[12px] font-medium text-text-secondary">Repeat</label>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setRepeat((v) => clampRepeat(v - 1))}
+                  disabled={repeat <= 1}
+                  className="w-6 h-6 flex items-center justify-center rounded bg-bg-card hover:bg-bg-input border border-border-subtle text-text-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  aria-label="Decrease repeat count"
+                >
+                  <Minus size={11} />
+                </button>
+                <input
+                  type="number"
+                  min={1}
+                  max={MAX_REPEAT}
+                  value={repeat}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value, 10);
+                    setRepeat(Number.isFinite(n) ? clampRepeat(n) : 1);
+                  }}
+                  className="w-14 h-6 px-1 text-center text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid tabular-nums"
+                />
+                <button
+                  type="button"
+                  onClick={() => setRepeat((v) => clampRepeat(v + 1))}
+                  disabled={repeat >= MAX_REPEAT}
+                  className="w-6 h-6 flex items-center justify-center rounded bg-bg-card hover:bg-bg-input border border-border-subtle text-text-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  aria-label="Increase repeat count"
+                >
+                  <Plus size={11} />
+                </button>
+              </div>
+            </div>
+
+            {/* Delay between presses — always rendered, disabled when repeat == 1.
+                The dimmed state signals "would matter if you bumped repeat up" without
+                hiding the field, which would cause the dialog to jump in height.
+
+                The right column mirrors the Repeat row's geometry: a phantom 24×24 cell
+                stands in for the [-] button, the input occupies the centre slot at the
+                same x as Repeat's input, and the "ms" label is sized like the [+]
+                button so the right edge of both rows lands on the same vertical line.
+                Net effect: the two inputs stack perfectly across rows. */}
+            <div className="flex items-center justify-between gap-3">
+              <label className={`text-[12px] font-medium transition-colors ${repeat > 1 ? 'text-text-secondary' : 'text-text-disabled'}`}>
+                Delay between presses
+              </label>
+              <div className="flex items-center gap-1">
+                <div className="w-6 h-6" aria-hidden="true" />
+                <input
+                  type="number"
+                  min={0}
+                  max={MAX_REPEAT_DELAY}
+                  value={repeatDelay}
+                  disabled={repeat <= 1}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value, 10);
+                    setRepeatDelay(Number.isFinite(n) ? clampDelay(n) : 0);
+                  }}
+                  className="w-14 h-6 px-1 text-center text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid tabular-nums disabled:opacity-40 disabled:cursor-not-allowed"
+                />
+                <span className={`w-6 h-6 inline-flex items-center justify-center text-[11px] transition-colors ${repeat > 1 ? 'text-text-tertiary' : 'text-text-disabled'}`}>ms</span>
+              </div>
+            </div>
           </div>
         </div>
 
