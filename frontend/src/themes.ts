@@ -84,7 +84,7 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   actionPauseColor: '#fbbf24',
   fontMono: 'Consolas',
   matchSystemTheme: false,
-  darkPresetId: 'one-dark-pro-night-flat',
+  darkPresetId: 'lavender-coal',
   lightPresetId: 'github-light',
   enableAnimations: true,
 };
@@ -478,20 +478,22 @@ export const themes: ThemePreset[] = [
     },
   },
   {
-    // One Dark Pro Night Flat — Binaryify/OneDark-Pro's "flat" variant.
-    // editor.background, sidebar, statusBar, panel all collapse to #282c34
-    // (no shadow/border layering between them), with input/badge dropping to
-    // #21252b. Foreground stays at #abb2bf; titleBar fg at #9da5b4 carries
-    // the secondary text role. Accent #61afef is the trademark One Dark blue.
+    // One Dark Pro Night Flat — Binaryify/OneDark-Pro's official "night-flat"
+    // variant (OneDark-Pro-night-flat.json). editor/sidebar/activityBar/statusBar
+    // all collapse to #16191d (deeper than the regular Flat #282c34). Dropdown
+    // sits at #1e2227, input at #1d1f23. Foreground stays at #abb2bf with
+    // titleBar fg #9da5b4 as the secondary text role. Comment #5c6370 and
+    // disabled #4b5263 keep One Dark's classic muted greys. Accent #61afef is
+    // the trademark One Dark blue.
     id: 'one-dark-pro-night-flat',
     name: 'Night Flat',
-    preview: ['#21252b', '#282c34', '#2e333d', '#61afef'],
+    preview: ['#1d1f23', '#16191d', '#1e2227', '#61afef'],
     colors: {
-      'bg-base': '#282c34',
-      'bg-surface': '#282c34',
-      'bg-card': '#282c34',
-      'bg-elevated': '#2e333d',
-      'bg-input': '#21252b',
+      'bg-base': '#16191d',
+      'bg-surface': '#16191d',
+      'bg-card': '#16191d',
+      'bg-elevated': '#1e2227',
+      'bg-input': '#1d1f23',
       'border-subtle': 'rgba(171,178,191,0.06)',
       'border-default': 'rgba(171,178,191,0.1)',
       'border-strong': 'rgba(171,178,191,0.15)',
@@ -502,6 +504,117 @@ export const themes: ThemePreset[] = [
       accent: '#61afef',
       'accent-solid': '#4392d3',
       'accent-hover': '#80c0f5',
+    },
+  },
+  {
+    // Lavender Coal — custom near-black flat palette (originally mis-labeled
+    // "Night Flat" before alignment to the official Binaryify variant). Pairs
+    // a One Dark-style blue accent (#61afef) and comment grey (#4b5263) with
+    // a custom lavender-tinted foreground (#c8c8d4) over flat near-black
+    // backgrounds. Not derived from any single official theme — kept as an
+    // intentional in-house design.
+    id: 'lavender-coal',
+    name: 'Lavender Coal',
+    preview: ['#161616', '#1a1a1a', '#232323', '#61afef'],
+    colors: {
+      'bg-base': '#1a1a1a',
+      'bg-surface': '#1c1c1c',
+      'bg-card': '#1f1f1f',
+      'bg-elevated': '#232323',
+      'bg-input': '#161616',
+      'border-subtle': 'rgba(200,200,212,0.06)',
+      'border-default': 'rgba(200,200,212,0.1)',
+      'border-strong': 'rgba(200,200,212,0.15)',
+      'text-primary': '#c8c8d4',
+      'text-secondary': '#a0a8b4',
+      'text-tertiary': '#6b7280',
+      'text-disabled': '#4b5263',
+      accent: '#61afef',
+      'accent-solid': '#4392d3',
+      'accent-hover': '#80c0f5',
+    },
+  },
+  {
+    // Cursor Dark — official theme from cursor.sh, mirrored by
+    // CedricVerlinden/cursor-dark and BioHazard786/cursor-theme-vscode.
+    // editor.background #1a1a1a; sidebar/activityBar/statusBar/panel all
+    // collapse to #141414 for a deeper chrome. Foreground #D8DEE9 (Nord-like
+    // snow storm). Accent / button / textLink #4c9df3 (saturated blue);
+    // badge #88C0D0 hints at the Nord aurora cyan.
+    id: 'cursor-dark',
+    name: 'Cursor Dark',
+    preview: ['#141414', '#1a1a1a', '#2a2a2a', '#4c9df3'],
+    colors: {
+      'bg-base': '#1a1a1a',
+      'bg-surface': '#141414',
+      'bg-card': '#1a1a1a',
+      'bg-elevated': '#2a2a2a',
+      'bg-input': '#222222',
+      'border-subtle': 'rgba(216,222,233,0.06)',
+      'border-default': 'rgba(216,222,233,0.1)',
+      'border-strong': 'rgba(216,222,233,0.15)',
+      'text-primary': '#D8DEE9',
+      'text-secondary': '#cccccc',
+      'text-tertiary': '#8a8e94',
+      'text-disabled': '#5c6066',
+      accent: '#4c9df3',
+      'accent-solid': '#2f7fd4',
+      'accent-hover': '#6cb0f7',
+    },
+  },
+  {
+    // Cursor Less Dark — official lighter variant of Cursor Dark from
+    // cursor.sh (CedricVerlinden/cursor-dark themes/cursor-less-dark.json).
+    // editor.background lifts to #242424; sidebar/activityBar/statusBar/panel
+    // sit at #1E1E1E. Same #D8DEE9 foreground and #4c9df3 accent as Cursor
+    // Dark — only the surface tones shift up.
+    id: 'cursor-less-dark',
+    name: 'Cursor Less Dark',
+    preview: ['#1E1E1E', '#242424', '#2e2e2e', '#4c9df3'],
+    colors: {
+      'bg-base': '#242424',
+      'bg-surface': '#1E1E1E',
+      'bg-card': '#242424',
+      'bg-elevated': '#2e2e2e',
+      'bg-input': '#2a2a2a',
+      'border-subtle': 'rgba(216,222,233,0.06)',
+      'border-default': 'rgba(216,222,233,0.1)',
+      'border-strong': 'rgba(216,222,233,0.15)',
+      'text-primary': '#D8DEE9',
+      'text-secondary': '#bcc1c8',
+      'text-tertiary': '#8a8e94',
+      'text-disabled': '#5c6066',
+      accent: '#4c9df3',
+      'accent-solid': '#2f7fd4',
+      'accent-hover': '#6cb0f7',
+    },
+  },
+  {
+    // Material Theme Darker — Equinusocio/Mattia Astorino's classic "Darker"
+    // variant (now community-maintained as vsc-community-material-theme).
+    // editor/sidebar/activityBar/statusBar/panel all collapse to #212121.
+    // Trademark cyan-tinted white foreground #EEFFFF; input #2b2b2b lifts
+    // slightly. Accent #80CBC4 is the Material teal (textLink). Secondary
+    // text-grey #b0bec5 is Material Blue-Grey 200, comment #545454.
+    id: 'material-theme-darker',
+    name: 'Material Theme Darker',
+    preview: ['#212121', '#2b2b2b', '#3a3a3a', '#80CBC4'],
+    colors: {
+      'bg-base': '#212121',
+      'bg-surface': '#212121',
+      'bg-card': '#212121',
+      'bg-elevated': '#2b2b2b',
+      'bg-input': '#2b2b2b',
+      'border-subtle': 'rgba(238,255,255,0.06)',
+      'border-default': 'rgba(238,255,255,0.1)',
+      'border-strong': 'rgba(238,255,255,0.15)',
+      'text-primary': '#EEFFFF',
+      'text-secondary': '#b0bec5',
+      'text-tertiary': '#808080',
+      'text-disabled': '#545454',
+      accent: '#80CBC4',
+      'accent-solid': '#5d9c95',
+      'accent-hover': '#a0e0d9',
     },
   },
   {
@@ -972,7 +1085,7 @@ export const themes: ThemePreset[] = [
   },
 ];
 
-export const DEFAULT_THEME_ID = 'one-dark-pro-night-flat';
+export const DEFAULT_THEME_ID = 'lavender-coal';
 
 // Filterable tags for the Themes tab — every preset is "dark" or "light", plus
 // optional style tags (vivid / pastel / monochrome) when those traits dominate.
@@ -998,6 +1111,10 @@ export const THEME_TAGS: Record<string, ThemeTag[]> = {
   'midnight': ['dark'],
   'one-dark-pro': ['dark'],
   'one-dark-pro-night-flat': ['dark', 'monochrome'],
+  'lavender-coal': ['dark', 'monochrome'],
+  'cursor-dark': ['dark', 'monochrome'],
+  'cursor-less-dark': ['dark', 'monochrome'],
+  'material-theme-darker': ['dark', 'monochrome'],
   'tokyo-night': ['dark'],
   'github-dark': ['dark'],
   'github-dark-default': ['dark'],
