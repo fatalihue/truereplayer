@@ -1169,6 +1169,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         const curDelay = editing?.repeatDelayMs ?? 30;
         return (
           <KeystrokeCaptureDialog
+            initialKeystroke={editing?.key}
             initialRepeat={curRepeat}
             initialRepeatDelayMs={curDelay}
             onConfirm={(keystroke, repeat, repeatDelayMs) => {

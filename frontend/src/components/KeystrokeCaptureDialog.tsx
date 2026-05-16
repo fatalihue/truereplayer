@@ -11,7 +11,13 @@ interface KeystrokeCaptureDialogProps {
   // in defaults and UI emphasis.
   mode?: 'keystroke' | 'press-n';
   // Initial values used when re-opening the dialog to edit an existing Keystroke row
-  // (recapture flow in ActionTable). Omitted on insert flows — defaults apply.
+  // (recapture flow in ActionTable). All three are omitted on insert flows — defaults
+  // apply. When `initialKeystroke` is set the dialog enters "edit mode": the captured
+  // value is pre-filled (so Save is enabled without forcing a re-capture), the title
+  // and confirm button switch labels, and Esc closes the dialog instead of re-arming
+  // the capture pad. This is what lets a user click the × N badge and adjust JUST
+  // the repeat count without having to press the key combo again.
+  initialKeystroke?: string;
   initialRepeat?: number;
   initialRepeatDelayMs?: number;
   onConfirm: (keystroke: string, repeat: number, repeatDelayMs: number) => void;
@@ -123,13 +129,22 @@ function keystrokeDisplay(keystroke: string): string {
 
 export function KeystrokeCaptureDialog({
   mode = 'keystroke',
+  initialKeystroke,
   initialRepeat,
   initialRepeatDelayMs,
   onConfirm,
   onClose,
 }: KeystrokeCaptureDialogProps) {
   const isPressN = mode === 'press-n';
-  const [captured, setCaptured] = useState<string | null>(null);
+  // initialKeystroke presence is the edit-mode flag. We avoid a separate `mode = 'edit'`
+  // value because mode controls the *defaults* (press-n vs keystroke counts), while
+  // editing is orthogonal — a user could be editing either a press-n row or a regular
+  // keystroke row, and the defaults are irrelevant in both cases (we seed from props).
+  const isEditing = initialKeystroke != null;
+  // Seed `captured` with the existing combo so Save is enabled the moment the dialog
+  // opens. Without this seed the Insert/Save button stayed disabled until the user
+  // re-captured a key — making it impossible to edit only the Repeat / Delay fields.
+  const [captured, setCaptured] = useState<string | null>(initialKeystroke ?? null);
   // Initial value priority: explicit `initialRepeat` (edit flow) > mode default
   // (press-n = 5 to make the feature obvious, classic keystroke = 1).
   const [repeat, setRepeat] = useState<number>(initialRepeat ?? (isPressN ? 5 : 1));
@@ -155,9 +170,13 @@ export function KeystrokeCaptureDialog({
     // "5" in the Repeat field would re-commit the captured combo with key "5".
     const target = e.target as HTMLElement;
     if (target?.tagName === 'INPUT') return;
-    // Escape closes the dialog if no combo is captured yet. Once a combo is captured,
-    // pressing Escape RE-captures (replaces with a new combo) — same as KeyCaptureDialog.
-    if (e.key === 'Escape' && captured === null) {
+    // Escape closes the dialog when:
+    //   • no combo captured yet (insert flow waiting for first capture), OR
+    //   • we're editing an existing row (Esc = abandon edit, matches user expectation
+    //     that Esc cancels a dialog they opened to tweak settings).
+    // Otherwise (insert flow with a combo already captured), pressing Escape re-captures
+    // — same as KeyCaptureDialog — letting the user retry without leaving the dialog.
+    if (e.key === 'Escape' && (captured === null || isEditing)) {
       e.preventDefault();
       onClose();
       return;
@@ -196,12 +215,14 @@ export function KeystrokeCaptureDialog({
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
-        {/* Header — title shifts to "Press Key × N" when mode === 'press-n' so the user
-            understands at a glance that this flow creates a repeating row. */}
+        {/* Header — title reflects the flow:
+              • Edit mode → "Edit Keystroke" (user is tweaking an existing row)
+              • press-n  → "Press Key × N times" (insert with repeat focus)
+              • default  → "Capture Keystroke" (classic single-press insert) */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
           <Keyboard size={14} className="text-accent-light" />
           <h3 className="text-sm font-semibold text-text-primary">
-            {isPressN ? 'Press Key × N times' : 'Capture Keystroke'}
+            {isEditing ? 'Edit Keystroke' : isPressN ? 'Press Key × N times' : 'Capture Keystroke'}
           </h3>
         </div>
 
@@ -237,9 +258,13 @@ export function KeystrokeCaptureDialog({
                   ))}
                 </div>
                 <div className="mt-3 text-[10px] text-text-tertiary">
-                  {repeat > 1
-                    ? <>Inserts <span className="text-text-secondary font-semibold">1 row · {repeat} press cycles</span></>
-                    : <>Inserts <span className="text-text-secondary font-semibold">1 Keystroke row</span></>}
+                  {isEditing
+                    ? (repeat > 1
+                        ? <>Updates row to <span className="text-text-secondary font-semibold">{repeat} press cycles</span></>
+                        : <>Updates row to <span className="text-text-secondary font-semibold">single press</span></>)
+                    : (repeat > 1
+                        ? <>Inserts <span className="text-text-secondary font-semibold">1 row · {repeat} press cycles</span></>
+                        : <>Inserts <span className="text-text-secondary font-semibold">1 Keystroke row</span></>)}
                 </div>
                 <div className="mt-1 text-[10px] text-text-disabled">
                   Press another combo to replace
@@ -335,7 +360,7 @@ export function KeystrokeCaptureDialog({
             disabled={captured === null}
             className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Insert
+            {isEditing ? 'Save' : 'Insert'}
           </button>
         </div>
       </div>
