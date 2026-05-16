@@ -1294,12 +1294,23 @@ namespace TrueReplayer.Services
             // Only cancel — disposal is handled by the next StartAsync() call
             _cts?.Cancel();
             ResetMouseState();
+            ResetKeyState();
         }
 
         // Tracks mouse buttons pressed down by the replay that have not yet been released.
         // Used by ResetMouseState to only release buttons we actually pressed — avoids firing
         // spurious UP events (which some apps perceive as a click) when replay stops cleanly.
         private bool _simLeftDown, _simRightDown, _simMiddleDown;
+
+        // Same idea for keyboard: tracks key names sent KEYDOWN by the replay that haven't
+        // received their matching KEYUP yet. Used by ResetKeyState on Stop so a macro that
+        // does `KeyDown(W), delay 10s, KeyUp(W)` doesn't leave W stuck in the OS keyboard
+        // state when the user hits Stop mid-hold (a real bug pre-fix — without an explicit
+        // KEYUP the OS treats the key as physically pressed until the user releases it
+        // themselves, which manifests as a "stuck character" or a game-character that
+        // keeps walking forever). StringComparer.OrdinalIgnoreCase matches the resolution
+        // logic in SimulateKey which is case-insensitive at the VK lookup.
+        private readonly HashSet<string> _simulatedKeysDown = new(StringComparer.OrdinalIgnoreCase);
 
         private void ResetMouseState()
         {
@@ -1308,6 +1319,15 @@ namespace TrueReplayer.Services
             if (_simLeftDown)   { SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_LEFTUP);   _simLeftDown = false; }
             if (_simRightDown)  { SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_RIGHTUP);  _simRightDown = false; }
             if (_simMiddleDown) { SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_MIDDLEUP); _simMiddleDown = false; }
+        }
+
+        private void ResetKeyState()
+        {
+            if (_simulatedKeysDown.Count == 0) return;
+            // Snapshot first — SimulateKey(_, false) calls Remove() on the set, mutating it
+            // mid-iteration. Copy-then-iterate avoids InvalidOperationException.
+            var pending = _simulatedKeysDown.ToArray();
+            foreach (var key in pending) SimulateKey(key, false);
         }
 
         private void SimulateScroll(int delta)
@@ -2114,6 +2134,14 @@ namespace TrueReplayer.Services
             };
 
             NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
+
+            // Track pressed-but-not-released keys so ResetKeyState (called from Stop) can
+            // emit the missing KEYUP. Mirrors the _simLeftDown/_simRightDown/_simMiddleDown
+            // mouse pattern above. Modifier-only keystrokes (SimulateKeystroke) press +
+            // release modifiers synchronously inside the same function call, so this Add+
+            // Remove balance is always preserved by the end of that flow.
+            if (isDown) _simulatedKeysDown.Add(key);
+            else _simulatedKeysDown.Remove(key);
         }
     }
 }
