@@ -1257,6 +1257,13 @@ namespace TrueReplayer
                         Timeout = a.Timeout,
                         Confidence = a.Confidence,
                         ImagePath = a.ImagePath,
+                        WaitImageOnTimeout = a.WaitImageOnTimeout,
+                        WaitImageInvert = a.WaitImageInvert,
+                        WaitImageClickOnMatch = a.WaitImageClickOnMatch,
+                        WaitImageSearchX = a.WaitImageSearchX,
+                        WaitImageSearchY = a.WaitImageSearchY,
+                        WaitImageSearchW = a.WaitImageSearchW,
+                        WaitImageSearchH = a.WaitImageSearchH,
                         BrowserText = a.BrowserText,
                         NewTab = a.NewTab,
                         IsSkipped = a.IsSkipped,
@@ -1265,7 +1272,10 @@ namespace TrueReplayer
                         PostNavigateSelector = a.PostNavigateSelector,
                         TypeAppend = a.TypeAppend,
                         TypePaste = a.TypePaste,
-                        TypeDelay = a.TypeDelay
+                        TypeDelay = a.TypeDelay,
+                        SelectMatchMode = a.SelectMatchMode,
+                        RepeatCount = a.RepeatCount,
+                        RepeatDelayMs = a.RepeatDelayMs,
                     });
                 }
             }
@@ -1307,9 +1317,25 @@ namespace TrueReplayer
                     Timeout = copied.Timeout,
                     Confidence = copied.Confidence,
                     ImagePath = clonedImagePath,
+                    WaitImageOnTimeout = copied.WaitImageOnTimeout,
+                    WaitImageInvert = copied.WaitImageInvert,
+                    WaitImageClickOnMatch = copied.WaitImageClickOnMatch,
+                    WaitImageSearchX = copied.WaitImageSearchX,
+                    WaitImageSearchY = copied.WaitImageSearchY,
+                    WaitImageSearchW = copied.WaitImageSearchW,
+                    WaitImageSearchH = copied.WaitImageSearchH,
                     BrowserText = copied.BrowserText,
                     NewTab = copied.NewTab,
                     IsSkipped = copied.IsSkipped,
+                    WaitMode = copied.WaitMode,
+                    UrlWaitPattern = copied.UrlWaitPattern,
+                    PostNavigateSelector = copied.PostNavigateSelector,
+                    TypeAppend = copied.TypeAppend,
+                    TypePaste = copied.TypePaste,
+                    TypeDelay = copied.TypeDelay,
+                    SelectMatchMode = copied.SelectMatchMode,
+                    RepeatCount = copied.RepeatCount,
+                    RepeatDelayMs = copied.RepeatDelayMs,
                     RowNumber = insertIndex + 1
                 };
                 actions.Insert(insertIndex, clone);
@@ -2297,7 +2323,10 @@ namespace TrueReplayer
                         PostNavigateSelector = original.PostNavigateSelector,
                         TypeAppend = original.TypeAppend,
                         TypePaste = original.TypePaste,
-                        TypeDelay = original.TypeDelay
+                        TypeDelay = original.TypeDelay,
+                        SelectMatchMode = original.SelectMatchMode,
+                        RepeatCount = original.RepeatCount,
+                        RepeatDelayMs = original.RepeatDelayMs,
                     };
                     actions.Insert(insertPos, clone);
                     insertPos++;
