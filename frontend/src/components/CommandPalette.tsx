@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom';
 import {
   Search, Circle, Play, Square, Type, Save, FolderOpen, RotateCcw, FilePlus,
   Trash2, PinOff, Pin, Download, Upload, MonitorDown, Shield, Minimize2, RefreshCw,
-  Hourglass, ScanSearch, Repeat2, Undo2, Redo2, ClipboardPaste, Files, Replace,
-  FolderPlus, Palette, PanelLeft, DownloadCloud, Table2,
+  Hourglass, ScanSearch, Repeat, Repeat2, Undo2, Redo2, ClipboardPaste, Files, Replace,
+  FolderPlus, Palette, PanelLeft, DownloadCloud, Table2, Keyboard,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -112,6 +112,23 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             id: 'sendtext', label: 'Insert Send Text',
             icon: <Type size={14} className="text-text-secondary" />,
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:sendtext')); },
+          },
+          {
+            id: 'sendkey', label: 'Insert Send Key',
+            icon: <Keyboard size={14} className="text-text-secondary" />,
+            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:sendkey')); },
+          },
+          {
+            id: 'sendkeystroke', label: 'Insert Send Keystroke',
+            icon: <Keyboard size={14} className="text-text-secondary" />,
+            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:sendkeystroke')); },
+          },
+          {
+            id: 'presskeyn', label: 'Insert Press Key × N',
+            // Repeat (single-arrow loop) matches the toolbar / grid-context icon
+            // for this action and stays visually distinct from Run Profile's Repeat2.
+            icon: <Repeat size={14} className="text-text-secondary" />,
+            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:presskeyn')); },
           },
           {
             id: 'waitimage', label: 'Insert Wait for Image',

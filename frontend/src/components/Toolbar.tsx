@@ -144,6 +144,40 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
     return () => window.removeEventListener('cmd:runprofile', handler);
   }, []);
 
+  // Command-palette wrappers for the three keyboard inserts. Mirrors what the
+  // "Add Action" dropdown does on click: compute the insertIndex from the
+  // current selection (or end-of-list), stash it in the dialog's ref so a
+  // race during capture doesn't lose it, and open the dialog. SendKeystroke
+  // and PressKeyN share the same dialog component — the `mode` state selects
+  // defaults / header copy.
+  useEffect(() => {
+    const onSendKey = () => {
+      const sel = selectionRef.current;
+      keyCaptureInsertIndex.current = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+      setShowKeyCapture(true);
+    };
+    const onSendKeystroke = () => {
+      const sel = selectionRef.current;
+      keystrokeCaptureInsertIndex.current = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+      setKeystrokeCaptureMode('keystroke');
+      setShowKeystrokeCapture(true);
+    };
+    const onPressKeyN = () => {
+      const sel = selectionRef.current;
+      keystrokeCaptureInsertIndex.current = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+      setKeystrokeCaptureMode('press-n');
+      setShowKeystrokeCapture(true);
+    };
+    window.addEventListener('cmd:sendkey', onSendKey);
+    window.addEventListener('cmd:sendkeystroke', onSendKeystroke);
+    window.addEventListener('cmd:presskeyn', onPressKeyN);
+    return () => {
+      window.removeEventListener('cmd:sendkey', onSendKey);
+      window.removeEventListener('cmd:sendkeystroke', onSendKeystroke);
+      window.removeEventListener('cmd:presskeyn', onPressKeyN);
+    };
+  }, [actions.length, selectionRef]);
+
   // Global keyboard shortcuts forwarded from App.tsx (which has no bridge access)
   useEffect(() => {
     const onSave = () => send({ type: 'profile:save', payload: {} });
