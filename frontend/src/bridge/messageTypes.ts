@@ -306,6 +306,9 @@ export type OutgoingMessage =
   | { type: 'profile:deleteFolder'; payload: { name: string } }
   | { type: 'profile:setFolderColor'; payload: { name: string; color: string } }
   | { type: 'profile:toggleFolderCollapse'; payload: { name: string } }
+  // Bulk collapse/expand for the "Collapse all folders" / "Expand all folders"
+  // context-menu item. One disk write regardless of folder count.
+  | { type: 'profile:setAllFoldersCollapsed'; payload: { collapsed: boolean } }
   | { type: 'profile:toggleFolderDisable'; payload: { name: string } }
   | { type: 'profile:moveToFolder'; payload: { profileName: string; folderName: string | null } }
   | { type: 'profile:reorder'; payload: { pinned?: string[]; folders?: ProfileFolder[]; ungroupedOrder?: string[] } }

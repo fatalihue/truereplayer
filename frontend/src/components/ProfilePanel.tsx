@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Search, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink } from 'lucide-react';
+import { Search, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink } from 'lucide-react';
 import type { ProfileEntry } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -1336,11 +1336,11 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
       {/* Folder Context Menu */}
       {folderContextMenu && (
-        // Folder context menu — mirrors the profile menu's grouping pattern at
-        // a smaller scale:
-        //   - Identity     → Rename · Color ▸
-        //   - Triggers     → Window target… · Disable / Enable
-        //   - Destructive  → Delete Folder
+        // Folder context menu — grouped top-to-bottom by scope:
+        //   - Triggers (apply to this folder's children) → Window target… · Disable all
+        //   - Identity (apply to this folder itself)     → Rename · Color ▸
+        //   - View (apply to ALL folders)                → Collapse / Expand all folders
+        //   - Destructive                                 → Delete folder
         // Folders are virtual organisation buckets (not file-system folders),
         // so they have no "Open in Explorer" / "Duplicate" equivalent.
         <div
@@ -1348,7 +1348,39 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           className="fixed z-50 min-w-[160px] py-1 bg-bg-card border border-border-default rounded-md shadow-lg"
           style={{ left: folderContextMenu.x, top: folderContextMenu.y }}
         >
-          {/* ── Identity ── */}
+          {/* ── Triggers (this folder's children) ── */}
+          {/* "Window target…" — inherited by every profile inside the folder
+              unless that profile overrides it. The trailing ellipsis indicates
+              a dialog opens (matches the profile menu's "Assign hotkey…" etc). */}
+          <button
+            onClick={() => {
+              setShowFolderTargetDialog(folderContextMenu.folderName);
+              setFolderContextMenu(null);
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Crosshair size={13} className="text-text-tertiary" />
+            Window target…
+          </button>
+          <button
+            onClick={() => {
+              send({ type: 'profile:toggleFolderDisable', payload: { name: folderContextMenu.folderName } });
+              setFolderContextMenu(null);
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Ban size={13} className="text-text-tertiary" />
+            {(() => {
+              const folder = (profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName);
+              const items = folder?.items ?? [];
+              const allDisabled = items.length > 0 && items.every(n => profiles.find(p => p.name === n)?.isDisabled);
+              return allDisabled ? 'Enable all' : 'Disable all';
+            })()}
+          </button>
+
+          <div className="my-1 border-t border-border-subtle" />
+
+          {/* ── Identity (this folder) ── */}
           <button
             onClick={() => handleRenameFolder(folderContextMenu.folderName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
@@ -1386,39 +1418,39 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               </div>
             )}
           </div>
-          <div className="my-1 border-t border-border-subtle" />
-
-          {/* ── Triggers / state ── */}
-          {/* "Window target…" — inherited by every profile inside the folder
-              unless that profile overrides it. The trailing ellipsis indicates
-              a dialog opens (matches the profile menu's "Assign hotkey…" etc). */}
-          <button
-            onClick={() => {
-              setShowFolderTargetDialog(folderContextMenu.folderName);
-              setFolderContextMenu(null);
-            }}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-          >
-            <Crosshair size={13} className="text-text-tertiary" />
-            Window target…
-          </button>
-          <button
-            onClick={() => {
-              send({ type: 'profile:toggleFolderDisable', payload: { name: folderContextMenu.folderName } });
-              setFolderContextMenu(null);
-            }}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-          >
-            <Ban size={13} className="text-text-tertiary" />
-            {(() => {
-              const folder = (profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName);
-              const items = folder?.items ?? [];
-              const allDisabled = items.length > 0 && items.every(n => profiles.find(p => p.name === n)?.isDisabled);
-              return allDisabled ? 'Enable all' : 'Disable all';
-            })()}
-          </button>
 
           <div className="my-1 border-t border-border-subtle" />
+
+          {/* ── View (all folders) ──
+              Label flips Collapse/Expand based on the majority state, mirroring
+              the "Disable all / Enable all" pattern above. Hidden when there's
+              only one folder (the per-folder chevron in the row already handles
+              that case — a bulk operation on a single item is just noise). */}
+          {(profileOrder?.folders ?? []).length > 1 && (() => {
+            const folders = profileOrder?.folders ?? [];
+            // "Collapse all" if ANY folder is currently expanded — collapsing has
+            // priority because users typically hit this to clean up a busy tree.
+            // Only flip to "Expand all" when every folder is already collapsed.
+            const anyExpanded = folders.some(f => !f.collapsed);
+            const targetCollapsed = anyExpanded; // collapse if any expanded, otherwise expand
+            const Icon = anyExpanded ? ChevronsDownUp : ChevronsUpDown;
+            const label = anyExpanded ? 'Collapse all folders' : 'Expand all folders';
+            return (
+              <>
+                <button
+                  onClick={() => {
+                    send({ type: 'profile:setAllFoldersCollapsed', payload: { collapsed: targetCollapsed } });
+                    setFolderContextMenu(null);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                >
+                  <Icon size={13} className="text-text-tertiary" />
+                  {label}
+                </button>
+                <div className="my-1 border-t border-border-subtle" />
+              </>
+            );
+          })()}
 
           {/* ── Destructive ── */}
           <button

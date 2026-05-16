@@ -1336,6 +1336,26 @@ namespace TrueReplayer.Controllers
             }
         }
 
+        /// <summary>
+        /// Bulk set the collapsed flag on every folder. Used by the "Collapse all
+        /// folders" / "Expand all folders" context-menu item — avoids the N disk
+        /// writes that iterating per-folder ToggleFolderCollapseAsync would cause.
+        /// No-op (no save) if nothing actually changes.
+        /// </summary>
+        public async Task SetAllFoldersCollapsedAsync(bool collapsed)
+        {
+            bool changed = false;
+            foreach (var folder in _profileOrder.Folders)
+            {
+                if (folder.Collapsed != collapsed)
+                {
+                    folder.Collapsed = collapsed;
+                    changed = true;
+                }
+            }
+            if (changed) await SaveProfileOrderAsync();
+        }
+
         public async Task MoveToFolderAsync(string profileName, string? folderName)
         {
             // Remove from current folder or ungrouped

@@ -435,6 +435,7 @@ namespace TrueReplayer
                     case "profile:toggleFolderDisable": HandleToggleFolderDisable(payload); break;
                     case "profile:setFolderColor": HandleSetFolderColor(payload); break;
                     case "profile:toggleFolderCollapse": HandleToggleFolderCollapse(payload); break;
+                    case "profile:setAllFoldersCollapsed": HandleSetAllFoldersCollapsed(payload); break;
                     case "profile:moveToFolder": HandleMoveToFolder(payload); break;
                     case "profile:reorder": HandleProfileReorder(payload); break;
                     case "profile:export": HandleProfileExport(payload); break;
@@ -3899,6 +3900,15 @@ namespace TrueReplayer
             string name = payload.GetProperty("name").GetString() ?? "";
             if (string.IsNullOrEmpty(name)) return;
             await profileController.ToggleFolderCollapseAsync(name);
+            PushProfilesUpdate();
+        }
+
+        private async void HandleSetAllFoldersCollapsed(JsonElement payload)
+        {
+            // Single bulk write — the controller skips the save entirely when no
+            // folder changes state, so the menu item is a no-op on second click.
+            bool collapsed = payload.GetProperty("collapsed").GetBoolean();
+            await profileController.SetAllFoldersCollapsedAsync(collapsed);
             PushProfilesUpdate();
         }
 
