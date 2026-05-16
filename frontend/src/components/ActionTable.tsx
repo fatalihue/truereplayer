@@ -541,10 +541,16 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       e.preventDefault(); // Prevent text selection while dragging
       cursorY.current = e.clientY;
       recomputeDropTarget(e.clientY);
-      // Kick off the auto-scroll loop if the cursor is near an edge and we aren't
-      // already scrolling. The loop self-terminates when the cursor leaves the zone.
+      // Kick off the auto-scroll loop only if the cursor is actually in an edge zone —
+      // otherwise we'd schedule a RAF per mousemove just to read the position and bail,
+      // wasting cycles on a cursor moving comfortably inside the list.
       if (autoScrollRaf.current === null) {
-        autoScrollRaf.current = requestAnimationFrame(tickAutoScroll);
+        const container = scrollRef.current;
+        if (container) {
+          const rect = container.getBoundingClientRect();
+          const inZone = e.clientY < rect.top + AUTOSCROLL_ZONE || e.clientY > rect.bottom - AUTOSCROLL_ZONE;
+          if (inZone) autoScrollRaf.current = requestAnimationFrame(tickAutoScroll);
+        }
       }
     };
 
