@@ -576,6 +576,71 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const dragActive = useRef(false);
   const folderRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const ungroupedRef = useRef<HTMLDivElement>(null);
+  // Scroll container ref — used to auto-scroll the profile list when dragging near
+  // top/bottom edges. Same pattern as ActionTable's DnD: indispensable for long
+  // profile lists, otherwise reaching the opposite end mid-drag is impossible.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const AUTOSCROLL_ZONE = 40;
+  const AUTOSCROLL_MAX_SPEED = 14;
+  const autoScrollRaf = useRef<number | null>(null);
+  const cursorY = useRef(0);
+  // Cursor position in state — drives the floating drag preview chip shared
+  // between profile drag (move-to-folder) and folder drag (reorder).
+  const [dragCursorPos, setDragCursorPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Auto-scroll loop, shared by both DnD systems. Self-terminates when the cursor
+  // leaves the edge zone; canceled on mouseUp / Esc / unmount.
+  const tickAutoScroll = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container || (!dragActive.current && !folderDragActiveRef.current)) {
+      autoScrollRaf.current = null;
+      return;
+    }
+    const rect = container.getBoundingClientRect();
+    const y = cursorY.current;
+    let delta = 0;
+    if (y < rect.top + AUTOSCROLL_ZONE) {
+      const intensity = (rect.top + AUTOSCROLL_ZONE - y) / AUTOSCROLL_ZONE;
+      delta = -AUTOSCROLL_MAX_SPEED * Math.min(1, Math.max(0, intensity));
+    } else if (y > rect.bottom - AUTOSCROLL_ZONE) {
+      const intensity = (y - (rect.bottom - AUTOSCROLL_ZONE)) / AUTOSCROLL_ZONE;
+      delta = AUTOSCROLL_MAX_SPEED * Math.min(1, Math.max(0, intensity));
+    }
+    if (delta !== 0) {
+      container.scrollTop += delta;
+      autoScrollRaf.current = requestAnimationFrame(tickAutoScroll);
+    } else {
+      autoScrollRaf.current = null;
+    }
+  }, []);
+
+  // Forward-declared so tickAutoScroll above can read it before folderDragActive is set up.
+  const folderDragActiveRef = useRef(false);
+
+  // Maybe-start the auto-scroll loop if cursor is in an edge zone of the scroll container.
+  const maybeKickAutoScroll = useCallback((clientY: number) => {
+    if (autoScrollRaf.current !== null) return;
+    const container = scrollRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    if (clientY < rect.top + AUTOSCROLL_ZONE || clientY > rect.bottom - AUTOSCROLL_ZONE) {
+      autoScrollRaf.current = requestAnimationFrame(tickAutoScroll);
+    }
+  }, [tickAutoScroll]);
+
+  // Wraps a state-mutating bridge call in a View Transition when the browser supports
+  // it (Chromium 111+, WebView2 recent). Falls back to a plain call otherwise.
+  const sendWithTransition = useCallback((msg: Parameters<typeof send>[0]) => {
+    const vt = (document as unknown as { startViewTransition?: (cb: () => void | Promise<void>) => unknown }).startViewTransition;
+    if (typeof vt === 'function') {
+      vt.call(document, () => {
+        send(msg);
+        return new Promise<void>(resolve => setTimeout(resolve, 50));
+      });
+    } else {
+      send(msg);
+    }
+  }, [send]);
 
   const handleProfileMouseDown = (e: React.MouseEvent, profileName: string) => {
     if (e.button !== 0) return; // left click only
@@ -595,6 +660,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       if (!dragActive.current && Math.abs(dx) + Math.abs(dy) < 5) return;
       if (!dragActive.current) document.body.style.cursor = 'grabbing';
       dragActive.current = true;
+      cursorY.current = e.clientY;
+      setDragCursorPos({ x: e.clientX, y: e.clientY });
 
       // Hit-test which folder or ungrouped area the mouse is over
       let foundTarget: string | null = null;
@@ -611,6 +678,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         }
       }
       setDropTarget(foundTarget);
+      maybeKickAutoScroll(e.clientY);
     };
 
     const handleMouseUp = () => {
@@ -618,7 +686,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         const targetFolder = dropTarget === '__ungrouped__' ? null : dropTarget;
         const currentFolder = getProfileFolder(dragProfile);
         if (currentFolder !== targetFolder) {
-          send({ type: 'profile:moveToFolder', payload: { profileName: dragProfile, folderName: targetFolder } });
+          sendWithTransition({ type: 'profile:moveToFolder', payload: { profileName: dragProfile, folderName: targetFolder } });
         }
       }
       document.body.style.cursor = '';
@@ -626,19 +694,48 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       dragActive.current = false;
       setDragProfile(null);
       setDropTarget(null);
+      setDragCursorPos(null);
+      if (autoScrollRaf.current !== null) {
+        cancelAnimationFrame(autoScrollRaf.current);
+        autoScrollRaf.current = null;
+      }
+    };
+
+    // Esc cancels an in-progress profile drag — restores state without moving.
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !dragActive.current) return;
+      e.stopPropagation();
+      document.body.style.cursor = '';
+      dragStartPos.current = null;
+      dragActive.current = false;
+      setDragProfile(null);
+      setDropTarget(null);
+      setDragCursorPos(null);
+      if (autoScrollRaf.current !== null) {
+        cancelAnimationFrame(autoScrollRaf.current);
+        autoScrollRaf.current = null;
+      }
     };
 
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('keydown', handleKeyDown, true);
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('keydown', handleKeyDown, true);
+      if (autoScrollRaf.current !== null) {
+        cancelAnimationFrame(autoScrollRaf.current);
+        autoScrollRaf.current = null;
+      }
     };
-  }, [dragProfile, dropTarget, send]);
+  }, [dragProfile, dropTarget, sendWithTransition, maybeKickAutoScroll]);
 
   // ── Folder Drag & Drop (reorder folders) ──
   const folderDragStartPos = useRef<{ x: number; y: number } | null>(null);
-  const folderDragActive = useRef(false);
+  // folderDragActive is mirrored to folderDragActiveRef (declared up-front) so
+  // the shared tickAutoScroll can read it without re-deriving on each render.
+  const folderDragActive = folderDragActiveRef;
 
   const handleFolderMouseDown = (e: React.MouseEvent, folderName: string) => {
     if (e.button !== 0) return;
@@ -657,6 +754,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       if (!folderDragActive.current && Math.abs(dx) + Math.abs(dy) < 5) return;
       if (!folderDragActive.current) document.body.style.cursor = 'grabbing';
       folderDragActive.current = true;
+      cursorY.current = e.clientY;
+      setDragCursorPos({ x: e.clientX, y: e.clientY });
 
       // Hit-test folder positions to find drop index
       const folders = profileOrder?.folders ?? [];
@@ -671,6 +770,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         }
       });
       setDropFolderIndex(bestIndex);
+      maybeKickAutoScroll(e.clientY);
     };
 
     const handleMouseUp = () => {
@@ -681,7 +781,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           const [moved] = folders.splice(fromIdx, 1);
           const toIdx = dropFolderIndex > fromIdx ? dropFolderIndex - 1 : dropFolderIndex;
           folders.splice(toIdx, 0, moved);
-          send({ type: 'profile:reorder', payload: { folders } });
+          sendWithTransition({ type: 'profile:reorder', payload: { folders } });
         }
       }
       document.body.style.cursor = '';
@@ -689,15 +789,42 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       folderDragActive.current = false;
       setDragFolder(null);
       setDropFolderIndex(null);
+      setDragCursorPos(null);
+      if (autoScrollRaf.current !== null) {
+        cancelAnimationFrame(autoScrollRaf.current);
+        autoScrollRaf.current = null;
+      }
+    };
+
+    // Esc cancels an in-progress folder drag.
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !folderDragActive.current) return;
+      e.stopPropagation();
+      document.body.style.cursor = '';
+      folderDragStartPos.current = null;
+      folderDragActive.current = false;
+      setDragFolder(null);
+      setDropFolderIndex(null);
+      setDragCursorPos(null);
+      if (autoScrollRaf.current !== null) {
+        cancelAnimationFrame(autoScrollRaf.current);
+        autoScrollRaf.current = null;
+      }
     };
 
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('keydown', handleKeyDown, true);
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('keydown', handleKeyDown, true);
+      if (autoScrollRaf.current !== null) {
+        cancelAnimationFrame(autoScrollRaf.current);
+        autoScrollRaf.current = null;
+      }
     };
-  }, [dragFolder, dropFolderIndex, profileOrder, send]);
+  }, [dragFolder, dropFolderIndex, profileOrder, sendWithTransition, maybeKickAutoScroll, folderDragActive]);
 
   const handleDialogKeyDown = (e: React.KeyboardEvent, onConfirm: () => void) => {
     if (e.key === 'Enter') {
@@ -935,7 +1062,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         </div>
 
         {/* Profile List - Sectioned */}
-        <div className="flex-1 overflow-y-auto px-1.5 pb-1">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-1.5 pb-1">
           {isSearching ? (
             // Flat search results
             filtered.map(renderProfileRow)
@@ -965,7 +1092,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                     {showDropBefore && (
                       <div className="flex items-center gap-1 mx-1 my-1">
                         <div className="w-1.5 h-1.5 rounded-full bg-accent-solid shrink-0" />
-                        <div className="flex-1 h-0.5 bg-accent-solid rounded-full shadow-[0_0_6px_rgba(96,205,255,0.5)]" />
+                        <div
+                          className="flex-1 h-[3px] bg-accent-solid rounded-full"
+                          style={{ boxShadow: '0 0 6px color-mix(in srgb, var(--color-accent) 60%, transparent)' }}
+                        />
                         <div className="w-1.5 h-1.5 rounded-full bg-accent-solid shrink-0" />
                       </div>
                     )}
@@ -1011,7 +1141,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                     {showDropAfter && (
                       <div className="flex items-center gap-1 mx-1 my-1">
                         <div className="w-1.5 h-1.5 rounded-full bg-accent-solid shrink-0" />
-                        <div className="flex-1 h-0.5 bg-accent-solid rounded-full shadow-[0_0_6px_rgba(96,205,255,0.5)]" />
+                        <div
+                          className="flex-1 h-[3px] bg-accent-solid rounded-full"
+                          style={{ boxShadow: '0 0 6px color-mix(in srgb, var(--color-accent) 60%, transparent)' }}
+                        />
                         <div className="w-1.5 h-1.5 rounded-full bg-accent-solid shrink-0" />
                       </div>
                     )}
@@ -1888,6 +2021,19 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           />
         );
       })()}
+
+      {/* Floating drag preview — shared by profile drag and folder drag. Sits 32×32px
+          off the cursor to clear the Windows "grabbing" cursor visual. Identical UX to
+          the ActionTable chip. */}
+      {dragCursorPos !== null && (dragProfile || dragFolder) && (
+        <div
+          className="fixed pointer-events-none z-50 flex items-center gap-1.5 px-2.5 py-1 rounded bg-bg-card border border-accent-solid/60 shadow-lg text-[11px] text-text-primary"
+          style={{ left: dragCursorPos.x + 32, top: dragCursorPos.y + 32 }}
+        >
+          {dragFolder ? <FolderOpen size={11} className="text-accent shrink-0" /> : <FilePlus size={11} className="text-accent shrink-0" />}
+          {dragFolder ?? dragProfile}
+        </div>
+      )}
     </>
   );
 }

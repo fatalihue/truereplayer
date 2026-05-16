@@ -478,23 +478,26 @@ export const themes: ThemePreset[] = [
     },
   },
   {
-    // One Dark Pro Night Flat — flat variant of One Dark Pro: layered
-    // backgrounds collapse into nearly-uniform tones for a calmer feel.
+    // One Dark Pro Night Flat — Binaryify/OneDark-Pro's "flat" variant.
+    // editor.background, sidebar, statusBar, panel all collapse to #282c34
+    // (no shadow/border layering between them), with input/badge dropping to
+    // #21252b. Foreground stays at #abb2bf; titleBar fg at #9da5b4 carries
+    // the secondary text role. Accent #61afef is the trademark One Dark blue.
     id: 'one-dark-pro-night-flat',
     name: 'Night Flat',
-    preview: ['#1a1a1a', '#1c1c1c', '#1f1f1f', '#61afef'],
+    preview: ['#21252b', '#282c34', '#2e333d', '#61afef'],
     colors: {
-      'bg-base': '#1a1a1a',
-      'bg-surface': '#1c1c1c',
-      'bg-card': '#1f1f1f',
-      'bg-elevated': '#232323',
-      'bg-input': '#161616',
-      'border-subtle': 'rgba(200,200,212,0.06)',
-      'border-default': 'rgba(200,200,212,0.1)',
-      'border-strong': 'rgba(200,200,212,0.15)',
-      'text-primary': '#c8c8d4',
-      'text-secondary': '#a0a8b4',
-      'text-tertiary': '#6b7280',
+      'bg-base': '#282c34',
+      'bg-surface': '#282c34',
+      'bg-card': '#282c34',
+      'bg-elevated': '#2e333d',
+      'bg-input': '#21252b',
+      'border-subtle': 'rgba(171,178,191,0.06)',
+      'border-default': 'rgba(171,178,191,0.1)',
+      'border-strong': 'rgba(171,178,191,0.15)',
+      'text-primary': '#abb2bf',
+      'text-secondary': '#9da5b4',
+      'text-tertiary': '#5c6370',
       'text-disabled': '#4b5263',
       accent: '#61afef',
       'accent-solid': '#4392d3',

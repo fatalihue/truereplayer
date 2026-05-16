@@ -466,6 +466,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const AUTOSCROLL_MAX_SPEED = 14; // px per animation frame
   const autoScrollRaf = useRef<number | null>(null);
   const cursorY = useRef(0);
+  // Cursor X/Y in state — only used to position the floating drag preview chip, which
+  // renders a "N items" counter near the cursor during a multi-row drag.
+  const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
 
   const handleRowMouseDown = useCallback((idx: number, e: React.MouseEvent) => {
     if (!isDraggable || e.button !== 0) return;
@@ -540,6 +543,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       }
       e.preventDefault(); // Prevent text selection while dragging
       cursorY.current = e.clientY;
+      setCursorPos({ x: e.clientX, y: e.clientY });
       recomputeDropTarget(e.clientY);
       // Kick off the auto-scroll loop only if the cursor is actually in an edge zone —
       // otherwise we'd schedule a RAF per mousemove just to read the position and bail,
@@ -561,7 +565,22 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         const target = dropTargetRef.current;
 
         if (target !== null && indices.length > 0) {
-          send({ type: 'actions:reorder', payload: { indices, targetIndex: target } });
+          // View Transitions wraps the reorder in a snapshot/animate cycle when supported.
+          // The browser captures the "before" state, lets the bridge update the actions
+          // array via React (the inner promise tick gives reconciliation time), then
+          // animates the diff. Chromium 111+ (which WebView2 ships); silent no-op on older.
+          const doReorder = () => send({ type: 'actions:reorder', payload: { indices, targetIndex: target } });
+          const vt = (document as unknown as { startViewTransition?: (cb: () => void | Promise<void>) => unknown }).startViewTransition;
+          if (typeof vt === 'function') {
+            vt.call(document, () => {
+              doReorder();
+              // Bridge round-trip is local + sync-ish; give React ~50ms to commit the
+              // new ordering before View Transitions snapshots the "after" state.
+              return new Promise<void>(resolve => setTimeout(resolve, 50));
+            });
+          } else {
+            doReorder();
+          }
           setSelectedIndices(new Set());
         }
 
@@ -571,6 +590,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
       dragState.current = null;
       dropTargetRef.current = null;
+      setCursorPos(null);
       if (autoScrollRaf.current !== null) {
         cancelAnimationFrame(autoScrollRaf.current);
         autoScrollRaf.current = null;
@@ -584,6 +604,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       e.stopPropagation();
       setDragIndices(null);
       setDropTarget(null);
+      setCursorPos(null);
       dragState.current = null;
       dropTargetRef.current = null;
       if (autoScrollRaf.current !== null) {
@@ -828,15 +849,28 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             : 'bg-[rgba(255,255,255,0.02)]'
                   } hover:bg-bg-elevated`}
                 >
-                  {/* Drop indicator lines */}
+                  {/* Drop indicator — accent line with a small leading circle and a soft
+                      glow. The circle anchors the eye on where the drop "starts" (left edge
+                      of the column area) and reads as more deliberate than a bare hairline.
+                      box-shadow uses var(--color-accent) so it follows theme accents. */}
                   {showDropBefore && (
                     <td colSpan={99} className="absolute top-0 left-0 right-0 h-0 p-0 border-0">
-                      <div className="absolute top-[-1px] left-2 right-2 h-[2px] bg-accent-solid rounded-full" />
+                      <div
+                        className="absolute top-[-2px] left-2 right-2 h-[3px] rounded-full bg-accent-solid"
+                        style={{ boxShadow: '0 0 6px color-mix(in srgb, var(--color-accent) 60%, transparent)' }}
+                      >
+                        <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-accent-solid" />
+                      </div>
                     </td>
                   )}
                   {showDropAfter && (
                     <td colSpan={99} className="absolute bottom-0 left-0 right-0 h-0 p-0 border-0">
-                      <div className="absolute bottom-[-1px] left-2 right-2 h-[2px] bg-accent-solid rounded-full" />
+                      <div
+                        className="absolute bottom-[-2px] left-2 right-2 h-[3px] rounded-full bg-accent-solid"
+                        style={{ boxShadow: '0 0 6px color-mix(in srgb, var(--color-accent) 60%, transparent)' }}
+                      >
+                        <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-accent-solid" />
+                      </div>
                     </td>
                   )}
 
@@ -1073,6 +1107,21 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           </div>
         )}
       </div>
+
+      {/* Floating drag preview — follows the cursor with a "N items" badge so the user
+          knows what's being moved during a multi-row drag. The Windows "grabbing" cursor
+          is ~32×32px and the user reported the chip getting covered at smaller offsets;
+          push it to (+32, +32) so the chip clears the cursor bounds in any DPI/scaling.
+          pointer-events-none keeps it out of hit-testing. */}
+      {dragIndices !== null && cursorPos !== null && (
+        <div
+          className="fixed pointer-events-none z-50 flex items-center gap-1.5 px-2.5 py-1 rounded bg-bg-card border border-accent-solid/60 shadow-lg text-[11px] text-text-primary"
+          style={{ left: cursorPos.x + 32, top: cursorPos.y + 32 }}
+        >
+          <GripVertical size={11} className="text-accent shrink-0" />
+          {dragIndices.length === 1 ? '1 item' : `${dragIndices.length} items`}
+        </div>
+      )}
 
       {sendTextEdit && (
         <SendTextDialog
