@@ -590,9 +590,12 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
           >
             <ClipboardPaste size={14} />
             {buttonStates.copiedCount > 0 && (
-              // Count badge — communicates "there are N actions in the clipboard ready".
-              // Hidden in disabled state because zero would just be noise.
-              <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 flex items-center justify-center bg-accent-solid text-white text-[9px] font-bold leading-none rounded-full">
+              // Count indicator — communicates "there are N actions in the clipboard
+              // ready". Bare numeral (no circle/pill background) keeps the toolbar
+              // visually quiet; the accent-light colour ties it to the icon, which
+              // switches to the same hue when paste is enabled. tabular-nums keeps
+              // two-digit counts (10..99) from jittering against the button corner.
+              <span className="absolute -top-0.5 -right-0.5 text-[10px] font-semibold leading-none tabular-nums text-accent-light pointer-events-none">
                 {buttonStates.copiedCount}
               </span>
             )}
