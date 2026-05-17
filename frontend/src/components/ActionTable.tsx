@@ -151,10 +151,18 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     }
   }, [buttonStates.replayActive]);
 
-  // Auto-scroll to highlighted row during replay
+  // Auto-scroll to highlighted row during replay.
+  //
+  // `behavior: 'auto'` (instant jump) is intentional here despite feeling less
+  // polished than smooth scrolling. At higher replay speeds (10+ actions/sec)
+  // smooth scrolls queue up faster than they complete — the animation never
+  // catches the latest row, the grid visibly lags, and the main thread is
+  // occupied with overlapping scroll tweens instead of paint work. Auto-scroll
+  // costs nothing per call and keeps the highlight visually tied to the
+  // currently-executing action even at burst rates.
   useEffect(() => {
     if (highlightedActionIndex !== null && highlightedRowRef.current) {
-      highlightedRowRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      highlightedRowRef.current.scrollIntoView({ block: 'nearest', behavior: 'auto' });
     }
   }, [highlightedActionIndex]);
 
@@ -1258,7 +1266,18 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       {dragIndices !== null && cursorPos !== null && (
         <div
           className="fixed pointer-events-none z-50 flex items-center gap-1.5 px-2.5 py-1 rounded bg-bg-card border border-accent-solid/60 shadow-lg text-[11px] text-text-primary"
-          style={{ left: cursorPos.x + 32, top: cursorPos.y + 32 }}
+          // `transform: translate3d(...)` instead of `left/top` so the chip rides
+          // on the GPU compositor layer — each mousemove only retriggers a
+          // composite, never a layout/paint of the surrounding tree. `top:0;
+          // left:0` anchors the transform origin, `willChange:transform` hints
+          // the browser to promote the element ahead of time. Saves a layout
+          // pass per pointermove in the DnD hot loop.
+          style={{
+            top: 0,
+            left: 0,
+            transform: `translate3d(${cursorPos.x + 32}px, ${cursorPos.y + 32}px, 0)`,
+            willChange: 'transform',
+          }}
         >
           <GripVertical size={11} className="text-accent shrink-0" />
           {dragIndices.length === 1 ? '1 item' : `${dragIndices.length} items`}

@@ -33,7 +33,17 @@ export function getDisplayY(item: ActionItem): string {
   return NO_COORD_TYPES.has(item.actionType) ? '' : String(item.y);
 }
 
-export function getActionTypeColors(actionType: string) {
+// Resolved-color tuple cached per action type. The values themselves are CSS
+// var() references — they're token strings, not actual colors — so caching is
+// safe across theme changes (the variable resolves at paint time, not at
+// JS-string-construction time). Keyed by raw `actionType` string so all of
+// "BrowserClick", "BrowserType", etc. share the Browser entry via the
+// startsWith check below. Allocates ~12 objects total instead of one per row
+// per render — meaningful when rendering a 500+ row grid where the function
+// was being called for every iteration of actions.map.
+const ACTION_COLOR_CACHE: Map<string, { bg: string; fg: string }> = new Map();
+
+function computeActionTypeColors(actionType: string): { bg: string; fg: string } {
   if (actionType.startsWith('Browser'))
     return { bg: 'var(--color-action-browser-bg)', fg: 'var(--color-action-browser-fg)' };
   if (actionType.includes('Click'))
@@ -51,6 +61,14 @@ export function getActionTypeColors(actionType: string) {
   if (actionType === 'Pause')
     return { bg: 'var(--color-action-pause-bg)', fg: 'var(--color-action-pause-fg)' };
   return { bg: 'transparent', fg: 'var(--color-text-tertiary)' };
+}
+
+export function getActionTypeColors(actionType: string): { bg: string; fg: string } {
+  const cached = ACTION_COLOR_CACHE.get(actionType);
+  if (cached) return cached;
+  const result = computeActionTypeColors(actionType);
+  ACTION_COLOR_CACHE.set(actionType, result);
+  return result;
 }
 
 export function getActionTypeIcon(actionType: string): string {

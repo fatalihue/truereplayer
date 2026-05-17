@@ -1322,41 +1322,59 @@ export function resolveThemeColors(config: ThemeConfig, customPresets: ThemePres
 
 export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISettings) {
   const root = document.documentElement;
+
+  // Build the entire variable set as one cssText string, then assign once.
+  // Each `setProperty` call invalidates the style cache and can schedule a
+  // separate style recalc — with ~40 vars per theme apply, the cumulative
+  // cost is visible on theme-editor sliders (one keystroke = full recompute
+  // through 40 sets). One cssText assign is a single mutation that the
+  // browser batches into a single recalc. Trade-off: we lose the inline-vs-
+  // stylesheet distinction, but every var here was already an inline anyway,
+  // so net behaviour is identical — just faster.
+  const parts: string[] = [];
   for (const [key, value] of Object.entries(colors)) {
-    root.style.setProperty(`--color-${key}`, value);
+    parts.push(`--color-${key}: ${value};`);
   }
   // Layout
-  root.style.setProperty('--ui-font-size', `${uiSettings.fontSize}px`);
-  root.style.setProperty('--ui-border-radius', `${uiSettings.borderRadius}px`);
-  root.style.setProperty('--ui-row-height', `${uiSettings.rowHeight}px`);
-  root.style.setProperty('zoom', `${uiSettings.zoom / 100}`);
+  parts.push(`--ui-font-size: ${uiSettings.fontSize}px;`);
+  parts.push(`--ui-border-radius: ${uiSettings.borderRadius}px;`);
+  parts.push(`--ui-row-height: ${uiSettings.rowHeight}px;`);
   // Semantic colors + auto-derived backgrounds
-  root.style.setProperty('--color-recording', uiSettings.recordingColor);
-  root.style.setProperty('--color-recording-bg', `color-mix(in srgb, ${uiSettings.recordingColor} 10%, transparent)`);
-  root.style.setProperty('--color-replay', uiSettings.replayColor);
-  root.style.setProperty('--color-replay-bg', `color-mix(in srgb, ${uiSettings.replayColor} 10%, transparent)`);
-  root.style.setProperty('--color-clicker', uiSettings.clickerColor);
-  root.style.setProperty('--color-clicker-bg', `color-mix(in srgb, ${uiSettings.clickerColor} 12%, transparent)`);
-  root.style.setProperty('--color-clicker-border', `color-mix(in srgb, ${uiSettings.clickerColor} 30%, transparent)`);
+  parts.push(`--color-recording: ${uiSettings.recordingColor};`);
+  parts.push(`--color-recording-bg: color-mix(in srgb, ${uiSettings.recordingColor} 10%, transparent);`);
+  parts.push(`--color-replay: ${uiSettings.replayColor};`);
+  parts.push(`--color-replay-bg: color-mix(in srgb, ${uiSettings.replayColor} 10%, transparent);`);
+  parts.push(`--color-clicker: ${uiSettings.clickerColor};`);
+  parts.push(`--color-clicker-bg: color-mix(in srgb, ${uiSettings.clickerColor} 12%, transparent);`);
+  parts.push(`--color-clicker-border: color-mix(in srgb, ${uiSettings.clickerColor} 30%, transparent);`);
   // Action type pill colors + auto-derived backgrounds
-  root.style.setProperty('--color-action-mouse-fg', uiSettings.actionMouseColor);
-  root.style.setProperty('--color-action-mouse-bg', `color-mix(in srgb, ${uiSettings.actionMouseColor} 10%, transparent)`);
-  root.style.setProperty('--color-action-key-fg', uiSettings.actionKeyColor);
-  root.style.setProperty('--color-action-key-bg', `color-mix(in srgb, ${uiSettings.actionKeyColor} 10%, transparent)`);
-  root.style.setProperty('--color-action-scroll-fg', uiSettings.actionScrollColor);
-  root.style.setProperty('--color-action-scroll-bg', `color-mix(in srgb, ${uiSettings.actionScrollColor} 10%, transparent)`);
-  root.style.setProperty('--color-action-sendtext-fg', uiSettings.actionSendTextColor);
-  root.style.setProperty('--color-action-sendtext-bg', `color-mix(in srgb, ${uiSettings.actionSendTextColor} 10%, transparent)`);
-  root.style.setProperty('--color-action-waitimage-fg', uiSettings.actionWaitImageColor);
-  root.style.setProperty('--color-action-waitimage-bg', `color-mix(in srgb, ${uiSettings.actionWaitImageColor} 10%, transparent)`);
-  root.style.setProperty('--color-action-browser-fg', uiSettings.actionBrowserColor);
-  root.style.setProperty('--color-action-browser-bg', `color-mix(in srgb, ${uiSettings.actionBrowserColor} 10%, transparent)`);
-  root.style.setProperty('--color-action-runprofile-fg', uiSettings.actionRunProfileColor);
-  root.style.setProperty('--color-action-runprofile-bg', `color-mix(in srgb, ${uiSettings.actionRunProfileColor} 10%, transparent)`);
-  root.style.setProperty('--color-action-pause-fg', uiSettings.actionPauseColor);
-  root.style.setProperty('--color-action-pause-bg', `color-mix(in srgb, ${uiSettings.actionPauseColor} 10%, transparent)`);
+  parts.push(`--color-action-mouse-fg: ${uiSettings.actionMouseColor};`);
+  parts.push(`--color-action-mouse-bg: color-mix(in srgb, ${uiSettings.actionMouseColor} 10%, transparent);`);
+  parts.push(`--color-action-key-fg: ${uiSettings.actionKeyColor};`);
+  parts.push(`--color-action-key-bg: color-mix(in srgb, ${uiSettings.actionKeyColor} 10%, transparent);`);
+  parts.push(`--color-action-scroll-fg: ${uiSettings.actionScrollColor};`);
+  parts.push(`--color-action-scroll-bg: color-mix(in srgb, ${uiSettings.actionScrollColor} 10%, transparent);`);
+  parts.push(`--color-action-sendtext-fg: ${uiSettings.actionSendTextColor};`);
+  parts.push(`--color-action-sendtext-bg: color-mix(in srgb, ${uiSettings.actionSendTextColor} 10%, transparent);`);
+  parts.push(`--color-action-waitimage-fg: ${uiSettings.actionWaitImageColor};`);
+  parts.push(`--color-action-waitimage-bg: color-mix(in srgb, ${uiSettings.actionWaitImageColor} 10%, transparent);`);
+  parts.push(`--color-action-browser-fg: ${uiSettings.actionBrowserColor};`);
+  parts.push(`--color-action-browser-bg: color-mix(in srgb, ${uiSettings.actionBrowserColor} 10%, transparent);`);
+  parts.push(`--color-action-runprofile-fg: ${uiSettings.actionRunProfileColor};`);
+  parts.push(`--color-action-runprofile-bg: color-mix(in srgb, ${uiSettings.actionRunProfileColor} 10%, transparent);`);
+  parts.push(`--color-action-pause-fg: ${uiSettings.actionPauseColor};`);
+  parts.push(`--color-action-pause-bg: color-mix(in srgb, ${uiSettings.actionPauseColor} 10%, transparent);`);
   // Font
-  root.style.setProperty('--font-mono', `'${uiSettings.fontMono}', 'Courier New', monospace`);
+  parts.push(`--font-mono: '${uiSettings.fontMono}', 'Courier New', monospace;`);
+
+  root.style.cssText = parts.join(' ');
+
+  // `zoom` doesn't sit cleanly in the cssText batch because it's a real CSS
+  // property (not a custom var). Set it separately — a single property assign
+  // still benefits from coming after the variable batch so the browser only
+  // composes one final layout. Same reasoning for the data-attribute.
+  root.style.zoom = `${uiSettings.zoom / 100}`;
+
   // Animations toggle — exposes a single data-attribute the CSS can hook into
   // (e.g. `html[data-animations="true"] .some-thing { transition: ... }`).
   root.setAttribute('data-animations', uiSettings.enableAnimations ? 'true' : 'false');
