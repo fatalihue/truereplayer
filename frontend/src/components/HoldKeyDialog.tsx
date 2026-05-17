@@ -45,25 +45,53 @@ export function HoldKeyDialog({
 }: HoldKeyDialogProps) {
   const isEditing = initialKey != null;
   const [captured, setCaptured] = useState<string | null>(initialKey ?? null);
-  const [holdMs, setHoldMs] = useState<number>(initialHoldDurationMs ?? DEFAULT_HOLD_MS);
+
+  // Two-track state for the duration: `holdMs` (React state, drives render) and
+  // `holdMsRef` (synchronous source of truth, drives the commit handler). Every
+  // setter goes through `updateHoldMs` which writes both. handleConfirm reads
+  // exclusively from the ref so the value at commit time can't be stale relative
+  // to a preset click or spinner click that hasn't flushed through React yet.
+  // Worked around a real bug where clicking Insert immediately after a preset
+  // chip saved the OLD default (1000) instead of the preset value.
+  const initialMs = initialHoldDurationMs ?? DEFAULT_HOLD_MS;
+  const [holdMs, setHoldMsState] = useState<number>(initialMs);
+  const holdMsRef = useRef<number>(initialMs);
+  const setHoldMs = useCallback((next: number | ((v: number) => number)) => {
+    setHoldMsState(prev => {
+      const value = typeof next === 'function' ? next(prev) : next;
+      holdMsRef.current = value;
+      return value;
+    });
+  }, []);
+
+  // Reset state when the dialog is reopened with a different prop value. Critical
+  // because React may reuse the component instance across opens (the conditional
+  // `{holdKeyEdit && <Dialog/>}` toggles mount/unmount, but reconciliation at the
+  // same JSX position may preserve state). A bare `initialHoldDurationMs` change
+  // re-syncs both the render-state and the commit-ref so the input opens at the
+  // row's actual current value, not whatever the previous edit left behind.
+  useEffect(() => {
+    if (initialHoldDurationMs != null) {
+      setHoldMsState(initialHoldDurationMs);
+      holdMsRef.current = initialHoldDurationMs;
+    }
+  }, [initialHoldDurationMs]);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const durationInputRef = useRef<HTMLInputElement>(null);
 
-  // On mount: focus the container so the capture pad receives the first keypress.
-  // After a key is captured: shift focus to the duration input AND select its
-  // contents — so the user can type a new duration immediately without clicking
-  // into the field first, and without their typing being interpreted as a
-  // re-capture by the container's keydown handler. This is the fix for the
-  // "I typed 5000 but the badge still shows 1s" bug: previously the focus
-  // stayed on the container, every digit re-captured the key, and the
-  // duration input never received the keystrokes.
+  // Focus management. Mount → container (capture pad ready). Once a key is
+  // captured → input (so the user can type the duration immediately without
+  // clicking into the field). Removed the .select() that was here previously —
+  // some browsers fired focus+select in a way that briefly displayed the OLD
+  // value during the selection paint, which confused users into thinking the
+  // dialog had loaded with stale data.
   useEffect(() => {
     containerRef.current?.focus();
   }, []);
   useEffect(() => {
     if (captured && durationInputRef.current) {
       durationInputRef.current.focus();
-      durationInputRef.current.select();
     }
   }, [captured]);
 
@@ -92,17 +120,15 @@ export function HoldKeyDialog({
     if (name) setCaptured(name);
   }, [captured, isEditing, onClose]);
 
-  // Read the duration straight from the DOM at commit time. Belt-and-braces
-  // against any React-state-flush ordering issue between the input's onChange
-  // and the button's onClick (was a real bug pre-fix: clicking Insert
-  // immediately after typing read a stale `holdMs` and saved 1000 ms even
-  // though the input showed the new value).
+  // Commit reads from the ref (which is updated synchronously by every setter
+  // and onChange) — that bypasses any timing issue between React's batched
+  // state flush and the button's click event. The earlier DOM-ref approach
+  // (reading durationInputRef.current.value) failed for preset / spinner
+  // clicks because the DOM hadn't been repainted yet between the chip's
+  // setState and the Insert button's click.
   const handleConfirm = () => {
     if (!captured) return;
-    const raw = durationInputRef.current?.value ?? String(holdMs);
-    const parsed = parseInt(raw, 10);
-    const finalMs = Number.isFinite(parsed) ? clamp(parsed) : clamp(holdMs);
-    onConfirm(captured, finalMs);
+    onConfirm(captured, clamp(holdMsRef.current));
   };
 
   // Display the chosen duration in seconds when it's a clean multiple of 1000,

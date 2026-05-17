@@ -113,8 +113,12 @@ namespace TrueReplayer.Models
         // with a single atomic row whose Value column reads "W · 1.5s hold". 0 = use the
         // global default. Clamped 10..60000 on edit. Stuck-key cleanup (ResetKeyState)
         // safely releases the key if the replay is cancelled mid-hold.
-        // WhenWritingDefault keeps non-HoldKey rows schema-clean on disk.
-        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        //
+        // Always serialized (no JsonIgnore) — earlier draft used WhenWritingDefault, but
+        // that hid the field whenever the value happened to be 0 (e.g. a freshly typed-and-
+        // -clamped state during edit), which led to the frontend reading `undefined` and
+        // falling back to a hardcoded 1000 ms display. Keeping it always-on costs ~20 bytes
+        // per non-HoldKey row in the saved profile JSON — well within budget.
         public int HoldDurationMs { get; set; }
 
         // Default hold duration used by HoldKey when HoldDurationMs == 0. Same sharing
