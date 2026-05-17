@@ -88,6 +88,16 @@ export function HoldKeyDialog({
   // dialog had loaded with stale data.
   useEffect(() => {
     containerRef.current?.focus();
+    // Diagnostic for the "dialog opens with 1000 instead of saved value" bug —
+    // logs what props arrived on mount so we can tell if the parent's IIFE is
+    // passing the wrong value (vs. some internal state issue here).
+    // eslint-disable-next-line no-console
+    console.log('[HoldKeyDialog] mount', {
+      initialKey,
+      initialHoldDurationMs,
+      isEditing,
+      initialState: initialMs,
+    });
   }, []);
   useEffect(() => {
     if (captured && durationInputRef.current) {
@@ -128,7 +138,20 @@ export function HoldKeyDialog({
   // setState and the Insert button's click.
   const handleConfirm = () => {
     if (!captured) return;
-    onConfirm(captured, clamp(holdMsRef.current));
+    const finalMs = clamp(holdMsRef.current);
+    // Temporary diagnostic — surface every value relevant to the commit path so
+    // the user can verify in DevTools (tray menu → DevTools) which step lost the
+    // duration. Remove once the underlying bug is identified.
+    // eslint-disable-next-line no-console
+    console.log('[HoldKeyDialog] handleConfirm', {
+      captured,
+      initialHoldDurationMs,
+      holdMsRef: holdMsRef.current,
+      holdMsState: holdMs,
+      inputDOMValue: durationInputRef.current?.value,
+      finalMs,
+    });
+    onConfirm(captured, finalMs);
   };
 
   // Display the chosen duration in seconds when it's a clean multiple of 1000,

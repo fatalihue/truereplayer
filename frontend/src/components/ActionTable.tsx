@@ -1393,6 +1393,18 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         const editing = actions[holdKeyEdit.index];
         const curKey = editing?.key ?? '';
         const curDuration = editing?.holdDurationMs && editing.holdDurationMs > 0 ? editing.holdDurationMs : 1000;
+        // Diagnostic — surfaces what the parent IIFE actually reads from state.
+        // If `editing.holdDurationMs` is undefined here but the badge above
+        // shows the saved value, the bug is upstream (bridge/serialization).
+        // eslint-disable-next-line no-console
+        console.log('[ActionTable] holdKeyEdit IIFE', {
+          index: holdKeyEdit.index,
+          editingExists: editing != null,
+          editingActionType: editing?.actionType,
+          editingHoldDurationMs: editing?.holdDurationMs,
+          curKey,
+          curDuration,
+        });
         return (
           <HoldKeyDialog
             initialKey={curKey}
