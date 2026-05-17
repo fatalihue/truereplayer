@@ -168,8 +168,14 @@ export function KeystrokeCaptureDialog({
     // If focus is on a numeric input, let it process keystrokes normally — we shouldn't
     // hijack digit presses to "capture" them as a key combo. Stops the case where typing
     // "5" in the Repeat field would re-commit the captured combo with key "5".
+    // stopPropagation also keeps Ctrl+A from leaking up to the ActionTable's grid
+    // handler (which would otherwise select every row instead of selecting the
+    // input's text).
     const target = e.target as HTMLElement;
-    if (target?.tagName === 'INPUT') return;
+    if (target?.tagName === 'INPUT') {
+      e.stopPropagation();
+      return;
+    }
     // Escape closes the dialog when:
     //   • no combo captured yet (insert flow waiting for first capture), OR
     //   • we're editing an existing row (Esc = abandon edit, matches user expectation

@@ -47,17 +47,38 @@ export function HoldKeyDialog({
   const [captured, setCaptured] = useState<string | null>(initialKey ?? null);
   const [holdMs, setHoldMs] = useState<number>(initialHoldDurationMs ?? DEFAULT_HOLD_MS);
   const containerRef = useRef<HTMLDivElement>(null);
+  const durationInputRef = useRef<HTMLInputElement>(null);
 
+  // On mount: focus the container so the capture pad receives the first keypress.
+  // After a key is captured: shift focus to the duration input AND select its
+  // contents — so the user can type a new duration immediately without clicking
+  // into the field first, and without their typing being interpreted as a
+  // re-capture by the container's keydown handler. This is the fix for the
+  // "I typed 5000 but the badge still shows 1s" bug: previously the focus
+  // stayed on the container, every digit re-captured the key, and the
+  // duration input never received the keystrokes.
   useEffect(() => {
     containerRef.current?.focus();
   }, []);
+  useEffect(() => {
+    if (captured && durationInputRef.current) {
+      durationInputRef.current.focus();
+      durationInputRef.current.select();
+    }
+  }, [captured]);
 
   const clamp = (v: number) => Math.max(MIN_HOLD_MS, Math.min(MAX_HOLD_MS, Math.floor(v)));
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    // Numeric inputs handle their own keystrokes — don't hijack digits for capture.
+    // When the user is typing in the duration input, the container should NOT
+    // hijack the keystroke for re-capture. stopPropagation also blocks Ctrl+A
+    // from leaking up to the ActionTable's grid handler, which would otherwise
+    // select every action in the grid instead of the input's text.
     const target = e.target as HTMLElement;
-    if (target?.tagName === 'INPUT') return;
+    if (target?.tagName === 'INPUT') {
+      e.stopPropagation();
+      return;
+    }
     // Esc closes when no key captured yet, or when editing (cancel the edit).
     // When inserting AND already captured, Esc re-captures (replaces with a new key).
     if (e.key === 'Escape' && (captured === null || isEditing)) {
@@ -71,8 +92,17 @@ export function HoldKeyDialog({
     if (name) setCaptured(name);
   }, [captured, isEditing, onClose]);
 
+  // Read the duration straight from the DOM at commit time. Belt-and-braces
+  // against any React-state-flush ordering issue between the input's onChange
+  // and the button's onClick (was a real bug pre-fix: clicking Insert
+  // immediately after typing read a stale `holdMs` and saved 1000 ms even
+  // though the input showed the new value).
   const handleConfirm = () => {
-    if (captured) onConfirm(captured, clamp(holdMs));
+    if (!captured) return;
+    const raw = durationInputRef.current?.value ?? String(holdMs);
+    const parsed = parseInt(raw, 10);
+    const finalMs = Number.isFinite(parsed) ? clamp(parsed) : clamp(holdMs);
+    onConfirm(captured, finalMs);
   };
 
   // Display the chosen duration in seconds when it's a clean multiple of 1000,
@@ -149,6 +179,7 @@ export function HoldKeyDialog({
                 <Minus size={11} />
               </button>
               <input
+                ref={durationInputRef}
                 type="number"
                 min={MIN_HOLD_MS}
                 max={MAX_HOLD_MS}
