@@ -543,6 +543,17 @@ namespace TrueReplayer
                 newTab = a.NewTab,
                 isSkipped = a.IsSkipped,
                 repeatCount = a.RepeatCount,
+                // Keystroke × N inter-cycle gap. Forwarded so the edit dialog can
+                // restore the user's chosen delay (and the Keystroke replay loop
+                // on the C# side already reads it from the action's own property).
+                repeatDelayMs = a.RepeatDelayMs,
+                // HoldKey duration — without this, the frontend's badge / edit
+                // dialog never see the value the user set, fall back to a
+                // hardcoded 1000 ms default, and every "press for X seconds"
+                // round-trips back as 1 s. (This was the actual root cause of
+                // the "badge always shows 1s" bug — the DTO had been hand-
+                // assembled here and the new property was forgotten.)
+                holdDurationMs = a.HoldDurationMs,
                 // New browser action fields (must be forwarded so the editor restores their state)
                 waitMode = a.WaitMode,
                 urlWaitPattern = a.UrlWaitPattern,
@@ -899,6 +910,12 @@ namespace TrueReplayer
                     newTab = a.NewTab,
                     isSkipped = a.IsSkipped,
                     repeatCount = a.RepeatCount,
+                    // Mirror PushActionsUpdate — repeatDelayMs (Keystroke gap) and
+                    // holdDurationMs (HoldKey duration) need to ride along on the
+                    // cold-start state:init payload, otherwise the editor opens at
+                    // the row's defaults rather than its saved values.
+                    repeatDelayMs = a.RepeatDelayMs,
+                    holdDurationMs = a.HoldDurationMs,
                     // Browser action extras (Wait mode, Navigate post-checks, Type options) —
                     // same fix as the WaitImage extras above.
                     waitMode = a.WaitMode,

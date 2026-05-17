@@ -105,14 +105,6 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
           : state.clickerStats,
       };
     case 'actions:updated':
-      // Temporary diagnostic — surface the raw JSON action(s) the C# is sending,
-      // so we can tell whether HoldDurationMs is being serialised or omitted on
-      // the wire. If a HoldKey row arrives without `holdDurationMs`, the bug is
-      // in the C# serialisation (still using WhenWritingDefault, value happens
-      // to be 0, etc.) — fix is on the backend. If the field IS present but
-      // the badge / edit dialog still misreads it, the bug is on the frontend.
-      // eslint-disable-next-line no-console
-      console.log('[AppState] actions:updated raw payload', JSON.stringify(message.payload.actions));
       return { ...state, actions: message.payload.actions, highlightedActionIndex: null };
     case 'actions:highlight':
       return { ...state, highlightedActionIndex: message.payload.index };
