@@ -80,8 +80,10 @@ namespace TrueReplayer.Services
             // coords (that's what the overlay form reports), so we must subtract (vx, vy) before
             // indexing into the bitmap — otherwise multi-monitor setups with vx ≠ 0 would crop
             // the wrong slice (and the test-match score would tank to noise levels).
-            int vx = NativeMethods.GetSystemMetrics(76);  // SM_XVIRTUALSCREEN
-            int vy = NativeMethods.GetSystemMetrics(77);  // SM_YVIRTUALSCREEN
+            // Cached virtual-screen origin — saves 2 P/Invokes per match attempt
+            // (WaitImage polls at 500 ms, so a few seconds of waiting was hitting
+            // GetSystemMetrics dozens of times). See NativeMethods.VirtualScreen.
+            var (vx, vy, _, _) = NativeMethods.VirtualScreen.Bounds;
 
             int offsetX = 0;
             int offsetY = 0;

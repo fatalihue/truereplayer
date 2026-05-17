@@ -255,5 +255,42 @@ namespace TrueReplayer.Interop
             using var curModule = curProcess.MainModule!;
             return SetWindowsHookEx(WH_KEYBOARD_LL, proc, GetModuleHandle(curModule.ModuleName!), 0);
         }
+
+        /// <summary>
+        /// Virtual-screen bounds (SM_X/YVIRTUALSCREEN + SM_CX/CYVIRTUALSCREEN) cached
+        /// to avoid 4 P/Invoke calls per mouse action / clicker iteration. The values
+        /// only change on monitor add/remove or DPI change — both rare events; users
+        /// who hit one can restart the replay to pick up the new bounds. Worth the
+        /// micro-saving in the cursor-clicker hot loop where SimulateMouse fires at
+        /// 10+ Hz and previously did 4 GetSystemMetrics calls per click.
+        /// </summary>
+        public static class VirtualScreen
+        {
+            private static int _x, _y, _w, _h;
+            private static bool _cached;
+
+            public static (int X, int Y, int W, int H) Bounds
+            {
+                get
+                {
+                    if (!_cached)
+                    {
+                        _x = GetSystemMetrics(76); // SM_XVIRTUALSCREEN
+                        _y = GetSystemMetrics(77); // SM_YVIRTUALSCREEN
+                        _w = GetSystemMetrics(78); // SM_CXVIRTUALSCREEN
+                        _h = GetSystemMetrics(79); // SM_CYVIRTUALSCREEN
+                        _cached = true;
+                    }
+                    return (_x, _y, _w, _h);
+                }
+            }
+
+            /// <summary>
+            /// Drops the cache so the next read re-queries Windows. Call after a
+            /// monitor reconfiguration or DPI change. Not wired to any system event
+            /// yet — invoke manually if needed.
+            /// </summary>
+            public static void Invalidate() => _cached = false;
+        }
     }
 }

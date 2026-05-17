@@ -296,10 +296,9 @@ namespace TrueReplayer.Services
                             jitteredY += Random.Shared.Next(-jitterRadius, jitterRadius + 1);
                         }
 
-                        int vx = NativeMethods.GetSystemMetrics(76);
-                        int vy = NativeMethods.GetSystemMetrics(77);
-                        int vw = NativeMethods.GetSystemMetrics(78);
-                        int vh = NativeMethods.GetSystemMetrics(79);
+                        // Cached virtual-screen bounds — same call signature minus 4
+                        // P/Invokes per clicker tick. See NativeMethods.VirtualScreen.
+                        var (vx, vy, vw, vh) = NativeMethods.VirtualScreen.Bounds;
                         int absX = (int)(((double)(jitteredX - vx) * 65535) / (vw - 1));
                         int absY = (int)(((double)(jitteredY - vy) * 65535) / (vh - 1));
                         uint posFlags = NativeMethods.MOUSEEVENTF_MOVE | NativeMethods.MOUSEEVENTF_ABSOLUTE | NativeMethods.MOUSEEVENTF_VIRTUALDESK;
@@ -1379,10 +1378,9 @@ namespace TrueReplayer.Services
                 }
             }
 
-            int vx = NativeMethods.GetSystemMetrics(76); // SM_XVIRTUALSCREEN
-            int vy = NativeMethods.GetSystemMetrics(77); // SM_YVIRTUALSCREEN
-            int vw = NativeMethods.GetSystemMetrics(78); // SM_CXVIRTUALSCREEN
-            int vh = NativeMethods.GetSystemMetrics(79); // SM_CYVIRTUALSCREEN
+            // Cached virtual-screen bounds — saves 4 P/Invokes per mouse action.
+            // See NativeMethods.VirtualScreen.
+            var (vx, vy, vw, vh) = NativeMethods.VirtualScreen.Bounds;
 
             int absoluteX = (int)(((double)(x - vx) * 65535) / (vw - 1));
             int absoluteY = (int)(((double)(y - vy) * 65535) / (vh - 1));
