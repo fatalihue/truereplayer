@@ -952,6 +952,11 @@ namespace TrueReplayer
                     effectiveTargetProcessName = p.EffectiveTargetProcessName,
                     effectiveTargetWindowTitle = p.EffectiveTargetWindowTitle,
                     effectiveTargetTitleMatchMode = p.EffectiveTargetTitleMatchMode,
+                    // Keep in sync with PushProfilesUpdate — without this, the first paint
+                    // after launch renders the crosshair fallback for every targeted profile
+                    // even though the on-disk icon cache has the PNG ready. The icon only
+                    // appears on the next push (drag, expand, etc.), which feels broken.
+                    appIconBase64 = AppIconService.GetIconBase64(p.EffectiveTargetProcessName),
                     useRelativeCoordinates = p.UseRelativeCoordinates,
                     bringToFocus = p.BringToFocus,
                     restorePosition = p.RestorePosition,
@@ -973,6 +978,7 @@ namespace TrueReplayer
                         windowTargetProcessName = f.TargetWindow?.ProcessName,
                         windowTargetWindowTitle = f.TargetWindow?.WindowTitle,
                         windowTargetTitleMatchMode = f.TargetWindow?.TitleMatchMode ?? "contains",
+                        appIconBase64 = AppIconService.GetIconBase64(f.TargetWindow?.ProcessName),
                         useRelativeCoordinates = f.UseRelativeCoordinates,
                         bringToFocus = f.BringToFocus,
                         restorePosition = f.RestorePosition,
