@@ -528,13 +528,6 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                     ))}
                   </div>
                 ))}
-                {/* Footer tip nudges users to Recording for the things the dropdown no longer
-                    covers (clicks, scrolls, multi-key sequences). Without this, "where's Left
-                    Click?" or "where's Scroll?" becomes a support question. */}
-                <div className="h-px bg-border-subtle my-1" />
-                <div className="px-2.5 py-2 text-[10px] text-text-tertiary leading-relaxed">
-                  💡 For clicks, scrolls or key sequences, use <span className="text-text-secondary font-semibold">Recording</span>.
-                </div>
               </div>
             )}
           </div>

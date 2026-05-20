@@ -804,12 +804,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   // Submenu items — mirrors the toolbar's Add Action dropdown so users see the
   // same vocabulary regardless of entry point. Click x3 + KeyPress + Scrolls were
   // removed in the toolbar pass because recording captures them natively; same
-  // reasoning here. The remaining 5 are exactly what the toolbar exposes:
-  //   - Send Text / Send Key open capture dialogs
-  //   - Run Profile opens the profile picker
-  //   - Pause / Wait for Image insert directly
+  // reasoning here. Send Text is also omitted because the toolbar already has a
+  // dedicated button for it — keeping it here too was redundant.
   const submenuItems = [
-    { type: 'SendText', label: 'Send Text…', icon: Type },
     { type: 'SendKey', label: 'Send Key…', icon: Keyboard },
     { type: 'SendKeystroke', label: 'Send Keystroke…', icon: Keyboard },
     // Press Key × N — uses the single-arrow `Repeat` icon to stay distinct from
