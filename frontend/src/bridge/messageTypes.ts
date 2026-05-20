@@ -82,6 +82,11 @@ export interface ProfileEntry {
   effectiveTargetProcessName: string | null;
   effectiveTargetWindowTitle: string | null;
   effectiveTargetTitleMatchMode: string;
+  // Base64-encoded PNG of the effective-target .exe's icon, or null when no target
+  // is set / icon extraction failed. Backend-resolved from process name via running
+  // processes + App Paths registry; not persisted to disk. UI uses
+  // `effectiveTargetSource` to pick opacity (own = 100 %, folder-inherited = 55 %).
+  appIconBase64: string | null;
   useRelativeCoordinates: boolean;
   bringToFocus: boolean;
   restorePosition: boolean;
@@ -101,6 +106,9 @@ export interface ProfileFolder {
   windowTargetProcessName?: string;
   windowTargetWindowTitle?: string;
   windowTargetTitleMatchMode?: string;
+  // Base64-encoded PNG of the folder target's .exe, or null. Resolved server-side
+  // alongside the profile-level icon; not persisted with the folder definition.
+  appIconBase64?: string | null;
   useRelativeCoordinates?: boolean;
   bringToFocus?: boolean;
   // Inheritable Restore Position/Size + geometry. Profile inside the folder uses these unless

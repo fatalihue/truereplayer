@@ -655,6 +655,12 @@ namespace TrueReplayer
                 effectiveTargetProcessName = p.EffectiveTargetProcessName,
                 effectiveTargetWindowTitle = p.EffectiveTargetWindowTitle,
                 effectiveTargetTitleMatchMode = p.EffectiveTargetTitleMatchMode,
+                // Icon of the effective WindowTarget's .exe, base64 PNG. Pure UI augmentation
+                // — not persisted, not in the typed ProfileEntry model. The frontend uses
+                // effectiveTargetSource to decide opacity (own = 100 %, folder-inherited = 55 %).
+                // Null when no target or icon extraction failed (UWP host, portable not in
+                // PATH, etc.) — the existing crosshair badge renders as fallback.
+                appIconBase64 = AppIconService.GetIconBase64(p.EffectiveTargetProcessName),
                 useRelativeCoordinates = p.UseRelativeCoordinates,
                 bringToFocus = p.BringToFocus,
                 restorePosition = p.RestorePosition,
@@ -677,6 +683,7 @@ namespace TrueReplayer
                     windowTargetProcessName = f.TargetWindow?.ProcessName,
                     windowTargetWindowTitle = f.TargetWindow?.WindowTitle,
                     windowTargetTitleMatchMode = f.TargetWindow?.TitleMatchMode ?? "contains",
+                    appIconBase64 = AppIconService.GetIconBase64(f.TargetWindow?.ProcessName),
                     useRelativeCoordinates = f.UseRelativeCoordinates,
                     bringToFocus = f.BringToFocus,
                     restorePosition = f.RestorePosition,

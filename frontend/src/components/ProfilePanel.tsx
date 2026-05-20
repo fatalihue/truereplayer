@@ -871,6 +871,23 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           <div className="w-[3px] h-4 rounded-sm bg-accent-solid shrink-0" />
         )}
 
+        {/* App icon — base64 PNG of the effective target's .exe, resolved server-side.
+            Sits between the active marker and the name. Opacity follows the same rule
+            as the inherited-crosshair below: 100 % when this profile owns the target,
+            55 % when it inherits from a folder. Null when no target is set or icon
+            extraction failed (UWP host, portable apps off PATH) — in that case the
+            crosshair badge to the right renders as fallback. The image's title is the
+            process name so hover still surfaces the target identity. */}
+        {p.appIconBase64 && (
+          <img
+            src={`data:image/png;base64,${p.appIconBase64}`}
+            alt=""
+            title={p.effectiveTargetProcessName ?? ''}
+            className="w-3.5 h-3.5 shrink-0 object-contain pointer-events-none"
+            style={{ opacity: p.effectiveTargetSource === 'folder' ? 0.55 : 1 }}
+          />
+        )}
+
         <span
           className={`text-ui flex-1 min-w-0 truncate ${
             p.isActive
@@ -881,7 +898,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           {p.name}
         </span>
 
-        {p.hasWindowTarget ? (
+        {p.hasWindowTarget && !p.appIconBase64 ? (
+          // Own target but the icon couldn't be resolved (UWP host, portable not in PATH).
+          // Crosshair stays as a "this row IS gated" cue — same affordances as before:
+          // hover reveals process/title, ✕ overlay removes the target.
           <span
             className="group/target shrink-0 relative"
             data-tip={p.windowTargetProcessName || p.windowTargetWindowTitle || 'Window target set'}
@@ -893,11 +913,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               className="hidden group-hover/target:inline-flex absolute top-0 right-0 w-full h-full items-center justify-center rounded-full bg-recording text-white text-[7px] font-bold leading-none hover:bg-red-500"
             >✕</button>
           </span>
-        ) : p.hasEffectiveTarget && p.effectiveTargetSource === 'folder' && (
-          // Inherited from folder — show a faded crosshair so the user can see this profile
-          // IS gated even though it has no target of its own. No remove (✕) overlay because
-          // removal must happen from the folder, not the row. The folder ancestry is already
-          // visible in the tree, so the tooltip only carries the target identity.
+        ) : (!p.appIconBase64 && p.hasEffectiveTarget && p.effectiveTargetSource === 'folder') && (
+          // Inherited from folder AND no icon resolved — fall back to the faded crosshair.
+          // Removal must happen from the folder, not the row, so no ✕ overlay here.
           <span
             className="shrink-0 opacity-50"
             data-tip={p.effectiveTargetProcessName || p.effectiveTargetWindowTitle || 'Window target'}
@@ -1115,8 +1133,19 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                           {folder.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
                         </span>
                         <FolderOpen size={12} style={{ color: folder.color }} className={`shrink-0 ${folderAllDisabled ? 'opacity-40' : ''}`} />
+                        {/* Folder-target app icon — same resolution rules as the profile row.
+                            Sits between the FolderOpen glyph and the name. The crosshair
+                            below only renders when the icon is missing (UWP/portable). */}
+                        {folder.appIconBase64 && (
+                          <img
+                            src={`data:image/png;base64,${folder.appIconBase64}`}
+                            alt=""
+                            title={folder.windowTargetProcessName ?? ''}
+                            className={`w-3.5 h-3.5 shrink-0 object-contain pointer-events-none ${folderAllDisabled ? 'opacity-40' : ''}`}
+                          />
+                        )}
                         <span className={`text-xs font-medium flex-1 truncate ${folderAllDisabled ? 'text-text-disabled' : 'text-text-secondary'}`}>{folder.name}</span>
-                        {folder.hasWindowTarget && (
+                        {folder.hasWindowTarget && !folder.appIconBase64 && (
                           <span
                             className="group/ftarget shrink-0 relative"
                             data-tip={folder.windowTargetProcessName || folder.windowTargetWindowTitle || 'Window Target'}
