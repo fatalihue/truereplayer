@@ -302,7 +302,7 @@ export type OutgoingMessage =
   | { type: 'profile:detectWindow'; payload: Record<string, never> }
   | { type: 'profile:testWindowMatch'; payload: { processName: string; windowTitle: string; titleMatchMode: string } }
   | { type: 'process:list'; payload: Record<string, never> }
-  | { type: 'profile:openFolder'; payload: { name: string } }
+  | { type: 'profile:openFolder'; payload: { name?: string } }
   | { type: 'profile:pin'; payload: { name: string } }
   | { type: 'profile:unpin'; payload: { name: string } }
   | { type: 'profile:createFolder'; payload: { name: string; color?: string } }

@@ -30,7 +30,7 @@ const FOLDER_COLORS = [
 ];
 
 export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePanelProps) {
-  const { profiles, profileOrder, activeProfile } = useAppState();
+  const { profiles, profileOrder } = useAppState();
   const { send, subscribe } = useBridge();
   const [searchQuery, setSearchQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -296,6 +296,13 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const handleOpenFolder = (name: string) => {
     setContextMenu(null);
     send({ type: 'profile:openFolder', payload: { name } });
+  };
+
+  // Header-button variant: opens the Profiles directory itself without selecting any file.
+  // Works even when no profile is loaded — the user might be looking to manually drop a
+  // .json in there, browse what's saved, or back things up.
+  const handleOpenProfilesFolder = () => {
+    send({ type: 'profile:openFolder', payload: {} });
   };
 
   const handleAssignHotkey = (name: string) => {
@@ -1000,20 +1007,11 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               <ChevronsLeft size={14} />
             </button>
             <button
-              onClick={() => activeProfile && handleOpenFolder(activeProfile)}
-              disabled={!activeProfile}
-              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-              data-tip="Open profile file in Explorer"
+              onClick={handleOpenProfilesFolder}
+              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+              data-tip="Open profiles folder"
             >
               <ExternalLink size={14} />
-            </button>
-            <button
-              onClick={() => activeProfile && handleDuplicate(activeProfile)}
-              disabled={!activeProfile}
-              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-              data-tip="Duplicate active profile"
-            >
-              <Copy size={14} />
             </button>
             <button
               onClick={handleExportClick}

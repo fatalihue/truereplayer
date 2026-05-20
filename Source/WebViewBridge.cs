@@ -3880,20 +3880,39 @@ namespace TrueReplayer
 
         private void HandleProfileOpenFolder(JsonElement payload)
         {
-            string name = payload.GetProperty("name").GetString() ?? "";
-            if (string.IsNullOrEmpty(name)) return;
+            // Two modes:
+            //   - name present → reveal that profile's .json in Explorer (context-menu path).
+            //   - name absent/empty → just open the Profiles folder itself (header button path),
+            //     used when the user wants to browse profiles without one being selected.
+            string name = payload.TryGetProperty("name", out var nameEl)
+                ? (nameEl.GetString() ?? "")
+                : "";
 
-            var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
-            if (entry == null) return;
-
-            if (File.Exists(entry.FilePath))
+            if (!string.IsNullOrEmpty(name))
             {
-                try
+                var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
+                if (entry != null && File.Exists(entry.FilePath))
                 {
-                    System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{entry.FilePath}\"");
+                    try
+                    {
+                        System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{entry.FilePath}\"");
+                    }
+                    catch { }
                 }
-                catch { }
+                return;
             }
+
+            // Folder-only mode. Open the Profiles directory; create it first if it's missing
+            // (fresh install with no profiles saved yet) so Explorer doesn't pop an error.
+            try
+            {
+                string profileDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                    "TrueReplayer", "Profiles");
+                Directory.CreateDirectory(profileDir);
+                System.Diagnostics.Process.Start("explorer.exe", $"\"{profileDir}\"");
+            }
+            catch { }
         }
 
         // ── Profile Organization Handlers ──
