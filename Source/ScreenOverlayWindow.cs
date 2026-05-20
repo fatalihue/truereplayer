@@ -55,14 +55,16 @@ namespace TrueReplayer.Services
         // <paramref name="pointPick"/>: when true, a single mouse click returns immediately as
         // a zero-size "region" — used by Pick Position on click actions to set X/Y from a
         // direct screen click without dragging a rect.
-        public ScreenOverlayForm(Bitmap screenshot, bool regionOnly = false, bool pointPick = false, string? hintText = null)
+        //
+        // <paramref name="initialRect"/>: when non-null and the rect is large enough, the overlay
+        // opens with that region already drawn (in screen-absolute coords). Lets the user see
+        // what's currently saved instead of starting blank — they can hit ESC to keep it as-is,
+        // or drag a new selection to overwrite. Ignored in pointPick mode.
+        public ScreenOverlayForm(Bitmap screenshot, bool regionOnly = false, bool pointPick = false, string? hintText = null, Rectangle? initialRect = null)
         {
             _screenshot = screenshot;
             _regionOnly = regionOnly;
             _pointPick = pointPick;
-            _hintText = hintText ?? (pointPick
-                ? "Click anywhere to pick a position  •  ESC to cancel"
-                : "Click and drag to select a region  •  ESC to cancel");
 
             // Virtual screen bounds (all monitors)
             int vx = NativeMethods.GetSystemMetrics(76);
@@ -71,6 +73,29 @@ namespace TrueReplayer.Services
             int vh = NativeMethods.GetSystemMetrics(79);
             _virtualOriginX = vx;
             _virtualOriginY = vy;
+
+            // Seed the selection from a previously-saved rect so the user sees what's already
+            // there. Same minimum size as OnMouseUp (10x10) — anything smaller is treated as
+            // "no usable seed" and the overlay opens blank. Converts screen-absolute to
+            // form-local by subtracting the virtual origin.
+            bool seeded = false;
+            if (initialRect.HasValue && !pointPick)
+            {
+                var r = initialRect.Value;
+                if (r.Width >= 10 && r.Height >= 10)
+                {
+                    _startPoint = new Point(r.X - vx, r.Y - vy);
+                    _currentPoint = new Point(r.X - vx + r.Width, r.Y - vy + r.Height);
+                    _hasSelection = true;
+                    seeded = true;
+                }
+            }
+
+            _hintText = hintText ?? (pointPick
+                ? "Click anywhere to pick a position  •  ESC to cancel"
+                : seeded
+                    ? "Drag to redraw the region  •  ESC to keep current"
+                    : "Click and drag to select a region  •  ESC to cancel");
 
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
@@ -132,8 +157,10 @@ namespace TrueReplayer.Services
                 }
             }
 
-            // Instruction text at top center
-            if (!_isDragging && !_hasSelection)
+            // Instruction text at top center. Visible whenever the user isn't actively dragging
+            // — including the seeded-rect case where _hasSelection is true at startup, so the
+            // "ESC to keep current" hint reaches the user before they touch the mouse.
+            if (!_isDragging)
             {
                 string hint = _hintText;
                 using var font = new Font("Segoe UI", 13f, FontStyle.Regular);

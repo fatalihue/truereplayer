@@ -2304,9 +2304,21 @@ namespace TrueReplayer
 
         // Lets the user draw a search ROI for an existing WaitImage. Behaves like the recapture
         // flow but in "region-only" mode — no PNG is saved, just the rect is reported back.
+        // Accepts an optional existing rect (x/y/w/h) so the overlay opens with that region
+        // pre-drawn — the user sees what's currently saved instead of starting from blank.
         private async Task HandleConfigureSearchRegionAsync(JsonElement payload)
         {
             string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
+
+            System.Drawing.Rectangle? initialRect = null;
+            if (payload.TryGetProperty("x", out var xEl) && xEl.ValueKind == JsonValueKind.Number &&
+                payload.TryGetProperty("y", out var yEl) && yEl.ValueKind == JsonValueKind.Number &&
+                payload.TryGetProperty("w", out var wEl) && wEl.ValueKind == JsonValueKind.Number &&
+                payload.TryGetProperty("h", out var hEl) && hEl.ValueKind == JsonValueKind.Number)
+            {
+                initialRect = new System.Drawing.Rectangle(
+                    xEl.GetInt32(), yEl.GetInt32(), wEl.GetInt32(), hEl.GetInt32());
+            }
 
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
@@ -2332,7 +2344,10 @@ namespace TrueReplayer
                 using var overlay = new ScreenOverlayForm(
                     screenshot,
                     regionOnly: true,
-                    hintText: "Drag to set the search area for this Wait Image  •  ESC to cancel");
+                    hintText: initialRect.HasValue
+                        ? "Drag to redraw the search area  •  ESC to keep current"
+                        : "Drag to set the search area for this Wait Image  •  ESC to cancel",
+                    initialRect: initialRect);
                 overlay.ShowDialog();
                 selection = overlay.GetSelectionAsync().Result;
             });

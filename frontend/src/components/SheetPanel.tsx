@@ -615,11 +615,19 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   }, [action, confidence, waitImageSearchRegion, send, clearTestMatchTimeout]);
 
   // WaitImage: launch the screen overlay in region-only mode so the user can draw an ROI.
-  // Result arrives via the 'waitimage:searchRegionSet' message handled above.
+  // Result arrives via the 'waitimage:searchRegionSet' message handled above. When a region
+  // is already saved, pass it along so the overlay opens with the rect pre-drawn — the user
+  // can ESC to keep it as-is or drag a new one to overwrite.
   const handleConfigureSearchRegion = useCallback(() => {
     const requestId = Math.random().toString(36).slice(2, 10);
-    send({ type: 'waitimage:configureSearchRegion', payload: { requestId } });
-  }, [send]);
+    const r = waitImageSearchRegion;
+    send({
+      type: 'waitimage:configureSearchRegion',
+      payload: r
+        ? { requestId, x: r.x, y: r.y, w: r.w, h: r.h }
+        : { requestId },
+    });
+  }, [send, waitImageSearchRegion]);
 
   // Crop save: send the rect (image-pixel coords) to the backend, which clones the existing
   // PNG and updates action.ImagePath. The new imageBase64 arrives via the next actions:updated

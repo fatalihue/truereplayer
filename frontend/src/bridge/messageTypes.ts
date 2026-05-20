@@ -355,7 +355,7 @@ export type OutgoingMessage =
   | { type: 'actions:addRunProfile'; payload: { profileName: string; repeatCount: number; insertIndex?: number } }
   | { type: 'actions:editRunProfile'; payload: { index: number; profileName: string; repeatCount: number } }
   | { type: 'waitimage:recapture'; payload: { index: number } }
-  | { type: 'waitimage:configureSearchRegion'; payload: { requestId: string } }
+  | { type: 'waitimage:configureSearchRegion'; payload: { requestId: string; x?: number; y?: number; w?: number; h?: number } }
   | { type: 'waitimage:cropReference'; payload: { index: number; x: number; y: number; w: number; h: number } }
   | { type: 'image:testMatch'; payload: { requestId: string; imagePath: string; confidence: number; searchRegion?: { x: number; y: number; w: number; h: number } } }
   | { type: 'mouse:pickPosition'; payload: { requestId: string } }
