@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, Download, MousePointerClick } from 'lucide-react';
+import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, Download, MousePointerClick, Palette } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -631,6 +631,26 @@ export function SettingsPanel() {
                   isOn={settings.runAsAdmin ?? false}
                   onChange={(v) => changeSetting('runAsAdmin', v)}
                 />
+              </SettingRow>
+            </Section>
+
+            {/* Appearance — opens the full ThemeEditor modal via the existing
+                cmd:themeeditor custom event. The event handler lives in the top-
+                level layout, so this section stays decoupled from where the dialog
+                is actually mounted. Palette icon + purple hue mirrors the action's
+                own visual identity inside the editor. */}
+            <Section icon={Palette} iconColor="#c084fc" title="Appearance" defaultOpen={false}>
+              <SettingRow
+                label="Custom theme"
+                tooltip="Open the Theme Editor to customise colours, font, row height, and per-action accents."
+              >
+                <button
+                  onClick={() => window.dispatchEvent(new CustomEvent('cmd:themeeditor'))}
+                  className="flex items-center gap-1.5 h-7 px-3 rounded text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default hover:bg-bg-card hover:text-text-primary transition-colors"
+                >
+                  <Palette size={11} />
+                  Open Theme Editor
+                </button>
               </SettingRow>
             </Section>
 

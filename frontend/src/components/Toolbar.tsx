@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ArrowUpToLine, ArrowDownToLine, ScanSearch, Pipette, Plus, Keyboard, Globe, Repeat2, Hourglass, X } from 'lucide-react';
+import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
-import { ThemeEditor } from './ThemeEditor';
 import { SendTextDialog } from './SendTextDialog';
 import { RunProfileDialog } from './RunProfileDialog';
 import { NavigateDialog } from './NavigateDialog';
@@ -27,10 +26,10 @@ export const defaultColumnVisibility: ColumnVisibility = {
   notes: true,
 };
 
-interface ToolbarProps {
-  columnVisibility: ColumnVisibility;
-  onColumnVisibilityChange: (vis: ColumnVisibility) => void;
-}
+// Toolbar takes no props now — column visibility lives in ActionTable (where the
+// header-anchored toggle button lives), and Theme Editor mounts at the App level
+// (Settings → Appearance + Command Palette both trigger it via cmd:themeeditor).
+type ToolbarProps = Record<string, never>;
 
 /**
  * Profile-name display that gracefully degrades:
@@ -98,25 +97,19 @@ function ResponsiveProfileName({ name, actionCount }: { name: string; actionCoun
   );
 }
 
-export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarProps) {
+export function Toolbar(_props: ToolbarProps) {
   const { toolbar, buttonStates, actions, activeProfile } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
-  const [showThemeEditor, setShowThemeEditor] = useState(false);
-  const [showColDropdown, setShowColDropdown] = useState(false);
   const [showSendTextDialog, setShowSendTextDialog] = useState(false);
-  const [showAddActions, setShowAddActions] = useState(false);
   const [showBrowserMenu, setShowBrowserMenu] = useState(false);
   const [showNavigateDialog, setShowNavigateDialog] = useState(false);
   const [showRunProfileDialog, setShowRunProfileDialog] = useState(false);
-  // Send Key… opens this dialog (captures one key via JS events, dispatches an
-  // Send Keystroke — single dialog covers single press, press × N, and hold-key
-  // flows via its Mode toggle. Legacy Send Key / Press Key × N / Hold Key state +
-  // refs were removed when their menu entries collapsed into this one.
+  // Send Keystroke — unified dialog covers single press, press × N, and hold-key
+  // flows via its Mode toggle. Legacy Send Key / Press Key × N / Hold Key state
+  // collapsed into this one slot.
   const [showKeystrokeCapture, setShowKeystrokeCapture] = useState(false);
   const keystrokeCaptureInsertIndex = useRef<number>(0);
-  const colDropdownRef = useRef<HTMLDivElement>(null);
-  const addActionsRef = useRef<HTMLDivElement>(null);
   const browserMenuRef = useRef<HTMLDivElement>(null);
 
   // Listen for command palette trigger
@@ -124,12 +117,6 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
     const handler = () => setShowSendTextDialog(true);
     window.addEventListener('cmd:sendtext', handler);
     return () => window.removeEventListener('cmd:sendtext', handler);
-  }, []);
-
-  useEffect(() => {
-    const handler = () => setShowThemeEditor(prev => !prev);
-    window.addEventListener('cmd:themeeditor', handler);
-    return () => window.removeEventListener('cmd:themeeditor', handler);
   }, []);
 
   useEffect(() => {
@@ -170,17 +157,13 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
     };
   }, [send]);
 
-  // Close dropdowns on outside click or Escape
+  // Close Browser dropdown on outside click or Escape. The columns + add-actions
+  // dropdowns that used to share this handler are gone (columns moved to the grid
+  // header, individual inserts are now direct toolbar buttons).
   useEffect(() => {
-    if (!showColDropdown && !showAddActions && !showBrowserMenu) return;
+    if (!showBrowserMenu) return;
     const handler = (e: MouseEvent) => {
-      if (showColDropdown && colDropdownRef.current && !colDropdownRef.current.contains(e.target as Node)) {
-        setShowColDropdown(false);
-      }
-      if (showAddActions && addActionsRef.current && !addActionsRef.current.contains(e.target as Node)) {
-        setShowAddActions(false);
-      }
-      if (showBrowserMenu && browserMenuRef.current && !browserMenuRef.current.contains(e.target as Node)) {
+      if (browserMenuRef.current && !browserMenuRef.current.contains(e.target as Node)) {
         setShowBrowserMenu(false);
       }
     };
@@ -188,8 +171,6 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
       if (e.key !== 'Escape') return;
       e.preventDefault();
       e.stopPropagation();
-      setShowColDropdown(false);
-      setShowAddActions(false);
       setShowBrowserMenu(false);
     };
     document.addEventListener('mousedown', handler);
@@ -198,7 +179,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
       document.removeEventListener('mousedown', handler);
       document.removeEventListener('keydown', keyHandler, true);
     };
-  }, [showColDropdown, showAddActions, showBrowserMenu]);
+  }, [showBrowserMenu]);
 
   // Ctrl+Z / Ctrl+Y keyboard shortcuts for undo/redo
   useEffect(() => {
@@ -253,19 +234,6 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
     // doesn't cause extra subscribes. Adding it just silences exhaustive-deps without
     // changing behaviour (handler always reads .current at the time it fires).
   }, [send, actions.length, selectionRef]);
-
-  const toggleColumn = (key: keyof ColumnVisibility) => {
-    onColumnVisibilityChange({ ...columnVisibility, [key]: !columnVisibility[key] });
-  };
-
-  const columns: { key: keyof ColumnVisibility; label: string }[] = [
-    { key: 'action', label: 'Action' },
-    { key: 'key', label: 'Key' },
-    { key: 'x', label: 'X' },
-    { key: 'y', label: 'Y' },
-    { key: 'delay', label: 'Delay' },
-    { key: 'notes', label: 'Notes' },
-  ];
 
   return (
     <>
@@ -337,140 +305,14 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
 
           <div className="w-px h-4 bg-border-subtle mx-1" />
 
-          {/* Move Up / Move Down */}
-          <button
-            tabIndex={-1}
-            onClick={() => {
-              const sel = selectionRef.current;
-              if (sel.size === 0) return;
-              const indices = Array.from(sel).sort((a, b) => a - b);
-              const minIdx = indices[0];
-              if (minIdx <= 0) return;
-              send({ type: 'actions:reorder', payload: { indices, targetIndex: minIdx - 1 } });
-              // Tell ActionTable to update selection to new positions
-              window.dispatchEvent(new CustomEvent('selection:set', { detail: indices.map(i => i - 1) }));
-            }}
-            disabled={buttonStates.recordingActive || buttonStates.replayActive}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Move selection up (Alt+↑)"
-          >
-            <ArrowUpToLine size={14} />
-          </button>
-          <button
-            tabIndex={-1}
-            onClick={() => {
-              const sel = selectionRef.current;
-              if (sel.size === 0) return;
-              const indices = Array.from(sel).sort((a, b) => a - b);
-              const maxIdx = indices[indices.length - 1];
-              if (maxIdx >= toolbar.actionCount - 1) return;
-              send({ type: 'actions:reorder', payload: { indices, targetIndex: maxIdx + 2 } });
-              // Tell ActionTable to update selection to new positions
-              window.dispatchEvent(new CustomEvent('selection:set', { detail: indices.map(i => i + 1) }));
-            }}
-            disabled={buttonStates.recordingActive || buttonStates.replayActive}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Move selection down (Alt+↓)"
-          >
-            <ArrowDownToLine size={14} />
-          </button>
-
-          <div className="w-px h-4 bg-border-subtle mx-1" />
-
-          {/* Add Actions */}
-          <div className="relative" ref={addActionsRef}>
-            <button
-              tabIndex={-1}
-              onClick={() => setShowAddActions(prev => !prev)}
-              disabled={buttonStates.recordingActive || buttonStates.replayActive}
-              className={`p-1.5 rounded transition-colors disabled:text-text-disabled ${
-                showAddActions
-                  ? 'bg-bg-elevated text-accent-light'
-                  : 'hover:bg-bg-elevated text-text-tertiary hover:text-text-primary'
-              }`}
-              data-tip="Add Actions"
-            >
-              <Plus size={14} />
-            </button>
-
-            {showAddActions && (
-              <div
-                className="absolute right-0 top-[calc(100%+4px)] min-w-[200px] p-1 bg-bg-card border border-border-default rounded-lg z-50"
-                style={{ animation: 'fade-in 0.12s ease-out', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
-              >
-                {/* Two-section dropdown:
-                    - "Keyboard"    → one-off keystroke inserts that need a capture flow
-                                       (Send Key today; a future "Keystroke" combo recorder
-                                       lives next to it)
-                    - "Wait / Flow" → control-flow inserts (delays / image wait / sub-macro)
-                    Click x3 was removed first: recording captures real coords automatically,
-                    and the old menu items entered an OS capture mode that required a physical
-                    click — strictly worse than recording.
-                    Scroll Up/Down removed next for the same principle: recording captures
-                    scrolls natively, and the manual-insert path produced an action identical
-                    to a recorded one with extra clicks. "Send Key…" replaces the old "Key Press"
-                    item with a visible capture dialog (KeyCaptureDialog) so the user sees
-                    what was captured before commit. */}
-                {([
-                  {
-                    label: 'Keyboard',
-                    items: [
-                      // Send Keystroke — single entry that covers every keyboard insert.
-                      // The dialog's Mode toggle picks Press (single tap, with optional
-                      // ×N repetition) or Hold (key held for a duration). Replaces the
-                      // legacy four-entry split (Send Key / Send Keystroke / Press × N /
-                      // Hold Key) which all opened slightly different dialogs for what is
-                      // ultimately one decision: "what shape of keypress do I want?"
-                      { type: 'SendKeystroke', label: 'Send Keystroke…', icon: Keyboard },
-                    ],
-                  },
-                  {
-                    label: 'Wait / Flow',
-                    items: [
-                      { type: 'Pause', label: 'Pause', icon: Hourglass },
-                      { type: 'WaitImage', label: 'Wait for Image', icon: ScanSearch },
-                      { type: 'WaitPixelColor', label: 'Wait for Pixel Color', icon: Pipette },
-                      { type: 'RunProfile', label: 'Run Profile', icon: Repeat2 },
-                    ],
-                  },
-                ] as const).map((group, gi) => (
-                  <div key={group.label}>
-                    {gi > 0 && <div className="h-px bg-border-subtle my-1" />}
-                    <div className="px-2.5 py-1.5 text-[11px] font-semibold text-text-tertiary">
-                      {group.label}
-                    </div>
-                    {group.items.map(item => (
-                      <button
-                        key={item.type}
-                        onClick={() => {
-                          setShowAddActions(false);
-                          const sel = selectionRef.current;
-                          const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-                          // Two special cases that need a capture / picker before the
-                          // bridge call: Run Profile opens a picker, Send Keystroke opens
-                          // the unified capture dialog (single press, repeat × N, or hold).
-                          if (item.type === 'RunProfile') {
-                            setShowRunProfileDialog(true);
-                            return;
-                          }
-                          if (item.type === 'SendKeystroke') {
-                            keystrokeCaptureInsertIndex.current = insertIndex;
-                            setShowKeystrokeCapture(true);
-                            return;
-                          }
-                          send({ type: 'actions:insertAction', payload: { actionType: item.type, insertIndex } });
-                        }}
-                        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
-                      >
-                        <item.icon size={12} className="shrink-0" />
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          {/* ── Insert actions ─────────────────────────────────────────────
+              Direct buttons replace the previous "Add Actions" dropdown — six
+              icons covering every common insert (Send Text, Send Keystroke,
+              Pause, Wait Image, Wait Pixel Color, Run Profile) plus the Browser
+              dropdown that has its own multi-variant submenu. Move Up / Move
+              Down moved to the BulkActionBar (only useful with a selection);
+              click x3 / scroll inserts removed long ago because Recording does
+              them better. */}
 
           {/* Send Text */}
           <button
@@ -483,9 +325,77 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             <Type size={14} />
           </button>
 
-          {/* Wait for Image / Run Profile / Pause moved into the Add Action dropdown
-              under "Wait / Flow" — they're low-frequency inserts that didn't earn
-              their own real estate on the main toolbar. */}
+          {/* Send Keystroke — unified keyboard insert (Press 1×, Press N×, or
+              Hold for X ms; mode toggle lives inside the dialog). */}
+          <button
+            tabIndex={-1}
+            onClick={() => {
+              const sel = selectionRef.current;
+              keystrokeCaptureInsertIndex.current = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+              setShowKeystrokeCapture(true);
+            }}
+            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip="Insert Send Keystroke action"
+          >
+            <Keyboard size={14} />
+          </button>
+
+          {/* Pause — wait for a hotkey or a timeout before continuing replay. */}
+          <button
+            tabIndex={-1}
+            onClick={() => {
+              const sel = selectionRef.current;
+              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+              send({ type: 'actions:insertAction', payload: { actionType: 'Pause', insertIndex } });
+            }}
+            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip="Insert Pause action"
+          >
+            <Hourglass size={14} />
+          </button>
+
+          {/* Wait for Image — OpenCV template match with optional ROI. */}
+          <button
+            tabIndex={-1}
+            onClick={() => {
+              const sel = selectionRef.current;
+              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+              send({ type: 'actions:insertAction', payload: { actionType: 'WaitImage', insertIndex } });
+            }}
+            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip="Insert Wait for Image action"
+          >
+            <ScanSearch size={14} />
+          </button>
+
+          {/* Wait for Pixel Color — single-pixel GDI watch, much lighter than WaitImage. */}
+          <button
+            tabIndex={-1}
+            onClick={() => {
+              const sel = selectionRef.current;
+              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+              send({ type: 'actions:insertAction', payload: { actionType: 'WaitPixelColor', insertIndex } });
+            }}
+            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip="Insert Wait for Pixel Color action"
+          >
+            <Pipette size={14} />
+          </button>
+
+          {/* Run Profile — sub-macro call (picker dialog). */}
+          <button
+            tabIndex={-1}
+            onClick={() => setShowRunProfileDialog(true)}
+            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip="Insert Run Profile action"
+          >
+            <Repeat2 size={14} />
+          </button>
 
           {/* Browser Actions */}
           <div className="relative" ref={browserMenuRef}>
@@ -533,65 +443,12 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
 
           <div className="w-px h-4 bg-border-subtle mx-1" />
 
-          {/* Copy / Paste / Clear */}
-          <button
-            tabIndex={-1}
-            onClick={() => {
-              const sel = selectionRef.current;
-              if (sel.size > 0) {
-                send({ type: 'actions:copyInternal', payload: { indices: Array.from(sel) } });
-              } else if (actions.length > 0) {
-                send({ type: 'actions:copyInternal', payload: { indices: actions.map((_, i) => i) } });
-              }
-            }}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-            data-tip="Copy Actions (Ctrl+C)"
-          >
-            <Copy size={14} />
-          </button>
-          {/* Paste is ALWAYS rendered (symmetry with Copy, which is also always-on) but
-              disabled while the internal copy buffer is empty. Earlier this button was
-              conditionally rendered when copiedCount > 0 — which made it pop in on the
-              first copy and then never disappear (the clipboard never auto-empties on
-              paste, so copiedCount stays > 0 for the rest of the session). The "appears
-              and stays" pattern read as buggy; always-visible + disabled is the standard
-              toolbar convention and lets users learn the button is there before they
-              need it. The badge count is the indicator of clipboard state. */}
-          <button
-            tabIndex={-1}
-            onClick={() => {
-              const sel = selectionRef.current;
-              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-              send({ type: 'actions:paste', payload: { insertIndex } });
-            }}
-            disabled={buttonStates.copiedCount === 0}
-            className={`relative p-1.5 rounded transition-colors ${
-              buttonStates.copiedCount > 0
-                ? 'text-accent-light hover:bg-bg-elevated hover:text-accent'
-                : 'text-text-disabled hover:bg-transparent cursor-not-allowed'
-            }`}
-            data-tip={
-              buttonStates.copiedCount > 0
-                ? `Paste ${buttonStates.copiedCount} action(s) (Ctrl+V)`
-                : 'Paste actions (Ctrl+V) — copy something first'
-            }
-          >
-            <ClipboardPaste size={14} />
-            {buttonStates.copiedCount > 0 && (
-              // Count indicator — communicates "there are N actions in the clipboard
-              // ready". Bare numeral (no circle/pill background) keeps the toolbar
-              // visually quiet; the accent-light colour ties it to the icon, which
-              // switches to the same hue when paste is enabled. tabular-nums keeps
-              // two-digit counts (10..99) from jittering against the button corner.
-              <span className="absolute -top-0.5 -right-0.5 text-[10px] font-semibold leading-none tabular-nums text-accent-light pointer-events-none">
-                {buttonStates.copiedCount}
-              </span>
-            )}
-          </button>
-          {/* Destructive hover (red text + faint red bg) mirrors BulkActionBar's
-              Delete pattern. Clear All wipes every action in the profile, so we
-              want users to pause before clicking — neutral gray hover let it
-              blend in with non-destructive controls. */}
+          {/* Clear All — destructive hover (red text + faint red bg) mirrors
+              BulkActionBar's Delete. Copy/Paste removed from the toolbar
+              (redundant with the Ctrl+C / Ctrl+V hotkeys and the BulkActionBar's
+              buttons when a selection exists); Toggle Columns moved to the grid
+              header where it belongs semantically; Theme Editor moved to
+              Settings → Appearance. */}
           <button
             tabIndex={-1}
             onClick={() => send({ type: 'actions:clear', payload: {} })}
@@ -600,69 +457,8 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
           >
             <Trash2 size={14} />
           </button>
-
-          <div className="w-px h-4 bg-border-subtle mx-1" />
-
-          {/* Toggle Columns */}
-          <div className="relative" ref={colDropdownRef}>
-            <button
-              tabIndex={-1}
-              onClick={() => setShowColDropdown(prev => !prev)}
-              className={`p-1.5 rounded transition-colors ${
-                showColDropdown
-                  ? 'bg-bg-elevated text-accent-light'
-                  : 'hover:bg-bg-elevated text-text-tertiary hover:text-text-primary'
-              }`}
-              data-tip="Toggle Columns"
-            >
-              <LayoutGrid size={14} />
-            </button>
-
-            {showColDropdown && (
-              <div
-                className="absolute right-0 top-[calc(100%+4px)] min-w-[150px] p-1 bg-bg-card border border-border-default rounded-lg z-50"
-                style={{ animation: 'fade-in 0.12s ease-out', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
-              >
-                <div className="px-2.5 py-1.5 text-[11px] font-semibold text-text-tertiary">
-                  Toggle columns
-                </div>
-                {columns.map(col => (
-                  <button
-                    key={col.key}
-                    onClick={() => toggleColumn(col.key)}
-                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
-                  >
-                    <div className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center shrink-0 ${
-                      columnVisibility[col.key]
-                        ? 'bg-accent-solid border-accent-solid'
-                        : 'border-border-default'
-                    }`}>
-                      {columnVisibility[col.key] && <Check size={10} className="text-white" />}
-                    </div>
-                    {col.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Theme Editor */}
-          <button
-            tabIndex={-1}
-            onClick={() => setShowThemeEditor(prev => !prev)}
-            className={`p-1.5 rounded transition-colors ${
-              showThemeEditor
-                ? 'bg-bg-elevated text-accent-light'
-                : 'hover:bg-bg-elevated text-text-tertiary hover:text-text-primary'
-            }`}
-            data-tip="Theme Editor"
-          >
-            <Palette size={14} />
-          </button>
         </div>
       </div>
-
-      {showThemeEditor && <ThemeEditor onClose={() => setShowThemeEditor(false)} />}
 
       {showSendTextDialog && (
         <SendTextDialog

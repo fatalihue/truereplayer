@@ -18,6 +18,7 @@ import { ExtensionUpdateBanner } from './components/ExtensionUpdateBanner';
 import { ClickerEmptyState } from './components/ClickerEmptyState';
 import { CommandPalette } from './components/CommandPalette';
 import { SheetPanel } from './components/SheetPanel';
+import { ThemeEditor } from './components/ThemeEditor';
 
 // AppShell is rendered inside AppStateProvider so it can read settings to drive
 // mode-dependent visuals (Clicker mode glow, ActionTable replacement).
@@ -29,6 +30,16 @@ function AppShell() {
   const [sheetActionIndex, setSheetActionIndex] = useState<number | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>(defaultColumnVisibility);
+  // Theme Editor is mounted at the App level (not inside Toolbar) because its
+  // open/close trigger now comes from multiple surfaces (Settings panel's
+  // Appearance section, Command Palette, future shortcuts). Listens to the
+  // shared cmd:themeeditor event so every caller stays decoupled.
+  const [showThemeEditor, setShowThemeEditor] = useState(false);
+  useEffect(() => {
+    const handler = () => setShowThemeEditor(prev => !prev);
+    window.addEventListener('cmd:themeeditor', handler);
+    return () => window.removeEventListener('cmd:themeeditor', handler);
+  }, []);
 
   // Global keyboard handler: Ctrl+K for command palette, Ctrl+S to save profile,
   // Ctrl+Z/Y for undo/redo + block UI interaction keys.
@@ -111,15 +122,13 @@ function AppShell() {
         {/* Center: Toolbar + Table + Action Bar */}
         <div className="flex-1 flex flex-col gap-1 min-w-0">
           <ExtensionUpdateBanner />
-          <Toolbar
-            columnVisibility={columnVisibility}
-            onColumnVisibilityChange={setColumnVisibility}
-          />
+          <Toolbar />
           {isClicker ? (
             <ClickerEmptyState />
           ) : (
             <ActionTable
               columnVisibility={columnVisibility}
+              onColumnVisibilityChange={setColumnVisibility}
               onOpenSheet={handleOpenSheet}
             />
           )}
@@ -143,6 +152,7 @@ function AppShell() {
         actionIndex={sheetActionIndex}
         onClose={() => setSheetActionIndex(null)}
       />
+      {showThemeEditor && <ThemeEditor onClose={() => setShowThemeEditor(false)} />}
       <UpdateOverlay />
     </div>
   );

@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronsDownUp, ChevronsUpDown, Plus, MoreHorizontal, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical, Timer } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronsDownUp, ChevronsUpDown, Plus, MoreHorizontal, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical, Timer, LayoutGrid, Check } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -44,10 +44,14 @@ interface EditingCell {
 
 interface ActionTableProps {
   columnVisibility: ColumnVisibility;
+  // Mutator for the columns-visibility dropdown that now lives in the grid header.
+  // Was previously owned by the global Toolbar; the prop drill is unchanged on the
+  // App side (App passes both visibility + setter to ActionTable instead of Toolbar).
+  onColumnVisibilityChange: (vis: ColumnVisibility) => void;
   onOpenSheet?: (index: number) => void;
 }
 
-export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps) {
+export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpenSheet }: ActionTableProps) {
   const { actions, highlightedActionIndex, buttonStates, activeProfile, pauseState } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
@@ -106,6 +110,30 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   // a mode flag through this state any more — the dialog's onConfirm result
   // tells us which bridge message to dispatch (Keystroke vs HoldKey).
   const [keystrokeCaptureInsert, setKeystrokeCaptureInsert] = useState<{ insertIndex: number } | null>(null);
+  // Columns-toggle dropdown — moved here from the global Toolbar because columns
+  // are a property of the grid, not a global preference. The dropdown opens
+  // anchored to the header's right edge; click-outside closes it via the effect
+  // below (mirrors the same pattern the Toolbar used).
+  const [showColDropdown, setShowColDropdown] = useState(false);
+  const colDropdownRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showColDropdown) return;
+    const onDown = (e: MouseEvent) => {
+      if (colDropdownRef.current && !colDropdownRef.current.contains(e.target as Node)) {
+        setShowColDropdown(false);
+      }
+    };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [showColDropdown]);
+  const columns: { key: keyof ColumnVisibility; label: string }[] = [
+    { key: 'action', label: 'Action' },
+    { key: 'key', label: 'Key' },
+    { key: 'x', label: 'X' },
+    { key: 'y', label: 'Y' },
+    { key: 'delay', label: 'Delay' },
+    { key: 'notes', label: 'Notes' },
+  ];
   const { showToast } = useToast();
   const contextMenuEnabled = !buttonStates.recordingActive && !buttonStates.replayActive;
 
@@ -843,7 +871,50 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         {columnVisibility.y && <span className="text-xs font-semibold text-text-tertiary pl-2">Y</span>}
         {columnVisibility.delay && <span className="text-xs font-semibold text-text-tertiary pl-2">Delay</span>}
         {columnVisibility.notes && <span className="text-xs font-semibold text-text-tertiary pl-2 pr-2">Notes</span>}
-        <span />
+        {/* Columns toggle — anchored in the row-actions slot at the right edge of
+            the header. Clicking opens a dropdown to show/hide each column. Moved
+            here from the global Toolbar because column visibility is a grid-level
+            preference and reads more naturally next to the header it controls. */}
+        <span className="flex items-center justify-center relative" ref={colDropdownRef}>
+          <button
+            type="button"
+            onClick={() => setShowColDropdown(prev => !prev)}
+            className={`p-1 rounded transition-colors ${
+              showColDropdown
+                ? 'bg-bg-elevated text-accent-light'
+                : 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary'
+            }`}
+            title="Toggle columns"
+          >
+            <LayoutGrid size={12} />
+          </button>
+          {showColDropdown && (
+            <div
+              className="absolute right-0 top-[calc(100%+4px)] min-w-[150px] p-1 bg-bg-card border border-border-default rounded-lg z-50"
+              style={{ animation: 'fade-in 0.12s ease-out', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
+            >
+              <div className="px-2.5 py-1.5 text-[11px] font-semibold text-text-tertiary">
+                Toggle columns
+              </div>
+              {columns.map(col => (
+                <button
+                  key={col.key}
+                  onClick={() => onColumnVisibilityChange({ ...columnVisibility, [col.key]: !columnVisibility[col.key] })}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
+                >
+                  <div className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center shrink-0 ${
+                    columnVisibility[col.key]
+                      ? 'bg-accent-solid border-accent-solid'
+                      : 'border-border-default'
+                  }`}>
+                    {columnVisibility[col.key] && <Check size={10} className="text-white" />}
+                  </div>
+                  {col.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </span>
       </div>
 
       {/* Body */}
@@ -1377,36 +1448,65 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         />
       )}
 
-      {/* Bulk Action Bar — inline at bottom */}
-      {selectedIndices.size > 0 && !buttonStates.recordingActive && !buttonStates.replayActive && (
+      {/* Bulk Action Bar — inline at bottom. Reordering (Move Up / Move Down)
+          lives here now instead of on the global toolbar because the operation
+          requires a selection by definition — keeping it on the toolbar created
+          two grey-buttons-90%-of-the-time. canMoveUp/Down disable the buttons
+          when the selection is already at the start / end of the list, so the
+          same affordance rule the keyboard shortcut already used (no-op at
+          edges) is visible on the button state. */}
+      {selectedIndices.size > 0 && !buttonStates.recordingActive && !buttonStates.replayActive && (() => {
+        const selSorted = Array.from(selectedIndices).sort((a, b) => a - b);
+        const canMoveUp = selSorted.length > 0 && selSorted[0] > 0;
+        const canMoveDown = selSorted.length > 0 && selSorted[selSorted.length - 1] < actions.length - 1;
+        return (
         <BulkActionBar
           selectedCount={selectedIndices.size}
           selectedIndices={selectedIndices}
-          allSelectedSkipped={Array.from(selectedIndices).every(i => actions[i]?.isSkipped)}
+          allSelectedSkipped={selSorted.every(i => actions[i]?.isSkipped)}
+          canMoveUp={canMoveUp}
+          canMoveDown={canMoveDown}
           onClearSelection={() => setSelectedIndices(new Set())}
           onDelete={() => {
-            send({ type: 'actions:delete', payload: { indices: Array.from(selectedIndices) } });
+            send({ type: 'actions:delete', payload: { indices: selSorted } });
             showToast(`Deleted ${selectedIndices.size} action(s)`, 'success');
             setSelectedIndices(new Set());
           }}
           onDuplicate={() => {
-            send({ type: 'actions:duplicate', payload: { indices: Array.from(selectedIndices) } });
+            send({ type: 'actions:duplicate', payload: { indices: selSorted } });
             showToast(`Duplicated ${selectedIndices.size} action(s)`, 'success');
           }}
+          onMoveUp={() => {
+            // Mirror the Alt+↑ hotkey logic: shift the contiguous indices one slot up
+            // and re-emit selection:set so the highlighted rows follow their new
+            // positions. Guarded by canMoveUp so first-row selections no-op silently.
+            if (!canMoveUp) return;
+            const minIdx = selSorted[0];
+            send({ type: 'actions:reorder', payload: { indices: selSorted, targetIndex: minIdx - 1 } });
+            window.dispatchEvent(new CustomEvent('selection:set', { detail: selSorted.map(i => i - 1) }));
+          }}
+          onMoveDown={() => {
+            if (!canMoveDown) return;
+            const maxIdx = selSorted[selSorted.length - 1];
+            // targetIndex = maxIdx + 2 because the reorder API treats the target as the
+            // pre-shift insertion point (mirrors the Alt+↓ hotkey behaviour exactly).
+            send({ type: 'actions:reorder', payload: { indices: selSorted, targetIndex: maxIdx + 2 } });
+            window.dispatchEvent(new CustomEvent('selection:set', { detail: selSorted.map(i => i + 1) }));
+          }}
           onSetDelay={(delay) => {
-            send({ type: 'actions:bulkUpdateDelay', payload: { indices: Array.from(selectedIndices), delay } });
+            send({ type: 'actions:bulkUpdateDelay', payload: { indices: selSorted, delay } });
             showToast(`Set delay to ${delay}ms for ${selectedIndices.size} action(s)`, 'success');
           }}
           onSetCoord={(axis, value) => {
-            send({ type: 'actions:bulkUpdateCoord', payload: { indices: Array.from(selectedIndices), axis, value } });
+            send({ type: 'actions:bulkUpdateCoord', payload: { indices: selSorted, axis, value } });
           }}
           onSetComment={(comment) => {
-            send({ type: 'actions:bulkUpdateComment', payload: { indices: Array.from(selectedIndices), comment } });
+            send({ type: 'actions:bulkUpdateComment', payload: { indices: selSorted, comment } });
             showToast(`Set notes for ${selectedIndices.size} action(s)`, 'success');
           }}
           onToggleSkip={() => {
-            const allSkipped = Array.from(selectedIndices).every(i => actions[i]?.isSkipped);
-            send({ type: 'actions:toggleSkip', payload: { indices: Array.from(selectedIndices) } });
+            const allSkipped = selSorted.every(i => actions[i]?.isSkipped);
+            send({ type: 'actions:toggleSkip', payload: { indices: selSorted } });
             showToast(
               allSkipped
                 ? `Enabled ${selectedIndices.size} action(s)`
@@ -1415,7 +1515,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             );
           }}
         />
-      )}
+        );
+      })()}
 
       {/* Context Menu — rendered via portal to escape overflow:hidden */}
       {contextMenu && menuPos && createPortal(

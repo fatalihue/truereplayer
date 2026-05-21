@@ -1,13 +1,20 @@
 import { useState } from 'react';
-import { Clock, Copy, Trash2, X, Crosshair, MessageSquare, Eye, EyeOff } from 'lucide-react';
+import { Clock, Copy, Trash2, X, Crosshair, MessageSquare, Eye, EyeOff, ArrowUpToLine, ArrowDownToLine } from 'lucide-react';
 
 interface BulkActionBarProps {
   selectedCount: number;
   selectedIndices: Set<number>;
   allSelectedSkipped: boolean;
+  // True when no selection can move further in that direction (first row selected
+  // for Up, last row selected for Down). Disables the corresponding button rather
+  // than no-op'ing the click — keeps the bar's affordance honest.
+  canMoveUp: boolean;
+  canMoveDown: boolean;
   onClearSelection: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
   onSetDelay: (delay: number) => void;
   onSetCoord: (axis: 'x' | 'y', value: string) => void;
   onSetComment: (comment: string) => void;
@@ -18,9 +25,13 @@ export function BulkActionBar({
   selectedCount,
   selectedIndices: _selectedIndices,
   allSelectedSkipped,
+  canMoveUp,
+  canMoveDown,
   onClearSelection,
   onDelete,
   onDuplicate,
+  onMoveUp,
+  onMoveDown,
   onSetDelay,
   onSetCoord,
   onSetComment,
@@ -148,6 +159,28 @@ export function BulkActionBar({
             </button>
 
             <div className="w-px h-3.5 bg-border-subtle mx-0.5" />
+
+            {/* Move Up / Move Down — moved here from the toolbar because these only
+                make sense with a selection (the toolbar versions were dead weight
+                otherwise). Same payload (actions:reorder) under the hood; the
+                Alt+↑/↓ hotkey continues to work from anywhere. Disabled when the
+                selection is already at the top / bottom of the list. */}
+            <button
+              onClick={onMoveUp}
+              disabled={!canMoveUp}
+              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-tertiary"
+              title="Move selection up (Alt+↑)"
+            >
+              <ArrowUpToLine size={11} />
+            </button>
+            <button
+              onClick={onMoveDown}
+              disabled={!canMoveDown}
+              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-tertiary"
+              title="Move selection down (Alt+↓)"
+            >
+              <ArrowDownToLine size={11} />
+            </button>
 
             {/* Copy was removed here — redundant with the toolbar's Copy button
                 which is always visible and already does "copy selection if any,
