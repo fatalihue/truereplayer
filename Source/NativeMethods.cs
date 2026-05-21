@@ -226,6 +226,20 @@ namespace TrueReplayer.Interop
         [DllImport("gdi32.dll")]
         public static extern bool DeleteDC(IntPtr hdc);
 
+        // GetDC(NULL) returns a DC for the entire virtual screen (all monitors), letting
+        // GetPixel sample any visible pixel without per-monitor handling. ReleaseDC must
+        // be called on the same hWnd that was passed to GetDC, even when that hWnd is NULL.
+        // GetPixel returns a COLORREF (0x00BBGGRR) or CLR_INVALID (0xFFFFFFFF) when the
+        // coordinates fall outside the DC. Used by PixelColorService for WaitPixelColor.
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetDC(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+        [DllImport("gdi32.dll")]
+        public static extern uint GetPixel(IntPtr hdc, int nXPos, int nYPos);
+
         // Window management
         public const int SW_MINIMIZE = 6;
         public const int SW_RESTORE = 9;
