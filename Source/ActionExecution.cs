@@ -979,6 +979,7 @@ namespace TrueReplayer.Services
                         case "ScrollDown": SimulateScroll(-120); break;
                         case "SendText": await SimulateClipboardPaste(action.Key, token); break;
                         case "WaitImage": await ExecuteWaitImage(action, token); break;
+                        case "WaitPixelColor": await ExecuteWaitPixelColor(action, token); break;
                         case "RunProfile": await HandleRunProfile(action, token); break;
                         case "Pause": await ExecutePause(action, token); break;
                         case "BrowserClick":
@@ -1828,6 +1829,82 @@ namespace TrueReplayer.Services
             {
                 return;
             }
+            _cts?.Cancel();
+        }
+
+        /// <summary>
+        /// Poll a single screen pixel until it matches (or stops matching, with Invert) a
+        /// target colour within a per-channel tolerance, or the timeout elapses. Mirrors the
+        /// shape of <see cref="ExecuteWaitImage"/> so they share the same OnTimeout vocabulary
+        /// and cancellation semantics, but the implementation is intentionally tiny —
+        /// <c>GetPixelAt</c> is ~0.1 ms so the loop spends ~all its time in Task.Delay,
+        /// keeping CPU near zero and cancellation responsive.
+        /// </summary>
+        private async Task ExecuteWaitPixelColor(ActionItem action, CancellationToken token)
+        {
+            // Missing coords or unparseable colour → immediate timeout. Better to surface the
+            // configuration error via OnTimeout (Stop/Continue/Halt) than to silently no-op
+            // and have the user wonder why the action did nothing.
+            if (action.PixelX is not int px || action.PixelY is not int py)
+            {
+                HandleWaitPixelColorTimeout(action);
+                return;
+            }
+            var target = PixelColorService.ParseHex(action.PixelColor);
+            if (target == null)
+            {
+                HandleWaitPixelColorTimeout(action);
+                return;
+            }
+
+            int timeoutMs = action.Timeout > 0 ? action.Timeout : 5000;
+            int tolerance = action.PixelTolerance;
+            bool invert = action.PixelInvert;
+
+            // 50 ms poll = ~20 Hz. Fast enough that humans never perceive lag, slow enough
+            // that even an infinite loop costs <1 % CPU on a recent machine. Stopwatch
+            // beats DateTime here because we're inside a hot loop with cancellation.
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            System.Drawing.Color? lastSampled = null;
+
+            while (!token.IsCancellationRequested && sw.ElapsedMilliseconds < timeoutMs)
+            {
+                var sampled = PixelColorService.GetPixelAt(px, py);
+                lastSampled = sampled;
+
+                if (sampled is System.Drawing.Color s)
+                {
+                    bool match = PixelColorService.MatchesWithinTolerance(s, target.Value, tolerance);
+                    // Invert flips the success condition: "wait for X to disappear" succeeds
+                    // when the current colour DOESN'T match. Out-of-bounds reads (sampled
+                    // null) treat as no-match this iteration — they never satisfy either
+                    // branch, so the action falls through to its timeout.
+                    if (invert ? !match : match) return;
+                }
+
+                try { await Task.Delay(50, token); }
+                catch (TaskCanceledException) { return; }
+            }
+
+            if (token.IsCancellationRequested) return;
+
+            // Surface the last sampled colour into the diagnostic log so the user can
+            // compare "wanted #FF5733 ± 10 / got #2B2B2B" without instrumenting anything.
+            // Cheap and non-blocking; falls off the end of the buffer like any other log.
+            System.Diagnostics.Debug.WriteLine(
+                $"[WaitPixelColor] Timeout @ ({px},{py}). Target={action.PixelColor} " +
+                $"tol={tolerance} invert={invert} " +
+                $"lastSampled={(lastSampled is System.Drawing.Color ls ? PixelColorService.ToHex(ls) : "null")}");
+            HandleWaitPixelColorTimeout(action);
+        }
+
+        // Same Continue/StopReplay shape as HandleWaitImageTimeout, just driven by the
+        // separate PixelOnTimeout field so each action type can carry its own policy.
+        // No diagnostic screenshot here — the cheaper, more relevant artefact (last sampled
+        // colour) already went into the Debug log above.
+        private void HandleWaitPixelColorTimeout(ActionItem action)
+        {
+            if (action.PixelOnTimeout == "Continue") return;
             _cts?.Cancel();
         }
 
