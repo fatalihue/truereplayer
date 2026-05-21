@@ -17,7 +17,7 @@ const DISPLAY_KEY_MAP: Record<string, string> = {
   'Next': 'Page Down', 'Prior': 'Page Up',
 };
 
-const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'RunProfile', 'Pause']);
+const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'RunProfile', 'Pause']);
 
 export function getDisplayKey(key: string): string {
   if (!key) return '';
@@ -56,6 +56,8 @@ function computeActionTypeColors(actionType: string): { bg: string; fg: string }
     return { bg: 'var(--color-action-sendtext-bg)', fg: 'var(--color-action-sendtext-fg)' };
   if (actionType === 'WaitImage')
     return { bg: 'var(--color-action-waitimage-bg)', fg: 'var(--color-action-waitimage-fg)' };
+  if (actionType === 'WaitPixelColor')
+    return { bg: 'var(--color-action-pixelcolor-bg)', fg: 'var(--color-action-pixelcolor-fg)' };
   if (actionType === 'RunProfile')
     return { bg: 'var(--color-action-runprofile-bg)', fg: 'var(--color-action-runprofile-fg)' };
   if (actionType === 'Pause')
@@ -80,6 +82,7 @@ export function getActionTypeIcon(actionType: string): string {
   if (actionType === 'HoldKey') return 'Timer';
   if (actionType === 'SendText') return 'Type';
   if (actionType === 'WaitImage') return 'ScanSearch';
+  if (actionType === 'WaitPixelColor') return 'Pipette';
   if (actionType === 'RunProfile') return 'Repeat2';
   if (actionType === 'Pause') return 'Hourglass';
   return 'Zap';

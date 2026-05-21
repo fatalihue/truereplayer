@@ -46,6 +46,15 @@ export interface ActionItem {
   waitImageSearchY?: number | null;
   waitImageSearchW?: number | null;
   waitImageSearchH?: number | null;
+  // WaitPixelColor — lighter alternative to WaitImage that watches a single screen pixel
+  // for a target colour within a per-channel tolerance band. Coords are absolute virtual-
+  // screen pixels (same convention as mouse-click X/Y). Reuses the `timeout` field above.
+  pixelX?: number | null;
+  pixelY?: number | null;
+  pixelColor?: string | null;        // "#RRGGBB"
+  pixelTolerance?: number;            // 0–255 per channel; default 0 = exact match
+  pixelOnTimeout?: string | null;     // "Halt" | "Continue" | "StopReplay"
+  pixelInvert?: boolean;              // wait for colour to DISAPPEAR
 }
 
 // #2 — Selector alternative returned by the picker
@@ -281,7 +290,9 @@ export type IncomingMessage =
   | { type: 'browser:extensionOutdated'; payload: { currentVersion: string; expectedVersion: string } }
   | { type: 'image:testMatchResult'; payload: { requestId: string; found: boolean; score: number; x: number; y: number; w: number; h: number; error?: string } }
   | { type: 'waitimage:searchRegionSet'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; w?: number; h?: number } }
-  | { type: 'mouse:positionPicked'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number } };
+  | { type: 'mouse:positionPicked'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number } }
+  | { type: 'pixel:colorPicked'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; hex?: string } }
+  | { type: 'pixel:testMatchResult'; payload: { requestId: string; matches: boolean; sampledHex?: string | null; error?: string } };
 
 // ── Messages JS → C# ──
 
@@ -379,6 +390,8 @@ export type OutgoingMessage =
   | { type: 'waitimage:cropReference'; payload: { index: number; x: number; y: number; w: number; h: number } }
   | { type: 'image:testMatch'; payload: { requestId: string; imagePath: string; confidence: number; searchRegion?: { x: number; y: number; w: number; h: number } } }
   | { type: 'mouse:pickPosition'; payload: { requestId: string } }
+  | { type: 'pixel:pickColor'; payload: { requestId: string } }
+  | { type: 'pixel:testMatch'; payload: { requestId: string; x: number; y: number; hex: string; tolerance: number } }
   | { type: 'selection:changed'; payload: { indices: number[] } }
   | { type: 'window:alwaysOnTop'; payload: { enabled: boolean } }
   | { type: 'window:minimizeToTray'; payload: { enabled: boolean } }

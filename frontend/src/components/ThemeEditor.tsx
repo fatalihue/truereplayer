@@ -964,6 +964,12 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                   onChange={(v) => setUISetting('actionWaitImageColor', v)}
                 />
                 <AppearanceColorRow
+                  label="Pixel Color"
+                  value={config.uiSettings.actionPixelColorColor}
+                  defaultValue={DEFAULT_UI_SETTINGS.actionPixelColorColor}
+                  onChange={(v) => setUISetting('actionPixelColorColor', v)}
+                />
+                <AppearanceColorRow
                   label="Browser"
                   value={config.uiSettings.actionBrowserColor}
                   defaultValue={DEFAULT_UI_SETTINGS.actionBrowserColor}

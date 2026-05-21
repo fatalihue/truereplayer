@@ -46,6 +46,7 @@ export interface ThemeUISettings {
   actionScrollColor: string;
   actionSendTextColor: string;
   actionWaitImageColor: string;
+  actionPixelColorColor: string;
   actionBrowserColor: string;
   actionRunProfileColor: string;
   actionPauseColor: string;
@@ -76,6 +77,10 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   actionScrollColor: '#6bcb77',
   actionSendTextColor: '#d4a020',
   actionWaitImageColor: '#e879f9',
+  // Cyan — picked to stay distinct from WaitImage magenta (#e879f9) and Key blue
+  // (#60cdff). The two Wait* actions read as a family (similar hue tier) while
+  // keeping the per-row badge instantly distinguishable.
+  actionPixelColorColor: '#22d3ee',
   actionBrowserColor: '#fb923c',
   // True blue, picked to be distinct from Key cyan (#60cdff) and Mouse purple
   // (#a78bfa). Carries the "control flow / chain call" semantic.
@@ -1358,6 +1363,8 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   parts.push(`--color-action-sendtext-bg: color-mix(in srgb, ${uiSettings.actionSendTextColor} 10%, transparent);`);
   parts.push(`--color-action-waitimage-fg: ${uiSettings.actionWaitImageColor};`);
   parts.push(`--color-action-waitimage-bg: color-mix(in srgb, ${uiSettings.actionWaitImageColor} 10%, transparent);`);
+  parts.push(`--color-action-pixelcolor-fg: ${uiSettings.actionPixelColorColor};`);
+  parts.push(`--color-action-pixelcolor-bg: color-mix(in srgb, ${uiSettings.actionPixelColorColor} 10%, transparent);`);
   parts.push(`--color-action-browser-fg: ${uiSettings.actionBrowserColor};`);
   parts.push(`--color-action-browser-bg: color-mix(in srgb, ${uiSettings.actionBrowserColor} 10%, transparent);`);
   parts.push(`--color-action-runprofile-fg: ${uiSettings.actionRunProfileColor};`);

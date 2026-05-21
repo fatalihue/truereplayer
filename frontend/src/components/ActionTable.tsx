@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronsDownUp, ChevronsUpDown, Plus, MoreHorizontal, Pencil, ScanSearch, Globe, CheckCheck, Code2, Files, Hourglass, Repeat, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical, Timer } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronsDownUp, ChevronsUpDown, Plus, MoreHorizontal, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Code2, Files, Hourglass, Repeat, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical, Timer } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -30,6 +30,7 @@ function ActionIcon({ actionType }: { actionType: string }) {
   if (actionType.startsWith('Key')) return <Keyboard size={size} />;
   if (actionType === 'SendText') return <Type size={size} />;
   if (actionType === 'WaitImage') return <ScanSearch size={size} />;
+  if (actionType === 'WaitPixelColor') return <Pipette size={size} />;
   // Match the toolbar's redesigned icons so the chip in the table reads the same
   // as the entry that inserts the action: Hourglass (not Pause-glyph) for the
   // delay action, Repeat2 (not Workflow) for sub-macro calls.
@@ -819,6 +820,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     { type: 'HoldKey', label: 'Hold Key…', icon: Timer },
     { type: 'Pause', label: 'Pause', icon: Hourglass },
     { type: 'WaitImage', label: 'Wait for Image', icon: ScanSearch },
+    { type: 'WaitPixelColor', label: 'Wait for Pixel Color', icon: Pipette },
     { type: 'RunProfile', label: 'Run Profile', icon: Repeat2 },
   ] as const;
 
@@ -1014,6 +1016,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     >
                       <ActionIcon actionType={action.actionType} />
                       {action.actionType === 'WaitImage' ? 'Wait Image'
+                        : action.actionType === 'WaitPixelColor' ? 'Pixel Color'
                         : action.actionType === 'BrowserClick' ? 'Left Click'
                         : action.actionType === 'BrowserRightClick' ? 'Right Click'
                         : action.actionType === 'BrowserType' ? 'Input Text'

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ArrowUpToLine, ArrowDownToLine, ScanSearch, Plus, Keyboard, Globe, Repeat, Repeat2, Hourglass, Timer, X } from 'lucide-react';
+import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ArrowUpToLine, ArrowDownToLine, ScanSearch, Pipette, Plus, Keyboard, Globe, Repeat, Repeat2, Hourglass, Timer, X } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -471,6 +471,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                     items: [
                       { type: 'Pause', label: 'Pause', icon: Hourglass },
                       { type: 'WaitImage', label: 'Wait for Image', icon: ScanSearch },
+                      { type: 'WaitPixelColor', label: 'Wait for Pixel Color', icon: Pipette },
                       { type: 'RunProfile', label: 'Run Profile', icon: Repeat2 },
                     ],
                   },
