@@ -872,19 +872,39 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         )}
 
         {/* App icon — base64 PNG of the effective target's .exe, resolved server-side.
-            Sits between the active marker and the name. Opacity follows the same rule
-            as the inherited-crosshair below: 100 % when this profile owns the target,
-            55 % when it inherits from a folder. Null when no target is set or icon
-            extraction failed (UWP host, portable apps off PATH) — in that case the
-            crosshair badge to the right renders as fallback. The image's title is the
-            process name so hover still surfaces the target identity. */}
-        {p.appIconBase64 && (
+            Sits between the active marker and the name. Two render modes:
+
+            • Own target  → wrapped in a group with a hover ✕ overlay so the user can
+              remove the target inline (same affordance the crosshair had before the
+              icon took its slot). Full opacity.
+            • Inherited from a folder → plain <img>, no ✕, 55 % opacity. Removal has
+              to happen from the folder, not the row.
+
+            Null when no target is set or icon extraction failed (UWP host, portable
+            apps off PATH) — in that case the crosshair badge to the right renders
+            as the fallback (and keeps its own ✕ for the own-target case). */}
+        {p.appIconBase64 && p.hasWindowTarget && (
+          <span
+            className="group/target shrink-0 relative w-3.5 h-3.5"
+            title={p.effectiveTargetProcessName ?? ''}
+          >
+            <img
+              src={`data:image/png;base64,${p.appIconBase64}`}
+              alt=""
+              className="w-3.5 h-3.5 object-contain pointer-events-none"
+            />
+            <button
+              onClick={(e) => { e.stopPropagation(); handleRemoveWindowTarget(p.name); }}
+              className="hidden group-hover/target:inline-flex absolute inset-0 items-center justify-center rounded-full bg-recording text-white text-[7px] font-bold leading-none hover:bg-red-500"
+            >✕</button>
+          </span>
+        )}
+        {p.appIconBase64 && !p.hasWindowTarget && (
           <img
             src={`data:image/png;base64,${p.appIconBase64}`}
             alt=""
             title={p.effectiveTargetProcessName ?? ''}
-            className="w-3.5 h-3.5 shrink-0 object-contain pointer-events-none"
-            style={{ opacity: p.effectiveTargetSource === 'folder' ? 0.55 : 1 }}
+            className="w-3.5 h-3.5 shrink-0 object-contain pointer-events-none opacity-55"
           />
         )}
 
@@ -1134,15 +1154,23 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         </span>
                         <FolderOpen size={12} style={{ color: folder.color }} className={`shrink-0 ${folderAllDisabled ? 'opacity-40' : ''}`} />
                         {/* Folder-target app icon — same resolution rules as the profile row.
-                            Sits between the FolderOpen glyph and the name. The crosshair
-                            below only renders when the icon is missing (UWP/portable). */}
+                            Wrapped in a group so hover reveals a ✕ overlay that removes the
+                            folder's target inline, matching the crosshair fallback below. */}
                         {folder.appIconBase64 && (
-                          <img
-                            src={`data:image/png;base64,${folder.appIconBase64}`}
-                            alt=""
+                          <span
+                            className={`group/ftarget shrink-0 relative w-3.5 h-3.5 ${folderAllDisabled ? 'opacity-40' : ''}`}
                             title={folder.windowTargetProcessName ?? ''}
-                            className={`w-3.5 h-3.5 shrink-0 object-contain pointer-events-none ${folderAllDisabled ? 'opacity-40' : ''}`}
-                          />
+                          >
+                            <img
+                              src={`data:image/png;base64,${folder.appIconBase64}`}
+                              alt=""
+                              className="w-3.5 h-3.5 object-contain pointer-events-none"
+                            />
+                            <button
+                              onClick={(e) => { e.stopPropagation(); send({ type: 'profile:removeFolderWindowTarget', payload: { folderName: folder.name } }); }}
+                              className="hidden group-hover/ftarget:inline-flex absolute inset-0 items-center justify-center rounded-full bg-recording text-white text-[7px] font-bold leading-none hover:bg-red-500"
+                            >✕</button>
+                          </span>
                         )}
                         <span className={`text-xs font-medium flex-1 truncate ${folderAllDisabled ? 'text-text-disabled' : 'text-text-secondary'}`}>{folder.name}</span>
                         {folder.hasWindowTarget && !folder.appIconBase64 && (
