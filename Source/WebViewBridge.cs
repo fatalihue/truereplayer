@@ -402,6 +402,8 @@ namespace TrueReplayer
                     case "waitimage:cropReference": HandleCropReference(payload); break;
                     case "image:testMatch": _ = HandleTestMatchAsync(payload); break;
                     case "mouse:pickPosition": _ = HandleMousePickPositionAsync(payload); break;
+                    case "pixel:pickColor": _ = HandlePixelColorPickAsync(payload); break;
+                    case "pixel:testMatch": HandlePixelColorTestMatch(payload); break;
                     case "actions:addBrowserAction": HandleAddBrowserAction(payload); break;
                     case "browser:toggleRecording": HandleBrowserToggleRecording(payload); break;
                     case "browser:pickElement": HandlePickElement(); break;
@@ -1855,6 +1857,26 @@ namespace TrueReplayer
                 return;
             }
 
+            // WaitPixelColor: insert directly with empty coords/colour. Unlike WaitImage
+            // (which needs a reference PNG up front), the pixel target is set inside the
+            // SheetPanel editor via the eyedropper button, so a freshly-inserted row is
+            // valid-but-unconfigured — matches how Pause / SendText defer their config.
+            if (actionType == "WaitPixelColor")
+            {
+                int delay = int.TryParse(CustomDelay, out var pcd) ? pcd : 100;
+                actions.Insert(insertIndex, new ActionItem
+                {
+                    ActionType = actionType,
+                    Key = "",
+                    Delay = delay,
+                    Timeout = 5000,
+                });
+                HasUnsavedChanges = true;
+                PushActionsUpdate();
+                mainController.UpdateButtonStates();
+                return;
+            }
+
             // Browser actions: insert directly
             if (actionType.StartsWith("Browser"))
             {
@@ -2321,6 +2343,104 @@ namespace TrueReplayer
                 cancelled = false,
                 x = selection.ScreenX,
                 y = selection.ScreenY
+            });
+        }
+
+        // Eyedropper for WaitPixelColor — minimise the app, drop the user into the screen
+        // overlay in pointPick mode, and round-trip the clicked pixel back to the editor as
+        // { x, y, hex }. The overlay already samples the colour from its in-memory screenshot
+        // (RegionSelectionResult.PickedColor), so no second screen capture happens here.
+        private async Task HandlePixelColorPickAsync(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
+
+            var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
+            await Task.Delay(400);
+
+            System.Drawing.Bitmap screenshot;
+            try
+            {
+                screenshot = ScreenCaptureService.CaptureVirtualScreen();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[PixelColorPick] Screenshot failed: {ex.Message}");
+                dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+                SendMessage("pixel:colorPicked", new { requestId, cancelled = true });
+                return;
+            }
+
+            RegionSelectionResult? selection = null;
+            var thread = new Thread(() =>
+            {
+                System.Windows.Forms.Application.EnableVisualStyles();
+                using var overlay = new ScreenOverlayForm(
+                    screenshot,
+                    regionOnly: false,
+                    pointPick: true,
+                    hintText: "Click on the pixel to watch — colour and coords are captured  •  ESC to cancel");
+                overlay.ShowDialog();
+                selection = overlay.GetSelectionAsync().Result;
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            await Task.Run(() => thread.Join());
+
+            dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+
+            if (selection == null || selection.PickedColor == null)
+            {
+                SendMessage("pixel:colorPicked", new { requestId, cancelled = true });
+                return;
+            }
+
+            SendMessage("pixel:colorPicked", new
+            {
+                requestId,
+                cancelled = false,
+                x = selection.ScreenX,
+                y = selection.ScreenY,
+                hex = PixelColorService.ToHex(selection.PickedColor.Value),
+            });
+        }
+
+        // Test the user's pixel/colour/tolerance configuration against the LIVE screen
+        // (not a screenshot — the editor wants the current colour right now, so we sample
+        // through GDI directly). Returns matches + the sampled hex so the editor can show
+        // "✅ Matches" or "❌ Got #2B2B2B vs #FF5733 ± 10" without round-tripping a Bitmap.
+        // Synchronous because each call is ~0.1 ms and the editor never fires this in bulk.
+        private void HandlePixelColorTestMatch(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
+            int x = payload.TryGetProperty("x", out var xEl) && xEl.ValueKind == JsonValueKind.Number ? xEl.GetInt32() : 0;
+            int y = payload.TryGetProperty("y", out var yEl) && yEl.ValueKind == JsonValueKind.Number ? yEl.GetInt32() : 0;
+            string targetHex = payload.TryGetProperty("hex", out var hexEl) ? (hexEl.GetString() ?? "") : "";
+            int tolerance = payload.TryGetProperty("tolerance", out var tolEl) && tolEl.ValueKind == JsonValueKind.Number ? tolEl.GetInt32() : 0;
+
+            var sampled = PixelColorService.GetPixelAt(x, y);
+            var target = PixelColorService.ParseHex(targetHex);
+
+            if (sampled == null || target == null)
+            {
+                SendMessage("pixel:testMatchResult", new
+                {
+                    requestId,
+                    matches = false,
+                    sampledHex = sampled.HasValue ? PixelColorService.ToHex(sampled.Value) : null,
+                    error = sampled == null
+                        ? "Couldn't sample pixel (off-screen or hardware-accelerated surface)"
+                        : "Invalid target colour",
+                });
+                return;
+            }
+
+            bool matches = PixelColorService.MatchesWithinTolerance(sampled.Value, target.Value, tolerance);
+            SendMessage("pixel:testMatchResult", new
+            {
+                requestId,
+                matches,
+                sampledHex = PixelColorService.ToHex(sampled.Value),
             });
         }
 

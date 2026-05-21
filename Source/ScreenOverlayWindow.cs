@@ -16,6 +16,11 @@ namespace TrueReplayer.Services
         public int ScreenY { get; set; }
         public int Width { get; set; }
         public int Height { get; set; }
+        // Only set in pointPick mode — the colour of the pixel the user clicked on, sampled
+        // directly from the in-memory screenshot (no second screen capture). Null for region
+        // or recapture flows where a single colour wouldn't be meaningful. Used by the
+        // WaitPixelColor eyedropper to fill the target-colour swatch alongside X/Y.
+        public Color? PickedColor { get; set; }
     }
 
     public class ScreenOverlayForm : Form
@@ -209,6 +214,19 @@ namespace TrueReplayer.Services
                 {
                     // Single-click capture — no drag needed. Width/Height stay 0 to mark this
                     // result as a point rather than a region; callers index off ScreenX/ScreenY.
+                    // Also sample the colour at the click directly from the in-memory
+                    // screenshot — the WaitPixelColor eyedropper consumes this, and even
+                    // callers that ignore it (Pick Position) pay only one GetPixel call.
+                    // Guarded against out-of-form coordinates so a fast click on the edge
+                    // can't throw.
+                    Color? pickedColor = null;
+                    if (e.Location.X >= 0 && e.Location.Y >= 0
+                        && e.Location.X < _screenshot.Width && e.Location.Y < _screenshot.Height)
+                    {
+                        try { pickedColor = _screenshot.GetPixel(e.Location.X, e.Location.Y); }
+                        catch { /* defensive — bitmap access can race with Dispose on cancel */ }
+                    }
+
                     _tcs.TrySetResult(new RegionSelectionResult
                     {
                         CroppedImage = null,
@@ -216,6 +234,7 @@ namespace TrueReplayer.Services
                         ScreenY = e.Location.Y + _virtualOriginY,
                         Width = 0,
                         Height = 0,
+                        PickedColor = pickedColor,
                     });
                     Close();
                     return;
