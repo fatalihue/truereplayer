@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, RefreshCw, Crosshair, Copy, ClipboardPaste, ShieldCheck, ShieldAlert, ShieldQuestion, PlayCircle, Check, X } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Crosshair, Copy, ClipboardPaste, ShieldCheck, ShieldAlert, ShieldQuestion, PlayCircle, Pipette, Check, X } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
 import type { SelectorAlternative, BrowserTestResult } from '../bridge/messageTypes';
@@ -133,6 +133,23 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const [waitImageClickOnMatch, setWaitImageClickOnMatch] = useState(false);
   const [waitImageSearchRegion, setWaitImageSearchRegion] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
+  // WaitPixelColor state — mirror of the action's pixel fields. Held locally so the user
+  // can edit freely before Save; written back as 'actions:edit' messages on Save. Strings
+  // for the numeric inputs to allow empty intermediate states without forcing 0 echoes.
+  const [pixelX, setPixelX] = useState<string>('');
+  const [pixelY, setPixelY] = useState<string>('');
+  const [pixelColor, setPixelColor] = useState<string>('');     // "#RRGGBB"
+  const [pixelTolerance, setPixelTolerance] = useState<string>('0');
+  const [pixelOnTimeout, setPixelOnTimeout] = useState<string>('StopReplay'); // 'Continue' | 'StopReplay'
+  const [pixelInvert, setPixelInvert] = useState(false);
+
+  // Eyedropper / live-test request tracking — mirrors the WaitImage testMatch /
+  // mouse:pickPosition pattern. Single in-flight request at a time; the requestId
+  // gates the message handler so a stale reply can't overwrite newer state.
+  const [pickColorRequestId, setPickColorRequestId] = useState<string | null>(null);
+  const [testPixelRequestId, setTestPixelRequestId] = useState<string | null>(null);
+  const [testPixelResult, setTestPixelResult] = useState<{ matches: boolean; sampledHex?: string | null; error?: string } | null>(null);
+
   // Test match button — fires a single MatchOnce on the live screen and shows the score.
   // Result is transient (cleared on close/save/recapture); no persistence.
   const [testMatchRequestId, setTestMatchRequestId] = useState<string | null>(null);
@@ -224,9 +241,28 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           }
           setPickPositionRequestId(null);
         }
+      } else if (msg.type === 'pixel:colorPicked') {
+        // Eyedropper reply — fills X/Y + colour in one shot. Three-field update so
+        // the user gets all the metadata of the click; they can still tweak any of
+        // the three before saving.
+        const r = msg.payload as { requestId: string; cancelled: boolean; x?: number; y?: number; hex?: string };
+        if (pickColorRequestId && r.requestId === pickColorRequestId) {
+          if (!r.cancelled && r.x != null && r.y != null && r.hex) {
+            setPixelX(String(r.x));
+            setPixelY(String(r.y));
+            setPixelColor(r.hex);
+          }
+          setPickColorRequestId(null);
+        }
+      } else if (msg.type === 'pixel:testMatchResult') {
+        const r = msg.payload as { requestId: string; matches: boolean; sampledHex?: string | null; error?: string };
+        if (testPixelRequestId && r.requestId === testPixelRequestId) {
+          setTestPixelResult({ matches: r.matches, sampledHex: r.sampledHex, error: r.error });
+          setTestPixelRequestId(null);
+        }
       }
     });
-  }, [subscribe, testRequestId, clearTestTimeout, testMatchRequestId, clearTestMatchTimeout, pickPositionRequestId]);
+  }, [subscribe, testRequestId, clearTestTimeout, testMatchRequestId, clearTestMatchTimeout, pickPositionRequestId, pickColorRequestId, testPixelRequestId]);
 
   // Sync local state from action. This is intentionally an effect-driven seed: keeping
   // local state lets the user edit freely before saving, while the dependency on `action`
@@ -290,6 +326,17 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       setTestResult(null);
       setTestMatchResult(null);
       setTestMatchRequestId(null);
+      // WaitPixelColor state seeding — null/undefined become empty strings so the
+      // numeric inputs render blank instead of "null". OnTimeout collapses everything
+      // that isn't explicit "Continue" down to "StopReplay" to match the dropdown options.
+      setPixelX(action.pixelX != null ? String(action.pixelX) : '');
+      setPixelY(action.pixelY != null ? String(action.pixelY) : '');
+      setPixelColor(action.pixelColor ?? '');
+      setPixelTolerance(String(action.pixelTolerance ?? 0));
+      setPixelOnTimeout(action.pixelOnTimeout === 'Continue' ? 'Continue' : 'StopReplay');
+      setPixelInvert(action.pixelInvert || false);
+      setTestPixelResult(null);
+      setTestPixelRequestId(null);
     }
   }, [action]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -355,6 +402,50 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
         : '';
       if (newRect !== currentRect) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'waitImageSearchRegion', value: newRect } });
+      }
+    }
+
+    // WaitPixelColor — persist each field separately so partial edits don't drop other
+    // settings on the floor. Timeout is shared with WaitImage so the conversion logic
+    // matches (seconds → ms, >= 1 s). Empty X/Y/colour fields are sent as empty strings
+    // and stored as null on the backend, surfacing as immediate-timeout at runtime.
+    if (actionType === 'WaitPixelColor') {
+      const newTimeoutMs = Math.max(1, parseFloat(timeout) || 5) * 1000;
+      if (newTimeoutMs !== (action.timeout || 5000)) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(Math.round(newTimeoutMs)) } });
+      }
+      const trimmedX = pixelX.trim();
+      const trimmedY = pixelY.trim();
+      const parsedX = trimmedX === '' ? null : parseInt(trimmedX, 10);
+      const parsedY = trimmedY === '' ? null : parseInt(trimmedY, 10);
+      if ((parsedX ?? null) !== (action.pixelX ?? null)) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'pixelX', value: parsedX == null ? '' : String(parsedX) } });
+      }
+      if ((parsedY ?? null) !== (action.pixelY ?? null)) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'pixelY', value: parsedY == null ? '' : String(parsedY) } });
+      }
+      // Normalise the colour string on commit: trim, uppercase, ensure leading '#'.
+      // Backend stores exactly what we send; keeping it canonical here avoids "#fc5" vs
+      // "FC5" vs "fc5" diffs in the saved JSON and keeps the swatch in the editor
+      // stable across save+reload cycles.
+      const rawColor = pixelColor.trim();
+      const normalisedColor = rawColor === ''
+        ? ''
+        : (rawColor.startsWith('#') ? rawColor.toUpperCase() : '#' + rawColor.toUpperCase());
+      if (normalisedColor !== (action.pixelColor ?? '')) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'pixelColor', value: normalisedColor } });
+      }
+      const newTol = Math.max(0, Math.min(255, parseInt(pixelTolerance, 10) || 0));
+      if (newTol !== (action.pixelTolerance ?? 0)) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'pixelTolerance', value: String(newTol) } });
+      }
+      const persistedPxTimeout = pixelOnTimeout === 'Continue' ? 'Continue' : '';
+      const currentPxTimeout = action.pixelOnTimeout === 'Continue' ? 'Continue' : '';
+      if (persistedPxTimeout !== currentPxTimeout) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'pixelOnTimeout', value: persistedPxTimeout } });
+      }
+      if (!!pixelInvert !== !!(action.pixelInvert)) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'pixelInvert', value: String(pixelInvert) } });
       }
     }
 
@@ -647,6 +738,41 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     send({ type: 'mouse:pickPosition', payload: { requestId } });
   }, [send]);
 
+  // WaitPixelColor — eyedropper. Minimises the app, opens the screen overlay in
+  // pointPick mode, fills X/Y + colour from the click in one shot. The reply lands
+  // in the 'pixel:colorPicked' handler above which writes back through setters.
+  const handlePickPixelColor = useCallback(() => {
+    const requestId = Math.random().toString(36).slice(2, 10);
+    setPickColorRequestId(requestId);
+    send({ type: 'pixel:pickColor', payload: { requestId } });
+  }, [send]);
+
+  // WaitPixelColor — sanity-check the current config against the LIVE screen pixel
+  // (no capture). Shows "✅ Matches" or "❌ Got #2B2B2B vs #FF5733 ± 10" inline so
+  // the user can calibrate tolerance without leaving the editor. Bails early when
+  // the form is incomplete — the backend would just echo a useless mismatch.
+  const handleTestPixelMatch = useCallback(() => {
+    const trimmedColor = pixelColor.trim();
+    if (pixelX.trim() === '' || pixelY.trim() === '' || trimmedColor === '') {
+      setTestPixelResult({ matches: false, error: 'Set X, Y, and the target colour first.' });
+      return;
+    }
+    const requestId = Math.random().toString(36).slice(2, 10);
+    setTestPixelRequestId(requestId);
+    setTestPixelResult(null);
+    const hex = trimmedColor.startsWith('#') ? trimmedColor : '#' + trimmedColor;
+    send({
+      type: 'pixel:testMatch',
+      payload: {
+        requestId,
+        x: parseInt(pixelX, 10),
+        y: parseInt(pixelY, 10),
+        hex,
+        tolerance: parseInt(pixelTolerance, 10) || 0,
+      },
+    });
+  }, [pixelX, pixelY, pixelColor, pixelTolerance, send]);
+
   // Copy/Paste X,Y — supports the common workflow of picking a position on one click half
   // (e.g. LeftClickDown) and reusing it on the matching half (LeftClickUp) without picking
   // again. Uses the system clipboard so the value survives navigating between actions and
@@ -699,6 +825,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const isKeyAction = actionType === 'KeyDown' || actionType === 'KeyUp';
   const isSendText = actionType === 'SendText';
   const isWaitImage = actionType === 'WaitImage';
+  const isWaitPixelColor = actionType === 'WaitPixelColor';
   const isPause = actionType === 'Pause';
   const isBrowser = actionType.startsWith('Browser');
   const isBrowserType = actionType === 'BrowserType';
@@ -760,6 +887,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             <div className="text-[11px] text-text-tertiary mt-0.5 flex items-center gap-1.5 flex-wrap">
               <span>
                 Action #{(actionIndex ?? 0) + 1} — {isWaitImage ? 'Wait Image'
+                  : isWaitPixelColor ? 'Wait Pixel Color'
                   : actionType === 'BrowserClick' ? 'Left Click'
                   : actionType === 'BrowserRightClick' ? 'Right Click'
                   : actionType === 'BrowserType' ? 'Input Text'
@@ -1015,6 +1143,166 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 </label>
               </div>
             )}
+          </>
+          )}
+
+          {/* WaitPixelColor Settings — lighter-weight sibling of WaitImage. Watches a single
+              screen pixel for a target colour within a per-channel tolerance, then either
+              proceeds, halts, or stops the replay (same OnTimeout vocabulary). Eyedropper
+              button fills X/Y + colour from a single screen click in one shot. */}
+          {isWaitPixelColor && (
+          <>
+            {/* PIXEL TO WATCH — coords + Pick. The eyedropper grabs the colour at the same
+                time so users normally don't need to fill the colour swatch manually. */}
+            <div>
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">PIXEL TO WATCH</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={pixelX}
+                  onChange={(e) => setPixelX(e.target.value)}
+                  placeholder="X"
+                  className="w-20 h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
+                />
+                <input
+                  type="text"
+                  value={pixelY}
+                  onChange={(e) => setPixelY(e.target.value)}
+                  placeholder="Y"
+                  className="w-20 h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
+                />
+                <button
+                  type="button"
+                  onClick={handlePickPixelColor}
+                  className="flex items-center gap-1.5 h-7 px-2.5 text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default rounded hover:bg-bg-card hover:text-text-primary transition-colors"
+                  title="Click anywhere on screen — captures X, Y, and the pixel colour in one shot"
+                >
+                  <Pipette size={12} />
+                  Pick from screen
+                </button>
+              </div>
+            </div>
+
+            {/* TARGET COLOUR — swatch + hex input. The eyedropper above writes both, but
+                the user can also type or paste a hex code directly. Normalisation
+                (uppercase + leading #) happens on Save, not on every keystroke, so the
+                input stays predictable while editing. */}
+            <div>
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TARGET COLOUR</label>
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-7 h-7 rounded border border-border-default shrink-0"
+                  style={{ background: /^#?[0-9A-Fa-f]{6}$/.test(pixelColor.trim()) ? (pixelColor.trim().startsWith('#') ? pixelColor.trim() : '#' + pixelColor.trim()) : 'transparent' }}
+                  title={pixelColor || 'No colour set'}
+                />
+                <input
+                  type="text"
+                  value={pixelColor}
+                  onChange={(e) => setPixelColor(e.target.value)}
+                  placeholder="#RRGGBB"
+                  className="flex-1 h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                />
+              </div>
+            </div>
+
+            {/* TOLERANCE — per-channel band. Slider + numeric input so users can either
+                drag for feel or type an exact value. Range capped at 50 (out of 255)
+                because anything higher starts matching unrelated colours; expert users
+                who really want > 50 can still type it. */}
+            <div>
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TOLERANCE (PER CHANNEL)</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min="0"
+                  max="50"
+                  value={pixelTolerance}
+                  onChange={(e) => setPixelTolerance(e.target.value)}
+                  className="flex-1 accent-accent-solid"
+                />
+                <input
+                  type="text"
+                  value={pixelTolerance}
+                  onChange={(e) => setPixelTolerance(e.target.value)}
+                  className="w-14 h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
+                />
+                <span className="text-[11px] text-text-disabled">/ 255</span>
+              </div>
+              <div className="text-[10px] text-text-disabled mt-1">
+                0 = exact match. Try 5–15 for game UI colours that compress slightly.
+              </div>
+            </div>
+
+            {/* TIMEOUT + ON TIMEOUT — mirrors the WaitImage block layout so users moving
+                between the two action types see the same controls in the same place. */}
+            <div>
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={timeout}
+                  onChange={(e) => setTimeout(e.target.value)}
+                  className="w-20 h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
+                />
+                <span className="text-[11px] text-text-disabled">seconds</span>
+                <span className="flex-1" />
+                <select
+                  value={pixelOnTimeout}
+                  onChange={(e) => setPixelOnTimeout(e.target.value)}
+                  className="h-7 px-2 text-ui text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                >
+                  <option value="StopReplay">Stop replay</option>
+                  <option value="Continue">Continue anyway</option>
+                </select>
+              </div>
+            </div>
+
+            {/* INVERT — checkbox. Same visual treatment as the WaitImage "Click on found
+                location" toggle above for consistency. */}
+            <div>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={pixelInvert}
+                  onChange={(e) => setPixelInvert(e.target.checked)}
+                  className="w-3.5 h-3.5 accent-accent-solid"
+                />
+                <span className="text-ui text-text-secondary">Wait for the colour to DISAPPEAR</span>
+              </label>
+              <div className="text-[10px] text-text-disabled mt-0.5 ml-5">
+                Inverts the match — useful for "cooldown indicator stops glowing red" patterns.
+              </div>
+            </div>
+
+            {/* TEST MATCH — single button that sends a synchronous pixel:testMatch and
+                renders the result inline. Result clears on next pick / test / save. */}
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={handleTestPixelMatch}
+                className="flex items-center gap-1.5 h-7 px-2.5 text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default rounded hover:bg-bg-card hover:text-text-primary transition-colors"
+              >
+                <PlayCircle size={12} />
+                Test match
+              </button>
+              {testPixelResult && (
+                <div className="mt-2 text-[11px] font-mono">
+                  {testPixelResult.error ? (
+                    <span className="text-text-tertiary">⚠️ {testPixelResult.error}</span>
+                  ) : testPixelResult.matches ? (
+                    <span style={{ color: 'var(--color-action-pixelcolor-fg)' }}>
+                      ✓ Matches (got {testPixelResult.sampledHex})
+                    </span>
+                  ) : (
+                    <span className="text-text-tertiary">
+                      ✗ Got <span className="text-text-primary">{testPixelResult.sampledHex ?? 'no read'}</span>
+                      {' '}vs <span className="text-text-primary">{pixelColor}</span>
+                      {' '}± {pixelTolerance}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
           </>
           )}
 

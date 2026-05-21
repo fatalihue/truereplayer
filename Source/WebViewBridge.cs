@@ -1483,6 +1483,37 @@ namespace TrueReplayer
                         }
                     }
                     break;
+                case "pixelX":
+                    // Empty clears the field (returns to "not configured" → immediate timeout
+                    // at execution). Otherwise parse as int; absolute virtual-screen coord.
+                    if (string.IsNullOrEmpty(value)) action.PixelX = null;
+                    else if (int.TryParse(value, out int pxx)) action.PixelX = pxx;
+                    break;
+                case "pixelY":
+                    if (string.IsNullOrEmpty(value)) action.PixelY = null;
+                    else if (int.TryParse(value, out int pxy)) action.PixelY = pxy;
+                    break;
+                case "pixelColor":
+                    // Empty = clear target. Otherwise expect "#RRGGBB" — the editor's hex
+                    // input normalises on commit; an unparseable string surfaces at execution
+                    // time as immediate-timeout instead of a crash, so no validation here.
+                    action.PixelColor = string.IsNullOrEmpty(value) ? null : value;
+                    break;
+                case "pixelTolerance":
+                    // 0–255 per channel. Anything outside clamps to that range rather than
+                    // rejecting, since a malformed payload (older frontend, edited JSON)
+                    // shouldn't silently break the action.
+                    if (int.TryParse(value, out int ptol))
+                        action.PixelTolerance = Math.Max(0, Math.Min(255, ptol));
+                    break;
+                case "pixelOnTimeout":
+                    // Same convention as waitImageOnTimeout — only "Continue" is persisted;
+                    // default "StopReplay" stays null on disk so saved profiles read clean.
+                    action.PixelOnTimeout = value == "Continue" ? "Continue" : null;
+                    break;
+                case "pixelInvert":
+                    action.PixelInvert = value == "true";
+                    break;
             }
 
             HasUnsavedChanges = true;
