@@ -1,57 +1,35 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Keyboard, Minus, Plus } from 'lucide-react';
-
-interface KeystrokeCaptureDialogProps {
-  // `mode` controls the dialog flavour:
-  //   "keystroke" — classic "Send Keystroke…" flow, Repeat defaults to 1 and is collapsed
-  //                 under an "Advanced" toggle so the common case stays uncluttered.
-  //   "press-n"   — "Press × N" insert flow, Repeat defaults to 5 and is rendered
-  //                 prominently so the count is the first thing the user sees.
-  // Both modes commit to the SAME `actions:insertKeystroke` message — they only differ
-  // in defaults and UI emphasis.
-  mode?: 'keystroke' | 'press-n';
-  // Initial values used when re-opening the dialog to edit an existing Keystroke row
-  // (recapture flow in ActionTable). All three are omitted on insert flows — defaults
-  // apply. When `initialKeystroke` is set the dialog enters "edit mode": the captured
-  // value is pre-filled (so Save is enabled without forcing a re-capture), the title
-  // and confirm button switch labels, and Esc closes the dialog instead of re-arming
-  // the capture pad. This is what lets a user click the × N badge and adjust JUST
-  // the repeat count without having to press the key combo again.
-  initialKeystroke?: string;
-  initialRepeat?: number;
-  initialRepeatDelayMs?: number;
-  onConfirm: (keystroke: string, repeat: number, repeatDelayMs: number) => void;
-  onClose: () => void;
-}
-
-const DEFAULT_REPEAT_DELAY_MS = 30; // mirrors ActionItem.DefaultRepeatDelayMs on the C# side
-const MAX_REPEAT = 999;             // mirrors the clamp range in HandleActionsEdit/InsertKeystroke
-const MAX_REPEAT_DELAY = 5000;
+import { Keyboard, Minus, Plus, AlertCircle } from 'lucide-react';
 
 /**
- * Captures a keyboard combo (e.g. "Ctrl+Alt+T", "Alt+Tab", "Shift+F10") and reports it
- * back as a single "+"-joined string. The caller is expected to insert it as ONE
- * Keystroke action (the replay engine expands it to the proper modifier-down → key-down →
- * key-up → modifier-up sequence at run time).
+ * Unified "Send Keystroke" dialog. One capture pad + a Press/Hold mode toggle covers
+ * everything keyboard-related the user could want to insert manually:
  *
- * Different from KeyCaptureDialog:
- *   - KeyCaptureDialog captures one key and inserts a KeyDown+KeyUp PAIR. The user's
- *     intent is "tap this key once"; modifiers are ignored / treated as part of the
- *     "before-tap" state, not part of the captured value.
- *   - KeystrokeCaptureDialog captures the FULL COMBO as a single value. Modifiers are
- *     part of the keystroke, and the dialog waits for a non-modifier key to commit.
- *     This is intent-based ("I want to send Alt+Tab") not event-based ("I pressed Alt").
+ *   Press mode (default):
+ *     • Times = 1 → single press of a key or combo  (Ctrl+S, F5, A, Alt+Tab)
+ *     • Times > 1 → press N times with configurable gap (Tab × 5, F5 × 10)
  *
- * Why not auto-detect combos in regular recording? See the discussion in the project
- * notes — recording captures literal events with precise timing; turning event sequences
- * into intent-level combos at record time would discard timing fidelity and produce false
- * positives (e.g. "hold Ctrl, click somewhere, release Ctrl" is NOT Ctrl+click as a combo,
- * it's an intentional modifier-held mouse gesture).
+ *   Hold mode:
+ *     • Press a single key, keep it down for the configured duration
+ *     • Preset chips for common holds (100 ms tap → 5 s long press)
+ *     • Modifier keys are stripped on save — backend SimulateKey only handles
+ *       single keys; the warning chip surfaces this whenever the captured value
+ *       contains a "+", so the user is never surprised.
+ *
+ * Replaces the three legacy dialogs / menu entries (Send Key, Send Keystroke,
+ * Press Key × N, Hold Key) — keeps the underlying ActionType split intact
+ * (Keystroke for press flows, HoldKey for hold flows) so no profile migration
+ * is required.
  */
 
-/** Map a non-modifier keydown event to the canonical key name used in actions. Mirrors
- *  mapKeyEvent in KeyCaptureDialog but trimmed to the cases that matter here — modifier
- *  branches are handled by the caller (we extract them from e.ctrlKey etc.). */
+// ── Capture helpers (key-mapping) ──
+
+/**
+ * Maps a non-modifier keydown event to the canonical key name used in actions. Mirrors
+ * the legacy logic that lived split across KeyCaptureDialog and KeystrokeCaptureDialog —
+ * one map now serves both single-key and combo capture since the dialog flavour is
+ * decided after capture by the Press/Hold toggle.
+ */
 function mapKeyPart(e: KeyboardEvent): string | null {
   if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter' && e.code !== 'NumpadDecimal') {
     const numpadMap: Record<string, string> = {
@@ -85,7 +63,7 @@ function mapKeyPart(e: KeyboardEvent): string | null {
   if (e.key === 'PageDown') return 'PageDown';
   if (e.key === 'Escape') return 'Escape';
   if (e.key.startsWith('F') && e.key.length <= 3 && !isNaN(Number(e.key.slice(1)))) return e.key;
-  // Dead keys (´ ` ^ ~ on ABNT2/AZERTY) — recover from e.code, same as KeyCaptureDialog
+  // Dead keys (´ ` ^ ~ on ABNT2/AZERTY)
   if (e.key === 'Dead') {
     const deadCodeMap: Record<string, string> = {
       Backquote: '`', Quote: "'", BracketLeft: '[', BracketRight: ']',
@@ -93,25 +71,14 @@ function mapKeyPart(e: KeyboardEvent): string | null {
     };
     return deadCodeMap[e.code] ?? null;
   }
-  // Digit and letter keys — use e.code (physical position, layout-independent and
-  // shift-immune) instead of e.key (logical character, which becomes a SHIFTED symbol
-  // when Shift is held: Shift+1 → e.key="!" but e.code="Digit1"). Saving the shifted
-  // symbol broke replay because there's no VK code for "!" on its own — "!" requires
-  // Shift+VK_1. Using e.code captures the base key; the modifier list captures Shift
-  // separately, so the replay engine reconstructs the combo correctly.
+  // Digit and letter keys — use e.code (physical, layout-independent, shift-immune)
   if (/^Digit[0-9]$/.test(e.code)) return e.code.slice(5);
   if (/^Key[A-Z]$/.test(e.code)) return e.code.slice(3);
-  if (e.key.length === 1) {
-    // Fallback for symbols / punctuation not covered by Digit*/Key* codes
-    // (`, [, ], -, =, ;, ', ,, ., /, ç on ABNT2, etc.). e.key here is already the
-    // base character because no modifier is producing a shift mapping for these.
-    return e.key;
-  }
+  if (e.key.length === 1) return e.key;
   return null;
 }
 
-/** Builds the "+"-joined combo string with a stable modifier order: Ctrl+Shift+Alt+KEY.
- *  Backend's keystroke replay handler parses on "+" — same separator. */
+/** Builds the "+"-joined combo string with a stable modifier order: Ctrl+Shift+Alt+KEY. */
 function buildKeystroke(modifiers: { ctrl: boolean; shift: boolean; alt: boolean }, key: string): string {
   const parts: string[] = [];
   if (modifiers.ctrl) parts.push('Ctrl');
@@ -121,67 +88,132 @@ function buildKeystroke(modifiers: { ctrl: boolean; shift: boolean; alt: boolean
   return parts.join('+');
 }
 
-/** Human-readable label for the chip. Replaces VK_93 with "Menu" so the badge reads
- *  cleanly even when the user captured the context-menu key. */
+/** Human-readable label for the chip. */
 function keystrokeDisplay(keystroke: string): string {
   return keystroke.replace(/\bVK_93\b/, 'Menu');
 }
 
+// ── Constants (match the C# clamps) ──
+
+const DEFAULT_REPEAT_DELAY_MS = 30;
+const MAX_REPEAT = 999;
+const MAX_REPEAT_DELAY = 5000;
+
+const DEFAULT_HOLD_MS = 1000;
+const MIN_HOLD_MS = 10;
+const MAX_HOLD_MS = 60000;
+
+// Common hold durations, surfaced as one-click chips. 250 ms (typical human key
+// press) wasn't in the legacy HoldKeyDialog presets but lands naturally between
+// "fast tap" (100 ms) and "deliberate hold" (500 ms), so it's worth offering.
+const HOLD_PRESETS = [100, 250, 500, 1000, 2000, 5000];
+
+/** Spinner step: 1 s once we're past 1 s, 100 ms below — match HoldKeyDialog's feel. */
+const stepFor = (v: number) => v >= 1000 ? 1000 : 100;
+
+// ── Component ──
+
+type Mode = 'press' | 'hold';
+
+export type SendKeystrokeResult =
+  | { actionType: 'Keystroke'; key: string; repeat: number; repeatDelayMs: number }
+  | { actionType: 'HoldKey'; key: string; holdDurationMs: number };
+
+interface KeystrokeCaptureDialogProps {
+  /**
+   * Edit-mode seeds. When `initialKey` is set, the dialog opens in edit mode:
+   * captured value pre-filled, Save button label, Esc closes (instead of re-arming
+   * capture). `initialActionType` chooses the starting mode (Press for Keystroke,
+   * Hold for HoldKey).
+   */
+  initialActionType?: 'Keystroke' | 'HoldKey';
+  initialKey?: string;
+  initialRepeat?: number;
+  initialRepeatDelayMs?: number;
+  initialHoldDurationMs?: number;
+  onConfirm: (result: SendKeystrokeResult) => void;
+  onClose: () => void;
+}
+
 export function KeystrokeCaptureDialog({
-  mode = 'keystroke',
-  initialKeystroke,
+  initialActionType,
+  initialKey,
   initialRepeat,
   initialRepeatDelayMs,
+  initialHoldDurationMs,
   onConfirm,
   onClose,
 }: KeystrokeCaptureDialogProps) {
-  const isPressN = mode === 'press-n';
-  // initialKeystroke presence is the edit-mode flag. We avoid a separate `mode = 'edit'`
-  // value because mode controls the *defaults* (press-n vs keystroke counts), while
-  // editing is orthogonal — a user could be editing either a press-n row or a regular
-  // keystroke row, and the defaults are irrelevant in both cases (we seed from props).
-  const isEditing = initialKeystroke != null;
-  // Seed `captured` with the existing combo so Save is enabled the moment the dialog
-  // opens. Without this seed the Insert/Save button stayed disabled until the user
-  // re-captured a key — making it impossible to edit only the Repeat / Delay fields.
-  const [captured, setCaptured] = useState<string | null>(initialKeystroke ?? null);
-  // Initial value priority: explicit `initialRepeat` (edit flow) > mode default
-  // (press-n = 5 to make the feature obvious, classic keystroke = 1).
-  const [repeat, setRepeat] = useState<number>(initialRepeat ?? (isPressN ? 5 : 1));
-  // Delay between cycles. Starts at the action's stored value (edit) or the C#
-  // default (insert). Always rendered — the input is disabled when repeat == 1
-  // since there's nothing to space against, but staying visible keeps the dialog
-  // a fixed size.
+  // `isEditing` flips Esc behaviour and the button label. Decoupled from mode so
+  // we can edit a Keystroke row, switch to Hold, and save — converting the row's
+  // ActionType without leaving the dialog.
+  const isEditing = initialKey != null;
+
+  // Mode follows the edited row's ActionType on insert/edit. Insert flow defaults
+  // to Press because that's the most common keyboard intent (tap once / tap N
+  // times); Hold is a deliberate choice the user toggles into.
+  const [mode, setMode] = useState<Mode>(initialActionType === 'HoldKey' ? 'hold' : 'press');
+
+  // Capture state — seeded from initialKey on edit so Save is enabled immediately.
+  const [captured, setCaptured] = useState<string | null>(initialKey ?? null);
+
+  // Press-mode state.
+  const [repeat, setRepeat] = useState<number>(initialRepeat ?? 1);
   const [repeatDelay, setRepeatDelay] = useState<number>(initialRepeatDelayMs ?? DEFAULT_REPEAT_DELAY_MS);
+
+  // Hold-mode state. Two-track (state + ref) because the Insert button can fire
+  // immediately after a preset click before React's batched state has flushed —
+  // reading from a synchronous ref on commit avoids a real "saves the previous
+  // value" bug we hit in the original HoldKeyDialog.
+  const initialMs = initialHoldDurationMs ?? DEFAULT_HOLD_MS;
+  const [holdMs, setHoldMsState] = useState<number>(initialMs);
+  const holdMsRef = useRef<number>(initialMs);
+  const setHoldMs = useCallback((next: number | ((v: number) => number)) => {
+    setHoldMsState(prev => {
+      const value = typeof next === 'function' ? next(prev) : next;
+      holdMsRef.current = value;
+      return value;
+    });
+  }, []);
+
+  // Re-sync when reopening the dialog on a different row (parent toggles mount
+  // via `{editState && <Dialog />}` but React may reuse the instance at the same
+  // JSX position). Without this, a second Edit click could open with stale values.
+  useEffect(() => {
+    if (initialHoldDurationMs != null) {
+      setHoldMsState(initialHoldDurationMs);
+      holdMsRef.current = initialHoldDurationMs;
+    }
+  }, [initialHoldDurationMs]);
+
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     containerRef.current?.focus();
   }, []);
 
-  // Clamp helper used by both the spinner buttons and the direct numeric inputs so
-  // pasting / typing a wild value (-99, 50000, NaN) lands in the legal range.
+  // Clamp helpers — applied on commit (handleConfirm) and on +/− spinner clicks.
+  // Free-form typing is allowed to fall below the lower bound in transient states
+  // so the input doesn't snap while the user is still typing.
   const clampRepeat = (v: number) => Math.max(1, Math.min(MAX_REPEAT, Math.floor(v)));
   const clampDelay = (v: number) => Math.max(0, Math.min(MAX_REPEAT_DELAY, Math.floor(v)));
+  const clampHold = (v: number) => Math.max(MIN_HOLD_MS, Math.min(MAX_HOLD_MS, Math.floor(v)));
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    // If focus is on a numeric input, let it process keystrokes normally — we shouldn't
-    // hijack digit presses to "capture" them as a key combo. Stops the case where typing
-    // "5" in the Repeat field would re-commit the captured combo with key "5".
-    // stopPropagation also keeps Ctrl+A from leaking up to the ActionTable's grid
-    // handler (which would otherwise select every row instead of selecting the
-    // input's text).
+    // Don't hijack keystrokes while the user is typing inside a numeric input —
+    // a "5" pressed in the Times field should land as text, not re-capture the
+    // combo. stopPropagation also blocks Ctrl+A from leaking up to ActionTable's
+    // grid handler.
     const target = e.target as HTMLElement;
     if (target?.tagName === 'INPUT') {
       e.stopPropagation();
       return;
     }
-    // Escape closes the dialog when:
+    // Esc closes the dialog when:
     //   • no combo captured yet (insert flow waiting for first capture), OR
-    //   • we're editing an existing row (Esc = abandon edit, matches user expectation
-    //     that Esc cancels a dialog they opened to tweak settings).
-    // Otherwise (insert flow with a combo already captured), pressing Escape re-captures
-    // — same as KeyCaptureDialog — letting the user retry without leaving the dialog.
+    //   • we're editing an existing row (Esc = abandon).
+    // Otherwise (insert with combo captured) Esc re-captures so the user can
+    // retry without leaving the dialog.
     if (e.key === 'Escape' && (captured === null || isEditing)) {
       e.preventDefault();
       onClose();
@@ -189,25 +221,55 @@ export function KeystrokeCaptureDialog({
     }
     e.preventDefault();
     e.stopPropagation();
-    // Skip pure modifier presses (Ctrl/Shift/Alt/Meta on its own). We're waiting for the
-    // "real" key while the user holds modifiers. Without this skip, pressing Ctrl on the
-    // way to Ctrl+A would commit "Ctrl" alone before the A keydown arrived.
+    // Skip pure modifier presses — wait for the "real" key while modifiers
+    // are held. Without this, pressing Ctrl on the way to Ctrl+A commits
+    // "Ctrl" alone before the A keydown arrives.
     if (['Control', 'Shift', 'Alt', 'AltGraph', 'Meta'].includes(e.key)) return;
     const keyPart = mapKeyPart(e.nativeEvent);
     if (!keyPart) return;
     const modifiers = {
       ctrl: e.ctrlKey,
       shift: e.shiftKey,
-      // AltGraph (right Alt on ABNT2) reports as e.altKey=true too on Windows since
-      // the OS sends Ctrl+Alt for it; we accept that as "Alt" semantically.
       alt: e.altKey,
     };
     setCaptured(buildKeystroke(modifiers, keyPart));
   }, [captured, isEditing, onClose]);
 
+  // Derived values used by the renderer + commit.
+  const hasModifiers = captured?.includes('+') ?? false;
+  // For Hold mode, only the last part of the combo gets used on commit — that's
+  // the actual key the OS will keep pressed. Modifiers in the captured string
+  // would confuse SimulateKey (no virtual-key code for "Ctrl+S"), so we strip
+  // them at save time and warn in the UI.
+  const heldKey = captured ? captured.split('+').pop() ?? captured : '';
+
   const handleConfirm = () => {
-    if (captured) onConfirm(captured, clampRepeat(repeat), clampDelay(repeatDelay));
+    if (!captured) return;
+    if (mode === 'hold') {
+      onConfirm({
+        actionType: 'HoldKey',
+        key: heldKey,
+        holdDurationMs: clampHold(holdMsRef.current),
+      });
+    } else {
+      onConfirm({
+        actionType: 'Keystroke',
+        key: captured,
+        repeat: clampRepeat(repeat),
+        repeatDelayMs: clampDelay(repeatDelay),
+      });
+    }
   };
+
+  // Duration readout — show seconds for clean multiples of 1000, otherwise ms.
+  const durationLabel = holdMs >= 1000 && holdMs % 100 === 0
+    ? `${(holdMs / 1000).toFixed(holdMs % 1000 === 0 ? 0 : 1)} s`
+    : `${holdMs} ms`;
+
+  // Title flips by intent: edit vs insert, then by mode.
+  const title = isEditing
+    ? (mode === 'hold' ? 'Edit Hold Key' : 'Edit Keystroke')
+    : 'Send Keystroke';
 
   return (
     <div
@@ -217,36 +279,28 @@ export function KeystrokeCaptureDialog({
       <div
         ref={containerRef}
         tabIndex={-1}
-        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[420px] max-w-[90vw] flex flex-col outline-none"
+        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[440px] max-w-[90vw] flex flex-col outline-none"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
-        {/* Header — title reflects the flow:
-              • Edit mode → "Edit Keystroke" (user is tweaking an existing row)
-              • press-n  → "Press Key × N times" (insert with repeat focus)
-              • default  → "Capture Keystroke" (classic single-press insert) */}
+        {/* Header */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
           <Keyboard size={14} className="text-accent-light" />
-          <h3 className="text-sm font-semibold text-text-primary">
-            {isEditing ? 'Edit Keystroke' : isPressN ? 'Press Key × N times' : 'Capture Keystroke'}
-          </h3>
+          <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
         </div>
 
-        {/* Body — fixed layout. Capture pad has a stable 156 px min-height so it doesn't
-            jump between placeholder / captured states; the Repeat and Delay rows below
-            are always rendered (no collapse toggle) so the dialog never resizes. */}
         <div className="px-5 py-5 flex flex-col gap-4">
-          {/* Capture pad */}
+          {/* Capture pad — universal for both modes. Single press detects whatever
+              modifiers the user is holding; Hold mode silently uses only the last
+              key, with a warning chip when modifiers got dropped. */}
           <div className="bg-bg-input border border-dashed border-[#FFC107]/40 rounded-md py-5 px-4 text-center min-h-[156px] flex flex-col justify-center">
             {captured === null ? (
               <>
-                <div className="text-[12px] text-text-tertiary mb-1">Press any key combination</div>
-                <div className="text-[10px] text-text-disabled">
-                  E.g. Alt+Tab · Ctrl+Shift+T · Alt+F4
+                <div className="text-[12px] text-text-tertiary mb-1">Press any key or combo</div>
+                <div className="text-[10px] text-text-tertiary">
+                  Single keys, or Ctrl/Shift/Alt + key. E.g. A · F5 · Ctrl+S · Alt+Tab
                 </div>
-                <div className="text-[10px] text-text-disabled mt-1">
-                  Esc to cancel
-                </div>
+                <div className="text-[10px] text-text-tertiary mt-1">Esc to cancel</div>
               </>
             ) : (
               <>
@@ -264,91 +318,201 @@ export function KeystrokeCaptureDialog({
                   ))}
                 </div>
                 <div className="mt-3 text-[10px] text-text-tertiary">
-                  {isEditing
-                    ? (repeat > 1
-                        ? <>Updates row to <span className="text-text-secondary font-semibold">{repeat} press cycles</span></>
-                        : <>Updates row to <span className="text-text-secondary font-semibold">single press</span></>)
+                  {mode === 'hold'
+                    ? (isEditing
+                        ? <>Updates row to <span className="text-text-secondary font-semibold">{durationLabel} hold</span></>
+                        : <>Inserts <span className="text-text-secondary font-semibold">1 row · {durationLabel} hold</span></>)
                     : (repeat > 1
-                        ? <>Inserts <span className="text-text-secondary font-semibold">1 row · {repeat} press cycles</span></>
-                        : <>Inserts <span className="text-text-secondary font-semibold">1 Keystroke row</span></>)}
+                        ? (isEditing
+                            ? <>Updates row to <span className="text-text-secondary font-semibold">{repeat} press cycles</span></>
+                            : <>Inserts <span className="text-text-secondary font-semibold">1 row · {repeat} press cycles</span></>)
+                        : (isEditing
+                            ? <>Updates row to <span className="text-text-secondary font-semibold">single press</span></>
+                            : <>Inserts <span className="text-text-secondary font-semibold">1 Keystroke row</span></>))}
                 </div>
-                <div className="mt-1 text-[10px] text-text-disabled">
-                  Press another combo to replace
-                </div>
+                <div className="mt-1 text-[10px] text-text-tertiary">Press another combo to replace</div>
               </>
             )}
           </div>
 
-          {/* Settings — always visible. Both rows share the same right-aligned column
-              for inputs so the eye tracks a clean vertical line. */}
-          <div className="flex flex-col gap-2.5">
-            {/* Repeat */}
-            <div className="flex items-center justify-between gap-3">
-              <label className="text-[12px] font-medium text-text-secondary">Repeat</label>
-              <div className="flex items-center gap-1">
+          {/* Mode toggle — switches the body below between Press and Hold settings.
+              Two equal-width buttons read as a segmented control without needing a
+              dedicated component. Active state uses the accent colour to mirror
+              the dialog's primary action. */}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wider">Mode</span>
+            <div className="grid grid-cols-2 gap-1 p-1 bg-bg-input border border-border-default rounded">
+              {(['press', 'hold'] as const).map(m => (
                 <button
+                  key={m}
                   type="button"
-                  onClick={() => setRepeat((v) => clampRepeat(v - 1))}
-                  disabled={repeat <= 1}
-                  className="w-6 h-6 flex items-center justify-center rounded bg-bg-card hover:bg-bg-input border border-border-subtle text-text-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  aria-label="Decrease repeat count"
+                  onClick={() => setMode(m)}
+                  className={`px-3 py-1.5 rounded text-[12px] font-medium transition-colors ${
+                    mode === m
+                      ? 'bg-accent-solid text-white'
+                      : 'text-text-secondary hover:bg-bg-card hover:text-text-primary'
+                  }`}
                 >
-                  <Minus size={11} />
+                  {m === 'press' ? 'Press' : 'Hold'}
                 </button>
-                <input
-                  type="number"
-                  min={1}
-                  max={MAX_REPEAT}
-                  value={repeat}
-                  onChange={(e) => {
-                    const n = parseInt(e.target.value, 10);
-                    setRepeat(Number.isFinite(n) ? clampRepeat(n) : 1);
-                  }}
-                  className="w-14 h-6 px-1 text-center text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid tabular-nums"
-                />
-                <button
-                  type="button"
-                  onClick={() => setRepeat((v) => clampRepeat(v + 1))}
-                  disabled={repeat >= MAX_REPEAT}
-                  className="w-6 h-6 flex items-center justify-center rounded bg-bg-card hover:bg-bg-input border border-border-subtle text-text-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  aria-label="Increase repeat count"
-                >
-                  <Plus size={11} />
-                </button>
-              </div>
-            </div>
-
-            {/* Delay between presses — always rendered, disabled when repeat == 1.
-                The dimmed state signals "would matter if you bumped repeat up" without
-                hiding the field, which would cause the dialog to jump in height.
-
-                The right column mirrors the Repeat row's geometry: a phantom 24×24 cell
-                stands in for the [-] button, the input occupies the centre slot at the
-                same x as Repeat's input, and the "ms" label is sized like the [+]
-                button so the right edge of both rows lands on the same vertical line.
-                Net effect: the two inputs stack perfectly across rows. */}
-            <div className="flex items-center justify-between gap-3">
-              <label className={`text-[12px] font-medium transition-colors ${repeat > 1 ? 'text-text-secondary' : 'text-text-disabled'}`}>
-                Delay between presses
-              </label>
-              <div className="flex items-center gap-1">
-                <div className="w-6 h-6" aria-hidden="true" />
-                <input
-                  type="number"
-                  min={0}
-                  max={MAX_REPEAT_DELAY}
-                  value={repeatDelay}
-                  disabled={repeat <= 1}
-                  onChange={(e) => {
-                    const n = parseInt(e.target.value, 10);
-                    setRepeatDelay(Number.isFinite(n) ? clampDelay(n) : 0);
-                  }}
-                  className="w-14 h-6 px-1 text-center text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid tabular-nums disabled:opacity-40 disabled:cursor-not-allowed"
-                />
-                <span className={`w-6 h-6 inline-flex items-center justify-center text-[11px] transition-colors ${repeat > 1 ? 'text-text-tertiary' : 'text-text-disabled'}`}>ms</span>
-              </div>
+              ))}
             </div>
           </div>
+
+          {/* ── PRESS mode body ── */}
+          {mode === 'press' && (
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <label className="text-[12px] font-medium text-text-secondary">Times to repeat</label>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setRepeat((v) => clampRepeat(v - 1))}
+                    disabled={repeat <= 1}
+                    className="w-6 h-6 flex items-center justify-center rounded bg-bg-card hover:bg-bg-input border border-border-subtle text-text-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    aria-label="Decrease repeat count"
+                  >
+                    <Minus size={11} />
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={MAX_REPEAT}
+                    value={repeat}
+                    onChange={(e) => {
+                      const n = parseInt(e.target.value, 10);
+                      setRepeat(Number.isFinite(n) ? clampRepeat(n) : 1);
+                    }}
+                    className="w-14 h-6 px-1 text-center text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid tabular-nums"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setRepeat((v) => clampRepeat(v + 1))}
+                    disabled={repeat >= MAX_REPEAT}
+                    className="w-6 h-6 flex items-center justify-center rounded bg-bg-card hover:bg-bg-input border border-border-subtle text-text-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    aria-label="Increase repeat count"
+                  >
+                    <Plus size={11} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Gap stays visible but dims when Times = 1 — communicates the field
+                  exists for repeat-flavoured presses without making the dialog
+                  jump in height when the user increments Times. */}
+              <div className="flex items-center justify-between gap-3">
+                <label className={`text-[12px] font-medium transition-colors ${repeat > 1 ? 'text-text-secondary' : 'text-text-tertiary'}`}>
+                  Gap between presses
+                </label>
+                <div className="flex items-center gap-1">
+                  <div className="w-6 h-6" aria-hidden="true" />
+                  <input
+                    type="number"
+                    min={0}
+                    max={MAX_REPEAT_DELAY}
+                    value={repeatDelay}
+                    disabled={repeat <= 1}
+                    onChange={(e) => {
+                      const n = parseInt(e.target.value, 10);
+                      setRepeatDelay(Number.isFinite(n) ? clampDelay(n) : 0);
+                    }}
+                    className="w-14 h-6 px-1 text-center text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid tabular-nums disabled:opacity-40 disabled:cursor-not-allowed"
+                  />
+                  <span className={`w-6 h-6 inline-flex items-center justify-center text-[11px] transition-colors ${repeat > 1 ? 'text-text-tertiary' : 'text-text-tertiary opacity-60'}`}>ms</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── HOLD mode body ── */}
+          {mode === 'hold' && (
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <label className="text-[12px] font-medium text-text-secondary">Hold duration</label>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setHoldMs(v => clampHold(v - stepFor(v)))}
+                    disabled={holdMs <= MIN_HOLD_MS}
+                    className="w-6 h-6 flex items-center justify-center rounded bg-bg-card hover:bg-bg-input border border-border-subtle text-text-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    aria-label="Decrease hold duration"
+                  >
+                    <Minus size={11} />
+                  </button>
+                  <input
+                    type="number"
+                    min={MIN_HOLD_MS}
+                    max={MAX_HOLD_MS}
+                    step={100}
+                    value={holdMs}
+                    onChange={(e) => {
+                      // Don't snap to MIN_HOLD_MS during typing — would rewrite the field
+                      // mid-keystroke. Lower bound enforced on Save (handleConfirm) instead.
+                      const raw = e.target.value;
+                      if (raw === '') { setHoldMs(0); return; }
+                      const n = parseInt(raw, 10);
+                      if (Number.isFinite(n) && n >= 0) {
+                        setHoldMs(Math.min(MAX_HOLD_MS, n));
+                      }
+                    }}
+                    onBlur={() => setHoldMs(v => clampHold(v))}
+                    className="w-20 h-6 px-1 text-center text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid tabular-nums"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setHoldMs(v => clampHold(v + stepFor(v)))}
+                    disabled={holdMs >= MAX_HOLD_MS}
+                    className="w-6 h-6 flex items-center justify-center rounded bg-bg-card hover:bg-bg-input border border-border-subtle text-text-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    aria-label="Increase hold duration"
+                  >
+                    <Plus size={11} />
+                  </button>
+                  <span className="text-[11px] text-text-tertiary ml-1">ms</span>
+                </div>
+              </div>
+
+              {/* Preset chips. Click writes the value directly into both the state
+                  and the ref (so an immediately-following Insert click reads the
+                  fresh value). User can still fine-tune via the spinner / typed
+                  entry afterwards — presets are shortcuts, not locks. */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] text-text-tertiary">Presets:</span>
+                {HOLD_PRESETS.map(ms => (
+                  <button
+                    key={ms}
+                    type="button"
+                    onClick={() => setHoldMs(ms)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-mono tabular-nums transition-colors ${
+                      holdMs === ms
+                        ? 'bg-accent-solid/20 text-accent-light border border-accent-solid/40'
+                        : 'bg-bg-card hover:bg-bg-input border border-border-subtle text-text-tertiary hover:text-text-secondary'
+                    }`}
+                  >
+                    {ms >= 1000 ? `${ms / 1000}s` : `${ms}ms`}
+                  </button>
+                ))}
+              </div>
+
+              {/* Modifier-strip warning. Captured combo like "Ctrl+S" can't be held
+                  by the backend (SimulateKey takes a single virtual-key code), so
+                  Save will use only the last token. Surfaced as an explicit chip
+                  rather than a silent strip so the user can choose to drop Hold
+                  mode or recapture without modifiers. */}
+              {hasModifiers && (
+                <div className="flex items-start gap-2 px-2.5 py-2 rounded bg-[#FFC107]/10 border border-[#FFC107]/30">
+                  <AlertCircle size={12} className="text-[#FFC107] mt-[1px] shrink-0" />
+                  <div className="text-[10px] text-text-secondary leading-relaxed">
+                    Hold mode supports single keys only. Saving will hold{' '}
+                    <kbd className="px-1 py-px bg-bg-elevated border border-border-default rounded font-mono text-[10px] text-[#FFC107]">
+                      {keystrokeDisplay(heldKey)}
+                    </kbd>{' '}
+                    and ignore the modifiers. To hold a combo, insert two rows: a
+                    Hold for the modifier, plus the action under it.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer */}

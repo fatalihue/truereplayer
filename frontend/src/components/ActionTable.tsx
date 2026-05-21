@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronsDownUp, ChevronsUpDown, Plus, MoreHorizontal, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Code2, Files, Hourglass, Repeat, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical, Timer } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronsDownUp, ChevronsUpDown, Plus, MoreHorizontal, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical, Timer } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -11,9 +11,7 @@ import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors } from '..
 import { SendTextDialog } from './SendTextDialog';
 import { SendTextPreview } from './SendTextPreview';
 import { RunProfileDialog } from './RunProfileDialog';
-import { KeyCaptureDialog } from './KeyCaptureDialog';
 import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
-import { HoldKeyDialog } from './HoldKeyDialog';
 import { BulkActionBar } from './BulkActionBar';
 import { Checkbox, CheckboxBox } from './Checkbox';
 import type { ColumnVisibility } from './Toolbar';
@@ -86,16 +84,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const wasRecording = useRef(false);
   const [sendTextEdit, setSendTextEdit] = useState<{ index: number; text: string } | null>(null);
   const [runProfileEdit, setRunProfileEdit] = useState<{ index: number; profileName: string; repeatCount: number } | null>(null);
-  // Editing a Keystroke action = re-capturing it. There's no other state to tweak
-  // (no body text like SendText, no profile target like RunProfile, no coords) —
-  // the captured combo IS the action. So Edit reopens KeystrokeCaptureDialog rather
-  // than dropping the user into the generic SheetPanel.
+  // Editing a Keystroke OR HoldKey row reopens the unified KeystrokeCaptureDialog —
+  // these two ActionTypes share the same edit surface now that Press/Hold is a mode
+  // toggle inside the dialog. `index` is all we need; the dialog reads the row's
+  // ActionType + key + duration / repeat fields directly from the action item to
+  // pick the starting mode.
   const [keystrokeEdit, setKeystrokeEdit] = useState<{ index: number } | null>(null);
-  // HoldKey edit follows the same single-state pattern as keystrokeEdit — open the
-  // dedicated capture dialog with the row's current key + duration pre-filled.
-  const [holdKeyEdit, setHoldKeyEdit] = useState<{ index: number } | null>(null);
-  // Insert flow for HoldKey from the right-click submenu (mirrors keystrokeCaptureInsert).
-  const [holdKeyInsert, setHoldKeyInsert] = useState<{ insertIndex: number } | null>(null);
   const [dragIndices, setDragIndices] = useState<number[] | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null);
 
@@ -107,12 +101,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const [sendTextInsert, setSendTextInsert] = useState<{ insertIndex: number } | null>(null);
   const [runProfileInsert, setRunProfileInsert] = useState<{ insertIndex: number } | null>(null);
-  const [keyCaptureInsert, setKeyCaptureInsert] = useState<{ insertIndex: number } | null>(null);
-  // `mode` mirrors the Toolbar's keystrokeCaptureMode state — distinguishes the
-  // classic "Send Keystroke" flow (single press, Repeat = 1) from the "Press × N"
-  // flow (Repeat defaults to 5, header says "Press Key × N times"). Both reuse
-  // the same KeystrokeCaptureDialog component via its `mode` prop.
-  const [keystrokeCaptureInsert, setKeystrokeCaptureInsert] = useState<{ insertIndex: number; mode: 'keystroke' | 'press-n' } | null>(null);
+  // Insert flow for the right-click submenu's "Send Keystroke…" entry. The
+  // dialog handles Press / Hold internally via its Mode toggle so we don't carry
+  // a mode flag through this state any more — the dialog's onConfirm result
+  // tells us which bridge message to dispatch (Keystroke vs HoldKey).
+  const [keystrokeCaptureInsert, setKeystrokeCaptureInsert] = useState<{ insertIndex: number } | null>(null);
   const { showToast } = useToast();
   const contextMenuEnabled = !buttonStates.recordingActive && !buttonStates.replayActive;
 
@@ -686,23 +679,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       closeContextMenu();
       return;
     }
-    if (actionType === 'SendKey') {
-      setKeyCaptureInsert({ insertIndex });
-      closeContextMenu();
-      return;
-    }
     if (actionType === 'SendKeystroke') {
-      setKeystrokeCaptureInsert({ insertIndex, mode: 'keystroke' });
-      closeContextMenu();
-      return;
-    }
-    if (actionType === 'PressKeyN') {
-      setKeystrokeCaptureInsert({ insertIndex, mode: 'press-n' });
-      closeContextMenu();
-      return;
-    }
-    if (actionType === 'HoldKey') {
-      setHoldKeyInsert({ insertIndex });
+      // Unified entry — the dialog's Mode toggle picks Press vs Hold; both legacy
+      // entries (Send Key / Press Key × N / Hold Key) routed here too now.
+      setKeystrokeCaptureInsert({ insertIndex });
       closeContextMenu();
       return;
     }
@@ -808,16 +788,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   // reasoning here. Send Text is also omitted because the toolbar already has a
   // dedicated button for it — keeping it here too was redundant.
   const submenuItems = [
-    { type: 'SendKey', label: 'Send Key…', icon: Keyboard },
+    // Send Keystroke — unified entry. The dialog's own Press/Hold toggle replaces
+    // the four legacy entries (Send Key, Send Keystroke, Press × N, Hold Key);
+    // they all opened slightly different dialogs for slices of the same intent.
     { type: 'SendKeystroke', label: 'Send Keystroke…', icon: Keyboard },
-    // Press Key × N — uses the single-arrow `Repeat` icon to stay distinct from
-    // RunProfile's double-arrow `Repeat2`. Same dialog as SendKeystroke under
-    // the hood; the mode prop flips the defaults and labels.
-    { type: 'PressKeyN', label: 'Press Key × N…', icon: Repeat },
-    // Hold Key — single atomic row that presses, waits the configured duration,
-    // and releases. Replaces the legacy "KeyDown + KeyUp with manually-edited
-    // delay" workflow with one click. Timer icon connects to the dialog header.
-    { type: 'HoldKey', label: 'Hold Key…', icon: Timer },
     { type: 'Pause', label: 'Pause', icon: Hourglass },
     { type: 'WaitImage', label: 'Wait for Image', icon: ScanSearch },
     { type: 'WaitPixelColor', label: 'Wait for Pixel Color', icon: Pipette },
@@ -1067,18 +1041,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             setSendTextEdit({ index: idx, text: action.key });
                           } else if (action.actionType === 'RunProfile') {
                             setRunProfileEdit({ index: idx, profileName: action.key, repeatCount: action.repeatCount ?? 1 });
-                          } else if (action.actionType === 'Keystroke') {
-                            // Keystroke double-click → recapture dialog. The inline single-
-                            // key edit path used by KeyDown/KeyUp below would let the user
-                            // overwrite the combo with a single key (e.g. replace "Alt+Tab"
-                            // with just "T") and silently lose the modifiers — wrong shape
-                            // for a Keystroke action.
+                          } else if (action.actionType === 'Keystroke' || action.actionType === 'HoldKey') {
+                            // Both Keystroke and HoldKey rows open the unified capture
+                            // dialog — it picks Press / Hold based on the row's
+                            // ActionType and lets the user switch mid-edit. Inline
+                            // single-key edit (used by KeyDown/KeyUp below) would
+                            // silently drop modifiers from a combo and lose the
+                            // hold-duration context, so we always go through the
+                            // dialog for these two types.
                             setKeystrokeEdit({ index: idx });
-                          } else if (action.actionType === 'HoldKey') {
-                            // HoldKey edits the key AND the duration together — single
-                            // dialog covers both. Inline edit on the key alone would lose
-                            // the duration context.
-                            setHoldKeyEdit({ index: idx });
                           } else if (action.actionType.startsWith('Key')) {
                             startEdit(idx, 'key', action.key);
                           }
@@ -1111,10 +1082,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         )}
                         {/* Hold-duration badge for HoldKey rows. Same visual treatment as
                             the × N badge so the two repeat-flavoured key actions look like
-                            siblings. Click reopens HoldKeyDialog in edit mode (key +
-                            duration pre-filled). Format: "1s" for clean second multiples,
-                            "1.5s" for fractional, "500ms" for sub-second. No "hold" text —
-                            the row's pill ("Hold Key") + the Timer icon already convey
+                            siblings. Click reopens the unified Keystroke dialog (in Hold
+                            mode) with key + duration pre-filled. Format: "1s" for clean
+                            second multiples, "1.5s" for fractional, "500ms" for sub-second.
+                            No "hold" text — the row's pill + Timer icon already convey
                             the action; the badge just communicates the duration. */}
                         {action.actionType === 'HoldKey' && (() => {
                           const ms = action.holdDurationMs && action.holdDurationMs > 0 ? action.holdDurationMs : 1000;
@@ -1127,7 +1098,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                               title={`Hold duration: ${ms} ms`}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setHoldKeyEdit({ index: idx });
+                                setKeystrokeEdit({ index: idx });
                               }}
                             >
                               {label}
@@ -1307,27 +1278,46 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         />
       )}
 
+      {/* Unified edit dialog for both Keystroke and HoldKey rows. Seeds Mode from
+          the row's ActionType so the dialog opens already showing the right fields.
+          On Save the dialog tells us which ActionType the result is; if it differs
+          from the original (user toggled Press↔Hold), we emit an actionType edit
+          first so the backend has the right shape when subsequent field edits land. */}
       {keystrokeEdit && (() => {
         const editing = actions[keystrokeEdit.index];
+        const isHold = editing?.actionType === 'HoldKey';
         const curRepeat = editing?.repeatCount ?? 1;
         const curDelay = editing?.repeatDelayMs ?? 30;
+        const curDuration = editing?.holdDurationMs && editing.holdDurationMs > 0 ? editing.holdDurationMs : 1000;
         return (
           <KeystrokeCaptureDialog
-            initialKeystroke={editing?.key}
+            initialActionType={isHold ? 'HoldKey' : 'Keystroke'}
+            initialKey={editing?.key}
             initialRepeat={curRepeat}
             initialRepeatDelayMs={curDelay}
-            onConfirm={(keystroke, repeat, repeatDelayMs) => {
-              // Three independent edits routed through the generic actions:edit channel.
-              // Only emit changes — saves an undo step per untouched field and avoids
-              // marking the profile dirty when the user just confirmed without changes.
-              if (keystroke !== editing?.key) {
-                send({ type: 'actions:edit', payload: { index: keystrokeEdit.index, field: 'key', value: keystroke } });
+            initialHoldDurationMs={isHold ? curDuration : undefined}
+            onConfirm={(result) => {
+              const idx = keystrokeEdit.index;
+              // ActionType conversion fires first so the backend applies field
+              // updates against the right action shape (a holdDurationMs edit on a
+              // row that's still typed as Keystroke would be silently ignored).
+              if (result.actionType !== editing?.actionType) {
+                send({ type: 'actions:edit', payload: { index: idx, field: 'actionType', value: result.actionType } });
               }
-              if (repeat !== curRepeat) {
-                send({ type: 'actions:edit', payload: { index: keystrokeEdit.index, field: 'repeat', value: String(repeat) } });
+              if (result.key !== editing?.key) {
+                send({ type: 'actions:edit', payload: { index: idx, field: 'key', value: result.key } });
               }
-              if (repeatDelayMs !== curDelay) {
-                send({ type: 'actions:edit', payload: { index: keystrokeEdit.index, field: 'repeatDelayMs', value: String(repeatDelayMs) } });
+              if (result.actionType === 'Keystroke') {
+                if (result.repeat !== curRepeat) {
+                  send({ type: 'actions:edit', payload: { index: idx, field: 'repeat', value: String(result.repeat) } });
+                }
+                if (result.repeatDelayMs !== curDelay) {
+                  send({ type: 'actions:edit', payload: { index: idx, field: 'repeatDelayMs', value: String(result.repeatDelayMs) } });
+                }
+              } else {
+                if (result.holdDurationMs !== curDuration) {
+                  send({ type: 'actions:edit', payload: { index: idx, field: 'holdDurationMs', value: String(result.holdDurationMs) } });
+                }
               }
               setKeystrokeEdit(null);
             }}
@@ -1348,10 +1338,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         />
       )}
 
-      {/* Insert-flow dialogs for the context menu's Insert Action submenu. Same
-          three special-cases as the toolbar's Add Action dropdown — Send Text,
-          Send Key (capture), Run Profile (picker) — each needs a dialog before
-          a concrete action can be inserted. */}
+      {/* Insert-flow dialogs for the context menu's Insert Action submenu — Send
+          Text (body), Send Keystroke (capture + Press/Hold), Run Profile (picker). */}
       {runProfileInsert && (
         <RunProfileDialog
           excludeProfileName={activeProfile ?? undefined}
@@ -1363,72 +1351,31 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         />
       )}
 
-      {keyCaptureInsert && (
-        <KeyCaptureDialog
-          onConfirm={(key) => {
-            send({ type: 'actions:insertKey', payload: { key, insertIndex: keyCaptureInsert.insertIndex } });
-            setKeyCaptureInsert(null);
-          }}
-          onClose={() => setKeyCaptureInsert(null)}
-        />
-      )}
-
       {keystrokeCaptureInsert && (
         <KeystrokeCaptureDialog
-          mode={keystrokeCaptureInsert.mode}
-          onConfirm={(keystroke, repeat, repeatDelayMs) => {
-            // Only attach repeat fields when they diverge from the implicit defaults
-            // (1, 30 ms). Keeps the bridge payload minimal for the common case and
-            // mirrors what HandleInsertKeystroke does on the C# side with WhenWritingNull.
-            const payload: { keystroke: string; insertIndex: number; repeat?: number; repeatDelayMs?: number } =
-              { keystroke, insertIndex: keystrokeCaptureInsert.insertIndex };
-            if (repeat > 1) {
-              payload.repeat = repeat;
-              if (repeatDelayMs !== 30) payload.repeatDelayMs = repeatDelayMs;
+          onConfirm={(result) => {
+            const insertIndex = keystrokeCaptureInsert.insertIndex;
+            if (result.actionType === 'HoldKey') {
+              send({
+                type: 'actions:insertHoldKey',
+                payload: { key: result.key, insertIndex, holdDurationMs: result.holdDurationMs },
+              });
+            } else {
+              // Omit repeat fields for the implicit defaults so the bridge payload
+              // stays minimal and the C# side keeps RepeatDelayMs null on disk.
+              const payload: { keystroke: string; insertIndex: number; repeat?: number; repeatDelayMs?: number } =
+                { keystroke: result.key, insertIndex };
+              if (result.repeat > 1) {
+                payload.repeat = result.repeat;
+                if (result.repeatDelayMs !== 30) payload.repeatDelayMs = result.repeatDelayMs;
+              }
+              send({ type: 'actions:insertKeystroke', payload });
             }
-            send({ type: 'actions:insertKeystroke', payload });
             setKeystrokeCaptureInsert(null);
           }}
           onClose={() => setKeystrokeCaptureInsert(null)}
         />
       )}
-
-      {/* HoldKey insert flow — invoked by submenu "Hold Key…" or palette command. */}
-      {holdKeyInsert && (
-        <HoldKeyDialog
-          onConfirm={(key, holdDurationMs) => {
-            send({ type: 'actions:insertHoldKey', payload: { key, insertIndex: holdKeyInsert.insertIndex, holdDurationMs } });
-            setHoldKeyInsert(null);
-          }}
-          onClose={() => setHoldKeyInsert(null)}
-        />
-      )}
-
-      {/* HoldKey edit flow — opens with the row's current key + duration so the
-          user can tweak either side without losing context. Edits fire as
-          separate actions:edit messages; unchanged fields are skipped to avoid
-          burning undo steps. */}
-      {holdKeyEdit && (() => {
-        const editing = actions[holdKeyEdit.index];
-        const curKey = editing?.key ?? '';
-        const curDuration = editing?.holdDurationMs && editing.holdDurationMs > 0 ? editing.holdDurationMs : 1000;
-        return (
-          <HoldKeyDialog
-            initialKey={curKey}
-            initialHoldDurationMs={curDuration}
-            onConfirm={(key, holdDurationMs) => {
-              if (key !== curKey) {
-                send({ type: 'actions:edit', payload: { index: holdKeyEdit.index, field: 'key', value: key } });
-              }
-              if (holdDurationMs !== curDuration) {
-                send({ type: 'actions:edit', payload: { index: holdKeyEdit.index, field: 'holdDurationMs', value: String(holdDurationMs) } });
-              }
-              setHoldKeyEdit(null);
-            }}
-            onClose={() => setHoldKeyEdit(null)}
-          />
-        );
-      })()}
 
       {/* Bulk Action Bar — inline at bottom */}
       {selectedIndices.size > 0 && !buttonStates.recordingActive && !buttonStates.replayActive && (
@@ -1531,10 +1478,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   profileName: rowAction.key,
                   repeatCount: rowAction.repeatCount ?? 1,
                 });
-              } else if (rowAction?.actionType === 'Keystroke') {
+              } else if (rowAction?.actionType === 'Keystroke' || rowAction?.actionType === 'HoldKey') {
+                // Both share the unified Send Keystroke dialog now — the dialog
+                // seeds Press / Hold mode based on the row's ActionType.
                 setKeystrokeEdit({ index: contextMenu.rowIndex });
-              } else if (rowAction?.actionType === 'HoldKey') {
-                setHoldKeyEdit({ index: contextMenu.rowIndex });
               } else {
                 onOpenSheet?.(contextMenu.rowIndex);
               }

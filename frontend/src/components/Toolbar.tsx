@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ArrowUpToLine, ArrowDownToLine, ScanSearch, Pipette, Plus, Keyboard, Globe, Repeat, Repeat2, Hourglass, Timer, X } from 'lucide-react';
+import { Copy, ClipboardPaste, Trash2, Palette, Undo2, Redo2, LayoutGrid, Check, Type, ArrowUpToLine, ArrowDownToLine, ScanSearch, Pipette, Plus, Keyboard, Globe, Repeat2, Hourglass, X } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -7,9 +7,7 @@ import { ThemeEditor } from './ThemeEditor';
 import { SendTextDialog } from './SendTextDialog';
 import { RunProfileDialog } from './RunProfileDialog';
 import { NavigateDialog } from './NavigateDialog';
-import { KeyCaptureDialog } from './KeyCaptureDialog';
 import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
-import { HoldKeyDialog } from './HoldKeyDialog';
 
 export interface ColumnVisibility {
   action: boolean;
@@ -112,18 +110,11 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
   const [showNavigateDialog, setShowNavigateDialog] = useState(false);
   const [showRunProfileDialog, setShowRunProfileDialog] = useState(false);
   // Send Key… opens this dialog (captures one key via JS events, dispatches an
-  // insert-pair message). Replaces the old "Key Press" item that entered OS-level
-  // capture mode silently with no visual prompt or commit step.
-  const [showKeyCapture, setShowKeyCapture] = useState(false);
-  const keyCaptureInsertIndex = useRef<number>(0);
+  // Send Keystroke — single dialog covers single press, press × N, and hold-key
+  // flows via its Mode toggle. Legacy Send Key / Press Key × N / Hold Key state +
+  // refs were removed when their menu entries collapsed into this one.
   const [showKeystrokeCapture, setShowKeystrokeCapture] = useState(false);
-  // `keystrokeCaptureMode` differentiates the two menu entries that share this dialog:
-  //   "keystroke" — opened by "Send Keystroke…" (single combo, repeat = 1)
-  //   "press-n"   — opened by "Press Key × N"  (repeating combo, repeat = 5 default)
-  const [keystrokeCaptureMode, setKeystrokeCaptureMode] = useState<'keystroke' | 'press-n'>('keystroke');
   const keystrokeCaptureInsertIndex = useRef<number>(0);
-  const [showHoldKeyDialog, setShowHoldKeyDialog] = useState(false);
-  const holdKeyInsertIndex = useRef<number>(0);
   const colDropdownRef = useRef<HTMLDivElement>(null);
   const addActionsRef = useRef<HTMLDivElement>(null);
   const browserMenuRef = useRef<HTMLDivElement>(null);
@@ -150,41 +141,17 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
   // Command-palette wrappers for the three keyboard inserts. Mirrors what the
   // "Add Action" dropdown does on click: compute the insertIndex from the
   // current selection (or end-of-list), stash it in the dialog's ref so a
-  // race during capture doesn't lose it, and open the dialog. SendKeystroke
-  // and PressKeyN share the same dialog component — the `mode` state selects
-  // defaults / header copy.
+  // race during capture doesn't lose it, and open the dialog. The dialog's
+  // own Mode toggle picks Press vs Hold internally — no `mode` prop needed.
   useEffect(() => {
-    const onSendKey = () => {
-      const sel = selectionRef.current;
-      keyCaptureInsertIndex.current = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-      setShowKeyCapture(true);
-    };
     const onSendKeystroke = () => {
       const sel = selectionRef.current;
       keystrokeCaptureInsertIndex.current = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-      setKeystrokeCaptureMode('keystroke');
       setShowKeystrokeCapture(true);
     };
-    const onPressKeyN = () => {
-      const sel = selectionRef.current;
-      keystrokeCaptureInsertIndex.current = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-      setKeystrokeCaptureMode('press-n');
-      setShowKeystrokeCapture(true);
-    };
-    const onHoldKey = () => {
-      const sel = selectionRef.current;
-      holdKeyInsertIndex.current = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-      setShowHoldKeyDialog(true);
-    };
-    window.addEventListener('cmd:sendkey', onSendKey);
     window.addEventListener('cmd:sendkeystroke', onSendKeystroke);
-    window.addEventListener('cmd:presskeyn', onPressKeyN);
-    window.addEventListener('cmd:holdkey', onHoldKey);
     return () => {
-      window.removeEventListener('cmd:sendkey', onSendKey);
       window.removeEventListener('cmd:sendkeystroke', onSendKeystroke);
-      window.removeEventListener('cmd:presskeyn', onPressKeyN);
-      window.removeEventListener('cmd:holdkey', onHoldKey);
     };
   }, [actions.length, selectionRef]);
 
@@ -448,25 +415,13 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                   {
                     label: 'Keyboard',
                     items: [
-                      { type: 'SendKey', label: 'Send Key…', icon: Keyboard },
-                      // Send Keystroke captures a full combo (Alt+Tab, Ctrl+Shift+T,
-                      // Alt+F4) as ONE atomic action. Unlike SendKey which inserts a
-                      // KeyDown+KeyUp pair (and gets called "tap a single key"), this
-                      // inserts a single Keystroke row whose .key is the "+"-joined
-                      // combo string; the replay engine expands it to the proper
-                      // modifier-down → key-tap → modifier-up sequence at run time.
+                      // Send Keystroke — single entry that covers every keyboard insert.
+                      // The dialog's Mode toggle picks Press (single tap, with optional
+                      // ×N repetition) or Hold (key held for a duration). Replaces the
+                      // legacy four-entry split (Send Key / Send Keystroke / Press × N /
+                      // Hold Key) which all opened slightly different dialogs for what is
+                      // ultimately one decision: "what shape of keypress do I want?"
                       { type: 'SendKeystroke', label: 'Send Keystroke…', icon: Keyboard },
-                      // Press Key × N — same dialog as Send Keystroke but opens with
-                      // Repeat = 5 and a header that signals the row will fire multiple
-                      // press cycles. Saves the user from inserting and then editing
-                      // RepeatCount when "press Enter 5x" is the explicit intent. Uses
-                      // the single-arrow `Repeat` icon to stay distinct from RunProfile's
-                      // double-arrow `Repeat2` below.
-                      { type: 'PressKeyN', label: 'Press Key × N…', icon: Repeat },
-                      // Hold Key — single atomic row that presses, waits, and releases.
-                      // Timer icon ties the action visually to its stopwatch-style intent
-                      // and stays distinct from every other keyboard insert above.
-                      { type: 'HoldKey', label: 'Hold Key…', icon: Timer },
                     ],
                   },
                   {
@@ -491,35 +446,16 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
                           setShowAddActions(false);
                           const sel = selectionRef.current;
                           const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-                          // Four special cases that don't fit the generic insertAction
-                          // pattern: Run Profile opens a picker dialog, Send Key opens the
-                          // single-key capture dialog (dispatches actions:insertKey on
-                          // commit), Send Keystroke opens the combo capture dialog
-                          // (dispatches actions:insertKeystroke).
+                          // Two special cases that need a capture / picker before the
+                          // bridge call: Run Profile opens a picker, Send Keystroke opens
+                          // the unified capture dialog (single press, repeat × N, or hold).
                           if (item.type === 'RunProfile') {
                             setShowRunProfileDialog(true);
                             return;
                           }
-                          if (item.type === 'SendKey') {
-                            keyCaptureInsertIndex.current = insertIndex;
-                            setShowKeyCapture(true);
-                            return;
-                          }
                           if (item.type === 'SendKeystroke') {
                             keystrokeCaptureInsertIndex.current = insertIndex;
-                            setKeystrokeCaptureMode('keystroke');
                             setShowKeystrokeCapture(true);
-                            return;
-                          }
-                          if (item.type === 'PressKeyN') {
-                            keystrokeCaptureInsertIndex.current = insertIndex;
-                            setKeystrokeCaptureMode('press-n');
-                            setShowKeystrokeCapture(true);
-                            return;
-                          }
-                          if (item.type === 'HoldKey') {
-                            holdKeyInsertIndex.current = insertIndex;
-                            setShowHoldKeyDialog(true);
                             return;
                           }
                           send({ type: 'actions:insertAction', payload: { actionType: item.type, insertIndex } });
@@ -766,57 +702,35 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
         />
       )}
 
-      {/* Send Key… capture dialog. The insertIndex is stashed in a ref at the
-          moment the user clicks the dropdown item, because by the time they've
-          pressed a key the selection may have changed. */}
-      {showKeyCapture && (
-        <KeyCaptureDialog
-          onConfirm={(key) => {
-            send({ type: 'actions:insertKey', payload: { key, insertIndex: keyCaptureInsertIndex.current } });
-            setShowKeyCapture(false);
-          }}
-          onClose={() => setShowKeyCapture(false)}
-        />
-      )}
-
-      {/* Send Keystroke… combo capture dialog. Same insertIndex-stashing pattern as
-          Send Key above. Produces a single Keystroke action holding the "+"-joined
-          combo string; the replay engine expands it at run time.
-
-          The same component renders "Press × N" via the `mode` prop — only the
-          defaults and labels differ; the bridge message is the same. We track the
-          chosen mode in state so both menu entries route through one mount. */}
+      {/* Send Keystroke — unified capture dialog. The user picks Press or Hold via
+          the dialog's own Mode toggle; this mount stays agnostic and dispatches the
+          appropriate bridge message based on the result.actionType the dialog returns.
+          insertIndex is stashed in a ref at the moment the menu item was clicked
+          because by the time the user presses a key the selection may have moved. */}
       {showKeystrokeCapture && (
         <KeystrokeCaptureDialog
-          mode={keystrokeCaptureMode}
-          onConfirm={(keystroke, repeat, repeatDelayMs) => {
-            // Mirror the action-table insert: omit `repeat`/`repeatDelayMs` for the
-            // single-press default so the bridge payload stays minimal and the C#
-            // side leaves RepeatDelayMs as null (clean profile JSON).
-            const payload: { keystroke: string; insertIndex: number; repeat?: number; repeatDelayMs?: number } =
-              { keystroke, insertIndex: keystrokeCaptureInsertIndex.current };
-            if (repeat > 1) {
-              payload.repeat = repeat;
-              if (repeatDelayMs !== 30) payload.repeatDelayMs = repeatDelayMs;
+          onConfirm={(result) => {
+            const insertIndex = keystrokeCaptureInsertIndex.current;
+            if (result.actionType === 'HoldKey') {
+              send({
+                type: 'actions:insertHoldKey',
+                payload: { key: result.key, insertIndex, holdDurationMs: result.holdDurationMs },
+              });
+            } else {
+              // Omit `repeat`/`repeatDelayMs` for the single-press default so the bridge
+              // payload stays minimal and the C# side leaves RepeatDelayMs as null (clean
+              // profile JSON). Mirrors the previous insertion convention.
+              const payload: { keystroke: string; insertIndex: number; repeat?: number; repeatDelayMs?: number } =
+                { keystroke: result.key, insertIndex };
+              if (result.repeat > 1) {
+                payload.repeat = result.repeat;
+                if (result.repeatDelayMs !== 30) payload.repeatDelayMs = result.repeatDelayMs;
+              }
+              send({ type: 'actions:insertKeystroke', payload });
             }
-            send({ type: 'actions:insertKeystroke', payload });
             setShowKeystrokeCapture(false);
           }}
           onClose={() => setShowKeystrokeCapture(false)}
-        />
-      )}
-
-      {/* Hold Key… single-key + duration capture. Same insertIndex-stash pattern as
-          the dialogs above. Produces a single HoldKey row whose replay sends KEYDOWN,
-          waits the configured ms, then KEYUP — stuck-key cleanup releases the key if
-          the user hits Stop mid-hold (see ResetKeyState on the C# side). */}
-      {showHoldKeyDialog && (
-        <HoldKeyDialog
-          onConfirm={(key, holdDurationMs) => {
-            send({ type: 'actions:insertHoldKey', payload: { key, insertIndex: holdKeyInsertIndex.current, holdDurationMs } });
-            setShowHoldKeyDialog(false);
-          }}
-          onClose={() => setShowHoldKeyDialog(false)}
         />
       )}
     </>
