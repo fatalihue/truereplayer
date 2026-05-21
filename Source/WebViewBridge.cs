@@ -541,6 +541,16 @@ namespace TrueReplayer
                 waitImageSearchY = a.WaitImageSearchY,
                 waitImageSearchW = a.WaitImageSearchW,
                 waitImageSearchH = a.WaitImageSearchH,
+                // WaitPixelColor — same pattern as the WaitImage extras above. Skipping
+                // these silently wipes the user's saved coords/colour/tolerance on the
+                // next push, because the editor sees `undefined` and treats it as
+                // "field is empty" on the round-trip back through actions:edit.
+                pixelX = a.PixelX,
+                pixelY = a.PixelY,
+                pixelColor = a.PixelColor,
+                pixelTolerance = a.PixelTolerance,
+                pixelOnTimeout = a.PixelOnTimeout,
+                pixelInvert = a.PixelInvert,
                 browserText = a.BrowserText ?? "",
                 newTab = a.NewTab,
                 isSkipped = a.IsSkipped,
@@ -915,6 +925,14 @@ namespace TrueReplayer
                     waitImageSearchY = a.WaitImageSearchY,
                     waitImageSearchW = a.WaitImageSearchW,
                     waitImageSearchH = a.WaitImageSearchH,
+                    // WaitPixelColor — mirrors PushActionsUpdate, for the same reason as the
+                    // WaitImage extras above.
+                    pixelX = a.PixelX,
+                    pixelY = a.PixelY,
+                    pixelColor = a.PixelColor,
+                    pixelTolerance = a.PixelTolerance,
+                    pixelOnTimeout = a.PixelOnTimeout,
+                    pixelInvert = a.PixelInvert,
                     browserText = a.BrowserText ?? "",
                     newTab = a.NewTab,
                     isSkipped = a.IsSkipped,
