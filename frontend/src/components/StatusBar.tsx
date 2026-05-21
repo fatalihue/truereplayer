@@ -66,6 +66,24 @@ export function StatusBar() {
       <div className="w-px h-3 bg-border-subtle mx-3" />
       <span className="text-[11px] text-text-disabled">{statusBar.actionCount} actions</span>
 
+      {/* Macro loop counter — sits at the panel level (not nested in the progress block)
+          so it survives the replaying→ready transition. The progress block above unmounts
+          on status:ready, taking its inline contents with it; the counter needs to keep
+          showing the final "Loop 100/100" briefly after the run ends, mirroring how the
+          Clicker stats below persists past run-end. `loopProgress.active` is the gate —
+          the backend only flips it true for genuine loops (>1 iteration or infinite), so
+          single-shot replays never render this. total === 0 → infinite (∞). */}
+      {!isClicker && loopProgress.active && (
+        <>
+          <div className="w-px h-3 bg-border-subtle mx-3" />
+          <span className="text-[11px] font-mono text-text-secondary shrink-0">
+            Loop <strong className="text-text-primary">{loopProgress.current}</strong>
+            <span className="text-text-disabled">/</span>
+            <strong className="text-text-primary">{loopProgress.total === 0 ? '∞' : loopProgress.total}</strong>
+          </span>
+        </>
+      )}
+
       {/* Clicker live stats — shows during a Clicker run AND after it ends (so the user
           can read the final total without it vanishing instantly). The reducer wipes
           clickerStats only when a NEW run starts via status:changed → 'replaying',
@@ -115,20 +133,6 @@ export function StatusBar() {
             <span className="text-[11px] text-text-disabled font-mono shrink-0">
               {minutes}:{seconds}
             </span>
-            {/* Loop counter — only shown when the backend pushed loopProgress, which it
-                does only for genuine loops (count > 1 or infinite). Single-shot replays
-                don't reach this branch even though they're "isReplaying". total === 0
-                signals infinite (rendered as ∞). */}
-            {loopProgress.active && (
-              <>
-                <div className="w-px h-3 bg-border-subtle shrink-0" />
-                <span className="text-[11px] font-mono text-text-secondary shrink-0">
-                  Loop <strong className="text-text-primary">{loopProgress.current}</strong>
-                  <span className="text-text-disabled">/</span>
-                  <strong className="text-text-primary">{loopProgress.total === 0 ? '∞' : loopProgress.total}</strong>
-                </span>
-              </>
-            )}
             {chainLabel && (
               <>
                 <div className="w-px h-3 bg-border-subtle shrink-0" />
