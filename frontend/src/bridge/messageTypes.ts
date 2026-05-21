@@ -227,6 +227,17 @@ export interface AppState {
     elapsedMs: number;
   };
   /**
+   * Macro loop counter — pushed during looping replays (~4 Hz throttle, plus a final push
+   * when the run ends). Only set by the backend when the replay actually loops (loopCount
+   * > 1 or infinite); single-shot replays leave this in its inactive default. StatusBar
+   * gates rendering on `active`. `total === 0` means infinite (rendered as "Loop X/∞").
+   */
+  loopProgress: {
+    active: boolean;
+    current: number;
+    total: number;
+  };
+  /**
    * Increments on every explicit "reset to defaults" action. Used as a `key` prop on
    * settings panels that hold non-persistent local UI state (e.g. ClickerSection's
    * /s ↔ ms unit toggle), forcing a remount so the local state goes back to its
@@ -257,6 +268,7 @@ export type IncomingMessage =
   | { type: 'replay:paused'; payload: { hotkey: string; timeoutMs: number } }
   | { type: 'replay:resumed'; payload: Record<string, never> }
   | { type: 'clicker:stats'; payload: { count: number; elapsedMs: number } }
+  | { type: 'macro:loopProgress'; payload: { current: number; total: number } }
   | { type: 'settings:reset'; payload: Record<string, never> }
   | { type: 'update:available'; payload: { version: string; currentVersion: string; notes: string[] } }
   | { type: 'update:progress'; payload: { percent: number } }

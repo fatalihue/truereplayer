@@ -138,6 +138,13 @@ namespace TrueReplayer.Services
             {
                 OnReplayResumed?.Invoke();
             };
+            // Loop counter — defined on the inner replayer (it's the one running the loop),
+            // re-exposed here so MainWindow can wire the bridge callback alongside the other
+            // ReplayService events. Same pass-through pattern as OnReplayPaused/Resumed above.
+            replayer.OnLoopProgress = (current, total) =>
+            {
+                OnLoopProgress?.Invoke(current, total);
+            };
         }
 
         // Re-exposed events from the inner replayer so MainWindow/WebViewBridge can wire UI feedback.
@@ -226,6 +233,11 @@ namespace TrueReplayer.Services
         // Throttled to ~4 Hz inside the loop so the WebView2 message channel isn't flooded
         // (a 100 Hz clicker would otherwise spam 100 messages/s).
         public Action<long, long>? OnClickerStats; // (count, elapsedMs)
+
+        // Macro loop counter — re-exposed from the inner ActionReplayer. Fired only for
+        // genuine loops (LoopCount > 1 or infinite); single-shot replays never trigger it.
+        // total == 0 signals infinite loop. Frontend renders "Loop X/Y" or "Loop X/∞".
+        public Action<int, int>? OnLoopProgress;
 
         public void ToggleCursorClickReplay(int delay, bool useJitter, int jitterPercent, int loopCount, int loopInterval, string button = "Left", int holdMs = 10, int positionJitter = 0)
         {
@@ -637,6 +649,14 @@ namespace TrueReplayer.Services
         private int _loopInterval = 0;
         private Func<string>? _getProfileName;
 
+        // Bridge callback for the status bar's "Loop X/Y" indicator. Mirrors OnClickerStats:
+        // throttled to ~4 Hz inside the loop so we don't flood the WebView2 message channel
+        // for tight macros, plus a final push in the finally block so the last count lands
+        // even when the throttle skipped the last tick or the user cancelled mid-iteration.
+        // total == 0 means infinite (WhilePressed or LoopCount=0).
+        public Action<int, int>? OnLoopProgress;
+        private long _lastLoopProgressMs;
+
         // ── Profile chaining ──
         // Async lookup that resolves a profile name into its UserProfile. Returns null when missing.
         private Func<string, Task<Models.UserProfile?>>? _profileLookup;
@@ -752,6 +772,12 @@ namespace TrueReplayer.Services
             var token = _cts.Token;
             int iteration = 0;
             bool isInfinite = _forceInfiniteLoop || _loopCount == 0;
+            // Status-bar loop counter only makes sense for actual loops. Single-run replays
+            // (loopCount=1, not infinite) execute the macro once and end — no counter to
+            // overlay. Computed once here so the lambda captures stay simple.
+            bool emitLoopProgress = isInfinite || _loopCount > 1;
+            int loopProgressTotal = isInfinite ? 0 : _loopCount;
+            _lastLoopProgressMs = 0;
 
             // Snapshot the actions list to avoid crashes from concurrent modifications
             var snapshot = _actions.ToList();
@@ -841,6 +867,21 @@ namespace TrueReplayer.Services
                     {
                         iteration++;
 
+                        // Throttled status-bar update. First iteration is always pushed so the
+                        // counter appears immediately; subsequent iterations are coalesced to
+                        // ~4 Hz to avoid flooding the message channel on tight loops (e.g. a
+                        // macro that's basically "press key + 10 ms delay" running infinite).
+                        if (emitLoopProgress)
+                        {
+                            long nowMs = Environment.TickCount64;
+                            if (iteration == 1 || nowMs - _lastLoopProgressMs >= 250)
+                            {
+                                _lastLoopProgressMs = nowMs;
+                                int capturedIteration = iteration;
+                                dispatcherQueue.TryEnqueue(() => OnLoopProgress?.Invoke(capturedIteration, loopProgressTotal));
+                            }
+                        }
+
                         await ExecuteActionsAsync(snapshot, token);
 
                         if (!token.IsCancellationRequested && (isInfinite || iteration < _loopCount) && _loopInterval > 0)
@@ -851,6 +892,15 @@ namespace TrueReplayer.Services
             catch (TaskCanceledException) { }
             finally
             {
+                // Final push so the StatusBar lands on the actual completion count regardless
+                // of where the throttle happened to be. Skipped when no iterations ran (early
+                // cancel before the loop body) — pushing "Loop 0/N" would look broken.
+                if (emitLoopProgress && iteration > 0)
+                {
+                    int capturedFinal = iteration;
+                    dispatcherQueue.TryEnqueue(() => OnLoopProgress?.Invoke(capturedFinal, loopProgressTotal));
+                }
+
                 _callStack.Clear();
                 NotifyChainChanged();
             }

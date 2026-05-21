@@ -73,6 +73,7 @@ const initialState: AppState = {
   // during a Clicker run. The StatusBar renders "Clicked X · Y/s · MM:SS" from these.
   // `active` flips on first stats push and back off when the replay engine resets state.
   clickerStats: { active: false, count: 0, elapsedMs: 0 },
+  loopProgress: { active: false, current: 0, total: 0 },
   settingsResetEpoch: 0,
 };
 
@@ -103,6 +104,15 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
         clickerStats: message.payload.status === 'replaying'
           ? { active: true, count: 0, elapsedMs: 0 }
           : state.clickerStats,
+        // Macro loop counter — same lifecycle as clickerStats. New run wipes the counter
+        // so it doesn't carry over from the previous replay; 'ready' preserves the final
+        // value so the user can read "Loop 100/100" briefly after the run ends.
+        // `active` starts false here; first 'macro:loopProgress' push flips it true. This
+        // is what keeps single-shot (non-looping) replays from showing the indicator —
+        // the backend never sends loopProgress in that case.
+        loopProgress: message.payload.status === 'replaying'
+          ? { active: false, current: 0, total: 0 }
+          : state.loopProgress,
       };
     case 'actions:updated':
       return { ...state, actions: message.payload.actions, highlightedActionIndex: null };
@@ -143,6 +153,15 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
       return {
         ...state,
         clickerStats: { active: true, count: message.payload.count, elapsedMs: message.payload.elapsedMs },
+      };
+    case 'macro:loopProgress':
+      // Same idea as clicker:stats — first push flips `active` on, run-start in
+      // status:changed wipes it. Backend only emits for genuine loops (count > 1 or
+      // infinite), so a single-shot replay never lands here and the StatusBar's
+      // `active`-gated render stays hidden.
+      return {
+        ...state,
+        loopProgress: { active: true, current: message.payload.current, total: message.payload.total },
       };
     case 'settings:reset':
       // Increments on every explicit reset. SettingsPanel uses this as a `key` on

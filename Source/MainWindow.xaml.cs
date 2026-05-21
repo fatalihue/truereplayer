@@ -143,6 +143,14 @@ namespace TrueReplayer
                 bridge?.PushClickerStats(count, elapsedMs);
             };
 
+            // Macro loop counter — forward "Loop X/Y" progress for looping replays. Same
+            // throttle story as OnClickerStats; only fires on multi-iteration or infinite
+            // runs, so a single-shot macro never triggers this path.
+            replayService.OnLoopProgress = (current, total) =>
+            {
+                bridge?.PushLoopProgress(current, total);
+            };
+
             this.Closed += (_, _) =>
             {
                 Services.DiagnosticLog.Info("Window closing — disposing bridge and controllers");

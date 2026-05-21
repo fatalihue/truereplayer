@@ -1810,6 +1810,15 @@ namespace TrueReplayer
             SendMessage("clicker:stats", new { count, elapsedMs });
         }
 
+        // Macro loop counter — "Loop X/Y" in the StatusBar during a looping replay. Same
+        // throttling story as PushClickerStats. total == 0 signals infinite loop on the
+        // frontend side ("Loop X/∞"). Only fires for multi-iteration or infinite runs;
+        // single-shot replays never reach this path.
+        public void PushLoopProgress(int current, int total)
+        {
+            SendMessage("macro:loopProgress", new { current, total });
+        }
+
         // Manual resume from the status-bar Resume button. Forwards to the replay service which
         // fires the same callback the resume hotkey would, freeing ExecutePause's await.
         private void HandleReplayResume(JsonElement payload)

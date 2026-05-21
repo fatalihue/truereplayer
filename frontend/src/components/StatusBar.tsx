@@ -4,7 +4,7 @@ import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 
 export function StatusBar() {
-  const { statusBar, status, highlightedActionIndex, replayChain, pauseState, settings, clickerStats } = useAppState();
+  const { statusBar, status, highlightedActionIndex, replayChain, pauseState, settings, clickerStats, loopProgress } = useAppState();
   const { send } = useBridge();
   const isReplaying = status === 'replaying';
   const isClicker = settings.useCursorClick;
@@ -115,6 +115,20 @@ export function StatusBar() {
             <span className="text-[11px] text-text-disabled font-mono shrink-0">
               {minutes}:{seconds}
             </span>
+            {/* Loop counter — only shown when the backend pushed loopProgress, which it
+                does only for genuine loops (count > 1 or infinite). Single-shot replays
+                don't reach this branch even though they're "isReplaying". total === 0
+                signals infinite (rendered as ∞). */}
+            {loopProgress.active && (
+              <>
+                <div className="w-px h-3 bg-border-subtle shrink-0" />
+                <span className="text-[11px] font-mono text-text-secondary shrink-0">
+                  Loop <strong className="text-text-primary">{loopProgress.current}</strong>
+                  <span className="text-text-disabled">/</span>
+                  <strong className="text-text-primary">{loopProgress.total === 0 ? '∞' : loopProgress.total}</strong>
+                </span>
+              </>
+            )}
             {chainLabel && (
               <>
                 <div className="w-px h-3 bg-border-subtle shrink-0" />
