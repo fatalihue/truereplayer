@@ -39,7 +39,7 @@ const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
   ],
 };
 
-const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'Pause']);
+const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'Pause']);
 
 // #1 — Text matching modes mapped to selector prefixes
 type TextMode = 'exact' | 'contains' | 'icontains' | 'regex';
@@ -1226,9 +1226,9 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   onChange={(e) => setPixelTolerance(e.target.value)}
                   className="w-14 h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
                 />
-                <span className="text-[11px] text-text-disabled">/ 255</span>
+                <span className="text-[11px] text-text-tertiary">/ 255</span>
               </div>
-              <div className="text-[10px] text-text-disabled mt-1">
+              <div className="text-[10px] text-text-tertiary mt-1">
                 0 = exact match. Try 5–15 for game UI colours that compress slightly.
               </div>
             </div>
@@ -1244,7 +1244,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   onChange={(e) => setTimeout(e.target.value)}
                   className="w-20 h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
                 />
-                <span className="text-[11px] text-text-disabled">seconds</span>
+                <span className="text-[11px] text-text-tertiary">seconds</span>
                 <span className="flex-1" />
                 <select
                   value={pixelOnTimeout}
@@ -1269,7 +1269,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 />
                 <span className="text-ui text-text-secondary">Wait for the colour to DISAPPEAR</span>
               </label>
-              <div className="text-[10px] text-text-disabled mt-0.5 ml-5">
+              <div className="text-[10px] text-text-tertiary mt-0.5 ml-5">
                 Inverts the match — useful for "cooldown indicator stops glowing red" patterns.
               </div>
             </div>
