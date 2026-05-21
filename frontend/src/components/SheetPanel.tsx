@@ -526,7 +526,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     }
 
     onClose();
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, send, onClose]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
