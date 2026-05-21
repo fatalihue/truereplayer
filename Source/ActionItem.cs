@@ -44,6 +44,43 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public int? WaitImageSearchH { get; set; }
 
+        // ── WaitPixelColor properties ──
+        // Lighter alternative to WaitImage: polls a single screen pixel and waits for it to
+        // hit a target colour (within a per-channel tolerance). Reuses the existing Timeout
+        // field above. All fields are null/default-safe so existing profiles deserialize
+        // unchanged — only new WaitPixelColor rows write any of these out to disk.
+
+        // Absolute virtual-screen coordinates of the pixel to watch. Both must be set for the
+        // action to do anything; null on either falls through to immediate timeout.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? PixelX { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? PixelY { get; set; }
+
+        // Target colour in "#RRGGBB" form (uppercase hex). null = no target → immediate
+        // timeout. Editor + bridge always round-trip through PixelColorService.ToHex/ParseHex
+        // so the wire format stays canonical.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? PixelColor { get; set; }
+
+        // Per-channel R/G/B match tolerance, 0–255. 0 demands an exact match; ~10 covers
+        // mild compression/anti-aliasing noise on game UI elements without being so loose
+        // that an unrelated colour slips through. Default 0 keeps the JSON compact when the
+        // user hasn't customised it.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public int PixelTolerance { get; set; }
+
+        // Same vocabulary as WaitImageOnTimeout — "Halt" (default), "Continue", "StopReplay".
+        // Kept as a separate field so a profile can mix the two action types with different
+        // timeout policies without one bleeding into the other.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? PixelOnTimeout { get; set; }
+
+        // false = wait for the colour to APPEAR (default); true = wait for it to disappear.
+        // Useful for "cooldown indicator turned grey, ability is ready again" patterns.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool PixelInvert { get; set; }
+
         // Browser action properties
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? BrowserText { get; set; }
