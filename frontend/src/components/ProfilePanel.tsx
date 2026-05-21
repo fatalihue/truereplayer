@@ -418,12 +418,14 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     }
   };
 
-  // Suppress global hotkeys while hotkey dialog is open
+  // Suppress global hotkeys while hotkey dialog is open. `send` is a stable useCallback
+  // from BridgeContext (deps []), so listing it here doesn't cause extra re-runs — only
+  // silences exhaustive-deps without changing behaviour.
   useEffect(() => {
     if (!showHotkeyDialog) {
       send({ type: 'hotkey:suppress', payload: { enabled: false } });
     }
-  }, [showHotkeyDialog]);
+  }, [showHotkeyDialog, send]);
 
   // Auto-close hotkey dialog when profile list updates (means hotkey was saved successfully)
   useEffect(() => {
@@ -435,12 +437,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     });
   }, [showHotkeyDialog, subscribe]);
 
-  // Suppress global hotkeys while hotstring dialog is open
+  // Suppress global hotkeys while hotstring dialog is open. `send` is stable (see note above).
   useEffect(() => {
     if (!showHotstringDialog) {
       send({ type: 'hotkey:suppress', payload: { enabled: false } });
     }
-  }, [showHotstringDialog]);
+  }, [showHotstringDialog, send]);
 
   // Auto-close hotstring dialog when profile list updates
   useEffect(() => {
@@ -571,12 +573,16 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   const isPinned = (name: string) => profileOrder?.pinned?.includes(name) ?? false;
 
-  const getProfileFolder = (name: string): string | null => {
+  // Wrapped in useCallback so the drag-effect below can list it as a dep without
+  // re-subscribing window listeners on every render — without the memoisation the
+  // identity would change on every parent re-render and the effect would re-mount
+  // its mousemove/up listeners constantly during a drag.
+  const getProfileFolder = useCallback((name: string): string | null => {
     for (const f of profileOrder?.folders ?? []) {
       if (f.items.includes(name)) return f.name;
     }
     return null;
-  };
+  }, [profileOrder?.folders]);
 
   // ── Drag & Drop handlers (mouse-based, works in WebView2) ──
   const dragStartPos = useRef<{ x: number; y: number } | null>(null);
@@ -736,7 +742,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         autoScrollRaf.current = null;
       }
     };
-  }, [dragProfile, dropTarget, sendWithTransition, maybeKickAutoScroll]);
+  }, [dragProfile, dropTarget, sendWithTransition, maybeKickAutoScroll, getProfileFolder]);
 
   // ── Folder Drag & Drop (reorder folders) ──
   const folderDragStartPos = useRef<{ x: number; y: number } | null>(null);

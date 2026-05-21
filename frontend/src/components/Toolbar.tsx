@@ -282,7 +282,10 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [send, actions.length]);
+    // selectionRef is a useRef result — stable identity across renders, so listing it
+    // doesn't cause extra subscribes. Adding it just silences exhaustive-deps without
+    // changing behaviour (handler always reads .current at the time it fires).
+  }, [send, actions.length, selectionRef]);
 
   const toggleColumn = (key: keyof ColumnVisibility) => {
     onColumnVisibilityChange({ ...columnVisibility, [key]: !columnVisibility[key] });

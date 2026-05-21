@@ -203,7 +203,7 @@ export function KeystrokeCaptureDialog({
       alt: e.altKey,
     };
     setCaptured(buildKeystroke(modifiers, keyPart));
-  }, [captured, onClose]);
+  }, [captured, isEditing, onClose]);
 
   const handleConfirm = () => {
     if (captured) onConfirm(captured, clampRepeat(repeat), clampDelay(repeatDelay));
