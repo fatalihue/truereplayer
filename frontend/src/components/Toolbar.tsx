@@ -306,24 +306,13 @@ export function Toolbar(_props: ToolbarProps) {
           <div className="w-px h-4 bg-border-subtle mx-1" />
 
           {/* ── Insert actions ─────────────────────────────────────────────
-              Direct buttons replace the previous "Add Actions" dropdown — six
-              icons covering every common insert (Send Text, Send Keystroke,
-              Pause, Wait Image, Wait Pixel Color, Run Profile) plus the Browser
-              dropdown that has its own multi-variant submenu. Move Up / Move
-              Down moved to the BulkActionBar (only useful with a selection);
-              click x3 / scroll inserts removed long ago because Recording does
-              them better. */}
-
-          {/* Send Text */}
-          <button
-            tabIndex={-1}
-            onClick={() => setShowSendTextDialog(true)}
-            disabled={buttonStates.recordingActive || buttonStates.replayActive}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Insert Send Text action"
-          >
-            <Type size={14} />
-          </button>
+              Direct buttons replace the previous "Add Actions" dropdown. Order
+              groups input intent first (keystroke → text), then waits/checks
+              ordered cheapest-first (Pause → pixel watch → image search), then
+              the cross-surface helpers (Browser dropdown, sub-macro), ending
+              with the destructive Clear All. Move Up / Move Down moved to the
+              BulkActionBar (only useful with a selection); click x3 / scroll
+              inserts removed long ago because Recording does them better. */}
 
           {/* Send Keystroke — unified keyboard insert (Press 1×, Press N×, or
               Hold for X ms; mode toggle lives inside the dialog). */}
@@ -341,6 +330,17 @@ export function Toolbar(_props: ToolbarProps) {
             <Keyboard size={14} />
           </button>
 
+          {/* Send Text */}
+          <button
+            tabIndex={-1}
+            onClick={() => setShowSendTextDialog(true)}
+            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip="Insert Send Text action"
+          >
+            <Type size={14} />
+          </button>
+
           {/* Pause — wait for a hotkey or a timeout before continuing replay. */}
           <button
             tabIndex={-1}
@@ -356,22 +356,9 @@ export function Toolbar(_props: ToolbarProps) {
             <Hourglass size={14} />
           </button>
 
-          {/* Wait for Image — OpenCV template match with optional ROI. */}
-          <button
-            tabIndex={-1}
-            onClick={() => {
-              const sel = selectionRef.current;
-              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-              send({ type: 'actions:insertAction', payload: { actionType: 'WaitImage', insertIndex } });
-            }}
-            disabled={buttonStates.recordingActive || buttonStates.replayActive}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Insert Wait for Image action"
-          >
-            <ScanSearch size={14} />
-          </button>
-
-          {/* Wait for Pixel Color — single-pixel GDI watch, much lighter than WaitImage. */}
+          {/* Wait for Pixel Color — single-pixel GDI watch, much lighter than
+              WaitImage. Listed before Wait Image so the cheaper option appears
+              first; users that need template matching jump one icon over. */}
           <button
             tabIndex={-1}
             onClick={() => {
@@ -386,15 +373,19 @@ export function Toolbar(_props: ToolbarProps) {
             <Pipette size={14} />
           </button>
 
-          {/* Run Profile — sub-macro call (picker dialog). */}
+          {/* Wait for Image — OpenCV template match with optional ROI. */}
           <button
             tabIndex={-1}
-            onClick={() => setShowRunProfileDialog(true)}
+            onClick={() => {
+              const sel = selectionRef.current;
+              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+              send({ type: 'actions:insertAction', payload: { actionType: 'WaitImage', insertIndex } });
+            }}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Insert Run Profile action"
+            data-tip="Insert Wait for Image action"
           >
-            <Repeat2 size={14} />
+            <ScanSearch size={14} />
           </button>
 
           {/* Browser Actions */}
@@ -440,6 +431,18 @@ export function Toolbar(_props: ToolbarProps) {
               </div>
             )}
           </div>
+
+          {/* Run Profile — sub-macro call (picker dialog). Sits next to Browser
+              because both delegate work elsewhere (a profile / a browser tab). */}
+          <button
+            tabIndex={-1}
+            onClick={() => setShowRunProfileDialog(true)}
+            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip="Insert Run Profile action"
+          >
+            <Repeat2 size={14} />
+          </button>
 
           <div className="w-px h-4 bg-border-subtle mx-1" />
 
