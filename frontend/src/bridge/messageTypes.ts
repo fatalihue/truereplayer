@@ -364,11 +364,6 @@ export type OutgoingMessage =
   | { type: 'actions:toggleSkip'; payload: { indices: number[] } }
   | { type: 'actions:reorder'; payload: { indices: number[]; targetIndex: number } }
   | { type: 'actions:insertAction'; payload: { actionType: string; insertIndex: number } }
-  // Insert a KeyDown + KeyUp pair using a pre-captured key name (no OS capture mode).
-  // The frontend captures the keystroke in KeyCaptureDialog via JS keyboard events and
-  // sends the resulting internal name (e.g. "Return", "Tab", "A") — the backend turns
-  // that into two ActionItems back-to-back at insertIndex.
-  | { type: 'actions:insertKey'; payload: { key: string; insertIndex: number } }
   // Insert a single Keystroke action (atomic combo like "Alt+Tab", "Ctrl+Shift+T").
   // Unlike insertKey which expands a single tap into a KeyDown+KeyUp pair, insertKeystroke
   // creates ONE row holding the whole combo as a "+"-joined string. The replay engine

@@ -105,7 +105,11 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
 };
 
 export interface ThemeConfig {
-  version: 1;
+  // Schema version. v1 = original; v2 = post-palette-pass (PixelColor / Scroll /
+  // Pause defaults swapped). loadThemeConfig migrates v1 → v2 in place. Listed
+  // as `number` rather than a literal union so future bumps don't require a type
+  // edit at every call site.
+  version: number;
   baseThemeId: string;
   colorOverrides: Partial<ThemeColors>;
   uiSettings: ThemeUISettings;

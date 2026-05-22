@@ -391,7 +391,6 @@ namespace TrueReplayer
                     case "actions:toggleSkip": HandleActionsToggleSkip(payload); break;
                     case "actions:reorder": HandleActionsReorder(payload); break;
                     case "actions:insertAction": HandleInsertAction(payload); break;
-                    case "actions:insertKey": HandleInsertKey(payload); break;
                     case "actions:insertKeystroke": HandleInsertKeystroke(payload); break;
                     case "actions:insertHoldKey": HandleInsertHoldKey(payload); break;
                     case "actions:duplicate": HandleDuplicateActions(payload); break;
@@ -1974,43 +1973,6 @@ namespace TrueReplayer
             });
         }
 
-        // Insert a KeyDown + KeyUp pair from a key name pre-captured by the frontend's
-        // KeyCaptureDialog. Unlike HandleInsertAction with "KeyPress" (which enters
-        // OS-level capture mode and waits for a physical keystroke), this is fully
-        // declarative — the key is already known, so we just emit the two actions
-        // back-to-back at the requested index. The KeyUp lands at insertIndex+1 because
-        // the KeyDown was just inserted at insertIndex, bumping everything after it.
-        private void HandleInsertKey(JsonElement payload)
-        {
-            var key = payload.GetProperty("key").GetString();
-            var insertIndex = payload.GetProperty("insertIndex").GetInt32();
-            if (string.IsNullOrEmpty(key)) return;
-            if (insertIndex < 0 || insertIndex > actions.Count) insertIndex = actions.Count;
-
-            int delay = int.TryParse(CustomDelay, out var pd) ? pd : 100;
-            actions.Insert(insertIndex, new ActionItem
-            {
-                ActionType = "KeyDown",
-                Key = key,
-                Delay = delay,
-            });
-            // Both KeyDown and KeyUp get the same delay — that's what recording produces
-            // when the fixed custom delay is on (GetDelayForNewAction returns the same
-            // value for every recorded keystroke). An earlier draft used 0 for KeyUp on
-            // the theory that "this is a tap" but it diverged from recording behaviour
-            // and broke users' macros that relied on consistent per-step timing.
-            actions.Insert(insertIndex + 1, new ActionItem
-            {
-                ActionType = "KeyUp",
-                Key = key,
-                Delay = delay,
-            });
-            for (int i = 0; i < actions.Count; i++)
-                actions[i].RowNumber = i + 1;
-            HasUnsavedChanges = true;
-            PushActionsUpdate();
-            mainController.UpdateButtonStates();
-        }
 
         private void HandleInsertKeystroke(JsonElement payload)
         {
