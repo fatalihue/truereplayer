@@ -292,7 +292,12 @@ export type IncomingMessage =
   | { type: 'waitimage:searchRegionSet'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; w?: number; h?: number } }
   | { type: 'mouse:positionPicked'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number } }
   | { type: 'pixel:colorPicked'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; hex?: string } }
-  | { type: 'pixel:testMatchResult'; payload: { requestId: string; matches: boolean; sampledHex?: string | null; error?: string } };
+  | { type: 'pixel:testMatchResult'; payload: { requestId: string; matches: boolean; sampledHex?: string | null; error?: string } }
+  // Fired by the backend after a capture-first insert (Wait Image / Wait Pixel)
+  // to auto-open the row's editor. The user just told us where the thing lives;
+  // tolerance / timeout / on-timeout / etc are next — opening the sheet skips the
+  // "find the new row and click it" detour.
+  | { type: 'sheet:openIndex'; payload: { index: number } };
 
 // ── Messages JS → C# ──
 

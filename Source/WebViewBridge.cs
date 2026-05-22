@@ -2150,6 +2150,11 @@ namespace TrueReplayer
                 HasUnsavedChanges = true;
                 PushActionsUpdate();
                 mainController.UpdateButtonStates();
+                // Auto-open the editor for the freshly inserted row. Capturing the
+                // reference image is only step one — the user still needs to tune
+                // tolerance / timeout / on-timeout / click-on-match. Opening the
+                // sheet now saves a click and keeps the configuration flow linear.
+                SendMessage("sheet:openIndex", new { index = insertIndex });
             });
         }
 
@@ -2225,6 +2230,10 @@ namespace TrueReplayer
                 HasUnsavedChanges = true;
                 PushActionsUpdate();
                 mainController.UpdateButtonStates();
+                // Match WaitImage's insert flow: open the editor on the new row so
+                // the user can tune tolerance / timeout / invert without having to
+                // hunt for the row and click it manually.
+                SendMessage("sheet:openIndex", new { index = insertIndex });
             });
         }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { BridgeProvider } from './bridge/BridgeContext';
+import { BridgeProvider, useBridge } from './bridge/BridgeContext';
 import { AppStateProvider, useAppState } from './state/AppStateContext';
 import { SelectionProvider } from './state/SelectionContext';
 import { ThemeProvider } from './state/ThemeContext';
@@ -24,6 +24,7 @@ import { ThemeEditor } from './components/ThemeEditor';
 // mode-dependent visuals (Clicker mode glow, ActionTable replacement).
 function AppShell() {
   const { settings } = useAppState();
+  const { subscribe } = useBridge();
   const isClicker = settings.useCursorClick;
 
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
@@ -105,6 +106,18 @@ function AppShell() {
     window.addEventListener('cmd:togglesidebar', handler);
     return () => window.removeEventListener('cmd:togglesidebar', handler);
   }, []);
+
+  // Backend asks the editor to open for a specific row (currently fired after
+  // a capture-first insert for Wait Image / Wait Pixel — the row exists but
+  // still needs timing / tolerance / etc configured). Hosting the subscription
+  // here because sheetActionIndex lives in App-level state.
+  useEffect(() => {
+    return subscribe((msg) => {
+      if (msg.type === 'sheet:openIndex') {
+        setSheetActionIndex(msg.payload.index);
+      }
+    });
+  }, [subscribe]);
 
   return (
     <div className="h-full flex flex-col bg-bg-base">
