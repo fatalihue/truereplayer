@@ -994,8 +994,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               <div className="mt-2 flex gap-2">
                 <button
                   onClick={() => {
+                    // Don't close the panel — backend handles minimise/overlay/save
+                    // asynchronously and pushes actions:updated when done. The effect
+                    // that re-seeds local state on `action` change will pick up the
+                    // new imageBase64 / imagePath automatically, so the thumbnail
+                    // updates in place. Matches Wait Pixel's "Pick from screen"
+                    // behaviour where the editor stays open through the capture.
                     send({ type: 'waitimage:recapture', payload: { index: actionIndex } });
-                    onClose();
                   }}
                   className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
                   title="Recapture reference image"
