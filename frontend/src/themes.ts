@@ -74,19 +74,29 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   clickerColor: '#c084fc',
   actionMouseColor: '#a78bfa',
   actionKeyColor: '#60cdff',
-  actionScrollColor: '#6bcb77',
+  // Mint green — lighter / softer than the previous #6bcb77 so it reads as
+  // distinct from PixelColor's lime (#84cc16) at a glance. Same green "movement"
+  // semantic carried by Scroll actions.
+  actionScrollColor: '#8be597',
   actionSendTextColor: '#d4a020',
   actionWaitImageColor: '#e879f9',
-  // Cyan — picked to stay distinct from WaitImage magenta (#e879f9) and Key blue
-  // (#60cdff). The two Wait* actions read as a family (similar hue tier) while
-  // keeping the per-row badge instantly distinguishable.
-  actionPixelColorColor: '#22d3ee',
+  // Lime — replaced the old cyan (#22d3ee) which collided with Key (#60cdff) at
+  // only 13° of hue separation. Lime occupies the open slot between SendText
+  // gold (43°) and Scroll green (127°), giving 43°+ to every neighbour. No
+  // hardcoded semantic — PixelColor is "watch any colour", so the action is the
+  // free agent of the palette.
+  actionPixelColorColor: '#84cc16',
   actionBrowserColor: '#fb923c',
   // True blue, picked to be distinct from Key cyan (#60cdff) and Mouse purple
   // (#a78bfa). Carries the "control flow / chain call" semantic.
   actionRunProfileColor: '#3b82f6',
-  // Amber — semantic "wait/attention" for the Pause action.
-  actionPauseColor: '#fbbf24',
+  // Slate — neutral grey-blue, semantically "inactive / waiting". Replaces the
+  // previous amber (#fbbf24), which shared its exact hue (43°) with SendText
+  // gold and only differed in brightness — visually too close. Slate sits in a
+  // hue range no other action uses (~215°) and stays distinguishable from
+  // RunProfile's vivid blue by saturation (slate is desaturated grey-blue,
+  // RunProfile is fully saturated).
+  actionPauseColor: '#94a3b8',
   fontMono: 'Consolas',
   matchSystemTheme: false,
   darkPresetId: 'lavender-coal',
