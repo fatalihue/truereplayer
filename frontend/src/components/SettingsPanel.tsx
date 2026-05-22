@@ -660,6 +660,14 @@ export function SettingsPanel() {
                   onFocusChange={handleHotkeyFocusChange}
                 />
               </SettingRow>
+              <SettingRow label="Mode Toggle" tooltip="Switch between Macro and Clicker modes">
+                <HotkeyInput
+                  value={settings.modeToggleHotkey}
+                  settingKey="modeToggleHotkey"
+                  onChange={changeHotkey}
+                  onFocusChange={handleHotkeyFocusChange}
+                />
+              </SettingRow>
             </Section>
 
             {/* Window */}

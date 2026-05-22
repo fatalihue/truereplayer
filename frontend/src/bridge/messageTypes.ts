@@ -174,6 +174,7 @@ export interface SettingsState {
   replayHotkey: string;
   profileKeyToggleHotkey: string;
   foregroundHotkey: string;
+  modeToggleHotkey: string;
   alwaysOnTop: boolean;
   minimizeToTray: boolean;
   runOnStartup: boolean;

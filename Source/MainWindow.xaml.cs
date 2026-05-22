@@ -408,6 +408,24 @@ namespace TrueReplayer
                         return;
                     }
 
+                    if (key == UserProfile.Current.ModeToggleHotkey)
+                    {
+                        // Same code path as the UI mode toggle — flip + cancel any running
+                        // ops, persist, push to React, refresh tray. SetCursorClickMode
+                        // handles flip+cancel; we own the persist+push+tray here because
+                        // the settings:change handler does those at the end of its switch.
+                        if (bridge != null)
+                        {
+                            bridge.SetCursorClickMode(!bridge.UseCursorClick);
+                            var saved = AppSettingsManager.Load();
+                            saved.UseCursorClick = bridge.UseCursorClick;
+                            AppSettingsManager.Save(saved);
+                            bridge.PushSettingsLoaded();
+                            TrayIconService.UpdateTrayIcon();
+                        }
+                        return;
+                    }
+
                     // PROFILE_STOP:: is fired by WhilePressed release to cancel a running replay.
                     // Must run even when IsReplayInProgress (that's the whole point).
                     // We intentionally do NOT call ClearActiveHold here — the hook thread already

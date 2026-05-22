@@ -58,6 +58,7 @@ namespace TrueReplayer.Services
             public string ReplayHotkey { get; set; } = "Ctrl+PageDown";
             public string ProfileKeyToggleHotkey { get; set; } = "Pause";
             public string ForegroundHotkey { get; set; } = "Ctrl+Insert";
+            public string ModeToggleHotkey { get; set; } = "ScrollLock";
             public bool ProfileKeyEnabled { get; set; } = true;
             public bool BrowserSelectorEnabled { get; set; } = true;
             public bool RunAsAdmin { get; set; } = false;
@@ -114,6 +115,7 @@ namespace TrueReplayer.Services
             profile.ReplayHotkey = s.ReplayHotkey;
             profile.ProfileKeyToggleHotkey = s.ProfileKeyToggleHotkey;
             profile.ForegroundHotkey = s.ForegroundHotkey;
+            profile.ModeToggleHotkey = s.ModeToggleHotkey;
             profile.ProfileKeyEnabled = s.ProfileKeyEnabled;
 
             // Sync Run on Startup registry key with saved setting

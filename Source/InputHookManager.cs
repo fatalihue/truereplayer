@@ -604,6 +604,12 @@ namespace TrueReplayer
                             OnHotkeyPressed?.Invoke(key);
                             return (IntPtr)1;
                         }
+
+                        if (key == UserProfile.Current.ModeToggleHotkey)
+                        {
+                            OnHotkeyPressed?.Invoke(key);
+                            return (IntPtr)1;
+                        }
                     }
                     else
                     {
@@ -611,7 +617,8 @@ namespace TrueReplayer
                         if (key == UserProfile.Current.RecordingHotkey
                             || key == UserProfile.Current.ReplayHotkey
                             || key == UserProfile.Current.ProfileKeyToggleHotkey
-                            || key == UserProfile.Current.ForegroundHotkey)
+                            || key == UserProfile.Current.ForegroundHotkey
+                            || key == UserProfile.Current.ModeToggleHotkey)
                         {
                             return (IntPtr)1;
                         }

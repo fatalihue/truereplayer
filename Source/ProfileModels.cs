@@ -40,6 +40,12 @@ namespace TrueReplayer.Models
         [JsonIgnore]
         public string ForegroundHotkey { get; set; } = "Ctrl+Insert";
 
+        // Flips UseCursorClick (Macro ↔ Clicker). Default ScrollLock — pairs with Pause as
+        // the other single-key status-indicator hotkey already in use, and is almost
+        // universally unused by other apps.
+        [JsonIgnore]
+        public string ModeToggleHotkey { get; set; } = "ScrollLock";
+
         [JsonIgnore]
         public bool RecordMouse { get; set; } = true;
         [JsonIgnore]

@@ -42,6 +42,7 @@ const defaultSettings = {
   replayHotkey: 'Ctrl+PageDown',
   profileKeyToggleHotkey: 'Pause',
   foregroundHotkey: 'Ctrl+Insert',
+  modeToggleHotkey: 'ScrollLock',
   alwaysOnTop: false,
   minimizeToTray: true,
   runOnStartup: true,

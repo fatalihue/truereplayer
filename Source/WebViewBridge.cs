@@ -724,6 +724,19 @@ namespace TrueReplayer
             SendMessage("profiles:updated", new { profiles, activeProfile = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName, profileOrder });
         }
 
+        // Flip Macro ↔ Clicker. Cancels any running replay/recording so the active state
+        // matches the new mode (Clicker ignores recorded actions and vice versa). Used by
+        // both the settings:change "useCursorClick" path and the ModeToggleHotkey global
+        // hotkey path — keeping the side-effects in one place.
+        public void SetCursorClickMode(bool useClicker)
+        {
+            UseCursorClick = useClicker;
+            if (replayService.IsReplaying)
+                mainController.StopReplayIfRunning();
+            if (recordingService.IsRecording)
+                recordingService.StopRecording();
+        }
+
         // Build a Clicker run config from the current bridge mirror state. Single source of
         // truth so the Replay-hotkey path (MainWindow) and the toggle-replay message path
         // (HandleReplayToggle) stay in sync — both call this instead of duplicating the
@@ -783,6 +796,7 @@ namespace TrueReplayer
                     replayHotkey = profile.ReplayHotkey,
                     profileKeyToggleHotkey = profile.ProfileKeyToggleHotkey,
                     foregroundHotkey = profile.ForegroundHotkey,
+                    modeToggleHotkey = profile.ModeToggleHotkey,
                     alwaysOnTop = profile.AlwaysOnTop,
                     minimizeToTray = profile.MinimizeToTray,
                     runOnStartup = TrayIconService.IsRunOnStartup(),
@@ -1082,6 +1096,7 @@ namespace TrueReplayer
                     replayHotkey = profile.ReplayHotkey,
                     profileKeyToggleHotkey = profile.ProfileKeyToggleHotkey,
                     foregroundHotkey = profile.ForegroundHotkey,
+                    modeToggleHotkey = profile.ModeToggleHotkey,
                     alwaysOnTop = profile.AlwaysOnTop,
                     minimizeToTray = profile.MinimizeToTray,
                     runOnStartup = TrayIconService.IsRunOnStartup(),
@@ -4636,6 +4651,7 @@ namespace TrueReplayer
                 ReplayHotkey = UserProfile.Current.ReplayHotkey,
                 ProfileKeyToggleHotkey = UserProfile.Current.ProfileKeyToggleHotkey,
                 ForegroundHotkey = UserProfile.Current.ForegroundHotkey,
+                ModeToggleHotkey = UserProfile.Current.ModeToggleHotkey,
                 ProfileKeyEnabled = ProfileKeyEnabled,
                 BrowserSelectorEnabled = BrowserSelectorEnabled,
                 RunAsAdmin = AppSettingsManager.Load().RunAsAdmin,
@@ -4645,7 +4661,7 @@ namespace TrueReplayer
 
         private static readonly HashSet<string> HotkeySettingKeys = new()
         {
-            "recordingHotkey", "replayHotkey", "profileKeyToggleHotkey", "foregroundHotkey"
+            "recordingHotkey", "replayHotkey", "profileKeyToggleHotkey", "foregroundHotkey", "modeToggleHotkey"
         };
 
         private static readonly Dictionary<string, string> HotkeyDisplayNames = new()
@@ -4654,6 +4670,7 @@ namespace TrueReplayer
             ["replayHotkey"] = "Replay",
             ["profileKeyToggleHotkey"] = "Profile Key Toggle",
             ["foregroundHotkey"] = "Foreground",
+            ["modeToggleHotkey"] = "Mode Toggle",
         };
 
         /// <summary>
@@ -4705,6 +4722,7 @@ namespace TrueReplayer
                 ["replayHotkey"] = UserProfile.Current.ReplayHotkey,
                 ["profileKeyToggleHotkey"] = UserProfile.Current.ProfileKeyToggleHotkey,
                 ["foregroundHotkey"] = UserProfile.Current.ForegroundHotkey,
+                ["modeToggleHotkey"] = UserProfile.Current.ModeToggleHotkey,
             };
 
             foreach (var kv in globalHotkeys)
@@ -4772,14 +4790,7 @@ namespace TrueReplayer
                     LoopIntervalEnabled = valueElement.GetBoolean();
                     break;
                 case "useCursorClick":
-                    UseCursorClick = valueElement.GetBoolean();
-                    // Switching modes mid-execution: cancel anything currently running so the
-                    // app's "active" state matches the new mode. Recording is also stopped — Clicker
-                    // ignores recorded actions, and switching back to Replay mid-recording is unusual.
-                    if (replayService.IsReplaying)
-                        mainController.StopReplayIfRunning();
-                    if (recordingService.IsRecording)
-                        recordingService.StopRecording();
+                    SetCursorClickMode(valueElement.GetBoolean());
                     break;
                 case "cursorClickButton":
                     CursorClickButton = valueElement.GetString() ?? "Left";
@@ -4859,6 +4870,9 @@ namespace TrueReplayer
                     break;
                 case "foregroundHotkey":
                     UserProfile.Current.ForegroundHotkey = valueElement.GetString() ?? "Ctrl+Insert";
+                    break;
+                case "modeToggleHotkey":
+                    UserProfile.Current.ModeToggleHotkey = valueElement.GetString() ?? "ScrollLock";
                     break;
                 case "runAsAdmin":
                     {
