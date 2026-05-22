@@ -293,7 +293,9 @@ namespace TrueReplayer.Services
         private const int MagPixelSize = 13;
         private const int MagDiameter = MagPixelCount * MagPixelSize;
         private const int MagLabelGap = 8;
-        private const int MagLabelHeight = 22;
+        // Two-line chip: X/Y coords + sampled HEX. Must match the actual rendered height so
+        // the flip-on-edge logic in DrawMagnifier + GetCurrentMagnifierRect lands cleanly.
+        private const int MagLabelHeight = 40;
         private const int MagOffset = 20;
         private const int MagTotalHeight = MagDiameter + MagLabelGap + MagLabelHeight;
 
@@ -473,19 +475,43 @@ namespace TrueReplayer.Services
             using (var borderPen = new Pen(Color.FromArgb(140, 255, 255, 255), 1.5f))
                 g.DrawEllipse(borderPen, circleRect);
 
-            // Coord chip below the disc. Same accent colour as the regular cursor
-            // label so the two surfaces feel like the same family.
-            string text = $"X: {absX}  Y: {absY}";
-            using var font = new Font("Segoe UI", 10f, FontStyle.Regular);
-            var size = g.MeasureString(text, font);
-            float chipW = size.Width + 14;
-            float chipH = size.Height + 6;
+            // Coord chip below the disc — TWO lines:
+            //   1. "X: {absX}  Y: {absY}"  — same accent colour as the regular cursor label
+            //   2. "#RRGGBB"               — hex of the pixel at the crosshair, sampled from
+            //      the in-memory screenshot. Bounds-checked so a near-edge cursor doesn't
+            //      throw. Hex uses a monospace face so digits don't shift width as the
+            //      cursor moves over colours like FF0000 → 010101.
+            string coordText = $"X: {absX}  Y: {absY}";
+            string hexText = "—";
+            if (_cursorPoint.X >= 0 && _cursorPoint.X < _screenshot.Width
+                && _cursorPoint.Y >= 0 && _cursorPoint.Y < _screenshot.Height)
+            {
+                hexText = TrueReplayer.Services.PixelColorService.ToHex(
+                    _screenshot.GetPixel(_cursorPoint.X, _cursorPoint.Y));
+            }
+
+            using var coordFont = new Font("Segoe UI", 10f, FontStyle.Regular);
+            using var hexFont = new Font("Consolas", 9.5f, FontStyle.Regular);
+            var coordSize = g.MeasureString(coordText, coordFont);
+            var hexSize = g.MeasureString(hexText, hexFont);
+
+            // Chip width = widest line + horizontal padding; height tracks the running
+            // MagLabelHeight constant. Centring each line independently inside the chip
+            // keeps the layout balanced when the two strings have very different widths
+            // (e.g. "X: 10  Y: 10" vs "#FFFFFF").
+            float chipW = Math.Max(coordSize.Width, hexSize.Width) + 14;
+            float chipH = MagLabelHeight;
             float chipX = magX + (MagDiameter - chipW) / 2;
             float chipY = magY + MagDiameter + MagLabelGap;
             using (var chipBg = new SolidBrush(Color.FromArgb(220, 0, 0, 0)))
                 g.FillRoundedRectangle(chipBg, chipX, chipY, chipW, chipH, 5);
             using (var chipFg = new SolidBrush(Color.FromArgb(255, 96, 205, 255)))
-                g.DrawString(text, font, chipFg, chipX + 7, chipY + 3);
+            {
+                float coordX = chipX + (chipW - coordSize.Width) / 2;
+                g.DrawString(coordText, coordFont, chipFg, coordX, chipY + 3);
+                float hexX = chipX + (chipW - hexSize.Width) / 2;
+                g.DrawString(hexText, hexFont, chipFg, hexX, chipY + 3 + coordSize.Height + 1);
+            }
 
             // Tracked rect = whole magnifier + label. Used by OnMouseMove to
             // invalidate the previous frame; without it the disc would smear.
