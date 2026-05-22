@@ -224,6 +224,22 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           clearTestMatchTimeout();
           setTestMatchResult({ found: r.found, score: r.score, x: r.x, y: r.y, w: r.w, h: r.h, error: r.error });
           setTestMatchRequestId(null);
+          // Auto-apply the matched rect as the search region when the test succeeds.
+          // Saves a click — the user just confirmed where the image is, so the most
+          // useful Search Region is "right around there". 80 px padding tolerates
+          // small UI shifts (resize, anti-aliasing) without wasting CPU on the rest
+          // of the screen. The user can still customise via Configure Region — and
+          // re-running Test with a manual region keeps overwriting it (intentional:
+          // Test is the source of truth for "where the image actually is").
+          if (r.found) {
+            const margin = 80;
+            setWaitImageSearchRegion({
+              x: Math.max(0, r.x - margin),
+              y: Math.max(0, r.y - margin),
+              w: r.w + margin * 2,
+              h: r.h + margin * 2,
+            });
+          }
         }
       } else if (msg.type === 'waitimage:searchRegionSet') {
         const r = msg.payload as { requestId: string; cancelled: boolean; x?: number; y?: number; w?: number; h?: number };
@@ -997,9 +1013,11 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   {testMatchRequestId != null ? 'Testing…' : 'Test match'}
                 </button>
               </div>
-              {/* Test match result — coloured by whether the score clears the tolerance threshold.
-                  Plus a quick-action to convert the found match into the search region (the easiest
-                  way to set an ROI accurately, since the user no longer has to eyeball it). */}
+              {/* Test match result — coloured by whether the score clears the
+                  tolerance threshold. When the match succeeds, the Search Region
+                  was already auto-set by the result handler above; the inline
+                  note here just confirms that so the user notices the side-effect
+                  and knows where to tweak it (Configure Region button below). */}
               {testMatchResult && !testMatchRequestId && (
                 <div
                   className={`mt-2 px-2 py-1.5 rounded text-[11px] font-mono border ${
@@ -1019,24 +1037,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                         {testMatchResult.found ? ' ✓' : ' — below tolerance'}
                       </div>
                       {testMatchResult.found && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            // 80px margin around the match — wide enough to tolerate small UI
-                            // shifts (resizing, anti-aliasing) without wasting CPU on full-screen.
-                            const margin = 80;
-                            setWaitImageSearchRegion({
-                              x: Math.max(0, testMatchResult.x - margin),
-                              y: Math.max(0, testMatchResult.y - margin),
-                              w: testMatchResult.w + margin * 2,
-                              h: testMatchResult.h + margin * 2,
-                            });
-                          }}
-                          className="mt-1.5 text-[10px] underline decoration-dotted hover:text-text-primary transition-colors"
-                          title="Auto-set the Search Region to a rect around this match"
-                        >
-                          → Use as search region (with 80px margin)
-                        </button>
+                        <div className="mt-1 text-[10px] opacity-80">
+                          Search region set to a ±80 px rect around this match. Use
+                          Configure Region below to fine-tune.
+                        </div>
                       )}
                     </>
                   )}
