@@ -1298,17 +1298,34 @@ export function loadThemeConfig(): ThemeConfig {
 
   try {
     const parsed = JSON.parse(raw);
-    if (parsed && parsed.version === 1 && parsed.baseThemeId) {
+    if (parsed && parsed.version >= 1 && parsed.baseThemeId) {
       // Merge UI settings with defaults for backwards compatibility (new fields)
-      return {
+      const merged: ThemeConfig = {
         ...parsed,
+        version: 2,
         uiSettings: { ...DEFAULT_UI_SETTINGS, ...parsed.uiSettings },
-      } as ThemeConfig;
+      };
+
+      // v1 → v2 migration: the palette pass swapped three action colours
+      // (PixelColor cyan → lime, Scroll deep mint → light mint, Pause amber →
+      // slate) to resolve hue clashes with Key and SendText. Only swap the
+      // user's stored value when it still matches the OLD default — that way
+      // anyone who deliberately picked one of those hex values keeps their
+      // choice intact. Fresh installs already get the new defaults via
+      // DEFAULT_UI_SETTINGS; this branch covers existing localStorage data.
+      if (parsed.version < 2) {
+        const ui = merged.uiSettings;
+        if (ui.actionPixelColorColor === '#22d3ee') ui.actionPixelColorColor = DEFAULT_UI_SETTINGS.actionPixelColorColor;
+        if (ui.actionScrollColor === '#6bcb77') ui.actionScrollColor = DEFAULT_UI_SETTINGS.actionScrollColor;
+        if (ui.actionPauseColor === '#fbbf24') ui.actionPauseColor = DEFAULT_UI_SETTINGS.actionPauseColor;
+      }
+
+      return merged;
     }
   } catch {
     // Not JSON — old format (plain theme ID string)
     if (getThemeById(raw)) {
-      return { version: 1, baseThemeId: raw, colorOverrides: {}, uiSettings: { ...DEFAULT_UI_SETTINGS } };
+      return { version: 2, baseThemeId: raw, colorOverrides: {}, uiSettings: { ...DEFAULT_UI_SETTINGS } };
     }
   }
 
@@ -1320,7 +1337,7 @@ export function saveThemeConfig(config: ThemeConfig): void {
 }
 
 export function makeDefaultConfig(): ThemeConfig {
-  return { version: 1, baseThemeId: DEFAULT_THEME_ID, colorOverrides: {}, uiSettings: { ...DEFAULT_UI_SETTINGS } };
+  return { version: 2, baseThemeId: DEFAULT_THEME_ID, colorOverrides: {}, uiSettings: { ...DEFAULT_UI_SETTINGS } };
 }
 
 // ── Theme Resolution ──
