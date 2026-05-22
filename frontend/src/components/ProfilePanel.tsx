@@ -1232,50 +1232,34 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
       {/* Context Menu */}
       {contextMenu && menuPos && (
-        // Profile row context menu — organised into 4 groups (mirrors the
-        // ActionTable row menu pass):
-        //   - State toggles     → Pin / Unpin · Disable / Enable
-        //   - Organization      → Move to folder ▸ · Rename · Duplicate · Open in Explorer
-        //   - Triggers          → Assign hotkey… · Assign hotstring… · Window target…
-        //   - Destructive       → Delete
-        // Trailing ellipsis on "Assign… / Window target…" follows the standard
-        // convention that the label opens a dialog rather than acting inline.
+        // Profile row context menu — five groups ordered by setup → state →
+        // occasional → destructive, so reading top-to-bottom matches the
+        // "create a profile and configure it" flow:
+        //
+        //   - Identity     → Rename · Move to folder ▸
+        //   - Triggers     → Assign hotkey… · Assign hotstring… · Window target…
+        //   - State        → Pin / Unpin · Disable / Enable
+        //   - Advanced     → Duplicate · Open in Explorer
+        //   - Destructive  → Delete
+        //
+        // Previous layout put State first and buried Triggers under it; the swap
+        // brings the most-relevant-after-create items (rename / hotkey) to the
+        // top, and isolates rarely-used items (Duplicate, Open in Explorer) in
+        // a dedicated Advanced bucket so they don't crowd the prime real estate.
         <div
           ref={contextMenuRef}
           className="fixed z-50 min-w-[180px] py-1 bg-bg-card border border-border-default rounded-md shadow-lg"
           style={{ left: menuPos.x, top: menuPos.y }}
         >
-          {/* ── Group 1: State toggles ── */}
-          {/* Pin / Unpin */}
-          {isPinned(contextMenu.profileName) ? (
-            <button
-              onClick={() => handleUnpinProfile(contextMenu.profileName)}
-              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-            >
-              <PinOff size={13} className="text-text-tertiary" />
-              Unpin
-            </button>
-          ) : (
-            <button
-              onClick={() => handlePinProfile(contextMenu.profileName)}
-              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-            >
-              <Pin size={13} className="text-text-tertiary" />
-              Pin
-            </button>
-          )}
-
+          {/* ── Identity ── */}
           <button
-            onClick={() => handleToggleDisable(contextMenu.profileName)}
+            onClick={() => handleRename(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
           >
-            <Ban size={13} className="text-text-tertiary" />
-            {profile?.isDisabled ? 'Enable' : 'Disable'}
+            <Pencil size={13} className="text-text-tertiary" />
+            Rename
           </button>
 
-          <div className="my-1 border-t border-border-subtle" />
-
-          {/* ── Group 2: Organization ── */}
           {/* Move to Folder submenu */}
           <div
             className="relative"
@@ -1324,39 +1308,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             )}
           </div>
 
-          <button
-            onClick={() => handleRename(contextMenu.profileName)}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-          >
-            <Pencil size={13} className="text-text-tertiary" />
-            Rename
-          </button>
-
-          {/* Duplicate — mirrors the toolbar header button. Per-row entry point is
-              useful when the user wants to duplicate a profile that isn't currently
-              the active one. */}
-          <button
-            onClick={() => handleDuplicate(contextMenu.profileName)}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-          >
-            <Copy size={13} className="text-text-tertiary" />
-            Duplicate
-          </button>
-
-          {/* Open in Explorer — opens the profile's .json file in the Windows
-              Explorer. Mirrors the toolbar header button but works for any
-              profile, not just the active one. */}
-          <button
-            onClick={() => { handleOpenFolder(contextMenu.profileName); setContextMenu(null); }}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-          >
-            <ExternalLink size={13} className="text-text-tertiary" />
-            Open in Explorer
-          </button>
-
           <div className="my-1 border-t border-border-subtle" />
 
-          {/* ── Group 3: Trigger dialogs ── */}
+          {/* ── Triggers — what makes the profile fire ──
+              Trailing ellipsis on the three labels follows the standard
+              convention that the label opens a dialog rather than acting
+              inline. */}
           <button
             onClick={() => handleAssignHotkey(contextMenu.profileName)}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
@@ -1377,6 +1334,57 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           >
             <Crosshair size={13} className="text-text-tertiary" />
             Window target…
+          </button>
+
+          <div className="my-1 border-t border-border-subtle" />
+
+          {/* ── State ── */}
+          {isPinned(contextMenu.profileName) ? (
+            <button
+              onClick={() => handleUnpinProfile(contextMenu.profileName)}
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+            >
+              <PinOff size={13} className="text-text-tertiary" />
+              Unpin
+            </button>
+          ) : (
+            <button
+              onClick={() => handlePinProfile(contextMenu.profileName)}
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+            >
+              <Pin size={13} className="text-text-tertiary" />
+              Pin
+            </button>
+          )}
+
+          <button
+            onClick={() => handleToggleDisable(contextMenu.profileName)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Ban size={13} className="text-text-tertiary" />
+            {profile?.isDisabled ? 'Enable' : 'Disable'}
+          </button>
+
+          <div className="my-1 border-t border-border-subtle" />
+
+          {/* ── Advanced — low-frequency / debug entry points ──
+              Duplicate is occasional ("make a variant of this profile"); Open
+              in Explorer is debug-tier ("show me the .json on disk"). Both used
+              to sit between Rename and Triggers, where they crowded out the
+              actions the user actually came here for. */}
+          <button
+            onClick={() => handleDuplicate(contextMenu.profileName)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Copy size={13} className="text-text-tertiary" />
+            Duplicate
+          </button>
+          <button
+            onClick={() => { handleOpenFolder(contextMenu.profileName); setContextMenu(null); }}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <ExternalLink size={13} className="text-text-tertiary" />
+            Open in Explorer
           </button>
 
           <div className="my-1 border-t border-border-subtle" />
