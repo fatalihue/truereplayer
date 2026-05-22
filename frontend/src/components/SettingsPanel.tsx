@@ -640,18 +640,18 @@ export function SettingsPanel() {
                 is actually mounted. Palette icon + purple hue mirrors the action's
                 own visual identity inside the editor. */}
             <Section icon={Palette} iconColor="#c084fc" title="Appearance" defaultOpen={false}>
-              <SettingRow
-                label="Custom theme"
-                tooltip="Open the Theme Editor to customise colours, font, row height, and per-action accents."
+              {/* Single full-width button — the section is one-action only, so the
+                  label/button pair the other Sections use would look lopsided here.
+                  Tooltip carries the explanation that the "Custom theme" label
+                  previously offered. */}
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('cmd:themeeditor'))}
+                title="Customise colours, font, row height, and per-action accents."
+                className="w-full flex items-center justify-center gap-1.5 h-7 px-3 rounded text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default hover:bg-bg-card hover:text-text-primary transition-colors"
               >
-                <button
-                  onClick={() => window.dispatchEvent(new CustomEvent('cmd:themeeditor'))}
-                  className="flex items-center gap-1.5 h-7 px-3 rounded text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default hover:bg-bg-card hover:text-text-primary transition-colors"
-                >
-                  <Palette size={11} />
-                  Open Theme Editor
-                </button>
-              </SettingRow>
+                <Palette size={11} />
+                Open Theme Editor
+              </button>
             </Section>
 
             {/* Updates */}
