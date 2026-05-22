@@ -179,12 +179,20 @@ namespace TrueReplayer.Services
                 g.DrawString(hint, font, textBrush, hx, hy);
             }
 
-            // Cursor coord callout — drawn last so it sits above the overlay tint and any
+            // Cursor callout — drawn last so it sits above the overlay tint and any
             // selection rect. Skipped once a selection is committed (hasSelection && !drag)
             // because the click already landed and the value is captured.
+            //
+            // pointPick mode (Wait Pixel eyedropper) gets a ShareX-style zoom magnifier
+            // because precision matters at the pixel level — clicking a 1-pixel target
+            // with the system cursor alone is hit-or-miss. Other modes (region drag,
+            // recapture, etc) only need the coord readout.
             if (!_hasSelection || _isDragging)
             {
-                DrawCursorCoords(g);
+                if (_pointPick)
+                    DrawMagnifier(g);
+                else
+                    DrawCursorCoords(g);
             }
         }
 
@@ -277,27 +285,54 @@ namespace TrueReplayer.Services
             Invalidate(dirty);
         }
 
-        // Approximates where the label WILL be drawn on the next paint. Used by
-        // OnMouseMove to know what area to invalidate. Over-estimates width (9 px/char
-        // instead of the empirical ~7 px/char) so the dirty rect always covers what
-        // MeasureString will eventually produce — under-estimating leaves a trail.
+        // Magnifier sizing constants — kept on the type so ComputeCursorLabelRect
+        // and DrawMagnifier agree without copy-pasting numbers. 11×11 grid (odd so
+        // the centre pixel sits exactly on the cursor) at 13 px each = 143 px disc,
+        // plus a label and gap below.
+        private const int MagPixelCount = 11;
+        private const int MagPixelSize = 13;
+        private const int MagDiameter = MagPixelCount * MagPixelSize;
+        private const int MagLabelGap = 8;
+        private const int MagLabelHeight = 22;
+        private const int MagOffset = 20;
+        private const int MagTotalHeight = MagDiameter + MagLabelGap + MagLabelHeight;
+
+        // Approximates where the cursor callout WILL be drawn on the next paint.
+        // Used by OnMouseMove to know what area to invalidate.
+        //   • Regular modes → just the coord label (over-estimates width to absorb
+        //     font-metric drift; under-estimating leaves a smeared trail).
+        //   • pointPick mode → the whole magnifier disc plus label, with margin for
+        //     the dropshadow / circle stroke. Same flip-on-edge logic.
         // The actual paint rect is captured back into _lastCursorLabelRect inside
-        // DrawCursorCoords, which is the source of truth on the next move.
+        // the drawing methods so the next move invalidates exactly the touched pixels.
         private Rectangle ComputeCursorLabelRect()
         {
             if (!_hasCursor) return Rectangle.Empty;
+
+            if (_pointPick)
+            {
+                // Total bounding box of the magnifier + its coord label below.
+                int lx = _cursorPoint.X + MagOffset;
+                int ly = _cursorPoint.Y + MagOffset;
+                if (lx + MagDiameter > ClientRectangle.Width)  lx = _cursorPoint.X - MagOffset - MagDiameter;
+                if (ly + MagTotalHeight > ClientRectangle.Height) ly = _cursorPoint.Y - MagOffset - MagTotalHeight;
+                if (lx < 0) lx = 0;
+                if (ly < 0) ly = 0;
+                return new Rectangle(lx, ly, MagDiameter, MagTotalHeight);
+            }
+
             int absX = _cursorPoint.X + _virtualOriginX;
             int absY = _cursorPoint.Y + _virtualOriginY;
             string text = $"{absX}, {absY}";
             int labelW = (int)Math.Ceiling(text.Length * 9f) + 12;  // generous overshoot
             int labelH = 14 + 6;
-            int lx = _cursorPoint.X + 16;
-            int ly = _cursorPoint.Y + 16;
-            if (lx + labelW > ClientRectangle.Width)  lx = _cursorPoint.X - 16 - labelW;
-            if (ly + labelH > ClientRectangle.Height) ly = _cursorPoint.Y - 16 - labelH;
-            if (lx < 0) lx = 0;
-            if (ly < 0) ly = 0;
-            return new Rectangle(lx, ly, labelW, labelH);
+            int sx = _cursorPoint.X + 16;
+            int sy = _cursorPoint.Y + 16;
+            if (sx + labelW > ClientRectangle.Width)  sx = _cursorPoint.X - 16 - labelW;
+            if (sy + labelH > ClientRectangle.Height) sy = _cursorPoint.Y - 16 - labelH;
+            if (sx < 0) sx = 0;
+            if (sy < 0) sy = 0;
+            return new Rectangle(sx, sy, labelW, labelH);
         }
 
         // Renders an "(x, y)" callout near the cursor showing the absolute virtual-screen
@@ -336,6 +371,125 @@ namespace TrueReplayer.Services
             // FIRST move (when this hasn't been set yet) or when the rect rebound from a
             // flip — the inflate(8,8) in OnMouseMove absorbs that drift.
             _lastCursorLabelRect = new Rectangle((int)lx, (int)ly, (int)Math.Ceiling(labelW), (int)Math.Ceiling(labelH));
+        }
+
+        // ShareX-style zoom magnifier. Renders an 11×11 patch of the in-memory
+        // screenshot centred on the cursor, amplified ~13× with nearest-neighbour
+        // so individual pixels are crisp squares. A crosshair points at the centre
+        // pixel — the one the click will actually capture — and the absolute coords
+        // sit in a chip below the disc.
+        //
+        // Used only in pointPick mode. The system cursor alone makes 1-pixel
+        // colour-picking essentially a guessing game; this disc removes the
+        // ambiguity (the user sees exactly which pixel will be sampled).
+        private void DrawMagnifier(Graphics g)
+        {
+            if (!_hasCursor) return;
+            int absX = _cursorPoint.X + _virtualOriginX;
+            int absY = _cursorPoint.Y + _virtualOriginY;
+
+            // Position with the same flip-on-edge rules as DrawCursorCoords. Total
+            // box includes the label below; if the disc alone would clip, flip
+            // vertically before the label clipping logic runs.
+            int magX = _cursorPoint.X + MagOffset;
+            int magY = _cursorPoint.Y + MagOffset;
+            if (magX + MagDiameter > ClientRectangle.Width)
+                magX = _cursorPoint.X - MagOffset - MagDiameter;
+            if (magY + MagTotalHeight > ClientRectangle.Height)
+                magY = _cursorPoint.Y - MagOffset - MagTotalHeight;
+            if (magX < 0) magX = 0;
+            if (magY < 0) magY = 0;
+
+            var circleRect = new Rectangle(magX, magY, MagDiameter, MagDiameter);
+
+            // Dark backdrop so out-of-bounds source pixels (near screen edges) read
+            // as "void" instead of garbage. Sub-pixel circle border softens the
+            // clipped edge.
+            using (var bg = new SolidBrush(Color.FromArgb(235, 18, 18, 18)))
+                g.FillEllipse(bg, circleRect);
+
+            // Clip to the disc, then blit the screenshot patch with
+            // NearestNeighbour for pixel-perfect zoom (no smoothing).
+            using (var clip = new GraphicsPath())
+            {
+                clip.AddEllipse(circleRect);
+                g.SetClip(clip);
+
+                int halfGrid = MagPixelCount / 2;
+                var srcRect = new Rectangle(
+                    _cursorPoint.X - halfGrid,
+                    _cursorPoint.Y - halfGrid,
+                    MagPixelCount, MagPixelCount);
+
+                var oldInterp = g.InterpolationMode;
+                var oldPixel = g.PixelOffsetMode;
+                g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                try
+                {
+                    g.DrawImage(_screenshot, circleRect, srcRect, GraphicsUnit.Pixel);
+                }
+                finally
+                {
+                    g.InterpolationMode = oldInterp;
+                    g.PixelOffsetMode = oldPixel;
+                }
+
+                // Faint grid between amplified pixels — half-alpha white so it sits
+                // on top of any colour without dominating. Skipping the i=0 and
+                // i=MagPixelCount edges (they land on the disc border anyway).
+                using var gridPen = new Pen(Color.FromArgb(35, 255, 255, 255));
+                for (int i = 1; i < MagPixelCount; i++)
+                {
+                    int gx = magX + i * MagPixelSize;
+                    int gy = magY + i * MagPixelSize;
+                    g.DrawLine(gridPen, gx, magY, gx, magY + MagDiameter);
+                    g.DrawLine(gridPen, magX, gy, magX + MagDiameter, gy);
+                }
+
+                // Crosshair — accent-coloured lines through the centre, broken
+                // around the centre pixel so the target colour stays visible.
+                using var crossPen = new Pen(Color.FromArgb(200, 96, 205, 255), 2f);
+                int pxCenterX = magX + MagDiameter / 2;
+                int pxCenterY = magY + MagDiameter / 2;
+                int gap = MagPixelSize / 2 + 2;
+                g.DrawLine(crossPen, magX + 4, pxCenterY, pxCenterX - gap, pxCenterY);
+                g.DrawLine(crossPen, pxCenterX + gap, pxCenterY, magX + MagDiameter - 4, pxCenterY);
+                g.DrawLine(crossPen, pxCenterX, magY + 4, pxCenterX, pxCenterY - gap);
+                g.DrawLine(crossPen, pxCenterX, pxCenterY + gap, pxCenterX, magY + MagDiameter - 4);
+
+                // Highlight the exact target pixel — 1.5 px white outline around the
+                // centre cell so the user can see which pixel the click will sample,
+                // even when the underlying colour is white-ish.
+                int halfPx = (MagPixelCount / 2) * MagPixelSize;
+                using var centerPen = new Pen(Color.White, 1.5f);
+                g.DrawRectangle(centerPen, magX + halfPx, magY + halfPx, MagPixelSize, MagPixelSize);
+
+                g.ResetClip();
+            }
+
+            // Disc border — 1.5 px subtle white outside the clip so it doesn't
+            // overlap with the centre highlight.
+            using (var borderPen = new Pen(Color.FromArgb(140, 255, 255, 255), 1.5f))
+                g.DrawEllipse(borderPen, circleRect);
+
+            // Coord chip below the disc. Same accent colour as the regular cursor
+            // label so the two surfaces feel like the same family.
+            string text = $"X: {absX}  Y: {absY}";
+            using var font = new Font("Segoe UI", 10f, FontStyle.Regular);
+            var size = g.MeasureString(text, font);
+            float chipW = size.Width + 14;
+            float chipH = size.Height + 6;
+            float chipX = magX + (MagDiameter - chipW) / 2;
+            float chipY = magY + MagDiameter + MagLabelGap;
+            using (var chipBg = new SolidBrush(Color.FromArgb(220, 0, 0, 0)))
+                g.FillRoundedRectangle(chipBg, chipX, chipY, chipW, chipH, 5);
+            using (var chipFg = new SolidBrush(Color.FromArgb(255, 96, 205, 255)))
+                g.DrawString(text, font, chipFg, chipX + 7, chipY + 3);
+
+            // Tracked rect = whole magnifier + label. Used by OnMouseMove to
+            // invalidate the previous frame; without it the disc would smear.
+            _lastCursorLabelRect = new Rectangle(magX, magY, MagDiameter, MagTotalHeight);
         }
 
         private void OnMouseUp(object? sender, MouseEventArgs e)
