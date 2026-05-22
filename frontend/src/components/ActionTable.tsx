@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronsDownUp, ChevronsUpDown, Plus, MoreHorizontal, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical, Timer, LayoutGrid, Check } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical, Timer, LayoutGrid, Check } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -138,18 +138,6 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
   const contextMenuEnabled = !buttonStates.recordingActive && !buttonStates.replayActive;
 
   // Row action button handler (opens context menu at button position)
-  const handleRowActionClick = useCallback((idx: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!contextMenuEnabled) return;
-    if (!selectedIndices.has(idx)) {
-      setSelectedIndices(new Set([idx]));
-      lastClickedIndex.current = idx;
-    }
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setActiveSubmenu(null);
-    setContextMenu({ x: rect.left, y: rect.bottom + 4, rowIndex: idx });
-  }, [contextMenuEnabled, selectedIndices]);
-
   // Suppress hotkeys while SendText edit dialog or inline key editing is active
 
   // Clear selection when recording stops so next recording appends normally
@@ -847,12 +835,13 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
         style={{ gridTemplateColumns: [
           '28px', '50px',
           ...(columnVisibility.action ? ['140px'] : []),
-          ...(columnVisibility.key ? ['100px'] : []),
+          // 100 + 12 px reclaimed from the trailing toggle-columns slot.
+          ...(columnVisibility.key ? ['112px'] : []),
           ...(columnVisibility.x ? ['65px'] : []),
           ...(columnVisibility.y ? ['65px'] : []),
           ...(columnVisibility.delay ? ['70px'] : []),
           ...(columnVisibility.notes ? ['1fr'] : []),
-          '36px',
+          '24px',
         ].join(' ') }}
       >
         <span className="flex items-center justify-center">
@@ -933,12 +922,12 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
             <col style={{ width: 28 }} />
             <col style={{ width: 50 }} />
             {columnVisibility.action && <col style={{ width: 140 }} />}
-            {columnVisibility.key && <col style={{ width: 100 }} />}
+            {columnVisibility.key && <col style={{ width: 112 }} />}
             {columnVisibility.x && <col style={{ width: 65 }} />}
             {columnVisibility.y && <col style={{ width: 65 }} />}
             {columnVisibility.delay && <col style={{ width: 70 }} />}
             {columnVisibility.notes && <col />}
-            <col style={{ width: 36 }} />
+            <col style={{ width: 24 }} />
           </colgroup>
           <tbody ref={tbodyRef}>
             {actions.map((action, idx) => {
@@ -1286,15 +1275,9 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
                   </td>
                   )}
 
-                  {/* Row action */}
-                  <td className="w-9">
-                    <button
-                      onClick={(e) => handleRowActionClick(idx, e)}
-                      className="w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-100 text-text-tertiary hover:text-text-primary transition-opacity"
-                    >
-                      <MoreHorizontal size={14} />
-                    </button>
-                  </td>
+                  {/* Spacer to match the header's 24 px Toggle-Columns slot. Right-click
+                      opens the row's context menu (was previously the "…" button). */}
+                  <td />
                 </tr>
               );
             })}
