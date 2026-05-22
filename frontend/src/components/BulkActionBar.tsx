@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Clock, Copy, Trash2, X, Crosshair, MessageSquare, Eye, EyeOff, ArrowUpToLine, ArrowDownToLine } from 'lucide-react';
+import { Clock, Trash2, X, Crosshair, MessageSquare, Eye, EyeOff, ArrowUpToLine, ArrowDownToLine } from 'lucide-react';
 
 interface BulkActionBarProps {
   selectedCount: number;
@@ -12,7 +12,6 @@ interface BulkActionBarProps {
   canMoveDown: boolean;
   onClearSelection: () => void;
   onDelete: () => void;
-  onDuplicate: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onSetDelay: (delay: number) => void;
@@ -29,7 +28,6 @@ export function BulkActionBar({
   canMoveDown,
   onClearSelection,
   onDelete,
-  onDuplicate,
   onMoveUp,
   onMoveDown,
   onSetDelay,
@@ -117,6 +115,28 @@ export function BulkActionBar({
           </div>
         ) : (
           <>
+            {/* Move Up / Move Down — first group, mirrors the reorder gesture users
+                already use via Alt+↑/↓. Only enabled when the selection isn't already
+                at the start / end of the list. */}
+            <button
+              onClick={onMoveUp}
+              disabled={!canMoveUp}
+              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-tertiary"
+              title="Move selection up (Alt+↑)"
+            >
+              <ArrowUpToLine size={11} />
+            </button>
+            <button
+              onClick={onMoveDown}
+              disabled={!canMoveDown}
+              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-tertiary"
+              title="Move selection down (Alt+↓)"
+            >
+              <ArrowDownToLine size={11} />
+            </button>
+
+            <div className="w-px h-3.5 bg-border-subtle mx-0.5" />
+
             {/* Set Delay */}
             <button
               onClick={() => openInput('delay')}
@@ -128,8 +148,7 @@ export function BulkActionBar({
             </button>
 
             {/* Set X / Y — Crosshair icon mirrors the Copy Coordinates entry in the row
-                context menu, so coord-related UI uses the same glyph across the app
-                (previously Hash, which reads as "number / tag" not "coordinate"). */}
+                context menu, so coord-related UI uses the same glyph across the app. */}
             <button
               onClick={() => openInput('x')}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
@@ -160,49 +179,10 @@ export function BulkActionBar({
 
             <div className="w-px h-3.5 bg-border-subtle mx-0.5" />
 
-            {/* Move Up / Move Down — moved here from the toolbar because these only
-                make sense with a selection (the toolbar versions were dead weight
-                otherwise). Same payload (actions:reorder) under the hood; the
-                Alt+↑/↓ hotkey continues to work from anywhere. Disabled when the
-                selection is already at the top / bottom of the list. */}
-            <button
-              onClick={onMoveUp}
-              disabled={!canMoveUp}
-              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-tertiary"
-              title="Move selection up (Alt+↑)"
-            >
-              <ArrowUpToLine size={11} />
-            </button>
-            <button
-              onClick={onMoveDown}
-              disabled={!canMoveDown}
-              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-tertiary"
-              title="Move selection down (Alt+↓)"
-            >
-              <ArrowDownToLine size={11} />
-            </button>
-
-            {/* Copy was removed here — redundant with the toolbar's Copy button
-                which is always visible and already does "copy selection if any,
-                else copy all". Having two Copy buttons on screen at the same time
-                while rows were selected just added clutter. Ctrl+C still works
-                from anywhere. */}
-
-            {/* Duplicate */}
-            <button
-              onClick={onDuplicate}
-              className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
-              title="Duplicate selected"
-            >
-              <Copy size={11} />
-              Duplicate
-            </button>
-
             {/* Skip / Enable — Eye / EyeOff mirrors the row context menu's Skip toggle
-                so the same visual vocabulary travels across both surfaces. Active
-                colour standardised to text-accent-light (matches the toolbar's
-                active dropdown state); the previous text-accent (solid) was the
-                lone holdout from the active-state cleanup pass. */}
+                so the same visual vocabulary travels across both surfaces. Duplicate
+                was removed from here; the row context menu still has it, which is the
+                more discoverable path for the rare cases users want a copy of a row. */}
             <button
               onClick={onToggleSkip}
               className={`flex items-center gap-1 h-6 px-2 rounded text-[11px] transition-colors ${
@@ -216,13 +196,8 @@ export function BulkActionBar({
               {allSelectedSkipped ? 'Enable' : 'Skip'}
             </button>
 
-            <div className="w-px h-3.5 bg-border-subtle mx-0.5" />
-
-            {/* Delete — kbd hint kept in the tooltip only; inline "Del" badge made
-                the bar overflow at narrower window widths and bumped the "N selected"
-                text into wrapping. Tooltip is enough — the row context menu's "Del"
-                badge has a justify-between layout that absorbs it cleanly; this bar
-                is denser. */}
+            {/* Delete — destructive group of one. Tooltip carries the Del hotkey
+                hint; inline "Del" badge would bump the bar over at narrow widths. */}
             <button
               onClick={onDelete}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-recording hover:text-recording/80 hover:bg-recording-bg transition-colors"

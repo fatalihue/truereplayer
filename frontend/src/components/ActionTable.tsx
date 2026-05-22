@@ -1472,10 +1472,6 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
             showToast(`Deleted ${selectedIndices.size} action(s)`, 'success');
             setSelectedIndices(new Set());
           }}
-          onDuplicate={() => {
-            send({ type: 'actions:duplicate', payload: { indices: selSorted } });
-            showToast(`Duplicated ${selectedIndices.size} action(s)`, 'success');
-          }}
           onMoveUp={() => {
             // Mirror the Alt+↑ hotkey logic: shift the contiguous indices one slot up
             // and re-emit selection:set so the highlighted rows follow their new
