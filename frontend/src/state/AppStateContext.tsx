@@ -41,7 +41,7 @@ const defaultSettings = {
   recordingHotkey: 'Ctrl+PageUp',
   replayHotkey: 'Ctrl+PageDown',
   profileKeyToggleHotkey: 'Pause',
-  foregroundHotkey: 'Ctrl+Insert',
+  foregroundHotkey: 'Insert',
   modeToggleHotkey: 'ScrollLock',
   alwaysOnTop: false,
   minimizeToTray: true,

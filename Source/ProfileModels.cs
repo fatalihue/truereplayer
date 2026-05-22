@@ -38,7 +38,7 @@ namespace TrueReplayer.Models
         public string ProfileKeyToggleHotkey { get; set; } = "Pause";
 
         [JsonIgnore]
-        public string ForegroundHotkey { get; set; } = "Ctrl+Insert";
+        public string ForegroundHotkey { get; set; } = "Insert";
 
         // Flips UseCursorClick (Macro ↔ Clicker). Default ScrollLock — pairs with Pause as
         // the other single-key status-indicator hotkey already in use, and is almost

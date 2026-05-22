@@ -4869,7 +4869,7 @@ namespace TrueReplayer
                     UserProfile.Current.ProfileKeyToggleHotkey = valueElement.GetString() ?? "Pause";
                     break;
                 case "foregroundHotkey":
-                    UserProfile.Current.ForegroundHotkey = valueElement.GetString() ?? "Ctrl+Insert";
+                    UserProfile.Current.ForegroundHotkey = valueElement.GetString() ?? "Insert";
                     break;
                 case "modeToggleHotkey":
                     UserProfile.Current.ModeToggleHotkey = valueElement.GetString() ?? "ScrollLock";

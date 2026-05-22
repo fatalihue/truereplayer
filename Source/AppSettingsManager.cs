@@ -57,7 +57,7 @@ namespace TrueReplayer.Services
             public string RecordingHotkey { get; set; } = "Ctrl+PageUp";
             public string ReplayHotkey { get; set; } = "Ctrl+PageDown";
             public string ProfileKeyToggleHotkey { get; set; } = "Pause";
-            public string ForegroundHotkey { get; set; } = "Ctrl+Insert";
+            public string ForegroundHotkey { get; set; } = "Insert";
             public string ModeToggleHotkey { get; set; } = "ScrollLock";
             public bool ProfileKeyEnabled { get; set; } = true;
             public bool BrowserSelectorEnabled { get; set; } = true;
