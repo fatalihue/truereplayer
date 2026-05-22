@@ -2039,58 +2039,62 @@ namespace TrueReplayer
                 return;
             }
 
-            RegionSelectionResult? selection = null;
-
-            // Run overlay on STA thread (WinForms requirement)
-            var thread = new Thread(() =>
+            try
             {
-                System.Windows.Forms.Application.EnableVisualStyles();
-                using var overlay = new ScreenOverlayForm(screenshot);
-                overlay.ShowDialog();
-                selection = overlay.GetSelectionAsync().Result;
-            });
-            thread.SetApartmentState(ApartmentState.STA);
-            thread.Start();
-            await Task.Run(() => thread.Join());
+                RegionSelectionResult? selection = null;
 
-            // Restore main window
-            dispatcherQueue.TryEnqueue(() =>
-            {
-                NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
-            });
-
-            if (selection?.CroppedImage == null) return; // Cancelled or region-only (no image)
-
-            // Save the cropped image
-            string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
-            string imagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, profileName);
-            selection.CroppedImage.Dispose();
-
-            // Insert the action
-            int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
-            dispatcherQueue.TryEnqueue(() =>
-            {
-                actions.Insert(insertIndex, new ActionItem
+                // Run overlay on STA thread (WinForms requirement)
+                var thread = new Thread(() =>
                 {
-                    ActionType = "WaitImage",
-                    ImagePath = imagePath,
-                    Timeout = 5000,
-                    Confidence = 0.8,
-                    Delay = delay,
-                    Key = "",
-                    Comment = ""
+                    System.Windows.Forms.Application.EnableVisualStyles();
+                    using var overlay = new ScreenOverlayForm(screenshot);
+                    overlay.ShowDialog();
+                    selection = overlay.GetSelectionAsync().Result;
                 });
-                for (int i = 0; i < actions.Count; i++)
-                    actions[i].RowNumber = i + 1;
-                HasUnsavedChanges = true;
-                PushActionsUpdate();
-                mainController.UpdateButtonStates();
-                // Auto-open the editor for the freshly inserted row. Capturing the
-                // reference image is only step one — the user still needs to tune
-                // tolerance / timeout / on-timeout / click-on-match. Opening the
-                // sheet now saves a click and keeps the configuration flow linear.
-                SendMessage("sheet:openIndex", new { index = insertIndex });
-            });
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                await Task.Run(() => thread.Join());
+
+                // Restore main window
+                dispatcherQueue.TryEnqueue(() =>
+                {
+                    NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
+                });
+
+                if (selection?.CroppedImage == null) return; // Cancelled or region-only (no image)
+
+                // Save the cropped image
+                string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
+                string imagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, profileName);
+                selection.CroppedImage.Dispose();
+
+                // Insert the action
+                int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
+                dispatcherQueue.TryEnqueue(() =>
+                {
+                    actions.Insert(insertIndex, new ActionItem
+                    {
+                        ActionType = "WaitImage",
+                        ImagePath = imagePath,
+                        Timeout = 5000,
+                        Confidence = 0.8,
+                        Delay = delay,
+                        Key = "",
+                        Comment = ""
+                    });
+                    for (int i = 0; i < actions.Count; i++)
+                        actions[i].RowNumber = i + 1;
+                    HasUnsavedChanges = true;
+                    PushActionsUpdate();
+                    mainController.UpdateButtonStates();
+                    // Auto-open the editor for the freshly inserted row.
+                    SendMessage("sheet:openIndex", new { index = insertIndex });
+                });
+            }
+            finally
+            {
+                screenshot.Dispose();
+            }
         }
 
         private void HandleInsertWaitPixelColor(JsonElement payload)
@@ -2126,50 +2130,55 @@ namespace TrueReplayer
                 return;
             }
 
-            RegionSelectionResult? selection = null;
-            var thread = new Thread(() =>
+            try
             {
-                System.Windows.Forms.Application.EnableVisualStyles();
-                using var overlay = new ScreenOverlayForm(
-                    screenshot,
-                    regionOnly: false,
-                    pointPick: true,
-                    hintText: "Click on the pixel to watch — colour and coords are captured  •  ESC to cancel");
-                overlay.ShowDialog();
-                selection = overlay.GetSelectionAsync().Result;
-            });
-            thread.SetApartmentState(ApartmentState.STA);
-            thread.Start();
-            await Task.Run(() => thread.Join());
-
-            dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
-
-            // Cancel (Esc) or out-of-bounds click → nothing inserted.
-            if (selection == null || selection.PickedColor == null) return;
-
-            int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
-            dispatcherQueue.TryEnqueue(() =>
-            {
-                actions.Insert(insertIndex, new ActionItem
+                RegionSelectionResult? selection = null;
+                var thread = new Thread(() =>
                 {
-                    ActionType = "WaitPixelColor",
-                    Key = "",
-                    Delay = delay,
-                    Timeout = 5000,
-                    PixelX = selection.ScreenX,
-                    PixelY = selection.ScreenY,
-                    PixelColor = PixelColorService.ToHex(selection.PickedColor.Value),
+                    System.Windows.Forms.Application.EnableVisualStyles();
+                    using var overlay = new ScreenOverlayForm(
+                        screenshot,
+                        regionOnly: false,
+                        pointPick: true,
+                        hintText: "Click on the pixel to watch — colour and coords are captured  •  ESC to cancel");
+                    overlay.ShowDialog();
+                    selection = overlay.GetSelectionAsync().Result;
                 });
-                for (int i = 0; i < actions.Count; i++)
-                    actions[i].RowNumber = i + 1;
-                HasUnsavedChanges = true;
-                PushActionsUpdate();
-                mainController.UpdateButtonStates();
-                // Match WaitImage's insert flow: open the editor on the new row so
-                // the user can tune tolerance / timeout / invert without having to
-                // hunt for the row and click it manually.
-                SendMessage("sheet:openIndex", new { index = insertIndex });
-            });
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                await Task.Run(() => thread.Join());
+
+                dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+
+                // Cancel (Esc) or out-of-bounds click → nothing inserted.
+                if (selection == null || selection.PickedColor == null) return;
+
+                int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
+                dispatcherQueue.TryEnqueue(() =>
+                {
+                    actions.Insert(insertIndex, new ActionItem
+                    {
+                        ActionType = "WaitPixelColor",
+                        Key = "",
+                        Delay = delay,
+                        Timeout = 5000,
+                        PixelX = selection.ScreenX,
+                        PixelY = selection.ScreenY,
+                        PixelColor = PixelColorService.ToHex(selection.PickedColor.Value),
+                    });
+                    for (int i = 0; i < actions.Count; i++)
+                        actions[i].RowNumber = i + 1;
+                    HasUnsavedChanges = true;
+                    PushActionsUpdate();
+                    mainController.UpdateButtonStates();
+                    // Match WaitImage's insert flow: open the editor on the new row.
+                    SendMessage("sheet:openIndex", new { index = insertIndex });
+                });
+            }
+            finally
+            {
+                screenshot.Dispose();
+            }
         }
 
         private void HandleWaitImageRecapture(JsonElement payload)
@@ -2197,41 +2206,47 @@ namespace TrueReplayer
                 return;
             }
 
-            RegionSelectionResult? selection = null;
-            var thread = new Thread(() =>
+            try
             {
-                System.Windows.Forms.Application.EnableVisualStyles();
-                using var overlay = new ScreenOverlayForm(screenshot);
-                overlay.ShowDialog();
-                selection = overlay.GetSelectionAsync().Result;
-            });
-            thread.SetApartmentState(ApartmentState.STA);
-            thread.Start();
-            await Task.Run(() => thread.Join());
-
-            dispatcherQueue.TryEnqueue(() =>
-            {
-                NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
-            });
-
-            if (selection?.CroppedImage == null) return; // Cancelled
-
-            // Save new image. We intentionally keep the old PNG on disk so undo can restore the
-            // previous reference image. Orphan PNGs are cleaned up at app startup by
-            // ImageStorageService.CleanupOrphanImages.
-            string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
-            string newImagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, profileName);
-            selection.CroppedImage.Dispose();
-
-            dispatcherQueue.TryEnqueue(() =>
-            {
-                if (index < actions.Count)
+                RegionSelectionResult? selection = null;
+                var thread = new Thread(() =>
                 {
-                    actions[index].ImagePath = newImagePath;
-                    HasUnsavedChanges = true;
-                    PushActionsUpdate();
-                }
-            });
+                    System.Windows.Forms.Application.EnableVisualStyles();
+                    using var overlay = new ScreenOverlayForm(screenshot);
+                    overlay.ShowDialog();
+                    selection = overlay.GetSelectionAsync().Result;
+                });
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                await Task.Run(() => thread.Join());
+
+                dispatcherQueue.TryEnqueue(() =>
+                {
+                    NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
+                });
+
+                if (selection?.CroppedImage == null) return; // Cancelled
+
+                // Keep the old PNG on disk so undo can restore the previous reference image.
+                // Orphan PNGs are cleaned at app startup by ImageStorageService.CleanupOrphanImages.
+                string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
+                string newImagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, profileName);
+                selection.CroppedImage.Dispose();
+
+                dispatcherQueue.TryEnqueue(() =>
+                {
+                    if (index < actions.Count)
+                    {
+                        actions[index].ImagePath = newImagePath;
+                        HasUnsavedChanges = true;
+                        PushActionsUpdate();
+                    }
+                });
+            }
+            finally
+            {
+                screenshot.Dispose();
+            }
         }
 
         // Single-shot match against the current screen — powers the "Test match" calibration
@@ -2369,37 +2384,44 @@ namespace TrueReplayer
                 return;
             }
 
-            RegionSelectionResult? selection = null;
-            var thread = new Thread(() =>
+            try
             {
-                System.Windows.Forms.Application.EnableVisualStyles();
-                using var overlay = new ScreenOverlayForm(
-                    screenshot,
-                    regionOnly: false,
-                    pointPick: true,
-                    hintText: "Click anywhere on screen to set X/Y  •  ESC to cancel");
-                overlay.ShowDialog();
-                selection = overlay.GetSelectionAsync().Result;
-            });
-            thread.SetApartmentState(ApartmentState.STA);
-            thread.Start();
-            await Task.Run(() => thread.Join());
+                RegionSelectionResult? selection = null;
+                var thread = new Thread(() =>
+                {
+                    System.Windows.Forms.Application.EnableVisualStyles();
+                    using var overlay = new ScreenOverlayForm(
+                        screenshot,
+                        regionOnly: false,
+                        pointPick: true,
+                        hintText: "Click anywhere on screen to set X/Y  •  ESC to cancel");
+                    overlay.ShowDialog();
+                    selection = overlay.GetSelectionAsync().Result;
+                });
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                await Task.Run(() => thread.Join());
 
-            dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+                dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
 
-            if (selection == null)
-            {
-                SendMessage("mouse:positionPicked", new { requestId, cancelled = true });
-                return;
+                if (selection == null)
+                {
+                    SendMessage("mouse:positionPicked", new { requestId, cancelled = true });
+                    return;
+                }
+
+                SendMessage("mouse:positionPicked", new
+                {
+                    requestId,
+                    cancelled = false,
+                    x = selection.ScreenX,
+                    y = selection.ScreenY
+                });
             }
-
-            SendMessage("mouse:positionPicked", new
+            finally
             {
-                requestId,
-                cancelled = false,
-                x = selection.ScreenX,
-                y = selection.ScreenY
-            });
+                screenshot.Dispose();
+            }
         }
 
         // Eyedropper for WaitPixelColor — minimise the app, drop the user into the screen
@@ -2427,38 +2449,45 @@ namespace TrueReplayer
                 return;
             }
 
-            RegionSelectionResult? selection = null;
-            var thread = new Thread(() =>
+            try
             {
-                System.Windows.Forms.Application.EnableVisualStyles();
-                using var overlay = new ScreenOverlayForm(
-                    screenshot,
-                    regionOnly: false,
-                    pointPick: true,
-                    hintText: "Click on the pixel to watch — colour and coords are captured  •  ESC to cancel");
-                overlay.ShowDialog();
-                selection = overlay.GetSelectionAsync().Result;
-            });
-            thread.SetApartmentState(ApartmentState.STA);
-            thread.Start();
-            await Task.Run(() => thread.Join());
+                RegionSelectionResult? selection = null;
+                var thread = new Thread(() =>
+                {
+                    System.Windows.Forms.Application.EnableVisualStyles();
+                    using var overlay = new ScreenOverlayForm(
+                        screenshot,
+                        regionOnly: false,
+                        pointPick: true,
+                        hintText: "Click on the pixel to watch — colour and coords are captured  •  ESC to cancel");
+                    overlay.ShowDialog();
+                    selection = overlay.GetSelectionAsync().Result;
+                });
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                await Task.Run(() => thread.Join());
 
-            dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+                dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
 
-            if (selection == null || selection.PickedColor == null)
-            {
-                SendMessage("pixel:colorPicked", new { requestId, cancelled = true });
-                return;
+                if (selection == null || selection.PickedColor == null)
+                {
+                    SendMessage("pixel:colorPicked", new { requestId, cancelled = true });
+                    return;
+                }
+
+                SendMessage("pixel:colorPicked", new
+                {
+                    requestId,
+                    cancelled = false,
+                    x = selection.ScreenX,
+                    y = selection.ScreenY,
+                    hex = PixelColorService.ToHex(selection.PickedColor.Value),
+                });
             }
-
-            SendMessage("pixel:colorPicked", new
+            finally
             {
-                requestId,
-                cancelled = false,
-                x = selection.ScreenX,
-                y = selection.ScreenY,
-                hex = PixelColorService.ToHex(selection.PickedColor.Value),
-            });
+                screenshot.Dispose();
+            }
         }
 
         // Test the user's pixel/colour/tolerance configuration against the LIVE screen
