@@ -183,16 +183,14 @@ namespace TrueReplayer.Services
             // selection rect. Skipped once a selection is committed (hasSelection && !drag)
             // because the click already landed and the value is captured.
             //
-            // pointPick mode (Wait Pixel eyedropper) gets a ShareX-style zoom magnifier
-            // because precision matters at the pixel level — clicking a 1-pixel target
-            // with the system cursor alone is hit-or-miss. Other modes (region drag,
-            // recapture, etc) only need the coord readout.
+            // ShareX-style zoom magnifier for every selection mode — pointPick (Wait Pixel),
+            // regionOnly (Click Area / Wait Image search region) and image crop (Wait Image
+            // initial capture / recapture). All benefit from pixel-level precision either
+            // at the click point or at the rect corner being dragged. The HEX line in the
+            // chip is gated to pointPick inside DrawMagnifier (other modes don't need colour).
             if (!_hasSelection || _isDragging)
             {
-                if (_pointPick)
-                    DrawMagnifier(g);
-                else
-                    DrawCursorCoords(g);
+                DrawMagnifier(g);
             }
         }
 
@@ -299,80 +297,19 @@ namespace TrueReplayer.Services
         private const int MagOffset = 20;
         private const int MagTotalHeight = MagDiameter + MagLabelGap + MagLabelHeight;
 
-        // Approximates where the cursor callout WILL be drawn on the next paint.
-        // Used by OnMouseMove to know what area to invalidate.
-        //   • Regular modes → just the coord label (over-estimates width to absorb
-        //     font-metric drift; under-estimating leaves a smeared trail).
-        //   • pointPick mode → the whole magnifier disc plus label, with margin for
-        //     the dropshadow / circle stroke. Same flip-on-edge logic.
-        // The actual paint rect is captured back into _lastCursorLabelRect inside
-        // the drawing methods so the next move invalidates exactly the touched pixels.
+        // Approximates the magnifier's bounding box for OnMouseMove's invalidate. The
+        // actual paint rect is captured back into _lastCursorLabelRect inside DrawMagnifier
+        // so the next move invalidates exactly the touched pixels.
         private Rectangle ComputeCursorLabelRect()
         {
             if (!_hasCursor) return Rectangle.Empty;
-
-            if (_pointPick)
-            {
-                // Total bounding box of the magnifier + its coord label below.
-                int lx = _cursorPoint.X + MagOffset;
-                int ly = _cursorPoint.Y + MagOffset;
-                if (lx + MagDiameter > ClientRectangle.Width)  lx = _cursorPoint.X - MagOffset - MagDiameter;
-                if (ly + MagTotalHeight > ClientRectangle.Height) ly = _cursorPoint.Y - MagOffset - MagTotalHeight;
-                if (lx < 0) lx = 0;
-                if (ly < 0) ly = 0;
-                return new Rectangle(lx, ly, MagDiameter, MagTotalHeight);
-            }
-
-            int absX = _cursorPoint.X + _virtualOriginX;
-            int absY = _cursorPoint.Y + _virtualOriginY;
-            string text = $"{absX}, {absY}";
-            int labelW = (int)Math.Ceiling(text.Length * 9f) + 12;  // generous overshoot
-            int labelH = 14 + 6;
-            int sx = _cursorPoint.X + 16;
-            int sy = _cursorPoint.Y + 16;
-            if (sx + labelW > ClientRectangle.Width)  sx = _cursorPoint.X - 16 - labelW;
-            if (sy + labelH > ClientRectangle.Height) sy = _cursorPoint.Y - 16 - labelH;
-            if (sx < 0) sx = 0;
-            if (sy < 0) sy = 0;
-            return new Rectangle(sx, sy, labelW, labelH);
-        }
-
-        // Renders an "(x, y)" callout near the cursor showing the absolute virtual-screen
-        // coordinates (i.e. what the action will actually store). Inspired by ShareX /
-        // Greenshot — small, high-contrast, follows the cursor, flips to the opposite side
-        // when too close to an edge so it never gets clipped. Writes the actual rendered
-        // rect back to _lastCursorLabelRect so the next OnMouseMove invalidates the exact
-        // pixels we drew (not an approximation).
-        private void DrawCursorCoords(Graphics g)
-        {
-            if (!_hasCursor) return;
-            int absX = _cursorPoint.X + _virtualOriginX;
-            int absY = _cursorPoint.Y + _virtualOriginY;
-            string text = $"{absX}, {absY}";
-            using var font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
-            var size = g.MeasureString(text, font);
-            // Default offset: 16px down-right of cursor (out of the way of the click target).
-            // Flip horizontally / vertically if we'd run off the form.
-            float padX = 6, padY = 3;
-            float labelW = size.Width + padX * 2;
-            float labelH = size.Height + padY * 2;
-            float lx = _cursorPoint.X + 16;
-            float ly = _cursorPoint.Y + 16;
-            if (lx + labelW > ClientRectangle.Width)  lx = _cursorPoint.X - 16 - labelW;
-            if (ly + labelH > ClientRectangle.Height) ly = _cursorPoint.Y - 16 - labelH;
+            int lx = _cursorPoint.X + MagOffset;
+            int ly = _cursorPoint.Y + MagOffset;
+            if (lx + MagDiameter > ClientRectangle.Width)  lx = _cursorPoint.X - MagOffset - MagDiameter;
+            if (ly + MagTotalHeight > ClientRectangle.Height) ly = _cursorPoint.Y - MagOffset - MagTotalHeight;
             if (lx < 0) lx = 0;
             if (ly < 0) ly = 0;
-            using var bg = new SolidBrush(Color.FromArgb(220, 0, 0, 0));
-            g.FillRoundedRectangle(bg, lx, ly, labelW, labelH, 4);
-            using var fg = new SolidBrush(Color.FromArgb(255, 96, 205, 255)); // #60CDFF accent
-            g.DrawString(text, font, fg, lx + padX, ly + padY);
-
-            // Source of truth for the next move's dirty-rect calc. Captured AFTER the
-            // actual MeasureString + edge-flip, so we know exactly which pixels were
-            // touched. The approximation in ComputeCursorLabelRect is only used for the
-            // FIRST move (when this hasn't been set yet) or when the rect rebound from a
-            // flip — the inflate(8,8) in OnMouseMove absorbs that drift.
-            _lastCursorLabelRect = new Rectangle((int)lx, (int)ly, (int)Math.Ceiling(labelW), (int)Math.Ceiling(labelH));
+            return new Rectangle(lx, ly, MagDiameter, MagTotalHeight);
         }
 
         // ShareX-style zoom magnifier. Renders an 11×11 patch of the in-memory
@@ -476,14 +413,14 @@ namespace TrueReplayer.Services
                 g.DrawEllipse(borderPen, circleRect);
 
             // Coord chip below the disc — TWO lines:
-            //   1. "X: {absX}  Y: {absY}"  — same accent colour as the regular cursor label
-            //   2. "#RRGGBB"               — hex of the pixel at the crosshair, sampled from
-            //      the in-memory screenshot. Bounds-checked so a near-edge cursor doesn't
-            //      throw. Hex uses a monospace face so digits don't shift width as the
-            //      cursor moves over colours like FF0000 → 010101.
+            //   1. "X: {absX}  Y: {absY}"  — always shown
+            //   2. "#RRGGBB"               — pointPick (Wait Pixel) only. Region picks don't
+            //      need the colour; suppress the line to keep the chip compact.
             string coordText = $"X: {absX}  Y: {absY}";
+            bool showHex = _pointPick;
             string hexText = "—";
-            if (_cursorPoint.X >= 0 && _cursorPoint.X < _screenshot.Width
+            if (showHex
+                && _cursorPoint.X >= 0 && _cursorPoint.X < _screenshot.Width
                 && _cursorPoint.Y >= 0 && _cursorPoint.Y < _screenshot.Height)
             {
                 hexText = TrueReplayer.Services.PixelColorService.ToHex(
@@ -493,14 +430,11 @@ namespace TrueReplayer.Services
             using var coordFont = new Font("Segoe UI", 10f, FontStyle.Regular);
             using var hexFont = new Font("Consolas", 9.5f, FontStyle.Regular);
             var coordSize = g.MeasureString(coordText, coordFont);
-            var hexSize = g.MeasureString(hexText, hexFont);
+            var hexSize = showHex ? g.MeasureString(hexText, hexFont) : SizeF.Empty;
 
-            // Chip width = widest line + horizontal padding; height tracks the running
-            // MagLabelHeight constant. Centring each line independently inside the chip
-            // keeps the layout balanced when the two strings have very different widths
-            // (e.g. "X: 10  Y: 10" vs "#FFFFFF").
+            // Chip sized per content — full height when HEX is shown, half when not.
             float chipW = Math.Max(coordSize.Width, hexSize.Width) + 14;
-            float chipH = MagLabelHeight;
+            float chipH = showHex ? MagLabelHeight : (coordSize.Height + 6);
             float chipX = magX + (MagDiameter - chipW) / 2;
             float chipY = magY + MagDiameter + MagLabelGap;
             using (var chipBg = new SolidBrush(Color.FromArgb(220, 0, 0, 0)))
@@ -509,8 +443,11 @@ namespace TrueReplayer.Services
             {
                 float coordX = chipX + (chipW - coordSize.Width) / 2;
                 g.DrawString(coordText, coordFont, chipFg, coordX, chipY + 3);
-                float hexX = chipX + (chipW - hexSize.Width) / 2;
-                g.DrawString(hexText, hexFont, chipFg, hexX, chipY + 3 + coordSize.Height + 1);
+                if (showHex)
+                {
+                    float hexX = chipX + (chipW - hexSize.Width) / 2;
+                    g.DrawString(hexText, hexFont, chipFg, hexX, chipY + 3 + coordSize.Height + 1);
+                }
             }
 
             // Tracked rect = whole magnifier + label. Used by OnMouseMove to
