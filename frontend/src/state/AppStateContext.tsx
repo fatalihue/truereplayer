@@ -26,6 +26,9 @@ const defaultSettings = {
   cursorClickHold: '10',
   cursorClickPositionJitter: '10',
   cursorClickUsePositionJitter: false,
+  // null = no rect saved. useArea is the on/off toggle (preserves the rect when temporarily off).
+  cursorClickUseArea: false,
+  cursorClickArea: null as { x: number; y: number; w: number; h: number } | null,
   cursorClickLoops: '0',
   cursorClickUseLoops: false,
   cursorClickInterval: '200',

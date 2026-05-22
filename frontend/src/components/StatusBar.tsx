@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Play, Pause as PauseIcon, MousePointerClick } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
+import { usePauseTick } from '../hooks/usePauseTick';
+import { formatClickerStats } from '../utils/clickerFormat';
 
 export function StatusBar() {
   const { statusBar, status, highlightedActionIndex, replayChain, pauseState, settings, clickerStats, loopProgress } = useAppState();
@@ -39,13 +41,7 @@ export function StatusBar() {
   const minutes = Math.floor(elapsed / 60);
   const seconds = String(elapsed % 60).padStart(2, '0');
 
-  // Tick once per second while paused so the countdown text refreshes.
-  const [, setNowTick] = useState(0);
-  useEffect(() => {
-    if (!pauseState.isPaused || pauseState.timeoutMs <= 0) return;
-    const id = setInterval(() => setNowTick(t => t + 1), 1000);
-    return () => clearInterval(id);
-  }, [pauseState.isPaused, pauseState.timeoutMs]);
+  usePauseTick(pauseState);
 
   const pauseRemainingSec = pauseState.timeoutMs > 0
     ? Math.max(0, Math.ceil((pauseState.timeoutMs - (Date.now() - pauseState.startedAt)) / 1000))
@@ -90,13 +86,8 @@ export function StatusBar() {
           which keeps post-run values intact. Gate: in Clicker mode + (currently running
           OR a previous run actually clicked something). */}
       {isClicker && (isReplaying || clickerStats.count > 0) && (() => {
-        const sec = Math.max(0, Math.floor(clickerStats.elapsedMs / 1000));
-        const mm = Math.floor(sec / 60);
-        const ss = String(sec % 60).padStart(2, '0');
-        const rate = clickerStats.elapsedMs > 0
-          ? (clickerStats.count * 1000 / clickerStats.elapsedMs)
-          : 0;
-        const rateLabel = rate >= 10 ? rate.toFixed(0) : rate.toFixed(1);
+        // Renamed to avoid shadowing the outer `elapsed` number (Replay-mode timer above).
+        const { elapsed: clickerElapsed, rateLabel } = formatClickerStats(clickerStats.count, clickerStats.elapsedMs);
         return (
           <>
             <div className="w-px h-3 bg-border-subtle mx-3" />
@@ -106,7 +97,7 @@ export function StatusBar() {
               <span className="text-text-disabled">·</span>
               <strong className="text-text-primary">{rateLabel}/s</strong>
               <span className="text-text-disabled">·</span>
-              <strong className="text-text-primary">{mm}:{ss}</strong>
+              <strong className="text-text-primary">{clickerElapsed}</strong>
             </span>
           </>
         );

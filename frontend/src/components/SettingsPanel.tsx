@@ -114,6 +114,7 @@ function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-14', suf
 // configuring Clicker, not the macro profile".
 function ClickerSection({
   button, rate, rateJitter, useRateJitter, hold, positionJitter, usePositionJitter,
+  useArea, area,
   loops, useLoops, interval, useInterval, onChange,
 }: {
   button: string;
@@ -123,12 +124,15 @@ function ClickerSection({
   hold: string;
   positionJitter: string;
   usePositionJitter: boolean;
+  useArea: boolean;
+  area: { x: number; y: number; w: number; h: number } | null;
   loops: string;
   useLoops: boolean;
   interval: string;
   useInterval: boolean;
-  onChange: (key: string, value: string | boolean) => void;
+  onChange: (key: string, value: string | boolean | number | object | null) => void;
 }) {
+  const { send } = useBridge();
   const [isOpen, setIsOpen] = useState(true);
   // Unit toggle for the Rate row: 'ms' shows the raw delay; '/s' shows clicks per second
   // computed from delay (1000 / ms). Backend always stores ms — the toggle is display-only.
@@ -168,11 +172,21 @@ function ClickerSection({
     onChange('cursorClickDelay', String(ms));
   };
 
-  // Helper: turn a toggle ON if it isn't already. Used by onEnter on each row that has a
-  // companion switch, so typing a value + Enter activates the switch automatically (same
-  // affordance as the Execution panel's Delay / Jitter / Loops / Interval rows).
+  // Turn a toggle ON if it isn't already — used by row-input onEnter to auto-activate the
+  // companion switch when the user types a value (matches the Execution panel's affordance).
   const activateIfOff = (currentlyOn: boolean, settingKey: string) => {
     if (!currentlyOn) onChange(settingKey, true);
+  };
+
+  // Activate `self`, force `other` off — for mutually-exclusive Position/Area toggles where
+  // both write to the same axis (where a click lands).
+  const setExclusive = (
+    self: { key: string; on: boolean },
+    other: { key: string; on: boolean },
+    enable: boolean,
+  ) => {
+    onChange(self.key, enable);
+    if (enable && other.on) onChange(other.key, false);
   };
 
   return (
@@ -247,14 +261,66 @@ function ClickerSection({
                 aligned with the rows that do have a toggle (matches Toggle's w-10 footprint). */}
             <div className="w-10" />
           </SettingRow>
-          <SettingRow label="Position" tooltip="Random ±px offset around the cursor (anti-cheat detection)">
+          <SettingRow label="Position" tooltip="Random ±px offset around the cursor (anti-cheat detection). Mutually exclusive with Area.">
             <SettingInput
               value={positionJitter}
               onCommit={(v) => onChange('cursorClickPositionJitter', v)}
-              onEnter={() => activateIfOff(usePositionJitter, 'cursorClickUsePositionJitter')}
+              onEnter={() => setExclusive(
+                { key: 'cursorClickUsePositionJitter', on: usePositionJitter },
+                { key: 'cursorClickUseArea', on: useArea },
+                true,
+              )}
               width="w-[80px]"
             />
-            <Toggle isOn={usePositionJitter} onChange={(v) => onChange('cursorClickUsePositionJitter', v)} />
+            <Toggle
+              isOn={usePositionJitter}
+              onChange={(v) => setExclusive(
+                { key: 'cursorClickUsePositionJitter', on: usePositionJitter },
+                { key: 'cursorClickUseArea', on: useArea },
+                v,
+              )}
+            />
+          </SettingRow>
+          {/* Click area row. "Set…" opens the region picker; backend persists + auto-enables
+              useArea + disables Position jitter on a successful draw. ✕ lives INSIDE the
+              field (absolute, hover-revealed) so the right column stays Toggle-only. */}
+          <SettingRow label="Area" tooltip="Click at a random point inside a screen rectangle. Mutually exclusive with Position.">
+            <div className="relative group w-[80px]">
+              <button
+                onClick={() => send({ type: 'clicker:configureArea', payload: { requestId: `clicker-area-${Date.now()}` } })}
+                className="h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none hover:border-accent-solid focus:border-accent-solid cursor-pointer flex items-center justify-center gap-1.5 w-full"
+                title={area
+                  ? `Current: ${area.w}×${area.h} at (${area.x}, ${area.y}). Click to redraw.`
+                  : 'Drag a rectangle on screen'}
+              >
+                {area
+                  ? <span className="text-[10px] truncate">{area.w}×{area.h}</span>
+                  : <span className="text-[11px]">Set…</span>}
+              </button>
+              {area && (
+                <button
+                  onClick={(e) => {
+                    // stopPropagation so the click doesn't bubble to the field button below.
+                    e.stopPropagation();
+                    onChange('cursorClickUseArea', false);
+                    onChange('cursorClickArea', null);
+                  }}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus:opacity-100 text-text-tertiary hover:text-text-primary text-[12px] leading-none px-1 transition-opacity bg-bg-input rounded"
+                  title="Clear area"
+                  tabIndex={-1}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+            <Toggle
+              isOn={useArea}
+              onChange={(v) => setExclusive(
+                { key: 'cursorClickUseArea', on: useArea },
+                { key: 'cursorClickUsePositionJitter', on: usePositionJitter },
+                v,
+              )}
+            />
           </SettingRow>
           <SettingRow label="Loops" tooltip="Number of clicks per run. 0 = infinite">
             <SettingInput
@@ -404,7 +470,7 @@ export function SettingsPanel() {
     });
   }, [subscribe]);
 
-  const changeSetting = (key: string, value: string | boolean | number) => {
+  const changeSetting = (key: string, value: string | boolean | number | object | null) => {
     send({ type: 'settings:change', payload: { key, value } });
   };
 
@@ -464,6 +530,8 @@ export function SettingsPanel() {
                 hold={settings.cursorClickHold}
                 positionJitter={settings.cursorClickPositionJitter}
                 usePositionJitter={settings.cursorClickUsePositionJitter}
+                useArea={settings.cursorClickUseArea}
+                area={settings.cursorClickArea}
                 loops={settings.cursorClickLoops}
                 useLoops={settings.cursorClickUseLoops}
                 interval={settings.cursorClickInterval}

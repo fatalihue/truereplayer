@@ -15,7 +15,7 @@ import { StatusBar } from './components/StatusBar';
 import { Toast } from './components/Toast';
 import { UpdateOverlay } from './components/UpdateOverlay';
 import { ExtensionUpdateBanner } from './components/ExtensionUpdateBanner';
-import { ClickerEmptyState } from './components/ClickerEmptyState';
+import { ClickerDashboard } from './components/ClickerDashboard';
 import { CommandPalette } from './components/CommandPalette';
 import { SheetPanel } from './components/SheetPanel';
 import { ThemeEditor } from './components/ThemeEditor';
@@ -137,7 +137,7 @@ function AppShell() {
           <ExtensionUpdateBanner />
           <Toolbar />
           {isClicker ? (
-            <ClickerEmptyState />
+            <ClickerDashboard />
           ) : (
             <ActionTable
               columnVisibility={columnVisibility}

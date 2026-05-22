@@ -239,8 +239,24 @@ namespace TrueReplayer.Services
         // total == 0 signals infinite loop. Frontend renders "Loop X/Y" or "Loop X/∞".
         public Action<int, int>? OnLoopProgress;
 
-        public void ToggleCursorClickReplay(int delay, bool useJitter, int jitterPercent, int loopCount, int loopInterval, string button = "Left", int holdMs = 10, int positionJitter = 0)
+        public void ToggleCursorClickReplay(ClickerRunConfig config)
         {
+            // Locals mirror the old method parameters so the loop body below stays unchanged.
+            int delay = config.DelayMs;
+            bool useJitter = config.UseJitter;
+            int jitterPercent = config.JitterPercent;
+            int loopCount = config.LoopCount;
+            int loopInterval = config.LoopIntervalMs;
+            string button = config.Button;
+            int holdMs = config.HoldMs;
+            int positionJitter = config.PositionJitter;
+            // Decompose the optional Area record into the booleans + 4 ints the engine expects.
+            bool useArea = config.Area is not null;
+            int areaX = config.Area?.X ?? 0;
+            int areaY = config.Area?.Y ?? 0;
+            int areaW = config.Area?.W ?? 0;
+            int areaH = config.Area?.H ?? 0;
+
             if (IsReplaying)
             {
                 // Stop whatever's running — could be either a regular replay (started by a profile
@@ -262,14 +278,14 @@ namespace TrueReplayer.Services
                 long clickCount = 0;
                 var startedAt = DateTime.UtcNow;
                 long lastStatsPushMs = 0;
+                // Read by the finally block for the final loop-progress flush.
+                int iteration = 0;
+                bool isInfinite = loopCount == 0;
                 try
                 {
                     // Wait for hotkey release
                     await Task.Delay(200, token);
                     startedAt = DateTime.UtcNow;  // reset after the grace delay so CPS isn't skewed
-
-                    int iteration = 0;
-                    bool isInfinite = loopCount == 0;
 
                     // Resolve button flags
                     uint downFlag = button switch
@@ -290,22 +306,36 @@ namespace TrueReplayer.Services
                     // Position jitter is treated as a radius in px on each axis. Stored value
                     // is already validated >= 0 by the UI, but defensive-clamp anyway.
                     int jitterRadius = Math.Max(0, positionJitter);
+                    // Area mode: each click picks a uniformly-random pixel inside (x,y,w,h).
+                    // Requires positive dimensions — defensive against stale/empty state.
+                    bool areaActive = useArea && areaW > 0 && areaH > 0;
 
                     while (!token.IsCancellationRequested && (isInfinite || iteration < loopCount))
                     {
                         iteration++;
 
-                        NativeMethods.GetCursorPos(out var pos);
-
-                        // Apply position jitter to the raw cursor coords, BEFORE normalising
-                        // to the virtual-desktop 0-65535 range. Keeps the jitter measured in
-                        // pixels (what the user dialled in) rather than abstract 0-65535 units.
-                        int jitteredX = pos.x;
-                        int jitteredY = pos.y;
-                        if (jitterRadius > 0)
+                        int jitteredX, jitteredY;
+                        if (areaActive)
                         {
-                            jitteredX += Random.Shared.Next(-jitterRadius, jitterRadius + 1);
-                            jitteredY += Random.Shared.Next(-jitterRadius, jitterRadius + 1);
+                            // Sample inclusive on both axes (Next's upper bound is exclusive, so
+                            // we pass areaW directly to get [0, areaW-1], which when added to
+                            // areaX covers [areaX, areaX+areaW-1] — the full rect interior.
+                            jitteredX = areaX + Random.Shared.Next(0, areaW);
+                            jitteredY = areaY + Random.Shared.Next(0, areaH);
+                        }
+                        else
+                        {
+                            NativeMethods.GetCursorPos(out var pos);
+                            // Apply position jitter to the raw cursor coords, BEFORE normalising
+                            // to the virtual-desktop 0-65535 range. Keeps the jitter measured in
+                            // pixels (what the user dialled in) rather than abstract 0-65535 units.
+                            jitteredX = pos.x;
+                            jitteredY = pos.y;
+                            if (jitterRadius > 0)
+                            {
+                                jitteredX += Random.Shared.Next(-jitterRadius, jitterRadius + 1);
+                                jitteredY += Random.Shared.Next(-jitterRadius, jitterRadius + 1);
+                            }
                         }
 
                         // Cached virtual-screen bounds — same call signature minus 4
@@ -361,6 +391,15 @@ namespace TrueReplayer.Services
                             var snapshotCount = clickCount;
                             var snapshotElapsed = elapsedMs;
                             dispatcherQueue.TryEnqueue(() => OnClickerStats?.Invoke(snapshotCount, snapshotElapsed));
+
+                            // Loop progress for genuine loops only (single-shot keeps "—").
+                            // total=0 signals infinite — matches Macro engine convention.
+                            if (isInfinite || loopCount > 1)
+                            {
+                                var snapshotIteration = iteration;
+                                var snapshotTotal = isInfinite ? 0 : loopCount;
+                                dispatcherQueue.TryEnqueue(() => OnLoopProgress?.Invoke(snapshotIteration, snapshotTotal));
+                            }
                         }
 
                         // Apply delay + jitter
@@ -381,13 +420,18 @@ namespace TrueReplayer.Services
                 catch (OperationCanceledException) { }
                 finally
                 {
-                    // Final stats push so the UI sees the exact final count + elapsed even if
-                    // the loop ended between throttled pushes.
+                    // Final flush so the UI lands on the exact end-state (e.g. "100/100" not
+                    // "97/100") even if the loop ended between throttled pushes.
                     var finalCount = clickCount;
                     var finalElapsed = (long)(DateTime.UtcNow - startedAt).TotalMilliseconds;
+                    var finalIteration = iteration;
+                    var finalLoopTotal = isInfinite ? 0 : loopCount;
+                    var emitFinalLoop = isInfinite || loopCount > 1;
                     dispatcherQueue.TryEnqueue(() =>
                     {
                         OnClickerStats?.Invoke(finalCount, finalElapsed);
+                        if (emitFinalLoop)
+                            OnLoopProgress?.Invoke(finalIteration, finalLoopTotal);
                         ResetReplayState();
                     });
                 }

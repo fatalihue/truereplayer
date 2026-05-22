@@ -156,6 +156,11 @@ export interface SettingsState {
   cursorClickHold: string;
   cursorClickPositionJitter: string;
   cursorClickUsePositionJitter: boolean;
+  // Click-area rectangle (virtual-desktop px). null = no rect saved.
+  // useArea is the on/off toggle — preserves the saved rect while temporarily disabled.
+  // Effective area mode = useArea && area !== null.
+  cursorClickUseArea: boolean;
+  cursorClickArea: { x: number; y: number; w: number; h: number } | null;
   cursorClickLoops: string;
   cursorClickUseLoops: boolean;
   cursorClickInterval: string;
@@ -291,6 +296,7 @@ export type IncomingMessage =
   | { type: 'browser:extensionOutdated'; payload: { currentVersion: string; expectedVersion: string } }
   | { type: 'image:testMatchResult'; payload: { requestId: string; found: boolean; score: number; x: number; y: number; w: number; h: number; error?: string } }
   | { type: 'waitimage:searchRegionSet'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; w?: number; h?: number } }
+  | { type: 'clicker:areaSet'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; w?: number; h?: number } }
   | { type: 'mouse:positionPicked'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number } }
   | { type: 'pixel:colorPicked'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; hex?: string } }
   | { type: 'pixel:testMatchResult'; payload: { requestId: string; matches: boolean; sampledHex?: string | null; error?: string } }
@@ -356,7 +362,7 @@ export type OutgoingMessage =
   | { type: 'profile:save'; payload: Record<string, never> }
   | { type: 'profile:load'; payload: Record<string, never> }
   | { type: 'profile:reset'; payload: Record<string, never> }
-  | { type: 'settings:change'; payload: { key: string; value: string | boolean | number } }
+  | { type: 'settings:change'; payload: { key: string; value: string | boolean | number | object | null } }
   | { type: 'actions:addSendText'; payload: { text: string; insertIndex?: number } }
   | { type: 'actions:editSendText'; payload: { index: number; text: string } }
   | { type: 'actions:bulkUpdateDelay'; payload: { indices: number[]; delay: number } }
@@ -393,6 +399,7 @@ export type OutgoingMessage =
   | { type: 'actions:editRunProfile'; payload: { index: number; profileName: string; repeatCount: number } }
   | { type: 'waitimage:recapture'; payload: { index: number } }
   | { type: 'waitimage:configureSearchRegion'; payload: { requestId: string; x?: number; y?: number; w?: number; h?: number } }
+  | { type: 'clicker:configureArea'; payload: { requestId: string } }
   | { type: 'waitimage:cropReference'; payload: { index: number; x: number; y: number; w: number; h: number } }
   | { type: 'image:testMatch'; payload: { requestId: string; imagePath: string; confidence: number; searchRegion?: { x: number; y: number; w: number; h: number } } }
   | { type: 'mouse:pickPosition'; payload: { requestId: string } }

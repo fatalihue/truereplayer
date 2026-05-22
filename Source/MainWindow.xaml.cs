@@ -482,25 +482,11 @@ namespace TrueReplayer
                             // exact same logic as WebViewBridge.HandleReplayToggle (button path),
                             // otherwise the button and the hotkey produce different behaviour
                             // for the same configuration.
-                            int delay = int.TryParse(bridge?.CursorClickDelay ?? "100", out var cd) ? cd : 100;
-                            int jitterPercent = int.TryParse(bridge?.CursorClickDelayJitter ?? "0", out var jp) ? jp : 0;
-                            int holdMs = int.TryParse(bridge?.CursorClickHold ?? "10", out var h) ? h : 10;
-                            int positionJitter = (bridge?.CursorClickUsePositionJitter ?? false)
-                                && int.TryParse(bridge?.CursorClickPositionJitter ?? "0", out var pj) ? pj : 0;
-                            // Loop convention: loops disabled → 1 iteration; loops enabled + count=0 → infinite.
-                            int loops = (bridge?.CursorClickUseLoops ?? false)
-                                && int.TryParse(bridge?.CursorClickLoops ?? "1", out var lc) && lc >= 0 ? lc : 1;
-                            int interval = (bridge?.CursorClickUseInterval ?? false)
-                                && int.TryParse(bridge?.CursorClickInterval ?? "0", out var li) ? li : 0;
+                            // Hotkey entry — defer to the bridge's BuildClickerConfig so the
+                            // parsing rules + Area/loop conventions stay in one place.
                             mainController.ToggleCursorClickReplay(
-                                delay,
-                                bridge?.CursorClickUseJitter ?? false,
-                                jitterPercent,
-                                loops,
-                                interval,
-                                bridge?.CursorClickButton ?? "Left",
-                                holdMs,
-                                positionJitter);
+                                bridge?.BuildClickerConfig() ?? new ClickerRunConfig(
+                                    100, false, 0, 1, 0, "Left", 10, 0, null));
                         }
                         else
                         {

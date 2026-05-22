@@ -66,6 +66,10 @@ namespace TrueReplayer
         public string CursorClickHold { get; set; } = "10";
         public string CursorClickPositionJitter { get; set; } = "0";
         public bool CursorClickUsePositionJitter { get; set; } = false;
+        // null = no rect saved. CursorClickUseArea is the on/off toggle and is preserved
+        // separately so a user can toggle off without losing the saved rect.
+        public bool CursorClickUseArea { get; set; } = false;
+        public ClickArea? CursorClickArea { get; set; }
         public string CursorClickLoops { get; set; } = "0";
         public bool CursorClickUseLoops { get; set; } = false;
         public string CursorClickInterval { get; set; } = "0";
@@ -326,6 +330,13 @@ namespace TrueReplayer
             CursorClickHold = saved.CursorClickHoldMs.ToString();
             CursorClickPositionJitter = saved.CursorClickPositionJitter.ToString();
             CursorClickUsePositionJitter = saved.CursorClickUsePositionJitter;
+            CursorClickUseArea = saved.CursorClickUseArea;
+            // Project the 5 on-disk fields into the in-memory ClickArea record. Null when
+            // dimensions are unset (forward-compat with appsettings.json files that pre-date
+            // the area feature).
+            CursorClickArea = (saved.CursorClickAreaW > 0 && saved.CursorClickAreaH > 0)
+                ? new ClickArea(saved.CursorClickAreaX, saved.CursorClickAreaY, saved.CursorClickAreaW, saved.CursorClickAreaH)
+                : null;
             CursorClickLoops = saved.CursorClickLoops.ToString();
             CursorClickUseLoops = saved.CursorClickUseLoops;
             CursorClickInterval = saved.CursorClickIntervalMs.ToString();
@@ -399,6 +410,7 @@ namespace TrueReplayer
                     case "waitimage:recapture": HandleWaitImageRecapture(payload); break;
                     case "actions:insertWaitPixelColor": HandleInsertWaitPixelColor(payload); break;
                     case "waitimage:configureSearchRegion": _ = HandleConfigureSearchRegionAsync(payload); break;
+                    case "clicker:configureArea": _ = HandleConfigureClickAreaAsync(payload); break;
                     case "waitimage:cropReference": HandleCropReference(payload); break;
                     case "image:testMatch": _ = HandleTestMatchAsync(payload); break;
                     case "mouse:pickPosition": _ = HandleMousePickPositionAsync(payload); break;
@@ -712,6 +724,25 @@ namespace TrueReplayer
             SendMessage("profiles:updated", new { profiles, activeProfile = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName, profileOrder });
         }
 
+        // Build a Clicker run config from the current bridge mirror state. Single source of
+        // truth so the Replay-hotkey path (MainWindow) and the toggle-replay message path
+        // (HandleReplayToggle) stay in sync — both call this instead of duplicating the
+        // string→int parsing and the Area/loop convention logic.
+        // Loop convention: cursorClickUseLoops=false → 1 iteration; true + count=0 → infinite (0).
+        // Area gate: requires positive W/H — defensive against stale all-zero state.
+        public ClickerRunConfig BuildClickerConfig()
+        {
+            int delay = int.TryParse(CursorClickDelay, out var d) ? d : 100;
+            int jitterPercent = int.TryParse(CursorClickDelayJitter, out var jp) ? jp : 0;
+            int holdMs = int.TryParse(CursorClickHold, out var h) ? h : 10;
+            int positionJitter = CursorClickUsePositionJitter && int.TryParse(CursorClickPositionJitter, out var pj) ? pj : 0;
+            int loops = CursorClickUseLoops && int.TryParse(CursorClickLoops, out var lc) && lc >= 0 ? lc : 1;
+            int interval = CursorClickUseInterval && int.TryParse(CursorClickInterval, out var li) ? li : 0;
+            ClickArea? area = CursorClickUseArea ? CursorClickArea : null;
+            return new ClickerRunConfig(delay, CursorClickUseJitter, jitterPercent, loops, interval,
+                CursorClickButton, holdMs, positionJitter, area);
+        }
+
         public void PushSettingsLoaded()
         {
             var profile = UserProfile.Current;
@@ -735,6 +766,10 @@ namespace TrueReplayer
                     cursorClickHold = CursorClickHold,
                     cursorClickPositionJitter = CursorClickPositionJitter,
                     cursorClickUsePositionJitter = CursorClickUsePositionJitter,
+                    cursorClickUseArea = CursorClickUseArea,
+                    cursorClickArea = CursorClickArea is { } a
+                        ? (object)new { x = a.X, y = a.Y, w = a.W, h = a.H }
+                        : null,
                     cursorClickLoops = CursorClickLoops,
                     cursorClickUseLoops = CursorClickUseLoops,
                     cursorClickInterval = CursorClickInterval,
@@ -1030,6 +1065,10 @@ namespace TrueReplayer
                     cursorClickHold = CursorClickHold,
                     cursorClickPositionJitter = CursorClickPositionJitter,
                     cursorClickUsePositionJitter = CursorClickUsePositionJitter,
+                    cursorClickUseArea = CursorClickUseArea,
+                    cursorClickArea = CursorClickArea is { } a
+                        ? (object)new { x = a.X, y = a.Y, w = a.W, h = a.H }
+                        : null,
                     cursorClickLoops = CursorClickLoops,
                     cursorClickUseLoops = CursorClickUseLoops,
                     cursorClickInterval = CursorClickInterval,
@@ -1231,14 +1270,7 @@ namespace TrueReplayer
                 // Clicker v2 — read from the dedicated CursorClick* fields (sourced from
                 // AppSettings) instead of the profile's CustomDelay/Jitter/Loop. This makes
                 // Clicker truly mode-of-the-app, no longer mode-of-active-profile.
-                int delay = int.TryParse(CursorClickDelay, out var d) ? d : 100;
-                int jitterPercent = int.TryParse(CursorClickDelayJitter, out var jp) ? jp : 0;
-                int holdMs = int.TryParse(CursorClickHold, out var h) ? h : 10;
-                int positionJitter = CursorClickUsePositionJitter && int.TryParse(CursorClickPositionJitter, out var pj) ? pj : 0;
-                // Loop convention: loops disabled → 1 iteration; loops enabled + count=0 → infinite.
-                int loops = CursorClickUseLoops && int.TryParse(CursorClickLoops, out var lc) && lc >= 0 ? lc : 1;
-                int interval = CursorClickUseInterval && int.TryParse(CursorClickInterval, out var li) ? li : 0;
-                mainController.ToggleCursorClickReplay(delay, CursorClickUseJitter, jitterPercent, loops, interval, CursorClickButton, holdMs, positionJitter);
+                mainController.ToggleCursorClickReplay(BuildClickerConfig());
                 return;
             }
 
@@ -2468,10 +2500,58 @@ namespace TrueReplayer
             });
         }
 
-        // Lets the user draw a search ROI for an existing WaitImage. Behaves like the recapture
-        // flow but in "region-only" mode — no PNG is saved, just the rect is reported back.
-        // Accepts an optional existing rect (x/y/w/h) so the overlay opens with that region
-        // pre-drawn — the user sees what's currently saved instead of starting from blank.
+        // Shared infrastructure for the two "draw a rectangle on screen" flows (WaitImage
+        // search region + Clicker click area). Minimises the main window, takes a virtual-
+        // desktop screenshot, runs ScreenOverlayForm on an STA thread, and returns the
+        // selection (or null if cancelled / screenshot failed). The bitmap is disposed
+        // here so neither caller leaks a multi-MB GDI handle.
+        private async Task<RegionSelectionResult?> RunRegionPickerAsync(
+            System.Drawing.Rectangle? initialRect, string hintWhenSet, string hintWhenEmpty, string logPrefix)
+        {
+            var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
+            await Task.Delay(400);
+
+            System.Drawing.Bitmap? screenshot;
+            try
+            {
+                screenshot = ScreenCaptureService.CaptureVirtualScreen();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[{logPrefix}] Screenshot failed: {ex.Message}");
+                dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+                return null;
+            }
+
+            try
+            {
+                RegionSelectionResult? selection = null;
+                var hint = initialRect.HasValue ? hintWhenSet : hintWhenEmpty;
+                var thread = new Thread(() =>
+                {
+                    System.Windows.Forms.Application.EnableVisualStyles();
+                    using var overlay = new ScreenOverlayForm(
+                        screenshot, regionOnly: true, hintText: hint, initialRect: initialRect);
+                    overlay.ShowDialog();
+                    selection = overlay.GetSelectionAsync().Result;
+                });
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                await Task.Run(() => thread.Join());
+
+                dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+                return selection;
+            }
+            finally
+            {
+                screenshot.Dispose();
+            }
+        }
+
+        // Lets the user draw a search ROI for an existing WaitImage. Region-only mode — no
+        // PNG saved, just the rect reported back. Pre-drawn with the existing rect (when
+        // payload carries one) so the user can tweak instead of restarting from blank.
         private async Task HandleConfigureSearchRegionAsync(JsonElement payload)
         {
             string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
@@ -2486,42 +2566,11 @@ namespace TrueReplayer
                     xEl.GetInt32(), yEl.GetInt32(), wEl.GetInt32(), hEl.GetInt32());
             }
 
-            var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
-            NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
-            await Task.Delay(400);
-
-            System.Drawing.Bitmap screenshot;
-            try
-            {
-                screenshot = ScreenCaptureService.CaptureVirtualScreen();
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[WaitImage] Configure-region screenshot failed: {ex.Message}");
-                dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
-                SendMessage("waitimage:searchRegionSet", new { requestId, cancelled = true });
-                return;
-            }
-
-            RegionSelectionResult? selection = null;
-            var thread = new Thread(() =>
-            {
-                System.Windows.Forms.Application.EnableVisualStyles();
-                using var overlay = new ScreenOverlayForm(
-                    screenshot,
-                    regionOnly: true,
-                    hintText: initialRect.HasValue
-                        ? "Drag to redraw the search area  •  ESC to keep current"
-                        : "Drag to set the search area for this Wait Image  •  ESC to cancel",
-                    initialRect: initialRect);
-                overlay.ShowDialog();
-                selection = overlay.GetSelectionAsync().Result;
-            });
-            thread.SetApartmentState(ApartmentState.STA);
-            thread.Start();
-            await Task.Run(() => thread.Join());
-
-            dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+            var selection = await RunRegionPickerAsync(
+                initialRect,
+                hintWhenSet: "Drag to redraw the search area  •  ESC to keep current",
+                hintWhenEmpty: "Drag to set the search area for this Wait Image  •  ESC to cancel",
+                logPrefix: "WaitImage");
 
             if (selection == null)
             {
@@ -2530,6 +2579,47 @@ namespace TrueReplayer
             }
 
             SendMessage("waitimage:searchRegionSet", new
+            {
+                requestId,
+                cancelled = false,
+                x = selection.ScreenX,
+                y = selection.ScreenY,
+                w = selection.Width,
+                h = selection.Height
+            });
+        }
+
+        // Lets the user draw the Clicker click-area rectangle. Pre-draws the existing rect
+        // when one is set so the user can tweak instead of restarting from blank.
+        private async Task HandleConfigureClickAreaAsync(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
+
+            // Pre-draw the saved rect (when there is one + the toggle is on, signalling intent).
+            System.Drawing.Rectangle? initialRect = (CursorClickUseArea && CursorClickArea is { } cur)
+                ? new System.Drawing.Rectangle(cur.X, cur.Y, cur.W, cur.H)
+                : null;
+
+            var selection = await RunRegionPickerAsync(
+                initialRect,
+                hintWhenSet: "Drag to redraw the click area  •  ESC to keep current",
+                hintWhenEmpty: "Drag to set the click area  •  ESC to cancel",
+                logPrefix: "Clicker");
+
+            if (selection == null)
+            {
+                SendMessage("clicker:areaSet", new { requestId, cancelled = true });
+                return;
+            }
+
+            // Persist + auto-enable useArea + disable Position jitter (mutual exclusion).
+            CursorClickArea = new ClickArea(selection.ScreenX, selection.ScreenY, selection.Width, selection.Height);
+            CursorClickUseArea = true;
+            CursorClickUsePositionJitter = false;
+            SaveGlobalSettings();
+            PushSettingsLoaded();
+
+            SendMessage("clicker:areaSet", new
             {
                 requestId,
                 cancelled = false,
@@ -4499,6 +4589,13 @@ namespace TrueReplayer
                 CursorClickHoldMs = int.TryParse(CursorClickHold, out var cch) ? cch : 10,
                 CursorClickPositionJitter = int.TryParse(CursorClickPositionJitter, out var ccpj) ? ccpj : 0,
                 CursorClickUsePositionJitter = CursorClickUsePositionJitter,
+                CursorClickUseArea = CursorClickUseArea,
+                // On-disk schema stays 5 fields for forward-compat. When the rect is null,
+                // we write zeros — Load above treats W=H=0 as "no rect" and projects back to null.
+                CursorClickAreaX = CursorClickArea?.X ?? 0,
+                CursorClickAreaY = CursorClickArea?.Y ?? 0,
+                CursorClickAreaW = CursorClickArea?.W ?? 0,
+                CursorClickAreaH = CursorClickArea?.H ?? 0,
                 CursorClickLoops = int.TryParse(CursorClickLoops, out var ccl) ? ccl : 0,
                 CursorClickUseLoops = CursorClickUseLoops,
                 CursorClickIntervalMs = int.TryParse(CursorClickInterval, out var cci) ? cci : 0,
@@ -4676,6 +4773,19 @@ namespace TrueReplayer
                     break;
                 case "cursorClickUsePositionJitter":
                     CursorClickUsePositionJitter = valueElement.GetBoolean();
+                    break;
+                case "cursorClickUseArea":
+                    CursorClickUseArea = valueElement.GetBoolean();
+                    break;
+                case "cursorClickArea":
+                    // Null → clear the saved rect. Object → { x, y, w, h }, all required.
+                    CursorClickArea = valueElement.ValueKind == JsonValueKind.Null
+                        ? null
+                        : new ClickArea(
+                            valueElement.GetProperty("x").GetInt32(),
+                            valueElement.GetProperty("y").GetInt32(),
+                            valueElement.GetProperty("w").GetInt32(),
+                            valueElement.GetProperty("h").GetInt32());
                     break;
                 case "cursorClickLoops":
                     CursorClickLoops = valueElement.GetString() ?? "0";
