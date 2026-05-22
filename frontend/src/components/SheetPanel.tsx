@@ -1038,14 +1038,45 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                       </div>
                       {testMatchResult.found && (
                         <div className="mt-1 text-[10px] opacity-80">
-                          Search region set to a ±80 px rect around this match. Use
-                          Configure Region below to fine-tune.
+                          Search region set to a ±80 px rect around this match. Use the
+                          Search Region field below to fine-tune.
                         </div>
                       )}
                     </>
                   )}
                 </div>
               )}
+            </div>
+
+            {/* Search Region (ROI) — placed right under the Test result so the auto-set
+                feedback sits next to the field it just modified. Label + display row carry
+                the meaning; Configure button's title attribute keeps the discovery hint
+                on hover. */}
+            <div>
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">SEARCH REGION</label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 px-2 py-1.5 text-[11px] font-mono bg-bg-input border border-border-default rounded text-text-secondary">
+                  {waitImageSearchRegion
+                    ? `${waitImageSearchRegion.x}, ${waitImageSearchRegion.y}  ·  ${waitImageSearchRegion.w} × ${waitImageSearchRegion.h}`
+                    : <span className="text-text-disabled italic">Full screen (default)</span>}
+                </div>
+                <button
+                  onClick={handleConfigureSearchRegion}
+                  className="px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
+                  title="Draw a sub-rectangle of the screen to limit where the match runs. Reduces CPU and false positives."
+                >
+                  Configure…
+                </button>
+                {waitImageSearchRegion && (
+                  <button
+                    onClick={() => setWaitImageSearchRegion(null)}
+                    className="px-2 py-1.5 rounded text-xs text-text-tertiary hover:text-[#C42B1C] hover:bg-bg-card transition-colors"
+                    title="Clear search region (revert to full screen)"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Wait Until + On Timeout — both options in each select are self-explanatory now
@@ -1099,36 +1130,6 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   step="5"
                   className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
                 />
-              </div>
-            </div>
-
-            {/* Search Region (ROI) — label + display row carry the meaning; explanation line
-                would be redundant. Configure button's title attribute keeps the discovery hint
-                on hover for users who pause over it. */}
-            <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">SEARCH REGION</label>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 px-2 py-1.5 text-[11px] font-mono bg-bg-input border border-border-default rounded text-text-secondary">
-                  {waitImageSearchRegion
-                    ? `${waitImageSearchRegion.x}, ${waitImageSearchRegion.y}  ·  ${waitImageSearchRegion.w} × ${waitImageSearchRegion.h}`
-                    : <span className="text-text-disabled italic">Full screen (default)</span>}
-                </div>
-                <button
-                  onClick={handleConfigureSearchRegion}
-                  className="px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
-                  title="Draw a sub-rectangle of the screen to limit where the match runs. Reduces CPU and false positives."
-                >
-                  Configure…
-                </button>
-                {waitImageSearchRegion && (
-                  <button
-                    onClick={() => setWaitImageSearchRegion(null)}
-                    className="px-2 py-1.5 rounded text-xs text-text-tertiary hover:text-[#C42B1C] hover:bg-bg-card transition-colors"
-                    title="Clear search region (revert to full screen)"
-                  >
-                    <X size={12} />
-                  </button>
-                )}
               </div>
             </div>
 
