@@ -81,6 +81,11 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
         public bool PixelInvert { get; set; }
 
+        // Click (PixelX, PixelY) after a successful match. Mirrors WaitImageClickOnMatch;
+        // suppressed when PixelInvert=true (same gate the WaitImage code uses).
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool PixelClickOnMatch { get; set; }
+
         // Browser action properties
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? BrowserText { get; set; }
@@ -261,6 +266,53 @@ namespace TrueReplayer.Models
                 return DisplayKeyMap.TryGetValue(Key, out var readable) ? readable : Key;
             }
         }
+
+        // Deep copy of every persisted data field. Used by Copy/Paste/Duplicate flows so
+        // any new field added to this class is automatically carried — no more silent data
+        // loss like the Pixel* fields had before this helper existed. UI-only state
+        // (RowNumber, IsInsertionPoint, IsVisuallyDeselected) is intentionally NOT cloned
+        // — the caller sets RowNumber after insertion, and the selection flags belong to
+        // whichever row instance is currently in the grid.
+        public ActionItem Clone() => new()
+        {
+            ActionType = ActionType,
+            Key = Key,
+            X = X,
+            Y = Y,
+            Delay = Delay,
+            Comment = Comment,
+            ImagePath = ImagePath,
+            Timeout = Timeout,
+            Confidence = Confidence,
+            WaitImageOnTimeout = WaitImageOnTimeout,
+            WaitImageInvert = WaitImageInvert,
+            WaitImageClickOnMatch = WaitImageClickOnMatch,
+            WaitImageSearchX = WaitImageSearchX,
+            WaitImageSearchY = WaitImageSearchY,
+            WaitImageSearchW = WaitImageSearchW,
+            WaitImageSearchH = WaitImageSearchH,
+            PixelX = PixelX,
+            PixelY = PixelY,
+            PixelColor = PixelColor,
+            PixelTolerance = PixelTolerance,
+            PixelOnTimeout = PixelOnTimeout,
+            PixelInvert = PixelInvert,
+            PixelClickOnMatch = PixelClickOnMatch,
+            BrowserText = BrowserText,
+            NewTab = NewTab,
+            WaitMode = WaitMode,
+            UrlWaitPattern = UrlWaitPattern,
+            PostNavigateSelector = PostNavigateSelector,
+            TypeAppend = TypeAppend,
+            TypePaste = TypePaste,
+            TypeDelay = TypeDelay,
+            SelectMatchMode = SelectMatchMode,
+            IsSkipped = IsSkipped,
+            RepeatCount = RepeatCount,
+            RepeatDelayMs = RepeatDelayMs,
+            HoldDurationMs = HoldDurationMs,
+            RecordedAt = RecordedAt,
+        };
 
         public event PropertyChangedEventHandler? PropertyChanged;
         protected void OnPropertyChanged(string propertyName) =>

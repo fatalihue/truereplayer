@@ -1879,7 +1879,19 @@ namespace TrueReplayer.Services
                     // when the current colour DOESN'T match. Out-of-bounds reads (sampled
                     // null) treat as no-match this iteration — they never satisfy either
                     // branch, so the action falls through to its timeout.
-                    if (invert ? !match : match) return;
+                    if (invert ? !match : match)
+                    {
+                        // Click the watched pixel when the user opted in. Suppressed in invert
+                        // mode because "the colour we expected isn't here anymore" doesn't make
+                        // a clear target for a follow-up click — same gate WaitImage uses.
+                        // SimulateMouse handles virtual-desktop normalisation + Raw Input.
+                        if (action.PixelClickOnMatch && !invert)
+                        {
+                            SimulateMouse(px, py, NativeMethods.MOUSEEVENTF_LEFTDOWN);
+                            SimulateMouse(px, py, NativeMethods.MOUSEEVENTF_LEFTUP);
+                        }
+                        return;
+                    }
                 }
 
                 try { await Task.Delay(50, token); }

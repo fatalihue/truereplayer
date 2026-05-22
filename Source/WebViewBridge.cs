@@ -551,6 +551,7 @@ namespace TrueReplayer
                 pixelTolerance = a.PixelTolerance,
                 pixelOnTimeout = a.PixelOnTimeout,
                 pixelInvert = a.PixelInvert,
+                pixelClickOnMatch = a.PixelClickOnMatch,
                 browserText = a.BrowserText ?? "",
                 newTab = a.NewTab,
                 isSkipped = a.IsSkipped,
@@ -933,6 +934,7 @@ namespace TrueReplayer
                     pixelTolerance = a.PixelTolerance,
                     pixelOnTimeout = a.PixelOnTimeout,
                     pixelInvert = a.PixelInvert,
+                    pixelClickOnMatch = a.PixelClickOnMatch,
                     browserText = a.BrowserText ?? "",
                     newTab = a.NewTab,
                     isSkipped = a.IsSkipped,
@@ -1296,41 +1298,7 @@ namespace TrueReplayer
             foreach (var idx in indices)
             {
                 if (idx >= 0 && idx < actions.Count)
-                {
-                    var a = actions[idx];
-                    _copiedActions.Add(new ActionItem
-                    {
-                        ActionType = a.ActionType,
-                        Key = a.Key,
-                        X = a.X,
-                        Y = a.Y,
-                        Delay = a.Delay,
-                        Comment = a.Comment,
-                        Timeout = a.Timeout,
-                        Confidence = a.Confidence,
-                        ImagePath = a.ImagePath,
-                        WaitImageOnTimeout = a.WaitImageOnTimeout,
-                        WaitImageInvert = a.WaitImageInvert,
-                        WaitImageClickOnMatch = a.WaitImageClickOnMatch,
-                        WaitImageSearchX = a.WaitImageSearchX,
-                        WaitImageSearchY = a.WaitImageSearchY,
-                        WaitImageSearchW = a.WaitImageSearchW,
-                        WaitImageSearchH = a.WaitImageSearchH,
-                        BrowserText = a.BrowserText,
-                        NewTab = a.NewTab,
-                        IsSkipped = a.IsSkipped,
-                        WaitMode = a.WaitMode,
-                        UrlWaitPattern = a.UrlWaitPattern,
-                        PostNavigateSelector = a.PostNavigateSelector,
-                        TypeAppend = a.TypeAppend,
-                        TypePaste = a.TypePaste,
-                        TypeDelay = a.TypeDelay,
-                        SelectMatchMode = a.SelectMatchMode,
-                        RepeatCount = a.RepeatCount,
-                        RepeatDelayMs = a.RepeatDelayMs,
-                        HoldDurationMs = a.HoldDurationMs,
-                    });
-                }
+                    _copiedActions.Add(actions[idx].Clone());
             }
             SendMessage("alert:show", new { message = $"Copied {_copiedActions.Count} action(s)" });
             PushButtonStates();
@@ -1353,45 +1321,15 @@ namespace TrueReplayer
 
             foreach (var copied in _copiedActions)
             {
-                string? clonedImagePath = copied.ImagePath;
+                var clone = copied.Clone();
+                // WaitImage PNG is profile-scoped — clone the file when pasting cross-profile
+                // so the dst profile owns its own reference image.
                 if (copied.ActionType == "WaitImage" && !string.IsNullOrEmpty(copied.ImagePath))
                 {
-                    clonedImagePath = ImageStorageService.CloneReferenceImage(srcProfile, copied.ImagePath, dstProfile)
+                    clone.ImagePath = ImageStorageService.CloneReferenceImage(srcProfile, copied.ImagePath, dstProfile)
                                       ?? copied.ImagePath;
                 }
-                var clone = new ActionItem
-                {
-                    ActionType = copied.ActionType,
-                    Key = copied.Key,
-                    X = copied.X,
-                    Y = copied.Y,
-                    Delay = copied.Delay,
-                    Comment = copied.Comment,
-                    Timeout = copied.Timeout,
-                    Confidence = copied.Confidence,
-                    ImagePath = clonedImagePath,
-                    WaitImageOnTimeout = copied.WaitImageOnTimeout,
-                    WaitImageInvert = copied.WaitImageInvert,
-                    WaitImageClickOnMatch = copied.WaitImageClickOnMatch,
-                    WaitImageSearchX = copied.WaitImageSearchX,
-                    WaitImageSearchY = copied.WaitImageSearchY,
-                    WaitImageSearchW = copied.WaitImageSearchW,
-                    WaitImageSearchH = copied.WaitImageSearchH,
-                    BrowserText = copied.BrowserText,
-                    NewTab = copied.NewTab,
-                    IsSkipped = copied.IsSkipped,
-                    WaitMode = copied.WaitMode,
-                    UrlWaitPattern = copied.UrlWaitPattern,
-                    PostNavigateSelector = copied.PostNavigateSelector,
-                    TypeAppend = copied.TypeAppend,
-                    TypePaste = copied.TypePaste,
-                    TypeDelay = copied.TypeDelay,
-                    SelectMatchMode = copied.SelectMatchMode,
-                    RepeatCount = copied.RepeatCount,
-                    RepeatDelayMs = copied.RepeatDelayMs,
-                    HoldDurationMs = copied.HoldDurationMs,
-                    RowNumber = insertIndex + 1
-                };
+                clone.RowNumber = insertIndex + 1;
                 actions.Insert(insertIndex, clone);
                 insertIndex++;
             }
@@ -1531,6 +1469,9 @@ namespace TrueReplayer
                     break;
                 case "pixelInvert":
                     action.PixelInvert = value == "true";
+                    break;
+                case "pixelClickOnMatch":
+                    action.PixelClickOnMatch = value == "true";
                     break;
             }
 
@@ -2621,44 +2562,14 @@ namespace TrueReplayer
                 foreach (var idx in validIndices)
                 {
                     var original = actions[idx];
-                    string? clonedImagePath = original.ImagePath;
+                    var clone = original.Clone();
+                    // Duplicate within the same profile still needs a fresh PNG so an "undo
+                    // delete" on the original doesn't strand the copy without an image.
                     if (original.ActionType == "WaitImage" && !string.IsNullOrEmpty(original.ImagePath))
                     {
-                        clonedImagePath = ImageStorageService.CloneReferenceImage(profileName, original.ImagePath, profileName)
+                        clone.ImagePath = ImageStorageService.CloneReferenceImage(profileName, original.ImagePath, profileName)
                                           ?? original.ImagePath;
                     }
-                    var clone = new ActionItem
-                    {
-                        ActionType = original.ActionType,
-                        Key = original.Key,
-                        X = original.X,
-                        Y = original.Y,
-                        Delay = original.Delay,
-                        Comment = original.Comment,
-                        ImagePath = clonedImagePath,
-                        Timeout = original.Timeout,
-                        Confidence = original.Confidence,
-                        WaitImageOnTimeout = original.WaitImageOnTimeout,
-                        WaitImageInvert = original.WaitImageInvert,
-                        WaitImageClickOnMatch = original.WaitImageClickOnMatch,
-                        WaitImageSearchX = original.WaitImageSearchX,
-                        WaitImageSearchY = original.WaitImageSearchY,
-                        WaitImageSearchW = original.WaitImageSearchW,
-                        WaitImageSearchH = original.WaitImageSearchH,
-                        BrowserText = original.BrowserText,
-                        NewTab = original.NewTab,
-                        IsSkipped = original.IsSkipped,
-                        WaitMode = original.WaitMode,
-                        UrlWaitPattern = original.UrlWaitPattern,
-                        PostNavigateSelector = original.PostNavigateSelector,
-                        TypeAppend = original.TypeAppend,
-                        TypePaste = original.TypePaste,
-                        TypeDelay = original.TypeDelay,
-                        SelectMatchMode = original.SelectMatchMode,
-                        RepeatCount = original.RepeatCount,
-                        RepeatDelayMs = original.RepeatDelayMs,
-                        HoldDurationMs = original.HoldDurationMs,
-                    };
                     actions.Insert(insertPos, clone);
                     insertPos++;
                 }

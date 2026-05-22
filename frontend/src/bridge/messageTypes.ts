@@ -55,6 +55,7 @@ export interface ActionItem {
   pixelTolerance?: number;            // 0–255 per channel; default 0 = exact match
   pixelOnTimeout?: string | null;     // "Halt" | "Continue" | "StopReplay"
   pixelInvert?: boolean;              // wait for colour to DISAPPEAR
+  pixelClickOnMatch?: boolean;        // left-click (X,Y) once match condition is satisfied
 }
 
 // #2 — Selector alternative returned by the picker

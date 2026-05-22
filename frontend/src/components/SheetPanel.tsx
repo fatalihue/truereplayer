@@ -142,6 +142,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const [pixelTolerance, setPixelTolerance] = useState<string>('0');
   const [pixelOnTimeout, setPixelOnTimeout] = useState<string>('StopReplay'); // 'Continue' | 'StopReplay'
   const [pixelInvert, setPixelInvert] = useState(false);
+  const [pixelClickOnMatch, setPixelClickOnMatch] = useState(false);
 
   // Eyedropper / live-test request tracking — mirrors the WaitImage testMatch /
   // mouse:pickPosition pattern. Single in-flight request at a time; the requestId
@@ -351,6 +352,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       setPixelTolerance(String(action.pixelTolerance ?? 0));
       setPixelOnTimeout(action.pixelOnTimeout === 'Continue' ? 'Continue' : 'StopReplay');
       setPixelInvert(action.pixelInvert || false);
+      setPixelClickOnMatch(action.pixelClickOnMatch || false);
       setTestPixelResult(null);
       setTestPixelRequestId(null);
     }
@@ -463,6 +465,9 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       if (!!pixelInvert !== !!(action.pixelInvert)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'pixelInvert', value: String(pixelInvert) } });
       }
+      if (!!pixelClickOnMatch !== !!(action.pixelClickOnMatch)) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'pixelClickOnMatch', value: String(pixelClickOnMatch) } });
+      }
     }
 
     // Pause-specific fields: timeout in seconds. Hotkey shares the `key` field with other action
@@ -542,7 +547,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     }
 
     onClose();
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, send, onClose]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
@@ -1284,6 +1289,25 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               </div>
             </div>
 
+            {/* After Match — gated by !invert to mirror the WaitImage block above. */}
+            {!pixelInvert && (
+              <div>
+                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">AFTER MATCH</label>
+                <label
+                  className="flex items-center gap-2 cursor-pointer select-none"
+                  title="Left-clicks the watched pixel (X, Y) as soon as it matches the target colour."
+                >
+                  <input
+                    type="checkbox"
+                    checked={pixelClickOnMatch}
+                    onChange={(e) => setPixelClickOnMatch(e.target.checked)}
+                    className="w-3.5 h-3.5 accent-accent-solid"
+                  />
+                  <span className="text-ui text-text-secondary">Click on found location</span>
+                </label>
+              </div>
+            )}
+
             {/* TEST MATCH — single button that sends a synchronous pixel:testMatch and
                 renders the result inline. Result clears on next pick / test / save. */}
             <div className="pt-1">
@@ -1295,20 +1319,23 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 <PlayCircle size={12} />
                 Test match
               </button>
+              {/* Same pill treatment as WaitImage's testMatchResult. */}
               {testPixelResult && (
-                <div className="mt-2 text-[11px] font-mono">
+                <div
+                  className={`mt-2 px-2 py-1.5 rounded text-[11px] font-mono border ${
+                    testPixelResult.error
+                      ? 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#C42B1C]'
+                      : testPixelResult.matches
+                      ? 'border-[#0E7A0D]/40 bg-[#0E7A0D]/10 text-[#6bcb77]'
+                      : 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#ff6b6b]'
+                  }`}
+                >
                   {testPixelResult.error ? (
-                    <span className="text-text-tertiary">⚠️ {testPixelResult.error}</span>
+                    testPixelResult.error
                   ) : testPixelResult.matches ? (
-                    <span style={{ color: 'var(--color-action-pixelcolor-fg)' }}>
-                      ✓ Matches (got {testPixelResult.sampledHex})
-                    </span>
+                    <>Sampled {testPixelResult.sampledHex}  ·  Target {pixelColor} ± {pixelTolerance} ✓</>
                   ) : (
-                    <span className="text-text-tertiary">
-                      ✗ Got <span className="text-text-primary">{testPixelResult.sampledHex ?? 'no read'}</span>
-                      {' '}vs <span className="text-text-primary">{pixelColor}</span>
-                      {' '}± {pixelTolerance}
-                    </span>
+                    <>Sampled {testPixelResult.sampledHex ?? 'no read'}  ·  Target {pixelColor} ± {pixelTolerance} — out of tolerance</>
                   )}
                 </div>
               )}
