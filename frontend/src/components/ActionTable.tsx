@@ -714,6 +714,15 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
       closeContextMenu();
       return;
     }
+    if (actionType === 'WaitPixelColor') {
+      // Dedicated bridge message — backend opens the screen overlay in pointPick
+      // mode and only inserts the row after the user clicks a pixel. Matches the
+      // WaitImage flow so the two "wait for screen condition" actions behave the
+      // same way (capture-first, not insert-then-configure).
+      send({ type: 'actions:insertWaitPixelColor', payload: { insertIndex } });
+      closeContextMenu();
+      return;
+    }
     if (actionType === 'RunProfile') {
       setRunProfileInsert({ insertIndex });
       closeContextMenu();

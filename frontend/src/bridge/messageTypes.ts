@@ -377,6 +377,11 @@ export type OutgoingMessage =
   // engine emits KEYDOWN, waits holdDurationMs, then KEYUP. Default duration
   // applied server-side when holdDurationMs is absent.
   | { type: 'actions:insertHoldKey'; payload: { key: string; insertIndex: number; holdDurationMs?: number } }
+  // WaitPixelColor — minimises the app, opens the screen overlay in pointPick mode,
+  // and only inserts the row after the user clicks a pixel (or nothing on Esc).
+  // Mirrors how WaitImage's insertion flow works, so the two actions behave the
+  // same way when picked from the toolbar / context menu.
+  | { type: 'actions:insertWaitPixelColor'; payload: { insertIndex: number } }
   | { type: 'actions:duplicate'; payload: { indices: number[] } }
   // Atomic replace of a contiguous range — used by the "Collapse to × N" /
   // "Expand × N" flow so N rows in becomes M rows out under one undo step.

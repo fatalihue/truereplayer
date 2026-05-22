@@ -398,6 +398,7 @@ namespace TrueReplayer
                     case "actions:addRunProfile": HandleAddRunProfile(payload); break;
                     case "actions:editRunProfile": HandleEditRunProfile(payload); break;
                     case "waitimage:recapture": HandleWaitImageRecapture(payload); break;
+                    case "actions:insertWaitPixelColor": HandleInsertWaitPixelColor(payload); break;
                     case "waitimage:configureSearchRegion": _ = HandleConfigureSearchRegionAsync(payload); break;
                     case "waitimage:cropReference": HandleCropReference(payload); break;
                     case "image:testMatch": _ = HandleTestMatchAsync(payload); break;
@@ -1906,25 +1907,12 @@ namespace TrueReplayer
                 return;
             }
 
-            // WaitPixelColor: insert directly with empty coords/colour. Unlike WaitImage
-            // (which needs a reference PNG up front), the pixel target is set inside the
-            // SheetPanel editor via the eyedropper button, so a freshly-inserted row is
-            // valid-but-unconfigured — matches how Pause / SendText defer their config.
-            if (actionType == "WaitPixelColor")
-            {
-                int delay = int.TryParse(CustomDelay, out var pcd) ? pcd : 100;
-                actions.Insert(insertIndex, new ActionItem
-                {
-                    ActionType = actionType,
-                    Key = "",
-                    Delay = delay,
-                    Timeout = 5000,
-                });
-                HasUnsavedChanges = true;
-                PushActionsUpdate();
-                mainController.UpdateButtonStates();
-                return;
-            }
+            // WaitPixelColor is handled by the dedicated actions:insertWaitPixelColor
+            // message (captures coords + colour through the screen overlay before the
+            // row is inserted, matching WaitImage's behaviour). If someone still routes
+            // it through here via actions:insertAction (legacy / fallback), drop to the
+            // generic empty-insert below so the row at least exists — but the toolbar
+            // and context menu both use the dedicated message now.
 
             // Browser actions: insert directly
             if (actionType.StartsWith("Browser"))
@@ -2156,6 +2144,81 @@ namespace TrueReplayer
                     Delay = delay,
                     Key = "",
                     Comment = ""
+                });
+                for (int i = 0; i < actions.Count; i++)
+                    actions[i].RowNumber = i + 1;
+                HasUnsavedChanges = true;
+                PushActionsUpdate();
+                mainController.UpdateButtonStates();
+            });
+        }
+
+        private void HandleInsertWaitPixelColor(JsonElement payload)
+        {
+            int insertIndex = payload.TryGetProperty("insertIndex", out var iEl) && iEl.ValueKind == JsonValueKind.Number
+                ? iEl.GetInt32()
+                : actions.Count;
+            if (insertIndex < 0 || insertIndex > actions.Count) insertIndex = actions.Count;
+            _ = HandleInsertWaitPixelColorAsync(insertIndex);
+        }
+
+        private async Task HandleInsertWaitPixelColorAsync(int insertIndex)
+        {
+            // Mirrors HandleInsertWaitImageAsync: minimise the app, capture the screen,
+            // show the overlay in pointPick mode (single click instead of a drag), and
+            // insert the action with the captured coords + colour pre-filled. If the
+            // user hits Esc (selection == null), nothing is inserted — same "cancel
+            // means cancel" rule WaitImage already follows, so the grid never grows a
+            // half-configured row from a discarded capture.
+            var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
+            await Task.Delay(400);
+
+            System.Drawing.Bitmap screenshot;
+            try
+            {
+                screenshot = ScreenCaptureService.CaptureVirtualScreen();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[WaitPixelColor] Screenshot failed: {ex.Message}");
+                dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+                return;
+            }
+
+            RegionSelectionResult? selection = null;
+            var thread = new Thread(() =>
+            {
+                System.Windows.Forms.Application.EnableVisualStyles();
+                using var overlay = new ScreenOverlayForm(
+                    screenshot,
+                    regionOnly: false,
+                    pointPick: true,
+                    hintText: "Click on the pixel to watch — colour and coords are captured  •  ESC to cancel");
+                overlay.ShowDialog();
+                selection = overlay.GetSelectionAsync().Result;
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            await Task.Run(() => thread.Join());
+
+            dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+
+            // Cancel (Esc) or out-of-bounds click → nothing inserted.
+            if (selection == null || selection.PickedColor == null) return;
+
+            int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
+            dispatcherQueue.TryEnqueue(() =>
+            {
+                actions.Insert(insertIndex, new ActionItem
+                {
+                    ActionType = "WaitPixelColor",
+                    Key = "",
+                    Delay = delay,
+                    Timeout = 5000,
+                    PixelX = selection.ScreenX,
+                    PixelY = selection.ScreenY,
+                    PixelColor = PixelColorService.ToHex(selection.PickedColor.Value),
                 });
                 for (int i = 0; i < actions.Count; i++)
                     actions[i].RowNumber = i + 1;

@@ -358,13 +358,15 @@ export function Toolbar(_props: ToolbarProps) {
 
           {/* Wait for Pixel Color — single-pixel GDI watch, much lighter than
               WaitImage. Listed before Wait Image so the cheaper option appears
-              first; users that need template matching jump one icon over. */}
+              first. Uses the dedicated insertWaitPixelColor message so the screen
+              overlay opens immediately (same UX as WaitImage); the row is only
+              created after a successful click, never as an empty placeholder. */}
           <button
             tabIndex={-1}
             onClick={() => {
               const sel = selectionRef.current;
               const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-              send({ type: 'actions:insertAction', payload: { actionType: 'WaitPixelColor', insertIndex } });
+              send({ type: 'actions:insertWaitPixelColor', payload: { insertIndex } });
             }}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
