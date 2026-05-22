@@ -2874,18 +2874,47 @@ namespace TrueReplayer
             var profile = UserProfile.Default;
             await SettingsManager.SaveProfileAsync(fullPath, profile);
             await profileController.RefreshProfileListAsync(true);
+
+            string profileName = Path.GetFileNameWithoutExtension(fullPath);
+
             if (!string.IsNullOrEmpty(folderName))
             {
                 var order = profileController.GetProfileOrder();
                 var folder = order.Folders.FirstOrDefault(f => f.Name == folderName);
                 if (folder != null)
                 {
-                    string profileName = Path.GetFileNameWithoutExtension(fullPath);
                     order.UngroupedOrder.Remove(profileName);
                     if (!folder.Items.Contains(profileName))
                         folder.Items.Add(profileName);
                     await profileController.SaveProfileOrderAsync();
                 }
+            }
+
+            // Auto-select the freshly created profile so the user can start adding
+            // actions without clicking it first. Mirrors what HandleProfileClick does
+            // on the activate path, minus the unsaved-changes guard (this row didn't
+            // exist a moment ago, nothing to lose) and the deselect branch (it's not
+            // a re-click). Works identically inside or outside a folder — folder
+            // placement happened above, activation just needs the canonical name.
+            var loaded = await profileController.LoadProfileByNameAsync(profileName);
+            if (loaded != null)
+            {
+                var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == profileName);
+                UserProfile.Current = loaded;
+                AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
+                CurrentProfileName = profileName;
+                CurrentProfilePath = entry?.FilePath;
+                HasUnsavedChanges = false;
+                if (entry != null)
+                {
+                    entry.UseRelativeCoordinates = loaded.UseRelativeCoordinates;
+                    entry.BringToFocus = loaded.BringToFocus;
+                }
+                UserProfile.Current.UseRelativeCoordinates = profileController.GetEffectiveRelativeCoordinates(profileName);
+                UserProfile.Current.BringToFocus = profileController.GetEffectiveBringToFocus(profileName);
+                ApplyProfile(loaded);
+                profileController.UpdateProfileColors(profileName);
+                TrayIconService.UpdateTrayIcon();
             }
 
             PushProfilesUpdate();
