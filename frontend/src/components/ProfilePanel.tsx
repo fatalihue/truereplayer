@@ -1405,11 +1405,15 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
       {/* Folder Context Menu */}
       {folderContextMenu && (
-        // Folder context menu — grouped top-to-bottom by scope:
+        // Folder context menu — grouped top-to-bottom by scope and time:
         //   - Identity (apply to this folder itself)     → Rename · Color ▸
-        //   - Triggers (apply to this folder's children) → Window target… · Disable all
+        //   - Triggers (configure children, setup-time)  → Window target…
+        //   - State (batch state flip on children)       → Disable / Enable all
         //   - View (apply to ALL folders)                → Collapse / Expand all folders
         //   - Destructive                                 → Delete folder
+        // State got its own block (was bundled into Triggers) so the menu's
+        // semantic blocks match the profile context menu's structure:
+        // Identity → Triggers → State → … → Delete.
         // Folders are virtual organisation buckets (not file-system folders),
         // so they have no "Open in Explorer" / "Duplicate" equivalent.
         <div
@@ -1458,10 +1462,11 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
           <div className="my-1 border-t border-border-subtle" />
 
-          {/* ── Triggers (this folder's children) ── */}
-          {/* "Window target…" — inherited by every profile inside the folder
-              unless that profile overrides it. The trailing ellipsis indicates
-              a dialog opens (matches the profile menu's "Assign hotkey…" etc). */}
+          {/* ── Triggers (this folder's children) ──
+              "Window target…" is inherited by every profile inside the folder
+              unless that profile overrides it. Setup-time configuration of how
+              children fire. The trailing ellipsis indicates a dialog opens
+              (matches the profile menu's "Assign hotkey…" etc). */}
           <button
             onClick={() => {
               setShowFolderTargetDialog(folderContextMenu.folderName);
@@ -1472,6 +1477,13 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             <Crosshair size={13} className="text-text-tertiary" />
             Window target…
           </button>
+
+          <div className="my-1 border-t border-border-subtle" />
+
+          {/* ── State (batch operation on this folder's children) ──
+              Separated from Triggers because Disable-all is a run-time state
+              flip, not a configure-once trigger. Matches how the profile menu
+              keeps Pin / Disable in its own State block. */}
           <button
             onClick={() => {
               send({ type: 'profile:toggleFolderDisable', payload: { name: folderContextMenu.folderName } });
