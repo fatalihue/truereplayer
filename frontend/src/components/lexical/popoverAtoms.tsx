@@ -77,8 +77,11 @@ export function RadioRow({
 }
 
 // Thin wrapper kept for back-compat with token popover call sites — delegates to the
-// shared NumberInput. The `width` prop (in px) is translated to an inline style on a
-// wrapping span so existing layout constraints don't drift.
+// shared NumberInput. The `width` prop (in px) is applied as an inline width on the
+// wrapper span and the inner input is told to fill it via `inputWidth="w-full"`.
+// Earlier draft tried `inputWidth={\`w-[${width}px]\`}` — Tailwind's static extractor
+// can't see runtime template-literal classes, so those widths were never generated and
+// the chip rendered without any width. Inline style sidesteps that completely.
 export function NumInput({
   value,
   onChange,
@@ -93,13 +96,13 @@ export function NumInput({
   width?: number;
 }) {
   return (
-    <span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex' }}>
+    <span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', width }}>
       <NumberInput
         value={value}
         onChange={onChange}
         min={min}
         disabled={disabled}
-        inputWidth={`w-[${width}px]`}
+        inputWidth="w-full"
         inputHeight="h-7"
       />
     </span>

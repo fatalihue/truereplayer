@@ -1743,8 +1743,12 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               <div className="flex items-center gap-2">
                 <label className="text-[11px] text-text-tertiary" title="Delay between characters in ms (typing only). 0 = instant, blank = auto.">Char delay (ms)</label>
                 <NumberInput
-                  value={parseInt(typeDelay, 10) || 0}
+                  // typeDelay '' = "auto" (engine picks a default per text length). Pass
+                  // null so the placeholder shows; user clearing the field via onClear
+                  // restores the auto state.
+                  value={typeDelay === '' ? null : (Number.isFinite(parseInt(typeDelay, 10)) ? parseInt(typeDelay, 10) : null)}
                   onChange={(n) => setTypeDelay(String(n))}
+                  onClear={() => setTypeDelay('')}
                   min={0}
                   disabled={typePaste}
                   placeholder="auto"
@@ -1930,9 +1934,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             <div className="flex gap-2.5">
               <div className="flex-1">
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">X</label>
+                {/* x === '' means "no override" — the action keeps its recorded coord.
+                    Pass null so the "—" placeholder shows instead of "0" which would be
+                    a legitimate top-left coordinate but is here ambiguous with unset. */}
                 <NumberInput
-                  value={parseInt(x, 10) || 0}
+                  value={x === '' ? null : (Number.isFinite(parseInt(x, 10)) ? parseInt(x, 10) : null)}
                   onChange={(n) => setX(String(n))}
+                  onClear={() => setX('')}
                   placeholder="—"
                   inputWidth="w-full"
                   inputHeight="h-8"
@@ -1942,8 +1950,9 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               <div className="flex-1">
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">Y</label>
                 <NumberInput
-                  value={parseInt(y, 10) || 0}
+                  value={y === '' ? null : (Number.isFinite(parseInt(y, 10)) ? parseInt(y, 10) : null)}
                   onChange={(n) => setY(String(n))}
+                  onClear={() => setY('')}
                   placeholder="—"
                   inputWidth="w-full"
                   inputHeight="h-8"

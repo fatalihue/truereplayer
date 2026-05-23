@@ -2,8 +2,14 @@ import { Minus, Plus } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface NumberInputProps {
-  value: number;
+  // `null` = unset / blank — renders empty with placeholder visible. Used by call sites
+  // where empty has a distinct meaning from a numeric value (e.g. typeDelay '' = "auto",
+  // X/Y '' = "no override"). When the parent stores a real number, just pass that.
+  value: number | null;
   onChange: (n: number) => void;
+  // Optional callback when the user clears a previously-set field (blur with empty text).
+  // Lets the parent restore the "unset" sentinel that bare onChange can't express.
+  onClear?: () => void;
   min?: number;
   max?: number;
   step?: number;                      // increment per +/− click (default 1)
@@ -31,6 +37,7 @@ export interface NumberInputProps {
 export function NumberInput({
   value,
   onChange,
+  onClear,
   min,
   max,
   step = 1,
@@ -45,18 +52,17 @@ export function NumberInput({
   onBlur,
 }: NumberInputProps) {
   // Local string state so the user can type freely (clear the field, type a partial
-  // value like "" or "1" while heading toward "12") without the parent thrashing. We
-  // commit to `onChange` on every keystroke when the parsed value is valid, plus on
-  // blur to snap any out-of-range typed value back into bounds.
-  const [text, setText] = useState(() => String(value));
-  const lastPropValueRef = useRef(value);
+  // value like "" or "1" while heading toward "12") without the parent thrashing. Null
+  // value → empty text so the placeholder shows; user has to type or click + to set.
+  const [text, setText] = useState(() => value == null ? '' : String(value));
+  const lastPropValueRef = useRef<number | null>(value);
   useEffect(() => {
     // Sync when the parent updates value externally (e.g. +/− click or reset). Skip
     // when the change came from our own onChange to avoid clobbering an in-progress
     // edit ("12" → parent normalises to "12" → would overwrite "120" as user types).
     if (value !== lastPropValueRef.current) {
       lastPropValueRef.current = value;
-      setText(String(value));
+      setText(value == null ? '' : String(value));
     }
   }, [value]);
 
@@ -88,10 +94,19 @@ export function NumberInput({
   };
 
   const handleBlur = () => {
-    // Snap an out-of-range or empty value back to the nearest valid one.
+    // Clear path — empty/invalid text. When the parent supports onClear AND had a value
+    // before, fire it (parent restores its null/unset sentinel). Otherwise snap back to
+    // last good number.
     const n = Number(text);
     if (text === '' || !Number.isFinite(n)) {
-      commit(value);  // revert to last good
+      if (onClear && value != null) {
+        lastPropValueRef.current = null;
+        onClear();
+      } else if (value != null) {
+        commit(value);
+      } else {
+        setText('');
+      }
     } else {
       const clamped = clamp(n);
       if (clamped !== n || String(clamped) !== text) commit(clamped);
@@ -104,17 +119,20 @@ export function NumberInput({
     // accidentally bump numbers. preventDefault keeps the page from also scrolling.
     if (document.activeElement !== e.currentTarget) return;
     e.preventDefault();
-    commit(value + (e.deltaY > 0 ? -step : step));
+    const base = value ?? (min ?? 0);
+    commit(base + (e.deltaY > 0 ? -step : step));
   };
 
-  const canDec = min === undefined || value > min;
-  const canInc = max === undefined || value < max;
+  // − and + treat null as `min ?? 0`. + then adds step (so first click on a blank
+  // field sets it to step, intuitive); − is disabled (can't go below "unset").
+  const canDec = value != null && (min === undefined || value > min);
+  const canInc = max === undefined || value == null || value < max;
 
   return (
     <span className={`inline-flex items-stretch gap-0 ${className}`}>
       <button
         type="button"
-        onClick={() => commit(value - step)}
+        onClick={() => { if (value != null) commit(value - step); }}
         disabled={disabled || !canDec}
         aria-label="Decrease"
         className={`${inputHeight} w-6 flex items-center justify-center text-text-secondary bg-bg-input border border-border-default border-r-0 rounded-l hover:bg-bg-elevated hover:text-text-primary active:bg-bg-card disabled:opacity-40 disabled:cursor-not-allowed transition-colors`}
@@ -138,7 +156,7 @@ export function NumberInput({
       />
       <button
         type="button"
-        onClick={() => commit(value + step)}
+        onClick={() => commit((value ?? (min ?? 0)) + step)}
         disabled={disabled || !canInc}
         aria-label="Increase"
         className={`${inputHeight} w-6 flex items-center justify-center text-text-secondary bg-bg-input border border-border-default border-l-0 rounded-r hover:bg-bg-elevated hover:text-text-primary active:bg-bg-card disabled:opacity-40 disabled:cursor-not-allowed transition-colors`}
