@@ -5,6 +5,7 @@ import {
   Trash2, PinOff, Pin, Download, Upload, MonitorDown, Shield, Minimize2, RefreshCw,
   Hourglass, ScanSearch, Repeat2, Undo2, Redo2, ClipboardPaste, Files, Replace,
   FolderPlus, Palette, PanelLeft, DownloadCloud, Table2, Keyboard,
+  MousePointerClick, Pipette, Crosshair,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -22,6 +23,12 @@ interface CommandItem {
   icon: React.ReactNode;
   shortcut?: string;
   badge?: string;
+  // When true, the row renders greyed-out and clicks no-op. Used for commands that
+  // exist conceptually but can't run in the current state (e.g. Duplicate Profile
+  // with no active profile — better to show the command + hint than to vanish it,
+  // since users searching for "duplicate" otherwise see zero matches and wonder why).
+  disabled?: boolean;
+  disabledHint?: string;
   onAction: () => void;
 }
 
@@ -99,6 +106,16 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             },
           },
           {
+            // Macro ↔ Clicker mode switch. Routes through settings:change so the bridge's
+            // SetCursorClickMode runs the same flip+cancel logic as the UI toggle and the
+            // ModeToggleHotkey (ScrollLock by default).
+            id: 'mode',
+            label: settings.useCursorClick ? 'Switch to Macro Mode' : 'Switch to Clicker Mode',
+            icon: <MousePointerClick size={14} style={{ color: settings.useCursorClick ? 'var(--color-clicker)' : undefined }} className={settings.useCursorClick ? '' : 'text-text-secondary'} />,
+            shortcut: settings.modeToggleHotkey,
+            onAction: () => { send({ type: 'settings:change', payload: { key: 'useCursorClick', value: !settings.useCursorClick } }); onClose(); },
+          },
+          {
             id: 'undo', label: 'Undo', shortcut: 'Ctrl+Z',
             icon: <Undo2 size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:undo', payload: {} }); onClose(); },
@@ -126,6 +143,14 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             id: 'waitimage', label: 'Insert Wait for Image',
             icon: <ScanSearch size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'WaitImage', insertIndex: computeInsertIndex() } }); onClose(); },
+          },
+          {
+            // Pairs with Insert Wait for Image — same insert flow, uses the dedicated
+            // actions:insertWaitPixelColor handler so the eyedropper opens immediately
+            // (matches the Toolbar's Pipette button).
+            id: 'waitpixel', label: 'Insert Wait for Pixel Color',
+            icon: <Pipette size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:insertWaitPixelColor', payload: { insertIndex: computeInsertIndex() } }); onClose(); },
           },
           {
             id: 'pause', label: 'Insert Pause',
@@ -193,11 +218,13 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             icon: <RotateCcw size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:reset', payload: {} }); onClose(); },
           },
-          ...(activeProfile ? [{
+          {
             id: 'duplicateprofile', label: 'Duplicate Profile',
             icon: <Files size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'profile:duplicate', payload: { name: activeProfile } }); onClose(); },
-          }] : []),
+            disabled: !activeProfile,
+            disabledHint: 'Select a profile first',
+            onAction: () => { if (activeProfile) { send({ type: 'profile:duplicate', payload: { name: activeProfile } }); onClose(); } },
+          },
           {
             id: 'importprofiles', label: 'Import Profiles',
             icon: <Download size={14} className="text-text-secondary" />,
@@ -207,6 +234,19 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             id: 'exportall', label: 'Export All Profiles',
             icon: <Upload size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:export', payload: { names: profiles.map(p => p.name), includeOrganization: true } }); onClose(); },
+          },
+        ],
+      },
+      {
+        // CLICKER section — settings/actions specific to Clicker mode. Currently just the
+        // area configurator; will grow as the Clicker feature surface expands.
+        id: 'clicker',
+        title: 'CLICKER',
+        items: [
+          {
+            id: 'clickerarea', label: 'Configure Click Area',
+            icon: <Crosshair size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'clicker:configureArea', payload: { requestId: `palette-${Date.now()}` } }); onClose(); },
           },
         ],
       },
@@ -235,35 +275,34 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         id: 'window',
         title: 'WINDOW',
         items: [
+          // Window toggles — short labels; icon state telegraphs the current direction
+          // (Pin vs PinOff for Always On Top; the others just show their concept icon).
+          // A trailing "✓" badge could carry the on/off state but the icon swap already
+          // does that job for Always On Top, and the rest don't need it.
           {
-            id: 'alwaysontop',
-            label: settings.alwaysOnTop ? 'Disable Always On Top' : 'Enable Always On Top',
+            id: 'alwaysontop', label: 'Always On Top',
             icon: settings.alwaysOnTop
               ? <PinOff size={14} className="text-text-secondary" />
               : <Pin size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'window:alwaysOnTop', payload: { enabled: !settings.alwaysOnTop } }); onClose(); },
           },
           {
-            id: 'systemtray',
-            label: settings.minimizeToTray ? 'Disable System Tray' : 'Enable System Tray',
+            id: 'systemtray', label: 'System Tray',
             icon: <Minimize2 size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'window:minimizeToTray', payload: { enabled: !settings.minimizeToTray } }); onClose(); },
           },
           {
-            id: 'runonstartup',
-            label: settings.runOnStartup ? 'Disable Run on Startup' : 'Enable Run on Startup',
+            id: 'runonstartup', label: 'Run on Startup',
             icon: <MonitorDown size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'window:runOnStartup', payload: { enabled: !settings.runOnStartup } }); onClose(); },
           },
           {
-            id: 'startminimized',
-            label: settings.startMinimized ? 'Disable Start Minimized' : 'Enable Start Minimized',
+            id: 'startminimized', label: 'Start Minimized',
             icon: <Minimize2 size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'window:startMinimized', payload: { enabled: !settings.startMinimized } }); onClose(); },
           },
           {
-            id: 'runasadmin',
-            label: settings.runAsAdmin ? 'Disable Run as Administrator' : 'Enable Run as Administrator',
+            id: 'runasadmin', label: 'Run as Admin',
             icon: <Shield size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'settings:change', payload: { key: 'runAsAdmin', value: !settings.runAsAdmin } }); onClose(); },
           },
@@ -314,7 +353,8 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         setFocusedIndex(prev => Math.max(prev - 1, 0));
       } else if (e.key === 'Enter') {
         e.preventDefault();
-        flatItems[focusedIndex]?.onAction();
+        const item = flatItems[focusedIndex];
+        if (item && !item.disabled) item.onAction();
       }
     };
     document.addEventListener('keydown', handler);
@@ -368,28 +408,36 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
                 flatIndex++;
                 const isFocused = flatIndex === focusedIndex;
                 const idx = flatIndex;
+                const isDisabled = !!item.disabled;
                 return (
                   <button
                     key={item.id}
-                    onClick={item.onAction}
+                    onClick={isDisabled ? undefined : item.onAction}
                     onMouseEnter={() => setFocusedIndex(idx)}
+                    disabled={isDisabled}
+                    title={isDisabled ? item.disabledHint : undefined}
                     className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
-                      isFocused
-                        ? 'bg-bg-elevated text-text-primary'
-                        : 'text-text-secondary hover:bg-bg-elevated hover:text-text-primary'
+                      isDisabled
+                        ? 'opacity-40 cursor-not-allowed'
+                        : isFocused
+                          ? 'bg-bg-elevated text-text-primary'
+                          : 'text-text-secondary hover:bg-bg-elevated hover:text-text-primary'
                     }`}
                     style={{ borderRadius: 'var(--ui-border-radius)' }}
                   >
                     {item.icon}
                     <span className="flex-1 text-left">{item.label}</span>
-                    {item.badge && (
+                    {isDisabled && item.disabledHint && (
+                      <span className="text-[10px] text-text-disabled italic">{item.disabledHint}</span>
+                    )}
+                    {!isDisabled && item.badge && (
                       <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded-full text-accent"
                         style={{ background: 'color-mix(in srgb, var(--color-accent) 10%, transparent)' }}
                       >
                         {item.badge}
                       </span>
                     )}
-                    {item.shortcut && <KbdTag combo={item.shortcut} />}
+                    {!isDisabled && item.shortcut && <KbdTag combo={item.shortcut} />}
                   </button>
                 );
               })}
