@@ -265,6 +265,19 @@ html, body, #root {
   border-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
 }
 
+/* Hide native number-input spinners app-wide. We always pair number inputs with the
+   shared <NumberInput> component's explicit +/− buttons, so the native pseudo-elements
+   would just sit on top of our buttons (Chromium shows them on hover) and double-up the
+   UX. Firefox uses appearance:textfield; Webkit/Chromium needs the pseudo-elements. */
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 /* Subtle dark-themed checkbox */
 .checkbox-subtle {
   appearance: none;

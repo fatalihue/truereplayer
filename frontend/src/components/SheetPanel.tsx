@@ -5,6 +5,7 @@ import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
 import type { SelectorAlternative, BrowserTestResult } from '../bridge/messageTypes';
 import { Checkbox } from './Checkbox';
+import { NumberInput } from './common/NumberInput';
 import { ImageCropper } from './ImageCropper';
 import { LexicalTokenEditor, type LexicalEditorHandle } from './lexical/LexicalTokenEditor';
 import { getDisplayKey } from '../utils/displayUtils';
@@ -1116,29 +1117,31 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               </div>
             </div>
 
-            {/* Timeout / Tolerance */}
+            {/* Timeout / Tolerance — parent stores as string for back-compat with the
+                rest of SheetPanel state. parseInt with NaN-safe fallback to current min. */}
             <div className="flex gap-2.5">
               <div className="flex-1">
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
-                <input
-                  type="number"
-                  value={timeout}
-                  onChange={(e) => setTimeout_(e.target.value)}
-                  min="1"
-                  step="1"
-                  className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                <NumberInput
+                  value={parseInt(timeout, 10) || 1}
+                  onChange={(n) => setTimeout_(String(n))}
+                  min={1}
+                  inputWidth="w-full"
+                  inputHeight="h-8"
+                  ariaLabel="Timeout in seconds"
                 />
               </div>
               <div className="flex-1">
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TOLERANCE (%)</label>
-                <input
-                  type="number"
-                  value={confidence}
-                  onChange={(e) => setConfidence(e.target.value)}
-                  min="10"
-                  max="100"
-                  step="5"
-                  className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                <NumberInput
+                  value={parseInt(confidence, 10) || 80}
+                  onChange={(n) => setConfidence(String(n))}
+                  min={10}
+                  max={100}
+                  step={5}
+                  inputWidth="w-full"
+                  inputHeight="h-8"
+                  ariaLabel="Tolerance percent"
                 />
               </div>
             </div>
@@ -1403,13 +1406,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             </div>
             <div>
               <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s) — 0 = infinite</label>
-              <input
-                type="number"
-                value={timeout}
-                onChange={(e) => setTimeout_(e.target.value)}
-                min="0"
-                step="1"
-                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              <NumberInput
+                value={parseInt(timeout, 10) || 0}
+                onChange={(n) => setTimeout_(String(n))}
+                min={0}
+                inputWidth="w-full"
+                inputHeight="h-8"
+                ariaLabel="Timeout in seconds"
               />
               {/* Quick presets — covers the 90% of real-world pauses (a second, a few seconds,
                   a minute, a few minutes, indefinite wait). The Manual input above still
@@ -1739,15 +1742,15 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               />
               <div className="flex items-center gap-2">
                 <label className="text-[11px] text-text-tertiary" title="Delay between characters in ms (typing only). 0 = instant, blank = auto.">Char delay (ms)</label>
-                <input
-                  type="number"
-                  value={typeDelay}
-                  onChange={(e) => setTypeDelay(e.target.value)}
-                  min="0"
-                  step="1"
+                <NumberInput
+                  value={parseInt(typeDelay, 10) || 0}
+                  onChange={(n) => setTypeDelay(String(n))}
+                  min={0}
                   disabled={typePaste}
                   placeholder="auto"
-                  className="w-20 h-7 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid disabled:opacity-50"
+                  inputWidth="w-14"
+                  inputHeight="h-7"
+                  ariaLabel="Char delay (ms)"
                 />
               </div>
             </div>
@@ -1829,13 +1832,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             {(isBrowserWait || actionType === 'BrowserClick' || actionType === 'BrowserRightClick' || isBrowserType || isBrowserNavigate || isBrowserSelect) && (
             <div className="w-1/2">
               <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
-              <input
-                type="number"
-                value={timeout}
-                onChange={(e) => setTimeout_(e.target.value)}
-                min="1"
-                step="1"
-                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              <NumberInput
+                value={parseInt(timeout, 10) || 1}
+                onChange={(n) => setTimeout_(String(n))}
+                min={1}
+                inputWidth="w-full"
+                inputHeight="h-8"
+                ariaLabel="Timeout in seconds"
               />
             </div>
             )}
@@ -1927,22 +1930,24 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             <div className="flex gap-2.5">
               <div className="flex-1">
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">X</label>
-                <input
-                  type="number"
-                  value={x}
-                  onChange={(e) => setX(e.target.value)}
-                  className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                <NumberInput
+                  value={parseInt(x, 10) || 0}
+                  onChange={(n) => setX(String(n))}
                   placeholder="—"
+                  inputWidth="w-full"
+                  inputHeight="h-8"
+                  ariaLabel="X coordinate"
                 />
               </div>
               <div className="flex-1">
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">Y</label>
-                <input
-                  type="number"
-                  value={y}
-                  onChange={(e) => setY(e.target.value)}
-                  className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                <NumberInput
+                  value={parseInt(y, 10) || 0}
+                  onChange={(n) => setY(String(n))}
                   placeholder="—"
+                  inputWidth="w-full"
+                  inputHeight="h-8"
+                  ariaLabel="Y coordinate"
                 />
               </div>
               {isClickHalf && (
@@ -1993,11 +1998,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           {/* Delay */}
           <div>
             <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">DELAY (ms)</label>
-            <input
-              type="number"
-              value={delay}
-              onChange={(e) => setDelay(e.target.value)}
-              className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+            <NumberInput
+              value={parseInt(delay, 10) || 0}
+              onChange={(n) => setDelay(String(n))}
+              min={0}
+              inputWidth="w-full"
+              inputHeight="h-8"
+              ariaLabel="Delay in milliseconds"
             />
           </div>
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { X, Check, RotateCcw, Download, Upload, Clipboard, ClipboardPaste, Pipette } from 'lucide-react';
+import { NumberInput } from './common/NumberInput';
 import {
   themes,
   DEFAULT_UI_SETTINGS,
@@ -271,20 +272,15 @@ function SliderSetting({ label, value, min, max, unit, defaultValue, onChange }:
           </div>
         )}
       </div>
-      <div className="flex items-center gap-1">
-        <input
-          type="number"
-          min={min}
-          max={max}
-          value={value}
-          onChange={(e) => {
-            const n = Number(e.target.value);
-            if (n >= min && n <= max) onChange(n);
-          }}
-          className="w-14 h-7 px-2 text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
-        />
-        <span className="text-[11px] text-text-disabled w-5">{unit}</span>
-      </div>
+      <NumberInput
+        value={value}
+        onChange={onChange}
+        min={min}
+        max={max}
+        suffix={unit}
+        inputHeight="h-7"
+        ariaLabel="Value"
+      />
     </div>
   );
 }

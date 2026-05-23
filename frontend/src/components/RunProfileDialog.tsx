@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Repeat2 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
+import { NumberInput } from './common/NumberInput';
 
 export interface RunProfileDialogProps {
   /** When set, the dialog is in edit mode for this existing action. */
@@ -117,16 +118,14 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
                   Repeat
                 </label>
                 <div className="flex items-center gap-2">
-                  <input
-                    type="number"
+                  <NumberInput
+                    value={repeatCount}
+                    onChange={setRepeatCount}
                     min={1}
                     max={999}
-                    value={repeatCount}
-                    onChange={(e) => {
-                      const n = parseInt(e.target.value, 10);
-                      if (!isNaN(n)) setRepeatCount(Math.max(1, Math.min(999, n)));
-                    }}
-                    className="w-[80px] h-9 px-2 text-xs font-mono text-center text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                    inputWidth="w-16"
+                    inputHeight="h-9"
+                    ariaLabel="Repeat count"
                   />
                   <span className="text-xs text-text-tertiary">
                     {repeatCount === 1 ? 'time' : 'times'} per call

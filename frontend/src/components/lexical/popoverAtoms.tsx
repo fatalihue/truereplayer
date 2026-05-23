@@ -1,4 +1,5 @@
 import React from 'react';
+import { NumberInput } from '../common/NumberInput';
 
 // Small UI primitives shared by the Advanced Clipboard insert popover and the
 // chip click-to-edit popover. Pure presentational — no business logic here.
@@ -75,6 +76,9 @@ export function RadioRow({
   );
 }
 
+// Thin wrapper kept for back-compat with token popover call sites — delegates to the
+// shared NumberInput. The `width` prop (in px) is translated to an inline style on a
+// wrapping span so existing layout constraints don't drift.
 export function NumInput({
   value,
   onChange,
@@ -89,18 +93,15 @@ export function NumInput({
   width?: number;
 }) {
   return (
-    <input
-      type="number"
-      value={value}
-      min={min}
-      disabled={disabled}
-      onChange={(e) => {
-        const n = parseInt(e.target.value, 10);
-        if (!isNaN(n)) onChange(n);
-      }}
-      onClick={(e) => e.stopPropagation()}
-      style={{ width }}
-      className="h-7 px-1 text-[12px] font-mono text-center rounded border outline-none transition-colors bg-bg-input border-border-default text-text-primary focus:border-accent-solid disabled:opacity-50 disabled:cursor-not-allowed"
-    />
+    <span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex' }}>
+      <NumberInput
+        value={value}
+        onChange={onChange}
+        min={min}
+        disabled={disabled}
+        inputWidth={`w-[${width}px]`}
+        inputHeight="h-7"
+      />
+    </span>
   );
 }

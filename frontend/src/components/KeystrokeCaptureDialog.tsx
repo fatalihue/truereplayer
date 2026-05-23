@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Keyboard, Minus, Plus, AlertCircle } from 'lucide-react';
+import { Keyboard, AlertCircle } from 'lucide-react';
+import { NumberInput } from './common/NumberInput';
 
 /**
  * Unified "Send Keystroke" dialog. One capture pad + a Press/Hold mode toggle covers
@@ -364,37 +365,13 @@ export function KeystrokeCaptureDialog({
             <div className="flex flex-col gap-2.5">
               <div className="flex items-center justify-between gap-3">
                 <label className="text-[12px] font-medium text-text-secondary">Times to repeat</label>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setRepeat((v) => clampRepeat(v - 1))}
-                    disabled={repeat <= 1}
-                    className="w-6 h-6 flex items-center justify-center rounded bg-bg-card hover:bg-bg-input border border-border-subtle text-text-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    aria-label="Decrease repeat count"
-                  >
-                    <Minus size={11} />
-                  </button>
-                  <input
-                    type="number"
-                    min={1}
-                    max={MAX_REPEAT}
-                    value={repeat}
-                    onChange={(e) => {
-                      const n = parseInt(e.target.value, 10);
-                      setRepeat(Number.isFinite(n) ? clampRepeat(n) : 1);
-                    }}
-                    className="w-14 h-6 px-1 text-center text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid tabular-nums"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setRepeat((v) => clampRepeat(v + 1))}
-                    disabled={repeat >= MAX_REPEAT}
-                    className="w-6 h-6 flex items-center justify-center rounded bg-bg-card hover:bg-bg-input border border-border-subtle text-text-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    aria-label="Increase repeat count"
-                  >
-                    <Plus size={11} />
-                  </button>
-                </div>
+                <NumberInput
+                  value={repeat}
+                  onChange={(n) => setRepeat(clampRepeat(n))}
+                  min={1}
+                  max={MAX_REPEAT}
+                  ariaLabel="Repeat count"
+                />
               </div>
 
               {/* Gap stays visible but dims when Times = 1 — communicates the field
@@ -402,24 +379,16 @@ export function KeystrokeCaptureDialog({
                   jump in height when the user increments Times. */}
               <div className="flex items-center justify-between gap-3">
                 <label className={`text-[12px] font-medium transition-colors ${repeat > 1 ? 'text-text-secondary' : 'text-text-tertiary'}`}>
-                  Gap between presses
+                  Gap between presses (ms)
                 </label>
-                <div className="flex items-center gap-1">
-                  <div className="w-6 h-6" aria-hidden="true" />
-                  <input
-                    type="number"
-                    min={0}
-                    max={MAX_REPEAT_DELAY}
-                    value={repeatDelay}
-                    disabled={repeat <= 1}
-                    onChange={(e) => {
-                      const n = parseInt(e.target.value, 10);
-                      setRepeatDelay(Number.isFinite(n) ? clampDelay(n) : 0);
-                    }}
-                    className="w-14 h-6 px-1 text-center text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid tabular-nums disabled:opacity-40 disabled:cursor-not-allowed"
-                  />
-                  <span className={`w-6 h-6 inline-flex items-center justify-center text-[11px] transition-colors ${repeat > 1 ? 'text-text-tertiary' : 'text-text-tertiary opacity-60'}`}>ms</span>
-                </div>
+                <NumberInput
+                  value={repeatDelay}
+                  onChange={(n) => setRepeatDelay(clampDelay(n))}
+                  min={0}
+                  max={MAX_REPEAT_DELAY}
+                  disabled={repeat <= 1}
+                  ariaLabel="Gap between presses (ms)"
+                />
               </div>
             </div>
           )}
@@ -428,47 +397,19 @@ export function KeystrokeCaptureDialog({
           {mode === 'hold' && (
             <div className="flex flex-col gap-2.5">
               <div className="flex items-center justify-between gap-3">
-                <label className="text-[12px] font-medium text-text-secondary">Hold duration</label>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setHoldMs(v => clampHold(v - stepFor(v)))}
-                    disabled={holdMs <= MIN_HOLD_MS}
-                    className="w-6 h-6 flex items-center justify-center rounded bg-bg-card hover:bg-bg-input border border-border-subtle text-text-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    aria-label="Decrease hold duration"
-                  >
-                    <Minus size={11} />
-                  </button>
-                  <input
-                    type="number"
-                    min={MIN_HOLD_MS}
-                    max={MAX_HOLD_MS}
-                    step={100}
-                    value={holdMs}
-                    onChange={(e) => {
-                      // Don't snap to MIN_HOLD_MS during typing — would rewrite the field
-                      // mid-keystroke. Lower bound enforced on Save (handleConfirm) instead.
-                      const raw = e.target.value;
-                      if (raw === '') { setHoldMs(0); return; }
-                      const n = parseInt(raw, 10);
-                      if (Number.isFinite(n) && n >= 0) {
-                        setHoldMs(Math.min(MAX_HOLD_MS, n));
-                      }
-                    }}
-                    onBlur={() => setHoldMs(v => clampHold(v))}
-                    className="w-20 h-6 px-1 text-center text-xs font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid tabular-nums"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setHoldMs(v => clampHold(v + stepFor(v)))}
-                    disabled={holdMs >= MAX_HOLD_MS}
-                    className="w-6 h-6 flex items-center justify-center rounded bg-bg-card hover:bg-bg-input border border-border-subtle text-text-secondary disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    aria-label="Increase hold duration"
-                  >
-                    <Plus size={11} />
-                  </button>
-                  <span className="text-[11px] text-text-tertiary ml-1">ms</span>
-                </div>
+                <label className="text-[12px] font-medium text-text-secondary">Hold duration (ms)</label>
+                {/* Step is dynamic (stepFor returns 100 normally, 1 below 100ms for fine
+                    control). NumberInput's step is constant per render, so we recompute
+                    via the parent's clamp on each change. */}
+                <NumberInput
+                  value={holdMs}
+                  onChange={(n) => setHoldMs(clampHold(n))}
+                  min={MIN_HOLD_MS}
+                  max={MAX_HOLD_MS}
+                  step={stepFor(holdMs)}
+                  inputWidth="w-20"
+                  ariaLabel="Hold duration (ms)"
+                />
               </div>
 
               {/* Preset chips. Click writes the value directly into both the state
