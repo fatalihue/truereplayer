@@ -479,9 +479,12 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
       {/* 2-column grid: editor body on the left, persistent Live Preview on the right.
           Header and Tabs span both columns; body+footer share the left column;
           the preview pane spans the body+footer rows on the right. */}
+      {/* Fixed 1000×660 — matches TrueReplayer's 1180×780 launch size with ~90 px
+          horizontal and ~60 px vertical backdrop showing through. No 95vh that
+          ballooned on tall displays. Preview pane stays at 340 px (was 360). */}
       <div
         ref={panelRef}
-        className="w-[860px] h-[95vh] bg-bg-surface border border-border-default rounded-lg shadow-2xl overflow-hidden grid grid-cols-[1fr_360px] grid-rows-[auto_auto_1fr_auto]"
+        className="w-[1000px] h-[660px] bg-bg-surface border border-border-default rounded-lg shadow-2xl overflow-hidden grid grid-cols-[1fr_340px] grid-rows-[auto_auto_1fr_auto]"
       >
         {/* Header — spans both columns */}
         <div className="col-span-2 flex items-center justify-between px-5 py-3.5 border-b border-border-subtle">
@@ -613,7 +616,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                     </button>
                   )}
                 </div>
-                <div className="flex gap-1 flex-wrap">
+                <div className="flex gap-1 flex-wrap items-center">
                   {filterChips.map(chip => (
                     <button
                       key={chip.id}
@@ -627,6 +630,29 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                       {chip.label}
                     </button>
                   ))}
+                  {/* Random preset within the current filter — discovery shortcut for users
+                      browsing palettes. Excludes the currently active one so a click is
+                      always a visible change. Falls back to any preset when the filter is
+                      empty (shouldn't happen since builtinList is non-empty when shown). */}
+                  {(() => {
+                    // Disable when the filter has nothing to pick from OR the only item
+                    // in it is already active (a click would be a no-op + confuse).
+                    const pool = builtinList.filter(t => t.id !== config.baseThemeId);
+                    const noPick = pool.length === 0;
+                    return (
+                      <button
+                        onClick={() => {
+                          if (pool.length === 0) return;
+                          selectPreset(pool[Math.floor(Math.random() * pool.length)].id);
+                        }}
+                        disabled={noPick}
+                        className="ml-auto px-2.5 py-0.5 text-[10px] rounded-full border border-border-default text-text-tertiary hover:text-text-primary hover:border-accent-solid/40 hover:bg-bg-elevated disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        title={noPick ? 'No other presets in this filter' : 'Pick a random preset from the current filter'}
+                      >
+                        🎲 Surprise me
+                      </button>
+                    );
+                  })()}
                 </div>
 
                 {/* Built-in presets */}
@@ -1195,7 +1221,13 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
             The pane's content is non-interactive (pointer-events: none) since the buttons
             and inputs inside are mock — clicking would do nothing and confuse the user.
             The header label and "Active" chip are static text, so this is harmless. */}
-        <div className="col-start-2 row-start-3 row-span-2 bg-bg-base p-3 overflow-y-auto flex flex-col gap-3 select-none [&_button]:pointer-events-none [&_input]:pointer-events-none">
+        {/* Live preview: trimmed to the 3 sections that move the needle on theme swaps
+            — the action grid (pill colours), the semantic buttons (recording/replay/clicker
+            + primary/ghost), and the status bar (accent + replay tints). The previous 8-
+            section layout (profile row, tabs+slider, form, text hierarchy) was scrollable
+            noise: the data it visualised was either redundant with these three or already
+            visible behind the open dialog. Removing overflow-y-auto enforces "must fit". */}
+        <div className="col-start-2 row-start-3 row-span-2 bg-bg-base p-3 flex flex-col gap-3 select-none [&_button]:pointer-events-none [&_input]:pointer-events-none">
           {/* Header */}
           <div className="flex items-center justify-between pb-2 border-b border-border-subtle">
             <span className="text-[10px] font-semibold text-text-tertiary tracking-wider">LIVE PREVIEW</span>
@@ -1210,25 +1242,6 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
               <span className="w-1 h-1 rounded-full" style={{ background: 'var(--color-replay)' }} />
               Active
             </span>
-          </div>
-
-          {/* Profile row */}
-          <div className="flex flex-col gap-1">
-            <span className="text-[9px] font-semibold text-text-disabled tracking-wider">PROFILE</span>
-            <div className="flex items-center gap-2 px-2.5 py-1.5 bg-bg-card border border-border-subtle" style={{ borderRadius: 'var(--ui-border-radius)' }}>
-              <span className="flex-1 text-xs font-semibold text-accent">My Macro</span>
-              <span className="inline-block w-2.5 h-2.5 rounded-full border border-text-tertiary relative" title="Window target">
-                <span className="absolute inset-1 rounded-full bg-text-tertiary" />
-              </span>
-              <span
-                className="px-1.5 py-px rounded font-mono text-[10px] border"
-                style={{
-                  background: 'var(--color-hotkey-bg)',
-                  color: 'var(--color-hotkey-fg)',
-                  borderColor: 'var(--color-hotkey-border)',
-                }}
-              >Ctrl F8</span>
-            </div>
           </div>
 
           {/* Action table — exercises every pill color */}
@@ -1316,63 +1329,10 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
             </div>
           </div>
 
-          {/* Tabs + slider — exercises the accent-driven tab highlight and slider */}
-          <div className="flex flex-col gap-1">
-            <span className="text-[9px] font-semibold text-text-disabled tracking-wider">TABS</span>
-            <div
-              className="bg-bg-card border border-border-subtle px-2"
-              style={{ borderRadius: 'var(--ui-border-radius)' }}
-            >
-              <div className="flex border-b border-border-subtle">
-                <div className="flex-1 text-center py-1 text-[10px] text-accent border-b-2 border-accent">Profile</div>
-                <div className="flex-1 text-center py-1 text-[10px] text-text-tertiary">Global</div>
-                <div className="flex-1 text-center py-1 text-[10px] text-text-tertiary">Shortcuts</div>
-              </div>
-              <div className="flex items-center gap-2 py-2">
-                <div className="flex-1 relative h-1 rounded-full bg-bg-elevated">
-                  <div className="absolute inset-y-0 left-0 w-[45%] rounded-full bg-accent-solid" />
-                  <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-accent" style={{ left: '45%' }} />
-                </div>
-                <span className="font-mono text-[9px] text-text-tertiary">45%</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Form — input + toggle on + toggle off */}
-          <div className="flex flex-col gap-1">
-            <span className="text-[9px] font-semibold text-text-disabled tracking-wider">FORM</span>
-            <div className="bg-bg-card border border-border-subtle px-2.5 py-1.5" style={{ borderRadius: 'var(--ui-border-radius)' }}>
-              {[
-                { label: 'Delay', value: '100', on: true },
-                { label: 'Jitter', value: '20', on: false },
-              ].map(f => (
-                <div key={f.label} className="flex items-center gap-2 py-0.5 text-[11px]">
-                  <span className="flex-1 text-text-secondary">{f.label}</span>
-                  <input
-                    readOnly
-                    value={f.value}
-                    className="w-12 h-5 px-1.5 text-center text-[10px] font-mono text-text-primary bg-bg-input border border-border-default rounded"
-                  />
-                  <div className={`relative w-6 h-3 rounded-full border ${f.on ? 'bg-accent-solid border-accent-solid' : 'bg-bg-elevated border-border-default'}`}>
-                    <div className={`absolute top-0.5 w-2 h-2 rounded-full ${f.on ? 'left-[14px] bg-white' : 'left-0.5 bg-text-tertiary'}`} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Text hierarchy — 4 levels of foreground on bg-card */}
-          <div className="flex flex-col gap-1">
-            <span className="text-[9px] font-semibold text-text-disabled tracking-wider">TEXT HIERARCHY</span>
-            <div className="bg-bg-card border border-border-subtle px-2.5 py-1.5 text-[11px] leading-snug" style={{ borderRadius: 'var(--ui-border-radius)' }}>
-              <div className="text-text-primary">Primary heading text</div>
-              <div className="text-text-secondary">Secondary body copy</div>
-              <div className="text-text-tertiary">Tertiary meta info</div>
-              <div className="text-text-disabled">Disabled state</div>
-            </div>
-          </div>
-
-          {/* Status bar */}
+          {/* Status bar with a hotkey chip baked in — the chip keeps preview coverage
+              for the --color-hotkey-{bg,fg,border} variables that the trimmed Profile
+              row used to exercise. Real ProfilePanel rows render hotkeys this way too,
+              so a theme tweak shows up in the preview without re-opening the dialog. */}
           <div
             className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-text-tertiary bg-bg-card border border-border-subtle mt-auto"
             style={{ borderRadius: 'var(--ui-border-radius)' }}
@@ -1380,6 +1340,15 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
             <span>📁 ~/Macros</span>
             <span className="text-text-disabled">·</span>
             <span>8 actions</span>
+            <span className="text-text-disabled">·</span>
+            <span
+              className="px-1.5 py-px rounded font-mono text-[9px] border"
+              style={{
+                background: 'var(--color-hotkey-bg)',
+                color: 'var(--color-hotkey-fg)',
+                borderColor: 'var(--color-hotkey-border)',
+              }}
+            >Ctrl F8</span>
             <span className="text-text-disabled">·</span>
             <span style={{ color: 'var(--color-replay)' }}>Ready</span>
           </div>
