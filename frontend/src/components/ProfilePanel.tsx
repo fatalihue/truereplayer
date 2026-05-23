@@ -4,8 +4,10 @@ import type { ProfileEntry } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { KbdTag } from './common/KbdTag';
+import { RemovableChip } from './common/RemovableChip';
 import { CheckboxBox } from './Checkbox';
 import { TargetConfigDialog } from './TargetConfigDialog';
+import { useToast } from '../state/ToastContext';
 
 interface ContextMenuState {
   x: number;
@@ -32,6 +34,7 @@ const FOLDER_COLORS = [
 export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePanelProps) {
   const { profiles, profileOrder } = useAppState();
   const { send, subscribe } = useBridge();
+  const { showToast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -317,7 +320,22 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   const handleRemoveHotkey = (name: string) => {
     setContextMenu(null);
+    // Snapshot the previous hotkey + trigger mode BEFORE issuing the remove. The Undo
+    // re-sends the original assign payload so the round-trip is exact — same hotkey,
+    // same trigger mode. If the profile already had no hotkey somehow, we skip the toast.
+    const prev = profiles.find(p => p.name === name);
+    const prevHotkey = prev?.hotkey ?? null;
+    const prevMode = prev?.triggerMode ?? 'onPress';
     send({ type: 'profile:removeHotkey', payload: { name } });
+    if (prevHotkey) {
+      showToast(`Removed hotkey ${prevHotkey} from "${name}"`, {
+        type: 'success',
+        action: {
+          label: 'Undo',
+          onClick: () => send({ type: 'profile:assignHotkey', payload: { name, hotkey: prevHotkey, mode: prevMode } }),
+        },
+      });
+    }
   };
 
   const handleAssignHotstring = (name: string) => {
@@ -331,7 +349,19 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   const handleRemoveHotstring = (name: string) => {
     setContextMenu(null);
+    const prev = profiles.find(p => p.name === name);
+    const prevSeq = prev?.hotstring ?? null;
+    const prevInstant = prev?.hotstringInstant ?? true;
     send({ type: 'profile:removeHotstring', payload: { name } });
+    if (prevSeq) {
+      showToast(`Removed hotstring "${prevSeq}" from "${name}"`, {
+        type: 'success',
+        action: {
+          label: 'Undo',
+          onClick: () => send({ type: 'profile:assignHotstring', payload: { name, sequence: prevSeq, instant: prevInstant } }),
+        },
+      });
+    }
   };
 
   const confirmHotstring = () => {
@@ -349,9 +379,64 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setShowWindowTargetDialog(name);
   };
 
+  // Folder-target remove with Undo. Mirrors handleRemoveWindowTarget; the undo
+  // re-sends profile:setFolderWindowTarget with the captured fields. profileOrder.folders
+  // is the source of truth for folder metadata in this scope.
+  const handleRemoveFolderWindowTarget = (folderName: string) => {
+    const folder = profileOrder?.folders?.find(f => f.name === folderName);
+    const prevProcess = folder?.windowTargetProcessName ?? '';
+    const prevTitle = folder?.windowTargetWindowTitle ?? '';
+    const prevMode = folder?.windowTargetTitleMatchMode ?? 'contains';
+    const hadTarget = folder?.hasWindowTarget;
+    send({ type: 'profile:removeFolderWindowTarget', payload: { folderName } });
+    if (hadTarget) {
+      const label = prevProcess || prevTitle || 'target';
+      showToast(`Removed folder target (${label}) from "${folderName}"`, {
+        type: 'success',
+        action: {
+          label: 'Undo',
+          onClick: () => send({
+            type: 'profile:setFolderWindowTarget',
+            payload: { folderName, processName: prevProcess, windowTitle: prevTitle, titleMatchMode: prevMode },
+          }),
+        },
+      });
+    }
+  };
+
   const handleRemoveWindowTarget = (name: string) => {
     setContextMenu(null);
+    // Capture all 4 fields needed to reconstruct: process, title, match mode, plus the
+    // related coords/focus/geometry flags so the undo restores the exact target the
+    // user had (not a stripped-down version). The profile's own values — not effective
+    // (folder-inherited) ones — are what we wipe + restore.
+    const prev = profiles.find(p => p.name === name);
+    const hadOwn = prev?.hasWindowTarget;
+    const prevProcess = prev?.windowTargetProcessName ?? '';
+    const prevTitle = prev?.windowTargetWindowTitle ?? '';
+    const prevMode = prev?.windowTargetTitleMatchMode ?? 'contains';
+    const prevRelative = prev?.useRelativeCoordinates ?? false;
+    const prevBringFocus = prev?.bringToFocus ?? false;
+    const prevRestorePos = prev?.restorePosition ?? false;
+    const prevRestoreSize = prev?.restoreSize ?? false;
     send({ type: 'profile:removeWindowTarget', payload: { name } });
+    if (hadOwn) {
+      const label = prevProcess || prevTitle || 'target';
+      showToast(`Removed window target (${label}) from "${name}"`, {
+        type: 'success',
+        action: {
+          label: 'Undo',
+          onClick: () => send({
+            type: 'profile:setWindowTarget',
+            payload: {
+              name, processName: prevProcess, windowTitle: prevTitle, titleMatchMode: prevMode,
+              relativeCoordinates: prevRelative, bringToFocus: prevBringFocus,
+              restorePosition: prevRestorePos, restoreSize: prevRestoreSize,
+            },
+          }),
+        },
+      });
+    }
   };
 
   const handleHotkeyCapture = (e: React.KeyboardEvent) => {
@@ -890,20 +975,19 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             apps off PATH) — in that case the crosshair badge to the right renders
             as the fallback (and keeps its own ✕ for the own-target case). */}
         {p.appIconBase64 && p.hasWindowTarget && (
-          <span
-            className="group/target shrink-0 relative w-3.5 h-3.5"
-            title={p.effectiveTargetProcessName ?? ''}
+          <RemovableChip
+            variant="circle"
+            removeTitle={`Remove window target (${p.effectiveTargetProcessName ?? 'target'})`}
+            onRemove={(e) => { e.stopPropagation(); handleRemoveWindowTarget(p.name); }}
+            className="w-3.5 h-3.5"
           >
             <img
               src={`data:image/png;base64,${p.appIconBase64}`}
               alt=""
+              title={p.effectiveTargetProcessName ?? ''}
               className="w-3.5 h-3.5 object-contain pointer-events-none"
             />
-            <button
-              onClick={(e) => { e.stopPropagation(); handleRemoveWindowTarget(p.name); }}
-              className="hidden group-hover/target:inline-flex absolute inset-0 items-center justify-center rounded-full bg-recording text-white text-[7px] font-bold leading-none hover:bg-red-500"
-            >✕</button>
-          </span>
+          </RemovableChip>
         )}
         {p.appIconBase64 && !p.hasWindowTarget && (
           <img
@@ -926,19 +1010,19 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
         {p.hasWindowTarget && !p.appIconBase64 ? (
           // Own target but the icon couldn't be resolved (UWP host, portable not in PATH).
-          // Crosshair stays as a "this row IS gated" cue — same affordances as before:
-          // hover reveals process/title, ✕ overlay removes the target.
-          <span
-            className="group/target shrink-0 relative"
-            data-tip={p.windowTargetProcessName || p.windowTargetWindowTitle || 'Window target set'}
-            data-tip-pos="end"
+          // Crosshair stays as a "this row IS gated" cue. Removal via hover ✕ overlay.
+          <RemovableChip
+            variant="circle"
+            removeTitle={`Remove window target (${p.windowTargetProcessName || p.windowTargetWindowTitle || 'target'})`}
+            onRemove={(e) => { e.stopPropagation(); handleRemoveWindowTarget(p.name); }}
           >
-            <Crosshair size={11} className="text-text-tertiary" />
-            <button
-              onClick={(e) => { e.stopPropagation(); handleRemoveWindowTarget(p.name); }}
-              className="hidden group-hover/target:inline-flex absolute top-0 right-0 w-full h-full items-center justify-center rounded-full bg-recording text-white text-[7px] font-bold leading-none hover:bg-red-500"
-            >✕</button>
-          </span>
+            <span
+              data-tip={p.windowTargetProcessName || p.windowTargetWindowTitle || 'Window target set'}
+              data-tip-pos="end"
+            >
+              <Crosshair size={11} className="text-text-tertiary" />
+            </span>
+          </RemovableChip>
         ) : (!p.appIconBase64 && p.hasEffectiveTarget && p.effectiveTargetSource === 'folder') && (
           // Inherited from folder AND no icon resolved — fall back to the faded crosshair.
           // Removal must happen from the folder, not the row, so no ✕ overlay here.
@@ -972,26 +1056,23 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         )}
 
         {p.hotkey && (
-          <span className="group/hotkey shrink-0 relative">
+          <RemovableChip
+            removeTitle={`Remove hotkey ${p.hotkey}`}
+            onRemove={(e) => { e.stopPropagation(); handleRemoveHotkey(p.name); }}
+          >
             <KbdTag combo={p.hotkey} />
-            <button
-              onClick={(e) => { e.stopPropagation(); handleRemoveHotkey(p.name); }}
-              className="hidden group-hover/hotkey:inline-flex absolute top-0 right-0 bottom-0 w-4 items-center justify-center rounded-r bg-recording/80 text-white text-[7px] font-bold leading-none hover:bg-recording"
-            >✕</button>
-          </span>
+          </RemovableChip>
         )}
 
         {p.hotstring && (
-          <span
-            className="group/hotstring shrink-0 relative px-1.5 py-0.5 rounded text-[11px] font-mono bg-hotkey-bg border border-hotkey-border text-accent-hover"
-            title={p.hotstringInstant ? 'Hotstring (instant)' : 'Hotstring (terminator)'}
-          >
+          <RemovableChip
+            removeTitle={`Remove hotstring "${p.hotstring}"`}
+            onRemove={(e) => { e.stopPropagation(); handleRemoveHotstring(p.name); }}
+            className="px-1.5 py-0.5 rounded text-[11px] font-mono bg-hotkey-bg border border-hotkey-border text-accent-hover"
+          ><span title={p.hotstringInstant ? 'Hotstring (instant)' : 'Hotstring (terminator)'}>
             {p.hotstringInstant ? '\u26A1' : '\u21B5'}{p.hotstring}
-            <button
-              onClick={(e) => { e.stopPropagation(); handleRemoveHotstring(p.name); }}
-              className="hidden group-hover/hotstring:inline-flex absolute top-0 right-0 bottom-0 w-4 items-center justify-center rounded-r bg-recording/80 text-white text-[7px] font-bold leading-none hover:bg-recording"
-            >✕</button>
-          </span>
+            </span>
+          </RemovableChip>
         )}
     </div>
   );
@@ -1163,34 +1244,34 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                             Wrapped in a group so hover reveals a ✕ overlay that removes the
                             folder's target inline, matching the crosshair fallback below. */}
                         {folder.appIconBase64 && (
-                          <span
-                            className={`group/ftarget shrink-0 relative w-3.5 h-3.5 ${folderAllDisabled ? 'opacity-40' : ''}`}
-                            title={folder.windowTargetProcessName ?? ''}
+                          <RemovableChip
+                            variant="circle"
+                            removeTitle={`Remove folder target (${folder.windowTargetProcessName ?? 'target'})`}
+                            onRemove={(e) => { e.stopPropagation(); handleRemoveFolderWindowTarget(folder.name); }}
+                            className={`w-3.5 h-3.5 ${folderAllDisabled ? 'opacity-40' : ''}`}
                           >
                             <img
                               src={`data:image/png;base64,${folder.appIconBase64}`}
                               alt=""
+                              title={folder.windowTargetProcessName ?? ''}
                               className="w-3.5 h-3.5 object-contain pointer-events-none"
                             />
-                            <button
-                              onClick={(e) => { e.stopPropagation(); send({ type: 'profile:removeFolderWindowTarget', payload: { folderName: folder.name } }); }}
-                              className="hidden group-hover/ftarget:inline-flex absolute inset-0 items-center justify-center rounded-full bg-recording text-white text-[7px] font-bold leading-none hover:bg-red-500"
-                            >✕</button>
-                          </span>
+                          </RemovableChip>
                         )}
                         <span className={`text-xs font-medium flex-1 truncate ${folderAllDisabled ? 'text-text-disabled' : 'text-text-secondary'}`}>{folder.name}</span>
                         {folder.hasWindowTarget && !folder.appIconBase64 && (
-                          <span
-                            className="group/ftarget shrink-0 relative"
-                            data-tip={folder.windowTargetProcessName || folder.windowTargetWindowTitle || 'Window Target'}
-                            data-tip-pos="end"
+                          <RemovableChip
+                            variant="circle"
+                            removeTitle={`Remove folder target (${folder.windowTargetProcessName || folder.windowTargetWindowTitle || 'target'})`}
+                            onRemove={(e) => { e.stopPropagation(); handleRemoveFolderWindowTarget(folder.name); }}
                           >
-                            <Crosshair size={10} className="text-text-tertiary" />
-                            <button
-                              onClick={(e) => { e.stopPropagation(); send({ type: 'profile:removeFolderWindowTarget', payload: { folderName: folder.name } }); }}
-                              className="hidden group-hover/ftarget:inline-flex absolute top-0 right-0 w-full h-full items-center justify-center rounded-full bg-recording text-white text-[7px] font-bold leading-none hover:bg-red-500"
-                            >✕</button>
-                          </span>
+                            <span
+                              data-tip={folder.windowTargetProcessName || folder.windowTargetWindowTitle || 'Window Target'}
+                              data-tip-pos="end"
+                            >
+                              <Crosshair size={10} className="text-text-tertiary" />
+                            </span>
+                          </RemovableChip>
                         )}
                       </div>
                       {!folder.collapsed && hasVisibleProfiles && (

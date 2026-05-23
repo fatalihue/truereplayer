@@ -8,7 +8,7 @@ const iconMap: Record<ToastType, { Icon: React.ElementType; color: string }> = {
 };
 
 export function Toast() {
-  const { toasts } = useToast();
+  const { toasts, dismissToast } = useToast();
 
   if (toasts.length === 0) return null;
 
@@ -39,13 +39,25 @@ export function Toast() {
               border: '1px solid var(--color-border-default)',
               borderRadius: 'var(--ui-border-radius)',
               boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-              maxWidth: 320,
+              maxWidth: 380,
               animation: 'toast-in 0.2s ease-out',
               pointerEvents: 'auto',
             }}
           >
             <Icon size={14} style={{ color, flexShrink: 0 }} />
-            <span className="text-ui text-text-primary">{toast.message}</span>
+            <span className="text-ui text-text-primary" style={{ flex: 1 }}>{toast.message}</span>
+            {toast.action && (
+              <button
+                onClick={() => {
+                  toast.action!.onClick();
+                  dismissToast(toast.id);
+                }}
+                className="text-ui font-semibold uppercase tracking-wider px-2 py-1 rounded hover:bg-bg-elevated transition-colors"
+                style={{ color: 'var(--color-accent)', flexShrink: 0 }}
+              >
+                {toast.action.label}
+              </button>
+            )}
           </div>
         );
       })}

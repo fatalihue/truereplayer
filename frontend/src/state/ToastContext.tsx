@@ -3,15 +3,28 @@ import { useBridge } from '../bridge/BridgeContext';
 
 export type ToastType = 'success' | 'error' | 'info';
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
+export interface ToastOptions {
+  type?: ToastType;
+  duration?: number;        // ms; defaults to 8000 for errors / 6000 for action toasts / 3000 otherwise
+  action?: ToastAction;     // optional inline button (e.g. "Undo")
+}
+
 interface ToastItem {
   id: number;
   message: string;
   type: ToastType;
+  action?: ToastAction;
 }
 
 interface ToastContextValue {
   toasts: ToastItem[];
-  showToast: (message: string, type?: ToastType) => void;
+  showToast: (message: string, options?: ToastOptions | ToastType) => void;
+  dismissToast: (id: number) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -22,7 +35,7 @@ function inferType(message: string): ToastType {
   const lower = message.toLowerCase();
   if (lower.includes('error') || lower.includes('fail') || lower.includes('conflict') || lower.includes('invalid') || lower.includes('timed out'))
     return 'error';
-  if (lower.includes('saved') || lower.includes('created') || lower.includes('updated') || lower.includes('success') || lower.includes('deleted') || lower.includes('imported') || lower.startsWith('set '))
+  if (lower.includes('saved') || lower.includes('created') || lower.includes('updated') || lower.includes('success') || lower.includes('deleted') || lower.includes('removed') || lower.includes('imported') || lower.startsWith('set '))
     return 'success';
   return 'info';
 }
@@ -31,18 +44,23 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const { subscribe } = useBridge();
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
-  const showToast = useCallback((message: string, type?: ToastType) => {
-    const id = nextId++;
-    const resolvedType = type ?? inferType(message);
-    setToasts(prev => [...prev, { id, message, type: resolvedType }]);
-
-    // Auto-dismiss: 8s for errors (longer messages), 3s for others
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, resolvedType === 'error' ? 8000 : 3000);
+  const dismissToast = useCallback((id: number) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  // Subscribe to bridge alert:show
+  // Accepts either a ToastType string (legacy 2-arg call sites) or an options object.
+  const showToast = useCallback((message: string, opts?: ToastOptions | ToastType) => {
+    const options: ToastOptions = typeof opts === 'string' ? { type: opts } : (opts ?? {});
+    const id = nextId++;
+    const resolvedType = options.type ?? inferType(message);
+    const duration = options.duration
+      ?? (options.action ? 6000 : (resolvedType === 'error' ? 8000 : 3000));
+    setToasts(prev => [...prev, { id, message, type: resolvedType, action: options.action }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, duration);
+  }, []);
+
   useEffect(() => {
     return subscribe((msg) => {
       if (msg.type === 'alert:show') {
@@ -52,7 +70,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, [subscribe, showToast]);
 
   return (
-    <ToastContext.Provider value={{ toasts, showToast }}>
+    <ToastContext.Provider value={{ toasts, showToast, dismissToast }}>
       {children}
     </ToastContext.Provider>
   );
