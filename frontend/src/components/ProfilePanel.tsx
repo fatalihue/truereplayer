@@ -315,7 +315,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setHotkeyCapture(existing?.hotkey || '...');
     setHotkeyTriggerMode(existing?.triggerMode || 'onPress');
     setShowHotkeyDialog(name);
-    send({ type: 'hotkey:suppress', payload: { enabled: true } });
+    // Capture mode (not just suppress): the backend low-level hook composes each keydown
+    // and emits it via 'hotkey:captured'. Without this, the WebView2 JS layer never sees
+    // Win+letter combos because the Windows Shell intercepts them at OS level first.
+    send({ type: 'hotkey:capture', payload: { enabled: true } });
   };
 
   const handleRemoveHotkey = (name: string) => {
@@ -439,63 +442,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     }
   };
 
-  const handleHotkeyCapture = (e: React.KeyboardEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const modifiers: string[] = [];
-    if (e.ctrlKey) modifiers.push('Ctrl');
-    if (e.altKey) modifiers.push('Alt');
-    if (e.shiftKey) modifiers.push('Shift');
-
-    const modifierKeys = new Set(['Control', 'Alt', 'Shift', 'Meta']);
-    if (modifierKeys.has(e.key)) {
-      setHotkeyCapture(modifiers.join('+') || '...');
-      return;
-    }
-
-    // Use e.code to distinguish numpad from main keyboard
-    let mainKey = e.key;
-    if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter') {
-      const numpadMap: Record<string, string> = {
-        Numpad0: 'Num0', Numpad1: 'Num1', Numpad2: 'Num2', Numpad3: 'Num3',
-        Numpad4: 'Num4', Numpad5: 'Num5', Numpad6: 'Num6', Numpad7: 'Num7',
-        Numpad8: 'Num8', Numpad9: 'Num9',
-        NumpadMultiply: 'NumMultiply', NumpadDivide: 'NumDivide',
-        NumpadAdd: 'NumAdd', NumpadSubtract: 'NumSubtract',
-        NumpadDecimal: 'NumDecimal',
-      };
-      mainKey = numpadMap[e.code] ?? e.code;
-    } else if (mainKey === ' ') mainKey = 'Space';
-    // Digit and letter keys via e.code (physical position) — shift-immune. e.key
-    // returns the SHIFTED character when Shift is held (Shift+1 → "!"), which then
-    // fails to resolve at hotkey-trigger time because the backend looks up VK codes
-    // by the captured name and there's no VK for bare "!". e.code stays "Digit1"
-    // regardless of shift state, so we get the base "1" and the Shift modifier is
-    // captured separately in the modifiers list above.
-    else if (/^Digit[0-9]$/.test(e.code)) mainKey = e.code.slice(5);
-    else if (/^Key[A-Z]$/.test(e.code)) mainKey = e.code.slice(3);
-    else if (mainKey.length === 1) mainKey = mainKey.toUpperCase();
-    else if (mainKey === 'ArrowUp') mainKey = 'Up';
-    else if (mainKey === 'ArrowDown') mainKey = 'Down';
-    else if (mainKey === 'ArrowLeft') mainKey = 'Left';
-    else if (mainKey === 'ArrowRight') mainKey = 'Right';
-
-    if (!modifiers.includes(mainKey)) modifiers.push(mainKey);
-    const combo = modifiers.join('+');
-    setHotkeyCapture(combo);
-  };
-
-  const handleHotkeyWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const modifiers: string[] = [];
-    if (e.ctrlKey) modifiers.push('Ctrl');
-    if (e.altKey) modifiers.push('Alt');
-    if (e.shiftKey) modifiers.push('Shift');
-    modifiers.push(e.deltaY < 0 ? 'ScrollUp' : 'ScrollDown');
-    setHotkeyCapture(modifiers.join('+'));
-  };
-
   const confirmHotkey = () => {
     if (showHotkeyDialog && hotkeyCapture && hotkeyCapture !== '...') {
       send({ type: 'profile:assignHotkey', payload: { name: showHotkeyDialog, hotkey: hotkeyCapture, mode: hotkeyTriggerMode } });
@@ -503,14 +449,26 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     }
   };
 
-  // Suppress global hotkeys while hotkey dialog is open. `send` is a stable useCallback
+  // Disable backend capture mode when hotkey dialog closes. `send` is a stable useCallback
   // from BridgeContext (deps []), so listing it here doesn't cause extra re-runs — only
   // silences exhaustive-deps without changing behaviour.
   useEffect(() => {
     if (!showHotkeyDialog) {
-      send({ type: 'hotkey:suppress', payload: { enabled: false } });
+      send({ type: 'hotkey:capture', payload: { enabled: false } });
     }
   }, [showHotkeyDialog, send]);
+
+  // While the hotkey dialog is open, the backend hook composes every keypress and
+  // emits the combo here. The JS layer never sees Win+letter combos directly (Shell
+  // intercepts), so the backend round-trip is the only way to capture them.
+  useEffect(() => {
+    if (!showHotkeyDialog) return;
+    return subscribe((msg) => {
+      if (msg.type === 'hotkey:captured') {
+        setHotkeyCapture(msg.payload.combo);
+      }
+    });
+  }, [showHotkeyDialog, subscribe]);
 
   // Auto-close hotkey dialog when profile list updates (means hotkey was saved successfully)
   useEffect(() => {
@@ -1729,8 +1687,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               type="text"
               readOnly
               value={hotkeyCapture}
-              onKeyDown={handleHotkeyCapture}
-              onWheel={handleHotkeyWheel}
               className="w-full h-9 px-3 text-sm font-mono text-accent bg-bg-input border border-accent-solid rounded text-center outline-none"
             />
 

@@ -646,6 +646,18 @@ namespace TrueReplayer
                 });
             };
 
+            // Forward captured combos straight to the frontend chip. The hook has already
+            // swallowed the OS event by the time we get here, so the dialog can simply mirror
+            // whatever the user pressed — including Win+letter combos that the WebView2
+            // JS layer never sees because the Shell intercepts them first.
+            InputHookManager.OnHotkeyCaptured += (combo) =>
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    bridge?.SendMessage("hotkey:captured", new { combo });
+                });
+            };
+
             InputHookManager.OnMouseEvent += (button, x, y, isDown, scrollDelta) =>
             {
                 if (!mainController.IsRecording()) return;

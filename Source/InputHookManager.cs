@@ -17,6 +17,14 @@ namespace TrueReplayer
         public static event Action<string, bool>? OnKeyEvent;
         public static event Action<string>? OnHotkeyPressed;
 
+        /// <summary>
+        /// Fires when CaptureHotkeyMode is active and the user presses a key/combo. The string
+        /// is the composed hotkey (e.g. "Win+Q", "Ctrl+Shift+F5", "ScrollUp"). The hook
+        /// swallows the underlying OS event so the Windows Shell doesn't react to it (no
+        /// Start menu on Win+letter, no Run dialog on Win+R, etc.).
+        /// </summary>
+        public static event Action<string>? OnHotkeyCaptured;
+
         private static IntPtr _mouseHookId = IntPtr.Zero;
         private static IntPtr _keyboardHookId = IntPtr.Zero;
 
@@ -108,6 +116,15 @@ namespace TrueReplayer
         /// When true, suppresses ALL hotkey matching and key/mouse event recording.
         /// Used when a UI dialog/modal is active (SendText, Rename, Hotkey Capture, ContentDialogs).
         public static bool SuppressAllHotkeys { get; set; } = false;
+
+        /// When true, the low-level keyboard hook captures every keydown, composes it with
+        /// modifier state via BuildComposedKey, fires OnHotkeyCaptured, and swallows the event.
+        /// This is what allows the UI to capture combos that the Windows Shell would otherwise
+        /// intercept (Win+letter, Alt+Tab on some setups, etc.) — WH_KEYBOARD_LL runs before
+        /// the shell processes its own shortcuts, and returning 1 cancels the event entirely.
+        /// Auto-cancels Start/menu activation by injecting F15 when the combo includes Win/Alt
+        /// plus another key (same trick used for swallowed profile hotkeys).
+        public static bool CaptureHotkeyMode { get; set; } = false;
 
         /// When true, mouse click events (Down/Up) are swallowed (not passed to the target app).
         /// Used during capture mode to capture coordinates without performing the actual click.
@@ -368,7 +385,39 @@ namespace TrueReplayer
 
         private static IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0 && !SuppressAllHotkeys)
+            if (nCode < 0)
+                return NativeMethods.CallNextHookEx(_mouseHookId, nCode, wParam, lParam);
+
+            // Capture mode: scroll is a valid hotkey trigger, so wheel events get composed
+            // with modifier state and emitted through OnHotkeyCaptured, then swallowed.
+            // Mouse buttons are not capturable as hotkeys (would conflict with normal UI
+            // interaction inside the dialog), so they pass through.
+            if (CaptureHotkeyMode && (int)wParam == NativeMethods.WM_MOUSEWHEEL)
+            {
+                var wheelHookStruct = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
+                int wheelDelta = (short)((wheelHookStruct.mouseData >> 16) & 0xffff);
+                string scrollKey = wheelDelta > 0 ? "ScrollUp" : "ScrollDown";
+
+                // Tracked state, not GetAsyncKeyState — modifiers swallowed by the keyboard
+                // hook (Win in particular) won't show up in the async OS state.
+                bool winHeld = _vkCodesCurrentlyDown.Contains(0x5B) || _vkCodesCurrentlyDown.Contains(0x5C);
+                bool ctrlHeld = _vkCodesCurrentlyDown.Contains(0xA2) || _vkCodesCurrentlyDown.Contains(0xA3) || _vkCodesCurrentlyDown.Contains(0x11);
+                bool altHeld = _vkCodesCurrentlyDown.Contains(0xA4) || _vkCodesCurrentlyDown.Contains(0xA5) || _vkCodesCurrentlyDown.Contains(0x12);
+                bool shiftHeld = _vkCodesCurrentlyDown.Contains(0xA0) || _vkCodesCurrentlyDown.Contains(0xA1) || _vkCodesCurrentlyDown.Contains(0x10);
+
+                var parts = new List<string>();
+                if (winHeld) parts.Add("Win");
+                if (ctrlHeld) parts.Add("Ctrl");
+                if (altHeld) parts.Add("Alt");
+                if (shiftHeld) parts.Add("Shift");
+                parts.Add(scrollKey);
+                string combo = string.Join("+", parts);
+
+                OnHotkeyCaptured?.Invoke(combo);
+                return (IntPtr)1;
+            }
+
+            if (!SuppressAllHotkeys)
             {
                 var hookStruct = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
                 string? button = null;
@@ -405,8 +454,11 @@ namespace TrueReplayer
                     bool ctrlHeld = (NativeMethods.GetAsyncKeyState(0x11) & 0x8000) != 0;
                     bool altHeld = (NativeMethods.GetAsyncKeyState(0x12) & 0x8000) != 0;
                     bool shiftHeld = (NativeMethods.GetAsyncKeyState(0x10) & 0x8000) != 0;
+                    bool winHeld = (NativeMethods.GetAsyncKeyState(0x5B) & 0x8000) != 0
+                                || (NativeMethods.GetAsyncKeyState(0x5C) & 0x8000) != 0;
 
                     var parts = new List<string>();
+                    if (winHeld) parts.Add("Win");
                     if (ctrlHeld) parts.Add("Ctrl");
                     if (altHeld) parts.Add("Alt");
                     if (shiftHeld) parts.Add("Shift");
@@ -464,10 +516,43 @@ namespace TrueReplayer
             bool ctrlPressed = (NativeMethods.GetAsyncKeyState(0x11) & 0x8000) != 0; // VK_CONTROL
             bool altPressed = (NativeMethods.GetAsyncKeyState(0x12) & 0x8000) != 0;  // VK_MENU (Alt)
             bool shiftPressed = (NativeMethods.GetAsyncKeyState(0x10) & 0x8000) != 0; // VK_SHIFT
+            bool winPressed = (NativeMethods.GetAsyncKeyState(0x5B) & 0x8000) != 0   // VK_LWIN
+                           || (NativeMethods.GetAsyncKeyState(0x5C) & 0x8000) != 0;  // VK_RWIN
 
             string? mainKey = KeyUtils.NormalizeKeyName(vkCode) ?? SafeKeyFallback(vkCode);
 
             var parts = new List<string>();
+            if (winPressed) parts.Add("Win");
+            if (ctrlPressed) parts.Add("Ctrl");
+            if (altPressed) parts.Add("Alt");
+            if (shiftPressed) parts.Add("Shift");
+
+            if (!string.IsNullOrEmpty(mainKey) && !parts.Contains(mainKey, StringComparer.OrdinalIgnoreCase))
+                parts.Add(mainKey);
+
+            return string.Join("+", parts);
+        }
+
+        /// <summary>
+        /// Same shape as BuildComposedKey, but reads modifier state from _vkCodesCurrentlyDown
+        /// (which we populate ourselves from the hook callback) instead of GetAsyncKeyState.
+        /// Required in capture mode: when the hook swallows a modifier keydown by returning 1,
+        /// Windows does not update the async keyboard state — so by the time the main key (Q)
+        /// arrives, GetAsyncKeyState(VK_LWIN) reports "up" even though the user is still
+        /// physically holding Win. Our own set is always correct because we update it from the
+        /// raw hook event, before swallowing.
+        /// </summary>
+        private static string BuildComposedKeyFromTrackedState(int vkCode)
+        {
+            bool winPressed = _vkCodesCurrentlyDown.Contains(0x5B) || _vkCodesCurrentlyDown.Contains(0x5C);
+            bool ctrlPressed = _vkCodesCurrentlyDown.Contains(0xA2) || _vkCodesCurrentlyDown.Contains(0xA3) || _vkCodesCurrentlyDown.Contains(0x11);
+            bool altPressed = _vkCodesCurrentlyDown.Contains(0xA4) || _vkCodesCurrentlyDown.Contains(0xA5) || _vkCodesCurrentlyDown.Contains(0x12);
+            bool shiftPressed = _vkCodesCurrentlyDown.Contains(0xA0) || _vkCodesCurrentlyDown.Contains(0xA1) || _vkCodesCurrentlyDown.Contains(0x10);
+
+            string? mainKey = KeyUtils.NormalizeKeyName(vkCode) ?? SafeKeyFallback(vkCode);
+
+            var parts = new List<string>();
+            if (winPressed) parts.Add("Win");
             if (ctrlPressed) parts.Add("Ctrl");
             if (altPressed) parts.Add("Alt");
             if (shiftPressed) parts.Add("Shift");
@@ -494,6 +579,45 @@ namespace TrueReplayer
         {
             if (nCode >= 0)
             {
+                // Capture mode handled first: composes the combo via BuildComposedKey, emits
+                // it through OnHotkeyCaptured, then swallows the event so the Shell never sees
+                // it. This is the only way to bind Win+letter combos — WebView2's JS keydown
+                // never fires for them because the OS shortcut layer intercepts first.
+                if (CaptureHotkeyMode)
+                {
+                    int captureVk = Marshal.ReadInt32(lParam);
+                    bool captureDown = wParam == (IntPtr)NativeMethods.WM_KEYDOWN || wParam == (IntPtr)0x0104;
+                    uint captureFlags = (uint)Marshal.ReadInt32(lParam, 8);
+                    bool captureInjected = (captureFlags & 0x10) != 0;
+
+                    // Always let our own SendInput events through unchanged — they're our F15
+                    // menu-cancel pulses and we'd otherwise echo them back to the UI.
+                    if (captureInjected)
+                    {
+                        return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
+                    }
+
+                    // Track physical key state so a held key doesn't spam OnHotkeyCaptured.
+                    bool captureRepeat = captureDown && _vkCodesCurrentlyDown.Contains(captureVk);
+                    if (captureDown) _vkCodesCurrentlyDown.Add(captureVk);
+                    else _vkCodesCurrentlyDown.Remove(captureVk);
+
+                    if (captureDown && !captureRepeat)
+                    {
+                        // Use tracked state, not GetAsyncKeyState — see comment on the method.
+                        string combo = BuildComposedKeyFromTrackedState(captureVk);
+                        if (!string.IsNullOrEmpty(combo))
+                        {
+                            OnHotkeyCaptured?.Invoke(combo);
+                            // Win/Alt held + another key → tell the shell "something happened"
+                            // so releasing the modifier doesn't trigger Start/menu activation.
+                            if (ShouldCancelMenuFor(combo)) InjectMenuCancelKey();
+                        }
+                    }
+
+                    return (IntPtr)1; // swallow every keydown AND keyup while capturing
+                }
+
                 if (SuppressAllHotkeys)
                 {
                     return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);

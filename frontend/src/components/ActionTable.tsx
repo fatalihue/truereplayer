@@ -404,10 +404,10 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
       Numpad8: 'Num8', Numpad9: 'Num9',
       NumpadMultiply: 'NumMultiply', NumpadDivide: 'NumDivide',
       NumpadAdd: 'NumAdd', NumpadSubtract: 'NumSubtract',
+      NumpadDecimal: 'NumDecimal',
     };
-    // NumpadDecimal/NumpadEnter excluded — they fall through to the single-char and
-    // 'Enter' branches respectively, matching what recording produces (literal "."
-    // and "Enter" since they share VK codes with regular . and Enter).
+    // NumpadEnter excluded — shares VK 0x0D with regular Enter, indistinguishable
+    // at the hook layer, so falls through to the 'Enter' branch.
 
     // Canonical names matching KeyUtils.NormalizeKeyName in the C# backend. Earlier
     // versions of this map used WinForms Keys-enum names ("Return", "Back", "Prior",
@@ -415,7 +415,7 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
     // KeyUtils.VirtualKeyMap and aren't valid ConsoleKey members — so a value
     // entered via this capture path resolved to "key not found" at replay time and
     // the action silently no-op'd. Fixed to use the same names recording produces.
-    if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter' && e.code !== 'NumpadDecimal') {
+    if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter') {
       keyName = numpadMap[e.code] ?? e.code;
     } else if (e.key === ' ') keyName = 'Space';
     else if (e.key === 'Enter') keyName = 'Enter';

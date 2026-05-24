@@ -352,13 +352,13 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
   onChange: (key: string, hotkey: string) => void;
   onFocusChange?: (focused: boolean) => void;
 }) {
-  const { send } = useBridge();
+  const { send, subscribe } = useBridge();
   const [localValue, setLocalValue] = useState(value);
   const [isFocused, setIsFocused] = useState(false);
   // Idle-cancel timer — without an explicit Esc-to-cancel rule (so users can capture
   // Escape as a hotkey if they want), the only way out of capture mode is to click away
-  // or wait this many ms. Resets on every keypress so an actively engaged user is never
-  // surprised mid-press.
+  // or wait this many ms. Resets on every captured combo so an actively engaged user is
+  // never surprised mid-press.
   const inputRef = useRef<HTMLInputElement>(null);
   const captureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const KEY_CAPTURE_TIMEOUT_MS = 4000;
@@ -381,55 +381,27 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
     if (!isFocused) setLocalValue(value);
   }, [value, isFocused]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    // Push the idle-cancel timer further out on every key event — even modifiers — so a
-    // user mid-combo is never cut off.
-    armCaptureTimer();
-
-    const modifiers: string[] = [];
-    if (e.ctrlKey) modifiers.push('Ctrl');
-    if (e.altKey) modifiers.push('Alt');
-    if (e.shiftKey) modifiers.push('Shift');
-
-    const modifierKeys = new Set(['Control', 'Alt', 'Shift', 'Meta']);
-    if (modifierKeys.has(e.key)) {
-      // Keep the placeholder visible (empty string) while only a modifier is held — the
-      // pulse + accent border already signal "still listening". Showing "..." here was
-      // dead weight that conflicted with the placeholder.
-      setLocalValue(modifiers.join('+'));
-      return;
-    }
-
-    let mainKey = e.key;
-    if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter') {
-      const numpadMap: Record<string, string> = {
-        Numpad0: 'Num0', Numpad1: 'Num1', Numpad2: 'Num2', Numpad3: 'Num3',
-        Numpad4: 'Num4', Numpad5: 'Num5', Numpad6: 'Num6', Numpad7: 'Num7',
-        Numpad8: 'Num8', Numpad9: 'Num9',
-        NumpadMultiply: 'NumMultiply', NumpadDivide: 'NumDivide',
-        NumpadAdd: 'NumAdd', NumpadSubtract: 'NumSubtract',
-        NumpadDecimal: 'NumDecimal',
-      };
-      mainKey = numpadMap[e.code] ?? e.code;
-    } else if (mainKey === ' ') mainKey = 'Space';
-    else if (mainKey.length === 1) mainKey = mainKey.toUpperCase();
-    else if (mainKey === 'ArrowUp') mainKey = 'Up';
-    else if (mainKey === 'ArrowDown') mainKey = 'Down';
-    else if (mainKey === 'ArrowLeft') mainKey = 'Left';
-    else if (mainKey === 'ArrowRight') mainKey = 'Right';
-    // Escape falls through to here unchanged → captured as "Escape", which C# KeyUtils
-    // resolves to VK 0x1B. Users CAN bind Escape as a hotkey if they want.
-
-    if (!modifiers.includes(mainKey)) modifiers.push(mainKey);
-    const combo = modifiers.join('+');
-
-    setLocalValue(combo);
-    onChange(settingKey, combo);
-    disarmCaptureTimer();
-    (e.target as HTMLInputElement).blur();
-  };
+  // Subscribe to backend captures while focused. The low-level hook composes combos
+  // (including Win+letter and AltGr quirks the JS layer can't see) and emits them here.
+  // We commit on the first composed key+modifier event (matches the old single-press
+  // auto-commit behaviour).
+  useEffect(() => {
+    if (!isFocused) return;
+    return subscribe((msg) => {
+      if (msg.type !== 'hotkey:captured') return;
+      const combo = msg.payload.combo;
+      setLocalValue(combo);
+      armCaptureTimer();
+      // A pure modifier press ("Win", "Ctrl") shouldn't commit — wait for the real key.
+      const isPureModifier = combo === 'Win' || combo === 'Ctrl' || combo === 'Alt' || combo === 'Shift'
+        || /^(Win|Ctrl|Alt|Shift)(\+(Win|Ctrl|Alt|Shift))*$/.test(combo);
+      if (!isPureModifier) {
+        onChange(settingKey, combo);
+        disarmCaptureTimer();
+        inputRef.current?.blur();
+      }
+    });
+  }, [isFocused, subscribe, settingKey, onChange, armCaptureTimer, disarmCaptureTimer]);
 
   // Unified "capture mode" UX — same as the grid Key column edit and the SheetPanel /
   // ProfilePanel hotkey inputs. While focused, the field shows the live combo (or empty +
@@ -442,9 +414,8 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
       type="text"
       readOnly
       value={localValue}
-      onFocus={() => { setIsFocused(true); setLocalValue(''); onFocusChange?.(true); send({ type: 'hotkey:suppress', payload: { enabled: true } }); armCaptureTimer(); }}
-      onBlur={() => { setIsFocused(false); setLocalValue(value); onFocusChange?.(false); send({ type: 'hotkey:suppress', payload: { enabled: false } }); disarmCaptureTimer(); }}
-      onKeyDown={handleKeyDown}
+      onFocus={() => { setIsFocused(true); setLocalValue(''); onFocusChange?.(true); send({ type: 'hotkey:capture', payload: { enabled: true } }); armCaptureTimer(); }}
+      onBlur={() => { setIsFocused(false); setLocalValue(value); onFocusChange?.(false); send({ type: 'hotkey:capture', payload: { enabled: false } }); disarmCaptureTimer(); }}
       className={`w-[110px] h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
         isFocused
           ? 'text-accent-light border-accent-solid animate-pulse'

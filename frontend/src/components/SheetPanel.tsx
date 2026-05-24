@@ -572,6 +572,24 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     }
   }, []);
 
+  // Pause-resume hotkey capture: while the field is focused, the backend low-level
+  // hook composes every keypress (including Win+letter combos the WebView2 JS layer
+  // never sees) and forwards them here. Commit on first non-pure-modifier combo.
+  useEffect(() => {
+    if (!pauseHotkeyFocused) return;
+    return subscribe((msg) => {
+      if (msg.type !== 'hotkey:captured') return;
+      const combo = msg.payload.combo;
+      setKey(combo);
+      armKeyCaptureTimer();
+      const isPureModifier = /^(Win|Ctrl|Alt|Shift)(\+(Win|Ctrl|Alt|Shift))*$/.test(combo);
+      if (!isPureModifier) {
+        disarmKeyCaptureTimer();
+        keyFieldRef.current?.blur();
+      }
+    });
+  }, [pauseHotkeyFocused, subscribe, armKeyCaptureTimer, disarmKeyCaptureTimer]);
+
   const handleKeyCapture = useCallback((e: React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1363,39 +1381,15 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 readOnly
                 value={pauseHotkeyFocused ? '' : (key || '')}
                 placeholder="New key..."
-                onFocus={() => { setPauseHotkeyFocused(true); armKeyCaptureTimer(); }}
-                onBlur={() => { setPauseHotkeyFocused(false); disarmKeyCaptureTimer(); }}
-                onKeyDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
+                onFocus={() => {
+                  setPauseHotkeyFocused(true);
                   armKeyCaptureTimer();
-                  const modifierKeys = new Set(['Control', 'Alt', 'Shift', 'Meta']);
-                  const modifiers: string[] = [];
-                  if (e.ctrlKey) modifiers.push('Ctrl');
-                  if (e.altKey) modifiers.push('Alt');
-                  if (e.shiftKey) modifiers.push('Shift');
-                  if (modifierKeys.has(e.key)) return;
-                  let mainKey = e.key;
-                  if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter') {
-                    const numpadMap: Record<string, string> = {
-                      Numpad0: 'Num0', Numpad1: 'Num1', Numpad2: 'Num2', Numpad3: 'Num3',
-                      Numpad4: 'Num4', Numpad5: 'Num5', Numpad6: 'Num6', Numpad7: 'Num7',
-                      Numpad8: 'Num8', Numpad9: 'Num9',
-                      NumpadMultiply: 'NumMultiply', NumpadDivide: 'NumDivide',
-                      NumpadAdd: 'NumAdd', NumpadSubtract: 'NumSubtract',
-                      NumpadDecimal: 'NumDecimal',
-                    };
-                    mainKey = numpadMap[e.code] ?? e.code;
-                  } else if (mainKey === ' ') mainKey = 'Space';
-                  else if (mainKey.length === 1) mainKey = mainKey.toUpperCase();
-                  else if (mainKey === 'ArrowUp') mainKey = 'Up';
-                  else if (mainKey === 'ArrowDown') mainKey = 'Down';
-                  else if (mainKey === 'ArrowLeft') mainKey = 'Left';
-                  else if (mainKey === 'ArrowRight') mainKey = 'Right';
-                  if (!modifiers.includes(mainKey)) modifiers.push(mainKey);
-                  setKey(modifiers.join('+'));
+                  send({ type: 'hotkey:capture', payload: { enabled: true } });
+                }}
+                onBlur={() => {
+                  setPauseHotkeyFocused(false);
                   disarmKeyCaptureTimer();
-                  (e.target as HTMLInputElement).blur();
+                  send({ type: 'hotkey:capture', payload: { enabled: false } });
                 }}
                 className={`w-full h-8 px-2 text-ui font-mono bg-bg-input border rounded outline-none cursor-pointer placeholder:text-accent-light/50 ${
                   pauseHotkeyFocused

@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Keyboard, AlertCircle } from 'lucide-react';
 import { NumberInput } from './common/NumberInput';
+import { useBridge } from '../bridge/BridgeContext';
 
 /**
  * Unified "Send Keystroke" dialog. One capture pad + a Press/Hold mode toggle covers
  * everything keyboard-related the user could want to insert manually:
  *
  *   Press mode (default):
- *     • Times = 1 → single press of a key or combo  (Ctrl+S, F5, A, Alt+Tab)
+ *     • Times = 1 → single press of a key or combo  (Ctrl+S, F5, A, Alt+Tab, Win+A)
  *     • Times > 1 → press N times with configurable gap (Tab × 5, F5 × 10)
  *
  *   Hold mode:
@@ -17,77 +18,17 @@ import { NumberInput } from './common/NumberInput';
  *       single keys; the warning chip surfaces this whenever the captured value
  *       contains a "+", so the user is never surprised.
  *
+ * Capture goes through the backend low-level keyboard hook (hotkey:capture /
+ * hotkey:captured) because the WebView2 JS layer never sees Win+letter combos —
+ * the Windows Shell intercepts them at OS level. The hook composes the combo and
+ * forwards it here. Capture is automatically suspended while a numeric input is
+ * focused so the user can type "5" into Times without re-capturing "5" as a combo.
+ *
  * Replaces the three legacy dialogs / menu entries (Send Key, Send Keystroke,
  * Press Key × N, Hold Key) — keeps the underlying ActionType split intact
  * (Keystroke for press flows, HoldKey for hold flows) so no profile migration
  * is required.
  */
-
-// ── Capture helpers (key-mapping) ──
-
-/**
- * Maps a non-modifier keydown event to the canonical key name used in actions. Mirrors
- * the legacy logic that lived split across KeyCaptureDialog and KeystrokeCaptureDialog —
- * one map now serves both single-key and combo capture since the dialog flavour is
- * decided after capture by the Press/Hold toggle.
- */
-function mapKeyPart(e: KeyboardEvent): string | null {
-  if (e.code.startsWith('Numpad') && e.code !== 'NumpadEnter' && e.code !== 'NumpadDecimal') {
-    const numpadMap: Record<string, string> = {
-      Numpad0: 'Num0', Numpad1: 'Num1', Numpad2: 'Num2', Numpad3: 'Num3',
-      Numpad4: 'Num4', Numpad5: 'Num5', Numpad6: 'Num6', Numpad7: 'Num7',
-      Numpad8: 'Num8', Numpad9: 'Num9',
-      NumpadMultiply: 'NumMultiply', NumpadDivide: 'NumDivide',
-      NumpadAdd: 'NumAdd', NumpadSubtract: 'NumSubtract',
-    };
-    return numpadMap[e.code] ?? e.code;
-  }
-  if (e.key === ' ') return 'Space';
-  if (e.key === 'Enter') return 'Enter';
-  if (e.key === 'Backspace') return 'Backspace';
-  if (e.key === 'ArrowUp') return 'Up';
-  if (e.key === 'ArrowDown') return 'Down';
-  if (e.key === 'ArrowLeft') return 'Left';
-  if (e.key === 'ArrowRight') return 'Right';
-  if (e.key === 'Tab') return 'Tab';
-  if (e.key === 'CapsLock') return 'CapsLock';
-  if (e.key === 'NumLock') return 'NumLock';
-  if (e.key === 'ScrollLock') return 'ScrollLock';
-  if (e.key === 'Pause') return 'Pause';
-  if (e.key === 'PrintScreen') return 'PrintScreen';
-  if (e.key === 'ContextMenu') return 'VK_93';
-  if (e.key === 'Delete') return 'Delete';
-  if (e.key === 'Insert') return 'Insert';
-  if (e.key === 'Home') return 'Home';
-  if (e.key === 'End') return 'End';
-  if (e.key === 'PageUp') return 'PageUp';
-  if (e.key === 'PageDown') return 'PageDown';
-  if (e.key === 'Escape') return 'Escape';
-  if (e.key.startsWith('F') && e.key.length <= 3 && !isNaN(Number(e.key.slice(1)))) return e.key;
-  // Dead keys (´ ` ^ ~ on ABNT2/AZERTY)
-  if (e.key === 'Dead') {
-    const deadCodeMap: Record<string, string> = {
-      Backquote: '`', Quote: "'", BracketLeft: '[', BracketRight: ']',
-      Minus: '-', Equal: '=', Digit6: '^',
-    };
-    return deadCodeMap[e.code] ?? null;
-  }
-  // Digit and letter keys — use e.code (physical, layout-independent, shift-immune)
-  if (/^Digit[0-9]$/.test(e.code)) return e.code.slice(5);
-  if (/^Key[A-Z]$/.test(e.code)) return e.code.slice(3);
-  if (e.key.length === 1) return e.key;
-  return null;
-}
-
-/** Builds the "+"-joined combo string with a stable modifier order: Ctrl+Shift+Alt+KEY. */
-function buildKeystroke(modifiers: { ctrl: boolean; shift: boolean; alt: boolean }, key: string): string {
-  const parts: string[] = [];
-  if (modifiers.ctrl) parts.push('Ctrl');
-  if (modifiers.shift) parts.push('Shift');
-  if (modifiers.alt) parts.push('Alt');
-  parts.push(key);
-  return parts.join('+');
-}
 
 /** Human-readable label for the chip. */
 function keystrokeDisplay(keystroke: string): string {
@@ -188,10 +129,55 @@ export function KeystrokeCaptureDialog({
   }, [initialHoldDurationMs]);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const { send, subscribe } = useBridge();
 
   useEffect(() => {
     containerRef.current?.focus();
   }, []);
+
+  // Capture mode wiring. Mount → enable backend low-level capture; subscribe to
+  // composed combos. Numeric inputs (Times / Gap / Hold duration) suspend capture
+  // on focus so typing "5" lands as text instead of re-capturing "5" as a combo,
+  // and resume it on blur. Pure-modifier captures ("Win", "Ctrl+Alt") are kept
+  // visible in the chip but don't replace an already-captured real combo — that
+  // matches the old "wait for the real key" filter while still letting the user
+  // see what modifiers are held mid-press.
+  useEffect(() => {
+    send({ type: 'hotkey:capture', payload: { enabled: true } });
+    const isPureModifier = (combo: string) =>
+      /^(Win|Ctrl|Alt|Shift)(\+(Win|Ctrl|Alt|Shift))*$/.test(combo);
+
+    const unsub = subscribe((msg) => {
+      if (msg.type !== 'hotkey:captured') return;
+      const combo = msg.payload.combo;
+      setCaptured((prev) => {
+        // Don't overwrite an already-captured combo with a bare modifier press —
+        // user is probably holding modifiers for the next combo.
+        if (prev !== null && isPureModifier(combo)) return prev;
+        return combo;
+      });
+    });
+
+    const handleFocusIn = (e: FocusEvent) => {
+      if ((e.target as HTMLElement)?.tagName === 'INPUT') {
+        send({ type: 'hotkey:capture', payload: { enabled: false } });
+      }
+    };
+    const handleFocusOut = (e: FocusEvent) => {
+      if ((e.target as HTMLElement)?.tagName === 'INPUT') {
+        send({ type: 'hotkey:capture', payload: { enabled: true } });
+      }
+    };
+    document.addEventListener('focusin', handleFocusIn);
+    document.addEventListener('focusout', handleFocusOut);
+
+    return () => {
+      send({ type: 'hotkey:capture', payload: { enabled: false } });
+      document.removeEventListener('focusin', handleFocusIn);
+      document.removeEventListener('focusout', handleFocusOut);
+      unsub();
+    };
+  }, [send, subscribe]);
 
   // Clamp helpers — applied on commit (handleConfirm) and on +/− spinner clicks.
   // Free-form typing is allowed to fall below the lower bound in transient states
@@ -199,42 +185,6 @@ export function KeystrokeCaptureDialog({
   const clampRepeat = (v: number) => Math.max(1, Math.min(MAX_REPEAT, Math.floor(v)));
   const clampDelay = (v: number) => Math.max(0, Math.min(MAX_REPEAT_DELAY, Math.floor(v)));
   const clampHold = (v: number) => Math.max(MIN_HOLD_MS, Math.min(MAX_HOLD_MS, Math.floor(v)));
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    // Don't hijack keystrokes while the user is typing inside a numeric input —
-    // a "5" pressed in the Times field should land as text, not re-capture the
-    // combo. stopPropagation also blocks Ctrl+A from leaking up to ActionTable's
-    // grid handler.
-    const target = e.target as HTMLElement;
-    if (target?.tagName === 'INPUT') {
-      e.stopPropagation();
-      return;
-    }
-    // Esc closes the dialog when:
-    //   • no combo captured yet (insert flow waiting for first capture), OR
-    //   • we're editing an existing row (Esc = abandon).
-    // Otherwise (insert with combo captured) Esc re-captures so the user can
-    // retry without leaving the dialog.
-    if (e.key === 'Escape' && (captured === null || isEditing)) {
-      e.preventDefault();
-      onClose();
-      return;
-    }
-    e.preventDefault();
-    e.stopPropagation();
-    // Skip pure modifier presses — wait for the "real" key while modifiers
-    // are held. Without this, pressing Ctrl on the way to Ctrl+A commits
-    // "Ctrl" alone before the A keydown arrives.
-    if (['Control', 'Shift', 'Alt', 'AltGraph', 'Meta'].includes(e.key)) return;
-    const keyPart = mapKeyPart(e.nativeEvent);
-    if (!keyPart) return;
-    const modifiers = {
-      ctrl: e.ctrlKey,
-      shift: e.shiftKey,
-      alt: e.altKey,
-    };
-    setCaptured(buildKeystroke(modifiers, keyPart));
-  }, [captured, isEditing, onClose]);
 
   // Derived values used by the renderer + commit.
   const hasModifiers = captured?.includes('+') ?? false;
@@ -282,7 +232,6 @@ export function KeystrokeCaptureDialog({
         tabIndex={-1}
         className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[440px] max-w-[90vw] flex flex-col outline-none"
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
       >
         {/* Header */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
@@ -299,9 +248,9 @@ export function KeystrokeCaptureDialog({
               <>
                 <div className="text-[12px] text-text-tertiary mb-1">Press any key or combo</div>
                 <div className="text-[10px] text-text-tertiary">
-                  Single keys, or Ctrl/Shift/Alt + key. E.g. A · F5 · Ctrl+S · Alt+Tab
+                  Single keys, or Win/Ctrl/Shift/Alt + key. E.g. A · F5 · Ctrl+S · Win+A
                 </div>
-                <div className="text-[10px] text-text-tertiary mt-1">Esc to cancel</div>
+                <div className="text-[10px] text-text-tertiary mt-1">Click Cancel to abort</div>
               </>
             ) : (
               <>

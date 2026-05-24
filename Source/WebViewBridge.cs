@@ -472,6 +472,7 @@ namespace TrueReplayer
                     case "update:apply": _ = HandleUpdateApply(); break;
                     case "clipboard:read": _ = HandleClipboardRead(); break;
                     case "hotkey:suppress": HandleHotkeySuppress(payload); break;
+                    case "hotkey:capture": HandleHotkeyCapture(payload); break;
                     case "theme:colors": HandleThemeColors(payload); break;
                     default:
                         System.Diagnostics.Debug.WriteLine($"[Bridge] Unknown message type: {type}");
@@ -1239,6 +1240,12 @@ namespace TrueReplayer
         {
             bool enabled = payload.GetProperty("enabled").GetBoolean();
             InputHookManager.SuppressAllHotkeys = enabled;
+        }
+
+        private void HandleHotkeyCapture(JsonElement payload)
+        {
+            bool enabled = payload.GetProperty("enabled").GetBoolean();
+            InputHookManager.CaptureHotkeyMode = enabled;
         }
 
         private void HandleSelectionChanged(JsonElement payload)

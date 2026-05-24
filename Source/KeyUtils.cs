@@ -31,6 +31,7 @@ namespace TrueReplayer.Helpers
             if (vkCode == 0x6A) return "NumMultiply";
             if (vkCode == 0x6B) return "NumAdd";
             if (vkCode == 0x6D) return "NumSubtract";
+            if (vkCode == 0x6E) return "NumDecimal";
             if (vkCode == 0x6F) return "NumDivide";
 
             // 6. OEM keys — use ToUnicodeEx to get the actual character
@@ -155,6 +156,7 @@ namespace TrueReplayer.Helpers
             // NumPad operators
             ["NumMultiply"] = 0x6A, ["NumDivide"] = 0x6F,
             ["NumAdd"] = 0x6B, ["NumSubtract"] = 0x6D,
+            ["NumDecimal"] = 0x6E,
 
             // Named keys
             ["CapsLock"] = 0x14, ["NumLock"] = 0x90, ["ScrollLock"] = 0x91,

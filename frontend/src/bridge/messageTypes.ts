@@ -305,7 +305,12 @@ export type IncomingMessage =
   // to auto-open the row's editor. The user just told us where the thing lives;
   // tolerance / timeout / on-timeout / etc are next — opening the sheet skips the
   // "find the new row and click it" detour.
-  | { type: 'sheet:openIndex'; payload: { index: number } };
+  | { type: 'sheet:openIndex'; payload: { index: number } }
+  // Fired by the backend while CaptureHotkeyMode is active. The combo string is
+  // already composed (e.g. "Win+Q", "Ctrl+Shift+F5", "ScrollUp") and the hook has
+  // swallowed the underlying OS event so it doesn't trigger Start menu / shell
+  // shortcuts. Hotkey dialogs subscribe to this to fill the chip.
+  | { type: 'hotkey:captured'; payload: { combo: string } };
 
 // ── Messages JS → C# ──
 
@@ -422,4 +427,9 @@ export type OutgoingMessage =
   | { type: 'browser:pickElement'; payload: Record<string, never> }
   | { type: 'browser:testAction'; payload: { requestId: string; actionType: string; key: string; browserText?: string; newTab?: boolean; timeout: number; waitMode?: string | null; urlWaitPattern?: string | null; postNavigateSelector?: string | null; typeAppend?: boolean; typePaste?: boolean; typeDelay?: number | null; selectMatchMode?: string | null } }
   | { type: 'theme:colors'; payload: { bgSurface: string; bgCard: string; textPrimary: string; textSecondary: string; accentSolid: string; borderSubtle: string } }
-  | { type: 'hotkey:suppress'; payload: { enabled: boolean } };
+  | { type: 'hotkey:suppress'; payload: { enabled: boolean } }
+  // Activates the backend's low-level keyboard hook in capture mode: every keydown
+  // gets composed via BuildComposedKey, emitted through 'hotkey:captured', and
+  // swallowed before the OS shell sees it. This is what allows binding Win+letter
+  // combos that the WebView2 JS layer never receives.
+  | { type: 'hotkey:capture'; payload: { enabled: boolean } };

@@ -2273,20 +2273,21 @@ namespace TrueReplayer.Services
             // The LAST part is the target key; everything before it is a modifier.
             // Order matters at replay time, but for the modifier set we don't need to
             // preserve incoming order (Ctrl+Shift and Shift+Ctrl are semantically the
-            // same modifier set; we always emit in our canonical order: Ctrl, Shift, Alt).
+            // same modifier set; we always emit in our canonical order: Win, Ctrl, Shift, Alt).
             var modifiers = new System.Collections.Generic.List<string>();
             string target = parts[^1].Trim();
             for (int i = 0; i < parts.Length - 1; i++)
             {
                 var m = parts[i].Trim();
-                if (m == "Ctrl" || m == "Shift" || m == "Alt") modifiers.Add(m);
+                if (m == "Win" || m == "Ctrl" || m == "Shift" || m == "Alt") modifiers.Add(m);
                 // Silently skip unknown modifiers — keystroke replay is best-effort.
             }
 
-            // Modifiers down (in stable order so a Ctrl+Shift+T replay always presses
-            // Ctrl first, Shift second, regardless of which order the user pressed them
-            // during capture).
-            foreach (var m in new[] { "Ctrl", "Shift", "Alt" })
+            // Modifiers down. Win goes first because shell shortcuts (Win+D, Win+E, Win+R)
+            // need the LWin keydown to land before the trigger key, otherwise the Shell
+            // sees a bare D and ignores it. Ctrl/Shift/Alt order matches the capture
+            // canonical order.
+            foreach (var m in new[] { "Win", "Ctrl", "Shift", "Alt" })
                 if (modifiers.Contains(m)) SimulateKey(m, true);
 
             Thread.Sleep(10); // let target app's input system register the modifier set
@@ -2299,7 +2300,7 @@ namespace TrueReplayer.Services
             // pressed first. Some apps watch for transient modifier states; doing this
             // out of order can leave them in a stuck modifier state until the user
             // physically presses + releases the same modifier themselves.
-            foreach (var m in new[] { "Alt", "Shift", "Ctrl" })
+            foreach (var m in new[] { "Alt", "Shift", "Ctrl", "Win" })
                 if (modifiers.Contains(m)) SimulateKey(m, false);
         }
 
