@@ -2319,21 +2319,12 @@ namespace TrueReplayer
                 int sh = srEl.GetProperty("h").GetInt32();
                 if (sw > 0 && sh > 0)
                 {
-                    int storedSX = sx, storedSY = sy;
-                    bool hasRel = TryGetRelativeCaptureOffset(out var winRect);
-                    if (hasRel)
+                    if (TryGetRelativeCaptureOffset(out var winRect))
                     {
                         sx += winRect.Left;
                         sy += winRect.Top;
                     }
-                    System.Diagnostics.Debug.WriteLine(
-                        $"[WaitImage-TestMatch] stored=({storedSX},{storedSY},{sw},{sh}) hasRel={hasRel} " +
-                        $"winRect=({winRect.Left},{winRect.Top}) → search=({sx},{sy},{sw},{sh})");
                     searchRegion = new System.Drawing.Rectangle(sx, sy, sw, sh);
-                }
-                else
-                {
-                    System.Diagnostics.Debug.WriteLine("[WaitImage-TestMatch] no search region (whole screen)");
                 }
             }
 
@@ -2367,15 +2358,11 @@ namespace TrueReplayer
                 // shifting the displayed Configure rect and the search region by the window origin.
                 int reportX = result.X;
                 int reportY = result.Y;
-                bool hasRelReport = TryGetRelativeCaptureOffset(out var winRectReport);
-                if (hasRelReport)
+                if (TryGetRelativeCaptureOffset(out var winRectReport))
                 {
                     reportX -= winRectReport.Left;
                     reportY -= winRectReport.Top;
                 }
-                System.Diagnostics.Debug.WriteLine(
-                    $"[WaitImage-TestMatch] result abs=({result.X},{result.Y},{result.W},{result.H}) score={result.Score:F3} " +
-                    $"hasRel={hasRelReport} → report=({reportX},{reportY},{result.W},{result.H})");
 
                 SendMessage("image:testMatchResult", new
                 {
@@ -2607,16 +2594,11 @@ namespace TrueReplayer
             // window-relative — sampling at them directly would hit the wrong screen pixel.
             // Translate to absolute via the current target-window origin before sampling.
             // Falls back to the raw coords when rel coords is off or no target is running.
-            int storedX = x, storedY = y;
-            bool hasRel = TryGetRelativeCaptureOffset(out var winRect);
-            if (hasRel)
+            if (TryGetRelativeCaptureOffset(out var winRect))
             {
                 x += winRect.Left;
                 y += winRect.Top;
             }
-            System.Diagnostics.Debug.WriteLine(
-                $"[WaitPixel-TestMatch] stored=({storedX},{storedY}) hasRel={hasRel} " +
-                $"winRect=({winRect.Left},{winRect.Top}) → sample=({x},{y}) target={targetHex}");
 
             var sampled = PixelColorService.GetPixelAt(x, y);
             var target = PixelColorService.ParseHex(targetHex);
@@ -2710,10 +2692,6 @@ namespace TrueReplayer
             string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
 
             bool hasRelativeOffset = TryGetRelativeCaptureOffset(out var winRect);
-            System.Diagnostics.Debug.WriteLine(
-                $"[WaitImage-Configure] ENTRY hasRel={hasRelativeOffset} " +
-                $"winRect=({winRect.Left},{winRect.Top})..({winRect.Right},{winRect.Bottom}) " +
-                $"UseRelativeCoordinates={UserProfile.Current.UseRelativeCoordinates}");
 
             System.Drawing.Rectangle? initialRect = null;
             if (payload.TryGetProperty("x", out var xEl) && xEl.ValueKind == JsonValueKind.Number &&
@@ -2721,10 +2699,8 @@ namespace TrueReplayer
                 payload.TryGetProperty("w", out var wEl) && wEl.ValueKind == JsonValueKind.Number &&
                 payload.TryGetProperty("h", out var hEl) && hEl.ValueKind == JsonValueKind.Number)
             {
-                int storedX = xEl.GetInt32();
-                int storedY = yEl.GetInt32();
-                int initX = storedX;
-                int initY = storedY;
+                int initX = xEl.GetInt32();
+                int initY = yEl.GetInt32();
                 // Stored coords are profile-relative when rel coords on — translate for display.
                 if (hasRelativeOffset)
                 {
@@ -2732,13 +2708,6 @@ namespace TrueReplayer
                     initY += winRect.Top;
                 }
                 initialRect = new System.Drawing.Rectangle(initX, initY, wEl.GetInt32(), hEl.GetInt32());
-                System.Diagnostics.Debug.WriteLine(
-                    $"[WaitImage-Configure] PAYLOAD-IN stored=({storedX},{storedY},{wEl.GetInt32()},{hEl.GetInt32()}) → " +
-                    $"display abs=({initX},{initY},{wEl.GetInt32()},{hEl.GetInt32()})");
-            }
-            else
-            {
-                System.Diagnostics.Debug.WriteLine("[WaitImage-Configure] PAYLOAD-IN no rect (blank picker)");
             }
 
             var selection = await RunRegionPickerAsync(
@@ -2749,32 +2718,26 @@ namespace TrueReplayer
 
             if (selection == null)
             {
-                System.Diagnostics.Debug.WriteLine("[WaitImage-Configure] EXIT cancelled");
                 SendMessage("waitimage:searchRegionSet", new { requestId, cancelled = true });
                 return;
             }
 
             // Translate fresh selection (absolute from overlay) → profile-relative for storage.
             // Re-check the target window in case it moved or closed between display and selection.
-            int storedXOut = selection.ScreenX;
-            int storedYOut = selection.ScreenY;
-            bool hasRelativeOffsetNow = TryGetRelativeCaptureOffset(out var winRectNow);
-            if (hasRelativeOffsetNow)
+            int storedX = selection.ScreenX;
+            int storedY = selection.ScreenY;
+            if (TryGetRelativeCaptureOffset(out var winRectNow))
             {
-                storedXOut -= winRectNow.Left;
-                storedYOut -= winRectNow.Top;
+                storedX -= winRectNow.Left;
+                storedY -= winRectNow.Top;
             }
-            System.Diagnostics.Debug.WriteLine(
-                $"[WaitImage-Configure] SELECTION abs=({selection.ScreenX},{selection.ScreenY},{selection.Width},{selection.Height}) " +
-                $"hasRelNow={hasRelativeOffsetNow} winRectNow=({winRectNow.Left},{winRectNow.Top}) → " +
-                $"stored=({storedXOut},{storedYOut},{selection.Width},{selection.Height})");
 
             SendMessage("waitimage:searchRegionSet", new
             {
                 requestId,
                 cancelled = false,
-                x = storedXOut,
-                y = storedYOut,
+                x = storedX,
+                y = storedY,
                 w = selection.Width,
                 h = selection.Height
             });

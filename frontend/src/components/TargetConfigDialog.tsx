@@ -477,7 +477,10 @@ export function TargetConfigDialog({
           {convertHint && (
             <div className="flex items-start gap-2 px-2 py-1.5 text-[11px] text-amber-400 bg-amber-950/15 border border-amber-900/40 rounded">
               <span className="flex-1 leading-snug">
-                {convertibleActionCount} action{convertibleActionCount === 1 ? '' : 's'} captured in {convertHint === 'toRelative' ? 'absolute' : 'relative'} coords. Convert {convertHint === 'toRelative' ? 'to relative' : 'to absolute'} so they stay anchored to this window.
+                {convertibleActionCount} action{convertibleActionCount === 1 ? '' : 's'} captured in {convertHint === 'toRelative' ? 'absolute' : 'relative'} coords.{' '}
+                {convertHint === 'toRelative'
+                  ? 'Convert to relative so they follow this window when it moves.'
+                  : 'Convert to absolute so they keep their current screen positions.'}
               </span>
               <div className="flex gap-1 shrink-0">
                 <button

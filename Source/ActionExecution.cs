@@ -1888,10 +1888,8 @@ namespace TrueReplayer.Services
             System.Drawing.Rectangle? searchRegion = null;
             if (action.WaitImageSearchW is int sw && action.WaitImageSearchH is int sh && sw > 0 && sh > 0)
             {
-                int storedSX = action.WaitImageSearchX ?? 0;
-                int storedSY = action.WaitImageSearchY ?? 0;
-                int sx = storedSX;
-                int sy = storedSY;
+                int sx = action.WaitImageSearchX ?? 0;
+                int sy = action.WaitImageSearchY ?? 0;
                 if (!TryResolveRelativeOffset(out int dx, out int dy))
                 {
                     ReportMissingTargetWindow();
@@ -1899,9 +1897,6 @@ namespace TrueReplayer.Services
                 }
                 sx += dx;
                 sy += dy;
-                System.Diagnostics.Debug.WriteLine(
-                    $"[WaitImage-Replay] stored=({storedSX},{storedSY},{sw},{sh}) " +
-                    $"offset=({dx},{dy}) → search=({sx},{sy},{sw},{sh})");
                 searchRegion = new System.Drawing.Rectangle(sx, sy, sw, sh);
             }
 
@@ -1997,8 +1992,6 @@ namespace TrueReplayer.Services
             }
             int px = relPx + dx;
             int py = relPy + dy;
-            System.Diagnostics.Debug.WriteLine(
-                $"[WaitPixel-Replay] stored=({relPx},{relPy}) offset=({dx},{dy}) → sample=({px},{py}) target={action.PixelColor}");
 
             int timeoutMs = action.Timeout > 0 ? action.Timeout : 5000;
             int tolerance = action.PixelTolerance;
