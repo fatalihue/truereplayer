@@ -41,6 +41,12 @@ interface TargetConfigDialogProps {
   // Profile-only callbacks. When omitted the dialog hides the corresponding UI.
   onUpdateGeometry?: (fields: { processName: string; windowTitle: string; titleMatchMode: 'contains' | 'regex' }) => void;
   onConvertCoordinates?: (direction: 'toRelative' | 'toAbsolute') => void;
+  // Profile-only — count of actions whose stored coordinates would benefit from a coord-space
+  // conversion when the user toggles Relative Coordinates. Triggers the inline hint that
+  // suggests running "Convert to Relative/Absolute" so existing actions stay anchored to
+  // the right window position. Folder scope (where actions don't live on the folder itself)
+  // leaves this undefined → no hint.
+  convertibleActionCount?: number;
 }
 
 export function TargetConfigDialog({
@@ -54,6 +60,7 @@ export function TargetConfigDialog({
   onCancel,
   onUpdateGeometry,
   onConvertCoordinates,
+  convertibleActionCount = 0,
 }: TargetConfigDialogProps) {
   const { send, subscribe } = useBridge();
 
@@ -61,6 +68,24 @@ export function TargetConfigDialog({
   const [windowTitle, setWindowTitle] = useState(initial.windowTitle);
   const [titleMatchMode, setTitleMatchMode] = useState<'contains' | 'regex'>(initial.titleMatchMode);
   const [relativeCoordinates, setRelativeCoordinates] = useState(initial.relativeCoordinates);
+  // Migration hint state. Fires only on the user-initiated toggle transition (off→on or
+  // on→off), not on dialog open. `dismissed` mutes the hint after the user either runs the
+  // convert or explicitly dismisses, so re-toggling doesn't keep nagging within one session.
+  const [convertHint, setConvertHint] = useState<'toRelative' | 'toAbsolute' | null>(null);
+  const [convertHintDismissed, setConvertHintDismissed] = useState(false);
+
+  const handleToggleRelativeCoordinates = (next: boolean) => {
+    setRelativeCoordinates(next);
+    if (convertHintDismissed) return;
+    if (convertibleActionCount === 0) return;
+    if (!onConvertCoordinates) return;
+    // Only show hint when state actually changed from the user's previous saved value —
+    // re-toggling without saving doesn't accumulate hints, and opening the dialog with
+    // rel coords already on doesn't fire it spuriously.
+    if (next && !initial.relativeCoordinates) setConvertHint('toRelative');
+    else if (!next && initial.relativeCoordinates) setConvertHint('toAbsolute');
+    else setConvertHint(null);
+  };
   const [bringToFocus, setBringToFocus] = useState(initial.bringToFocus);
   const [restorePosition, setRestorePosition] = useState(initial.restorePosition ?? false);
   const [restoreSize, setRestoreSize] = useState(initial.restoreSize ?? false);
@@ -443,8 +468,38 @@ export function TargetConfigDialog({
         <div className="mt-3 pt-3 border-t border-border-subtle space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs text-text-secondary">Relative Coordinates</span>
-            <Toggle isOn={relativeCoordinates} onChange={setRelativeCoordinates} />
+            <Toggle isOn={relativeCoordinates} onChange={handleToggleRelativeCoordinates} />
           </div>
+          {/* Migration hint — surfaced only when the user just toggled the flag AND there
+              are existing actions whose stored coords are in the OLD coord space. Without
+              this nudge, the toggle silently reinterprets every stored X/Y, breaking clicks,
+              WaitImage regions, and WaitPixel coords against the wrong reference frame. */}
+          {convertHint && (
+            <div className="flex items-start gap-2 px-2 py-1.5 text-[11px] text-amber-400 bg-amber-950/15 border border-amber-900/40 rounded">
+              <span className="flex-1 leading-snug">
+                {convertibleActionCount} action{convertibleActionCount === 1 ? '' : 's'} captured in {convertHint === 'toRelative' ? 'absolute' : 'relative'} coords. Convert {convertHint === 'toRelative' ? 'to relative' : 'to absolute'} so they stay anchored to this window.
+              </span>
+              <div className="flex gap-1 shrink-0">
+                <button
+                  onClick={() => {
+                    onConvertCoordinates?.(convertHint);
+                    setConvertHint(null);
+                    setConvertHintDismissed(true);
+                  }}
+                  className="px-2 py-0.5 text-[10px] font-medium text-text-primary bg-accent-solid/30 hover:bg-accent-solid/50 rounded transition-colors"
+                >
+                  Convert
+                </button>
+                <button
+                  onClick={() => { setConvertHint(null); setConvertHintDismissed(true); }}
+                  className="px-1.5 py-0.5 text-[10px] text-text-tertiary hover:text-text-primary transition-colors"
+                  title="Skip — actions stay in their original coord space"
+                >
+                  Skip
+                </button>
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <span className="text-xs text-text-secondary">Bring to Focus</span>
             <Toggle isOn={bringToFocus} onChange={setBringToFocus} />
