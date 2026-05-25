@@ -136,8 +136,13 @@ namespace TrueReplayer.Services
             };
             // Forward structural-error messages (e.g. missing target window) to the host's
             // status pipeline. The "error:" prefix gets stripped by PushStatusChange and
-            // displayed as an alert toast.
-            replayer.OnReplayError = msg => onStatusChanged?.Invoke($"error:{msg}");
+            // displayed as an alert toast. Marshalled to the UI thread because the
+            // callback fires from background task contexts (ExecuteWaitImage,
+            // ExecuteWaitPixelColor) — onStatusChanged downstream updates UI state, so
+            // invoking it from the task pool would race the dispatcher. Mirrors the
+            // continuation pattern at the bottom of StartReplay (lines 203-213).
+            replayer.OnReplayError = msg => dispatcherQueue.TryEnqueue(
+                () => onStatusChanged?.Invoke($"error:{msg}"));
             replayer.OnReplayResumed += () =>
             {
                 OnReplayResumed?.Invoke();
