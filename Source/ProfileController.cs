@@ -19,7 +19,11 @@ using WinForms = System.Windows.Forms;
 namespace TrueReplayer.Controllers
 {
     public enum SaveDialogResult { Overwrite, SaveAsNew, Cancel }
-    public enum ImportConflictResult { Overwrite, Rename, Skip, OverwriteAll, SkipAll }
+    // Conflict resolution decided up-front in the React Import Preview dialog. The legacy
+    // "OverwriteAll" / "SkipAll" values were removed when the per-profile inline picker
+    // replaced the old C# bulk dialog — bulk behaviour is now a frontend convenience that
+    // just stamps the chosen value into every conflicting row's resolution.
+    public enum ImportConflictResult { Overwrite, Rename, Skip }
 
     public class ProfileController : IDisposable
     {
@@ -235,6 +239,13 @@ namespace TrueReplayer.Controllers
             var entry = ProfileEntries.FirstOrDefault(p => p.Name == profileName);
             if (entry != null)
             {
+                // Stamp UpdatedAt on every save so the Info tab + Import Preview show a
+                // meaningful "last modified" date. CreatedAt is only set if missing, so
+                // pre-existing profiles get a CreatedAt the first time they're saved after
+                // this feature lands (best we can do without inventing past dates).
+                var nowUtc = DateTime.UtcNow;
+                profile.UpdatedAt = nowUtc;
+                if (profile.CreatedAt == null) profile.CreatedAt = nowUtc;
                 await SettingsManager.SaveProfileAsync(entry.FilePath, profile);
             }
         }
@@ -295,7 +306,18 @@ namespace TrueReplayer.Controllers
                             RestorePosition = profile.RestorePosition,
                             RestoreSize = profile.RestoreSize,
                             TriggerMode = profile.TriggerMode,
-                            IsDisabled = profile.IsDisabled
+                            IsDisabled = profile.IsDisabled,
+                            // Mirror sharing metadata into the sidebar entry so the UI can render
+                            // icon/tags/version badges without re-reading the JSON. Null tags stays
+                            // null (don't coerce to empty list — the UI distinguishes "no tags set"
+                            // from "tags were set then all removed").
+                            Description = profile.Description,
+                            Tags = profile.Tags,
+                            IconEmoji = profile.IconEmoji,
+                            ProfileVersion = profile.ProfileVersion,
+                            CreatedAt = profile.CreatedAt,
+                            UpdatedAt = profile.UpdatedAt,
+                            AppMinVersion = profile.AppMinVersion
                         });
 
                         if (hasTarget)
@@ -826,6 +848,11 @@ namespace TrueReplayer.Controllers
                     }
                 }
 
+                // Recompute AppMinVersion on every export so the value always reflects the current
+                // action set — never trust the last persisted value, since the user may have
+                // edited the profile since the last export and added/removed gating features.
+                var computedMinVersion = ProfileCompatibility.ComputeMinVersion(profile);
+
                 envelope.Profiles.Add(new ProfileExportEntry
                 {
                     Name = name,
@@ -843,7 +870,16 @@ namespace TrueReplayer.Controllers
                     TriggerMode = profile.TriggerMode,
                     BatchDelay = profile.BatchDelay,
                     Actions = profile.Actions,
-                    Images = images
+                    Images = images,
+                    // Sharing metadata — copy verbatim from the source profile so the .trprofile
+                    // carries description/tags/etc for the receiver's Import Preview.
+                    Description = profile.Description,
+                    Tags = profile.Tags,
+                    CreatedAt = profile.CreatedAt,
+                    UpdatedAt = profile.UpdatedAt,
+                    ProfileVersion = profile.ProfileVersion,
+                    AppMinVersion = computedMinVersion,
+                    IconEmoji = profile.IconEmoji
                 });
             }
 
@@ -902,7 +938,16 @@ namespace TrueReplayer.Controllers
             return true;
         }
 
-        public async Task<(int imported, int skipped, bool cancelled, bool hasOrganization)> ImportProfilesAsync()
+        /// <summary>
+        /// Phase 1 of the two-step import flow. Opens the file picker and parses the .trprofile
+        /// envelope without writing anything to disk. Caller (WebViewBridge.HandleProfileImport)
+        /// holds the parsed envelope server-side and ships preview metadata to the frontend so
+        /// the user can review + select before any disk write happens.
+        ///
+        /// Returns (null, null) when the user cancels the picker or the file is invalid — the
+        /// bridge layer maps both to a no-op (no preview dialog opens).
+        /// </summary>
+        public async Task<(ProfileExportEnvelope? envelope, string? filePath)> PrepareImportPreviewAsync()
         {
             var fileName = await ShowFileDialogAsync(new WinForms.OpenFileDialog
             {
@@ -910,59 +955,80 @@ namespace TrueReplayer.Controllers
                 DefaultExt = "trprofile"
             });
 
-            if (fileName == null) return (0, 0, true, false);
+            if (fileName == null) return (null, null);
 
-            var json = await File.ReadAllTextAsync(fileName);
-            json = SettingsManager.MigrateProfileJson(json);  // Renomeia lockPosition→restorePosition em envelopes pré-rename
-            var options = new JsonSerializerOptions
+            try
             {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                TypeInfoResolver = new DefaultJsonTypeInfoResolver()
-            };
+                var json = await File.ReadAllTextAsync(fileName);
+                json = SettingsManager.MigrateProfileJson(json);
+                var options = new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+                };
+                var envelope = JsonSerializer.Deserialize<ProfileExportEnvelope>(json, options);
+                if (envelope?.Profiles == null || envelope.Profiles.Count == 0) return (null, null);
+                return (envelope, fileName);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ProfileController] PrepareImportPreview error: {ex.Message}");
+                return (null, null);
+            }
+        }
 
-            var envelope = JsonSerializer.Deserialize<ProfileExportEnvelope>(json, options);
-            if (envelope?.Profiles == null || envelope.Profiles.Count == 0)
-                return (0, 0, false, false);
-
+        /// <summary>
+        /// Phase 2 of the two-step import flow. Writes the user-selected subset of profiles
+        /// from a previously parsed envelope, using the per-profile conflict resolution
+        /// decided ahead-of-time in the React Import Preview dialog. Filters out profiles
+        /// whose AppMinVersion exceeds the running app version as a safety net (the
+        /// frontend already disables them, but trust-and-verify).
+        ///
+        /// `conflictResolutions` maps the source profile name → Overwrite | Rename | Skip.
+        /// Missing entries default to Rename (safest — never silently destroys local work).
+        /// The old `ShowImportConflictDialogAsync` is no longer called; the React dialog
+        /// surfaces all decisions up-front so the import runs without further prompts.
+        /// </summary>
+        public async Task<(int imported, int skipped, bool hasOrganization)> ConfirmImportAsync(
+            ProfileExportEnvelope envelope,
+            HashSet<string> selectedNames,
+            Dictionary<string, ImportConflictResult> conflictResolutions)
+        {
             bool hasOrganization = envelope.Organization != null;
-
             string profileDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
                 "TrueReplayer", "Profiles");
             Directory.CreateDirectory(profileDir);
 
+            string runningVersion = typeof(ProfileController).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+
             int imported = 0;
             int skipped = 0;
-            ImportConflictResult? applyAllDecision = null;
 
-            foreach (var entry in envelope.Profiles)
+            // Only iterate the entries the user actually selected. Maintains source order so
+            // multi-profile imports feel deterministic.
+            var toImport = envelope.Profiles.Where(p => selectedNames.Contains(p.Name)).ToList();
+
+            foreach (var entry in toImport)
             {
+                // Hard compatibility gate — refuse to write a profile the running app can't run.
+                // Frontend already filters but a stale preview or hand-crafted message could slip
+                // through. Counted as skipped so the user sees the number.
+                if (!ProfileCompatibility.IsCompatible(entry.AppMinVersion, runningVersion))
+                {
+                    skipped++;
+                    continue;
+                }
                 string targetPath = Path.Combine(profileDir, entry.Name + ".json");
                 string finalName = entry.Name;
 
                 if (File.Exists(targetPath))
                 {
-                    ImportConflictResult resolution;
-
-                    if (applyAllDecision == ImportConflictResult.OverwriteAll)
-                        resolution = ImportConflictResult.Overwrite;
-                    else if (applyAllDecision == ImportConflictResult.SkipAll)
-                        resolution = ImportConflictResult.Skip;
-                    else
-                    {
-                        resolution = await ShowImportConflictDialogAsync(entry.Name);
-
-                        if (resolution == ImportConflictResult.OverwriteAll)
-                        {
-                            applyAllDecision = ImportConflictResult.OverwriteAll;
-                            resolution = ImportConflictResult.Overwrite;
-                        }
-                        else if (resolution == ImportConflictResult.SkipAll)
-                        {
-                            applyAllDecision = ImportConflictResult.SkipAll;
-                            resolution = ImportConflictResult.Skip;
-                        }
-                    }
+                    // Look up the user's decision from the preview dialog. Default Rename when
+                    // the entry is missing — matches the safest default the dialog already uses.
+                    var resolution = conflictResolutions.TryGetValue(entry.Name, out var r)
+                        ? r
+                        : ImportConflictResult.Rename;
 
                     if (resolution == ImportConflictResult.Skip)
                     {
@@ -980,6 +1046,8 @@ namespace TrueReplayer.Controllers
                             counter++;
                         } while (File.Exists(targetPath));
                     }
+                    // Overwrite: leave targetPath / finalName as-is — File.WriteAllTextAsync below
+                    // replaces the existing file atomically.
                 }
 
                 var profile = new UserProfile
@@ -997,7 +1065,19 @@ namespace TrueReplayer.Controllers
                     RestoreSize = entry.RestoreSize,
                     BringToFocus = entry.BringToFocus,
                     TriggerMode = entry.TriggerMode,
-                    BatchDelay = entry.BatchDelay ?? "Delay (ms)"
+                    BatchDelay = entry.BatchDelay ?? "Delay (ms)",
+                    // Round-trip sharing metadata. Pre-metadata .trprofile files leave these null
+                    // (System.Text.Json default-inits when the property is missing in the JSON),
+                    // which is exactly what we want — the Info tab will render "Unknown" / empty.
+                    Description = entry.Description,
+                    Tags = entry.Tags,
+                    CreatedAt = entry.CreatedAt,
+                    UpdatedAt = entry.UpdatedAt,
+                    // ProfileVersion has a non-null default of 1 on ProfileExportEntry, so a missing
+                    // field in the JSON deserializes to 1 anyway. Keep that behaviour explicit here.
+                    ProfileVersion = entry.ProfileVersion > 0 ? entry.ProfileVersion : 1,
+                    AppMinVersion = entry.AppMinVersion,
+                    IconEmoji = entry.IconEmoji
                 };
                 SettingsManager.MigrateRestoreSize(profile);
 
@@ -1022,7 +1102,7 @@ namespace TrueReplayer.Controllers
             if (hasOrganization && imported > 0)
                 await MergeImportedOrganizationAsync(envelope.Organization!);
 
-            return (imported, skipped, false, hasOrganization);
+            return (imported, skipped, hasOrganization);
         }
 
         private async Task MergeImportedOrganizationAsync(ProfileExportOrganization org)
@@ -1076,83 +1156,10 @@ namespace TrueReplayer.Controllers
             await SaveProfileOrderAsync();
         }
 
-        public async Task<ImportConflictResult> ShowImportConflictDialogAsync(string profileName)
-        {
-            var resultTcs = new TaskCompletionSource<ImportConflictResult>();
-
-            var messageBlock = new TextBlock
-            {
-                Text = $"A profile named \"{profileName}\" already exists.\nWhat would you like to do?",
-                TextWrapping = Microsoft.UI.Xaml.TextWrapping.Wrap
-            };
-
-            var overwriteAllBtn = new Button
-            {
-                Content = "Overwrite All",
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                Margin = new Thickness(0, 0, 4, 0)
-            };
-            var skipAllBtn = new Button
-            {
-                Content = "Skip All",
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                Margin = new Thickness(4, 0, 0, 0)
-            };
-
-            var bulkPanel = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                Margin = new Thickness(0, 12, 0, 0)
-            };
-            overwriteAllBtn.Width = 130;
-            skipAllBtn.Width = 130;
-            bulkPanel.Children.Add(overwriteAllBtn);
-            bulkPanel.Children.Add(skipAllBtn);
-
-            var contentPanel = new StackPanel();
-            contentPanel.Children.Add(messageBlock);
-            contentPanel.Children.Add(bulkPanel);
-
-            ContentDialog? dialogRef = null;
-
-            overwriteAllBtn.Click += (s, e) => { resultTcs.TrySetResult(ImportConflictResult.OverwriteAll); dialogRef?.Hide(); };
-            skipAllBtn.Click += (s, e) => { resultTcs.TrySetResult(ImportConflictResult.SkipAll); dialogRef?.Hide(); };
-
-            var dialog = new ContentDialog
-            {
-                Title = "Import Conflict",
-                XamlRoot = window.Content.XamlRoot,
-                RequestedTheme = ElementTheme.Dark,
-                PrimaryButtonText = "Overwrite",
-                SecondaryButtonText = "Rename",
-                CloseButtonText = "Skip",
-                DefaultButton = ContentDialogButton.Secondary,
-                CornerRadius = new CornerRadius(8),
-                Content = contentPanel
-            };
-            dialogRef = dialog;
-            ApplyDialogTheme(dialog, messageBlock);
-
-            InputHookManager.SuppressAllHotkeys = true;
-            try
-            {
-                var dialogResult = await dialog.ShowAsync();
-                if (resultTcs.Task.IsCompleted)
-                    return resultTcs.Task.Result;
-
-                return dialogResult switch
-                {
-                    ContentDialogResult.Primary => ImportConflictResult.Overwrite,
-                    ContentDialogResult.Secondary => ImportConflictResult.Rename,
-                    _ => ImportConflictResult.Skip
-                };
-            }
-            finally
-            {
-                InputHookManager.SuppressAllHotkeys = false;
-            }
-        }
+        // ShowImportConflictDialogAsync was removed in 2.2.0 — conflict resolution moved
+        // into the React Import Preview dialog (per-profile inline picker + bulk toolbar),
+        // which eliminates the awkward C# dialog that crammed Overwrite/Rename/Skip plus
+        // Overwrite-All/Skip-All into one screen. See ImportPreviewDialog.tsx.
 
         #endregion
 

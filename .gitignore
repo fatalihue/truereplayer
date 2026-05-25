@@ -5,6 +5,9 @@
 bin/
 obj/
 
+# Roslyn / LightSwitch project cache (regenerated on every build)
+*.lscache
+
 # Visual Studio user-specific files
 .vs/
 *.user

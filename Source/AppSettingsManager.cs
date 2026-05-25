@@ -62,6 +62,11 @@ namespace TrueReplayer.Services
             public bool ProfileKeyEnabled { get; set; } = true;
             public bool BrowserSelectorEnabled { get; set; } = true;
             public bool RunAsAdmin { get; set; } = false;
+            // Sharing — first-time warning shown before importing any .trprofile so the user
+            // knows imported profiles execute arbitrary input. Flips to true permanently once
+            // the user ticks "Don't show again" on the warning dialog. Saved to appsettings.json
+            // so it survives reinstalls (same Documents folder as the rest of the file).
+            public bool HasAcknowledgedImportWarning { get; set; } = false;
         }
 
         public static void Save(AppSettings settings)

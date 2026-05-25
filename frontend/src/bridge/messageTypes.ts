@@ -103,7 +103,77 @@ export interface ProfileEntry {
   restoreSize: boolean;
   triggerMode: TriggerMode;
   isDisabled: boolean;
+  // ── Sharing metadata mirror (read-only on this surface; edit via profile:setMetadata) ──
+  // Pushed in every profiles:updated payload so the sidebar can render icon/tag badges
+  // without an extra round-trip per profile. Null fields mean "not set" — UI renders a
+  // placeholder rather than an empty string.
+  description?: string | null;
+  tags?: string[] | null;
+  iconEmoji?: string | null;
+  profileVersion?: number;
+  createdAt?: string | null;   // ISO 8601 UTC, e.g. "2026-05-24T12:34:56.789Z"
+  updatedAt?: string | null;
+  appMinVersion?: string | null;
 }
+
+// ── Sharing metadata payloads ──
+
+/** Per-profile preview row inside an Import Preview dialog. */
+export interface ImportPreviewProfile {
+  name: string;
+  description: string | null;
+  tags: string[] | null;
+  iconEmoji: string | null;
+  profileVersion: number;
+  createdAt: string | null;
+  updatedAt: string | null;
+  appMinVersion: string | null;
+  /** Server-computed: false when this profile's AppMinVersion exceeds the running version. */
+  compatible: boolean;
+  actionCount: number;
+  hotkey: string | null;
+  hotstring: string | null;
+  targetProcessName: string | null;
+  targetWindowTitle: string | null;
+  /** True when a profile with this exact name already exists locally. */
+  nameConflict: boolean;
+}
+
+/** Full Import Preview payload pushed by the bridge after the user picks a .trprofile. */
+export interface ImportPreviewPayload {
+  fileName: string;
+  envelopeVersion: number;
+  exportedAt: string;
+  runningVersion: string;
+  hasOrganization: boolean;
+  /** True when the user has never acknowledged the security warning before. */
+  requiresAcknowledgement: boolean;
+  profiles: ImportPreviewProfile[];
+}
+
+/** Detailed metadata payload for the Info tab. */
+export interface ProfileMetadataPayload {
+  name: string;
+  found: boolean;
+  description?: string | null;
+  tags?: string[];
+  iconEmoji?: string | null;
+  profileVersion?: number;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  appMinVersion?: string | null;
+  /** Feature names that pinned the AppMinVersion (e.g. "WaitImage", "TriggerMode WhilePressed"). */
+  appMinVersionContributors?: string[];
+}
+
+/** Tag autocomplete row, sorted by usage frequency descending. */
+export interface TagListEntry {
+  tag: string;
+  count: number;
+}
+
+/** Per-profile conflict resolution sent with profile:confirmImport. */
+export type ImportConflictResolution = 'overwrite' | 'rename' | 'skip';
 
 export type TriggerMode = 'onPress' | 'onRelease' | 'whilePressed' | 'toggle';
 
@@ -310,7 +380,19 @@ export type IncomingMessage =
   // already composed (e.g. "Win+Q", "Ctrl+Shift+F5", "ScrollUp") and the hook has
   // swallowed the underlying OS event so it doesn't trigger Start menu / shell
   // shortcuts. Hotkey dialogs subscribe to this to fill the chip.
-  | { type: 'hotkey:captured'; payload: { combo: string } };
+  | { type: 'hotkey:captured'; payload: { combo: string } }
+  // ── Sharing-metadata messages ──
+  // Pushed in response to profile:import (replaces the old auto-execute flow). The frontend
+  // shows the security warning if requiresAcknowledgement, then the Import Preview dialog,
+  // then sends profile:confirmImport with the selected names.
+  | { type: 'profile:importPreview'; payload: ImportPreviewPayload }
+  // Pushed in response to profile:getMetadata for the Info tab.
+  | { type: 'profile:metadata'; payload: ProfileMetadataPayload }
+  // Pushed in response to profile:listTags for the tag autocomplete.
+  | { type: 'profile:tagList'; payload: { tags: TagListEntry[] } }
+  // Confirmation after profile:bumpVersion succeeds — frontend can refresh its local
+  // version display without waiting for the next profiles:updated push.
+  | { type: 'profile:versionBumped'; payload: { name: string; newVersion: number } };
 
 // ── Messages JS → C# ──
 
@@ -432,4 +514,22 @@ export type OutgoingMessage =
   // gets composed via BuildComposedKey, emitted through 'hotkey:captured', and
   // swallowed before the OS shell sees it. This is what allows binding Win+letter
   // combos that the WebView2 JS layer never receives.
-  | { type: 'hotkey:capture'; payload: { enabled: boolean } };
+  | { type: 'hotkey:capture'; payload: { enabled: boolean } }
+  // ── Sharing-metadata outgoing ──
+  | { type: 'profile:getMetadata'; payload: { name: string } }
+  | { type: 'profile:setMetadata'; payload: { name: string; description?: string | null; tags?: string[] | null; iconEmoji?: string | null } }
+  | { type: 'profile:bumpVersion'; payload: { name: string } }
+  | { type: 'profile:listTags'; payload: Record<string, never> }
+  // Phase 2 of import: tell the bridge which profiles (by name) from the previously
+  // previewed envelope to actually import. conflictResolutions specifies what to do
+  // for each profile name that collides with an existing local profile — defaults to
+  // 'rename' server-side if a conflicting profile is missing from the map (defence
+  // against frontend bugs / stale previews).
+  | { type: 'profile:confirmImport'; payload: { selectedNames: string[]; conflictResolutions: Record<string, ImportConflictResolution> } }
+  // Sent when the user dismisses the preview without importing (cancels the security
+  // warning or the Import Preview dialog). Tells the bridge to drop the server-side
+  // parsed envelope so it doesn't linger in memory.
+  | { type: 'profile:cancelImport'; payload: Record<string, never> }
+  // Persists the "Don't show again" choice on the security warning so subsequent imports
+  // skip the warning dialog.
+  | { type: 'settings:acknowledgeImportWarning'; payload: Record<string, never> };

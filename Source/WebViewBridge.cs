@@ -456,6 +456,14 @@ namespace TrueReplayer
                     case "profile:reorder": HandleProfileReorder(payload); break;
                     case "profile:export": HandleProfileExport(payload); break;
                     case "profile:import": HandleProfileImport(); break;
+                    // ── Sharing metadata (Info tab + Import Preview) ──
+                    case "profile:getMetadata": HandleProfileGetMetadata(payload); break;
+                    case "profile:setMetadata": HandleProfileSetMetadata(payload); break;
+                    case "profile:bumpVersion": HandleProfileBumpVersion(payload); break;
+                    case "profile:listTags": HandleProfileListTags(); break;
+                    case "profile:confirmImport": HandleProfileConfirmImport(payload); break;
+                    case "profile:cancelImport": HandleProfileCancelImport(); break;
+                    case "settings:acknowledgeImportWarning": HandleAcknowledgeImportWarning(); break;
                     case "profile:save": HandleProfileSave(); break;
                     case "profile:load": HandleProfileLoad(); break;
                     case "profile:convertCoordinates": HandleConvertCoordinates(payload); break;
@@ -692,7 +700,17 @@ namespace TrueReplayer
                 restorePosition = p.RestorePosition,
                 restoreSize = p.RestoreSize,
                 triggerMode = TriggerModeToString(p.TriggerMode),
-                isDisabled = p.IsDisabled
+                isDisabled = p.IsDisabled,
+                // Sharing metadata mirror for sidebar badges + Info tab seed values. The
+                // Info tab still calls profile:get-metadata on open to refresh; this is just
+                // so the list can render emoji/tags without a round-trip per profile.
+                description = p.Description,
+                tags = p.Tags,
+                iconEmoji = p.IconEmoji,
+                profileVersion = p.ProfileVersion,
+                createdAt = p.CreatedAt?.ToString("o"),
+                updatedAt = p.UpdatedAt?.ToString("o"),
+                appMinVersion = p.AppMinVersion
             }).ToArray();
 
             var order = profileController.GetProfileOrder();
@@ -4287,6 +4305,10 @@ namespace TrueReplayer
                     CornerRadius = new Microsoft.UI.Xaml.CornerRadius(8),
                     Content = msgBlock
                 };
+                // Apply current theme — without this, the dialog renders with default WinUI
+                // dark-mode chrome (pure black) that clashes with the app's customised palette.
+                // Mirrors the pattern used by every other ContentDialog in the codebase.
+                profileController.ApplyDialogTheme(dialog, msgBlock);
 
                 InputHookManager.SuppressAllHotkeys = true;
                 Microsoft.UI.Xaml.Controls.ContentDialogResult result;
@@ -4425,23 +4447,149 @@ namespace TrueReplayer
             }
         }
 
+        // Pending-import slot: parsed envelope + file name held server-side between the
+        // preview round-trip and the confirm message. Single slot is fine because the
+        // user can only have one Import flow open at a time (the file dialog is modal).
+        // Cleared after confirm, on cancel (via profile:cancelImport), or when a new
+        // preview starts (slot is overwritten).
+        private ProfileExportEnvelope? _pendingImportEnvelope;
+        private string? _pendingImportFileName;
+
+        /// <summary>
+        /// Two-step import: opens the file picker, parses the envelope, and ships a
+        /// `profile:importPreview` message back to the frontend. The frontend renders
+        /// the security warning (first time only) + Import Preview dialog, then sends
+        /// `profile:confirmImport` with the selected profile names to actually write
+        /// them to disk.
+        /// </summary>
         private async void HandleProfileImport()
         {
             try
             {
-                var (imported, skipped, cancelled, hasOrganization) = await profileController.ImportProfilesAsync();
-
-                if (cancelled && imported == 0)
+                var (envelope, filePath) = await profileController.PrepareImportPreviewAsync();
+                if (envelope == null || filePath == null)
+                {
+                    // User cancelled the file picker, or the file was malformed/empty. No-op so
+                    // the UI doesn't pop a stale dialog.
+                    _pendingImportEnvelope = null;
+                    _pendingImportFileName = null;
                     return;
+                }
+
+                _pendingImportEnvelope = envelope;
+                _pendingImportFileName = Path.GetFileName(filePath);
+
+                // Build the preview payload — one entry per profile in the envelope with
+                // everything the Import Preview dialog needs to render. Compatibility is
+                // computed server-side so the frontend doesn't need to know the version table.
+                string runningVersion = typeof(WebViewBridge).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+                var previewProfiles = envelope.Profiles.Select(p => new
+                {
+                    name = p.Name,
+                    description = p.Description,
+                    tags = p.Tags,
+                    iconEmoji = p.IconEmoji,
+                    profileVersion = p.ProfileVersion,
+                    createdAt = p.CreatedAt?.ToString("o"),
+                    updatedAt = p.UpdatedAt?.ToString("o"),
+                    appMinVersion = p.AppMinVersion,
+                    compatible = ProfileCompatibility.IsCompatible(p.AppMinVersion, runningVersion),
+                    actionCount = p.Actions?.Count ?? 0,
+                    hotkey = p.CustomHotkey,
+                    hotstring = p.CustomHotstring?.Sequence,
+                    targetProcessName = p.TargetWindow?.ProcessName,
+                    targetWindowTitle = p.TargetWindow?.WindowTitle,
+                    // Conflict detection — the receiver may already have a profile with the
+                    // same name. Surface that here so the dialog can show a "will be renamed"
+                    // / "will overwrite" hint up-front instead of only learning at confirm time.
+                    nameConflict = profileController.ProfileEntries.Any(e => e.Name == p.Name)
+                }).ToArray();
+
+                SendMessage("profile:importPreview", new
+                {
+                    fileName = _pendingImportFileName,
+                    envelopeVersion = envelope.Version,
+                    exportedAt = envelope.ExportedAt,
+                    runningVersion,
+                    hasOrganization = envelope.Organization != null,
+                    requiresAcknowledgement = !AppSettingsManager.Load().HasAcknowledgedImportWarning,
+                    profiles = previewProfiles
+                });
+            }
+            catch (Exception ex)
+            {
+                SendMessage("alert:show", new { message = $"Import failed: {ex.Message}" });
+                _pendingImportEnvelope = null;
+                _pendingImportFileName = null;
+            }
+        }
+
+        /// <summary>
+        /// Phase 2 of import: receives the user's selection from the Import Preview dialog
+        /// and runs the actual write/conflict-resolution flow on the previously parsed
+        /// envelope. Clears the pending slot on completion (success or failure).
+        /// </summary>
+        private async void HandleProfileConfirmImport(JsonElement payload)
+        {
+            if (_pendingImportEnvelope == null)
+            {
+                // Stale confirm — most likely the bridge was reloaded between preview and confirm.
+                SendMessage("alert:show", new { message = "Import session expired — please try again." });
+                return;
+            }
+
+            // Selected names: which profiles from the envelope to actually import. Frontend
+            // omits incompatible ones (AppMinVersion > running) automatically — we trust
+            // it but double-check below as a safety net.
+            var selectedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (payload.TryGetProperty("selectedNames", out var namesProp) && namesProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in namesProp.EnumerateArray())
+                {
+                    var s = el.GetString();
+                    if (!string.IsNullOrEmpty(s)) selectedNames.Add(s);
+                }
+            }
+
+            // Per-conflict resolution map: { profileName → "overwrite" | "rename" | "skip" }.
+            // Frontend only populates entries for profiles whose names collide. Anything missing
+            // here defaults to "rename" on the backend — safest fallback (never silently
+            // overwrites). Extract BEFORE the first await: HandleMessage owns the JsonDocument
+            // via `using`, so payload becomes invalid after we yield.
+            var conflictResolutions = new Dictionary<string, ImportConflictResult>(StringComparer.OrdinalIgnoreCase);
+            if (payload.TryGetProperty("conflictResolutions", out var resProp) && resProp.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in resProp.EnumerateObject())
+                {
+                    var resStr = prop.Value.GetString();
+                    var resolution = resStr switch
+                    {
+                        "overwrite" => ImportConflictResult.Overwrite,
+                        "skip" => ImportConflictResult.Skip,
+                        _ => ImportConflictResult.Rename,  // includes "rename" + unknown values
+                    };
+                    conflictResolutions[prop.Name] = resolution;
+                }
+            }
+
+            if (selectedNames.Count == 0)
+            {
+                _pendingImportEnvelope = null;
+                _pendingImportFileName = null;
+                return;
+            }
+
+            try
+            {
+                var (imported, skipped, hasOrganization) = await profileController.ConfirmImportAsync(
+                    _pendingImportEnvelope, selectedNames, conflictResolutions);
 
                 if (imported > 0)
                 {
                     PushProfilesUpdate();
                     string msg = $"Imported {imported} profile(s).";
-                    if (skipped > 0)
-                        msg += $" {skipped} skipped.";
-                    if (hasOrganization)
-                        msg += " Folder organization imported.";
+                    if (skipped > 0) msg += $" {skipped} skipped.";
+                    if (hasOrganization) msg += " Folder organization imported.";
                     SendMessage("alert:show", new { message = msg });
                 }
                 else if (skipped > 0)
@@ -4453,6 +4601,192 @@ namespace TrueReplayer
             {
                 SendMessage("alert:show", new { message = $"Import failed: {ex.Message}" });
             }
+            finally
+            {
+                _pendingImportEnvelope = null;
+                _pendingImportFileName = null;
+            }
+        }
+
+        // ── Sharing metadata handlers ──
+
+        private async void HandleProfileGetMetadata(JsonElement payload)
+        {
+            string name = payload.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+            if (string.IsNullOrEmpty(name)) return;
+            var profile = await profileController.LoadProfileByNameAsync(name);
+            if (profile == null)
+            {
+                SendMessage("profile:metadata", new { name, found = false });
+                return;
+            }
+            // Recompute AppMinVersion + contributing features on the fly so the Info tab can
+            // explain why min-version is what it is even if the persisted value is stale.
+            var computed = ProfileCompatibility.ComputeMinVersion(profile);
+            var contributors = ProfileCompatibility.ListContributingFeatures(profile);
+            SendMessage("profile:metadata", new
+            {
+                name,
+                found = true,
+                description = profile.Description,
+                tags = profile.Tags ?? new List<string>(),
+                iconEmoji = profile.IconEmoji,
+                profileVersion = profile.ProfileVersion,
+                createdAt = profile.CreatedAt?.ToString("o"),
+                updatedAt = profile.UpdatedAt?.ToString("o"),
+                appMinVersion = computed,
+                appMinVersionContributors = contributors
+            });
+        }
+
+        private async void HandleProfileSetMetadata(JsonElement payload)
+        {
+            // CRITICAL: HandleMessage owns the JsonDocument via `using var doc = JsonDocument.Parse(...)`
+            // and disposes it as soon as this method's first `await` yields control. Any payload access
+            // AFTER the await throws ObjectDisposedException. Extract every field we need into POCO/local
+            // variables up-front, then operate on those. The TryGet... pattern below distinguishes
+            // "absent" (don't touch the field) from "present but null" (clear the field) — important
+            // for partial-update semantics where the frontend only sends the keys it actually changed.
+
+            string name = payload.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+            if (string.IsNullOrEmpty(name)) return;
+
+            // Description
+            bool hasDescription = payload.TryGetProperty("description", out var descProp);
+            string? descriptionValue = null;
+            if (hasDescription)
+            {
+                descriptionValue = descProp.ValueKind == JsonValueKind.Null ? null : descProp.GetString();
+                if (descriptionValue != null)
+                {
+                    descriptionValue = descriptionValue.Trim();
+                    if (descriptionValue.Length > 500) descriptionValue = descriptionValue.Substring(0, 500);
+                }
+            }
+
+            // Tags — materialise the whole cleaned list now so we can drop the JsonElement.
+            bool hasTags = payload.TryGetProperty("tags", out var tagsProp);
+            List<string>? tagsValue = null;
+            bool tagsExplicitNull = false;
+            if (hasTags)
+            {
+                if (tagsProp.ValueKind == JsonValueKind.Null)
+                {
+                    tagsExplicitNull = true;
+                }
+                else if (tagsProp.ValueKind == JsonValueKind.Array)
+                {
+                    var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var cleaned = new List<string>();
+                    foreach (var t in tagsProp.EnumerateArray())
+                    {
+                        var s = t.GetString();
+                        if (string.IsNullOrWhiteSpace(s)) continue;
+                        s = s.Trim().ToLowerInvariant();
+                        // Same regex enforced on the frontend tag input. Accepts a-z 0-9 . - _ +
+                        // — common in tags like "fps", "csgo-2024", "win+r".
+                        if (!System.Text.RegularExpressions.Regex.IsMatch(s, @"^[a-z0-9\-_+.]+$")) continue;
+                        if (s.Length > 32) s = s.Substring(0, 32);
+                        if (seen.Add(s)) cleaned.Add(s);
+                        if (cleaned.Count >= 10) break;
+                    }
+                    tagsValue = cleaned;
+                }
+            }
+
+            // IconEmoji — keep at most 1 grapheme cluster. The frontend picker sends one emoji
+            // at a time, but a single emoji can span up to ~14 UTF-16 code units (family ZWJ
+            // sequences with skin-tone modifiers). Naive `Substring(0, N)` on N too small
+            // would cut mid-codepoint and produce invalid UTF-16 garbage. StringInfo walks
+            // grapheme clusters correctly, so taking just the first one is safe for every
+            // emoji shape we ship.
+            bool hasIconEmoji = payload.TryGetProperty("iconEmoji", out var emojiProp);
+            string? iconEmojiValue = null;
+            if (hasIconEmoji)
+            {
+                iconEmojiValue = emojiProp.ValueKind == JsonValueKind.Null ? null : emojiProp.GetString();
+                if (!string.IsNullOrEmpty(iconEmojiValue))
+                {
+                    var enumerator = System.Globalization.StringInfo.GetTextElementEnumerator(iconEmojiValue);
+                    iconEmojiValue = enumerator.MoveNext() ? (string)enumerator.Current : null;
+                }
+            }
+
+            // From here on out, no more payload access — safe to await.
+            var profile = await profileController.LoadProfileByNameAsync(name);
+            if (profile == null) return;
+
+            if (hasDescription)
+                profile.Description = string.IsNullOrEmpty(descriptionValue) ? null : descriptionValue;
+            if (hasTags)
+                profile.Tags = tagsExplicitNull ? null : (tagsValue != null && tagsValue.Count > 0 ? tagsValue : null);
+            if (hasIconEmoji)
+                profile.IconEmoji = string.IsNullOrEmpty(iconEmojiValue) ? null : iconEmojiValue;
+
+            await profileController.SaveProfileByNameAsync(name, profile);
+            await profileController.RefreshProfileListAsync(true);
+            PushProfilesUpdate();
+        }
+
+        private async void HandleProfileBumpVersion(JsonElement payload)
+        {
+            string name = payload.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+            if (string.IsNullOrEmpty(name)) return;
+            var profile = await profileController.LoadProfileByNameAsync(name);
+            if (profile == null) return;
+            // Defensively guard against overflow on absurd values. Wraps at int.MaxValue,
+            // which no human will ever reach but better than crashing.
+            profile.ProfileVersion = profile.ProfileVersion < int.MaxValue ? profile.ProfileVersion + 1 : 1;
+            await profileController.SaveProfileByNameAsync(name, profile);
+            await profileController.RefreshProfileListAsync(true);
+            PushProfilesUpdate();
+            SendMessage("profile:versionBumped", new { name, newVersion = profile.ProfileVersion });
+        }
+
+        private void HandleProfileListTags()
+        {
+            // Aggregate from the in-memory ProfileEntries — already populated by LoadProfileListAsync.
+            // Counts let the autocomplete sort by popularity (most-used first), which matches
+            // user expectation: tags they've used 5× should bubble above one-offs.
+            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in profileController.ProfileEntries)
+            {
+                if (entry.Tags == null) continue;
+                foreach (var t in entry.Tags)
+                {
+                    if (string.IsNullOrWhiteSpace(t)) continue;
+                    var key = t.Trim().ToLowerInvariant();
+                    counts[key] = counts.GetValueOrDefault(key, 0) + 1;
+                }
+            }
+            var sorted = counts
+                .OrderByDescending(kv => kv.Value)
+                .ThenBy(kv => kv.Key)
+                .Select(kv => new { tag = kv.Key, count = kv.Value })
+                .ToArray();
+            SendMessage("profile:tagList", new { tags = sorted });
+        }
+
+        private void HandleAcknowledgeImportWarning()
+        {
+            var s = AppSettingsManager.Load();
+            if (!s.HasAcknowledgedImportWarning)
+            {
+                s.HasAcknowledgedImportWarning = true;
+                AppSettingsManager.Save(s);
+            }
+        }
+
+        /// <summary>
+        /// User aborted the import after the preview was prepared (either from the security
+        /// warning or the Import Preview dialog). Clears the server-side pending envelope so
+        /// it doesn't linger in memory until the next import overwrites it. Idempotent — safe
+        /// to call even when no envelope is pending (no-op then).
+        /// </summary>
+        private void HandleProfileCancelImport()
+        {
+            _pendingImportEnvelope = null;
+            _pendingImportFileName = null;
         }
 
         private async void HandleProfileSave()

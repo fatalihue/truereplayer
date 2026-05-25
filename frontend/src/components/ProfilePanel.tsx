@@ -1,12 +1,15 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Search, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink } from 'lucide-react';
-import type { ProfileEntry } from '../bridge/messageTypes';
+import { Search, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink, Info, Hash } from 'lucide-react';
+import type { ProfileEntry, ImportPreviewPayload, ImportConflictResolution } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { KbdTag } from './common/KbdTag';
 import { RemovableChip } from './common/RemovableChip';
 import { CheckboxBox } from './Checkbox';
 import { TargetConfigDialog } from './TargetConfigDialog';
+import { SecurityWarningModal } from './SecurityWarningModal';
+import { ImportPreviewDialog } from './ImportPreviewDialog';
+import { ProfileInfoDialog } from './ProfileInfoDialog';
 import { useToast } from '../state/ToastContext';
 
 interface ContextMenuState {
@@ -77,22 +80,37 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const profileMap = new Map<string, ProfileEntry>();
   profiles.forEach(p => profileMap.set(p.name, p));
 
-  // Filter profiles by search
-  const matchesSearch = (name: string) =>
-    !searchQuery || name.toLowerCase().includes(searchQuery.toLowerCase());
+  // Search supports two modes detected from the query prefix:
+  //   - "#fps"  → tag mode: matches profiles with a tag containing "fps" (substring,
+  //              so "#fp" also catches "fps"). Bare "#" shows everything (just typed
+  //              the sigil, hasn't entered the tag yet — feels unresponsive otherwise).
+  //   - "fps"   → name mode (default): substring match on the profile name.
+  // Mode is picked from the leading char so users can switch without a separate UI.
+  const trimmedQuery = searchQuery.trim();
+  const isTagSearch = trimmedQuery.startsWith('#');
+  const tagSearchTerm = isTagSearch ? trimmedQuery.slice(1).toLowerCase() : '';
+
+  const matchesSearch = (entry: ProfileEntry) => {
+    if (!searchQuery) return true;
+    if (isTagSearch) {
+      if (tagSearchTerm === '') return true;
+      return !!entry.tags?.some(t => t.toLowerCase().includes(tagSearchTerm));
+    }
+    return entry.name.toLowerCase().includes(searchQuery.toLowerCase());
+  };
 
   // Build sectioned lists (alphabetically sorted)
   const sortByName = (a: ProfileEntry, b: ProfileEntry) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
 
   const pinnedProfiles = (profileOrder?.pinned ?? [])
-    .filter(n => profileMap.has(n) && matchesSearch(n))
+    .filter(n => profileMap.has(n) && matchesSearch(profileMap.get(n)!))
     .map(n => profileMap.get(n)!)
     .sort(sortByName);
 
   const folderSections = (profileOrder?.folders ?? []).map(f => ({
     ...f,
     profiles: f.items
-      .filter(n => profileMap.has(n) && matchesSearch(n))
+      .filter(n => profileMap.has(n) && matchesSearch(profileMap.get(n)!))
       .map(n => profileMap.get(n)!)
       .sort(sortByName)
   }));
@@ -111,14 +129,16 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   ];
 
   const ungroupedProfiles = ungroupedNames
-    .filter(n => profileMap.has(n) && matchesSearch(n))
+    .filter(n => profileMap.has(n) && matchesSearch(profileMap.get(n)!))
     .map(n => profileMap.get(n)!)
     .sort(sortByName);
 
-  // If searching, show flat filtered list instead of sections
+  // If searching, show flat filtered list instead of sections. Reuses matchesSearch so
+  // #tag mode works here too — was previously a separate name-only filter, which silently
+  // broke tag-search by returning the unfiltered list when the prefix didn't match a name.
   const isSearching = searchQuery.length > 0;
   const filtered = isSearching
-    ? profiles.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    ? profiles.filter(matchesSearch)
     : profiles;
 
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
@@ -207,8 +227,81 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setShowExportDialog(true);
   };
 
+  // ── Import flow state ──
+  // The flow is: user clicks Import → C# shows file picker + parses envelope →
+  // emits profile:importPreview → we set `importPreview` → render security warning
+  // (if requiresAcknowledgement) → render ImportPreviewDialog → user picks profiles →
+  // we send profile:confirmImport → C# writes + emits alert + profiles:updated.
+  //
+  // Two separate state slots so the warning can stand alone (canceling it returns
+  // to "nothing pending", not "show the preview anyway"). `pendingPreview` holds the
+  // preview during the brief moment the warning is on screen.
+  const [securityWarningOpen, setSecurityWarningOpen] = useState(false);
+  const [pendingPreview, setPendingPreview] = useState<ImportPreviewPayload | null>(null);
+  const [importPreview, setImportPreview] = useState<ImportPreviewPayload | null>(null);
+
+  // Info dialog — opened from the profile context menu, edits sharing metadata.
+  const [showInfoDialog, setShowInfoDialog] = useState<string | null>(null);
+
   const handleImportClick = () => {
     send({ type: 'profile:import', payload: {} });
+  };
+
+  // Listen for the preview message and route through the warning if needed.
+  useEffect(() => {
+    return subscribe((msg) => {
+      if (msg.type === 'profile:importPreview') {
+        if (msg.payload.requiresAcknowledgement) {
+          setPendingPreview(msg.payload);
+          setSecurityWarningOpen(true);
+        } else {
+          setImportPreview(msg.payload);
+        }
+      }
+    });
+  }, [subscribe]);
+
+  const handleSecurityContinue = (dontShowAgain: boolean) => {
+    if (dontShowAgain) {
+      send({ type: 'settings:acknowledgeImportWarning', payload: {} });
+    }
+    setSecurityWarningOpen(false);
+    if (pendingPreview) {
+      setImportPreview(pendingPreview);
+      setPendingPreview(null);
+    }
+  };
+
+  const handleSecurityCancel = () => {
+    // Cancelling the warning aborts the whole import. Tell the bridge so the server-side
+    // parsed envelope doesn't linger in memory until the next import overwrites it.
+    setSecurityWarningOpen(false);
+    setPendingPreview(null);
+    send({ type: 'profile:cancelImport', payload: {} });
+  };
+
+  const handlePreviewConfirm = (
+    selectedNames: string[],
+    conflictResolutions: Record<string, ImportConflictResolution>
+  ) => {
+    if (selectedNames.length > 0) {
+      send({ type: 'profile:confirmImport', payload: { selectedNames, conflictResolutions } });
+    } else {
+      // Empty selection with confirm clicked is effectively a cancel — clear server side too.
+      send({ type: 'profile:cancelImport', payload: {} });
+    }
+    setImportPreview(null);
+  };
+
+  const handlePreviewCancel = () => {
+    // Mirror handleSecurityCancel for the second possible dismissal point.
+    setImportPreview(null);
+    send({ type: 'profile:cancelImport', payload: {} });
+  };
+
+  const handleShowInfo = (name: string) => {
+    setContextMenu(null);
+    setShowInfoDialog(name);
   };
 
   const allExportSelected = profiles.length > 0 && profiles.every(p => exportSelection[p.name]);
@@ -1120,10 +1213,17 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           </div>
         </div>
 
-        {/* Search */}
+        {/* Search — supports "#tag" prefix to filter by tag instead of name */}
         <div className="px-3 pb-1.5">
-          <div className="flex items-center gap-2 px-2.5 py-1.5 bg-bg-input border border-border-default rounded">
-            <Search size={13} className="text-text-disabled shrink-0" />
+          <div className={`flex items-center gap-2 px-2.5 py-1.5 bg-bg-input border rounded transition-colors ${
+            isTagSearch ? 'border-accent-solid/50' : 'border-border-default'
+          }`}>
+            {isTagSearch ? (
+              // Visual cue that tag mode is active — distinguishes #fps from "literal hash".
+              <Hash size={13} className="text-accent shrink-0" />
+            ) : (
+              <Search size={13} className="text-text-disabled shrink-0" />
+            )}
             <input
               type="text"
               placeholder="Search profiles..."
@@ -1297,6 +1397,13 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           >
             <Pencil size={13} className="text-text-tertiary" />
             Rename
+          </button>
+          <button
+            onClick={() => handleShowInfo(contextMenu.profileName)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Info size={13} className="text-text-tertiary" />
+            Edit info…
           </button>
 
           {/* Move to Folder submenu */}
@@ -2183,6 +2290,31 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           {dragFolder ? <FolderOpen size={11} className="text-accent shrink-0" /> : <FilePlus size={11} className="text-accent shrink-0" />}
           {dragFolder ?? dragProfile}
         </div>
+      )}
+
+      {/* ── Sharing-metadata dialogs ──
+          Mounted at the panel root so the modal backdrop fills the whole window.
+          Render order matters: security warning sits ABOVE the preview when both
+          would render (the warning blocks the preview anyway because we don't set
+          importPreview until the warning is dismissed). */}
+      {securityWarningOpen && (
+        <SecurityWarningModal
+          onContinue={handleSecurityContinue}
+          onCancel={handleSecurityCancel}
+        />
+      )}
+      {importPreview && !securityWarningOpen && (
+        <ImportPreviewDialog
+          preview={importPreview}
+          onConfirm={handlePreviewConfirm}
+          onCancel={handlePreviewCancel}
+        />
+      )}
+      {showInfoDialog && (
+        <ProfileInfoDialog
+          profileName={showInfoDialog}
+          onClose={() => setShowInfoDialog(null)}
+        />
       )}
     </>
   );

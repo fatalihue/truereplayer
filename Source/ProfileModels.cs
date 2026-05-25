@@ -93,6 +93,28 @@ namespace TrueReplayer.Models
         public TriggerMode TriggerMode { get; set; } = TriggerMode.OnPress;
         public bool IsDisabled { get; set; }
 
+        // ── Profile metadata (sharing / library) ──
+        // All optional with safe defaults so existing profile.json files load unchanged.
+        // Description: short text shown in the Info tab and Import Preview. Plain text, ~200 chars.
+        public string? Description { get; set; }
+        // Tags: free-form labels (lowercased on save). Used for browsing/grouping community profiles.
+        // Capped at 10 tags in the UI; backend doesn't enforce a hard limit to avoid breaking imports.
+        public List<string>? Tags { get; set; }
+        // CreatedAt / UpdatedAt: UTC. Set by ProfileController on create / save. Null on profiles
+        // that predate this feature — UI renders "Unknown" rather than inventing a date.
+        public DateTime? CreatedAt { get; set; }
+        public DateTime? UpdatedAt { get; set; }
+        // ProfileVersion: author-controlled semver-less integer. Bumped manually when sharing a new
+        // revision. Defaults to 1 for both new and pre-existing profiles.
+        public int ProfileVersion { get; set; } = 1;
+        // AppMinVersion: minimum TrueReplayer version required to run this profile, computed from
+        // the feature set used (see ProfileCompatibility). Null = no special requirement (1.0+).
+        // Recalculated on every export, stored here so subsequent edits can see the last value.
+        public string? AppMinVersion { get; set; }
+        // IconEmoji: single emoji character displayed in profile list + Import Preview. Validated
+        // on the frontend; backend accepts any string and trims to first grapheme on save.
+        public string? IconEmoji { get; set; }
+
         [JsonIgnore]
         public bool ProfileKeyEnabled { get; set; } = true;
 
@@ -139,6 +161,17 @@ namespace TrueReplayer.Models
         public string? Hotkey { get; set; }
         public string? Hotstring { get; set; }
         public bool HotstringInstant { get; set; }
+        // ── Profile metadata mirror (read from UserProfile on list load) ──
+        // Surfaced here so the sidebar can render icon badges + tag chips without re-reading
+        // the whole profile JSON. Not edited directly — Info tab calls profile:set-metadata
+        // which reloads the profile, then RefreshProfileListAsync repopulates this entry.
+        public string? Description { get; set; }
+        public List<string>? Tags { get; set; }
+        public string? IconEmoji { get; set; }
+        public int ProfileVersion { get; set; } = 1;
+        public DateTime? CreatedAt { get; set; }
+        public DateTime? UpdatedAt { get; set; }
+        public string? AppMinVersion { get; set; }
         public bool HasWindowTarget { get; set; }
         public string? WindowTargetProcessName { get; set; }
         public string? WindowTargetWindowTitle { get; set; }
@@ -228,6 +261,19 @@ namespace TrueReplayer.Models
         /// Embedded WaitImage reference images: filename → base64 PNG data.
         /// </summary>
         public Dictionary<string, string>? Images { get; set; }
+        // ── Sharing metadata (round-tripped to the .trprofile envelope) ──
+        // Same fields as UserProfile, copied at export time. All optional — pre-metadata
+        // exports omit these and old apps reading new exports ignore unknown keys.
+        public string? Description { get; set; }
+        public List<string>? Tags { get; set; }
+        public DateTime? CreatedAt { get; set; }
+        public DateTime? UpdatedAt { get; set; }
+        public int ProfileVersion { get; set; } = 1;
+        // AppMinVersion: semver-ish "MAJOR.MINOR.PATCH" string (e.g. "2.0.0", "2.1.0").
+        // Computed by ProfileCompatibility.ComputeMinVersion on every export so it always
+        // matches the feature set actually present in the actions.
+        public string? AppMinVersion { get; set; }
+        public string? IconEmoji { get; set; }
     }
 
     public class ProfileExportOrganization
