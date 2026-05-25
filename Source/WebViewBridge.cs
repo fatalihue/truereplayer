@@ -2193,6 +2193,18 @@ namespace TrueReplayer
                 // Cancel (Esc) or out-of-bounds click → nothing inserted.
                 if (selection == null || selection.PickedColor == null) return;
 
+                // Translate absolute pick → profile-relative when rel coords on + target running.
+                // Mirrors HandlePixelColorPickAsync — both paths can reach the WaitPixel storage,
+                // so both must apply the same translation or the stored coords desync with the
+                // replay/test-match consumers that now expect window-relative values.
+                int storedX = selection.ScreenX;
+                int storedY = selection.ScreenY;
+                if (TryGetRelativeCaptureOffset(out var winRect))
+                {
+                    storedX -= winRect.Left;
+                    storedY -= winRect.Top;
+                }
+
                 int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
                 dispatcherQueue.TryEnqueue(() =>
                 {
@@ -2202,8 +2214,8 @@ namespace TrueReplayer
                         Key = "",
                         Delay = delay,
                         Timeout = 5000,
-                        PixelX = selection.ScreenX,
-                        PixelY = selection.ScreenY,
+                        PixelX = storedX,
+                        PixelY = storedY,
                         PixelColor = PixelColorService.ToHex(selection.PickedColor.Value),
                     });
                     for (int i = 0; i < actions.Count; i++)
@@ -2306,7 +2318,20 @@ namespace TrueReplayer
                 int sw = srEl.GetProperty("w").GetInt32();
                 int sh = srEl.GetProperty("h").GetInt32();
                 if (sw > 0 && sh > 0)
+                {
+                    // Same translation as the replay path in ExecuteWaitImage — the stored
+                    // search region is window-relative when the profile uses rel coords, so
+                    // we must add the current target-window origin before handing it to
+                    // ImageMatchingService (which expects absolute virtual-desktop coords).
+                    // Without this, Test Match silently searches the wrong screen area and
+                    // either misses (red) or matches by coincidence (green but wrong).
+                    if (TryGetRelativeCaptureOffset(out var winRect))
+                    {
+                        sx += winRect.Left;
+                        sy += winRect.Top;
+                    }
                     searchRegion = new System.Drawing.Rectangle(sx, sy, sw, sh);
+                }
             }
 
             try
@@ -2553,6 +2578,16 @@ namespace TrueReplayer
             int y = payload.TryGetProperty("y", out var yEl) && yEl.ValueKind == JsonValueKind.Number ? yEl.GetInt32() : 0;
             string targetHex = payload.TryGetProperty("hex", out var hexEl) ? (hexEl.GetString() ?? "") : "";
             int tolerance = payload.TryGetProperty("tolerance", out var tolEl) && tolEl.ValueKind == JsonValueKind.Number ? tolEl.GetInt32() : 0;
+
+            // The frontend sends the action's STORED coords. With rel coords on these are
+            // window-relative — sampling at them directly would hit the wrong screen pixel.
+            // Translate to absolute via the current target-window origin before sampling.
+            // Falls back to the raw coords when rel coords is off or no target is running.
+            if (TryGetRelativeCaptureOffset(out var winRect))
+            {
+                x += winRect.Left;
+                y += winRect.Top;
+            }
 
             var sampled = PixelColorService.GetPixelAt(x, y);
             var target = PixelColorService.ParseHex(targetHex);
