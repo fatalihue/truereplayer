@@ -18,6 +18,22 @@ namespace TrueReplayer
         public static event Action<string>? OnHotkeyPressed;
 
         /// <summary>
+        /// Fires when a profile hotkey is pressed AND its target window can't be found
+        /// anywhere on the system (not just not-foreground — actually not running). Lets
+        /// the UI surface a "target X not open" toast so the user doesn't see the hotkey
+        /// silently swallowed. The legit gate case (target running but not foreground)
+        /// stays silent because that's the feature working as designed — user is in the
+        /// wrong window, shouldn't trigger the profile.
+        ///
+        /// Throttled per-profile via <see cref="_lastTargetMissingFireUtc"/> so a user
+        /// who mashes the hotkey doesn't get spammed.
+        /// </summary>
+        public static event Action<string>? OnProfileTargetMissing;
+
+        private static readonly Dictionary<string, DateTime> _lastTargetMissingFireUtc = new();
+        private static readonly TimeSpan _targetMissingCooldown = TimeSpan.FromSeconds(3);
+
+        /// <summary>
         /// Fires when CaptureHotkeyMode is active and the user presses a key/combo. The string
         /// is the composed hotkey (e.g. "Win+Q", "Ctrl+Shift+F5", "ScrollUp"). The hook
         /// swallows the underlying OS event so the Windows Shell doesn't react to it (no
@@ -265,12 +281,33 @@ namespace TrueReplayer
                 return true;
 
             IntPtr hwnd = NativeMethods.GetForegroundWindow();
-            if (hwnd == IntPtr.Zero)
-                return false;
-
             wt.CompiledRegexes.TryGetValue(profileName, out var regex);
-            return TrueReplayer.Helpers.WindowMatcher.Matches(
-                hwnd, target, regex, _windowTextBuffer, _processNameBuffer);
+
+            if (hwnd != IntPtr.Zero && TrueReplayer.Helpers.WindowMatcher.Matches(
+                    hwnd, target, regex, _windowTextBuffer, _processNameBuffer))
+                return true;
+
+            // Foreground doesn't match. Two sub-cases worth distinguishing for UX:
+            //   - target is running somewhere else (different desktop / behind other windows):
+            //     stay silent. The gate is doing its job — user pressed in the wrong context.
+            //   - target isn't running at all: surface a toast so the user knows why the
+            //     hotkey did nothing. Cooldown'd so a mashed key doesn't flood notifications.
+            // FindWindow walks the full window list which is cheap enough at hotkey-press rate.
+            try
+            {
+                if (TrueReplayer.Helpers.WindowMatcher.FindWindow(target, regex) == IntPtr.Zero)
+                {
+                    var now = DateTime.UtcNow;
+                    if (!_lastTargetMissingFireUtc.TryGetValue(profileName, out var last)
+                        || now - last >= _targetMissingCooldown)
+                    {
+                        _lastTargetMissingFireUtc[profileName] = now;
+                        OnProfileTargetMissing?.Invoke(profileName);
+                    }
+                }
+            }
+            catch { /* hook must never throw — swallow any FindWindow / event-handler failure */ }
+            return false;
         }
 
         #region Hotstring Helpers

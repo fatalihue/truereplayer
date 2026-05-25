@@ -488,6 +488,24 @@ namespace TrueReplayer
         {
             InputHookManager.Start();
 
+            // Profile hotkey was pressed but its target window isn't running anywhere on
+            // the system. Surface a toast so the user knows why nothing happened — the
+            // hook silently swallowed the hotkey otherwise (legit when target is just
+            // not foreground, confusing when target is closed entirely). The hook side
+            // cooldowns per-profile so a mashed key doesn't flood.
+            InputHookManager.OnProfileTargetMissing += (profileName) =>
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    var target = profileController.GetEffectiveWindowTarget(profileName);
+                    var procName = target?.ProcessName ?? "target window";
+                    bridge?.SendMessage("alert:show", new
+                    {
+                        message = $"Profile '{profileName}' hotkey ignored — '{procName}' isn't running"
+                    });
+                });
+            };
+
             InputHookManager.OnHotkeyPressed += (key) =>
             {
                 DispatcherQueue.TryEnqueue(async () =>
