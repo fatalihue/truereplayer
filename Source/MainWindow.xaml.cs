@@ -165,7 +165,33 @@ namespace TrueReplayer
 
         private async void InitializeWebView()
         {
-            await WebView.EnsureCoreWebView2Async();
+            // Pin the WebView2 UserDataFolder to a stable location OUTSIDE Velopack's
+            // versioned app directory. The default location is adjacent to the executable
+            // (e.g. `.../app-2.2.0/TrueReplayer.exe.WebView2/`), which the Velopack updater
+            // discards when it swaps in a new version directory — taking the theme,
+            // SendText snippets, and any other localStorage with it. Pinning to LocalAppData
+            // means the data survives every update.
+            var userDataFolder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "TrueReplayer", "WebView2");
+
+            // One-shot migration: if our stable location is empty (fresh install of the
+            // fix), look for the legacy default location next to a previous version's
+            // executable and copy it across. Best-effort — failures here are swallowed
+            // because the user can always re-pick their theme; we just want to spare
+            // them the round-trip if possible.
+            TryMigrateLegacyWebView2Data(userDataFolder);
+
+            try { Directory.CreateDirectory(userDataFolder); }
+            catch (Exception ex) { Services.DiagnosticLog.Warn($"WebView2 UserDataFolder create failed: {ex.Message}"); }
+
+            // CreateWithOptionsAsync is the WinRT projection's name for the 3-arg factory
+            // (the net462 dll exposes plain CreateAsync, but the .NET 8 WinMD-backed
+            // projection renamed it with the "WithOptions" suffix per WinRT convention).
+            var envOptions = new Microsoft.Web.WebView2.Core.CoreWebView2EnvironmentOptions();
+            var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateWithOptionsAsync(
+                null, userDataFolder, envOptions);
+            await WebView.EnsureCoreWebView2Async(env);
 
             // Create bridge and register message handler BEFORE navigation
             // to ensure no messages from React are missed
@@ -332,6 +358,93 @@ namespace TrueReplayer
                 InputHookManager.RegisterProfileHotkeys(hotkeys);
                 InputHookManager.RegisterProfileTriggerModes(profileController.GetProfileTriggerModes());
             });
+        }
+
+        /// <summary>
+        /// One-shot migration of the WebView2 UserDataFolder from its legacy default location
+        /// (adjacent to the executable, inside Velopack's per-version `app-X.Y.Z/` directory)
+        /// to the stable LocalAppData location used from 2.2.1 onwards. Preserves theme,
+        /// SendText snippets, and any other localStorage on first launch after the upgrade.
+        ///
+        /// Best-effort: every exception is swallowed because the worst case is the user
+        /// re-picks their theme. Detection is heuristic — we look for sibling `app-*`
+        /// folders next to the current executable and copy the most recently modified
+        /// `*.WebView2/EBWebView` (or `EBWebView`) folder found.
+        ///
+        /// No-op if the target folder already exists and is non-empty — we never overwrite.
+        /// </summary>
+        private static void TryMigrateLegacyWebView2Data(string targetDir)
+        {
+            try
+            {
+                // Skip when the canonical folder already has data (already migrated, or
+                // fresh install with no legacy to import).
+                if (Directory.Exists(targetDir) && Directory.EnumerateFileSystemEntries(targetDir).Any())
+                    return;
+
+                var exeDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+                var exeName = Path.GetFileNameWithoutExtension(
+                    System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName ?? "TrueReplayer");
+
+                // Candidate names WebView2 has used as default UserDataFolder:
+                //  1. {exe}.WebView2 — current Microsoft.UI.Xaml.Controls.WebView2 default
+                //  2. EBWebView — older WebView2 SDK default
+                // Both forms are checked next to the current exe AND every sibling
+                // app-* folder Velopack left behind from the prior install.
+                string[] candidateLeafNames = { $"{exeName}.exe.WebView2", "EBWebView" };
+
+                var searchRoots = new System.Collections.Generic.List<string> { exeDir };
+                // Velopack layout: .../current/app-X.Y.Z/. Look at every sibling app-* dir.
+                var parent = Directory.GetParent(exeDir)?.FullName;
+                if (parent != null && Directory.Exists(parent))
+                {
+                    foreach (var sibling in Directory.GetDirectories(parent, "app-*"))
+                        if (!string.Equals(sibling, exeDir, StringComparison.OrdinalIgnoreCase))
+                            searchRoots.Add(sibling);
+                }
+
+                string? best = null;
+                DateTime bestStamp = DateTime.MinValue;
+                foreach (var root in searchRoots)
+                {
+                    foreach (var leaf in candidateLeafNames)
+                    {
+                        var path = Path.Combine(root, leaf);
+                        if (!Directory.Exists(path)) continue;
+                        // Treat empty / placeholder folders as "no data here".
+                        if (!Directory.EnumerateFileSystemEntries(path).Any()) continue;
+                        var stamp = new DirectoryInfo(path).LastWriteTimeUtc;
+                        if (stamp > bestStamp) { best = path; bestStamp = stamp; }
+                    }
+                }
+
+                if (best == null) return;
+                Services.DiagnosticLog.Info($"Migrating WebView2 user data from '{best}' → '{targetDir}'");
+                Directory.CreateDirectory(targetDir);
+                CopyDirectoryRecursive(best, targetDir);
+            }
+            catch (Exception ex)
+            {
+                Services.DiagnosticLog.Warn($"WebView2 legacy migration skipped: {ex.Message}");
+            }
+        }
+
+        private static void CopyDirectoryRecursive(string sourceDir, string destDir)
+        {
+            Directory.CreateDirectory(destDir);
+            foreach (var file in Directory.GetFiles(sourceDir))
+            {
+                var dest = Path.Combine(destDir, Path.GetFileName(file));
+                try { File.Copy(file, dest, overwrite: true); }
+                catch { /* skip locked / unreadable files — partial migration is fine */ }
+            }
+            foreach (var subDir in Directory.GetDirectories(sourceDir))
+            {
+                // Skip the LockFile / .lock equivalents that a running WebView2 might hold open.
+                var name = Path.GetFileName(subDir);
+                if (name.StartsWith("LockFile", StringComparison.OrdinalIgnoreCase)) continue;
+                CopyDirectoryRecursive(subDir, Path.Combine(destDir, name));
+            }
         }
 
         private async Task<bool> HandleCloseGuardAsync()
