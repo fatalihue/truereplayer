@@ -2193,18 +2193,6 @@ namespace TrueReplayer
                 // Cancel (Esc) or out-of-bounds click → nothing inserted.
                 if (selection == null || selection.PickedColor == null) return;
 
-                // Translate absolute pick → profile-relative when rel coords on + target running.
-                // Mirrors HandlePixelColorPickAsync — both paths can reach the WaitPixel storage,
-                // so both must apply the same translation or the stored coords desync with the
-                // replay/test-match consumers that now expect window-relative values.
-                int storedX = selection.ScreenX;
-                int storedY = selection.ScreenY;
-                if (TryGetRelativeCaptureOffset(out var winRect))
-                {
-                    storedX -= winRect.Left;
-                    storedY -= winRect.Top;
-                }
-
                 int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
                 dispatcherQueue.TryEnqueue(() =>
                 {
@@ -2214,8 +2202,8 @@ namespace TrueReplayer
                         Key = "",
                         Delay = delay,
                         Timeout = 5000,
-                        PixelX = storedX,
-                        PixelY = storedY,
+                        PixelX = selection.ScreenX,
+                        PixelY = selection.ScreenY,
                         PixelColor = PixelColorService.ToHex(selection.PickedColor.Value),
                     });
                     for (int i = 0; i < actions.Count; i++)
@@ -2318,20 +2306,7 @@ namespace TrueReplayer
                 int sw = srEl.GetProperty("w").GetInt32();
                 int sh = srEl.GetProperty("h").GetInt32();
                 if (sw > 0 && sh > 0)
-                {
-                    // Same translation as the replay path in ExecuteWaitImage — the stored
-                    // search region is window-relative when the profile uses rel coords, so
-                    // we must add the current target-window origin before handing it to
-                    // ImageMatchingService (which expects absolute virtual-desktop coords).
-                    // Without this, Test Match silently searches the wrong screen area and
-                    // either misses (red) or matches by coincidence (green but wrong).
-                    if (TryGetRelativeCaptureOffset(out var winRect))
-                    {
-                        sx += winRect.Left;
-                        sy += winRect.Top;
-                    }
                     searchRegion = new System.Drawing.Rectangle(sx, sy, sw, sh);
-                }
             }
 
             try
@@ -2540,23 +2515,12 @@ namespace TrueReplayer
                     return;
                 }
 
-                // Translate absolute pick → profile-relative when rel coords on + target running.
-                // The sampled colour is independent of coord space (taken from the screenshot
-                // pixel directly) so it round-trips unchanged.
-                int storedX = selection.ScreenX;
-                int storedY = selection.ScreenY;
-                if (TryGetRelativeCaptureOffset(out var winRect))
-                {
-                    storedX -= winRect.Left;
-                    storedY -= winRect.Top;
-                }
-
                 SendMessage("pixel:colorPicked", new
                 {
                     requestId,
                     cancelled = false,
-                    x = storedX,
-                    y = storedY,
+                    x = selection.ScreenX,
+                    y = selection.ScreenY,
                     hex = PixelColorService.ToHex(selection.PickedColor.Value),
                 });
             }
@@ -2578,16 +2542,6 @@ namespace TrueReplayer
             int y = payload.TryGetProperty("y", out var yEl) && yEl.ValueKind == JsonValueKind.Number ? yEl.GetInt32() : 0;
             string targetHex = payload.TryGetProperty("hex", out var hexEl) ? (hexEl.GetString() ?? "") : "";
             int tolerance = payload.TryGetProperty("tolerance", out var tolEl) && tolEl.ValueKind == JsonValueKind.Number ? tolEl.GetInt32() : 0;
-
-            // The frontend sends the action's STORED coords. With rel coords on these are
-            // window-relative — sampling at them directly would hit the wrong screen pixel.
-            // Translate to absolute via the current target-window origin before sampling.
-            // Falls back to the raw coords when rel coords is off or no target is running.
-            if (TryGetRelativeCaptureOffset(out var winRect))
-            {
-                x += winRect.Left;
-                y += winRect.Top;
-            }
 
             var sampled = PixelColorService.GetPixelAt(x, y);
             var target = PixelColorService.ParseHex(targetHex);
@@ -2667,20 +2621,9 @@ namespace TrueReplayer
         // Lets the user draw a search ROI for an existing WaitImage. Region-only mode — no
         // PNG saved, just the rect reported back. Pre-drawn with the existing rect (when
         // payload carries one) so the user can tweak instead of restarting from blank.
-        //
-        // Coordinate system handling: when the profile uses relative coords + has a target
-        // window currently running, we translate the stored rect (which is window-relative)
-        // to absolute for the overlay display, and translate the new selection back to
-        // window-relative before storing. Without this round-trip the overlay would render
-        // the initial rect at the wrong screen position when the window has moved, and a
-        // freshly-picked region would be stored as absolute (silently breaking the moment
-        // the target window moves at replay time — exactly the bug the rel-coord feature
-        // is meant to prevent).
         private async Task HandleConfigureSearchRegionAsync(JsonElement payload)
         {
             string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
-
-            bool hasRelativeOffset = TryGetRelativeCaptureOffset(out var winRect);
 
             System.Drawing.Rectangle? initialRect = null;
             if (payload.TryGetProperty("x", out var xEl) && xEl.ValueKind == JsonValueKind.Number &&
@@ -2688,15 +2631,8 @@ namespace TrueReplayer
                 payload.TryGetProperty("w", out var wEl) && wEl.ValueKind == JsonValueKind.Number &&
                 payload.TryGetProperty("h", out var hEl) && hEl.ValueKind == JsonValueKind.Number)
             {
-                int initX = xEl.GetInt32();
-                int initY = yEl.GetInt32();
-                // Stored coords are profile-relative when rel coords on — translate for display.
-                if (hasRelativeOffset)
-                {
-                    initX += winRect.Left;
-                    initY += winRect.Top;
-                }
-                initialRect = new System.Drawing.Rectangle(initX, initY, wEl.GetInt32(), hEl.GetInt32());
+                initialRect = new System.Drawing.Rectangle(
+                    xEl.GetInt32(), yEl.GetInt32(), wEl.GetInt32(), hEl.GetInt32());
             }
 
             var selection = await RunRegionPickerAsync(
@@ -2711,22 +2647,12 @@ namespace TrueReplayer
                 return;
             }
 
-            // Translate fresh selection (absolute from overlay) → profile-relative for storage.
-            // Re-check the target window in case it moved or closed between display and selection.
-            int storedX = selection.ScreenX;
-            int storedY = selection.ScreenY;
-            if (TryGetRelativeCaptureOffset(out var winRectNow))
-            {
-                storedX -= winRectNow.Left;
-                storedY -= winRectNow.Top;
-            }
-
             SendMessage("waitimage:searchRegionSet", new
             {
                 requestId,
                 cancelled = false,
-                x = storedX,
-                y = storedY,
+                x = selection.ScreenX,
+                y = selection.ScreenY,
                 w = selection.Width,
                 h = selection.Height
             });
@@ -3669,43 +3595,36 @@ namespace TrueReplayer
             var clickTypes = new HashSet<string> { "LeftClickDown", "LeftClickUp", "RightClickDown", "RightClickUp", "MiddleClickDown", "MiddleClickUp" };
             int converted = 0;
 
-            // Sign of the translation: subtract window origin to go absolute→relative,
-            // add to go the other way. Single sign variable avoids duplicating the loop body.
-            int sign = direction == "toRelative" ? -1 : +1;
-
-            foreach (var action in actions)
+            if (direction == "toRelative")
             {
-                if (clickTypes.Contains(action.ActionType))
+                foreach (var action in actions)
                 {
-                    action.X += sign * rect.Left;
-                    action.Y += sign * rect.Top;
-                    converted++;
+                    if (clickTypes.Contains(action.ActionType))
+                    {
+                        action.X -= rect.Left;
+                        action.Y -= rect.Top;
+                        converted++;
+                    }
                 }
-                // WaitImage: only translate when a search region is actually set. The X/Y
-                // fields are meaningless without W/H — leaving them at 0 lets the action
-                // fall back to a full-screen scan (existing behaviour).
-                else if (action.ActionType == "WaitImage"
-                    && action.WaitImageSearchW is int w && action.WaitImageSearchH is int h
-                    && w > 0 && h > 0)
-                {
-                    action.WaitImageSearchX = (action.WaitImageSearchX ?? 0) + sign * rect.Left;
-                    action.WaitImageSearchY = (action.WaitImageSearchY ?? 0) + sign * rect.Top;
-                    converted++;
-                }
-                // WaitPixelColor: PixelX/Y are nullable but required for the action to do
-                // anything — only convert when both are present.
-                else if (action.ActionType == "WaitPixelColor"
-                    && action.PixelX.HasValue && action.PixelY.HasValue)
-                {
-                    action.PixelX = action.PixelX.Value + sign * rect.Left;
-                    action.PixelY = action.PixelY.Value + sign * rect.Top;
-                    converted++;
-                }
+                UserProfile.Current.UseRelativeCoordinates = true;
+                UserProfile.Current.WindowWidth = rect.Right - rect.Left;
+                UserProfile.Current.WindowHeight = rect.Bottom - rect.Top;
             }
-
-            UserProfile.Current.UseRelativeCoordinates = direction == "toRelative";
-            UserProfile.Current.WindowWidth = direction == "toRelative" ? rect.Right - rect.Left : 0;
-            UserProfile.Current.WindowHeight = direction == "toRelative" ? rect.Bottom - rect.Top : 0;
+            else // toAbsolute
+            {
+                foreach (var action in actions)
+                {
+                    if (clickTypes.Contains(action.ActionType))
+                    {
+                        action.X += rect.Left;
+                        action.Y += rect.Top;
+                        converted++;
+                    }
+                }
+                UserProfile.Current.UseRelativeCoordinates = false;
+                UserProfile.Current.WindowWidth = 0;
+                UserProfile.Current.WindowHeight = 0;
+            }
 
             HasUnsavedChanges = true;
             PushActionsUpdate();
@@ -4504,28 +4423,6 @@ namespace TrueReplayer
 
             await profileController.ReorderProfilesAsync(pinned, folders, ungrouped);
             PushProfilesUpdate();
-        }
-
-        /// <summary>
-        /// Resolves the current target window's origin for the active profile, used to
-        /// translate freshly-captured WaitImage region / WaitPixelColor coords from absolute
-        /// (what the overlay returns) to profile-relative (what we store when UseRelativeCoordinates
-        /// is on). Returns true with rect populated only when ALL of these hold: the profile uses
-        /// relative coords, a WindowTarget is configured, and the target window is currently
-        /// running. False otherwise — caller stores absolute coords as fallback.
-        /// </summary>
-        private bool TryGetRelativeCaptureOffset(out NativeMethods.RECT rect)
-        {
-            rect = default;
-            if (!UserProfile.Current.UseRelativeCoordinates) return false;
-            var target = CurrentProfileName != "No Profile"
-                ? profileController.GetEffectiveWindowTarget(CurrentProfileName)
-                : UserProfile.Current.TargetWindow;
-            if (target == null || (string.IsNullOrEmpty(target.ProcessName) && string.IsNullOrEmpty(target.WindowTitle)))
-                return false;
-            IntPtr hwnd = TrueReplayer.Helpers.WindowMatcher.FindWindow(target);
-            if (hwnd == IntPtr.Zero) return false;
-            return NativeMethods.GetWindowRect(hwnd, out rect);
         }
 
         private async void HandleProfileExport(JsonElement payload)

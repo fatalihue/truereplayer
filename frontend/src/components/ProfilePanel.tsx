@@ -35,27 +35,7 @@ const FOLDER_COLORS = [
 ];
 
 export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePanelProps) {
-  const { profiles, profileOrder, actions } = useAppState();
-
-  // Pre-compute the count of actions whose stored coordinates would benefit from a
-  // Convert to Relative/Absolute pass. Used by TargetConfigDialog to show its migration
-  // hint when the user toggles UseRelativeCoordinates. Kept in sync with the backend's
-  // HandleConvertCoordinates filter (clicks + WaitImage with search region + WaitPixel
-  // with pixel set) — change both together if the filter ever changes.
-  const CLICK_TYPES = new Set([
-    'LeftClickDown', 'LeftClickUp',
-    'RightClickDown', 'RightClickUp',
-    'MiddleClickDown', 'MiddleClickUp',
-  ]);
-  const convertibleActionCount = actions.reduce((n, a) => {
-    if (CLICK_TYPES.has(a.actionType)) return n + 1;
-    if (a.actionType === 'WaitImage'
-      && typeof a.waitImageSearchW === 'number' && a.waitImageSearchW > 0
-      && typeof a.waitImageSearchH === 'number' && a.waitImageSearchH > 0) return n + 1;
-    if (a.actionType === 'WaitPixelColor'
-      && typeof a.pixelX === 'number' && typeof a.pixelY === 'number') return n + 1;
-    return n;
-  }, 0);
+  const { profiles, profileOrder } = useAppState();
   const { send, subscribe } = useBridge();
   const { showToast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
@@ -2241,7 +2221,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               type: 'profile:convertCoordinates',
               payload: { direction },
             })}
-            convertibleActionCount={convertibleActionCount}
           />
         );
       })()}

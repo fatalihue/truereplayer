@@ -134,15 +134,6 @@ namespace TrueReplayer.Services
             {
                 OnReplayPaused?.Invoke(hotkey, timeoutMs);
             };
-            // Forward structural-error messages (e.g. missing target window) to the host's
-            // status pipeline. The "error:" prefix gets stripped by PushStatusChange and
-            // displayed as an alert toast. Marshalled to the UI thread because the
-            // callback fires from background task contexts (ExecuteWaitImage,
-            // ExecuteWaitPixelColor) — onStatusChanged downstream updates UI state, so
-            // invoking it from the task pool would race the dispatcher. Mirrors the
-            // continuation pattern at the bottom of StartReplay (lines 203-213).
-            replayer.OnReplayError = msg => dispatcherQueue.TryEnqueue(
-                () => onStatusChanged?.Invoke($"error:{msg}"));
             replayer.OnReplayResumed += () =>
             {
                 OnReplayResumed?.Invoke();
@@ -731,10 +722,6 @@ namespace TrueReplayer.Services
         public event Action<ActionItem>? OnActionExecuting;
         public event Action<string, int>? OnReplayPaused;
         public event Action? OnReplayResumed;
-        // Surfaced when an action can't proceed for a structural reason (e.g. profile uses
-        // relative coords but the target window isn't running). ReplayService wires this to
-        // its onStatusChanged with the "error:" prefix so the bridge alerts the user.
-        public Action<string>? OnReplayError;
 
         public ActionReplayer(ObservableCollection<ActionItem> actions, DispatcherQueue dispatcherQueue, BrowserBridgeService? browserBridge = null)
         {
@@ -1473,70 +1460,17 @@ namespace TrueReplayer.Services
         private IntPtr FindTargetWindow()
             => TrueReplayer.Helpers.WindowMatcher.FindWindow(_windowTarget, _windowTargetTitleRegex);
 
-        /// <summary>
-        /// Resolve the offset (window origin) that converts profile-space coordinates to
-        /// absolute virtual-desktop coordinates. Used by every replay path that consumes
-        /// stored relative coords — mouse clicks, WaitImage search region, WaitPixelColor.
-        ///
-        /// Returns true when no translation is needed (rel coords off OR no target window
-        /// configured — degenerate state preserved for backward compat) OR the target was
-        /// found and dx/dy are populated. Returns false ONLY when rel coords are on AND a
-        /// target is configured AND we couldn't resolve the running window — caller should
-        /// treat this as an error (call <see cref="ReportMissingTargetWindow"/>).
-        /// </summary>
-        private bool TryResolveRelativeOffset(out int dx, out int dy)
+        private void SimulateMouse(int x, int y, uint mouseEvent, int mouseData = 0)
         {
-            dx = 0;
-            dy = 0;
-            if (!_useRelativeCoordinates) return true;
-            if (_windowTarget == null) return true;
-            var hwnd = FindTargetWindow();
-            if (hwnd == IntPtr.Zero) return false;
-            if (!NativeMethods.GetWindowRect(hwnd, out var rect)) return false;
-            dx = rect.Left;
-            dy = rect.Top;
-            return true;
-        }
-
-        /// <summary>
-        /// Surfaces a visible error and stops the replay when a profile-relative action
-        /// can't resolve its target window. Used to be silent for mouse clicks — actions
-        /// would land at the relative coord interpreted as absolute, almost certainly
-        /// somewhere wrong. Now the user sees "target window X not found" instead.
-        /// </summary>
-        private void ReportMissingTargetWindow()
-        {
-            var name = _windowTarget?.ProcessName ?? "target";
-            OnReplayError?.Invoke($"Target window '{name}' not found — open it and retry");
-            _cts?.Cancel();
-        }
-
-        /// <summary>
-        /// Send a synthesized mouse event. By default the (x, y) is interpreted as
-        /// "profile coord space" — i.e. relative to the target window when
-        /// <see cref="_useRelativeCoordinates"/> is on, absolute otherwise. Pass
-        /// <paramref name="coordsAreProfileSpace"/> = false for callers that already
-        /// have absolute virtual-desktop coordinates (e.g. WaitImage match-centre
-        /// click — the screenshot pipeline returns absolute hits regardless of
-        /// profile rel-coord state) so we don't double-translate.
-        /// </summary>
-        private void SimulateMouse(int x, int y, uint mouseEvent, int mouseData = 0, bool coordsAreProfileSpace = true)
-        {
-            // Translate profile-space coords (window-relative when UseRelativeCoordinates is on)
-            // to absolute virtual-desktop pixels. Callers that already hold absolute coords
-            // (e.g. WaitImage match-centre click) pass coordsAreProfileSpace: false to skip.
-            // Missing target window with rel-coords on used to silently fall through here —
-            // clicks would land at the relative coord interpreted as absolute. Now we surface
-            // a visible error and bail instead. Same fix applies to WaitImage / WaitPixelColor.
-            if (coordsAreProfileSpace)
+            // Convert window-relative coordinates to screen-absolute
+            if (_useRelativeCoordinates && _windowTarget != null)
             {
-                if (!TryResolveRelativeOffset(out int dx, out int dy))
+                var hwnd = FindTargetWindow();
+                if (hwnd != IntPtr.Zero && NativeMethods.GetWindowRect(hwnd, out var rect))
                 {
-                    ReportMissingTargetWindow();
-                    return;
+                    x = x + rect.Left;
+                    y = y + rect.Top;
                 }
-                x += dx;
-                y += dy;
             }
 
             // Cached virtual-screen bounds — saves 4 P/Invokes per mouse action.
@@ -1880,23 +1814,11 @@ namespace TrueReplayer.Services
             if (referenceImage == null) return;
 
             // Compose the optional ROI from the four nullable ints stored on the action.
-            // When the profile uses relative coordinates, the stored X/Y are window-relative
-            // and must be translated to absolute via the current target-window origin —
-            // mirrors the SimulateMouse translation path. Skipping translation here was the
-            // original bug: a WaitImage region anchored visually to a window would stop
-            // matching the moment the user moved the window.
             System.Drawing.Rectangle? searchRegion = null;
             if (action.WaitImageSearchW is int sw && action.WaitImageSearchH is int sh && sw > 0 && sh > 0)
             {
                 int sx = action.WaitImageSearchX ?? 0;
                 int sy = action.WaitImageSearchY ?? 0;
-                if (!TryResolveRelativeOffset(out int dx, out int dy))
-                {
-                    ReportMissingTargetWindow();
-                    return;
-                }
-                sx += dx;
-                sy += dy;
                 searchRegion = new System.Drawing.Rectangle(sx, sy, sw, sh);
             }
 
@@ -1921,17 +1843,15 @@ namespace TrueReplayer.Services
                 }
 
                 // Click center of the matched region when the user opted in. The match coords are
-                // absolute virtual-screen positions (from the screenshot pipeline) regardless of
-                // whether the profile uses relative coordinates. Pass coordsAreProfileSpace: false
-                // so SimulateMouse skips the relative→absolute translation it would normally apply —
-                // without this gate, a profile with rel-coords on would add the window origin twice
-                // and click in the wrong place.
+                // absolute virtual-screen positions even when a search region was used, so we just
+                // add half the template W/H to land on the centre. Uses SimulateMouse which already
+                // normalises to the virtual desktop (Raw Input compatible — see CLAUDE.md).
                 if (action.WaitImageClickOnMatch && !action.WaitImageInvert)
                 {
                     int cx = matchResult.X + matchResult.W / 2;
                     int cy = matchResult.Y + matchResult.H / 2;
-                    SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_LEFTDOWN, coordsAreProfileSpace: false);
-                    SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_LEFTUP, coordsAreProfileSpace: false);
+                    SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_LEFTDOWN);
+                    SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_LEFTUP);
                 }
             }
             finally
@@ -1969,7 +1889,7 @@ namespace TrueReplayer.Services
             // Missing coords or unparseable colour → immediate timeout. Better to surface the
             // configuration error via OnTimeout (Stop/Continue/Halt) than to silently no-op
             // and have the user wonder why the action did nothing.
-            if (action.PixelX is not int relPx || action.PixelY is not int relPy)
+            if (action.PixelX is not int px || action.PixelY is not int py)
             {
                 HandleWaitPixelColorTimeout(action);
                 return;
@@ -1980,18 +1900,6 @@ namespace TrueReplayer.Services
                 HandleWaitPixelColorTimeout(action);
                 return;
             }
-
-            // Translate profile-space coords to absolute virtual-desktop pixels via the
-            // current target-window origin. With rel-coords on but no target running this
-            // is a hard error: GetPixelAt at the wrong location would silently sample the
-            // desktop and never match. ReportMissingTargetWindow surfaces it + cancels.
-            if (!TryResolveRelativeOffset(out int dx, out int dy))
-            {
-                ReportMissingTargetWindow();
-                return;
-            }
-            int px = relPx + dx;
-            int py = relPy + dy;
 
             int timeoutMs = action.Timeout > 0 ? action.Timeout : 5000;
             int tolerance = action.PixelTolerance;
@@ -2023,11 +1931,8 @@ namespace TrueReplayer.Services
                         // SimulateMouse handles virtual-desktop normalisation + Raw Input.
                         if (action.PixelClickOnMatch && !invert)
                         {
-                            // px/py are already absolute after the TryResolveRelativeOffset
-                            // translation at the top of this method; pass coordsAreProfileSpace:
-                            // false so SimulateMouse doesn't translate a second time.
-                            SimulateMouse(px, py, NativeMethods.MOUSEEVENTF_LEFTDOWN, coordsAreProfileSpace: false);
-                            SimulateMouse(px, py, NativeMethods.MOUSEEVENTF_LEFTUP, coordsAreProfileSpace: false);
+                            SimulateMouse(px, py, NativeMethods.MOUSEEVENTF_LEFTDOWN);
+                            SimulateMouse(px, py, NativeMethods.MOUSEEVENTF_LEFTUP);
                         }
                         return;
                     }
@@ -2042,11 +1947,9 @@ namespace TrueReplayer.Services
             // Surface the last sampled colour into the diagnostic log so the user can
             // compare "wanted #FF5733 ± 10 / got #2B2B2B" without instrumenting anything.
             // Cheap and non-blocking; falls off the end of the buffer like any other log.
-            // Log both stored coords (profile space) and effective abs coords so users on
-            // rel-coords profiles can tell whether the translation landed where they wanted.
             System.Diagnostics.Debug.WriteLine(
-                $"[WaitPixelColor] Timeout @ rel ({relPx},{relPy}) → abs ({px},{py}). " +
-                $"Target={action.PixelColor} tol={tolerance} invert={invert} " +
+                $"[WaitPixelColor] Timeout @ ({px},{py}). Target={action.PixelColor} " +
+                $"tol={tolerance} invert={invert} " +
                 $"lastSampled={(lastSampled is System.Drawing.Color ls ? PixelColorService.ToHex(ls) : "null")}");
             HandleWaitPixelColorTimeout(action);
         }
