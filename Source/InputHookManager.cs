@@ -548,38 +548,33 @@ namespace TrueReplayer
             return KeyUtils.NormalizeKeyName(vkCode) ?? SafeKeyFallback(vkCode);
         }
 
-        private static string BuildComposedKey(int vkCode)
-        {
-            bool ctrlPressed = (NativeMethods.GetAsyncKeyState(0x11) & 0x8000) != 0; // VK_CONTROL
-            bool altPressed = (NativeMethods.GetAsyncKeyState(0x12) & 0x8000) != 0;  // VK_MENU (Alt)
-            bool shiftPressed = (NativeMethods.GetAsyncKeyState(0x10) & 0x8000) != 0; // VK_SHIFT
-            bool winPressed = (NativeMethods.GetAsyncKeyState(0x5B) & 0x8000) != 0   // VK_LWIN
-                           || (NativeMethods.GetAsyncKeyState(0x5C) & 0x8000) != 0;  // VK_RWIN
-
-            string? mainKey = KeyUtils.NormalizeKeyName(vkCode) ?? SafeKeyFallback(vkCode);
-
-            var parts = new List<string>();
-            if (winPressed) parts.Add("Win");
-            if (ctrlPressed) parts.Add("Ctrl");
-            if (altPressed) parts.Add("Alt");
-            if (shiftPressed) parts.Add("Shift");
-
-            if (!string.IsNullOrEmpty(mainKey) && !parts.Contains(mainKey, StringComparer.OrdinalIgnoreCase))
-                parts.Add(mainKey);
-
-            return string.Join("+", parts);
-        }
-
         /// <summary>
-        /// Same shape as BuildComposedKey, but reads modifier state from _vkCodesCurrentlyDown
-        /// (which we populate ourselves from the hook callback) instead of GetAsyncKeyState.
-        /// Required in capture mode: when the hook swallows a modifier keydown by returning 1,
-        /// Windows does not update the async keyboard state — so by the time the main key (Q)
-        /// arrives, GetAsyncKeyState(VK_LWIN) reports "up" even though the user is still
-        /// physically holding Win. Our own set is always correct because we update it from the
-        /// raw hook event, before swallowing.
+        /// Composes a modifier+key string (e.g. "Ctrl+Shift+F5") from the current event's main
+        /// vkCode plus whichever modifiers the user is physically holding.
+        ///
+        /// Reads modifier state from <see cref="_vkCodesCurrentlyDown"/> (populated only from
+        /// NON-injected hook events) instead of <see cref="NativeMethods.GetAsyncKeyState"/>.
+        /// GetAsyncKeyState reports the OS keyboard state, which is wrong in two opposite ways:
+        ///
+        ///  1. CAPTURE MODE — when the hook swallows a modifier keydown by returning 1, the OS
+        ///     never marks it as down. By the time the main key (Q) arrives, GetAsyncKeyState
+        ///     reports "up" even though the user is still physically holding the modifier, so a
+        ///     "Win+Q" capture would compose as just "Q".
+        ///
+        ///  2. REPLAY — when the replay engine injects a modifier KEYDOWN via SendInput (e.g. a
+        ///     "KeyDown Shift" action), the OS DOES mark the modifier as down. The hook event
+        ///     for the injection is dropped at the LLKHF_INJECTED gate so _vkCodesCurrentlyDown
+        ///     stays correct, but GetAsyncKeyState now returns "Shift held" for everything that
+        ///     follows. Result: the user's attempt to press the Replay-stop hotkey, or the
+        ///     profile's own hotkey, composes as "Shift+&lt;key&gt;" and misses the configured
+        ///     hotkey lookup — the press is silently swallowed and the replay can't be aborted
+        ///     until the macro releases Shift itself.
+        ///
+        /// Trusting the tracked set fixes both. Trade-off: if the user is already holding a
+        /// modifier when the hook installs (rare — only at app startup), we'll miss it until
+        /// they release and re-press. Acceptable; recovers on next keystroke.
         /// </summary>
-        private static string BuildComposedKeyFromTrackedState(int vkCode)
+        private static string BuildComposedKey(int vkCode)
         {
             bool winPressed = _vkCodesCurrentlyDown.Contains(0x5B) || _vkCodesCurrentlyDown.Contains(0x5C);
             bool ctrlPressed = _vkCodesCurrentlyDown.Contains(0xA2) || _vkCodesCurrentlyDown.Contains(0xA3) || _vkCodesCurrentlyDown.Contains(0x11);
@@ -641,8 +636,7 @@ namespace TrueReplayer
 
                     if (captureDown && !captureRepeat)
                     {
-                        // Use tracked state, not GetAsyncKeyState — see comment on the method.
-                        string combo = BuildComposedKeyFromTrackedState(captureVk);
+                        string combo = BuildComposedKey(captureVk);
                         if (!string.IsNullOrEmpty(combo))
                         {
                             OnHotkeyCaptured?.Invoke(combo);
