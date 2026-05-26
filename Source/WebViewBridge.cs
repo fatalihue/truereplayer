@@ -3601,6 +3601,17 @@ namespace TrueReplayer
             // Prevents the dialog from accidentally "promoting" a folder-inherited target into a
             // profile-level target just because the user toggled a flag.
             bool keepInheritedTarget = payload.TryGetProperty("keepInheritedTarget", out var kitProp) && kitProp.GetBoolean();
+            // Read upfront — the payload JsonElement points into a JsonDocument that is disposed
+            // when the dispatch loop's first await returns control. Touching payload after the
+            // SaveProfileByNameAsync / RefreshProfileListAsync awaits below would crash with
+            // ObjectDisposedException on the JsonDocument.
+            string? convertDirection = null;
+            if (payload.TryGetProperty("convertDirection", out var cdProp)
+                && cdProp.ValueKind == JsonValueKind.String)
+            {
+                var raw = cdProp.GetString();
+                if (raw == "toRelative" || raw == "toAbsolute") convertDirection = raw;
+            }
             if (string.IsNullOrEmpty(name)) return;
 
             if (!keepInheritedTarget)
@@ -3671,6 +3682,20 @@ namespace TrueReplayer
                 await profileController.RefreshProfileListAsync(true);
                 InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
                 PushProfilesUpdate();
+
+                // "Apply target & convert" — the target-config dialog passes convertDirection
+                // when the user opts to migrate stored action coords as part of saving the
+                // target (e.g. they typed a new process name, toggled Relative Coordinates,
+                // and clicked Convert in the migration hint). Runs HERE, after the save +
+                // refresh have settled, so ExecuteConvertCoordinates' window lookup uses the
+                // newly-saved target — not the stale state a separate convertCoordinates
+                // message would race against this handler's async path. The direction was
+                // captured into a local variable above (before the first await) because the
+                // payload JsonDocument is disposed by the dispatcher once we hit await.
+                if (CurrentProfileName == name && convertDirection != null)
+                {
+                    ExecuteConvertCoordinates(convertDirection);
+                }
             }
         }
 
@@ -3747,7 +3772,20 @@ namespace TrueReplayer
         private void HandleConvertCoordinates(JsonElement payload)
         {
             string direction = payload.GetProperty("direction").GetString() ?? "toRelative";
+            ExecuteConvertCoordinates(direction);
+        }
 
+        /// <summary>
+        /// Shared body of the coordinate conversion. Called directly by
+        /// <see cref="HandleConvertCoordinates"/>, and chained by
+        /// <see cref="HandleProfileSetWindowTarget"/> when the payload carries a
+        /// `convertDirection` (target-config dialog's "Apply target &amp; convert" flow —
+        /// runs the conversion AFTER the target save completes so the lookup uses the
+        /// freshly-saved geometry instead of the stale profile state, which would race a
+        /// separate `profile:convertCoordinates` message dispatched alongside the save).
+        /// </summary>
+        private void ExecuteConvertCoordinates(string direction)
+        {
             if (actions.Count == 0)
             {
                 SendMessage("alert:show", new { message = "No actions to convert." });

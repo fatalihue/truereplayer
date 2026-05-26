@@ -2257,6 +2257,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                   restorePosition: payload.restorePosition,
                   restoreSize: payload.restoreSize,
                   keepInheritedTarget: payload.keepInheritedTarget,
+                  // Forwarded from the "Apply target & convert" path so the backend
+                  // chains ExecuteConvertCoordinates after the save completes.
+                  convertDirection: payload.convertDirection,
                 },
               });
               setShowWindowTargetDialog(null);

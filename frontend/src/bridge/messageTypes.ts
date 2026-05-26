@@ -432,7 +432,12 @@ export type OutgoingMessage =
   | { type: 'profile:removeHotkey'; payload: { name: string } }
   | { type: 'profile:assignHotstring'; payload: { name: string; sequence: string; instant: boolean } }
   | { type: 'profile:removeHotstring'; payload: { name: string } }
-  | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean; restorePosition?: boolean; restoreSize?: boolean; keepInheritedTarget?: boolean } }
+  | { type: 'profile:setWindowTarget'; payload: { name: string; processName: string; windowTitle: string; titleMatchMode: string; relativeCoordinates?: boolean; bringToFocus?: boolean; restorePosition?: boolean; restoreSize?: boolean; keepInheritedTarget?: boolean;
+      // When set, the backend chains ExecuteConvertCoordinates after the target save
+      // completes. Used by the Target Configuration dialog's "Apply target & convert"
+      // path so save + conversion land atomically (no race with a separate
+      // convertCoordinates message dispatched alongside this one).
+      convertDirection?: 'toRelative' | 'toAbsolute' } }
   | { type: 'profile:setRelativeCoordinates'; payload: { name: string; enabled: boolean } }
   | { type: 'profile:convertCoordinates'; payload: { direction: 'toRelative' | 'toAbsolute' } }
   | { type: 'profile:updateWindowSize'; payload: { name?: string; folderName?: string; processName?: string; windowTitle?: string; titleMatchMode?: string } }

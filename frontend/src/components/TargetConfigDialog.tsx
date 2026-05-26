@@ -17,6 +17,12 @@ export type TargetSubmitPayload = {
   // Profile-only: when true and the target fields were not edited, the backend keeps the
   // folder-inherited target and only persists the flags. Folder submits leave undefined.
   keepInheritedTarget?: boolean;
+  // Profile-only: when set, the backend runs ExecuteConvertCoordinates AFTER the target
+  // save completes. Used by the "Apply target & convert" path in the migration hint so
+  // a single click can both persist the new target and migrate stored action coords
+  // against the freshly-saved window geometry. Two-step (separate save + convert
+  // messages) would race the async setWindowTarget against the sync conversion lookup.
+  convertDirection?: 'toRelative' | 'toAbsolute';
 };
 
 interface TargetConfigDialogProps {
@@ -207,7 +213,11 @@ export function TargetConfigDialog({
     onRemove?.();
   };
 
-  const handleSubmit = () => {
+  // `extras` lets the migration-hint Convert button piggyback `convertDirection` onto the
+  // same save round-trip — without it, the conversion would either race a separate
+  // message or run against the stale (pre-save) profile target. Default {} keeps every
+  // other caller (Set Target button, Enter key) on the existing semantics.
+  const handleSubmit = (extras: { convertDirection?: 'toRelative' | 'toAbsolute' } = {}) => {
     stopDetectionIfActive();
     // Defense in depth — submitDisabled already covers this, but a stray Enter press could
     // bypass the click handler's disabled check on some browsers.
@@ -231,10 +241,30 @@ export function TargetConfigDialog({
     if (scope === 'profile') {
       payload.keepInheritedTarget = keepInheritedTarget;
     }
+    if (extras.convertDirection) {
+      payload.convertDirection = extras.convertDirection;
+    }
     onSubmit(payload);
   };
 
   const submitDisabled = (!processName.trim() && !windowTitle.trim()) || regexError !== null;
+
+  // Hard-block the Relative Coordinates toggle from going OFF→ON without a target — rel
+  // coords are by definition "relative to a window" so saving them while the dialog has
+  // no process / title would lock the profile into a coord space anchored to nothing.
+  // ON→OFF stays freely allowed (recovery path: profile somehow ended up with rel coords
+  // but lost its target; user needs to be able to turn it off without first re-adding
+  // a target). The toggle component itself styles disabled buttons with opacity-40 +
+  // cursor-not-allowed; the wrapping row carries the title attr that explains why.
+  const hasTargetInFields = processName.trim().length > 0 || windowTitle.trim().length > 0;
+  const relativeToggleDisabled = !relativeCoordinates && !hasTargetInFields;
+
+  // Will the Convert button in the migration hint also need to save the target? True when
+  // the user has actually touched the target fields since opening (edited) AND the fields
+  // are populated. When the fields are empty the conversion still falls back to the
+  // currently-saved target via onConvertCoordinates — no apply step needed. When edited
+  // is false the saved target hasn't changed, so a plain convert is enough.
+  const convertAlsoApplies = edited && hasTargetInFields;
   const isProfile = scope === 'profile';
   const header = isProfile ? 'Target Configuration' : 'Folder Target Configuration';
   const description = isProfile
@@ -445,9 +475,22 @@ export function TargetConfigDialog({
 
         {/* Options */}
         <div className="mt-3 pt-3 border-t border-border-subtle space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-text-secondary">Relative Coordinates</span>
-            <Toggle isOn={relativeCoordinates} onChange={handleToggleRelativeCoordinates} />
+          {/* Relative Coordinates — disabled when the dialog has no target in its fields
+              and the flag is currently OFF (hard block on OFF→ON to prevent the user from
+              saving a profile in a coord space that can't be anchored to anything). The
+              title attr on the row surfaces the reason via tooltip on hover. */}
+          <div
+            className="flex items-center justify-between"
+            title={relativeToggleDisabled
+              ? 'Set a process name or window title first — relative coordinates need a target window to anchor to.'
+              : undefined}
+          >
+            <span className={`text-xs ${relativeToggleDisabled ? 'text-text-disabled' : 'text-text-secondary'}`}>Relative Coordinates</span>
+            <Toggle
+              isOn={relativeCoordinates}
+              onChange={handleToggleRelativeCoordinates}
+              disabled={relativeToggleDisabled}
+            />
           </div>
           {/* Migration hint — surfaced only when the user just toggled the flag AND there
               are existing actions whose stored coords are in the OLD coord space. Without
@@ -462,15 +505,32 @@ export function TargetConfigDialog({
                   : 'Convert to absolute so they keep their current screen positions.'}
               </span>
               <div className="flex gap-1 shrink-0">
+                {/* Two effective modes for this button:
+                    - convertAlsoApplies: target fields were edited AND non-empty → fold
+                      the save and the conversion into one submit so the backend's lookup
+                      uses the freshly-saved geometry instead of the stale profile state
+                      (separate save + convert messages would race the async setWindowTarget
+                      against the sync conversion). Closes the dialog like a normal Set
+                      Target — same effect with the conversion bolted on.
+                    - else: target already saved (or fields empty and only the flag
+                      changed) → keep the legacy in-place convert via onConvertCoordinates
+                      so the dialog stays open for further tweaks. */}
                 <button
                   onClick={() => {
-                    onConvertCoordinates?.(convertHint);
-                    setConvertHint(null);
-                    setConvertHintDismissed(true);
+                    if (convertAlsoApplies) {
+                      handleSubmit({ convertDirection: convertHint });
+                    } else {
+                      onConvertCoordinates?.(convertHint);
+                      setConvertHint(null);
+                      setConvertHintDismissed(true);
+                    }
                   }}
                   className="px-2 py-0.5 text-[10px] font-medium text-text-primary bg-accent-solid/30 hover:bg-accent-solid/50 rounded transition-colors"
+                  title={convertAlsoApplies
+                    ? 'Save the target above AND migrate stored action coords in one shot'
+                    : 'Migrate stored action coords using the saved target'}
                 >
-                  Convert
+                  {convertAlsoApplies ? 'Apply target & convert' : 'Convert'}
                 </button>
                 <button
                   onClick={() => { setConvertHint(null); setConvertHintDismissed(true); }}
@@ -555,7 +615,7 @@ export function TargetConfigDialog({
               className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
             >Cancel</button>
             <button
-              onClick={handleSubmit}
+              onClick={() => handleSubmit()}
               disabled={submitDisabled}
               className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
             >Set Target</button>
