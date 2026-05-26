@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical, Timer, LayoutGrid, Check } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
@@ -95,6 +95,15 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
   // pick the starting mode.
   const [keystrokeEdit, setKeystrokeEdit] = useState<{ index: number } | null>(null);
   const [dragIndices, setDragIndices] = useState<number[] | null>(null);
+  // Derived Set for O(1) membership checks inside the per-row render. The dragIndices
+  // array stays as-is so the rest of the file (drag-preview chip, count display, payload
+  // sent to the bridge) keeps using ordered access. Only the hot-path includes() lookups
+  // in the actions.map switch to has() — drag of 100+ selected rows in a 1000-row table
+  // was doing 200k Array.includes() per re-render before this.
+  const dragIndexSet = useMemo(
+    () => dragIndices ? new Set(dragIndices) : null,
+    [dragIndices]
+  );
   const [dropTarget, setDropTarget] = useState<number | null>(null);
 
   // Context menu state
@@ -957,10 +966,10 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
               const displayY = getDisplayY(action);
               const canEditXY = isMouseAction(action.actionType);
 
-              const isDragged = dragIndices?.includes(idx) ?? false;
+              const isDragged = dragIndexSet?.has(idx) ?? false;
               const isSkipped = action.isSkipped;
               const showDropBefore = dropTarget === idx && !isDragged;
-              const showDropAfter = dropTarget === idx + 1 && !isDragged && !(dragIndices?.includes(idx + 1));
+              const showDropAfter = dropTarget === idx + 1 && !isDragged && !(dragIndexSet?.has(idx + 1));
 
               return (
                 <tr
