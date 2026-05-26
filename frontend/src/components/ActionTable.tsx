@@ -1080,7 +1080,7 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
                         : action.actionType === 'BrowserType' ? 'Input Text'
                         : action.actionType === 'BrowserSelectOption' ? 'Select Option'
                         : action.actionType === 'BrowserWaitElement' ? 'Wait'
-                        : action.actionType === 'BrowserNavigate' ? 'Navigate'
+                        : action.actionType === 'BrowserNavigate' ? 'Navigate to URL'
                         : action.actionType === 'RunProfile' ? 'Run Profile'
                         : action.actionType === 'Pause' ? 'Pause'
                         : action.actionType === 'HoldKey' ? 'Hold Key'

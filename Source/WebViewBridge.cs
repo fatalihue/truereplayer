@@ -2006,6 +2006,15 @@ namespace TrueReplayer
                 HasUnsavedChanges = true;
                 PushActionsUpdate();
                 mainController.UpdateButtonStates();
+                // Auto-open the editor for action types that need a selector / text / option list
+                // filled in before they're useful. BrowserNavigate captures its URL via the
+                // dedicated NavigateDialog at add-time, so it's already complete — skip the sheet.
+                if (actionType == "BrowserClick" || actionType == "BrowserRightClick"
+                    || actionType == "BrowserType" || actionType == "BrowserSelectOption"
+                    || actionType == "BrowserWaitElement")
+                {
+                    SendMessage("sheet:openIndex", new { index = insertIndex });
+                }
                 return;
             }
 
@@ -2025,6 +2034,11 @@ namespace TrueReplayer
                 HasUnsavedChanges = true;
                 PushActionsUpdate();
                 mainController.UpdateButtonStates();
+                // Pause has no add-time prompt — user needs to set the resume hotkey and/or
+                // timeout via the editor before it does anything useful. Open the sheet so
+                // the freshly-inserted row doesn't sit there as a no-op until the user
+                // discovers they have to click it.
+                SendMessage("sheet:openIndex", new { index = insertIndex });
                 return;
             }
 
@@ -2922,6 +2936,17 @@ namespace TrueReplayer
             HasUnsavedChanges = true;
             PushActionsUpdate();
             mainController.UpdateButtonStates();
+
+            // Auto-open the editor for action types that arrive empty and need a selector /
+            // text / option list / wait condition filled in before they're useful.
+            // BrowserNavigate captures its URL via the dedicated NavigateDialog at add-time
+            // so it's already complete and is excluded.
+            if (actionType == "BrowserClick" || actionType == "BrowserRightClick"
+                || actionType == "BrowserType" || actionType == "BrowserSelectOption"
+                || actionType == "BrowserWaitElement")
+            {
+                SendMessage("sheet:openIndex", new { index = insertIndex });
+            }
         }
 
         private void HandleBrowserToggleRecording(JsonElement payload)

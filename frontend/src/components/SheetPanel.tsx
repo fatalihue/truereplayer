@@ -932,7 +932,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   : actionType === 'BrowserRightClick' ? 'Right Click'
                   : actionType === 'BrowserType' ? 'Input Text'
                   : actionType === 'BrowserWaitElement' ? 'Wait'
-                  : actionType === 'BrowserNavigate' ? 'Navigate'
+                  : actionType === 'BrowserNavigate' ? 'Navigate to URL'
                   : actionType === 'BrowserSelectOption' ? 'Select Option'
                   : isClickHalf
                     ? `${(clickHalfBase ?? '').replace('Click', '')} Click`
