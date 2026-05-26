@@ -3614,6 +3614,42 @@ namespace TrueReplayer
             }
             if (string.IsNullOrEmpty(name)) return;
 
+            // Pre-flight for the "Apply target & convert" path: resolve the target window NOW,
+            // before any save runs, so an unreachable target aborts the entire combined op
+            // atomically. Without this, the save would complete (target + flag persisted to
+            // disk), then the conversion would fail at FindWindow → the profile would be left
+            // with relativeCoordinates=true but actions still in absolute coords. Caching the
+            // rect here and threading it through to ExecuteConvertCoordinatesWithRect also
+            // closes the race where the user closes the target window between the save and
+            // the conversion — we already have the geometry we need.
+            NativeMethods.RECT? preflightRect = null;
+            if (convertDirection != null)
+            {
+                if (string.IsNullOrWhiteSpace(processName) && string.IsNullOrWhiteSpace(windowTitle))
+                {
+                    SendMessage("alert:show", new { message = "Set a process name or window title before converting." });
+                    return;
+                }
+                var tentativeTarget = new WindowTarget
+                {
+                    ProcessName = string.IsNullOrWhiteSpace(processName) ? null : processName.Trim(),
+                    WindowTitle = string.IsNullOrWhiteSpace(windowTitle) ? null : windowTitle.Trim(),
+                    TitleMatchMode = titleMatchMode,
+                };
+                IntPtr hwnd = TrueReplayer.Helpers.WindowMatcher.FindWindow(tentativeTarget);
+                if (hwnd == IntPtr.Zero)
+                {
+                    SendMessage("alert:show", new { message = "Target window not found. Open it first, then try Apply target & convert again." });
+                    return;
+                }
+                if (!NativeMethods.GetWindowRect(hwnd, out var rect))
+                {
+                    SendMessage("alert:show", new { message = "Could not read the target window's position. Try again." });
+                    return;
+                }
+                preflightRect = rect;
+            }
+
             if (!keepInheritedTarget)
             {
                 if (string.IsNullOrWhiteSpace(processName) && string.IsNullOrWhiteSpace(windowTitle))
@@ -3685,16 +3721,14 @@ namespace TrueReplayer
 
                 // "Apply target & convert" — the target-config dialog passes convertDirection
                 // when the user opts to migrate stored action coords as part of saving the
-                // target (e.g. they typed a new process name, toggled Relative Coordinates,
-                // and clicked Convert in the migration hint). Runs HERE, after the save +
-                // refresh have settled, so ExecuteConvertCoordinates' window lookup uses the
-                // newly-saved target — not the stale state a separate convertCoordinates
-                // message would race against this handler's async path. The direction was
-                // captured into a local variable above (before the first await) because the
-                // payload JsonDocument is disposed by the dispatcher once we hit await.
-                if (CurrentProfileName == name && convertDirection != null)
+                // target. Runs HERE, after the save + refresh have settled, using the rect we
+                // captured in the pre-flight above. Going through the WithRect variant (instead
+                // of letting ExecuteConvertCoordinates re-resolve the target) makes the whole
+                // combined op atomic — the window can close between save and conversion and we
+                // still apply the correct translation, because the geometry is already cached.
+                if (CurrentProfileName == name && convertDirection != null && preflightRect.HasValue)
                 {
-                    ExecuteConvertCoordinates(convertDirection);
+                    ExecuteConvertCoordinatesWithRect(convertDirection, preflightRect.Value);
                 }
             }
         }
@@ -3776,22 +3810,15 @@ namespace TrueReplayer
         }
 
         /// <summary>
-        /// Shared body of the coordinate conversion. Called directly by
-        /// <see cref="HandleConvertCoordinates"/>, and chained by
-        /// <see cref="HandleProfileSetWindowTarget"/> when the payload carries a
-        /// `convertDirection` (target-config dialog's "Apply target &amp; convert" flow —
-        /// runs the conversion AFTER the target save completes so the lookup uses the
-        /// freshly-saved geometry instead of the stale profile state, which would race a
-        /// separate `profile:convertCoordinates` message dispatched alongside the save).
+        /// Coordinate conversion entry point that resolves the target window itself.
+        /// Used by the standalone <see cref="HandleConvertCoordinates"/> path (when the
+        /// dialog has no edits to apply, or when the conversion is triggered outside the
+        /// dialog). The combined "Apply target &amp; convert" flow goes through
+        /// <see cref="ExecuteConvertCoordinatesWithRect"/> with a pre-flighted rect so
+        /// it doesn't re-do the FindWindow that the caller already performed.
         /// </summary>
         private void ExecuteConvertCoordinates(string direction)
         {
-            if (actions.Count == 0)
-            {
-                SendMessage("alert:show", new { message = "No actions to convert." });
-                return;
-            }
-
             // Use effective target (profile's own > folder-inherited)
             var target = CurrentProfileName != "No Profile"
                 ? profileController.GetEffectiveWindowTarget(CurrentProfileName)
@@ -3813,6 +3840,27 @@ namespace TrueReplayer
             if (!NativeMethods.GetWindowRect(hwnd, out var rect))
             {
                 SendMessage("alert:show", new { message = "Could not get window position." });
+                return;
+            }
+
+            ExecuteConvertCoordinatesWithRect(direction, rect);
+        }
+
+        /// <summary>
+        /// Performs the actual coord translation against a pre-resolved window rect. Split
+        /// from <see cref="ExecuteConvertCoordinates"/> so the "Apply target &amp; convert"
+        /// flow can pre-flight the FindWindow + GetWindowRect BEFORE the target save runs:
+        ///  - If the window can't be found, the dialog's combined operation aborts atomically
+        ///    (nothing saved, user sees a clear error, no half-applied state).
+        ///  - If it can be found, the rect is captured and passed here AFTER the save, so a
+        ///    window closing in the tiny window between save and conversion doesn't leave the
+        ///    profile with mismatched flag + action coords.
+        /// </summary>
+        private void ExecuteConvertCoordinatesWithRect(string direction, NativeMethods.RECT rect)
+        {
+            if (actions.Count == 0)
+            {
+                SendMessage("alert:show", new { message = "No actions to convert." });
                 return;
             }
 
