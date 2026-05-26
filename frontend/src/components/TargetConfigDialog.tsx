@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X, ChevronDown, MoreHorizontal } from 'lucide-react';
+import { X, ChevronDown } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { Toggle } from './common/Toggle';
 
@@ -98,9 +98,23 @@ export function TargetConfigDialog({
   const [edited, setEdited] = useState(false);
 
   // Result of the most recent Test Match request. Cleared when the user edits fields so a stale
-  // ✓/✗ can't be confused with a different config.
+  // ✓/✗ can't be confused with a different config, and auto-cleared 3.5 s after it arrives so
+  // the Test button returns to its idle label (the button itself doubles as the result chip —
+  // see the auto-revert effect below). Tied to a perRunToken so a quick re-test doesn't have
+  // the previous-run timer wipe out the current result mid-display.
   type TestResult = { matches: boolean; foregroundProcess: string; foregroundTitle: string; error?: string };
   const [testResult, setTestResult] = useState<TestResult | null>(null);
+
+  // Auto-revert: 3.5 s after a result lands, drop it so the button returns to its neutral
+  // "Test against foreground window" state. Re-runs cancel the prior timer via the cleanup
+  // (testResult changes → effect re-runs → previous setTimeout cleared). Long enough to read
+  // a wrapped process+title at a glance, short enough that a forgotten result doesn't masquerade
+  // as a live verdict if the user comes back later.
+  useEffect(() => {
+    if (!testResult) return;
+    const t = window.setTimeout(() => setTestResult(null), 3500);
+    return () => window.clearTimeout(t);
+  }, [testResult]);
 
   // Process picker — toggled on demand because enumerating windows is non-trivial. The list is
   // cached for the dialog's lifetime; user can refresh by closing/reopening the picker.
@@ -108,11 +122,6 @@ export function TargetConfigDialog({
   const [processList, setProcessList] = useState<ProcEntry[] | null>(null);
   const [showProcessPicker, setShowProcessPicker] = useState(false);
   const [processFilter, setProcessFilter] = useState('');
-
-  // Overflow menu (⋯) in the dialog header — houses rarely-used actions like Convert
-  // Coordinates so they don't take vertical space inside the dialog body. Only meaningful
-  // entries today are profile-scoped (Convert), so the icon hides for folder scope.
-  const [showOverflowMenu, setShowOverflowMenu] = useState(false);
 
   const markEdited = () => { setEdited(true); setTestResult(null); };
 
@@ -154,17 +163,14 @@ export function TargetConfigDialog({
     });
   }, [subscribe]);
 
-  // Esc priority (most specific → least): close any open menu (overflow / picker) →
-  // cancel detection → close dialog. The transient overlays absorb Esc first so the user
-  // can dismiss them without losing the dialog work; the dialog itself only closes when
-  // there's nothing else to dismiss.
+  // Esc priority (most specific → least): close process picker → cancel detection → close
+  // dialog. The transient overlay absorbs Esc first so the user can dismiss it without
+  // losing the dialog work; the dialog itself only closes when there's nothing to dismiss.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.stopPropagation();
-      if (showOverflowMenu) {
-        setShowOverflowMenu(false);
-      } else if (showProcessPicker) {
+      if (showProcessPicker) {
         setShowProcessPicker(false);
       } else if (isDetecting) {
         // Backend treats a second detectWindow message as toggle-off.
@@ -176,7 +182,7 @@ export function TargetConfigDialog({
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [isDetecting, showProcessPicker, showOverflowMenu, send, onCancel]);
+  }, [isDetecting, showProcessPicker, send, onCancel]);
 
   const handleDetect = () => {
     markEdited();
@@ -235,50 +241,10 @@ export function TargetConfigDialog({
     ? <>Configure target window for <span className="text-text-primary font-medium">'{targetLabel}'</span></>
     : <>Configure target for all profiles in <span className="text-text-primary font-medium">'{targetLabel}'</span>. Profiles with their own target override this.</>;
 
-  // Only show the overflow menu when there's something to put in it. Today that's
-  // Convert Coordinates (profile scope only). When folder scope grows its own advanced
-  // actions in the future, broaden this guard.
-  const hasOverflowActions = isProfile && !!onConvertCoordinates;
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-[380px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
-        <div className="flex items-start justify-between mb-3 relative">
-          <h3 className="text-sm font-semibold text-text-primary">{header}</h3>
-          {hasOverflowActions && (
-            <div className="relative">
-              <button
-                onClick={() => setShowOverflowMenu(v => !v)}
-                title="More actions"
-                className={`p-1 -mr-1 rounded transition-colors ${
-                  showOverflowMenu
-                    ? 'text-accent bg-bg-elevated'
-                    : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-elevated'
-                }`}
-              >
-                <MoreHorizontal size={14} />
-              </button>
-              {showOverflowMenu && (
-                <div className="absolute top-full right-0 mt-1 min-w-[200px] bg-bg-card border border-border-default rounded shadow-lg z-20 p-1">
-                  <button
-                    onClick={() => { onConvertCoordinates?.('toRelative'); setShowOverflowMenu(false); }}
-                    className="w-full text-left px-2.5 py-1.5 text-[11px] rounded hover:bg-bg-elevated transition-colors"
-                  >
-                    <div className="text-accent">Convert coords → Relative</div>
-                    <div className="text-[10px] text-text-tertiary mt-0.5">Anchor clicks to the target window</div>
-                  </button>
-                  <button
-                    onClick={() => { onConvertCoordinates?.('toAbsolute'); setShowOverflowMenu(false); }}
-                    className="w-full text-left px-2.5 py-1.5 text-[11px] rounded hover:bg-bg-elevated transition-colors"
-                  >
-                    <div className="text-text-primary">Convert coords → Absolute</div>
-                    <div className="text-[10px] text-text-tertiary mt-0.5">Use screen coordinates regardless of target</div>
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        <h3 className="text-sm font-semibold text-text-primary mb-3">{header}</h3>
         <p className="text-xs text-text-secondary mb-4">{description}</p>
 
         <div className="space-y-3">
@@ -422,7 +388,10 @@ export function TargetConfigDialog({
 
         {/* Test Match — checks current fields against whichever window the user has open behind
             the modal. The TR window itself is excluded server-side so the test reports against
-            the "real" foreground. */}
+            the "real" foreground. The button itself doubles as the result chip: idle = neutral
+            border, success = green tint with "✓ Matches — chrome.exe", failure / error = red.
+            Reverts to idle ~3.5 s after the result arrives (see the testResult useEffect).
+            Keeps the row to a single 28 px line — no separate slot growing the dialog. */}
         <button
           onClick={() => {
             setTestResult(null);
@@ -436,33 +405,43 @@ export function TargetConfigDialog({
             });
           }}
           disabled={(!processName.trim() && !windowTitle.trim()) || regexError !== null}
-          className="mt-2 w-full h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          title="Check whether the current config matches the window in front (excluding TrueReplayer)"
+          className={`mt-2 w-full h-7 px-2 text-[11px] border rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed overflow-hidden ${
+            testResult
+              ? testResult.error || !testResult.matches
+                ? 'bg-recording/10 text-recording border-recording/30 hover:bg-recording/15'
+                : 'bg-replay/10 text-replay border-replay/30 hover:bg-replay/15'
+              : 'text-text-secondary border-border-default hover:bg-bg-elevated'
+          }`}
+          title={testResult
+            ? (testResult.error
+                ? testResult.error
+                : `${testResult.matches ? 'Matches' : 'No match'} — ${testResult.foregroundProcess || '?'}${testResult.foregroundTitle ? ' / ' + testResult.foregroundTitle : ''}`)
+            : 'Check whether the current config matches the window in front (excluding TrueReplayer)'
+          }
         >
-          Test against foreground window
-        </button>
-        {testResult && (
-          <div className={`mt-1.5 px-2 py-1 rounded text-[11px] leading-tight ${
-            testResult.error
-              ? 'bg-recording/10 text-recording border border-recording/30'
-              : testResult.matches
-                ? 'bg-replay/10 text-replay border border-replay/30'
-                : 'bg-recording/10 text-recording border border-recording/30'
-          }`}>
-            {testResult.error ? (
-              testResult.error
+          <div className="truncate">
+            {testResult ? (
+              testResult.error ? (
+                testResult.error
+              ) : (
+                <>
+                  <span className="font-semibold">{testResult.matches ? '✓ Matches' : '✗ No match'}</span>
+                  {testResult.foregroundProcess && (
+                    <>
+                      {' — '}
+                      <span className="font-mono">{testResult.foregroundProcess}</span>
+                    </>
+                  )}
+                  {testResult.foregroundTitle && (
+                    <span className="opacity-70"> / {testResult.foregroundTitle}</span>
+                  )}
+                </>
+              )
             ) : (
-              <>
-                <span className="font-semibold">{testResult.matches ? '✓ Matches' : '✗ No match'}</span>
-                {' — '}
-                <span className="font-mono">{testResult.foregroundProcess || '?'}</span>
-                {testResult.foregroundTitle && (
-                  <span className="text-text-tertiary"> / {testResult.foregroundTitle}</span>
-                )}
-              </>
+              'Test against foreground window'
             )}
           </div>
-        )}
+        </button>
 
         {/* Options */}
         <div className="mt-3 pt-3 border-t border-border-subtle space-y-2">
@@ -519,8 +498,6 @@ export function TargetConfigDialog({
             <span className="text-xs text-text-secondary" title="Restore the target window to its saved size before replay (un-maximizes if needed)">Restore Size</span>
             <Toggle isOn={restoreSize} onChange={setRestoreSize} />
           </div>
-          {/* Convert Coordinates moved to the header overflow menu (⋯) — rarely used and
-              didn't earn its vertical space here. See the dialog header above. */}
           {onUpdateGeometry && (
             <button
               onClick={() => onUpdateGeometry({
@@ -536,6 +513,33 @@ export function TargetConfigDialog({
             </button>
           )}
         </div>
+
+        {/* Coordinate conversion — rewrites the X/Y of every action in the active profile
+            to the chosen coord space. Profile-only (folder actions live on each profile,
+            not on the folder itself). Surfaced directly here instead of buried in an
+            overflow menu so both destinations are visible side-by-side and don't require
+            an extra click to discover. */}
+        {onConvertCoordinates && (
+          <div className="mt-3 pt-3 border-t border-border-subtle">
+            <div className="text-[10px] text-text-tertiary uppercase tracking-wider mb-1.5">Convert Action Coordinates</div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onConvertCoordinates('toRelative')}
+                className="flex-1 h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors"
+                title="Rewrite every action's X/Y so they're relative to the target window (anchored to it when it moves)"
+              >
+                To Relative
+              </button>
+              <button
+                onClick={() => onConvertCoordinates('toAbsolute')}
+                className="flex-1 h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors"
+                title="Rewrite every action's X/Y to absolute screen coordinates (frozen to the screen, no target window dependency)"
+              >
+                To Absolute
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center mt-4">
           {hasOwnTarget && onRemove && (
