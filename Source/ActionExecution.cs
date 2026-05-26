@@ -817,16 +817,22 @@ namespace TrueReplayer.Services
 
         public async Task StartAsync()
         {
-            // Cancel any previous run and wait for it to finish before disposing
-            if (_cts != null)
+            // Atomically swap _cts so any in-flight callers that read the field after this
+            // line see the NEW cts immediately. Without Interlocked.Exchange there's a window
+            // where an internal cancel path (e.g. ReportMissingTargetWindow → _cts?.Cancel())
+            // could fire AFTER we reassign _cts and end up cancelling the new replay's CTS.
+            // Disposing the old cts is fire-and-forget on a background task — gives any sync
+            // loop sections of the old replay time to finish without us blocking StartAsync,
+            // AND ObjectDisposedException on any straggler Cancel is swallowed inside the
+            // continuation so the new replay doesn't crash.
+            var oldCts = System.Threading.Interlocked.Exchange(ref _cts, new CancellationTokenSource());
+            var token = _cts!.Token;
+            if (oldCts != null)
             {
-                _cts.Cancel();
-                // Give previous task a moment to observe cancellation
-                await Task.Delay(50);
-                _cts.Dispose();
+                try { oldCts.Cancel(); } catch (ObjectDisposedException) { /* already gone */ }
+                _ = Task.Delay(500).ContinueWith(_ => { try { oldCts.Dispose(); } catch { } }, TaskScheduler.Default);
             }
-            _cts = new CancellationTokenSource();
-            var token = _cts.Token;
+            await Task.Yield(); // preserve the original "yield before kickoff" behaviour
             int iteration = 0;
             bool isInfinite = _forceInfiniteLoop || _loopCount == 0;
             // Status-bar loop counter only makes sense for actual loops. Single-run replays
@@ -1413,8 +1419,11 @@ namespace TrueReplayer.Services
 
         public void Stop()
         {
-            // Only cancel — disposal is handled by the next StartAsync() call
-            _cts?.Cancel();
+            // Only cancel — disposal is handled by the next StartAsync() call (via async path).
+            // ObjectDisposedException is possible if Stop fires concurrently with a fresh
+            // StartAsync that already disposed the old cts; swallow because the intent
+            // (stop whatever's running) is satisfied regardless.
+            try { _cts?.Cancel(); } catch (ObjectDisposedException) { /* already gone */ }
             ResetMouseState();
             ResetKeyState();
         }
@@ -1508,7 +1517,7 @@ namespace TrueReplayer.Services
         {
             var name = _windowTarget?.ProcessName ?? "target";
             OnReplayError?.Invoke($"Target window '{name}' not found — open it and retry");
-            _cts?.Cancel();
+            try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
         }
 
         /// <summary>
@@ -1953,7 +1962,9 @@ namespace TrueReplayer.Services
             {
                 return;
             }
-            _cts?.Cancel();
+            // ObjectDisposedException possible if a new StartAsync swapped _cts out
+            // from under us; swallow because this run was already over anyway.
+            try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
         }
 
         /// <summary>
@@ -2058,7 +2069,8 @@ namespace TrueReplayer.Services
         private void HandleWaitPixelColorTimeout(ActionItem action)
         {
             if (action.PixelOnTimeout == "Continue") return;
-            _cts?.Cancel();
+            // Same swallow as HandleWaitImageTimeout — race with a fresh StartAsync.
+            try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
         }
 
         private void SaveTimeoutScreenshot(ActionItem action)

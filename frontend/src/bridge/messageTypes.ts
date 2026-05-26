@@ -1,6 +1,14 @@
 // ── Data Models ──
 
 export interface ActionItem {
+  /**
+   * Stable identifier set on action creation (UUID-like). Persisted in profile.json,
+   * backfilled on load for actions from pre-2.2.6 profiles. Used as the React key in
+   * ActionTable so reorder/undo/redo don't break selection or highlight state. Optional
+   * here only because the backend might briefly push a payload without ids during an
+   * upgrade window; the frontend should still treat it as required in new code.
+   */
+  id?: string;
   actionType: string;
   key: string;
   x: number;
@@ -392,7 +400,12 @@ export type IncomingMessage =
   | { type: 'profile:tagList'; payload: { tags: TagListEntry[] } }
   // Confirmation after profile:bumpVersion succeeds — frontend can refresh its local
   // version display without waiting for the next profiles:updated push.
-  | { type: 'profile:versionBumped'; payload: { name: string; newVersion: number } };
+  | { type: 'profile:versionBumped'; payload: { name: string; newVersion: number } }
+  // Backend confirms a window-target removal completed (vs being blocked by a hotkey/hotstring
+  // collision, in which case the alert path fires and this event does NOT). Frontend uses this
+  // to show the success-with-Undo toast — without it, an optimistic toast would appear even
+  // when the removal was blocked, contradicting the alert.
+  | { type: 'profile:windowTargetRemoved'; payload: { name: string } };
 
 // ── Messages JS → C# ──
 

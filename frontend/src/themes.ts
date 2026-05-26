@@ -1533,7 +1533,16 @@ export function loadCustomPresets(): CustomThemePreset[] {
 }
 
 export function saveCustomPresets(presets: CustomThemePreset[]): void {
-  localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(presets));
+  // localStorage.setItem can throw QuotaExceededError when the storage quota is full
+  // (rare in WebView2 with no other origins competing, but technically possible if
+  // the user accumulates hundreds of custom presets with embedded preview data).
+  // Swallow + log instead of crashing the theme provider — the user just won't see
+  // the preset persist; current session still works in memory.
+  try {
+    localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(presets));
+  } catch (err) {
+    console.warn('[themes] Failed to save custom presets:', err);
+  }
 }
 
 /** Generate a stable id from a user-supplied preset name. */
@@ -1583,7 +1592,14 @@ export function loadThemeConfig(): ThemeConfig {
 }
 
 export function saveThemeConfig(config: ThemeConfig): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  // Same QuotaExceededError guard as saveCustomPresets. Theme config is tiny (~1KB)
+  // so realistically the quota only fills up when something ELSE is misbehaving;
+  // logging + swallowing keeps the rest of the app responsive.
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  } catch (err) {
+    console.warn('[themes] Failed to save theme config:', err);
+  }
 }
 
 export function makeDefaultConfig(): ThemeConfig {

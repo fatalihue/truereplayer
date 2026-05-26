@@ -6,6 +6,14 @@ namespace TrueReplayer.Models
 {
     public class ActionItem : INotifyPropertyChanged
     {
+        // Stable identifier for React reconciliation — without this, the ActionTable uses
+        // the row index as key, which means a reorder/drag/undo changes which row maps to
+        // which action ID for React. The visual symptom is selections and highlight states
+        // landing on the wrong row after a reorder, and animations replaying on rows that
+        // didn't actually change. Generated once when the action is created; persisted in
+        // profile.json; migrated for old profiles via the load path (assigned if missing).
+        public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
         public string ActionType { get; set; } = "";
         public string Key { get; set; } = "";
         public int X { get; set; }

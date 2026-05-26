@@ -520,39 +520,79 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     }
   };
 
-  const handleRemoveWindowTarget = (name: string) => {
-    setContextMenu(null);
-    // Capture all 4 fields needed to reconstruct: process, title, match mode, plus the
-    // related coords/focus/geometry flags so the undo restores the exact target the
-    // user had (not a stripped-down version). The profile's own values — not effective
-    // (folder-inherited) ones — are what we wipe + restore.
-    const prev = profiles.find(p => p.name === name);
-    const hadOwn = prev?.hasWindowTarget;
-    const prevProcess = prev?.windowTargetProcessName ?? '';
-    const prevTitle = prev?.windowTargetWindowTitle ?? '';
-    const prevMode = prev?.windowTargetTitleMatchMode ?? 'contains';
-    const prevRelative = prev?.useRelativeCoordinates ?? false;
-    const prevBringFocus = prev?.bringToFocus ?? false;
-    const prevRestorePos = prev?.restorePosition ?? false;
-    const prevRestoreSize = prev?.restoreSize ?? false;
-    send({ type: 'profile:removeWindowTarget', payload: { name } });
-    if (hadOwn) {
-      const label = prevProcess || prevTitle || 'target';
-      showToast(`Removed window target (${label}) from "${name}"`, {
+  // Pending window-target removals: stash the prev values keyed by name. When the backend
+  // confirms via profile:windowTargetRemoved we look up + show the success toast with the
+  // matching Undo payload. Without this round-trip the toast fired optimistically and
+  // contradicted the backend's "Cannot remove" alert when the removal was blocked by a
+  // hotkey/hotstring collision.
+  const pendingRemovalsRef = useRef<Map<string, {
+    label: string;
+    processName: string;
+    windowTitle: string;
+    titleMatchMode: string;
+    relativeCoordinates: boolean;
+    bringToFocus: boolean;
+    restorePosition: boolean;
+    restoreSize: boolean;
+  }>>(new Map());
+
+  useEffect(() => {
+    return subscribe((msg) => {
+      if (msg.type !== 'profile:windowTargetRemoved') return;
+      const name = msg.payload.name;
+      const prev = pendingRemovalsRef.current.get(name);
+      if (!prev) return;  // Not ours, or already handled (defensive)
+      pendingRemovalsRef.current.delete(name);
+      showToast(`Removed window target (${prev.label}) from "${name}"`, {
         type: 'success',
         action: {
           label: 'Undo',
           onClick: () => send({
             type: 'profile:setWindowTarget',
             payload: {
-              name, processName: prevProcess, windowTitle: prevTitle, titleMatchMode: prevMode,
-              relativeCoordinates: prevRelative, bringToFocus: prevBringFocus,
-              restorePosition: prevRestorePos, restoreSize: prevRestoreSize,
+              name,
+              processName: prev.processName,
+              windowTitle: prev.windowTitle,
+              titleMatchMode: prev.titleMatchMode,
+              relativeCoordinates: prev.relativeCoordinates,
+              bringToFocus: prev.bringToFocus,
+              restorePosition: prev.restorePosition,
+              restoreSize: prev.restoreSize,
             },
           }),
         },
       });
+    });
+  }, [subscribe, send, showToast]);
+
+  const handleRemoveWindowTarget = (name: string) => {
+    setContextMenu(null);
+    // Capture all the fields needed to reconstruct the prior target, so the Undo toast
+    // (shown after the backend confirms) can restore the exact state. Only profiles with
+    // their own target (not folder-inherited) actually go through the remove → confirm
+    // round-trip; otherwise the message is a no-op server-side.
+    const prev = profiles.find(p => p.name === name);
+    const hadOwn = prev?.hasWindowTarget;
+    if (!hadOwn) {
+      // No own target → backend won't change anything → no confirmation event coming.
+      // Still send for symmetry (handler is a no-op when nothing to remove).
+      send({ type: 'profile:removeWindowTarget', payload: { name } });
+      return;
     }
+    const prevProcess = prev?.windowTargetProcessName ?? '';
+    const prevTitle = prev?.windowTargetWindowTitle ?? '';
+    const label = prevProcess || prevTitle || 'target';
+    pendingRemovalsRef.current.set(name, {
+      label,
+      processName: prevProcess,
+      windowTitle: prevTitle,
+      titleMatchMode: prev?.windowTargetTitleMatchMode ?? 'contains',
+      relativeCoordinates: prev?.useRelativeCoordinates ?? false,
+      bringToFocus: prev?.bringToFocus ?? false,
+      restorePosition: prev?.restorePosition ?? false,
+      restoreSize: prev?.restoreSize ?? false,
+    });
+    send({ type: 'profile:removeWindowTarget', payload: { name } });
   };
 
   const confirmHotkey = () => {

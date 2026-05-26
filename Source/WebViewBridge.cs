@@ -90,6 +90,30 @@ namespace TrueReplayer
 
         private readonly BrowserBridgeService? browserBridge;
 
+        // Handlers stored as fields so Dispose can unsubscribe them. Inline lambdas would
+        // create a fresh delegate instance per invocation, making -= a no-op and leaking
+        // every WebViewBridge instance through the static-ish event references. These are
+        // initialised once in the constructor if browserBridge is non-null.
+        private Action<bool>? _onBrowserConnectionChanged;
+        private Action<string, string>? _onBrowserExtensionVersionMismatch;
+        private Action<string, string, string?, string?, string?, bool>? _onBrowserElementClicked;
+        private Action<string, string, bool>? _onBrowserTypingCaptured;
+        private Action? _onBrowserSelectInteractionStarted;
+        private Action? _onBrowserSelectInteractionEnded;
+        private Action<string, string, string, string>? _onBrowserSelectChanged;
+
+        // Promoted from a captured local in the browserBridge subscribe block. Lives on the
+        // instance so Dispose can stop the timer (and the lambdas can read/clear it).
+        private System.Threading.Timer? _selectInteractionTimer;
+        private DateTime? _selectInteractionStart;
+        private void EndSelectInteraction()
+        {
+            InputHookManager.SuppressMouseRecording = false;
+            _selectInteractionTimer?.Dispose();
+            _selectInteractionTimer = null;
+            _selectInteractionStart = null;
+        }
+
         public WebViewBridge(
             CoreWebView2 webView,
             ObservableCollection<ActionItem> actions,
@@ -114,16 +138,23 @@ namespace TrueReplayer
             // Watch for browser extension events
             if (browserBridge != null)
             {
-                browserBridge.ConnectionChanged += (connected) =>
+                _onBrowserConnectionChanged = (connected) =>
                 {
+                    if (_disposed) return;
                     dispatcherQueue.TryEnqueue(() => SendMessage("browser:status", new { connected }));
                 };
-                browserBridge.ExtensionVersionMismatch += (currentVersion, expectedVersion) =>
+                browserBridge.ConnectionChanged += _onBrowserConnectionChanged;
+
+                _onBrowserExtensionVersionMismatch = (currentVersion, expectedVersion) =>
                 {
+                    if (_disposed) return;
                     dispatcherQueue.TryEnqueue(() => SendMessage("browser:extensionOutdated", new { currentVersion, expectedVersion }));
                 };
-                browserBridge.ElementClicked += (selector, description, url, tagName, button, isInput) =>
+                browserBridge.ExtensionVersionMismatch += _onBrowserExtensionVersionMismatch;
+
+                _onBrowserElementClicked = (selector, description, url, tagName, button, isInput) =>
                 {
+                    if (_disposed) return;
                     dispatcherQueue.TryEnqueue(() =>
                     {
                         if (!recordingService.IsRecording) return;
@@ -156,10 +187,13 @@ namespace TrueReplayer
                         mainController.UpdateButtonStates();
                     });
                 };
+                browserBridge.ElementClicked += _onBrowserElementClicked;
+
                 // #10 — Typing observed in a recorded input field. Locate the most recent
                 // matching BrowserType action for the same selector and fill its text.
-                browserBridge.TypingCaptured += (selector, text, isAppend) =>
+                _onBrowserTypingCaptured = (selector, text, isAppend) =>
                 {
+                    if (_disposed) return;
                     dispatcherQueue.TryEnqueue(() =>
                     {
                         if (!recordingService.IsRecording) return;
@@ -194,6 +228,7 @@ namespace TrueReplayer
                         mainController.UpdateButtonStates();
                     });
                 };
+                browserBridge.TypingCaptured += _onBrowserTypingCaptured;
 
                 // Native <select> value changed during recording — auto-create a
                 // BrowserSelectOption action with "text" match mode (most stable across
@@ -210,47 +245,46 @@ namespace TrueReplayer
                 // cover the race window) and wipe everything recorded after it when the
                 // change/end signal arrives. Duration-independent — works for users that
                 // take 30 s between open and pick.
-                System.Threading.Timer? selectInteractionTimer = null;
-                DateTime? selectInteractionStart = null;
-                void EndSelectInteraction()
+                // (_selectInteractionTimer / _selectInteractionStart / EndSelectInteraction
+                //  promoted to instance members so Dispose can stop the timer cleanly.)
+                _onBrowserSelectInteractionStarted = () =>
                 {
-                    InputHookManager.SuppressMouseRecording = false;
-                    selectInteractionTimer?.Dispose();
-                    selectInteractionTimer = null;
-                    selectInteractionStart = null;
-                }
-                browserBridge.SelectInteractionStarted += () =>
-                {
+                    if (_disposed) return;
                     dispatcherQueue.TryEnqueue(() =>
                     {
                         if (!recordingService.IsRecording) return;
                         InputHookManager.SuppressMouseRecording = true;
                         // Back-date the start by 500 ms so the race-leaked LeftClickDown
                         // is inside our cleanup window when change fires.
-                        selectInteractionStart = DateTime.UtcNow.AddMilliseconds(-500);
+                        _selectInteractionStart = DateTime.UtcNow.AddMilliseconds(-500);
                         // 15 s safety net — if for any reason the end signal is lost (page
                         // navigated away mid-pick, content script crashed, etc.) the flag
                         // clears itself so subsequent recording isn't permanently broken.
-                        selectInteractionTimer?.Dispose();
-                        selectInteractionTimer = new System.Threading.Timer(_ =>
+                        _selectInteractionTimer?.Dispose();
+                        _selectInteractionTimer = new System.Threading.Timer(_ =>
                         {
                             dispatcherQueue.TryEnqueue(EndSelectInteraction);
                         }, null, 15000, System.Threading.Timeout.Infinite);
                     });
                 };
-                browserBridge.SelectInteractionEnded += () =>
+                browserBridge.SelectInteractionStarted += _onBrowserSelectInteractionStarted;
+
+                _onBrowserSelectInteractionEnded = () =>
                 {
+                    if (_disposed) return;
                     dispatcherQueue.TryEnqueue(EndSelectInteraction);
                 };
+                browserBridge.SelectInteractionEnded += _onBrowserSelectInteractionEnded;
 
-                browserBridge.SelectChanged += (selector, description, selectedText, _selectedValue) =>
+                _onBrowserSelectChanged = (selector, description, selectedText, _selectedValue) =>
                 {
+                    if (_disposed) return;
                     dispatcherQueue.TryEnqueue(() =>
                     {
                         // Snapshot the start time before EndSelectInteraction nulls it out.
                         // Without the snapshot the cleanup below would fall back to a 3 s
                         // window, defeating the whole point of the interaction-bounded fix.
-                        var interactionStart = selectInteractionStart;
+                        var interactionStart = _selectInteractionStart;
                         EndSelectInteraction();
 
                         if (!recordingService.IsRecording) return;
@@ -287,6 +321,7 @@ namespace TrueReplayer
                         mainController.UpdateButtonStates();
                     });
                 };
+                browserBridge.SelectChanged += _onBrowserSelectChanged;
             }
 
             // Watch for actions collection changes
@@ -352,14 +387,27 @@ namespace TrueReplayer
 
         public void SendMessage(string type, object payload)
         {
+            // Skip entirely when the bridge has been disposed — the dispatcher queue may
+            // still accept enqueues, but invoking PostWebMessageAsJson on a torn-down
+            // WebView2 throws InvalidOperationException. Late status pushes (e.g. from
+            // a background task that finishes after the window closed) would otherwise
+            // spam Debug output.
+            if (_disposed) return;
             try
             {
                 var msg = new { type, payload };
                 var json = JsonSerializer.Serialize(msg, JsonOptions);
                 dispatcherQueue.TryEnqueue(() =>
                 {
+                    if (_disposed) return;
                     try { webView.PostWebMessageAsJson(json); }
-                    catch { /* WebView may not be ready */ }
+                    catch (Exception ex)
+                    {
+                        // ObjectDisposedException / InvalidOperationException are expected
+                        // during teardown; other exceptions deserve visibility.
+                        if (ex is not ObjectDisposedException && ex is not InvalidOperationException)
+                            System.Diagnostics.Debug.WriteLine($"[Bridge] PostWebMessageAsJson failed: {ex.Message}");
+                    }
                 });
             }
             catch (Exception ex)
@@ -539,6 +587,10 @@ namespace TrueReplayer
             string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
             var actionsList = actions.Select((a, i) => new
             {
+                // Stable id for React reconciliation. Brand-new actions inserted during this
+                // session have an Id assigned by ActionItem's default constructor; old-profile
+                // actions get one backfilled by SettingsManager.MigrateActionIds on load.
+                id = a.Id,
                 actionType = a.ActionType,
                 key = a.Key ?? "",
                 x = a.X,
@@ -1417,10 +1469,17 @@ namespace TrueReplayer
 
         private void HandleActionsEdit(JsonElement payload)
         {
+            // Defensive payload reads — GetProperty throws on missing fields and the outer
+            // try/catch in HandleMessage would silently swallow it (Debug.WriteLine only).
+            // TryGet returns explicit failure so we can no-op safely.
+            if (!payload.TryGetProperty("index", out var indexEl) || indexEl.ValueKind != JsonValueKind.Number) return;
+            if (!payload.TryGetProperty("field", out var fieldEl)) return;
+            if (!payload.TryGetProperty("value", out var valueEl)) return;
+
             PushUndoState();
-            int index = payload.GetProperty("index").GetInt32();
-            string field = payload.GetProperty("field").GetString() ?? "";
-            string value = payload.GetProperty("value").GetString() ?? "";
+            int index = indexEl.GetInt32();
+            string field = fieldEl.GetString() ?? "";
+            string value = valueEl.GetString() ?? "";
 
             if (index < 0 || index >= actions.Count) return;
 
@@ -1553,11 +1612,18 @@ namespace TrueReplayer
 
         private void HandleActionsDelete(JsonElement payload)
         {
-            PushUndoState();
-            var indices = payload.GetProperty("indices").EnumerateArray()
+            // Same defensive read as HandleActionsEdit — guard against missing/non-array
+            // payload + skip non-integer entries instead of crashing through the outer
+            // catch (which would have left undo state pushed but no actual deletion).
+            if (!payload.TryGetProperty("indices", out var indicesEl) || indicesEl.ValueKind != JsonValueKind.Array) return;
+            var indices = indicesEl.EnumerateArray()
+                .Where(e => e.ValueKind == JsonValueKind.Number)
                 .Select(e => e.GetInt32())
                 .OrderByDescending(i => i)
                 .ToList();
+            if (indices.Count == 0) return;
+
+            PushUndoState();
 
             // We intentionally don't delete the PNG of WaitImage actions here so undo can restore
             // the action with its original reference image still on disk. Orphan PNGs (those no
@@ -3389,6 +3455,13 @@ namespace TrueReplayer
                 var map = profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(map);
                 InputHookManager.RegisterProfileTriggerModes(profileController.GetProfileTriggerModes());
+                // Surface collisions right after the assign so the user gets immediate feedback
+                // when they bind a hotkey that another profile already claims. Single alert per
+                // colliding combo, "only one will fire" wording is in the helper.
+                foreach (var msg in profileController.GetAndClearHotkeyCollisions())
+                {
+                    SendMessage("alert:show", new { message = msg });
+                }
                 PushProfilesUpdate();
             }
         }
@@ -3638,6 +3711,11 @@ namespace TrueReplayer
                 await profileController.RefreshProfileListAsync(true);
                 InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
                 PushProfilesUpdate();
+                // Confirm to the frontend that the removal actually happened. Without this
+                // signal the frontend can't tell "blocked by hotkey conflict" (we return
+                // early above with an alert) from "removed successfully" — and was firing
+                // an optimistic "Removed target" toast either way.
+                SendMessage("profile:windowTargetRemoved", new { name });
             }
         }
 
@@ -5274,13 +5352,24 @@ namespace TrueReplayer
                     break;
                 case "cursorClickArea":
                     // Null → clear the saved rect. Object → { x, y, w, h }, all required.
-                    CursorClickArea = valueElement.ValueKind == JsonValueKind.Null
-                        ? null
-                        : new ClickArea(
-                            valueElement.GetProperty("x").GetInt32(),
-                            valueElement.GetProperty("y").GetInt32(),
-                            valueElement.GetProperty("w").GetInt32(),
-                            valueElement.GetProperty("h").GetInt32());
+                    // Defensive: a malformed payload missing any of the 4 numeric fields
+                    // would throw JsonException via GetInt32 and the outer try/catch would
+                    // swallow it, leaving the area in an inconsistent state. TryGet each
+                    // field with a fallback so partial payloads are at least ignored
+                    // predictably instead of crashing through the error handler.
+                    if (valueElement.ValueKind == JsonValueKind.Null)
+                    {
+                        CursorClickArea = null;
+                    }
+                    else if (valueElement.ValueKind == JsonValueKind.Object
+                        && valueElement.TryGetProperty("x", out var caXEl) && caXEl.ValueKind == JsonValueKind.Number
+                        && valueElement.TryGetProperty("y", out var caYEl) && caYEl.ValueKind == JsonValueKind.Number
+                        && valueElement.TryGetProperty("w", out var caWEl) && caWEl.ValueKind == JsonValueKind.Number
+                        && valueElement.TryGetProperty("h", out var caHEl) && caHEl.ValueKind == JsonValueKind.Number)
+                    {
+                        CursorClickArea = new ClickArea(caXEl.GetInt32(), caYEl.GetInt32(), caWEl.GetInt32(), caHEl.GetInt32());
+                    }
+                    // Else: ignore malformed payload — leave CursorClickArea unchanged.
                     break;
                 case "cursorClickLoops":
                     CursorClickLoops = valueElement.GetString() ?? "0";
@@ -5401,6 +5490,27 @@ namespace TrueReplayer
             if (_disposed) return;
             _disposed = true;
             actions.CollectionChanged -= OnActionsChanged;
+
+            // Unsubscribe every browserBridge event so the BrowserBridgeService doesn't hold
+            // delegates that capture `this` (the now-disposed WebViewBridge). Without these,
+            // a later browser event firing post-dispose would invoke the stale lambdas, which
+            // call into SendMessage / dispatcherQueue on the dead bridge. The handler fields
+            // are null-coalesced so a partial init (browserBridge was null at construction)
+            // doesn't NRE here.
+            if (browserBridge != null)
+            {
+                if (_onBrowserConnectionChanged != null) browserBridge.ConnectionChanged -= _onBrowserConnectionChanged;
+                if (_onBrowserExtensionVersionMismatch != null) browserBridge.ExtensionVersionMismatch -= _onBrowserExtensionVersionMismatch;
+                if (_onBrowserElementClicked != null) browserBridge.ElementClicked -= _onBrowserElementClicked;
+                if (_onBrowserTypingCaptured != null) browserBridge.TypingCaptured -= _onBrowserTypingCaptured;
+                if (_onBrowserSelectInteractionStarted != null) browserBridge.SelectInteractionStarted -= _onBrowserSelectInteractionStarted;
+                if (_onBrowserSelectInteractionEnded != null) browserBridge.SelectInteractionEnded -= _onBrowserSelectInteractionEnded;
+                if (_onBrowserSelectChanged != null) browserBridge.SelectChanged -= _onBrowserSelectChanged;
+            }
+            // Stop the select-interaction safety timer if it's still armed — otherwise its
+            // 15s callback would fire on a dead dispatcher.
+            _selectInteractionTimer?.Dispose();
+            _selectInteractionTimer = null;
         }
     }
 }

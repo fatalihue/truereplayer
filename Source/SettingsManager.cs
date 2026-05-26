@@ -96,6 +96,21 @@ namespace TrueReplayer.Services
             }
         }
 
+        /// <summary>
+        /// Backfill ActionItem.Id for profiles created before the stable-id schema landed.
+        /// Old actions deserialize with Id = empty string (no field in JSON); we assign a
+        /// fresh GUID per action. Idempotent — actions already carrying an Id are left alone,
+        /// so re-saving doesn't churn IDs and break frontend React keys across sessions.
+        /// </summary>
+        public static void MigrateActionIds(UserProfile profile)
+        {
+            foreach (var action in profile.Actions)
+            {
+                if (string.IsNullOrEmpty(action.Id))
+                    action.Id = Guid.NewGuid().ToString("N");
+            }
+        }
+
         public static async Task<UserProfile?> LoadProfileAsync(string? filePath = null)
         {
             if (string.IsNullOrWhiteSpace(filePath))
@@ -111,7 +126,11 @@ namespace TrueReplayer.Services
             var json = await File.ReadAllTextAsync(filePath);  // Lê o arquivo de perfil
             json = MigrateProfileJson(json);                    // Renomeia LockPosition→RestorePosition se necessário
             var profile = JsonSerializer.Deserialize<UserProfile>(json, options);
-            if (profile != null) MigrateRestoreSize(profile);   // Infere RestoreSize de perfis pré-split
+            if (profile != null)
+            {
+                MigrateRestoreSize(profile);   // Infere RestoreSize de perfis pré-split
+                MigrateActionIds(profile);     // Backfill stable Id for pre-2.2.6 actions
+            }
             return profile;
         }
     }

@@ -354,9 +354,31 @@ namespace TrueReplayer
                 bridge.PushProfilesUpdate();
                 bridge.PushStatusBarUpdate();
 
+                // Surface any profile.json files that failed to parse. Caught silently
+                // inside LoadProfileListAsync; if we don't tell the user, missing profiles
+                // look like a bug or data loss. One toast per startup, listing all failures
+                // at once.
+                var failures = profileController.GetAndClearLoadFailures();
+                if (failures.Count > 0)
+                {
+                    var names = string.Join(", ", failures.Take(5));
+                    var msg = failures.Count <= 5
+                        ? $"{failures.Count} profile(s) couldn't load: {names}"
+                        : $"{failures.Count} profiles couldn't load (first 5: {names}, …)";
+                    bridge.SendMessage("alert:show", new { message = msg });
+                }
+
                 var hotkeys = profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(hotkeys);
                 InputHookManager.RegisterProfileTriggerModes(profileController.GetProfileTriggerModes());
+
+                // Surface hotkey collisions detected during the GetProfileHotkeys pass.
+                // Two profiles bound to the same combo would otherwise silently fight
+                // (only one fires, which depends on Dictionary iteration order).
+                foreach (var msg in profileController.GetAndClearHotkeyCollisions())
+                {
+                    bridge.SendMessage("alert:show", new { message = msg });
+                }
             });
         }
 

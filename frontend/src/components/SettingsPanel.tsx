@@ -681,25 +681,22 @@ export function SettingsPanel() {
               </SettingRow>
             </Section>
 
-            {/* Appearance — opens the full ThemeEditor modal via the existing
-                cmd:themeeditor custom event. The event handler lives in the top-
-                level layout, so this section stays decoupled from where the dialog
-                is actually mounted. Palette icon + purple hue mirrors the action's
-                own visual identity inside the editor. */}
-            <Section icon={Palette} iconColor="#c084fc" title="Appearance" defaultOpen={false}>
-              {/* Single full-width button — the section is one-action only, so the
-                  label/button pair the other Sections use would look lopsided here.
-                  Tooltip carries the explanation that the "Custom theme" label
-                  previously offered. */}
-              <button
-                onClick={() => window.dispatchEvent(new CustomEvent('cmd:themeeditor'))}
-                title="Customise colours, font, row height, and per-action accents."
-                className="w-full flex items-center justify-center gap-1.5 h-7 px-3 rounded text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default hover:bg-bg-card hover:text-text-primary transition-colors"
-              >
-                <Palette size={11} />
-                Open Theme Editor
-              </button>
-            </Section>
+            {/* Appearance — direct action, not a collapsible Section. The category
+                only houses a single entry (Theme Editor) right now, so making the user
+                expand a submenu before clicking is pure friction. Render as a button
+                styled like a collapsed Section header so it slots into the panel's
+                visual rhythm. If we ever add more appearance settings (per-action
+                accents, font-only toggles, etc.) swap back to <Section> with the
+                children inside. */}
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('cmd:themeeditor'))}
+              title="Customise colours, font, row height, and per-action accents."
+              className="w-full flex items-center gap-2 px-3 py-2.5 bg-bg-surface border border-border-subtle rounded-ui hover:bg-bg-card transition-colors"
+            >
+              <Palette size={14} style={{ color: '#c084fc' }} />
+              <span className="text-ui font-semibold text-text-primary flex-1 text-left">Appearance</span>
+              <ChevronRight size={14} className="text-text-tertiary" />
+            </button>
 
             {/* Updates */}
             <Section icon={Download} iconColor="#6bcb77" title="Updates" defaultOpen={false}>

@@ -36,7 +36,14 @@ function loadSnippets(): Snippet[] {
 }
 
 function saveSnippets(snippets: Snippet[]) {
-  localStorage.setItem(SNIPPETS_KEY, JSON.stringify(snippets));
+  // QuotaExceededError guard — large snippet libraries (or storage shared with
+  // other features) could fill the quota. Swallow + log so the dialog stays usable;
+  // the snippet just won't persist across reloads.
+  try {
+    localStorage.setItem(SNIPPETS_KEY, JSON.stringify(snippets));
+  } catch (err) {
+    console.warn('[SendTextDialog] Failed to save snippets:', err);
+  }
 }
 
 // Inline edit form for an existing snippet — rendered in place of the row so

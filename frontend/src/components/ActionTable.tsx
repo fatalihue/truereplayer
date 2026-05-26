@@ -964,7 +964,13 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
 
               return (
                 <tr
-                  key={idx}
+                  // Prefer action.id for React reconciliation — without it, drag-reorder
+                  // and undo/redo end up with the wrong DOM nodes mapped to actions,
+                  // breaking highlight state and replaying entrance animations on rows
+                  // that didn't actually change. Falls back to idx for the brief window
+                  // between an old-profile backend push (no id yet) and the next refresh
+                  // after migration runs.
+                  key={action.id ?? idx}
                   ref={isHighlighted ? highlightedRowRef : undefined}
                   onMouseDown={(e) => handleRowMouseDown(idx, e)}
                   onClick={(e) => handleRowClick(idx, e)}

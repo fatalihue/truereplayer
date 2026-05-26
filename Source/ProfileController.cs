@@ -261,6 +261,25 @@ namespace TrueReplayer.Controllers
 
         #region Profile List Management
 
+        /// <summary>
+        /// Names of profile.json files that failed to load on the last LoadProfileListAsync
+        /// pass. Surfaced via <see cref="GetAndClearLoadFailures"/> so the bridge can show
+        /// the user a toast on startup instead of silently dropping the broken profiles.
+        /// </summary>
+        private readonly List<string> _loadFailures = new();
+
+        /// <summary>
+        /// Returns the list of profile names that failed to load on the most recent refresh,
+        /// then clears the list. Called once by the bridge after profiles:updated is pushed
+        /// so the alert fires exactly once per failed load.
+        /// </summary>
+        public IReadOnlyList<string> GetAndClearLoadFailures()
+        {
+            var copy = _loadFailures.ToList();
+            _loadFailures.Clear();
+            return copy;
+        }
+
         private async Task LoadProfileListAsync()
         {
             string profileDir = Path.Combine(
@@ -277,6 +296,7 @@ namespace TrueReplayer.Controllers
             ProfileEntries.Clear();
             _cachedWindowTargets.Clear();
             _referencedImagesByProfile.Clear();
+            _loadFailures.Clear();
 
             foreach (var file in files)
             {
@@ -335,6 +355,13 @@ namespace TrueReplayer.Controllers
                 }
                 catch (Exception ex)
                 {
+                    // Profile JSON is corrupt, has incompatible types, or otherwise can't be
+                    // deserialized. Record the name so the bridge can surface a single
+                    // user-visible alert listing all failed profiles ("3 profiles couldn't
+                    // load: foo, bar, baz") instead of letting the user discover the loss
+                    // by noticing missing entries.
+                    var failedName = Path.GetFileNameWithoutExtension(file);
+                    if (!string.IsNullOrEmpty(failedName)) _loadFailures.Add(failedName);
                     System.Diagnostics.Debug.WriteLine($"Erro ao carregar perfil {file}: {ex}");
                 }
             }
@@ -555,17 +582,82 @@ namespace TrueReplayer.Controllers
 
         #region Profile Hotkey Management
 
+        /// <summary>
+        /// Hotkey collisions detected on the most recent <see cref="GetProfileHotkeys"/> call.
+        /// Each entry is "Hotkey assigned to: A, B, C" — the bridge surfaces these as toasts
+        /// so the user knows two profiles fight for the same combo. Cleared at the start of
+        /// each GetProfileHotkeys call so we don't accumulate stale warnings.
+        /// </summary>
+        private readonly List<string> _hotkeyCollisions = new();
+
+        public IReadOnlyList<string> GetAndClearHotkeyCollisions()
+        {
+            var copy = _hotkeyCollisions.ToList();
+            _hotkeyCollisions.Clear();
+            return copy;
+        }
+
         public Dictionary<string, string> GetProfileHotkeys()
         {
             var hotkeys = new Dictionary<string, string>();
+            _hotkeyCollisions.Clear();
+            // Detect TRUE collisions only — two profiles with the same hotkey but DIFFERENT
+            // target windows are intentionally supported: IsForegroundWindowMatch disambiguates
+            // at fire time based on which window is foreground. That's a feature (e.g. Ctrl+F1
+            // does action A in Roblox and action B in Notepad). The collision is only a real
+            // problem when the targets overlap, which we approximate as identical (or both
+            // null) — anything else is a designed-for, silent-by-design hotkey routing.
+            var byHotkey = new Dictionary<string, List<ProfileEntry>>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var entry in ProfileEntries)
             {
-                if (!string.IsNullOrEmpty(entry.Hotkey) && !entry.IsDisabled)
-                    hotkeys[entry.Name] = entry.Hotkey;
+                if (string.IsNullOrEmpty(entry.Hotkey) || entry.IsDisabled) continue;
+                if (!byHotkey.TryGetValue(entry.Hotkey, out var list))
+                {
+                    list = new List<ProfileEntry>();
+                    byHotkey[entry.Hotkey] = list;
+                }
+                list.Add(entry);
+                hotkeys[entry.Name] = entry.Hotkey;
+            }
+
+            foreach (var (hotkey, candidates) in byHotkey)
+            {
+                if (candidates.Count <= 1) continue;
+                // Group by effective target signature. Profiles in the SAME bucket overlap →
+                // real collision. Profiles in DIFFERENT buckets are routed by foreground gate.
+                var byTargetSignature = candidates
+                    .GroupBy(e => GetEffectiveTargetSignature(e))
+                    .Where(g => g.Count() > 1);
+
+                foreach (var collidingGroup in byTargetSignature)
+                {
+                    var names = collidingGroup.Select(e => e.Name).ToList();
+                    var targetDesc = string.IsNullOrEmpty(collidingGroup.Key)
+                        ? "no target window"
+                        : $"target '{collidingGroup.Key}'";
+                    _hotkeyCollisions.Add(
+                        $"Hotkey '{hotkey}' is bound to {names.Count} profiles with the same {targetDesc}: " +
+                        $"{string.Join(", ", names)} — only one will fire");
+                }
             }
 
             return hotkeys;
+        }
+
+        /// <summary>
+        /// Produces a stable string describing an entry's EFFECTIVE target window (own or
+        /// folder-inherited). Used to detect "real" hotkey collisions — profiles with the
+        /// same hotkey but different target signatures coexist fine because the foreground
+        /// gate routes between them. Empty string when the entry has no effective target.
+        /// </summary>
+        private static string GetEffectiveTargetSignature(ProfileEntry e)
+        {
+            if (!e.HasEffectiveTarget) return "";
+            var proc = e.EffectiveTargetProcessName ?? "";
+            var title = e.EffectiveTargetWindowTitle ?? "";
+            var mode = e.EffectiveTargetTitleMatchMode ?? "contains";
+            return $"{proc.ToLowerInvariant()}|{title}|{mode}";
         }
 
         public Dictionary<string, TriggerMode> GetProfileTriggerModes()
