@@ -488,11 +488,22 @@ namespace TrueReplayer
                 {
                     string scrollKey = scrollDelta > 0 ? "ScrollUp" : "ScrollDown";
 
-                    bool ctrlHeld = (NativeMethods.GetAsyncKeyState(0x11) & 0x8000) != 0;
-                    bool altHeld = (NativeMethods.GetAsyncKeyState(0x12) & 0x8000) != 0;
-                    bool shiftHeld = (NativeMethods.GetAsyncKeyState(0x10) & 0x8000) != 0;
-                    bool winHeld = (NativeMethods.GetAsyncKeyState(0x5B) & 0x8000) != 0
-                                || (NativeMethods.GetAsyncKeyState(0x5C) & 0x8000) != 0;
+                    // Same rationale as BuildComposedKey: read modifier state from the tracked
+                    // set (populated only from non-injected events), not GetAsyncKeyState. A
+                    // macro that holds Shift via SendInput would otherwise make every user
+                    // scroll look like Shift+ScrollUp/Down, breaking scroll-bound profile
+                    // hotkeys mid-replay even though the user only meant to scroll.
+                    bool ctrlHeld = _vkCodesCurrentlyDown.Contains(0x11)
+                                 || _vkCodesCurrentlyDown.Contains(0xA2)
+                                 || _vkCodesCurrentlyDown.Contains(0xA3);
+                    bool altHeld = _vkCodesCurrentlyDown.Contains(0x12)
+                                || _vkCodesCurrentlyDown.Contains(0xA4)
+                                || _vkCodesCurrentlyDown.Contains(0xA5);
+                    bool shiftHeld = _vkCodesCurrentlyDown.Contains(0x10)
+                                  || _vkCodesCurrentlyDown.Contains(0xA0)
+                                  || _vkCodesCurrentlyDown.Contains(0xA1);
+                    bool winHeld = _vkCodesCurrentlyDown.Contains(0x5B)
+                                || _vkCodesCurrentlyDown.Contains(0x5C);
 
                     var parts = new List<string>();
                     if (winHeld) parts.Add("Win");
