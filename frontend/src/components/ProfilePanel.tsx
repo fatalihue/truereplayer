@@ -1865,7 +1865,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                   { id: 'onPress', label: 'On Press', help: 'Fires once when the key is pressed down.' },
                   { id: 'onRelease', label: 'On Release', help: 'Fires once when the key is released.' },
                   { id: 'whilePressed', label: 'While Pressed', help: 'Runs in infinite loop while held. Stops on release.' },
-                  { id: 'toggle', label: 'Toggle', help: "Press to start, press again to stop. Uses the profile's loop settings." },
+                  { id: 'toggle', label: 'Toggle', help: 'Press to start an infinite loop, press again to stop.' },
                 ] as const).map((opt) => (
                   <button
                     key={opt.id}
@@ -1885,7 +1885,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 {hotkeyTriggerMode === 'onPress' && 'Fires once when the key is pressed down.'}
                 {hotkeyTriggerMode === 'onRelease' && 'Fires once when the key is released.'}
                 {hotkeyTriggerMode === 'whilePressed' && 'Runs in infinite loop while held. Stops on release.'}
-                {hotkeyTriggerMode === 'toggle' && "Press to start, press again to stop. Uses the profile's loop settings."}
+                {hotkeyTriggerMode === 'toggle' && 'Press to start an infinite loop, press again to stop.'}
               </div>
             </div>
 

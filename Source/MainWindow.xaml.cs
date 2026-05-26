@@ -710,7 +710,21 @@ namespace TrueReplayer
                             : key.StartsWith("PROFILE_TOGGLE::") ? "PROFILE_TOGGLE::"
                             : "PROFILE::";
                         string profileName = key.Substring(prefix.Length);
-                        bool forceInfiniteLoop = prefix == "PROFILE_HOLD::";
+                        // Toggle and WhilePressed both force infinite-loop replay regardless of
+                        // the profile's own LoopCount: WhilePressed because the key stays held
+                        // (re-entry would re-trigger the same press), Toggle because otherwise
+                        // it'd be indistinguishable from OnPress + Loop — the whole point of
+                        // Toggle is "press once → loops until I press again to stop". The Toggle
+                        // *stop* path doesn't read this flag (second press goes through ToggleReplay
+                        // → StopReplay), so over-applying here is harmless.
+                        bool forceInfiniteLoop = prefix == "PROFILE_HOLD::" || prefix == "PROFILE_TOGGLE::";
+                        // Only WhilePressed has the race window the next two guards protect against —
+                        // its trigger is tied to a key being physically held when the async handler
+                        // runs, so the user can release between dispatch and start. Toggle is fire-
+                        // and-forget on each press (two discrete events), so these guards must NOT
+                        // fire for it — checking IsHoldActiveForProfile for a Toggle prefix would
+                        // always be false and silently swallow every Toggle start.
+                        bool isWhilePressedHold = prefix == "PROFILE_HOLD::";
 
                         var profile = await profileController.LoadProfileByNameAsync(profileName);
 
@@ -719,7 +733,7 @@ namespace TrueReplayer
                         // fired a PROFILE_STOP, the hold state was cleared, and we should NOT
                         // start the replay — otherwise it would loop forever with no keyup to
                         // stop it.
-                        if (forceInfiniteLoop && !InputHookManager.IsHoldActiveForProfile(profileName))
+                        if (isWhilePressedHold && !InputHookManager.IsHoldActiveForProfile(profileName))
                         {
                             return;
                         }
@@ -783,8 +797,9 @@ namespace TrueReplayer
                             // became true, the STOP handler would have seen no running replay
                             // and done nothing — leaving an infinite-loop replay with no way to
                             // stop it. Re-check hold state right after starting and stop if the
-                            // key is no longer held.
-                            if (forceInfiniteLoop && !InputHookManager.IsHoldActiveForProfile(profileName))
+                            // key is no longer held. Skipped for Toggle: there's no held-key
+                            // state to check (Toggle stops via a second discrete press).
+                            if (isWhilePressedHold && !InputHookManager.IsHoldActiveForProfile(profileName))
                             {
                                 mainController.StopReplayIfRunning();
                             }
