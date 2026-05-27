@@ -1237,6 +1237,11 @@ namespace TrueReplayer
 
         private async Task CheckForUpdateAsync()
         {
+            // Announce we're starting so the overlay can show its indeterminate "Checking…"
+            // state during the network round-trip. Resolves into update:available or
+            // update:none below, or update:error in the catch.
+            SendMessage("update:checking", new { });
+
             try
             {
                 var newVersion = await UpdateService.CheckForUpdateAsync();
@@ -1245,11 +1250,16 @@ namespace TrueReplayer
                     // Fetch release notes in parallel — best-effort, may be empty
                     var notes = await UpdateService.GetPendingReleaseNotesAsync();
 
+                    // autoApply tells the frontend to skip the "Download" confirmation gate
+                    // and transition straight to the downloading splash — matches the mockup
+                    // (no confirmation button). The legacy gate flow stays available when
+                    // AutoApplyUpdates is flipped off in code.
                     SendMessage("update:available", new
                     {
                         version = newVersion,
                         currentVersion = UpdateService.CurrentVersion ?? "unknown",
-                        notes = notes
+                        notes = notes,
+                        autoApply = AutoApplyUpdates,
                     });
 
                     if (AutoApplyUpdates)

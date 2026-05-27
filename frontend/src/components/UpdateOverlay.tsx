@@ -3,18 +3,20 @@ import { useBridge } from '../bridge/BridgeContext';
 
 type Phase =
   | { step: 'hidden' }
+  | { step: 'checking' }
   | { step: 'available'; version: string; currentVersion: string; notes: string[] }
   | { step: 'downloading'; percent: number; version: string; currentVersion: string }
   | { step: 'installing'; version: string; currentVersion: string }
   | { step: 'complete'; version: string; currentVersion: string };
 
 // Master switch for the user-facing update overlay.
-//   false → silent auto-update: the backend downloads + applies the update on its own
-//           after detection; this component stays mounted but renders nothing.
-//   true  → user-confirmation flow: show "Update available" → progress → complete.
-// Flip to true to bring the confirmation UI back. The full UI code below is preserved
-// so re-enabling is just this one line.
-const UPDATE_OVERLAY_ENABLED = false;
+//   true  → splash visible throughout the auto-update flow (checking → downloading →
+//           installing → complete), matching mockup/update-splash.html. When the backend
+//           has AutoApplyUpdates on (current default), the "available" gate is skipped:
+//           the overlay transitions straight to downloading without a confirmation button.
+//   false → component stays mounted but renders nothing; backend silently downloads +
+//           applies + restarts with no feedback.
+const UPDATE_OVERLAY_ENABLED = true;
 
 export function UpdateOverlay() {
   const { send, subscribe } = useBridge();
@@ -27,14 +29,32 @@ export function UpdateOverlay() {
       if (!UPDATE_OVERLAY_ENABLED) return;
 
       switch (msg.type) {
+        case 'update:checking':
+          // Initial indeterminate "Checking for updates…" splash — fired by the backend
+          // at the very start of CheckForUpdateAsync. Lands a beat before update:available
+          // or update:none resolves it.
+          setPhase({ step: 'checking' });
+          break;
         case 'update:available':
-          // Show confirmation screen — user decides when to download
-          setPhase({
-            step: 'available',
-            version: msg.payload.version,
-            currentVersion: msg.payload.currentVersion,
-            notes: msg.payload.notes ?? [],
-          });
+          // In silent (auto-apply) mode, skip the gate and transition straight into the
+          // downloading splash — the backend has already kicked off HandleUpdateApply.
+          // Without this, the user would see the "Baixar e Instalar" button briefly and
+          // then the splash would jump as the download started without their click.
+          if (msg.payload.autoApply) {
+            setPhase({
+              step: 'downloading',
+              percent: 0,
+              version: msg.payload.version,
+              currentVersion: msg.payload.currentVersion,
+            });
+          } else {
+            setPhase({
+              step: 'available',
+              version: msg.payload.version,
+              currentVersion: msg.payload.currentVersion,
+              notes: msg.payload.notes ?? [],
+            });
+          }
           break;
         case 'update:progress':
           setPhase((prev) => {
@@ -53,10 +73,9 @@ export function UpdateOverlay() {
           });
           break;
         case 'update:none':
-          setPhase({ step: 'hidden' });
-          break;
         case 'update:error':
-          // On error, just hide and let the app work normally
+          // No update / network failure: hide the splash. Errors fall back to silent so
+          // the user can keep using the app — they'll get the update on the next check.
           setPhase({ step: 'hidden' });
           break;
       }
@@ -86,8 +105,12 @@ export function UpdateOverlay() {
     send({ type: 'update:apply', payload: {} });
   };
 
-  const version = phase.version;
-  const currentVersion = phase.currentVersion;
+  // 'checking' is the only phase without version metadata (the check hasn't resolved yet).
+  // Every other field below tolerates that via the optional-chaining + isChecking gating
+  // in the JSX so the splash can render at app-start with just an indeterminate bar.
+  const isChecking = phase.step === 'checking';
+  const version = isChecking ? '' : phase.version;
+  const currentVersion = isChecking ? '' : phase.currentVersion;
   const isComplete = phase.step === 'complete';
   const isInstalling = phase.step === 'installing';
 
@@ -135,6 +158,7 @@ export function UpdateOverlay() {
             ...(isComplete || isInstalling ? { color: '#6bcb77' } : {}),
           }}
         >
+          {phase.step === 'checking' && 'Verificando atualizações'}
           {phase.step === 'available' && 'Atualização disponível'}
           {phase.step === 'downloading' && 'Baixando atualização'}
           {phase.step === 'installing' && `Atualizando para v${version}`}
@@ -143,14 +167,17 @@ export function UpdateOverlay() {
 
         {/* Subtitle */}
         <div style={subtitleStyle}>
+          {phase.step === 'checking' && 'Conectando ao servidor de releases…'}
           {phase.step === 'available' && 'Uma nova versão do TrueReplayer está pronta'}
           {phase.step === 'downloading' && 'Não feche o aplicativo'}
           {phase.step === 'installing' && 'Encerrando TrueReplayer...'}
           {phase.step === 'complete' && 'Você está agora na versão mais recente'}
         </div>
 
-        {/* Version chips (current ➜ new), or single chip for "complete" */}
-        {isComplete ? (
+        {/* Version chips (current ➜ new), or single chip for "complete".
+            Hidden during 'checking' because we don't know the target version yet —
+            the splash just shows the indeterminate progress bar in that state. */}
+        {isChecking ? null : isComplete ? (
           <div style={versionRowStyle}>
             <div style={{ ...versionChipStyle, ...versionChipNewStyle, minWidth: 120 }}>
               <div style={{ ...versionLabelStyle, color: '#60CDFF' }}>Versão atual</div>
@@ -189,17 +216,24 @@ export function UpdateOverlay() {
         )}
         {phase.step === 'complete' && <div style={{ height: 12 }} />}
 
-        {/* Progress bar (downloading / installing) */}
-        {(phase.step === 'downloading' || phase.step === 'installing') && (
+        {/* Progress bar (checking / downloading / installing).
+            Checking is indeterminate (40 % bar sliding across), matching the mockup —
+            no percent shown since we have nothing to report yet. Downloading is the
+            real percent. Installing pulses at 100 % while the apply runs. */}
+        {(phase.step === 'checking' || phase.step === 'downloading' || phase.step === 'installing') && (
           <>
             <div style={progressContainerStyle}>
               <div style={progressTrackStyle}>
                 <div
                   style={{
                     ...progressFillStyle,
-                    ...(phase.step === 'downloading'
-                      ? { width: `${phase.percent}%`, animation: 'none', transform: 'none' }
-                      : { width: '100%', animation: 'update-install-pulse 1.5s ease-in-out infinite', transform: 'none' }),
+                    ...(phase.step === 'checking'
+                      // No transform: 'none' here — the indeterminate keyframe drives transform
+                      // and inline 'none' would lose specificity battle, freezing the bar.
+                      ? { width: '40%', animation: 'update-indeterminate 1.8s ease-in-out infinite' }
+                      : phase.step === 'downloading'
+                        ? { width: `${phase.percent}%`, animation: 'none', transform: 'none' }
+                        : { width: '100%', animation: 'update-install-pulse 1.5s ease-in-out infinite', transform: 'none' }),
                   }}
                 />
               </div>
@@ -265,6 +299,10 @@ const keyframes = `
 @keyframes update-install-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.65; }
+}
+@keyframes update-indeterminate {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(350%); }
 }
 @keyframes update-checkmark {
   from { stroke-dashoffset: 24; }

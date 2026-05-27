@@ -370,7 +370,13 @@ export type IncomingMessage =
   | { type: 'clicker:stats'; payload: { count: number; elapsedMs: number } }
   | { type: 'macro:loopProgress'; payload: { current: number; total: number } }
   | { type: 'settings:reset'; payload: Record<string, never> }
-  | { type: 'update:available'; payload: { version: string; currentVersion: string; notes: string[] } }
+  // Fired at the start of CheckForUpdateAsync so the overlay can show the indeterminate
+  // "Checking for updates..." state (matches mockup phase 1). Resolves into update:available
+  // (update found) or update:none (no update) shortly after.
+  | { type: 'update:checking'; payload: Record<string, never> }
+  // autoApply mirrors the backend's AutoApplyUpdates const so the overlay knows whether to
+  // skip the "Download" gate (silent flow, mockup) or show the confirmation button (legacy).
+  | { type: 'update:available'; payload: { version: string; currentVersion: string; notes: string[]; autoApply?: boolean } }
   | { type: 'update:progress'; payload: { percent: number } }
   | { type: 'update:ready'; payload: Record<string, never> }
   | { type: 'update:error'; payload: { message: string } }
