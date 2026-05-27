@@ -166,11 +166,20 @@ namespace TrueReplayer.Services
 
         /// <summary>
         /// Applies the downloaded update and restarts the app.
+        ///
+        /// Uses <c>WaitExitThenApplyUpdates(silent: true, restart: true)</c> + an
+        /// <c>Environment.Exit(0)</c> instead of <c>ApplyUpdatesAndRestart</c> because the
+        /// latter spawns Velopack's native "Installing update X.Y.Z…" progress window with
+        /// a Hide button — a jarring duplicate next to our own React splash overlay. The
+        /// `silent: true` flag suppresses that native UI; Update.exe still applies the
+        /// patch + restarts, but invisibly. Replicates ApplyUpdatesAndRestart's internal
+        /// structure (queue → Environment.Exit) minus the dialog.
         /// </summary>
         public static void ApplyAndRestart()
         {
-            if (_pendingUpdate?.TargetFullRelease != null)
-                _manager.ApplyUpdatesAndRestart(_pendingUpdate.TargetFullRelease);
+            if (_pendingUpdate?.TargetFullRelease == null) return;
+            _manager.WaitExitThenApplyUpdates(_pendingUpdate.TargetFullRelease, silent: true, restart: true);
+            Environment.Exit(0);
         }
 
         /// <summary>

@@ -1300,6 +1300,13 @@ namespace TrueReplayer
             if (success)
             {
                 SendMessage("update:ready", new { });
+                // Give the React overlay a beat to render the 'installing' phase before
+                // we tear down the process. Without the pause, Environment.Exit(0) inside
+                // ApplyAndRestart kills the WebView2 in the same tick as the message
+                // dispatch — the user never sees "Atualizando para vX.Y.Z" / "Aplicando
+                // atualização" / pulsing progress. 1.8 s matches the user's eye on the
+                // checkmark animation cycle without dragging the restart noticeably.
+                await Task.Delay(1800);
                 UpdateService.ApplyAndRestart();
             }
             else
