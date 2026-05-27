@@ -163,7 +163,7 @@ export function StatusBar() {
           uses flex-1, so a second flex-1 here would split available space and squeeze the
           chain label. */}
       {!isReplaying && <div className="flex-1" />}
-      <span className="text-[11px] text-text-disabled shrink-0 ml-3">v2.2.7</span>
+      <span className="text-[11px] text-text-disabled shrink-0 ml-3">v2.2.8</span>
     </div>
   );
 }
