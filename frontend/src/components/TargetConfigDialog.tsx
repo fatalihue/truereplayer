@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, ChevronDown } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { Toggle } from './common/Toggle';
@@ -115,11 +115,21 @@ export function TargetConfigDialog({
   const [testResult, setTestResult] = useState<TestResult | null>(null);
 
   // Pending flag flipped on as soon as the Test button is clicked. Without it, a fast backend
-  // response (a few ms) would replace the previous colored chip with the new one in the same
-  // React batch — user perceives "the button didn't change" and waits for the auto-revert
+  // response (sub-frame) would replace the previous colored chip with the new one before the
+  // browser paints — user perceives "the button didn't change" and waits for the auto-revert
   // timer instead. The in-flight state forces a neutral "Testing…" render between clicks so
-  // the visual reset is always perceivable, even when the round-trip is instant.
+  // the visual reset is always perceivable.
   const [testInFlight, setTestInFlight] = useState(false);
+
+  // The flag alone isn't enough on its own — when the backend round-trip is faster than a
+  // single browser frame (~16 ms, common for the synchronous foreground-window check), the
+  // setTestInFlight(true) on click and the setTestInFlight(false) on response can both land
+  // before the paint and skip the intermediate state entirely. We track when the in-flight
+  // started and enforce a minimum visible duration (200 ms) by deferring the result apply.
+  // 200 ms is below the threshold where a click-response feels laggy yet long enough to be
+  // clearly perceptible as a state transition.
+  const testInFlightStartRef = useRef<number>(0);
+  const MIN_TEST_INFLIGHT_MS = 200;
 
   // Auto-revert: 3.5 s after a result lands, drop it so the button returns to its neutral
   // "Test against foreground window" state. Re-runs cancel the prior timer via the cleanup
@@ -171,8 +181,22 @@ export function TargetConfigDialog({
         const p = msg.payload as { detecting: boolean };
         setIsDetecting(p.detecting);
       } else if (msg.type === 'windowTarget:testResult') {
-        setTestInFlight(false);
-        setTestResult(msg.payload as TestResult);
+        // Enforce a minimum visible duration for the "Testing…" state. When the backend
+        // returns in less than MIN_TEST_INFLIGHT_MS, defer the apply so the user perceives
+        // a clean state transition (colored → neutral testing → new colored) instead of
+        // a single-frame re-render that visually looks like nothing happened.
+        const result = msg.payload as TestResult;
+        const elapsed = Date.now() - testInFlightStartRef.current;
+        const remaining = MIN_TEST_INFLIGHT_MS - elapsed;
+        if (remaining <= 0) {
+          setTestInFlight(false);
+          setTestResult(result);
+        } else {
+          window.setTimeout(() => {
+            setTestInFlight(false);
+            setTestResult(result);
+          }, remaining);
+        }
       } else if (msg.type === 'windowTarget:applyConvertCompleted') {
         // Backend confirms the combined save + convert succeeded. Dismiss the hint so a
         // second click on the same button doesn't double-translate the already-converted
@@ -449,10 +473,10 @@ export function TargetConfigDialog({
             Keeps the row to a single 28 px line — no separate slot growing the dialog. */}
         <button
           onClick={() => {
-            // Clear in this exact order: result first (so the colored state lets go),
-            // then flag the in-flight so the render branches into "Testing…" before the
-            // backend responds. React batches both into a single re-render — user sees
-            // the neutral pending state between clicks even when the response is instant.
+            // Stamp the start time BEFORE setting state so the response handler can compute
+            // an accurate elapsed and decide whether to defer the apply (see the
+            // windowTarget:testResult branch in the subscribe useEffect).
+            testInFlightStartRef.current = Date.now();
             setTestResult(null);
             setTestInFlight(true);
             send({
