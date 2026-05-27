@@ -3729,6 +3729,12 @@ namespace TrueReplayer
                 if (CurrentProfileName == name && convertDirection != null && preflightRect.HasValue)
                 {
                     ExecuteConvertCoordinatesWithRect(convertDirection, preflightRect.Value);
+                    // Tell the dialog the combined op landed cleanly so it can dismiss the
+                    // migration hint and clear its `edited` flag. Without this the dialog
+                    // would stay open (per opts.keepOpen) but still showing the hint —
+                    // clicking "Apply target & convert" a second time would re-translate
+                    // the already-relative coords, doubling the offset.
+                    SendMessage("windowTarget:applyConvertCompleted", new { });
                 }
             }
         }

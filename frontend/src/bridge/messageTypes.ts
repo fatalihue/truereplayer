@@ -356,6 +356,12 @@ export type IncomingMessage =
   | { type: 'windowTarget:detected'; payload: { processName: string; windowTitle: string } }
   | { type: 'windowTarget:detectState'; payload: { detecting: boolean } }
   | { type: 'windowTarget:testResult'; payload: { matches: boolean; foregroundProcess: string; foregroundTitle: string; error?: string } }
+  // Backend signal that the combined "Apply target & convert" path on profile:setWindowTarget
+  // completed successfully (target saved AND coords migrated). The dialog listens to dismiss
+  // the migration hint and reset its `edited` flag so a second click can't re-trigger the
+  // already-applied conversion. Pre-flight failures don't emit this — they alert via the
+  // standard `alert:show` toast.
+  | { type: 'windowTarget:applyConvertCompleted'; payload: Record<string, never> }
   | { type: 'process:list'; payload: { processes: { name: string; title: string }[] } }
   | { type: 'clipboard:content'; payload: { text: string } }
   | { type: 'replay:chain'; payload: { stack: string[] } }

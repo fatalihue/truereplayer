@@ -2244,7 +2244,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             hasOwnTarget={hasOwnTarget}
             inheritedFromFolder={!hasOwnTarget && !!folder}
             initial={initial}
-            onSubmit={(payload) => {
+            onSubmit={(payload, opts) => {
               send({
                 type: 'profile:setWindowTarget',
                 payload: {
@@ -2262,7 +2262,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                   convertDirection: payload.convertDirection,
                 },
               });
-              setShowWindowTargetDialog(null);
+              // Apply target & convert wants the toast to land while the dialog is still
+              // visible — opts.keepOpen carries that intent. Plain Set Target / Remove
+              // close the dialog as before.
+              if (!opts?.keepOpen) setShowWindowTargetDialog(null);
             }}
             onRemove={() => {
               handleRemoveWindowTarget(name);

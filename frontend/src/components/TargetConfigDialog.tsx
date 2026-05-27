@@ -41,7 +41,11 @@ interface TargetConfigDialogProps {
     restorePosition?: boolean;
     restoreSize?: boolean;
   };
-  onSubmit: (payload: TargetSubmitPayload) => void;
+  // The optional `opts.keepOpen` lets the dialog request that the parent NOT close it on
+  // submit. Used by the "Apply target & convert" flow so the toast confirmation lands
+  // while the user is still looking at the same dialog (instead of vanishing along with
+  // it). Parent ignores the opts when undefined and closes as usual.
+  onSubmit: (payload: TargetSubmitPayload, opts?: { keepOpen?: boolean }) => void;
   onRemove?: () => void;
   onCancel: () => void;
   // Profile-only callbacks. When omitted the dialog hides the corresponding UI.
@@ -106,10 +110,16 @@ export function TargetConfigDialog({
   // Result of the most recent Test Match request. Cleared when the user edits fields so a stale
   // ✓/✗ can't be confused with a different config, and auto-cleared 3.5 s after it arrives so
   // the Test button returns to its idle label (the button itself doubles as the result chip —
-  // see the auto-revert effect below). Tied to a perRunToken so a quick re-test doesn't have
-  // the previous-run timer wipe out the current result mid-display.
+  // see the auto-revert effect below).
   type TestResult = { matches: boolean; foregroundProcess: string; foregroundTitle: string; error?: string };
   const [testResult, setTestResult] = useState<TestResult | null>(null);
+
+  // Pending flag flipped on as soon as the Test button is clicked. Without it, a fast backend
+  // response (a few ms) would replace the previous colored chip with the new one in the same
+  // React batch — user perceives "the button didn't change" and waits for the auto-revert
+  // timer instead. The in-flight state forces a neutral "Testing…" render between clicks so
+  // the visual reset is always perceivable, even when the round-trip is instant.
+  const [testInFlight, setTestInFlight] = useState(false);
 
   // Auto-revert: 3.5 s after a result lands, drop it so the button returns to its neutral
   // "Test against foreground window" state. Re-runs cancel the prior timer via the cleanup
@@ -129,7 +139,7 @@ export function TargetConfigDialog({
   const [showProcessPicker, setShowProcessPicker] = useState(false);
   const [processFilter, setProcessFilter] = useState('');
 
-  const markEdited = () => { setEdited(true); setTestResult(null); };
+  const markEdited = () => { setEdited(true); setTestResult(null); setTestInFlight(false); };
 
   // Inline regex validation. We compile in the browser as a syntax check only — the backend
   // recompiles on its own (with timeout) for actual matching. Mirrors backend behavior: empty
@@ -161,7 +171,18 @@ export function TargetConfigDialog({
         const p = msg.payload as { detecting: boolean };
         setIsDetecting(p.detecting);
       } else if (msg.type === 'windowTarget:testResult') {
+        setTestInFlight(false);
         setTestResult(msg.payload as TestResult);
+      } else if (msg.type === 'windowTarget:applyConvertCompleted') {
+        // Backend confirms the combined save + convert succeeded. Dismiss the hint so a
+        // second click on the same button doesn't double-translate the already-converted
+        // actions, and reset `edited` so the dialog reflects that the typed fields are
+        // now the persisted state. The toast (alert:show) is sent separately by the
+        // backend so the user sees the confirmation regardless of whether the dialog
+        // stayed open or not.
+        setConvertHint(null);
+        setConvertHintDismissed(true);
+        setEdited(false);
       } else if (msg.type === 'process:list') {
         const p = msg.payload as { processes: ProcEntry[] };
         setProcessList(p.processes);
@@ -244,7 +265,11 @@ export function TargetConfigDialog({
     if (extras.convertDirection) {
       payload.convertDirection = extras.convertDirection;
     }
-    onSubmit(payload);
+    // Keep the dialog open on the combined "Apply target & convert" path so the toast
+    // confirmation is visible alongside it. The dialog's own success cleanup (dismissing
+    // the hint, resetting `edited`) runs when the backend emits
+    // `windowTarget:applyConvertCompleted` — see the subscribe handler.
+    onSubmit(payload, extras.convertDirection ? { keepOpen: true } : undefined);
   };
 
   const submitDisabled = (!processName.trim() && !windowTitle.trim()) || regexError !== null;
@@ -424,7 +449,12 @@ export function TargetConfigDialog({
             Keeps the row to a single 28 px line — no separate slot growing the dialog. */}
         <button
           onClick={() => {
+            // Clear in this exact order: result first (so the colored state lets go),
+            // then flag the in-flight so the render branches into "Testing…" before the
+            // backend responds. React batches both into a single re-render — user sees
+            // the neutral pending state between clicks even when the response is instant.
             setTestResult(null);
+            setTestInFlight(true);
             send({
               type: 'profile:testWindowMatch',
               payload: {
@@ -436,21 +466,27 @@ export function TargetConfigDialog({
           }}
           disabled={(!processName.trim() && !windowTitle.trim()) || regexError !== null}
           className={`mt-2 w-full h-7 px-2 text-[11px] border rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed overflow-hidden ${
-            testResult
-              ? testResult.error || !testResult.matches
-                ? 'bg-recording/10 text-recording border-recording/30 hover:bg-recording/15'
-                : 'bg-replay/10 text-replay border-replay/30 hover:bg-replay/15'
-              : 'text-text-secondary border-border-default hover:bg-bg-elevated'
+            testInFlight
+              ? 'text-text-tertiary border-border-default bg-bg-elevated/40'
+              : testResult
+                ? testResult.error || !testResult.matches
+                  ? 'bg-recording/10 text-recording border-recording/30 hover:bg-recording/15'
+                  : 'bg-replay/10 text-replay border-replay/30 hover:bg-replay/15'
+                : 'text-text-secondary border-border-default hover:bg-bg-elevated'
           }`}
-          title={testResult
-            ? (testResult.error
-                ? testResult.error
-                : `${testResult.matches ? 'Matches' : 'No match'} — ${testResult.foregroundProcess || '?'}${testResult.foregroundTitle ? ' / ' + testResult.foregroundTitle : ''}`)
-            : 'Check whether the current config matches the window in front (excluding TrueReplayer)'
+          title={testInFlight
+            ? 'Sending test request…'
+            : testResult
+              ? (testResult.error
+                  ? testResult.error
+                  : `${testResult.matches ? 'Matches' : 'No match'} — ${testResult.foregroundProcess || '?'}${testResult.foregroundTitle ? ' / ' + testResult.foregroundTitle : ''}`)
+              : 'Check whether the current config matches the window in front (excluding TrueReplayer)'
           }
         >
           <div className="truncate">
-            {testResult ? (
+            {testInFlight ? (
+              'Testing…'
+            ) : testResult ? (
               testResult.error ? (
                 testResult.error
               ) : (
