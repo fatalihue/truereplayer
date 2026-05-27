@@ -55,7 +55,19 @@ namespace TrueReplayer
         public bool EnableLoop { get; set; } = false;
         public string LoopInterval { get; set; } = "200";
         public bool LoopIntervalEnabled { get; set; } = false;
-        public bool UseCursorClick { get; set; } = false;
+        private bool _useCursorClick = false;
+        public bool UseCursorClick
+        {
+            get => _useCursorClick;
+            set
+            {
+                _useCursorClick = value;
+                // Propagate to the hook so the global Replay hotkey gate can bypass its
+                // target-foreground check while Clicker is active — Clicker doesn't replay
+                // a profile-bound macro so the active profile's target is irrelevant.
+                InputHookManager.IsCursorClickMode = value;
+            }
+        }
         public string CursorClickButton { get; set; } = "Left";
         // Clicker v2 — dedicated Clicker settings, fully decoupled from the active profile.
         // Stored in AppSettings; mirrored here for fast access. Strings (not ints) to mirror
