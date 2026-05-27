@@ -84,7 +84,20 @@ namespace TrueReplayer
         public int? SelectedInsertIndex { get; private set; }
 
         // Toolbar/StatusBar state
-        public string CurrentProfileName { get; set; } = "No Profile";
+        private string _currentProfileName = "No Profile";
+        public string CurrentProfileName
+        {
+            get => _currentProfileName;
+            set
+            {
+                _currentProfileName = value;
+                // Propagate to the hook so the global Replay hotkey gate can look up the
+                // active profile's target in _windowTargets — same registry that powers the
+                // profile-key foreground check. "No Profile" maps to null so the gate
+                // short-circuits (no profile → no target → no gating, fires as before).
+                InputHookManager.ActiveProfileName = value == "No Profile" ? null : value;
+            }
+        }
         public string? CurrentProfilePath { get; set; }
         public bool HasUnsavedChanges { get; set; }
 
@@ -1394,6 +1407,29 @@ namespace TrueReplayer
                     effH = folderGeom.Value.Height;
                 }
             }
+
+            // Mirror the hotkey gate — but adapted for the button: TR is always foreground
+            // when the user clicks Replay, so a literal IsForegroundWindowMatch would block
+            // the button entirely. Instead, refuse to start when the configured target isn't
+            // running anywhere — covers both regular and BringToFocus profiles, since neither
+            // can do anything useful when their target process isn't running. Stop is always
+            // allowed (clicking while replaying = abort). Skipped when no target is
+            // configured (preserves the "no profile" / "no target" workflows).
+            if (!mainController.IsReplayInProgress()
+                && effTarget != null
+                && (!string.IsNullOrEmpty(effTarget.ProcessName) || !string.IsNullOrEmpty(effTarget.WindowTitle)))
+            {
+                var hwnd = TrueReplayer.Helpers.WindowMatcher.FindWindow(effTarget);
+                if (hwnd == IntPtr.Zero)
+                {
+                    var label = !string.IsNullOrEmpty(effTarget.ProcessName)
+                        ? effTarget.ProcessName
+                        : effTarget.WindowTitle;
+                    SendMessage("alert:show", new { message = $"Target window not open: {label}" });
+                    return;
+                }
+            }
+
             mainController.ToggleReplay(loopEnabled, loopCount, intervalEnabled, intervalText, useVariation, variationPercent, effRelCoords, effTarget, effBringFocus, effW, effH, effGX, effGY, effRestorePos, effRestoreSz);
         }
 

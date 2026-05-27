@@ -53,6 +53,14 @@ namespace TrueReplayer
         public static volatile Dictionary<string, HotstringConfig> ProfileHotstrings = new();
         public static volatile Dictionary<string, TriggerMode> ProfileTriggerModes = new();
 
+        /// <summary>
+        /// Name of the currently-active profile (or null when "No Profile" is selected).
+        /// Used by the global Replay hotkey gate to look up the active profile's target
+        /// in <see cref="_windowTargets"/> and apply the same foreground-match rule that
+        /// profile keys already enforce. Set by WebViewBridge.CurrentProfileName's setter.
+        /// </summary>
+        public static volatile string? ActiveProfileName = null;
+
         // Tracks VK codes currently held down to suppress Windows auto-repeat. Keyed by vkCode
         // (physical key) rather than the composed hotkey string, because the composed string can
         // change between key-down and key-up if the user releases modifiers in a different order
@@ -754,6 +762,23 @@ namespace TrueReplayer
 
                         if (key == UserProfile.Current.ReplayHotkey)
                         {
+                            // Gate by the active profile's window target — same foreground rule
+                            // profile keys already enforce. Without this the global Replay would
+                            // fire from any window even when the profile is bound to a specific
+                            // target, silently running clicks/keystrokes against whatever happens
+                            // to be in front. IsForegroundWindowMatch returns true when there's
+                            // no profile, no target configured, or the active profile is in
+                            // BringToFocus mode (it'll re-focus the target itself), so the gate
+                            // is a no-op in those cases — pre-existing setups don't change.
+                            // Pass through (CallNextHookEx) instead of swallowing when the gate
+                            // rejects, so the user can still use the key for normal typing in
+                            // non-target apps. The toast for "target not running anywhere" is
+                            // emitted inside IsForegroundWindowMatch via OnProfileTargetMissing.
+                            var activeName = ActiveProfileName;
+                            if (!string.IsNullOrEmpty(activeName) && !IsForegroundWindowMatch(activeName))
+                            {
+                                return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
+                            }
                             LastTriggerHotkey = key;
                             OnHotkeyPressed?.Invoke(key);
                             return (IntPtr)1;
@@ -781,11 +806,24 @@ namespace TrueReplayer
                     {
                         // Repeat press of a global hotkey — swallow, don't re-fire
                         if (key == UserProfile.Current.RecordingHotkey
-                            || key == UserProfile.Current.ReplayHotkey
                             || key == UserProfile.Current.ProfileKeyToggleHotkey
                             || key == UserProfile.Current.ForegroundHotkey
                             || key == UserProfile.Current.ModeToggleHotkey)
                         {
+                            return (IntPtr)1;
+                        }
+                        // ReplayHotkey repeat: mirror the first-press gate. If the active
+                        // profile's target isn't foreground, pass the repeat through so the
+                        // user's natural typing in a non-target app sees auto-repeats too.
+                        // When the gate allows, swallow to prevent the action from re-firing
+                        // during a hold — the first press already triggered it.
+                        if (key == UserProfile.Current.ReplayHotkey)
+                        {
+                            var activeName = ActiveProfileName;
+                            if (!string.IsNullOrEmpty(activeName) && !IsForegroundWindowMatch(activeName))
+                            {
+                                return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
+                            }
                             return (IntPtr)1;
                         }
                     }
