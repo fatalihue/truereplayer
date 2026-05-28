@@ -104,9 +104,11 @@ export function Toolbar(_props: ToolbarProps) {
   const [showSendTextDialog, setShowSendTextDialog] = useState(false);
   const [showBrowserMenu, setShowBrowserMenu] = useState(false);
   // Conditional logic dropdown — opens a picker with the supported probe families
-  // (ImageFound / PixelColorMatch) plus two future entries marked "soon". Mirrors
-  // the Browser dropdown's open/close lifecycle so the outside-click handler can
-  // dismiss it the same way.
+  // (ImageFound / PixelColorMatch). Window-based probes were prototyped here under a
+  // "soon" tag but removed before v2.3.0 release to avoid shipping disabled UI for
+  // unbuilt features — they'll come back wired up when the engine gains the
+  // ProbeWindowExists / ProbeWindowFocused helpers. Mirrors the Browser dropdown's
+  // open/close lifecycle so the outside-click handler can dismiss it the same way.
   const [showConditionalMenu, setShowConditionalMenu] = useState(false);
   const conditionalMenuRef = useRef<HTMLDivElement>(null);
   const [showNavigateDialog, setShowNavigateDialog] = useState(false);
@@ -462,26 +464,6 @@ export function Toolbar(_props: ToolbarProps) {
                 >
                   <Pipette size={12} style={{ color: 'var(--color-action-if-fg)' }} />
                   If Pixel Color Match…
-                </button>
-                {/* Future condition families — disabled with a "soon" pill to set
-                    expectation without committing to a delivery date. Clicks no-op. */}
-                <button
-                  disabled
-                  className="w-full text-left px-3 py-1.5 text-xs text-text-disabled cursor-not-allowed flex items-center gap-2"
-                  title="Coming soon — checks whether the profile's Window Target is running"
-                >
-                  <Globe size={12} className="opacity-40" />
-                  If Window Target Exists…
-                  <span className="ml-auto text-[9.5px] px-1.5 py-px rounded bg-bg-elevated text-text-tertiary uppercase tracking-wider">soon</span>
-                </button>
-                <button
-                  disabled
-                  className="w-full text-left px-3 py-1.5 text-xs text-text-disabled cursor-not-allowed flex items-center gap-2"
-                  title="Coming soon — checks whether the profile's Window Target has focus"
-                >
-                  <Globe size={12} className="opacity-40" />
-                  If Window Target Focused…
-                  <span className="ml-auto text-[9.5px] px-1.5 py-px rounded bg-bg-elevated text-text-tertiary uppercase tracking-wider">soon</span>
                 </button>
               </div>
             )}
