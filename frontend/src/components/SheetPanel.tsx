@@ -1164,11 +1164,11 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   </div>
                 )}
               </button>
-              {/* Recapture is the only inline-with-thumbnail action now — Test match
-                  moved to the BOTTOM of the probe block so its position mirrors the
-                  Pixel editor (both end with "configure above → test at the foot of
-                  the section"). */}
-              <div className="mt-2">
+              {/* Recapture + Test match share the row below the thumbnail — both act
+                  on the captured reference (one regenerates it, the other validates
+                  it against the live screen) so they're sibling operations on the
+                  same artefact. */}
+              <div className="mt-2 flex gap-2">
                 <button
                   onClick={() => {
                     // Don't close the panel — backend handles minimise/overlay/save
@@ -1179,13 +1179,54 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     // behaviour where the editor stays open through the capture.
                     send({ type: 'waitimage:recapture', payload: { index: actionIndex } });
                   }}
-                  className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
                   title="Recapture reference image"
                 >
                   <RefreshCw size={12} />
                   Recapture
                 </button>
+                <button
+                  onClick={handleTestMatch}
+                  disabled={!action?.imagePath || testMatchRequestId != null}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Capture the screen now and report the match score"
+                >
+                  <PlayCircle size={12} />
+                  {testMatchRequestId != null ? 'Testing…' : 'Test match'}
+                </button>
               </div>
+              {/* Test match result — colour-coded by whether the score clears the
+                  tolerance threshold. Success also auto-sets the Search Region (see
+                  handler above); the inline note here confirms that side-effect so
+                  the user knows where to fine-tune it (Configure button below). */}
+              {testMatchResult && !testMatchRequestId && (
+                <div
+                  className={`mt-2 px-2 py-1.5 rounded text-[11px] font-mono border ${
+                    testMatchResult.error
+                      ? 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#C42B1C]'
+                      : testMatchResult.found
+                      ? 'border-[#0E7A0D]/40 bg-[#0E7A0D]/10 text-[#6bcb77]'
+                      : 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#ff6b6b]'
+                  }`}
+                >
+                  {testMatchResult.error ? (
+                    testMatchResult.error
+                  ) : (
+                    <>
+                      <div>
+                        Best match: {Math.round(testMatchResult.score * 100)}% at ({testMatchResult.x}, {testMatchResult.y})
+                        {testMatchResult.found ? ' ✓' : ' — below tolerance'}
+                      </div>
+                      {testMatchResult.found && (
+                        <div className="mt-1 text-[10px] opacity-80">
+                          Search region set to a ±80 px rect around this match. Use the
+                          Search Region field below to fine-tune.
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Search Region (ROI) — placed right under the Test result so the auto-set
@@ -1307,48 +1348,6 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               </div>
             )}
 
-            {/* TEST MATCH — bottom of the probe block, same position as the Pixel
-                editor's Test match. Result pill colour-coded by match outcome; success
-                also notes that the Search Region was auto-set (see handler above). */}
-            <div className="pt-1">
-              <button
-                onClick={handleTestMatch}
-                disabled={!action?.imagePath || testMatchRequestId != null}
-                className="flex items-center gap-1.5 h-7 px-2.5 text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default rounded hover:bg-bg-card hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Capture the screen now and report the match score"
-              >
-                <PlayCircle size={12} />
-                {testMatchRequestId != null ? 'Testing…' : 'Test match'}
-              </button>
-              {testMatchResult && !testMatchRequestId && (
-                <div
-                  className={`mt-2 px-2 py-1.5 rounded text-[11px] font-mono border ${
-                    testMatchResult.error
-                      ? 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#C42B1C]'
-                      : testMatchResult.found
-                      ? 'border-[#0E7A0D]/40 bg-[#0E7A0D]/10 text-[#6bcb77]'
-                      : 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#ff6b6b]'
-                  }`}
-                >
-                  {testMatchResult.error ? (
-                    testMatchResult.error
-                  ) : (
-                    <>
-                      <div>
-                        Best match: {Math.round(testMatchResult.score * 100)}% at ({testMatchResult.x}, {testMatchResult.y})
-                        {testMatchResult.found ? ' ✓' : ' — below tolerance'}
-                      </div>
-                      {testMatchResult.found && (
-                        <div className="mt-1 text-[10px] opacity-80">
-                          Search region set to a ±80 px rect around this match. Use the
-                          Search Region field above to fine-tune.
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
           </>
           )}
 
@@ -1359,8 +1358,12 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               !isIf below — IF rows do an instant single-shot probe with no timeout. */}
           {(isWaitPixelColor || isIfPixel) && (
           <>
-            {/* PIXEL TO WATCH — coords + Pick. The eyedropper grabs the colour at the same
-                time so users normally don't need to fill the colour swatch manually. */}
+            {/* PIXEL TO WATCH — coords + Pick + Test match. Pick and Test match
+                are sibling operations on the same coords (one captures them, the
+                other reads the live pixel and reports whether it matches the
+                target colour). Keeping them in the same block — Pick inline with
+                the X/Y inputs, Test match on the row below — clusters the
+                "configure the probe" and "validate the probe" actions visually. */}
             <div>
               <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">PIXEL TO WATCH</label>
               <div className="flex items-center gap-2">
@@ -1387,6 +1390,37 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   <Pipette size={12} />
                   Pick from screen
                 </button>
+              </div>
+              {/* Test match — separate row so the X/Y/Pick row stays uncluttered. */}
+              <div className="mt-2">
+                <button
+                  type="button"
+                  onClick={handleTestPixelMatch}
+                  className="flex items-center gap-1.5 h-7 px-2.5 text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default rounded hover:bg-bg-card hover:text-text-primary transition-colors"
+                  title="Read the live pixel and compare against the target colour"
+                >
+                  <PlayCircle size={12} />
+                  Test match
+                </button>
+                {testPixelResult && (
+                  <div
+                    className={`mt-2 px-2 py-1.5 rounded text-[11px] font-mono border ${
+                      testPixelResult.error
+                        ? 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#C42B1C]'
+                        : testPixelResult.matches
+                        ? 'border-[#0E7A0D]/40 bg-[#0E7A0D]/10 text-[#6bcb77]'
+                        : 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#ff6b6b]'
+                    }`}
+                  >
+                    {testPixelResult.error ? (
+                      testPixelResult.error
+                    ) : testPixelResult.matches ? (
+                      <>Sampled {testPixelResult.sampledHex}  ·  Target {pixelColor} ± {pixelTolerance} ✓</>
+                    ) : (
+                      <>Sampled {testPixelResult.sampledHex ?? 'no read'}  ·  Target {pixelColor} ± {pixelTolerance} — out of tolerance</>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1506,37 +1540,6 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               </div>
             )}
 
-            {/* TEST MATCH — bottom of the probe block. Same position + same pill
-                treatment as the WaitImage editor's Test match. */}
-            <div className="pt-1">
-              <button
-                type="button"
-                onClick={handleTestPixelMatch}
-                className="flex items-center gap-1.5 h-7 px-2.5 text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default rounded hover:bg-bg-card hover:text-text-primary transition-colors"
-              >
-                <PlayCircle size={12} />
-                Test match
-              </button>
-              {testPixelResult && (
-                <div
-                  className={`mt-2 px-2 py-1.5 rounded text-[11px] font-mono border ${
-                    testPixelResult.error
-                      ? 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#C42B1C]'
-                      : testPixelResult.matches
-                      ? 'border-[#0E7A0D]/40 bg-[#0E7A0D]/10 text-[#6bcb77]'
-                      : 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#ff6b6b]'
-                  }`}
-                >
-                  {testPixelResult.error ? (
-                    testPixelResult.error
-                  ) : testPixelResult.matches ? (
-                    <>Sampled {testPixelResult.sampledHex}  ·  Target {pixelColor} ± {pixelTolerance} ✓</>
-                  ) : (
-                    <>Sampled {testPixelResult.sampledHex ?? 'no read'}  ·  Target {pixelColor} ± {pixelTolerance} — out of tolerance</>
-                  )}
-                </div>
-              )}
-            </div>
           </>
           )}
 
