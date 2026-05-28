@@ -948,15 +948,16 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         className="grid items-center h-row border-b border-border-subtle shrink-0"
         style={{ gridTemplateColumns: [
           '28px', '50px',
-          ...(columnVisibility.action ? ['140px'] : []),
-          ...(columnVisibility.key ? ['112px'] : []),
+          // Action (152) + Key (124) absorb the 24 px previously held by the
+          // (now-removed) Toggle Columns trailing slot — split 12 / 12 between
+          // the two text-heaviest columns so long labels like "Navigate to URL"
+          // and combo keystrokes ("Ctrl+Shift+R") get more breathing room
+          // before truncation. Notes (1fr) keeps the rest of the available width.
+          ...(columnVisibility.action ? ['152px'] : []),
+          ...(columnVisibility.key ? ['124px'] : []),
           ...(columnVisibility.x ? ['65px'] : []),
           ...(columnVisibility.y ? ['65px'] : []),
           ...(columnVisibility.delay ? ['70px'] : []),
-          // The Notes column claims all remaining width (1fr). The Toggle Columns
-          // button used to live in a dedicated 24 px column to its right; that
-          // column was a dead data slot in every body row, so we moved the button
-          // inline with the Notes header text instead — see below.
           ...(columnVisibility.notes ? ['1fr'] : []),
         ].join(' ') }}
       >
@@ -993,8 +994,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           <colgroup>
             <col style={{ width: 28 }} />
             <col style={{ width: 50 }} />
-            {columnVisibility.action && <col style={{ width: 140 }} />}
-            {columnVisibility.key && <col style={{ width: 112 }} />}
+            {/* Action 152 + Key 124 match the header's gridTemplateColumns — both
+                gained 12 px from the reclaimed Toggle Columns slot so longer labels
+                ("Navigate to URL") and combo keystrokes ("Ctrl+Shift+R") have more
+                room before truncation. */}
+            {columnVisibility.action && <col style={{ width: 152 }} />}
+            {columnVisibility.key && <col style={{ width: 124 }} />}
             {columnVisibility.x && <col style={{ width: 65 }} />}
             {columnVisibility.y && <col style={{ width: 65 }} />}
             {columnVisibility.delay && <col style={{ width: 70 }} />}
@@ -1306,11 +1311,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         onFocus={armKeyCaptureTimer}
                         onKeyDown={handleKeyCaptureKeyDown}
                         onBlur={() => { disarmKeyCaptureTimer(); cancelEdit(); }}
-                        className="w-[92px] h-6 px-1 text-xs font-mono text-accent-light bg-bg-input border border-accent-solid rounded outline-none placeholder:text-accent-light/50 animate-pulse"
+                        className="w-[104px] h-6 px-1 text-xs font-mono text-accent-light bg-bg-input border border-accent-solid rounded outline-none placeholder:text-accent-light/50 animate-pulse"
                       />
                     ) : displayKey ? (
                       <span
-                        className={`inline-flex items-center translate-y-[-2px] px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input max-w-[92px] truncate ${
+                        className={`inline-flex items-center translate-y-[-2px] px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input max-w-[104px] truncate ${
                           action.actionType === 'SendText' || action.actionType.startsWith('Key') || action.actionType === 'HoldKey' || action.actionType === 'RunProfile'
                             ? 'cursor-text hover:text-accent-light'
                             : ''
