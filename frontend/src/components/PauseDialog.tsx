@@ -36,6 +36,11 @@ export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
   const [hotkeyFocused, setHotkeyFocused] = useState(false);
   const hotkeyInputRef = useRef<HTMLInputElement>(null);
   const captureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Stable refcount slot ID — generated once per dialog mount so enable and disable
+  // calls hit the same backend HashSet entry (see InputHookManager.RegisterCapture).
+  // Without this, two simultaneous capture consumers (e.g. Pause + Settings) used to
+  // stomp each other on cleanup.
+  const ownerIdRef = useRef(`pause-dialog-${crypto.randomUUID()}`);
   const { send, subscribe } = useBridge();
 
   // Idle-cancel timer for the hotkey capture field — same 4 s window the inline
@@ -70,14 +75,12 @@ export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
   // Only RUNS its body on focus; unfocus relies on the previous render's cleanup
   // to disable. Avoids the stray enabled:false message that used to fire on every
   // initial mount.
-  // KNOWN LIMITATION: hotkey:capture is a global backend toggle without refcounts.
-  // If another component (e.g. SheetPanel's pause-edit field) is simultaneously
-  // active, this dialog's cleanup will disable the hook out from under it. The UI
-  // flow today guarantees mutual exclusion (modal blocks the Sheet), but post-v2.3
-  // we should refcount hook ownership on the backend to make this safe by design.
+  // Refcounted by ownerIdRef.current — see InputHookManager.RegisterCapture. The
+  // previous "global toggle" limitation is gone: another consumer can hold capture
+  // open simultaneously and this dialog's cleanup only removes its own slot.
   useEffect(() => {
     if (!hotkeyFocused) return;
-    send({ type: 'hotkey:capture', payload: { enabled: true } });
+    send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } });
     const unsubscribe = subscribe((msg) => {
       if (msg.type !== 'hotkey:captured') return;
       const combo = msg.payload.combo;
@@ -94,7 +97,7 @@ export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
     });
     return () => {
       unsubscribe();
-      send({ type: 'hotkey:capture', payload: { enabled: false } });
+      send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } });
     };
   }, [hotkeyFocused, send, subscribe, armCaptureTimer, disarmCaptureTimer]);
 

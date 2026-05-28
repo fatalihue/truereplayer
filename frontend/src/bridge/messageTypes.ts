@@ -581,7 +581,13 @@ export type OutgoingMessage =
   // gets composed via BuildComposedKey, emitted through 'hotkey:captured', and
   // swallowed before the OS shell sees it. This is what allows binding Win+letter
   // combos that the WebView2 JS layer never receives.
-  | { type: 'hotkey:capture'; payload: { enabled: boolean } }
+  //
+  // ownerId is the refcount slot key — multiple components (Pause dialog, Sheet
+  // editor, Settings hotkey field, ...) can hold capture open simultaneously
+  // without stomping each other on cleanup (each registers under its own ID).
+  // Optional for backward compat: payloads without ownerId share a single
+  // "legacy" slot, matching pre-refcount v2.3.0 behaviour exactly.
+  | { type: 'hotkey:capture'; payload: { enabled: boolean; ownerId?: string } }
   // ── Sharing-metadata outgoing ──
   | { type: 'profile:getMetadata'; payload: { name: string } }
   | { type: 'profile:setMetadata'; payload: { name: string; description?: string | null; tags?: string[] | null; iconEmoji?: string | null } }

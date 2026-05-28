@@ -159,7 +159,45 @@ namespace TrueReplayer
         /// the shell processes its own shortcuts, and returning 1 cancels the event entirely.
         /// Auto-cancels Start/menu activation by injecting F15 when the combo includes Win/Alt
         /// plus another key (same trick used for swallowed profile hotkeys).
-        public static bool CaptureHotkeyMode { get; set; } = false;
+        ///
+        /// Refcounted by ownerId — multiple frontend consumers (Pause dialog, Sheet editor,
+        /// Settings hotkey field, etc.) can simultaneously hold the hook open without one
+        /// stomping the other on cleanup. Capture is active while any owner is registered.
+        /// Direct setter (for callers that don't have an ownerId) routes through a "legacy"
+        /// slot so old payloads still work — they share a single slot, so a refcounted owner
+        /// + a legacy caller still composes correctly.
+        public static bool CaptureHotkeyMode
+        {
+            get { lock (_captureOwnersLock) return _captureOwners.Count > 0; }
+            set { if (value) RegisterCapture("legacy"); else UnregisterCapture("legacy"); }
+        }
+
+        private static readonly HashSet<string> _captureOwners = new();
+        private static readonly object _captureOwnersLock = new();
+
+        /// Adds an owner to the capture refcount. Hook activates on the first owner; no-op
+        /// if the owner is already registered (HashSet semantics — idempotent).
+        public static void RegisterCapture(string ownerId)
+        {
+            if (string.IsNullOrEmpty(ownerId)) return;
+            lock (_captureOwnersLock) _captureOwners.Add(ownerId);
+        }
+
+        /// Removes an owner from the capture refcount. Hook deactivates when the last owner
+        /// is removed. No-op if the owner wasn't registered — keeps the API safe to call
+        /// blindly from cleanup paths.
+        public static void UnregisterCapture(string ownerId)
+        {
+            if (string.IsNullOrEmpty(ownerId)) return;
+            lock (_captureOwnersLock) _captureOwners.Remove(ownerId);
+        }
+
+        /// Zeroes the refcount. Called by MainWindow on WebView2 NavigationCompleted so a
+        /// frontend reload doesn't leave imortal owner IDs from the previous mount alive.
+        public static void ClearAllCaptures()
+        {
+            lock (_captureOwnersLock) _captureOwners.Clear();
+        }
 
         /// When true, mouse click events (Down/Up) are swallowed (not passed to the target app).
         /// Used during capture mode to capture coordinates without performing the actual click.

@@ -129,6 +129,10 @@ export function KeystrokeCaptureDialog({
   }, [initialHoldDurationMs]);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  // Stable refcount slot — see InputHookManager.RegisterCapture. Per-mount ID so
+  // enable/disable target the same slot, and a sibling consumer (Settings hotkey
+  // field, Pause dialog) can't accidentally turn the hook off via shared state.
+  const ownerIdRef = useRef(`keystroke-capture-${crypto.randomUUID()}`);
   const { send, subscribe } = useBridge();
 
   useEffect(() => {
@@ -143,7 +147,7 @@ export function KeystrokeCaptureDialog({
   // matches the old "wait for the real key" filter while still letting the user
   // see what modifiers are held mid-press.
   useEffect(() => {
-    send({ type: 'hotkey:capture', payload: { enabled: true } });
+    send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } });
     const isPureModifier = (combo: string) =>
       /^(Win|Ctrl|Alt|Shift)(\+(Win|Ctrl|Alt|Shift))*$/.test(combo);
 
@@ -160,19 +164,19 @@ export function KeystrokeCaptureDialog({
 
     const handleFocusIn = (e: FocusEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') {
-        send({ type: 'hotkey:capture', payload: { enabled: false } });
+        send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } });
       }
     };
     const handleFocusOut = (e: FocusEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') {
-        send({ type: 'hotkey:capture', payload: { enabled: true } });
+        send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } });
       }
     };
     document.addEventListener('focusin', handleFocusIn);
     document.addEventListener('focusout', handleFocusOut);
 
     return () => {
-      send({ type: 'hotkey:capture', payload: { enabled: false } });
+      send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } });
       document.removeEventListener('focusin', handleFocusIn);
       document.removeEventListener('focusout', handleFocusOut);
       unsub();

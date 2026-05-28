@@ -608,6 +608,11 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const [keyFieldFocused, setKeyFieldFocused] = useState(false);
   const keyFieldRef = useRef<HTMLInputElement>(null);
   const keyCaptureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Stable refcount slot for hotkey:capture — Sheet has two distinct capture surfaces
+  // (Pause-resume hotkey + Keystroke key field), but they're mutually exclusive at the
+  // UI level (only one panel renders at a time), so a single ownerId per Sheet mount
+  // is enough. See InputHookManager.RegisterCapture.
+  const captureOwnerIdRef = useRef(`sheet-panel-${crypto.randomUUID()}`);
   const KEY_CAPTURE_TIMEOUT_MS = 4000;
   const armKeyCaptureTimer = useCallback(() => {
     if (keyCaptureTimerRef.current) clearTimeout(keyCaptureTimerRef.current);
@@ -1532,12 +1537,12 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 onFocus={() => {
                   setPauseHotkeyFocused(true);
                   armKeyCaptureTimer();
-                  send({ type: 'hotkey:capture', payload: { enabled: true } });
+                  send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: captureOwnerIdRef.current } });
                 }}
                 onBlur={() => {
                   setPauseHotkeyFocused(false);
                   disarmKeyCaptureTimer();
-                  send({ type: 'hotkey:capture', payload: { enabled: false } });
+                  send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: captureOwnerIdRef.current } });
                 }}
                 className={`w-full h-8 px-2 text-ui font-mono bg-bg-input border rounded outline-none cursor-pointer placeholder:text-accent-light/50 ${
                   pauseHotkeyFocused

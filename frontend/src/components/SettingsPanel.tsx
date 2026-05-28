@@ -361,6 +361,10 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
   // never surprised mid-press.
   const inputRef = useRef<HTMLInputElement>(null);
   const captureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Stable refcount slot — each HotkeyInput instance owns its own slot in the backend
+  // HashSet so cleaning up one field (e.g. Profile-key toggle) doesn't disable the hook
+  // out from under another (Recording hotkey field). See InputHookManager.RegisterCapture.
+  const ownerIdRef = useRef(`settings-hotkey-${crypto.randomUUID()}`);
   const KEY_CAPTURE_TIMEOUT_MS = 4000;
   const armCaptureTimer = useCallback(() => {
     if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
@@ -414,8 +418,8 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
       type="text"
       readOnly
       value={localValue}
-      onFocus={() => { setIsFocused(true); setLocalValue(''); onFocusChange?.(true); send({ type: 'hotkey:capture', payload: { enabled: true } }); armCaptureTimer(); }}
-      onBlur={() => { setIsFocused(false); setLocalValue(value); onFocusChange?.(false); send({ type: 'hotkey:capture', payload: { enabled: false } }); disarmCaptureTimer(); }}
+      onFocus={() => { setIsFocused(true); setLocalValue(''); onFocusChange?.(true); send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } }); armCaptureTimer(); }}
+      onBlur={() => { setIsFocused(false); setLocalValue(value); onFocusChange?.(false); send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } }); disarmCaptureTimer(); }}
       className={`w-[110px] h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
         isFocused
           ? 'text-accent-light border-accent-solid animate-pulse'

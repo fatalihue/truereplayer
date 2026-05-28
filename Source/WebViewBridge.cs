@@ -1403,7 +1403,15 @@ namespace TrueReplayer
         private void HandleHotkeyCapture(JsonElement payload)
         {
             bool enabled = payload.GetProperty("enabled").GetBoolean();
-            InputHookManager.CaptureHotkeyMode = enabled;
+            // Optional ownerId — when present, register/unregister against the refcount
+            // so multiple frontend consumers can hold the hook open simultaneously without
+            // stomping each other on cleanup. Backward compat: payloads without ownerId
+            // route through a single "legacy" slot (matches the v2.3.0 behaviour exactly).
+            string ownerId = payload.TryGetProperty("ownerId", out var idProp) && idProp.ValueKind == JsonValueKind.String
+                ? idProp.GetString() ?? "legacy"
+                : "legacy";
+            if (enabled) InputHookManager.RegisterCapture(ownerId);
+            else InputHookManager.UnregisterCapture(ownerId);
         }
 
         private void HandleSelectionChanged(JsonElement payload)

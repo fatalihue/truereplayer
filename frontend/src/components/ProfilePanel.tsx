@@ -65,6 +65,11 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     return n;
   }, 0);
   const { send, subscribe } = useBridge();
+  // Stable refcount slot for hotkey:capture — assign-hotkey dialog can be triggered
+  // while Settings has its hotkey field focused (modal-over-modal isn't blocked at the
+  // route layer), and without a per-mount slot, closing one would disable the backend
+  // hook from under the other. See InputHookManager.RegisterCapture.
+  const captureOwnerIdRef = useRef(`profile-panel-${crypto.randomUUID()}`);
   const { showToast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -439,7 +444,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     // Capture mode (not just suppress): the backend low-level hook composes each keydown
     // and emits it via 'hotkey:captured'. Without this, the WebView2 JS layer never sees
     // Win+letter combos because the Windows Shell intercepts them at OS level first.
-    send({ type: 'hotkey:capture', payload: { enabled: true } });
+    send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: captureOwnerIdRef.current } });
   };
 
   const handleRemoveHotkey = (name: string) => {
@@ -615,7 +620,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   // silences exhaustive-deps without changing behaviour.
   useEffect(() => {
     if (!showHotkeyDialog) {
-      send({ type: 'hotkey:capture', payload: { enabled: false } });
+      send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: captureOwnerIdRef.current } });
     }
   }, [showHotkeyDialog, send]);
 
