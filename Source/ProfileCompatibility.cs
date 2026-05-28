@@ -76,7 +76,7 @@ namespace TrueReplayer.Services
             // Sharing-metadata round-trip itself is a 2.2 feature — anything carrying tags/description
             // came from a 2.2+ build. Older builds will ignore the metadata but load the actions fine,
             // so this is the floor for "no compatibility issues" rather than a hard requirement.
-            (p => p.Tags != null && p.Tags.Count > 0 || !string.IsNullOrEmpty(p.Description) || !string.IsNullOrEmpty(p.IconEmoji),
+            (p => (p.Tags != null && p.Tags.Count > 0) || !string.IsNullOrEmpty(p.Description) || !string.IsNullOrEmpty(p.IconEmoji),
                 new Version(2, 2, 0), "Profile sharing metadata"),
         };
 

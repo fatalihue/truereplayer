@@ -301,9 +301,9 @@ namespace TrueReplayer.Models
                 {
                     bool hasHotkey = !string.IsNullOrWhiteSpace(Key);
                     bool hasTimeout = Timeout > 0;
-                    if (hasHotkey && hasTimeout) return $"{Key} / {Timeout / 1000}s";
+                    if (hasHotkey && hasTimeout) return $"{Key} / {Timeout / 1000.0:0.##}s";
                     if (hasHotkey) return Key;
-                    if (hasTimeout) return $"{Timeout / 1000}s";
+                    if (hasTimeout) return $"{Timeout / 1000.0:0.##}s";
                     return "—";
                 }
 
@@ -335,7 +335,7 @@ namespace TrueReplayer.Models
                 if (string.IsNullOrEmpty(Key)) return "";
 
                 if (ActionType == "SendText") return Key;
-                if (ActionType == "WaitImage") return $"{Timeout / 1000}s";
+                if (ActionType == "WaitImage") return $"{Timeout / 1000.0:0.##}s";
                 if (ActionType == "BrowserNavigate") return Key;
                 if (ActionType == "RunProfile") return RepeatCount > 1 ? $"{Key} ×{RepeatCount}" : Key;
                 if (ActionType == "BrowserClick" || ActionType == "BrowserRightClick" || ActionType == "BrowserType" || ActionType == "BrowserWaitElement")

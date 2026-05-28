@@ -6179,6 +6179,11 @@ namespace TrueReplayer
             // 15s callback would fire on a dead dispatcher.
             _selectInteractionTimer?.Dispose();
             _selectInteractionTimer = null;
+
+            // Tear down the window-detection low-level mouse hook if a detect session was active
+            // when the bridge was disposed — otherwise the global hook leaks and its callback
+            // would fire into a dead instance.
+            StopWindowDetection();
         }
     }
 }

@@ -478,14 +478,6 @@ namespace TrueReplayer.Services
                     TrayIconService.ShowContextMenu();
                 }
             }
-            else if (msg == WM_SYSCOMMAND)
-            {
-                int command = wParam.ToInt32() & 0xFFF0;
-
-                // SC_MINIMIZE: normal minimize (taskbar), not tray
-                // Tray is handled by OnAppWindowClosing (X button) when System Tray is enabled
-            }
-
             return HwndHookManager.CallOriginalWndProc(hwnd, msg, wParam, lParam);
         }
 

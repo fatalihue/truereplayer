@@ -39,10 +39,18 @@ namespace TrueReplayer.Services
 
             try
             {
-                var mat = Mat.FromPixelData(bitmap.Height, bitmap.Width, MatType.CV_8UC4, bmpData.Scan0);
+                using var mat = Mat.FromPixelData(bitmap.Height, bitmap.Width, MatType.CV_8UC4, bmpData.Scan0);
                 var bgr = new Mat();
-                Cv2.CvtColor(mat, bgr, ColorConversionCodes.BGRA2BGR);
-                mat.Dispose();
+                try
+                {
+                    Cv2.CvtColor(mat, bgr, ColorConversionCodes.BGRA2BGR);
+                }
+                catch
+                {
+                    // Don't leak the destination Mat (native memory) if the colour convert throws.
+                    bgr.Dispose();
+                    throw;
+                }
                 return bgr;
             }
             finally

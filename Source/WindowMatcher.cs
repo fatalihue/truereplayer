@@ -101,7 +101,7 @@ namespace TrueReplayer.Helpers
                     if (len == 0) return false;
 
                     string fullPath = buf.ToString();
-                    string fileName = fullPath.Substring(fullPath.LastIndexOf('\\') + 1);
+                    string fileName = System.IO.Path.GetFileName(fullPath);
 
                     if (!fileName.Equals(target.ProcessName, StringComparison.OrdinalIgnoreCase))
                         return false;

@@ -350,8 +350,8 @@ namespace TrueReplayer.Services
                         // Cached virtual-screen bounds — same call signature minus 4
                         // P/Invokes per clicker tick. See NativeMethods.VirtualScreen.
                         var (vx, vy, vw, vh) = NativeMethods.VirtualScreen.Bounds;
-                        int absX = (int)(((double)(jitteredX - vx) * 65535) / (vw - 1));
-                        int absY = (int)(((double)(jitteredY - vy) * 65535) / (vh - 1));
+                        int absX = (int)(((double)(jitteredX - vx) * 65535) / Math.Max(1, vw - 1));
+                        int absY = (int)(((double)(jitteredY - vy) * 65535) / Math.Max(1, vh - 1));
                         uint posFlags = NativeMethods.MOUSEEVENTF_MOVE | NativeMethods.MOUSEEVENTF_ABSOLUTE | NativeMethods.MOUSEEVENTF_VIRTUALDESK;
                         int inputSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.INPUT));
 
@@ -1680,8 +1680,8 @@ namespace TrueReplayer.Services
             // See NativeMethods.VirtualScreen.
             var (vx, vy, vw, vh) = NativeMethods.VirtualScreen.Bounds;
 
-            int absoluteX = (int)(((double)(x - vx) * 65535) / (vw - 1));
-            int absoluteY = (int)(((double)(y - vy) * 65535) / (vh - 1));
+            int absoluteX = (int)(((double)(x - vx) * 65535) / Math.Max(1, vw - 1));
+            int absoluteY = (int)(((double)(y - vy) * 65535) / Math.Max(1, vh - 1));
 
             uint posFlags = NativeMethods.MOUSEEVENTF_MOVE
                 | NativeMethods.MOUSEEVENTF_ABSOLUTE
