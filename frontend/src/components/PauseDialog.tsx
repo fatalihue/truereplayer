@@ -59,11 +59,16 @@ export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
 
   // Activate / deactivate the backend low-level hook for hotkey capture. Without
   // this, Win+letter combos never reach the React layer (the OS shell eats them).
+  // Only RUNS its body on focus; unfocus relies on the previous render's cleanup
+  // to disable. Avoids the stray enabled:false message that used to fire on every
+  // initial mount.
+  // KNOWN LIMITATION: hotkey:capture is a global backend toggle without refcounts.
+  // If another component (e.g. SheetPanel's pause-edit field) is simultaneously
+  // active, this dialog's cleanup will disable the hook out from under it. The UI
+  // flow today guarantees mutual exclusion (modal blocks the Sheet), but post-v2.3
+  // we should refcount hook ownership on the backend to make this safe by design.
   useEffect(() => {
-    if (!hotkeyFocused) {
-      send({ type: 'hotkey:capture', payload: { enabled: false } });
-      return;
-    }
+    if (!hotkeyFocused) return;
     send({ type: 'hotkey:capture', payload: { enabled: true } });
     const unsubscribe = subscribe((msg) => {
       if (msg.type !== 'hotkey:captured') return;
@@ -176,8 +181,11 @@ export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
             </div>
           </div>
 
-          {/* Mode hint — explains what the four combinations do. Compact wording
-              avoids feeling like a tutorial; users who already know skip past. */}
+          {/* Mode hint — explains what each combination does. The no-hotkey-no-timeout
+              case is a CONFIGURATION ERROR (the replay engine silently skips a Pause row
+              with no resume condition — there's no manual-resume hook for empty Pause
+              today), so the hint explicitly tells the user to set at least one field
+              before Add becomes available. */}
           <p className="text-[11px] text-text-tertiary leading-relaxed">
             {hotkey && timeoutSeconds > 0
               ? 'Resumes on hotkey or timeout — whichever fires first.'
@@ -185,7 +193,7 @@ export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
                 ? 'Waits until the hotkey is pressed.'
                 : timeoutSeconds > 0
                   ? `Waits ${timeoutSeconds} second${timeoutSeconds === 1 ? '' : 's'} then continues.`
-                  : 'No hotkey or timeout set — replay pauses until you click Resume manually.'}
+                  : 'Set a hotkey or timeout — without either, the Pause is skipped at replay.'}
           </p>
         </div>
 
@@ -199,7 +207,8 @@ export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
           </button>
           <button
             onClick={handleConfirm}
-            className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors"
+            disabled={!hotkey && timeoutSeconds === 0}
+            className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Add
           </button>
