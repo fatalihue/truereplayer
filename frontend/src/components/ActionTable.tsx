@@ -12,6 +12,7 @@ import { SendTextDialog } from './SendTextDialog';
 import { SendTextPreview } from './SendTextPreview';
 import { RunProfileDialog } from './RunProfileDialog';
 import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
+import { PauseDialog } from './PauseDialog';
 import { BulkActionBar } from './BulkActionBar';
 import { Checkbox, CheckboxBox } from './Checkbox';
 import type { ColumnVisibility } from './Toolbar';
@@ -176,6 +177,9 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const [sendTextInsert, setSendTextInsert] = useState<{ insertIndex: number } | null>(null);
   const [runProfileInsert, setRunProfileInsert] = useState<{ insertIndex: number } | null>(null);
+  // Pause insert from the right-click submenu (Pattern B). Same dialog the toolbar
+  // mounts; opens config-first so Cancel never leaves an empty row in the grid.
+  const [pauseInsert, setPauseInsert] = useState<{ insertIndex: number } | null>(null);
   // Insert flow for the right-click submenu's "Send Keystroke…" entry. The
   // dialog handles Press / Hold internally via its Mode toggle so we don't carry
   // a mode flag through this state any more — the dialog's onConfirm result
@@ -816,6 +820,14 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
     }
     if (actionType === 'RunProfile') {
       setRunProfileInsert({ insertIndex });
+      closeContextMenu();
+      return;
+    }
+    if (actionType === 'Pause') {
+      // Pattern-B normalization mirror of the toolbar's Pause button: open the
+      // config-first dialog instead of inserting an empty row and auto-opening
+      // the Sheet. Cancel here leaves the grid untouched.
+      setPauseInsert({ insertIndex });
       closeContextMenu();
       return;
     }
@@ -1694,7 +1706,8 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
       )}
 
       {/* Insert-flow dialogs for the context menu's Insert Action submenu — Send
-          Text (body), Send Keystroke (capture + Press/Hold), Run Profile (picker). */}
+          Text (body), Send Keystroke (capture + Press/Hold), Run Profile (picker),
+          Pause (hotkey + timeout). */}
       {runProfileInsert && (
         <RunProfileDialog
           excludeProfileName={activeProfile ?? undefined}
@@ -1703,6 +1716,20 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
             setRunProfileInsert(null);
           }}
           onClose={() => setRunProfileInsert(null)}
+        />
+      )}
+
+      {pauseInsert && (
+        <PauseDialog
+          onConfirm={(key, timeoutSeconds) => {
+            const timeoutMs = Math.max(0, Math.round(timeoutSeconds * 1000));
+            send({
+              type: 'actions:insertPause',
+              payload: { key, timeoutMs, insertIndex: pauseInsert.insertIndex },
+            });
+            setPauseInsert(null);
+          }}
+          onClose={() => setPauseInsert(null)}
         />
       )}
 

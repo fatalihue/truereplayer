@@ -7,6 +7,7 @@ import { SendTextDialog } from './SendTextDialog';
 import { RunProfileDialog } from './RunProfileDialog';
 import { NavigateDialog } from './NavigateDialog';
 import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
+import { PauseDialog } from './PauseDialog';
 
 export interface ColumnVisibility {
   action: boolean;
@@ -113,6 +114,12 @@ export function Toolbar(_props: ToolbarProps) {
   const conditionalMenuRef = useRef<HTMLDivElement>(null);
   const [showNavigateDialog, setShowNavigateDialog] = useState(false);
   const [showRunProfileDialog, setShowRunProfileDialog] = useState(false);
+  // Pause modal (Pattern B normalization) — was an insert-then-Sheet flow before;
+  // now configures up-front like the other dialog-based inserts so Cancel leaves
+  // the grid untouched. The ref captures the intended insertIndex at click time
+  // because the user's selection may shift while they configure.
+  const [showPauseDialog, setShowPauseDialog] = useState(false);
+  const pauseDialogInsertIndex = useRef<number>(0);
   // Send Keystroke — unified dialog covers single press, press × N, and hold-key
   // flows via its Mode toggle. Legacy Send Key / Press Key × N / Hold Key state
   // collapsed into this one slot.
@@ -132,6 +139,18 @@ export function Toolbar(_props: ToolbarProps) {
     window.addEventListener('cmd:runprofile', handler);
     return () => window.removeEventListener('cmd:runprofile', handler);
   }, []);
+
+  // Pause from the command palette — same insertIndex-stash trick as the keystroke
+  // path below so a race during dialog config doesn't lose the original target row.
+  useEffect(() => {
+    const onPause = () => {
+      const sel = selectionRef.current;
+      pauseDialogInsertIndex.current = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+      setShowPauseDialog(true);
+    };
+    window.addEventListener('cmd:pause', onPause);
+    return () => window.removeEventListener('cmd:pause', onPause);
+  }, [actions.length, selectionRef]);
 
   // Command-palette wrappers for the three keyboard inserts. Mirrors what the
   // "Add Action" dropdown does on click: compute the insertIndex from the
@@ -373,13 +392,15 @@ export function Toolbar(_props: ToolbarProps) {
             <Type size={14} />
           </button>
 
-          {/* Pause — wait for a hotkey or a timeout before continuing replay. */}
+          {/* Pause — wait for a hotkey or a timeout before continuing replay. Now
+              opens a config-first dialog (Pattern B) instead of the old "insert empty
+              then auto-open Sheet" flow — Cancel here means no row is created at all. */}
           <button
             tabIndex={-1}
             onClick={() => {
               const sel = selectionRef.current;
-              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-              send({ type: 'actions:insertAction', payload: { actionType: 'Pause', insertIndex } });
+              pauseDialogInsertIndex.current = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+              setShowPauseDialog(true);
             }}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
@@ -579,6 +600,20 @@ export function Toolbar(_props: ToolbarProps) {
             setShowNavigateDialog(false);
           }}
           onClose={() => setShowNavigateDialog(false)}
+        />
+      )}
+
+      {showPauseDialog && (
+        <PauseDialog
+          onConfirm={(key, timeoutSeconds) => {
+            const timeoutMs = Math.max(0, Math.round(timeoutSeconds * 1000));
+            send({
+              type: 'actions:insertPause',
+              payload: { key, timeoutMs, insertIndex: pauseDialogInsertIndex.current },
+            });
+            setShowPauseDialog(false);
+          }}
+          onClose={() => setShowPauseDialog(false)}
         />
       )}
 

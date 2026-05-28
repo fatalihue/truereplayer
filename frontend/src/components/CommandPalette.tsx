@@ -155,7 +155,10 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           {
             id: 'pause', label: 'Insert Pause',
             icon: <Hourglass size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'Pause', insertIndex: computeInsertIndex() } }); onClose(); },
+            // Pattern B normalization — fire the cmd:pause event so the Toolbar
+            // opens the PauseDialog (config-first) instead of inserting an empty
+            // row that the user has to clean up if they Cancel.
+            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:pause')); },
           },
           {
             id: 'runprofile', label: 'Insert Run Profile',

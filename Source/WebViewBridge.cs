@@ -491,6 +491,7 @@ namespace TrueReplayer
                     case "actions:deleteConditional": HandleActionsDeleteConditional(payload); break;
                     case "actions:insertKeystroke": HandleInsertKeystroke(payload); break;
                     case "actions:insertHoldKey": HandleInsertHoldKey(payload); break;
+                    case "actions:insertPause": HandleInsertPause(payload); break;
                     case "actions:duplicate": HandleDuplicateActions(payload); break;
                     case "actions:addRunProfile": HandleAddRunProfile(payload); break;
                     case "actions:editRunProfile": HandleEditRunProfile(payload); break;
@@ -2180,7 +2181,12 @@ namespace TrueReplayer
                 return;
             }
 
-            // Pause: insert directly with empty hotkey + 0 timeout (user configures via Edit sheet)
+            // Pause legacy path — kept as defence against any stale caller still
+            // dispatching `actions:insertAction` with actionType="Pause". The toolbar /
+            // context menu / command palette all now go through `actions:insertPause`
+            // (config-first dialog). If anything still hits this branch, the result is
+            // a defensive empty Pause row — sheet auto-open removed so a stale caller
+            // can't accidentally re-introduce the orphan-on-Cancel UX issue.
             if (actionType == "Pause")
             {
                 int delay = int.TryParse(CustomDelay, out var pd) ? pd : 100;
@@ -2196,11 +2202,6 @@ namespace TrueReplayer
                 HasUnsavedChanges = true;
                 PushActionsUpdate();
                 mainController.UpdateButtonStates();
-                // Pause has no add-time prompt — user needs to set the resume hotkey and/or
-                // timeout via the editor before it does anything useful. Open the sheet so
-                // the freshly-inserted row doesn't sit there as a no-op until the user
-                // discovers they have to click it.
-                SendMessage("sheet:openIndex", new { index = insertIndex });
                 return;
             }
 
@@ -2585,6 +2586,47 @@ namespace TrueReplayer
                 Key = key,
                 Delay = delay,
                 HoldDurationMs = holdDuration,
+            });
+            for (int i = 0; i < actions.Count; i++)
+                actions[i].RowNumber = i + 1;
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+            mainController.UpdateButtonStates();
+        }
+
+        // Pause insert (Pattern B normalization). Replaces the previous flow where
+        // `actions:insertAction` with actionType="Pause" inserted an empty row and
+        // followed up with sheet:openIndex — a Cancel on that Sheet left an orphan
+        // row in the grid. With the dedicated PauseDialog the user configures the
+        // resume hotkey + timeout up-front; this handler just persists the result.
+        // Note: NO SendMessage("sheet:openIndex") here — the row is already fully
+        // configured by the time we get here.
+        private void HandleInsertPause(JsonElement payload)
+        {
+            var key = payload.TryGetProperty("key", out var k) && k.ValueKind == JsonValueKind.String
+                ? k.GetString() ?? ""
+                : "";
+            int insertIndex = payload.TryGetProperty("insertIndex", out var iEl) && iEl.ValueKind == JsonValueKind.Number
+                ? iEl.GetInt32()
+                : actions.Count;
+            if (insertIndex < 0 || insertIndex > actions.Count) insertIndex = actions.Count;
+
+            // Timeout is in milliseconds on the wire (frontend converts seconds → ms before
+            // sending) so the row stores the value consumed directly by ExecuteActionsAsync.
+            // Negative or absurd values clamped to a sane range: 0 = no timeout, max = 24 h.
+            int timeoutMs = 0;
+            if (payload.TryGetProperty("timeoutMs", out var t) && t.ValueKind == JsonValueKind.Number)
+                timeoutMs = Math.Max(0, Math.Min(86_400_000, t.GetInt32()));
+
+            int delay = int.TryParse(CustomDelay, out var d) ? d : 0;
+            PushUndoState();
+            actions.Insert(insertIndex, new ActionItem
+            {
+                ActionType = "Pause",
+                Key = key,
+                Timeout = timeoutMs,
+                Delay = delay,
+                Comment = "",
             });
             for (int i = 0; i < actions.Count; i++)
                 actions[i].RowNumber = i + 1;

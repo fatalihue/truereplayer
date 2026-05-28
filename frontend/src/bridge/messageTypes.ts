@@ -501,6 +501,12 @@ export type OutgoingMessage =
   | { type: 'actions:toggleSkip'; payload: { indices: number[] } }
   | { type: 'actions:reorder'; payload: { indices: number[]; targetIndex: number } }
   | { type: 'actions:insertAction'; payload: { actionType: string; insertIndex: number } }
+  // Pause insert (Pattern B normalization) — replaces the old "insertAction with
+  // actionType=Pause then auto-open Sheet" flow. The dialog captures the resume
+  // hotkey + timeout up-front; backend inserts a fully-configured row with no
+  // sheet:openIndex follow-up. Either key or timeoutMs (or both) may be empty/0
+  // for an infinite manual-resume Pause.
+  | { type: 'actions:insertPause'; payload: { key: string; timeoutMs: number; insertIndex: number } }
   // Conditional logic — inserts a single Else row just BEFORE the EndIf that matches
   // the IF at ifRowIndex. Backend forward-scans with a stack of nested IFs to find the
   // right EndIf, so the call works in nested blocks without the caller having to track
