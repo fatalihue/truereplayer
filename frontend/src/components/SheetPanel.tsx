@@ -1257,15 +1257,18 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             )}
 
             {/* TIMEOUT + ON TIMEOUT — WaitImage only. Side-by-side row identical in
-                shape to the Pixel editor's matching block. */}
+                shape to the Pixel editor's matching block. parseFloat (not parseInt)
+                preserves sub-second timeouts (e.g. 0.5) so they survive a render
+                round-trip. min={0.1} keeps NumberInput's clamp from rounding fractions
+                up to the next integer second on commit. */}
             {!isIf && (
             <div className="flex gap-2.5">
               <div className="flex-1">
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
                 <NumberInput
-                  value={parseInt(timeout, 10) || 1}
+                  value={(() => { const n = parseFloat(timeout); return Number.isFinite(n) && n > 0 ? n : 1; })()}
                   onChange={(n) => setTimeout_(String(n))}
-                  min={1}
+                  min={0.1}
                   inputWidth="w-full"
                   inputHeight="h-8"
                   ariaLabel="Timeout in seconds"
@@ -1288,17 +1291,19 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             {/* After Match — Checkbox component matches the Pixel editor's after-match
                 row. Suppressed on IF rows (the user routes click via a regular LeftClick
                 in the TRUE branch) and when waiting for disappearance (no found-location
-                to click on). */}
+                to click on). The label text is passed through Checkbox's `label` prop
+                (not a wrapping <label> element) so clicking the text correctly toggles
+                the checkbox — <label>'s for-control activation only works for native
+                form controls, not for the <button>-based Checkbox component. */}
             {!isIf && !waitImageInvert && (
               <div>
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">AFTER MATCH</label>
-                <label
-                  className="flex items-center gap-2 cursor-pointer"
+                <Checkbox
+                  checked={waitImageClickOnMatch}
+                  onChange={setWaitImageClickOnMatch}
+                  label="Click on found location"
                   title="Left-clicks the centre of the matched region as soon as it's found."
-                >
-                  <Checkbox checked={waitImageClickOnMatch} onChange={setWaitImageClickOnMatch} />
-                  <span className="text-ui text-text-secondary">Click on found location</span>
-                </label>
+                />
               </div>
             )}
 
@@ -1454,16 +1459,17 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
 
             {/* TIMEOUT + ON TIMEOUT — WaitPixelColor only. Side-by-side row identical
                 in shape to the WaitImage editor above (was a single inline row with a
-                raw text input). NumberInput keeps spinner + clamp consistent with the
-                rest of the panel. */}
+                raw text input). parseFloat + min={0.1} preserve the sub-second timeouts
+                that the previous raw text input allowed — without them, a stored 0.5
+                would clamp to 1 on the first +/- click and silently lose precision. */}
             {!isIf && (
             <div className="flex gap-2.5">
               <div className="flex-1">
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
                 <NumberInput
-                  value={parseInt(timeout, 10) || 1}
+                  value={(() => { const n = parseFloat(timeout); return Number.isFinite(n) && n > 0 ? n : 1; })()}
                   onChange={(n) => setTimeout_(String(n))}
-                  min={1}
+                  min={0.1}
                   inputWidth="w-full"
                   inputHeight="h-8"
                   ariaLabel="Timeout in seconds"
@@ -1483,20 +1489,20 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             </div>
             )}
 
-            {/* After Match — WaitPixelColor only. Uses the Checkbox component to match
-                the WaitImage editor's after-match row (was a raw <input type="checkbox">
-                before this pass). IF rows route click via a regular LeftClick in the
-                TRUE branch. */}
+            {/* After Match — WaitPixelColor only. Uses the Checkbox component's `label`
+                prop directly so clicking the text correctly toggles the checkbox — the
+                previous wrapping <label> element only activates native form controls,
+                not the <button>-based Checkbox. IF rows route click via a regular
+                LeftClick in the TRUE branch. */}
             {!isIf && !pixelInvert && (
               <div>
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">AFTER MATCH</label>
-                <label
-                  className="flex items-center gap-2 cursor-pointer"
+                <Checkbox
+                  checked={pixelClickOnMatch}
+                  onChange={setPixelClickOnMatch}
+                  label="Click on found location"
                   title="Left-clicks the watched pixel (X, Y) as soon as it matches the target colour."
-                >
-                  <Checkbox checked={pixelClickOnMatch} onChange={setPixelClickOnMatch} />
-                  <span className="text-ui text-text-secondary">Click on found location</span>
-                </label>
+                />
               </div>
             )}
 
