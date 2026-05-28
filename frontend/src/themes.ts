@@ -103,13 +103,15 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   // RunProfile's vivid blue by saturation (slate is desaturated grey-blue,
   // RunProfile is fully saturated).
   actionPauseColor: '#94a3b8',
-  // Amber — picked for conditional rows in the mockup pass. Distinct from Pause's
-  // slate (different hue family) and from SendText gold (#d4a020, darker/duller).
-  // Pause's v1 default used to be this exact hex (#fbbf24) — the v1→v2 migration
-  // at line 1579 specifically rewrites that case so users who never customized
-  // Pause silently get the new slate. Reusing the hex here is intentional and
-  // safe: the migration only swaps actionPauseColor, never actionIfColor.
-  actionIfColor: '#fbbf24',
+  // Teal — replaces the original amber (#fbbf24), which shared its hue (43°) with
+  // SendText gold (#d4a020) and was only distinguishable by brightness/saturation.
+  // At the action-pill size in the grid (~30 px wide) the two amber tones looked
+  // confusingly alike. Teal sits at 170° — 38° from Scroll mint, 28° from Key
+  // cyan, comfortably distinct from every other action. Preserves the
+  // "structural / decision" semantic without the warm-amber collision. The
+  // v2→v3 migration swaps the old #fbbf24 default for anyone who never
+  // customised the colour.
+  actionIfColor: '#2dd4bf',
   fontMono: 'Consolas',
   matchSystemTheme: false,
   darkPresetId: 'lavender-coal',
@@ -118,10 +120,11 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
 };
 
 export interface ThemeConfig {
-  // Schema version. v1 = original; v2 = post-palette-pass (PixelColor / Scroll /
-  // Pause defaults swapped). loadThemeConfig migrates v1 → v2 in place. Listed
-  // as `number` rather than a literal union so future bumps don't require a type
-  // edit at every call site.
+  // Schema version. v1 = original; v2 = palette pass (PixelColor / Scroll / Pause
+  // defaults swapped); v3 = If color moved from amber to teal to resolve hue
+  // collision with SendText gold. loadThemeConfig migrates v1 → v2 → v3 in place.
+  // Listed as `number` rather than a literal union so future bumps don't require
+  // a type edit at every call site.
   version: number;
   baseThemeId: string;
   colorOverrides: Partial<ThemeColors>;
@@ -1574,7 +1577,7 @@ export function loadThemeConfig(): ThemeConfig {
       // Merge UI settings with defaults for backwards compatibility (new fields)
       const merged: ThemeConfig = {
         ...parsed,
-        version: 2,
+        version: 3,
         uiSettings: { ...DEFAULT_UI_SETTINGS, ...parsed.uiSettings },
       };
 
@@ -1592,12 +1595,20 @@ export function loadThemeConfig(): ThemeConfig {
         if (ui.actionPauseColor === '#fbbf24') ui.actionPauseColor = DEFAULT_UI_SETTINGS.actionPauseColor;
       }
 
+      // v2 → v3 migration: If/Else/EndIf moved from amber (#fbbf24) to teal
+      // (#2dd4bf) so it no longer shares the 43° hue with SendText gold. Same
+      // "only swap if it still matches the old default" pattern as above.
+      if (parsed.version < 3) {
+        const ui = merged.uiSettings;
+        if (ui.actionIfColor === '#fbbf24') ui.actionIfColor = DEFAULT_UI_SETTINGS.actionIfColor;
+      }
+
       return merged;
     }
   } catch {
     // Not JSON — old format (plain theme ID string)
     if (getThemeById(raw)) {
-      return { version: 2, baseThemeId: raw, colorOverrides: {}, uiSettings: { ...DEFAULT_UI_SETTINGS } };
+      return { version: 3, baseThemeId: raw, colorOverrides: {}, uiSettings: { ...DEFAULT_UI_SETTINGS } };
     }
   }
 
@@ -1616,7 +1627,7 @@ export function saveThemeConfig(config: ThemeConfig): void {
 }
 
 export function makeDefaultConfig(): ThemeConfig {
-  return { version: 2, baseThemeId: DEFAULT_THEME_ID, colorOverrides: {}, uiSettings: { ...DEFAULT_UI_SETTINGS } };
+  return { version: 3, baseThemeId: DEFAULT_THEME_ID, colorOverrides: {}, uiSettings: { ...DEFAULT_UI_SETTINGS } };
 }
 
 // ── Theme Resolution ──
