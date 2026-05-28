@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, Eye } from 'lucide-react';
+import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -548,7 +548,7 @@ export function Toolbar(_props: ToolbarProps) {
               className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
               data-tip="Insert Wait (Image / Pixel Color)"
             >
-              <Eye size={14} />
+              <ScanEye size={14} />
             </button>
             {showWaitMenu && (
               <div className="absolute top-full left-0 mt-1 w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1">
