@@ -380,6 +380,17 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
   }, []);
   // Unmount cleanup — same defensive pattern as ActionTable / SheetPanel.
   useEffect(() => disarmCaptureTimer, [disarmCaptureTimer]);
+  // Release the hotkey-capture slot on unmount. Normal flow (user blurs the field
+  // before tearing down) already does this via onBlur, but tab-switching the
+  // Settings panel unmounts the input without a blur — without this, the slot
+  // would leak and the backend hook would stay armed until something else
+  // claimed and released a slot. HashSet.Remove is idempotent so this is a no-op
+  // when the slot was never registered.
+  useEffect(() => {
+    return () => {
+      send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } });
+    };
+  }, [send]);
 
   useEffect(() => {
     if (!isFocused) setLocalValue(value);

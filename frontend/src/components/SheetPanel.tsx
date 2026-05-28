@@ -608,10 +608,11 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const [keyFieldFocused, setKeyFieldFocused] = useState(false);
   const keyFieldRef = useRef<HTMLInputElement>(null);
   const keyCaptureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Stable refcount slot for hotkey:capture — Sheet has two distinct capture surfaces
-  // (Pause-resume hotkey + Keystroke key field), but they're mutually exclusive at the
-  // UI level (only one panel renders at a time), so a single ownerId per Sheet mount
-  // is enough. See InputHookManager.RegisterCapture.
+  // Stable refcount slot for hotkey:capture — only ONE surface in Sheet uses the
+  // backend low-level hook (the Pause-resume hotkey field, which has to capture
+  // Win+letter combos the WebView2 JS layer never sees). The Keystroke / KeyDown /
+  // KeyUp inline editors use plain React keydown handlers (see handleKeyCapture)
+  // and do NOT touch this slot. See InputHookManager.RegisterCapture.
   const captureOwnerIdRef = useRef(`sheet-panel-${crypto.randomUUID()}`);
   const KEY_CAPTURE_TIMEOUT_MS = 4000;
   const armKeyCaptureTimer = useCallback(() => {
@@ -626,6 +627,18 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       keyCaptureTimerRef.current = null;
     }
   }, []);
+
+  // Release the hotkey-capture slot on unmount. Normal flow (user blurs the
+  // Pause-resume hotkey field before closing the Sheet) already does this via
+  // onBlur, but Sheet can be torn down without a blur fire — backend-pushed
+  // sheet:openIndex (App.tsx) or a programmatic close while the field is focused
+  // both skip blur. HashSet.Remove is idempotent so this is a no-op when the
+  // slot was never registered.
+  useEffect(() => {
+    return () => {
+      send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: captureOwnerIdRef.current } });
+    };
+  }, [send]);
 
   // Pause-resume hotkey capture: while the field is focused, the backend low-level
   // hook composes every keypress (including Win+letter combos the WebView2 JS layer

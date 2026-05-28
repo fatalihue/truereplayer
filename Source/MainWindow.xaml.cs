@@ -291,7 +291,7 @@ namespace TrueReplayer
                 // Frontend mount is fresh — zero out any hotkey-capture owner IDs left over
                 // from the previous mount (refcount slots are tied to React refs / dialog
                 // instances, both gone after navigation). Without this, a reload during an
-                // active capture would leave orphan owners that keep the hook armed forever.
+                // active capture would leave immortal owners that keep the hook armed forever.
                 InputHookManager.ClearAllCaptures();
                 if (e.IsSuccess && bridge != null)
                 {

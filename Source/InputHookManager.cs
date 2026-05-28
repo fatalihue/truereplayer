@@ -152,24 +152,24 @@ namespace TrueReplayer
         /// Used when a UI dialog/modal is active (SendText, Rename, Hotkey Capture, ContentDialogs).
         public static bool SuppressAllHotkeys { get; set; } = false;
 
-        /// When true, the low-level keyboard hook captures every keydown, composes it with
-        /// modifier state via BuildComposedKey, fires OnHotkeyCaptured, and swallows the event.
-        /// This is what allows the UI to capture combos that the Windows Shell would otherwise
-        /// intercept (Win+letter, Alt+Tab on some setups, etc.) — WH_KEYBOARD_LL runs before
-        /// the shell processes its own shortcuts, and returning 1 cancels the event entirely.
-        /// Auto-cancels Start/menu activation by injecting F15 when the combo includes Win/Alt
-        /// plus another key (same trick used for swallowed profile hotkeys).
+        /// True while at least one owner has registered for capture mode (see
+        /// RegisterCapture / UnregisterCapture below).
+        ///
+        /// In capture mode, the low-level keyboard hook captures every keydown, composes
+        /// it with modifier state via BuildComposedKey, fires OnHotkeyCaptured, and swallows
+        /// the event. This is what allows the UI to capture combos that the Windows Shell
+        /// would otherwise intercept (Win+letter, Alt+Tab on some setups, etc.) —
+        /// WH_KEYBOARD_LL runs before the shell processes its own shortcuts, and returning
+        /// 1 cancels the event entirely. Auto-cancels Start/menu activation by injecting F15
+        /// when the combo includes Win/Alt plus another key (same trick used for swallowed
+        /// profile hotkeys).
         ///
         /// Refcounted by ownerId — multiple frontend consumers (Pause dialog, Sheet editor,
         /// Settings hotkey field, etc.) can simultaneously hold the hook open without one
         /// stomping the other on cleanup. Capture is active while any owner is registered.
-        /// Direct setter (for callers that don't have an ownerId) routes through a "legacy"
-        /// slot so old payloads still work — they share a single slot, so a refcounted owner
-        /// + a legacy caller still composes correctly.
         public static bool CaptureHotkeyMode
         {
             get { lock (_captureOwnersLock) return _captureOwners.Count > 0; }
-            set { if (value) RegisterCapture("legacy"); else UnregisterCapture("legacy"); }
         }
 
         private static readonly HashSet<string> _captureOwners = new();
@@ -193,7 +193,7 @@ namespace TrueReplayer
         }
 
         /// Zeroes the refcount. Called by MainWindow on WebView2 NavigationCompleted so a
-        /// frontend reload doesn't leave imortal owner IDs from the previous mount alive.
+        /// frontend reload doesn't leave immortal owner IDs from the previous mount alive.
         public static void ClearAllCaptures()
         {
             lock (_captureOwnersLock) _captureOwners.Clear();
