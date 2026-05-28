@@ -1164,7 +1164,11 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   </div>
                 )}
               </button>
-              <div className="mt-2 flex gap-2">
+              {/* Recapture is the only inline-with-thumbnail action now — Test match
+                  moved to the BOTTOM of the probe block so its position mirrors the
+                  Pixel editor (both end with "configure above → test at the foot of
+                  the section"). */}
+              <div className="mt-2">
                 <button
                   onClick={() => {
                     // Don't close the panel — backend handles minimise/overlay/save
@@ -1175,55 +1179,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     // behaviour where the editor stays open through the capture.
                     send({ type: 'waitimage:recapture', payload: { index: actionIndex } });
                   }}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
+                  className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
                   title="Recapture reference image"
                 >
                   <RefreshCw size={12} />
                   Recapture
                 </button>
-                <button
-                  onClick={handleTestMatch}
-                  disabled={!action?.imagePath || testMatchRequestId != null}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Capture the screen now and report the match score"
-                >
-                  <PlayCircle size={12} />
-                  {testMatchRequestId != null ? 'Testing…' : 'Test match'}
-                </button>
               </div>
-              {/* Test match result — coloured by whether the score clears the
-                  tolerance threshold. When the match succeeds, the Search Region
-                  was already auto-set by the result handler above; the inline
-                  note here just confirms that so the user notices the side-effect
-                  and knows where to tweak it (Configure Region button below). */}
-              {testMatchResult && !testMatchRequestId && (
-                <div
-                  className={`mt-2 px-2 py-1.5 rounded text-[11px] font-mono border ${
-                    testMatchResult.error
-                      ? 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#C42B1C]'
-                      : testMatchResult.found
-                      ? 'border-[#0E7A0D]/40 bg-[#0E7A0D]/10 text-[#6bcb77]'
-                      : 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#ff6b6b]'
-                  }`}
-                >
-                  {testMatchResult.error ? (
-                    testMatchResult.error
-                  ) : (
-                    <>
-                      <div>
-                        Best match: {Math.round(testMatchResult.score * 100)}% at ({testMatchResult.x}, {testMatchResult.y})
-                        {testMatchResult.found ? ' ✓' : ' — below tolerance'}
-                      </div>
-                      {testMatchResult.found && (
-                        <div className="mt-1 text-[10px] opacity-80">
-                          Search region set to a ±80 px rect around this match. Use the
-                          Search Region field below to fine-tune.
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
             </div>
 
             {/* Search Region (ROI) — placed right under the Test result so the auto-set
@@ -1257,21 +1219,57 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               </div>
             </div>
 
-            {/* Wait Until + On Timeout — WaitImage only. IF rows do a single instant
-                probe with no polling and no timeout; the equivalent "what if the probe
-                errors?" knob lives in the CONDITION section above (On probe error). */}
+            {/* TOLERANCE — own row with helper text. Mirrors Pixel's tolerance section
+                (which also sits before the time-axis fields) so the two probe editors
+                read in parallel: "what to look for → search region → how forgiving →
+                wait behavior → test it". */}
+            <div>
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TOLERANCE (%)</label>
+              <NumberInput
+                value={parseInt(confidence, 10) || 80}
+                onChange={(n) => setConfidence(String(n))}
+                min={10}
+                max={100}
+                step={5}
+                inputWidth="w-full"
+                inputHeight="h-8"
+                ariaLabel="Tolerance percent"
+              />
+              <div className="text-[10px] text-text-tertiary mt-1">
+                80% is a reasonable default. Raise toward 95 for stricter matches; drop below 70 for compressed / scaled UI elements.
+              </div>
+            </div>
+
+            {/* WAIT UNTIL — WaitImage only. IF rows route "wait for absence" via the
+                CONDITION section's Found / NOT Found toggle. */}
+            {!isIf && (
+            <div>
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">WAIT UNTIL</label>
+              <select
+                value={waitImageInvert ? 'disappears' : 'appears'}
+                onChange={(e) => setWaitImageInvert(e.target.value === 'disappears')}
+                className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              >
+                <option value="appears">Image appears</option>
+                <option value="disappears">Image disappears</option>
+              </select>
+            </div>
+            )}
+
+            {/* TIMEOUT + ON TIMEOUT — WaitImage only. Side-by-side row identical in
+                shape to the Pixel editor's matching block. */}
             {!isIf && (
             <div className="flex gap-2.5">
               <div className="flex-1">
-                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">WAIT UNTIL</label>
-                <select
-                  value={waitImageInvert ? 'disappears' : 'appears'}
-                  onChange={(e) => setWaitImageInvert(e.target.value === 'disappears')}
-                  className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-                >
-                  <option value="appears">Image appears</option>
-                  <option value="disappears">Image disappears</option>
-                </select>
+                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
+                <NumberInput
+                  value={parseInt(timeout, 10) || 1}
+                  onChange={(n) => setTimeout_(String(n))}
+                  min={1}
+                  inputWidth="w-full"
+                  inputHeight="h-8"
+                  ariaLabel="Timeout in seconds"
+                />
               </div>
               <div className="flex-1">
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">ON TIMEOUT</label>
@@ -1287,43 +1285,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             </div>
             )}
 
-            {/* Timeout / Tolerance — IF rows DO have Tolerance (it's the probe confidence
-                threshold), but no Timeout. Split the row so IF still renders Tolerance
-                full-width while WaitImage keeps both fields side-by-side. */}
-            <div className="flex gap-2.5">
-              {!isIf && (
-              <div className="flex-1">
-                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
-                <NumberInput
-                  value={parseInt(timeout, 10) || 1}
-                  onChange={(n) => setTimeout_(String(n))}
-                  min={1}
-                  inputWidth="w-full"
-                  inputHeight="h-8"
-                  ariaLabel="Timeout in seconds"
-                />
-              </div>
-              )}
-              <div className="flex-1">
-                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TOLERANCE (%)</label>
-                <NumberInput
-                  value={parseInt(confidence, 10) || 80}
-                  onChange={(n) => setConfidence(String(n))}
-                  min={10}
-                  max={100}
-                  step={5}
-                  inputWidth="w-full"
-                  inputHeight="h-8"
-                  ariaLabel="Tolerance percent"
-                />
-              </div>
-            </div>
-
-            {/* After Match — header kept for visual consistency with the other sections, but
-                the checkbox label already describes the behaviour; tooltip on hover carries the
-                longer explanation for users who linger. Suppressed on IF rows: click-on-match
-                isn't part of the MVP — the user routes that via a regular LeftClick action in
-                the TRUE branch instead. */}
+            {/* After Match — Checkbox component matches the Pixel editor's after-match
+                row. Suppressed on IF rows (the user routes click via a regular LeftClick
+                in the TRUE branch) and when waiting for disappearance (no found-location
+                to click on). */}
             {!isIf && !waitImageInvert && (
               <div>
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">AFTER MATCH</label>
@@ -1336,6 +1301,49 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 </label>
               </div>
             )}
+
+            {/* TEST MATCH — bottom of the probe block, same position as the Pixel
+                editor's Test match. Result pill colour-coded by match outcome; success
+                also notes that the Search Region was auto-set (see handler above). */}
+            <div className="pt-1">
+              <button
+                onClick={handleTestMatch}
+                disabled={!action?.imagePath || testMatchRequestId != null}
+                className="flex items-center gap-1.5 h-7 px-2.5 text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default rounded hover:bg-bg-card hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Capture the screen now and report the match score"
+              >
+                <PlayCircle size={12} />
+                {testMatchRequestId != null ? 'Testing…' : 'Test match'}
+              </button>
+              {testMatchResult && !testMatchRequestId && (
+                <div
+                  className={`mt-2 px-2 py-1.5 rounded text-[11px] font-mono border ${
+                    testMatchResult.error
+                      ? 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#C42B1C]'
+                      : testMatchResult.found
+                      ? 'border-[#0E7A0D]/40 bg-[#0E7A0D]/10 text-[#6bcb77]'
+                      : 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#ff6b6b]'
+                  }`}
+                >
+                  {testMatchResult.error ? (
+                    testMatchResult.error
+                  ) : (
+                    <>
+                      <div>
+                        Best match: {Math.round(testMatchResult.score * 100)}% at ({testMatchResult.x}, {testMatchResult.y})
+                        {testMatchResult.found ? ' ✓' : ' — below tolerance'}
+                      </div>
+                      {testMatchResult.found && (
+                        <div className="mt-1 text-[10px] opacity-80">
+                          Search region set to a ±80 px rect around this match. Use the
+                          Search Region field above to fine-tune.
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </>
           )}
 
@@ -1427,76 +1435,73 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               </div>
             </div>
 
-            {/* TIMEOUT + ON TIMEOUT — WaitPixelColor only. IF rows do an instant probe
-                with no timeout; the analogous "what if the read errors?" knob is the
-                CONDITION → On probe error dropdown rendered above the probe primitives. */}
+            {/* WAIT UNTIL — WaitPixelColor only. Same shape (own row, dropdown) and
+                same label as the WaitImage editor above. IF rows express the same
+                concept via the CONDITION section's Found / NOT Found toggle. */}
             {!isIf && (
             <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={timeout}
-                  onChange={(e) => setTimeout_(e.target.value)}
-                  className="w-20 h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">WAIT UNTIL</label>
+              <select
+                value={pixelInvert ? 'stopsMatching' : 'matches'}
+                onChange={(e) => setPixelInvert(e.target.value === 'stopsMatching')}
+                className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              >
+                <option value="matches">Colour matches</option>
+                <option value="stopsMatching">Colour stops matching</option>
+              </select>
+            </div>
+            )}
+
+            {/* TIMEOUT + ON TIMEOUT — WaitPixelColor only. Side-by-side row identical
+                in shape to the WaitImage editor above (was a single inline row with a
+                raw text input). NumberInput keeps spinner + clamp consistent with the
+                rest of the panel. */}
+            {!isIf && (
+            <div className="flex gap-2.5">
+              <div className="flex-1">
+                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
+                <NumberInput
+                  value={parseInt(timeout, 10) || 1}
+                  onChange={(n) => setTimeout_(String(n))}
+                  min={1}
+                  inputWidth="w-full"
+                  inputHeight="h-8"
+                  ariaLabel="Timeout in seconds"
                 />
-                <span className="text-[11px] text-text-tertiary">seconds</span>
-                <span className="flex-1" />
+              </div>
+              <div className="flex-1">
+                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">ON TIMEOUT</label>
                 <select
                   value={pixelOnTimeout}
                   onChange={(e) => setPixelOnTimeout(e.target.value)}
-                  className="h-7 px-2 text-ui text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                  className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
                 >
                   <option value="StopReplay">Stop replay</option>
-                  <option value="Continue">Continue anyway</option>
+                  <option value="Continue">Continue to next</option>
                 </select>
               </div>
             </div>
             )}
 
-            {/* INVERT — WaitPixelColor only. IF rows express "I want the pixel NOT to
-                match" via the CONDITION section's Found / NOT Found toggle, so the
-                inline checkbox here would be a confusing duplicate. */}
-            {!isIf && (
-            <div>
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={pixelInvert}
-                  onChange={(e) => setPixelInvert(e.target.checked)}
-                  className="w-3.5 h-3.5 accent-accent-solid"
-                />
-                <span className="text-ui text-text-secondary">Wait for the colour to DISAPPEAR</span>
-              </label>
-              <div className="text-[10px] text-text-tertiary mt-0.5 ml-5">
-                Inverts the match — useful for "cooldown indicator stops glowing red" patterns.
-              </div>
-            </div>
-            )}
-
-            {/* After Match — WaitPixelColor only. Same MVP-scope reasoning as the
-                WaitImage Click-on-match toggle above: IF rows route this via a regular
-                LeftClick in the TRUE branch. */}
+            {/* After Match — WaitPixelColor only. Uses the Checkbox component to match
+                the WaitImage editor's after-match row (was a raw <input type="checkbox">
+                before this pass). IF rows route click via a regular LeftClick in the
+                TRUE branch. */}
             {!isIf && !pixelInvert && (
               <div>
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">AFTER MATCH</label>
                 <label
-                  className="flex items-center gap-2 cursor-pointer select-none"
+                  className="flex items-center gap-2 cursor-pointer"
                   title="Left-clicks the watched pixel (X, Y) as soon as it matches the target colour."
                 >
-                  <input
-                    type="checkbox"
-                    checked={pixelClickOnMatch}
-                    onChange={(e) => setPixelClickOnMatch(e.target.checked)}
-                    className="w-3.5 h-3.5 accent-accent-solid"
-                  />
+                  <Checkbox checked={pixelClickOnMatch} onChange={setPixelClickOnMatch} />
                   <span className="text-ui text-text-secondary">Click on found location</span>
                 </label>
               </div>
             )}
 
-            {/* TEST MATCH — single button that sends a synchronous pixel:testMatch and
-                renders the result inline. Result clears on next pick / test / save. */}
+            {/* TEST MATCH — bottom of the probe block. Same position + same pill
+                treatment as the WaitImage editor's Test match. */}
             <div className="pt-1">
               <button
                 type="button"
@@ -1506,7 +1511,6 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 <PlayCircle size={12} />
                 Test match
               </button>
-              {/* Same pill treatment as WaitImage's testMatchResult. */}
               {testPixelResult && (
                 <div
                   className={`mt-2 px-2 py-1.5 rounded text-[11px] font-mono border ${
