@@ -48,6 +48,16 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "WaitPixelColor", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 1, 4), "WaitPixelColor"),
 
+            // Conditional logic (IF / ELSE / ENDIF blocks) — older builds don't understand
+            // the new action types and would treat them as no-op rows (worse: the body of
+            // a "false" branch would execute unconditionally). Pin the whole feature to
+            // 2.3.0 the moment ANY of the three structural rows appears.
+            (p => p.Actions.Any(a => !string.IsNullOrEmpty(a.ActionType) && (
+                string.Equals(a.ActionType, "If", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(a.ActionType, "Else", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(a.ActionType, "EndIf", StringComparison.OrdinalIgnoreCase))),
+                new Version(2, 3, 0), "Conditional logic (If/Else/EndIf)"),
+
             // Browser actions (BrowserClick/Type/Navigate/WaitElement/SelectOption) all rely on the
             // Chrome extension + native host bridge added in 2.1.0.
             (p => p.Actions.Any(a => !string.IsNullOrEmpty(a.ActionType) &&

@@ -40,7 +40,7 @@ const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
   ],
 };
 
-const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'Pause']);
+const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'Pause', 'If', 'Else', 'EndIf']);
 
 // #1 — Text matching modes mapped to selector prefixes
 type TextMode = 'exact' | 'contains' | 'icontains' | 'regex';
@@ -144,6 +144,14 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const [pixelOnTimeout, setPixelOnTimeout] = useState<string>('StopReplay'); // 'Continue' | 'StopReplay'
   const [pixelInvert, setPixelInvert] = useState(false);
   const [pixelClickOnMatch, setPixelClickOnMatch] = useState(false);
+
+  // Conditional logic — IF rows reuse the WaitImage / WaitPixelColor probe state
+  // above. Two extra knobs sit on top: Negate flips the branch outcome (IFNOT
+  // semantic), OnProbeError decides what happens when the probe throws/can't
+  // run. Default "TreatAsFalse" matches the C# IfOnProbeError null/default path
+  // and lets the FALSE branch fire on error; "Halt" rethrows and stops replay.
+  const [conditionNegate, setConditionNegate] = useState(false);
+  const [ifOnProbeError, setIfOnProbeError] = useState<'TreatAsFalse' | 'Halt'>('TreatAsFalse');
 
   // Eyedropper / live-test request tracking — mirrors the WaitImage testMatch /
   // mouse:pickPosition pattern. Single in-flight request at a time; the requestId
@@ -356,6 +364,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       setPixelClickOnMatch(action.pixelClickOnMatch || false);
       setTestPixelResult(null);
       setTestPixelRequestId(null);
+      // Conditional logic seeding — defaults to "Found" semantic + TreatAsFalse policy
+      // so a freshly-inserted IF row reads as the most permissive shape.
+      setConditionNegate(action.conditionNegate || false);
+      setIfOnProbeError(action.ifOnProbeError === 'Halt' ? 'Halt' : 'TreatAsFalse');
     }
   }, [action]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -363,6 +375,15 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
 
   const handleSave = useCallback(() => {
     if (actionIndex == null || !action) return;
+
+    // Conditional flags re-derived inside the callback because the outer
+    // `const isIf = ...` declarations sit FURTHER DOWN the component body
+    // (after this useCallback). TypeScript flags forward references as
+    // TS2448 / TS2454 in strict mode, even though the closure would read
+    // them correctly at runtime. Cost is one bool eval per save click.
+    const _isIf = actionType === 'If';
+    const _isIfImage = _isIf && action.conditionType === 'ImageFound';
+    const _isIfPixel = _isIf && action.conditionType === 'PixelColorMatch';
 
     if (actionType !== action.actionType) {
       send({ type: 'actions:edit', payload: { index: actionIndex, field: 'actionType', value: actionType } });
@@ -388,31 +409,38 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       send({ type: 'actions:edit', payload: { index: actionIndex, field: 'comment', value: comment } });
     }
 
-    // WaitImage-specific fields
-    if (actionType === 'WaitImage') {
-      const newTimeoutMs = Math.max(1, parseFloat(timeout) || 5) * 1000;
-      if (newTimeoutMs !== (action.timeout || 5000)) {
-        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(Math.round(newTimeoutMs)) } });
+    // WaitImage-specific fields — also runs for IF Image rows (_isIfImage), but
+    // the polling-only knobs (timeout, waitImageOnTimeout, waitImageInvert,
+    // waitImageClickOnMatch) are gated inside so they don't leak into IF rows.
+    if (actionType === 'WaitImage' || _isIfImage) {
+      if (actionType === 'WaitImage') {
+        const newTimeoutMs = Math.max(1, parseFloat(timeout) || 5) * 1000;
+        if (newTimeoutMs !== (action.timeout || 5000)) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(Math.round(newTimeoutMs)) } });
+        }
       }
       const newConfidence = Math.min(100, Math.max(10, parseInt(confidence, 10) || 80)) / 100;
       if (newConfidence !== (action.confidence || 0.8)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'confidence', value: String(newConfidence) } });
       }
-      // Only "Continue" is persisted explicitly; "StopReplay" is the default and stays null
-      // on disk to keep saved JSON minimal.
-      const persistedTimeoutMode = waitImageOnTimeout === 'Continue' ? 'Continue' : '';
-      const currentTimeoutMode = action.waitImageOnTimeout === 'Continue' ? 'Continue' : '';
-      if (persistedTimeoutMode !== currentTimeoutMode) {
-        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'waitImageOnTimeout', value: persistedTimeoutMode } });
-      }
-      if (!!waitImageInvert !== !!(action.waitImageInvert)) {
-        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'waitImageInvert', value: String(waitImageInvert) } });
-      }
-      if (!!waitImageClickOnMatch !== !!(action.waitImageClickOnMatch)) {
-        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'waitImageClickOnMatch', value: String(waitImageClickOnMatch) } });
+      if (actionType === 'WaitImage') {
+        // Only "Continue" is persisted explicitly; "StopReplay" is the default and stays null
+        // on disk to keep saved JSON minimal.
+        const persistedTimeoutMode = waitImageOnTimeout === 'Continue' ? 'Continue' : '';
+        const currentTimeoutMode = action.waitImageOnTimeout === 'Continue' ? 'Continue' : '';
+        if (persistedTimeoutMode !== currentTimeoutMode) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'waitImageOnTimeout', value: persistedTimeoutMode } });
+        }
+        if (!!waitImageInvert !== !!(action.waitImageInvert)) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'waitImageInvert', value: String(waitImageInvert) } });
+        }
+        if (!!waitImageClickOnMatch !== !!(action.waitImageClickOnMatch)) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'waitImageClickOnMatch', value: String(waitImageClickOnMatch) } });
+        }
       }
       // Search region — serialised as "x,y,w,h" or empty string. Compare against the action's
-      // current rect to avoid no-op edits (which would still bump the undo stack).
+      // current rect to avoid no-op edits (which would still bump the undo stack). Shared
+      // between WaitImage and IF Image — both use the ROI to constrain the probe.
       const currentRect = (action.waitImageSearchW && action.waitImageSearchH)
         ? `${action.waitImageSearchX || 0},${action.waitImageSearchY || 0},${action.waitImageSearchW},${action.waitImageSearchH}`
         : '';
@@ -424,14 +452,15 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       }
     }
 
-    // WaitPixelColor — persist each field separately so partial edits don't drop other
-    // settings on the floor. Timeout is shared with WaitImage so the conversion logic
-    // matches (seconds → ms, >= 1 s). Empty X/Y/colour fields are sent as empty strings
-    // and stored as null on the backend, surfacing as immediate-timeout at runtime.
-    if (actionType === 'WaitPixelColor') {
-      const newTimeoutMs = Math.max(1, parseFloat(timeout) || 5) * 1000;
-      if (newTimeoutMs !== (action.timeout || 5000)) {
-        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(Math.round(newTimeoutMs)) } });
+    // WaitPixelColor — also runs for IF Pixel rows (_isIfPixel) for the shared probe
+    // fields (pixelX/Y/Color/Tolerance). Polling-only knobs (timeout, pixelOnTimeout,
+    // pixelInvert, pixelClickOnMatch) are gated inside so they don't leak into IF rows.
+    if (actionType === 'WaitPixelColor' || _isIfPixel) {
+      if (actionType === 'WaitPixelColor') {
+        const newTimeoutMs = Math.max(1, parseFloat(timeout) || 5) * 1000;
+        if (newTimeoutMs !== (action.timeout || 5000)) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(Math.round(newTimeoutMs)) } });
+        }
       }
       const trimmedX = pixelX.trim();
       const trimmedY = pixelY.trim();
@@ -458,16 +487,33 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       if (newTol !== (action.pixelTolerance ?? 0)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'pixelTolerance', value: String(newTol) } });
       }
-      const persistedPxTimeout = pixelOnTimeout === 'Continue' ? 'Continue' : '';
-      const currentPxTimeout = action.pixelOnTimeout === 'Continue' ? 'Continue' : '';
-      if (persistedPxTimeout !== currentPxTimeout) {
-        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'pixelOnTimeout', value: persistedPxTimeout } });
+      if (actionType === 'WaitPixelColor') {
+        const persistedPxTimeout = pixelOnTimeout === 'Continue' ? 'Continue' : '';
+        const currentPxTimeout = action.pixelOnTimeout === 'Continue' ? 'Continue' : '';
+        if (persistedPxTimeout !== currentPxTimeout) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'pixelOnTimeout', value: persistedPxTimeout } });
+        }
+        if (!!pixelInvert !== !!(action.pixelInvert)) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'pixelInvert', value: String(pixelInvert) } });
+        }
+        if (!!pixelClickOnMatch !== !!(action.pixelClickOnMatch)) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'pixelClickOnMatch', value: String(pixelClickOnMatch) } });
+        }
       }
-      if (!!pixelInvert !== !!(action.pixelInvert)) {
-        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'pixelInvert', value: String(pixelInvert) } });
+    }
+
+    // Conditional-logic-specific fields — only fire when actually editing an IF row.
+    // ifOnProbeError persists "Halt" only; "TreatAsFalse" stays null on disk (matches
+    // the WaitImage / WaitPixelColor "Continue" convention). conditionNegate persists
+    // as a plain boolean.
+    if (_isIf) {
+      if (!!conditionNegate !== !!(action.conditionNegate)) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'conditionNegate', value: String(conditionNegate) } });
       }
-      if (!!pixelClickOnMatch !== !!(action.pixelClickOnMatch)) {
-        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'pixelClickOnMatch', value: String(pixelClickOnMatch) } });
+      const persistedErr = ifOnProbeError === 'Halt' ? 'Halt' : '';
+      const currentErr = action.ifOnProbeError === 'Halt' ? 'Halt' : '';
+      if (persistedErr !== currentErr) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'ifOnProbeError', value: persistedErr } });
       }
     }
 
@@ -548,7 +594,11 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     }
 
     onClose();
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, send, onClose]);
+    // isIf / isIfImage / isIfPixel intentionally NOT in deps: they're pure-derived
+    // from actionType + action.conditionType which are already in the array, so the
+    // callback rebinds whenever those change. Listing the derived flags would also
+    // be a forward-reference error (they're declared further down the component body).
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, send, onClose]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
@@ -868,6 +918,16 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const isWaitPixelColor = actionType === 'WaitPixelColor';
   const isPause = actionType === 'Pause';
   const isBrowser = actionType.startsWith('Browser');
+  // Conditional logic — three structural row types. isIfImage / isIfPixel
+  // discriminate which probe family the IF row uses, gating which sub-editor
+  // (WaitImage's image picker vs WaitPixelColor's pixel + colour fields) renders.
+  // Else/EndIf are pure structural markers — their editor is a Notes-only stub.
+  const isIf = actionType === 'If';
+  const isElse = actionType === 'Else';
+  const isEndIf = actionType === 'EndIf';
+  const isIfImage = isIf && action?.conditionType === 'ImageFound';
+  const isIfPixel = isIf && action?.conditionType === 'PixelColorMatch';
+  const isConditional = isIf || isElse || isEndIf;
   const isBrowserType = actionType === 'BrowserType';
   const isBrowserNavigate = actionType === 'BrowserNavigate';
   const isBrowserWait = actionType === 'BrowserWaitElement';
@@ -928,6 +988,11 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               <span>
                 Action #{(actionIndex ?? 0) + 1} — {isWaitImage ? 'Wait Image'
                   : isWaitPixelColor ? 'Wait Pixel Color'
+                  : isIfImage ? 'If Image Found'
+                  : isIfPixel ? 'If Pixel Color Match'
+                  : isIf ? 'If'
+                  : isElse ? 'Else'
+                  : isEndIf ? 'End If'
                   : actionType === 'BrowserClick' ? 'Left Click'
                   : actionType === 'BrowserRightClick' ? 'Right Click'
                   : actionType === 'BrowserType' ? 'Input Text'
@@ -989,8 +1054,74 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           </div>
           )}
 
-          {/* WaitImage Settings */}
-          {isWaitImage && (
+          {/* CONDITION — IF rows only. Two stacked controls:
+                • Found / NOT Found segmented toggle drives ConditionNegate. The labels
+                  read as the user-facing branch semantic ("fire TRUE branch when found"
+                  vs "fire TRUE branch when NOT found"); on disk this is just a flip of
+                  the conditionNegate bool. NOT Found is the IFNOT scenario from the
+                  user's example list.
+                • On Probe Error dropdown drives IfOnProbeError. "Treat as false" (the
+                  default) lets the FALSE branch fire on probe exception — graceful for
+                  flaky screen captures. "Halt replay" rethrows so the user notices.
+              Sits ABOVE the WaitImage / WaitPixelColor sub-editor so it reads as the
+              top-of-mind question ("what does this IF do?") before the user dives into
+              the probe configuration. */}
+          {isIf && (
+          <>
+            <div>
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">CONDITION</label>
+              <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setConditionNegate(false)}
+                  className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
+                    !conditionNegate
+                      ? 'bg-bg-elevated text-text-primary'
+                      : 'text-text-tertiary hover:text-text-secondary'
+                  }`}
+                  title="TRUE branch fires when the probe succeeds (image / pixel found)"
+                >
+                  Found
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConditionNegate(true)}
+                  className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
+                    conditionNegate
+                      ? 'bg-bg-elevated text-text-primary'
+                      : 'text-text-tertiary hover:text-text-secondary'
+                  }`}
+                  title="TRUE branch fires when the probe FAILS (image / pixel NOT found) — IFNOT"
+                >
+                  NOT Found
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">ON PROBE ERROR</label>
+              <select
+                value={ifOnProbeError}
+                onChange={(e) => setIfOnProbeError(e.target.value === 'Halt' ? 'Halt' : 'TreatAsFalse')}
+                className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              >
+                <option value="TreatAsFalse">Treat as false (default)</option>
+                <option value="Halt">Halt replay</option>
+              </select>
+              <div className="text-[10px] text-text-tertiary mt-1">
+                Default: probe exception falls through to the FALSE branch so the replay continues.
+                Halt rethrows so flaky probes don't silently mask bugs.
+              </div>
+            </div>
+          </>
+          )}
+
+          {/* WaitImage Settings — also rendered for IF rows whose ConditionType is
+              ImageFound (isIfImage). The probe internals (reference image, search
+              region, confidence) are shared; the time-axis fields (Timeout, OnTimeout,
+              Wait-for-disappear, Click-on-match) only apply to the polling WaitImage
+              action and are gated below with !isIf. */}
+          {(isWaitImage || isIfImage) && (
           <>
             {/* Thumbnail + Recapture + Test match — thumbnail is clickable to open the cropper
                 for fine-tuning the reference (no need to revisit the screen state). */}
@@ -1108,8 +1239,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               </div>
             </div>
 
-            {/* Wait Until + On Timeout — both options in each select are self-explanatory now
-                that ON TIMEOUT is collapsed to just two values, so no help line needed. */}
+            {/* Wait Until + On Timeout — WaitImage only. IF rows do a single instant
+                probe with no polling and no timeout; the equivalent "what if the probe
+                errors?" knob lives in the CONDITION section above (On probe error). */}
+            {!isIf && (
             <div className="flex gap-2.5">
               <div className="flex-1">
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">WAIT UNTIL</label>
@@ -1134,10 +1267,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 </select>
               </div>
             </div>
+            )}
 
-            {/* Timeout / Tolerance — parent stores as string for back-compat with the
-                rest of SheetPanel state. parseInt with NaN-safe fallback to current min. */}
+            {/* Timeout / Tolerance — IF rows DO have Tolerance (it's the probe confidence
+                threshold), but no Timeout. Split the row so IF still renders Tolerance
+                full-width while WaitImage keeps both fields side-by-side. */}
             <div className="flex gap-2.5">
+              {!isIf && (
               <div className="flex-1">
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
                 <NumberInput
@@ -1149,6 +1285,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   ariaLabel="Timeout in seconds"
                 />
               </div>
+              )}
               <div className="flex-1">
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TOLERANCE (%)</label>
                 <NumberInput
@@ -1166,8 +1303,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
 
             {/* After Match — header kept for visual consistency with the other sections, but
                 the checkbox label already describes the behaviour; tooltip on hover carries the
-                longer explanation for users who linger. */}
-            {!waitImageInvert && (
+                longer explanation for users who linger. Suppressed on IF rows: click-on-match
+                isn't part of the MVP — the user routes that via a regular LeftClick action in
+                the TRUE branch instead. */}
+            {!isIf && !waitImageInvert && (
               <div>
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">AFTER MATCH</label>
                 <label
@@ -1182,11 +1321,12 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           </>
           )}
 
-          {/* WaitPixelColor Settings — lighter-weight sibling of WaitImage. Watches a single
-              screen pixel for a target colour within a per-channel tolerance, then either
-              proceeds, halts, or stops the replay (same OnTimeout vocabulary). Eyedropper
-              button fills X/Y + colour from a single screen click in one shot. */}
-          {isWaitPixelColor && (
+          {/* WaitPixelColor Settings — also rendered for IF rows whose ConditionType is
+              PixelColorMatch (isIfPixel). The probe primitives (pixel coords, target
+              colour, tolerance) are shared verbatim with WaitPixelColor; the polling-
+              specific knobs (Timeout, OnTimeout, Invert, ClickOnMatch) are gated with
+              !isIf below — IF rows do an instant single-shot probe with no timeout. */}
+          {(isWaitPixelColor || isIfPixel) && (
           <>
             {/* PIXEL TO WATCH — coords + Pick. The eyedropper grabs the colour at the same
                 time so users normally don't need to fill the colour swatch manually. */}
@@ -1269,15 +1409,17 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               </div>
             </div>
 
-            {/* TIMEOUT + ON TIMEOUT — mirrors the WaitImage block layout so users moving
-                between the two action types see the same controls in the same place. */}
+            {/* TIMEOUT + ON TIMEOUT — WaitPixelColor only. IF rows do an instant probe
+                with no timeout; the analogous "what if the read errors?" knob is the
+                CONDITION → On probe error dropdown rendered above the probe primitives. */}
+            {!isIf && (
             <div>
               <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT</label>
               <div className="flex items-center gap-2">
                 <input
                   type="text"
                   value={timeout}
-                  onChange={(e) => setTimeout(e.target.value)}
+                  onChange={(e) => setTimeout_(e.target.value)}
                   className="w-20 h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
                 />
                 <span className="text-[11px] text-text-tertiary">seconds</span>
@@ -1292,9 +1434,12 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 </select>
               </div>
             </div>
+            )}
 
-            {/* INVERT — checkbox. Same visual treatment as the WaitImage "Click on found
-                location" toggle above for consistency. */}
+            {/* INVERT — WaitPixelColor only. IF rows express "I want the pixel NOT to
+                match" via the CONDITION section's Found / NOT Found toggle, so the
+                inline checkbox here would be a confusing duplicate. */}
+            {!isIf && (
             <div>
               <label className="flex items-center gap-2 cursor-pointer select-none">
                 <input
@@ -1309,9 +1454,12 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 Inverts the match — useful for "cooldown indicator stops glowing red" patterns.
               </div>
             </div>
+            )}
 
-            {/* After Match — gated by !invert to mirror the WaitImage block above. */}
-            {!pixelInvert && (
+            {/* After Match — WaitPixelColor only. Same MVP-scope reasoning as the
+                WaitImage Click-on-match toggle above: IF rows route this via a regular
+                LeftClick in the TRUE branch. */}
+            {!isIf && !pixelInvert && (
               <div>
                 <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">AFTER MATCH</label>
                 <label
@@ -1998,7 +2146,12 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             </div>
           )}
 
-          {/* Delay */}
+          {/* Delay — hidden for conditional structural rows. IF rows don't have a
+              meaningful "delay AFTER" (the probe is instant and the branch is taken
+              before the next action fires its own delay); Else/EndIf are pure markers
+              the engine walks past with zero work. Keeping the field would just invite
+              users to set a value that gets silently ignored. */}
+          {!isConditional && (
           <div>
             <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">DELAY (ms)</label>
             <NumberInput
@@ -2010,6 +2163,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               ariaLabel="Delay in milliseconds"
             />
           </div>
+          )}
 
           {/* Notes */}
           <div>

@@ -64,6 +64,18 @@ export interface ActionItem {
   pixelOnTimeout?: string | null;     // "Halt" | "Continue" | "StopReplay"
   pixelInvert?: boolean;              // wait for colour to DISAPPEAR
   pixelClickOnMatch?: boolean;        // left-click (X,Y) once match condition is satisfied
+  // ── Conditional logic (IF / ELSE / ENDIF) ──
+  // IF rows reuse the WaitImage / WaitPixelColor probe fields above. conditionType
+  // selects which probe family is meaningful: "ImageFound" uses imagePath/confidence/
+  // waitImageSearch*; "PixelColorMatch" uses pixelX/pixelY/pixelColor/pixelTolerance.
+  // null/undefined on Else/EndIf and every non-conditional action.
+  conditionType?: string | null;
+  // IFNOT semantic — inverts the probe outcome so the TRUE branch fires when the
+  // probe FAILS. Default false (clean JSON when unused).
+  conditionNegate?: boolean;
+  // null/undefined = "TreatAsFalse" (probe exception → walk FALSE branch). "Halt"
+  // rethrows and stops replay. Mirrors waitImageOnTimeout's vocabulary.
+  ifOnProbeError?: string | null;
 }
 
 // #2 — Selector alternative returned by the picker
@@ -489,6 +501,25 @@ export type OutgoingMessage =
   | { type: 'actions:toggleSkip'; payload: { indices: number[] } }
   | { type: 'actions:reorder'; payload: { indices: number[]; targetIndex: number } }
   | { type: 'actions:insertAction'; payload: { actionType: string; insertIndex: number } }
+  // Conditional logic — inserts a single Else row just BEFORE the EndIf that matches
+  // the IF at ifRowIndex. Backend forward-scans with a stack of nested IFs to find the
+  // right EndIf, so the call works in nested blocks without the caller having to track
+  // depth. PushUndoState is fired so the user can Ctrl+Z the Else they just added.
+  | { type: 'actions:addElseBranch'; payload: { ifRowIndex: number } }
+  // Conditional logic — capture-first insert. conditionType selects which probe family
+  // the new IF uses: 'ImageFound' runs the same screen overlay region-pick as WaitImage
+  // and the captured image becomes the IF's reference; 'PixelColorMatch' runs the same
+  // point-pick as WaitPixelColor and the captured X/Y/colour become the IF's probe data.
+  // After capture, the backend inserts {If, EndIf} as a pair at insertIndex and
+  // auto-opens the Sheet on the new IF row. If the user hits Esc during capture, nothing
+  // is inserted — same "cancel means cancel" rule the Wait* flows follow.
+  | { type: 'actions:insertConditional'; payload: { conditionType: 'ImageFound' | 'PixelColorMatch'; insertIndex: number } }
+  // Conditional logic — delete the entire IF/ELSE/ENDIF block. Backend forward-scans
+  // from ifRowIndex with a nested-IF stack to find the matching EndIf, then removes
+  // the contiguous range [ifRowIndex..endIfIdx] inclusive (covers body + optional ELSE
+  // + body + ENDIF). Wired from the row-actions menu's Delete on IF rows so deleting an
+  // IF alone never orphans its body. PushUndoState fires so the deletion is reversible.
+  | { type: 'actions:deleteConditional'; payload: { ifRowIndex: number } }
   // Insert a single Keystroke action (atomic combo like "Alt+Tab", "Ctrl+Shift+T").
   // Unlike insertKey which expands a single tap into a KeyDown+KeyUp pair, insertKeystroke
   // creates ONE row holding the whole combo as a "+"-joined string. The replay engine

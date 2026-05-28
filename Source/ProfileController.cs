@@ -34,6 +34,15 @@ namespace TrueReplayer.Controllers
         private DateTime suppressWatcherUntil = DateTime.MinValue;
 
         public ObservableCollection<ProfileEntry> ProfileEntries { get; } = new();
+
+        /// <summary>
+        /// Optional callback fired when a load-time operation surfaces a user-facing
+        /// notice (currently: ConditionalBlockValidator auto-repair on profile load).
+        /// The bridge wires this to SendMessage("alert:show", { message }) so the
+        /// frontend renders a toast. Wrapped in null-check so headless test contexts
+        /// don't have to provide one.
+        /// </summary>
+        public Action<string>? OnAlert { get; set; }
         private Dictionary<string, WindowTarget> _cachedWindowTargets = new();
         // Built during LoadProfileListAsync — maps sanitized profile folder name → set of
         // ImagePath filenames referenced by WaitImage actions. Used by ImageStorageService
@@ -194,6 +203,18 @@ namespace TrueReplayer.Controllers
 
                 if (profile != null)
                 {
+                    // Repair any unbalanced IF/ELSE/ENDIF blocks before handing the profile
+                    // to the rest of the app — the replay engine assumes the validator has
+                    // already run and won't second-guess hand-edited JSON. Idempotent + a
+                    // no-op for profiles without any conditionals.
+                    var blockFix = ConditionalBlockValidator.ValidateAndRepairBlocks(profile.Actions);
+                    if (blockFix.HadFixups)
+                    {
+                        var name = Path.GetFileNameWithoutExtension(path);
+                        DiagnosticLog.Info($"[ConditionalBlocks] Auto-repaired '{name}': removed {blockFix.OrphansRemoved} orphan(s), appended {blockFix.EndIfsAppended} synthetic ENDIF(s)");
+                        OnAlert?.Invoke(FormatBlockFixupToast(name, blockFix));
+                    }
+
                     UserProfile.Current = profile;
                     AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
                     UserProfile.Current.LastProfileDirectory = Path.GetDirectoryName(path)!;
@@ -229,9 +250,37 @@ namespace TrueReplayer.Controllers
             if (profile == null)
             {
                 System.Diagnostics.Debug.WriteLine($"Falha ao carregar o perfil '{profileName}' do arquivo '{entry.FilePath}'.");
+                return profile;
+            }
+
+            // Same validator hook as LoadProfileAsync — also covers sub-profile calls via
+            // RunProfile (MainWindow wires SetProfileLookup → this method) so a nested
+            // RunProfile target that's hand-edited with an unbalanced block gets repaired
+            // before the engine's BuildBlockMap runs over it.
+            var blockFix = ConditionalBlockValidator.ValidateAndRepairBlocks(profile.Actions);
+            if (blockFix.HadFixups)
+            {
+                DiagnosticLog.Info($"[ConditionalBlocks] Auto-repaired '{profileName}': removed {blockFix.OrphansRemoved} orphan(s), appended {blockFix.EndIfsAppended} synthetic ENDIF(s)");
+                OnAlert?.Invoke(FormatBlockFixupToast(profileName, blockFix));
             }
 
             return profile;
+        }
+
+        /// <summary>
+        /// Builds a one-line human-readable summary of what the conditional-block validator
+        /// just fixed up. Reads naturally on a toast ("Auto-repaired 'X': appended 2 EndIf,
+        /// removed 1 orphan"). Pluralisation handled by branching strings rather than a
+        /// helper because the two counters are independent and rarely both non-zero.
+        /// </summary>
+        private static string FormatBlockFixupToast(string profileName, ConditionalBlockValidator.BlockValidationResult fix)
+        {
+            var parts = new List<string>(2);
+            if (fix.EndIfsAppended > 0)
+                parts.Add($"appended {fix.EndIfsAppended} EndIf{(fix.EndIfsAppended == 1 ? "" : "s")}");
+            if (fix.OrphansRemoved > 0)
+                parts.Add($"removed {fix.OrphansRemoved} orphan{(fix.OrphansRemoved == 1 ? "" : "s")}");
+            return $"Auto-repaired conditional blocks in '{profileName}': {string.Join(", ", parts)}";
         }
 
         public async Task SaveProfileByNameAsync(string profileName, UserProfile profile)
@@ -343,12 +392,20 @@ namespace TrueReplayer.Controllers
                         if (hasTarget)
                             _cachedWindowTargets[name] = profile.TargetWindow!;
 
-                        // Collect WaitImage references for orphan-PNG cleanup at startup.
+                        // Collect referenced PNG filenames for orphan-cleanup at startup.
+                        // IF rows with ConditionType="ImageFound" share the same per-profile
+                        // ImagePath storage as WaitImage — leaving them out of the reference
+                        // set causes the cleanup to delete the captured PNG and the Sheet
+                        // reopens with an empty thumbnail after the next restart.
                         var refs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         foreach (var a in profile.Actions)
                         {
-                            if (a.ActionType == "WaitImage" && !string.IsNullOrEmpty(a.ImagePath))
+                            if (string.IsNullOrEmpty(a.ImagePath)) continue;
+                            if (a.ActionType == "WaitImage"
+                                || (a.ActionType == "If" && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)))
+                            {
                                 refs.Add(a.ImagePath);
+                            }
                         }
                         _referencedImagesByProfile[ImageStorageService.GetSanitizedProfileFolder(name)] = refs;
                     }
@@ -925,11 +982,16 @@ namespace TrueReplayer.Controllers
                 var profile = await LoadProfileByNameAsync(name);
                 if (profile == null) continue;
 
-                // Collect WaitImage reference images
+                // Collect reference images for WaitImage AND IF Image rows — both share the
+                // same per-profile PNG storage, so an exported envelope that bundles only the
+                // WaitImage PNGs would arrive at the receiver with broken IF Image rows.
                 Dictionary<string, string>? images = null;
                 foreach (var action in profile.Actions)
                 {
-                    if (action.ActionType == "WaitImage" && !string.IsNullOrEmpty(action.ImagePath))
+                    if (string.IsNullOrEmpty(action.ImagePath)) continue;
+                    bool refsImage = action.ActionType == "WaitImage"
+                        || (action.ActionType == "If" && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
+                    if (refsImage)
                     {
                         var base64 = ImageStorageService.ReadAsBase64(name, action.ImagePath);
                         if (base64 != null)

@@ -15,11 +15,13 @@ namespace TrueReplayer.Services
         /// File.Move can throw transient UnauthorizedAccessException / IOException on
         /// Windows when something briefly holds the destination file open — antivirus
         /// real-time scan (Defender, third-party AV), File Explorer preview pane,
-        /// indexing services, OneDrive/Dropbox sync agents. The window is usually
-        /// <100ms, so a tiny retry loop with backoff turns these into invisible
-        /// transients instead of save failures the user sees as a crash dialog.
+        /// indexing services, OneDrive/Dropbox sync agents. Some scanners hold the
+        /// lock for 1-3 seconds on newly-written temp files, so the retry window has
+        /// to outlast them. 8 attempts at 30/60/120/240/480/960/1920ms ≈ 3.8s total
+        /// covers >95 % of real-world scanner windows without blocking save for so
+        /// long that the user thinks the app froze.
         /// </summary>
-        private const int MoveRetryAttempts = 5;
+        private const int MoveRetryAttempts = 8;
         private const int MoveRetryInitialDelayMs = 30;
 
         private static void MoveWithRetry(string tempPath, string filePath)
@@ -32,13 +34,13 @@ namespace TrueReplayer.Services
                     File.Move(tempPath, filePath, overwrite: true);
                     return;
                 }
-                catch (UnauthorizedAccessException) when (attempt < MoveRetryAttempts - 1)
+                catch (Exception ex) when (ex is UnauthorizedAccessException || ex is IOException)
                 {
-                    Thread.Sleep(delay);
-                    delay *= 2;  // 30, 60, 120, 240 → ~450ms total cap
-                }
-                catch (IOException) when (attempt < MoveRetryAttempts - 1)
-                {
+                    if (attempt == MoveRetryAttempts - 1)
+                    {
+                        DiagnosticLog.Info($"[FileHelper] MoveWithRetry exhausted {MoveRetryAttempts} attempts for '{filePath}'. Last error: {ex.GetType().Name}: {ex.Message}. Likely a sustained file lock (antivirus real-time scan, search indexer, cloud-sync agent, or another process holding the file open).");
+                        throw;
+                    }
                     Thread.Sleep(delay);
                     delay *= 2;
                 }
@@ -55,13 +57,17 @@ namespace TrueReplayer.Services
                     File.Move(tempPath, filePath, overwrite: true);
                     return;
                 }
-                catch (UnauthorizedAccessException) when (attempt < MoveRetryAttempts - 1)
+                catch (Exception ex) when (ex is UnauthorizedAccessException || ex is IOException)
                 {
-                    await Task.Delay(delay);
-                    delay *= 2;
-                }
-                catch (IOException) when (attempt < MoveRetryAttempts - 1)
-                {
+                    // On every attempt EXCEPT the last, we back off and retry. On the last
+                    // attempt we log the diagnostic with file context (so post-mortem doesn't
+                    // need to grep the stack trace for the path) and rethrow so the caller
+                    // surfaces the error in the usual way.
+                    if (attempt == MoveRetryAttempts - 1)
+                    {
+                        DiagnosticLog.Info($"[FileHelper] MoveWithRetry exhausted {MoveRetryAttempts} attempts for '{filePath}'. Last error: {ex.GetType().Name}: {ex.Message}. Likely a sustained file lock (antivirus real-time scan, search indexer, cloud-sync agent, or another process holding the file open).");
+                        throw;
+                    }
                     await Task.Delay(delay);
                     delay *= 2;
                 }

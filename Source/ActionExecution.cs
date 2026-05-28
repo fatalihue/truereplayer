@@ -974,12 +974,115 @@ namespace TrueReplayer.Services
         /// this method again with the sub-profile's actions. Honors the same cancellation token,
         /// delay variation and skip behavior as the top-level loop.
         /// </summary>
+        // ── Conditional logic: block map ─────────────────────────────────────
+        // Single O(n) pass over the action list pre-computing:
+        //   elseOf[ifIndex]  = index of matching ELSE row (only when one exists)
+        //   endIfOf[ifIndex] = index of matching ENDIF row
+        //   endIfOf[elseIdx] = same ENDIF, so the engine can jump from inside a
+        //                       TRUE-branch body — when it hits the ELSE boundary —
+        //                       all the way to the closing ENDIF (skipping the FALSE body).
+        // Orphan ELSE / ENDIF (no open IF on the stack) are silently ignored at runtime;
+        // the load-time validator should have stripped them, but the engine stays
+        // graceful if a hand-edited profile slipped through.
+        private static (Dictionary<int, int> elseOf, Dictionary<int, int> endIfOf) BuildBlockMap(List<ActionItem> actions)
+        {
+            var elseOf = new Dictionary<int, int>();
+            var endIfOf = new Dictionary<int, int>();
+            var stack = new Stack<int>();
+            for (int i = 0; i < actions.Count; i++)
+            {
+                var t = actions[i].ActionType;
+                if (string.Equals(t, "If", StringComparison.OrdinalIgnoreCase))
+                {
+                    stack.Push(i);
+                }
+                else if (string.Equals(t, "Else", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (stack.Count > 0) elseOf[stack.Peek()] = i;
+                }
+                else if (string.Equals(t, "EndIf", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (stack.Count > 0)
+                    {
+                        int ifIdx = stack.Pop();
+                        endIfOf[ifIdx] = i;
+                        if (elseOf.TryGetValue(ifIdx, out int elseIdx))
+                            endIfOf[elseIdx] = i;
+                    }
+                }
+            }
+            return (elseOf, endIfOf);
+        }
+
         private async Task ExecuteActionsAsync(List<ActionItem> actions, CancellationToken token)
         {
+            // Pre-pass per call so nested RunProfile invocations each get a fresh map
+            // scoped to the sub-profile's action list. Cost is negligible (~32 B / IF row).
+            var (elseOf, endIfOf) = BuildBlockMap(actions);
+
             for (int i = 0; i < actions.Count; i++)
             {
                 if (token.IsCancellationRequested) break;
                 var action = actions[i];
+
+                // ── Conditional logic — handled before the regular Delay / Highlight /
+                // input-replay gate so block skips happen immediately (no spurious 0 ms
+                // Task.Delay) and ELSE/ENDIF don't trip the input-replay marker (they
+                // don't simulate input). Structural rows never enter the action switch.
+                if (string.Equals(action.ActionType, "If", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (action.IsSkipped)
+                    {
+                        // Block-level skip: jump past the whole IF/ELSE/ENDIF range so the
+                        // body rows of BOTH branches are elided. Mirrors the visual
+                        // "whole block is greyed out" the frontend renders for an IF row
+                        // whose IsSkipped is true. Orphan IF (no matching EndIf in the map
+                        // because the load-time validator failed somehow) → bail out to
+                        // end-of-list so the body doesn't run unconditionally. Safer than
+                        // continuing past the IF, which would execute the body as if no
+                        // IF existed and contradict the user's explicit skip.
+                        if (endIfOf.TryGetValue(i, out int endIdx))
+                            i = endIdx;
+                        else
+                            i = actions.Count;
+                        continue;
+                    }
+                    // Highlight while the probe runs — user feedback "we're checking the condition".
+                    dispatcherQueue.TryEnqueue(() => OnActionExecuting?.Invoke(action));
+                    bool branchTrue;
+                    try { branchTrue = InstantProbe(action, token); }
+                    catch (OperationCanceledException) { break; }
+                    if (!branchTrue)
+                    {
+                        // FALSE — jump to ELSE if one exists, otherwise to ENDIF. The loop's
+                        // i++ lands us on the row AFTER the structural marker (start of the
+                        // ELSE body, or the row right after the block if there's no ELSE).
+                        if (elseOf.TryGetValue(i, out int elseIdx))
+                            i = elseIdx;
+                        else
+                            i = endIfOf.GetValueOrDefault(i, i);
+                    }
+                    // TRUE → fall through; loop advances to i+1 which is the first body row.
+                    continue;
+                }
+                if (string.Equals(action.ActionType, "Else", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Encountered only when walking through the TRUE-branch body and the
+                    // loop reached the ELSE boundary. Skip the FALSE-branch body entirely
+                    // by jumping to the matching ENDIF. Orphan ELSE (no entry in the map
+                    // because the load-time validator failed to strip it) → treat as a
+                    // no-op so the rows after it run with whatever scope they were already
+                    // in. Falling through to the FALSE branch instead would execute the
+                    // wrong code path, which is worse than ignoring the orphan marker.
+                    if (endIfOf.TryGetValue(i, out int endIdx))
+                        i = endIdx;
+                    continue;
+                }
+                if (string.Equals(action.ActionType, "EndIf", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue; // structural marker — no work, no delay, no highlight
+                }
+
                 if (action.IsSkipped) continue;
                 int safeDelay = Math.Max(0, action.Delay);
                 if (_useDelayVariation && _delayVariationPercent > 0 && safeDelay > 0)
@@ -2071,6 +2174,123 @@ namespace TrueReplayer.Services
             if (action.PixelOnTimeout == "Continue") return;
             // Same swallow as HandleWaitImageTimeout — race with a fresh StartAsync.
             try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
+        }
+
+        // ── Conditional logic: instant probe ─────────────────────────────────
+        // Used by IF rows to decide which branch to take. Unlike ExecuteWaitImage /
+        // ExecuteWaitPixelColor, there's NO polling — one screen capture + match (image)
+        // or one pixel read (pixel), completes in ~tens of milliseconds. Cancellation is
+        // checked up-front; the probe itself is fast enough that we don't interleave
+        // checks during the work (MatchOnce is ~30-80 ms on 1080p, GetPixelAt is sub-ms).
+        //
+        // Returns the EFFECTIVE branch outcome — i.e. ConditionNegate is already applied.
+        // The caller treats the return value as "execute TRUE branch?" without needing
+        // to know about negation.
+        private bool InstantProbe(ActionItem action, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+
+            try
+            {
+                bool rawResult;
+                if (string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase))
+                {
+                    rawResult = ProbeImageFound(action);
+                }
+                else if (string.Equals(action.ConditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase))
+                {
+                    rawResult = ProbePixelColorMatch(action);
+                }
+                else
+                {
+                    // Unknown / unset ConditionType — return false so the FALSE branch fires.
+                    // The load-time validator should also have flagged this, but defending the
+                    // engine against a hand-edited typo keeps the replay graceful instead of
+                    // throwing on an unrecognized probe family.
+                    System.Diagnostics.Debug.WriteLine($"[InstantProbe] Unknown ConditionType '{action.ConditionType}' — treating as false");
+                    rawResult = false;
+                }
+
+                return action.ConditionNegate ? !rawResult : rawResult;
+            }
+            catch (OperationCanceledException)
+            {
+                // Cancellation always propagates regardless of error policy — the user
+                // explicitly stopped the replay; surfacing it as "no match" would let the
+                // FALSE branch run, which is wrong.
+                throw;
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Info($"[InstantProbe] Probe error ({action.ConditionType}): {ex.Message}");
+                if (string.Equals(action.IfOnProbeError, "Halt", StringComparison.OrdinalIgnoreCase))
+                    throw;
+                // TreatAsFalse (null / default): raw outcome is false, then apply Negate so
+                // the IFNOT semantics still hold (a negated IF whose probe errored still
+                // executes its TRUE branch — same as if the image weren't found).
+                return action.ConditionNegate;
+            }
+        }
+
+        private bool ProbeImageFound(ActionItem action)
+        {
+            if (string.IsNullOrEmpty(action.ImagePath)) return false;
+
+            string profileName = _getProfileName?.Invoke() ?? "default";
+            var referenceImage = ImageStorageService.LoadReferenceImage(profileName, action.ImagePath);
+            if (referenceImage == null) return false;
+
+            try
+            {
+                // Compose optional ROI the same way ExecuteWaitImage does — translate via
+                // the current relative-coord offset so a profile-bound region tracks its
+                // target window even when the user has moved the window.
+                System.Drawing.Rectangle? searchRegion = null;
+                if (action.WaitImageSearchW is int sw && action.WaitImageSearchH is int sh && sw > 0 && sh > 0)
+                {
+                    int sx = action.WaitImageSearchX ?? 0;
+                    int sy = action.WaitImageSearchY ?? 0;
+                    if (!TryResolveRelativeOffset(out int dx, out int dy))
+                    {
+                        // Rel-coords on but target window missing. With IfOnProbeError=Halt this
+                        // surfaces the error + cancels (same as WaitImage); otherwise we silently
+                        // treat as not-matched. Caller's catch above doesn't fire for this path
+                        // because it's not an exception — just a config-impossible state.
+                        if (string.Equals(action.IfOnProbeError, "Halt", StringComparison.OrdinalIgnoreCase))
+                            ReportMissingTargetWindow();
+                        return false;
+                    }
+                    searchRegion = new System.Drawing.Rectangle(sx + dx, sy + dy, sw, sh);
+                }
+
+                double confidence = action.Confidence > 0 ? action.Confidence : 0.8;
+                var matchResult = ImageMatchingService.MatchOnce(referenceImage, searchRegion);
+                return matchResult.Score >= confidence;
+            }
+            finally
+            {
+                referenceImage.Dispose();
+            }
+        }
+
+        private bool ProbePixelColorMatch(ActionItem action)
+        {
+            if (action.PixelX is not int relPx || action.PixelY is not int relPy) return false;
+            var target = PixelColorService.ParseHex(action.PixelColor);
+            if (target == null) return false;
+
+            if (!TryResolveRelativeOffset(out int dx, out int dy))
+            {
+                if (string.Equals(action.IfOnProbeError, "Halt", StringComparison.OrdinalIgnoreCase))
+                    ReportMissingTargetWindow();
+                return false;
+            }
+            int px = relPx + dx;
+            int py = relPy + dy;
+
+            var sampled = PixelColorService.GetPixelAt(px, py);
+            if (sampled is not System.Drawing.Color s) return false;
+            return PixelColorService.MatchesWithinTolerance(s, target.Value, action.PixelTolerance);
         }
 
         private void SaveTimeoutScreenshot(ActionItem action)

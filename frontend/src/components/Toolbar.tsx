@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X } from 'lucide-react';
+import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -103,6 +103,12 @@ export function Toolbar(_props: ToolbarProps) {
   const selectionRef = useSelectionRef();
   const [showSendTextDialog, setShowSendTextDialog] = useState(false);
   const [showBrowserMenu, setShowBrowserMenu] = useState(false);
+  // Conditional logic dropdown — opens a picker with the supported probe families
+  // (ImageFound / PixelColorMatch) plus two future entries marked "soon". Mirrors
+  // the Browser dropdown's open/close lifecycle so the outside-click handler can
+  // dismiss it the same way.
+  const [showConditionalMenu, setShowConditionalMenu] = useState(false);
+  const conditionalMenuRef = useRef<HTMLDivElement>(null);
   const [showNavigateDialog, setShowNavigateDialog] = useState(false);
   const [showRunProfileDialog, setShowRunProfileDialog] = useState(false);
   // Send Keystroke — unified dialog covers single press, press × N, and hold-key
@@ -180,6 +186,30 @@ export function Toolbar(_props: ToolbarProps) {
       document.removeEventListener('keydown', keyHandler, true);
     };
   }, [showBrowserMenu]);
+
+  // Same outside-click + Escape dismiss for the Conditional dropdown. Separate
+  // effect so the two menus close independently (clicking inside Browser doesn't
+  // close Conditional and vice versa).
+  useEffect(() => {
+    if (!showConditionalMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (conditionalMenuRef.current && !conditionalMenuRef.current.contains(e.target as Node)) {
+        setShowConditionalMenu(false);
+      }
+    };
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      setShowConditionalMenu(false);
+    };
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('keydown', keyHandler, true);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('keydown', keyHandler, true);
+    };
+  }, [showConditionalMenu]);
 
   // Ctrl+Z / Ctrl+Y keyboard shortcuts for undo/redo
   useEffect(() => {
@@ -389,6 +419,73 @@ export function Toolbar(_props: ToolbarProps) {
           >
             <ScanSearch size={14} />
           </button>
+
+          {/* Conditional logic — sits with the probe-based insertors (Pause / Pixel /
+              Image) because the active picker options reuse those probes as the IF
+              condition. GitBranch is the universal "branch / decision" glyph. */}
+          <div className="relative" ref={conditionalMenuRef}>
+            <button
+              tabIndex={-1}
+              onClick={() => setShowConditionalMenu(!showConditionalMenu)}
+              disabled={buttonStates.recordingActive || buttonStates.replayActive}
+              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+              data-tip="Insert Conditional (If / Else / EndIf)"
+            >
+              <GitBranch size={14} />
+            </button>
+            {showConditionalMenu && (
+              <div className="absolute top-full left-0 mt-1 w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1">
+                <div className="px-3 py-1 text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
+                  Insert Conditional
+                </div>
+                {/* Active items — reuse the WaitImage / WaitPixelColor capture flows. */}
+                <button
+                  className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
+                  onClick={() => {
+                    const sel = selectionRef.current;
+                    const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                    send({ type: 'actions:insertConditional', payload: { conditionType: 'ImageFound', insertIndex } });
+                    setShowConditionalMenu(false);
+                  }}
+                >
+                  <ScanSearch size={12} style={{ color: 'var(--color-action-if-fg)' }} />
+                  If Image Found…
+                </button>
+                <button
+                  className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
+                  onClick={() => {
+                    const sel = selectionRef.current;
+                    const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                    send({ type: 'actions:insertConditional', payload: { conditionType: 'PixelColorMatch', insertIndex } });
+                    setShowConditionalMenu(false);
+                  }}
+                >
+                  <Pipette size={12} style={{ color: 'var(--color-action-if-fg)' }} />
+                  If Pixel Color Match…
+                </button>
+                {/* Future condition families — disabled with a "soon" pill to set
+                    expectation without committing to a delivery date. Clicks no-op. */}
+                <button
+                  disabled
+                  className="w-full text-left px-3 py-1.5 text-xs text-text-disabled cursor-not-allowed flex items-center gap-2"
+                  title="Coming soon — checks whether the profile's Window Target is running"
+                >
+                  <Globe size={12} className="opacity-40" />
+                  If Window Target Exists…
+                  <span className="ml-auto text-[9.5px] px-1.5 py-px rounded bg-bg-elevated text-text-tertiary uppercase tracking-wider">soon</span>
+                </button>
+                <button
+                  disabled
+                  className="w-full text-left px-3 py-1.5 text-xs text-text-disabled cursor-not-allowed flex items-center gap-2"
+                  title="Coming soon — checks whether the profile's Window Target has focus"
+                >
+                  <Globe size={12} className="opacity-40" />
+                  If Window Target Focused…
+                  <span className="ml-auto text-[9.5px] px-1.5 py-px rounded bg-bg-elevated text-text-tertiary uppercase tracking-wider">soon</span>
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Browser Actions */}
           <div className="relative" ref={browserMenuRef}>

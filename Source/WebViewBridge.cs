@@ -160,6 +160,17 @@ namespace TrueReplayer
             this.window = window;
             this.browserBridge = browserBridge;
 
+            // Wire the profile controller's alert callback to a frontend toast so
+            // auto-repaired conditional blocks are visible to the user (today the
+            // only signal is in diagnostics.log which most users won't open).
+            // Marshal to the UI thread because the validator may run inside an
+            // async load chain on a worker thread.
+            this.profileController.OnAlert = message =>
+            {
+                if (_disposed) return;
+                dispatcherQueue.TryEnqueue(() => SendMessage("alert:show", new { message }));
+            };
+
             // Watch for browser extension events
             if (browserBridge != null)
             {
@@ -475,6 +486,9 @@ namespace TrueReplayer
                     case "actions:toggleSkip": HandleActionsToggleSkip(payload); break;
                     case "actions:reorder": HandleActionsReorder(payload); break;
                     case "actions:insertAction": HandleInsertAction(payload); break;
+                    case "actions:addElseBranch": HandleActionsAddElseBranch(payload); break;
+                    case "actions:insertConditional": HandleActionsInsertConditional(payload); break;
+                    case "actions:deleteConditional": HandleActionsDeleteConditional(payload); break;
                     case "actions:insertKeystroke": HandleInsertKeystroke(payload); break;
                     case "actions:insertHoldKey": HandleInsertHoldKey(payload); break;
                     case "actions:duplicate": HandleDuplicateActions(payload); break;
@@ -628,7 +642,13 @@ namespace TrueReplayer
                 imagePath = a.ImagePath ?? "",
                 timeout = a.Timeout,
                 confidence = a.Confidence,
-                imageBase64 = a.ActionType == "WaitImage" && !string.IsNullOrEmpty(a.ImagePath)
+                // IF Image rows reuse the same imagePath storage as WaitImage, so the
+                // Sheet panel's thumbnail + "Test match" + "Configure region" buttons all
+                // need the base64 to operate. Without the IF check here the Sheet opens
+                // "empty" right after a capture even though the row's ImagePath is set.
+                imageBase64 = !string.IsNullOrEmpty(a.ImagePath) && (
+                        a.ActionType == "WaitImage"
+                        || (a.ActionType == "If" && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)))
                     ? ImageStorageService.ReadAsBase64(profileName, a.ImagePath) ?? ""
                     : "",
                 // WaitImage extras (forwarded so the editor restores their state)
@@ -650,6 +670,16 @@ namespace TrueReplayer
                 pixelOnTimeout = a.PixelOnTimeout,
                 pixelInvert = a.PixelInvert,
                 pixelClickOnMatch = a.PixelClickOnMatch,
+                // Conditional logic (IF / ELSE / ENDIF). Forwarding these is mandatory —
+                // PushActionsUpdate is the *only* path the frontend learns of these fields,
+                // so omitting them means the editor seeds them as undefined on every reopen
+                // and the grid pill always falls back to "if image" because conditionType
+                // looks unset. Dropped on the wire for non-If rows (System.Text.Json omits
+                // nulls in anonymous-type round-trip), so the cost on non-conditional rows
+                // is just three JSON-property checks per push.
+                conditionType = a.ConditionType,
+                conditionNegate = a.ConditionNegate,
+                ifOnProbeError = a.IfOnProbeError,
                 browserText = a.BrowserText ?? "",
                 newTab = a.NewTab,
                 isSkipped = a.IsSkipped,
@@ -1046,6 +1076,11 @@ namespace TrueReplayer
                 status = "ready",
                 actions = actions.Select((a, i) => new
                 {
+                    // Mirror PushActionsUpdate which DOES emit `id`. Omitting it on the
+                    // cold-start state:init payload meant React fell back to index keys
+                    // for the very first frame, then re-keyed when the next push arrived
+                    // — selection / highlight state could briefly land on the wrong row.
+                    id = a.Id,
                     actionType = a.ActionType,
                     key = a.Key ?? "",
                     x = a.X,
@@ -1058,7 +1093,9 @@ namespace TrueReplayer
                     imagePath = a.ImagePath ?? "",
                     timeout = a.Timeout,
                     confidence = a.Confidence,
-                    imageBase64 = a.ActionType == "WaitImage" && !string.IsNullOrEmpty(a.ImagePath)
+                    imageBase64 = !string.IsNullOrEmpty(a.ImagePath) && (
+                            a.ActionType == "WaitImage"
+                            || (a.ActionType == "If" && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)))
                         ? ImageStorageService.ReadAsBase64(stateInitProfileName, a.ImagePath) ?? ""
                         : "",
                     // WaitImage extras — must match PushActionsUpdate so the editor restores
@@ -1080,6 +1117,14 @@ namespace TrueReplayer
                     pixelOnTimeout = a.PixelOnTimeout,
                     pixelInvert = a.PixelInvert,
                     pixelClickOnMatch = a.PixelClickOnMatch,
+                    // Conditional logic — same forwarding requirement as in
+                    // PushActionsUpdate. Without these, a cold start with an
+                    // IF row would arrive at React with conditionType=undefined,
+                    // collapsing the pill to "if image" fallback and clearing the
+                    // Negate / OnProbeError state in the Sheet.
+                    conditionType = a.ConditionType,
+                    conditionNegate = a.ConditionNegate,
+                    ifOnProbeError = a.IfOnProbeError,
                     browserText = a.BrowserText ?? "",
                     newTab = a.NewTab,
                     isSkipped = a.IsSkipped,
@@ -1508,15 +1553,48 @@ namespace TrueReplayer
             string dstProfile = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
             string srcProfile = _copiedSourceProfile ?? dstProfile;
 
-            foreach (var copied in _copiedActions)
+            // Auto-complete partial conditional blocks in the clipboard before paste-time
+            // insertion. Common case: the user copied { If, body } without the matching
+            // EndIf — the validator appends a synthetic EndIf so the pasted region is
+            // self-contained instead of leaking into whatever's around the paste site.
+            // Orphan ELSE/EndIf rows in the clipboard get dropped silently (same rule as
+            // load-time). Operates on a fresh list (not _copiedActions) so the user's
+            // original clipboard isn't mutated and a second paste produces the same
+            // result. Uses Clone() so the auto-complete pass and the cross-profile image
+            // CloneReferenceImage work on disjoint object identities.
+            var paste = _copiedActions.Select(a => a.Clone()).ToList();
+            var pasteFix = ConditionalBlockValidator.ValidateAndRepairBlocks(paste);
+            if (pasteFix.HadFixups)
+                DiagnosticLog.Info($"[ConditionalBlocks] Paste auto-completed: removed {pasteFix.OrphansRemoved} orphan(s), appended {pasteFix.EndIfsAppended} synthetic ENDIF(s)");
+
+            foreach (var clone in paste)
             {
-                var clone = copied.Clone();
-                // WaitImage PNG is profile-scoped — clone the file when pasting cross-profile
-                // so the dst profile owns its own reference image.
-                if (copied.ActionType == "WaitImage" && !string.IsNullOrEmpty(copied.ImagePath))
+                // `paste` already holds freshly-cloned items (auto-completed by the
+                // validator above), so we insert them directly. Image reference cloning
+                // is still per-row: a WaitImage row (or an If Image conditional) carries
+                // a profile-scoped PNG that must be duplicated into the destination
+                // profile so deleting the source doesn't break the paste.
+                bool refsImage = !string.IsNullOrEmpty(clone.ImagePath) && (
+                                    clone.ActionType == "WaitImage"
+                                    || (clone.ActionType == "If" && string.Equals(clone.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)));
+                if (refsImage)
                 {
-                    clone.ImagePath = ImageStorageService.CloneReferenceImage(srcProfile, copied.ImagePath, dstProfile)
-                                      ?? copied.ImagePath;
+                    var newPath = ImageStorageService.CloneReferenceImage(srcProfile, clone.ImagePath!, dstProfile);
+                    if (newPath != null)
+                    {
+                        clone.ImagePath = newPath;
+                    }
+                    else
+                    {
+                        // Clone failed — usually because the source profile was deleted
+                        // between copy and paste. Keeping the original ImagePath would
+                        // leave the pasted row pointing at a now-missing PNG. Clear the
+                        // reference instead so the user sees an empty thumbnail and a
+                        // visible "no image captured" hint in the Sheet, prompting them
+                        // to recapture rather than silently shipping a broken row.
+                        clone.ImagePath = null;
+                        DiagnosticLog.Info($"[Paste] Reference image clone failed for {clone.ActionType} (src='{srcProfile}' → dst='{dstProfile}'); ImagePath cleared.");
+                    }
                 }
                 clone.RowNumber = insertIndex + 1;
                 actions.Insert(insertIndex, clone);
@@ -1528,7 +1606,10 @@ namespace TrueReplayer
                 actions[i].RowNumber = i + 1;
 
             HasUnsavedChanges = true;
-            SendMessage("alert:show", new { message = $"Pasted {_copiedActions.Count} action(s)" });
+            // Use the effective paste count (may include auto-appended EndIf rows) so the
+            // toast tells the user what actually landed in the grid, not the pre-fix
+            // clipboard count.
+            SendMessage("alert:show", new { message = $"Pasted {paste.Count} action(s)" });
             PushActionsUpdate();
         }
 
@@ -1668,6 +1749,22 @@ namespace TrueReplayer
                     break;
                 case "pixelClickOnMatch":
                     action.PixelClickOnMatch = value == "true";
+                    break;
+                case "conditionType":
+                    // null/empty resets the field. Otherwise pass-through — the Sheet
+                    // only ever sends "ImageFound" or "PixelColorMatch", but a future
+                    // value ("WindowExists", "WindowFocused") would land here cleanly
+                    // without needing a bridge update.
+                    action.ConditionType = string.IsNullOrEmpty(value) ? null : value;
+                    break;
+                case "conditionNegate":
+                    action.ConditionNegate = value == "true";
+                    break;
+                case "ifOnProbeError":
+                    // Same convention as waitImageOnTimeout / pixelOnTimeout — only the
+                    // non-default "Halt" is persisted; "TreatAsFalse" stays null on disk
+                    // so existing profiles round-trip clean.
+                    action.IfOnProbeError = value == "Halt" ? "Halt" : null;
                     break;
             }
 
@@ -2131,6 +2228,297 @@ namespace TrueReplayer
             });
         }
 
+        // ── Conditional logic: Add Else branch ────────────────────────────────
+        // Inserts a single Else row just before the EndIf that matches the IF at
+        // ifRowIndex. Finding the matching EndIf is a forward scan with a nested-IF
+        // stack — same algorithm as the engine's BuildBlockMap, except localised
+        // to one starting IF so we can short-circuit as soon as we pop back to it.
+        // No-op when the index doesn't point to an IF, when no matching EndIf is
+        // found (malformed block), or when an Else already exists for this IF
+        // (the frontend's hasElse gate already prevents the click, but the backend
+        // re-validates so a duplicate addElseBranch from a stale UI is harmless).
+        private void HandleActionsAddElseBranch(JsonElement payload)
+        {
+            if (!payload.TryGetProperty("ifRowIndex", out var idxEl) || idxEl.ValueKind != JsonValueKind.Number) return;
+            int ifIdx = idxEl.GetInt32();
+            if (ifIdx < 0 || ifIdx >= actions.Count) return;
+            if (!string.Equals(actions[ifIdx].ActionType, "If", StringComparison.OrdinalIgnoreCase)) return;
+
+            // Forward-scan from the IF to find its matching EndIf, tracking nested
+            // IFs so we don't latch onto an inner block's EndIf by mistake. Also
+            // detect an existing Else along the way so we can bail without inserting
+            // a duplicate.
+            int depth = 0;
+            int endIfIdx = -1;
+            bool alreadyHasElse = false;
+            for (int i = ifIdx + 1; i < actions.Count; i++)
+            {
+                var t = actions[i].ActionType;
+                if (string.Equals(t, "If", StringComparison.OrdinalIgnoreCase))
+                {
+                    depth++;
+                }
+                else if (string.Equals(t, "Else", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (depth == 0) { alreadyHasElse = true; break; }
+                }
+                else if (string.Equals(t, "EndIf", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (depth == 0) { endIfIdx = i; break; }
+                    depth--;
+                }
+            }
+            if (alreadyHasElse || endIfIdx < 0) return;
+
+            PushUndoState();
+            actions.Insert(endIfIdx, new ActionItem
+            {
+                ActionType = "Else",
+                Delay = 0,
+                Comment = "",
+            });
+            for (int i = 0; i < actions.Count; i++)
+                actions[i].RowNumber = i + 1;
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+            mainController.UpdateButtonStates();
+        }
+
+        // ── Conditional logic: Insert IF block ────────────────────────────────
+        // Capture-first insert: the user's click in the toolbar picker routes here with
+        // a conditionType, we run the SAME screen-overlay flow WaitImage / WaitPixelColor
+        // use (so muscle memory carries over), and only after a successful capture do we
+        // insert {If, EndIf} as a pair. Esc / cancel results in zero rows inserted —
+        // matches the Wait* flows' "cancel means cancel" rule so the grid never grows a
+        // half-configured IF block.
+        private void HandleActionsInsertConditional(JsonElement payload)
+        {
+            string conditionType = payload.TryGetProperty("conditionType", out var ct) && ct.ValueKind == JsonValueKind.String
+                ? ct.GetString() ?? ""
+                : "";
+            int insertIndex = payload.TryGetProperty("insertIndex", out var iEl) && iEl.ValueKind == JsonValueKind.Number
+                ? iEl.GetInt32()
+                : actions.Count;
+            if (insertIndex < 0 || insertIndex > actions.Count) insertIndex = actions.Count;
+
+            if (string.Equals(conditionType, "ImageFound", StringComparison.OrdinalIgnoreCase))
+                _ = HandleInsertConditionalImageAsync(insertIndex);
+            else if (string.Equals(conditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase))
+                _ = HandleInsertConditionalPixelAsync(insertIndex);
+            // Unknown conditionType (e.g. future "WindowExists" from a stale frontend on
+            // an older backend) silently no-ops — better than inserting a half-configured
+            // IF the user can't interact with through the existing Sheet editor.
+        }
+
+        private async Task HandleInsertConditionalImageAsync(int insertIndex)
+        {
+            // Identical capture flow to HandleInsertWaitImageAsync above — same minimise,
+            // screenshot, region-pick overlay, ImageStorageService.SaveReferenceImage path.
+            // The only difference is what gets inserted at the end: {If, EndIf} pair
+            // sharing the same ImagePath + Confidence the WaitImage flow stores, with
+            // ConditionType set to "ImageFound" so the engine routes through InstantProbe.
+            var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
+            await Task.Delay(400);
+
+            System.Drawing.Bitmap screenshot;
+            try
+            {
+                screenshot = ScreenCaptureService.CaptureVirtualScreen();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[InsertIfImage] Screenshot failed: {ex.Message}");
+                NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
+                return;
+            }
+
+            try
+            {
+                RegionSelectionResult? selection = null;
+                var thread = new Thread(() =>
+                {
+                    System.Windows.Forms.Application.EnableVisualStyles();
+                    using var overlay = new ScreenOverlayForm(screenshot);
+                    overlay.ShowDialog();
+                    selection = overlay.GetSelectionAsync().Result;
+                });
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                await Task.Run(() => thread.Join());
+
+                dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+
+                if (selection?.CroppedImage == null) return;
+
+                string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
+                string imagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, profileName);
+                selection.CroppedImage.Dispose();
+
+                dispatcherQueue.TryEnqueue(() =>
+                {
+                    PushUndoState();
+                    actions.Insert(insertIndex, new ActionItem
+                    {
+                        ActionType = "If",
+                        ConditionType = "ImageFound",
+                        ImagePath = imagePath,
+                        Confidence = 0.8,
+                        Delay = 0,
+                        Key = "",
+                        Comment = "",
+                    });
+                    actions.Insert(insertIndex + 1, new ActionItem
+                    {
+                        ActionType = "EndIf",
+                        Delay = 0,
+                        Key = "",
+                        Comment = "",
+                    });
+                    for (int i = 0; i < actions.Count; i++)
+                        actions[i].RowNumber = i + 1;
+                    HasUnsavedChanges = true;
+                    PushActionsUpdate();
+                    mainController.UpdateButtonStates();
+                    // Auto-open the Sheet on the new IF row so the user can immediately
+                    // adjust confidence / search region / negate / on-probe-error.
+                    SendMessage("sheet:openIndex", new { index = insertIndex });
+                });
+            }
+            finally
+            {
+                screenshot.Dispose();
+            }
+        }
+
+        private async Task HandleInsertConditionalPixelAsync(int insertIndex)
+        {
+            // Mirror of HandleInsertWaitPixelColorAsync — same point-pick overlay, same
+            // relative-coord translation. End result: {If(PixelColorMatch + coords + hex),
+            // EndIf} pair inserted at insertIndex.
+            var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
+            await Task.Delay(400);
+
+            System.Drawing.Bitmap screenshot;
+            try
+            {
+                screenshot = ScreenCaptureService.CaptureVirtualScreen();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[InsertIfPixel] Screenshot failed: {ex.Message}");
+                dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+                return;
+            }
+
+            try
+            {
+                RegionSelectionResult? selection = null;
+                var thread = new Thread(() =>
+                {
+                    System.Windows.Forms.Application.EnableVisualStyles();
+                    using var overlay = new ScreenOverlayForm(
+                        screenshot,
+                        regionOnly: false,
+                        pointPick: true,
+                        hintText: "Click on the pixel to check — colour and coords are captured  •  ESC to cancel");
+                    overlay.ShowDialog();
+                    selection = overlay.GetSelectionAsync().Result;
+                });
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                await Task.Run(() => thread.Join());
+
+                dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
+
+                if (selection == null || selection.PickedColor == null) return;
+
+                int storedX = selection.ScreenX;
+                int storedY = selection.ScreenY;
+                if (TryGetRelativeCaptureOffset(out var winRect))
+                {
+                    storedX -= winRect.Left;
+                    storedY -= winRect.Top;
+                }
+
+                dispatcherQueue.TryEnqueue(() =>
+                {
+                    PushUndoState();
+                    actions.Insert(insertIndex, new ActionItem
+                    {
+                        ActionType = "If",
+                        ConditionType = "PixelColorMatch",
+                        PixelX = storedX,
+                        PixelY = storedY,
+                        PixelColor = PixelColorService.ToHex(selection.PickedColor.Value),
+                        Delay = 0,
+                        Key = "",
+                        Comment = "",
+                    });
+                    actions.Insert(insertIndex + 1, new ActionItem
+                    {
+                        ActionType = "EndIf",
+                        Delay = 0,
+                        Key = "",
+                        Comment = "",
+                    });
+                    for (int i = 0; i < actions.Count; i++)
+                        actions[i].RowNumber = i + 1;
+                    HasUnsavedChanges = true;
+                    PushActionsUpdate();
+                    mainController.UpdateButtonStates();
+                    SendMessage("sheet:openIndex", new { index = insertIndex });
+                });
+            }
+            finally
+            {
+                screenshot.Dispose();
+            }
+        }
+
+        // ── Conditional logic: Delete whole block ─────────────────────────────
+        // Forward-scan with a nested-IF stack to find the matching EndIf, then remove
+        // the contiguous range [ifIdx..endIfIdx] inclusive. Deleting only the IF would
+        // orphan its body rows — they'd execute unconditionally with no surrounding
+        // probe — and Else/EndIf alone would dangle. Block-delete is the safer default
+        // the row-actions menu wires for IF rows; body / Else / EndIf can still be
+        // deleted individually via the regular actions:delete path.
+        private void HandleActionsDeleteConditional(JsonElement payload)
+        {
+            if (!payload.TryGetProperty("ifRowIndex", out var idxEl) || idxEl.ValueKind != JsonValueKind.Number) return;
+            int ifIdx = idxEl.GetInt32();
+            if (ifIdx < 0 || ifIdx >= actions.Count) return;
+            if (!string.Equals(actions[ifIdx].ActionType, "If", StringComparison.OrdinalIgnoreCase)) return;
+
+            int depth = 0;
+            int endIfIdx = -1;
+            for (int i = ifIdx + 1; i < actions.Count; i++)
+            {
+                var t = actions[i].ActionType;
+                if (string.Equals(t, "If", StringComparison.OrdinalIgnoreCase)) depth++;
+                else if (string.Equals(t, "EndIf", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (depth == 0) { endIfIdx = i; break; }
+                    depth--;
+                }
+            }
+            // No matching EndIf — the validator should have appended one at load time,
+            // but if we got here with an unbalanced in-memory state, fall back to
+            // deleting just the IF row so the user at least gets visible progress.
+            if (endIfIdx < 0) endIfIdx = ifIdx;
+
+            PushUndoState();
+            // Remove from the END of the range so earlier indices stay valid as we go.
+            for (int i = endIfIdx; i >= ifIdx; i--)
+                actions.RemoveAt(i);
+            for (int i = 0; i < actions.Count; i++)
+                actions[i].RowNumber = i + 1;
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+            mainController.UpdateButtonStates();
+        }
+
 
         private void HandleInsertKeystroke(JsonElement payload)
         {
@@ -2381,7 +2769,16 @@ namespace TrueReplayer
         private void HandleWaitImageRecapture(JsonElement payload)
         {
             int index = payload.GetProperty("index").GetInt32();
-            if (index < 0 || index >= actions.Count || actions[index].ActionType != "WaitImage") return;
+            if (index < 0 || index >= actions.Count) return;
+            // Accept both WaitImage and IF Image rows. They share the same per-profile
+            // ImagePath storage, so the async capture flow can write back to ImagePath
+            // regardless of which family the row belongs to. The Sheet's Recapture button
+            // is gated by (isWaitImage || isIfImage) so this dispatch can be hit from
+            // either; the older WaitImage-only check silently dropped the IF Image clicks.
+            var a = actions[index];
+            bool eligible = a.ActionType == "WaitImage"
+                || (a.ActionType == "If" && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
+            if (!eligible) return;
             _ = HandleWaitImageRecaptureAsync(index);
         }
 
@@ -2543,11 +2940,19 @@ namespace TrueReplayer
             if (index < 0 || index >= actions.Count) return;
 
             var action = actions[index];
-            if (action.ActionType != "WaitImage" || string.IsNullOrEmpty(action.ImagePath)) return;
+            // Accept WaitImage and IF Image rows — both share the same per-profile PNG
+            // storage, so the cropper can rewrite ImagePath for either family. Without
+            // this, the Sheet thumbnail's crop-on-click silently no-opped for IF Image.
+            bool eligible = !string.IsNullOrEmpty(action.ImagePath) && (
+                action.ActionType == "WaitImage"
+                || (action.ActionType == "If" && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)));
+            if (!eligible) return;
             if (w < 10 || h < 10) return;
 
             string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
-            using var current = ImageStorageService.LoadReferenceImage(profileName, action.ImagePath);
+            // ImagePath non-null verified by the eligible check above; null-forgive to
+            // satisfy the compiler's flow analysis which doesn't follow the bool path.
+            using var current = ImageStorageService.LoadReferenceImage(profileName, action.ImagePath!);
             if (current == null) return;
 
             // Clamp the requested rect to the image bounds — the frontend already clamps but
@@ -2954,9 +3359,15 @@ namespace TrueReplayer
                     var clone = original.Clone();
                     // Duplicate within the same profile still needs a fresh PNG so an "undo
                     // delete" on the original doesn't strand the copy without an image.
-                    if (original.ActionType == "WaitImage" && !string.IsNullOrEmpty(original.ImagePath))
+                    // IF Image rows share the same per-profile PNG storage as WaitImage,
+                    // so the same protection applies — without the clone, duplicating an
+                    // IF Image and later deleting the original would orphan the duplicate.
+                    bool refsImage = !string.IsNullOrEmpty(original.ImagePath) && (
+                        original.ActionType == "WaitImage"
+                        || (original.ActionType == "If" && string.Equals(original.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)));
+                    if (refsImage)
                     {
-                        clone.ImagePath = ImageStorageService.CloneReferenceImage(profileName, original.ImagePath, profileName)
+                        clone.ImagePath = ImageStorageService.CloneReferenceImage(profileName, original.ImagePath!, profileName)
                                           ?? original.ImagePath;
                     }
                     actions.Insert(insertPos, clone);
@@ -3952,10 +4363,11 @@ namespace TrueReplayer
                     action.Y += sign * rect.Top;
                     converted++;
                 }
-                // WaitImage: only translate when a search region is actually set. The X/Y
-                // fields are meaningless without W/H — leaving them at 0 lets the action
-                // fall back to a full-screen scan (existing behaviour).
-                else if (action.ActionType == "WaitImage"
+                // WaitImage (and IF Image with a search region): only translate when W/H
+                // are set. The X/Y fields are meaningless without W/H — leaving them at 0
+                // lets the action fall back to a full-screen scan (existing behaviour).
+                else if ((action.ActionType == "WaitImage"
+                          || (action.ActionType == "If" && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)))
                     && action.WaitImageSearchW is int w && action.WaitImageSearchH is int h
                     && w > 0 && h > 0)
                 {
@@ -3963,9 +4375,10 @@ namespace TrueReplayer
                     action.WaitImageSearchY = (action.WaitImageSearchY ?? 0) + sign * rect.Top;
                     converted++;
                 }
-                // WaitPixelColor: PixelX/Y are nullable but required for the action to do
-                // anything — only convert when both are present.
-                else if (action.ActionType == "WaitPixelColor"
+                // WaitPixelColor (and IF Pixel): PixelX/Y are nullable but required for the
+                // action to do anything — only convert when both are present.
+                else if ((action.ActionType == "WaitPixelColor"
+                          || (action.ActionType == "If" && string.Equals(action.ConditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase)))
                     && action.PixelX.HasValue && action.PixelY.HasValue)
                 {
                     action.PixelX = action.PixelX.Value + sign * rect.Left;

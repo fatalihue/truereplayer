@@ -1009,6 +1009,12 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                   defaultValue={DEFAULT_UI_SETTINGS.actionPauseColor}
                   onChange={(v) => setUISetting('actionPauseColor', v)}
                 />
+                <AppearanceColorRow
+                  label="Conditional"
+                  value={config.uiSettings.actionIfColor}
+                  defaultValue={DEFAULT_UI_SETTINGS.actionIfColor}
+                  onChange={(v) => setUISetting('actionIfColor', v)}
+                />
               </div>
 
               {/* Font */}
@@ -1257,6 +1263,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                 { n: 6, pill: 'Pause', label: 'until Ctrl+Space', delay: '—', tone: ['--color-action-pause-bg', '--color-action-pause-fg'] },
                 { n: 7, pill: 'RunProfile', label: 'Sub-flow ×2', delay: '—', tone: ['--color-action-runprofile-bg', '--color-action-runprofile-fg'] },
                 { n: 8, pill: 'BrowserClick', label: 'button.submit', delay: '100 ms', tone: ['--color-action-browser-bg', '--color-action-browser-fg'] },
+                { n: 9, pill: 'if image', label: 'btn-ok.png', delay: '—', tone: ['--color-action-if-bg', '--color-action-if-fg'] },
               ].map(row => (
                 <div
                   key={row.n}

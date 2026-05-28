@@ -94,6 +94,29 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
         public bool PixelClickOnMatch { get; set; }
 
+        // ── Conditional logic (IF / ELSE / ENDIF) ──
+        // IF rows reuse the WaitImage / WaitPixelColor probe fields above (ImagePath +
+        // Confidence + WaitImageSearch* for ImageFound; PixelX/Y + PixelColor +
+        // PixelTolerance for PixelColorMatch) — no separate probe class. ConditionType
+        // distinguishes which family of probe fields are meaningful on a given IF row.
+        // Only valid when ActionType == "If"; null on Else/EndIf rows and every non-
+        // conditional action.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? ConditionType { get; set; }
+
+        // Inverts the probe outcome (IFNOT semantic). Default false keeps the JSON
+        // clean for the common case — only persisted when explicitly true.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool ConditionNegate { get; set; }
+
+        // On probe error policy. "TreatAsFalse" (null/default) silently treats a
+        // probe exception as "not matched" and walks the FALSE branch; "Halt" rethrows
+        // and stops replay. Same vocabulary as WaitImageOnTimeout for consistency; kept
+        // as a separate field so a profile mixing IF rows + Wait* actions can have
+        // independent error policies.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? IfOnProbeError { get; set; }
+
         // Browser action properties
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? BrowserText { get; set; }
@@ -233,13 +256,42 @@ namespace TrueReplayer.Models
             "KeyDown", "KeyUp", "Keystroke", "HoldKey", "ScrollUp", "ScrollDown", "SendText", "WaitImage",
             "BrowserClick", "BrowserRightClick", "BrowserType", "BrowserWaitElement", "BrowserNavigate",
             "BrowserSelectOption",
-            "RunProfile", "Pause"
+            "RunProfile", "Pause",
+            // Conditional structural rows never carry their OWN coordinates — the IF row
+            // borrows X/Y from its underlying probe data (handled below in DisplayX/Y);
+            // Else/EndIf are pure markers with no coordinate semantics at all.
+            "If", "Else", "EndIf"
         };
 
         private bool HideCoordinates => NoCoordinateActionTypes.Contains(ActionType ?? "");
 
-        public string DisplayX => HideCoordinates ? "" : X.ToString();
-        public string DisplayY => HideCoordinates ? "" : Y.ToString();
+        // IF rows with a PixelColorMatch condition should display the pixel's X/Y in
+        // the coordinate columns even though "If" is in NoCoordinateActionTypes — the
+        // user needs to see WHERE the pixel is being sampled at a glance, same as a
+        // regular WaitPixelColor row would after the column is enabled. ImageFound
+        // conditions still render blank (the IF row doesn't have a single XY — the
+        // matched-rect is dynamic per probe).
+        public string DisplayX
+        {
+            get
+            {
+                if (string.Equals(ActionType, "If", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(ConditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase))
+                    return PixelX?.ToString() ?? "";
+                return HideCoordinates ? "" : X.ToString();
+            }
+        }
+
+        public string DisplayY
+        {
+            get
+            {
+                if (string.Equals(ActionType, "If", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(ConditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase))
+                    return PixelY?.ToString() ?? "";
+                return HideCoordinates ? "" : Y.ToString();
+            }
+        }
 
         public string DisplayKey
         {
@@ -254,6 +306,31 @@ namespace TrueReplayer.Models
                     if (hasTimeout) return $"{Timeout / 1000}s";
                     return "—";
                 }
+
+                // IF row — show the condition's primary identifier so the user can read
+                // the block intent without opening the Sheet. The frontend renders the
+                // NOT badge separately when ConditionNegate is true, so this stays clean
+                // (no "NOT " prefix string concat — keeps presentation in the renderer).
+                if (string.Equals(ActionType, "If", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (string.Equals(ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (string.IsNullOrEmpty(ImagePath)) return "";
+                        // Filename only — full path is in the tooltip / Sheet editor.
+                        var slash = ImagePath.LastIndexOfAny(new[] { '/', '\\' });
+                        return slash >= 0 ? ImagePath[(slash + 1)..] : ImagePath;
+                    }
+                    if (string.Equals(ConditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return PixelColor ?? "";
+                    }
+                    return "";
+                }
+
+                // Else / EndIf rows carry no Key data.
+                if (string.Equals(ActionType, "Else", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(ActionType, "EndIf", StringComparison.OrdinalIgnoreCase))
+                    return "";
 
                 if (string.IsNullOrEmpty(Key)) return "";
 
@@ -306,6 +383,9 @@ namespace TrueReplayer.Models
             PixelOnTimeout = PixelOnTimeout,
             PixelInvert = PixelInvert,
             PixelClickOnMatch = PixelClickOnMatch,
+            ConditionType = ConditionType,
+            ConditionNegate = ConditionNegate,
+            IfOnProbeError = IfOnProbeError,
             BrowserText = BrowserText,
             NewTab = NewTab,
             WaitMode = WaitMode,

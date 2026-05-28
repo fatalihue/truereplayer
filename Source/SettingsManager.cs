@@ -27,14 +27,41 @@ namespace TrueReplayer.Services
             if (string.IsNullOrWhiteSpace(filePath))
                 filePath = GetDefaultProfilePath();  // Usa o caminho padrão, se não for especificado
 
+            // Belt-and-suspenders: repair any block imbalance still in memory before the
+            // JSON hits disk. The load-time validator catches everything from the file
+            // side, but an in-memory mutation (bridge bug, undo/redo race, drag that
+            // straddled a block boundary) could in principle leave the profile unbalanced
+            // until save. Idempotent for already-clean profiles.
+            //
+            // CRITICAL: do NOT mutate profile.Actions in place. Some callers pass an
+            // ObservableCollection that's bound to the UI grid — silently removing
+            // orphan rows during save would make rows vanish from the user's screen
+            // mid-save. Build a fresh snapshot, repair it, and swap it onto the profile
+            // just long enough to serialize, then restore the original reference.
+            var snapshot = new System.Collections.ObjectModel.ObservableCollection<ActionItem>(profile.Actions);
+            var saveFix = ConditionalBlockValidator.ValidateAndRepairBlocks(snapshot);
+            if (saveFix.HadFixups)
+                DiagnosticLog.Info($"[ConditionalBlocks] Save-time repair on '{Path.GetFileNameWithoutExtension(filePath)}': removed {saveFix.OrphansRemoved} orphan(s), appended {saveFix.EndIfsAppended} synthetic ENDIF(s)");
+
             var options = new JsonSerializerOptions
             {
                 WriteIndented = true,
                 TypeInfoResolver = new DefaultJsonTypeInfoResolver()
             };
 
-            var json = JsonSerializer.Serialize(profile, options);
-            await FileHelper.WriteAllTextAtomicAsync(filePath, json);
+            var originalActions = profile.Actions;
+            try
+            {
+                profile.Actions = snapshot;
+                var json = JsonSerializer.Serialize(profile, options);
+                await FileHelper.WriteAllTextAtomicAsync(filePath, json);
+            }
+            finally
+            {
+                // Restore the caller's original collection reference so the UI grid binding
+                // survives the save unchanged.
+                profile.Actions = originalActions;
+            }
         }
 
         /// <summary>

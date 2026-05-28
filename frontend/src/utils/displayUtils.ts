@@ -17,7 +17,7 @@ const DISPLAY_KEY_MAP: Record<string, string> = {
   'Next': 'Page Down', 'Prior': 'Page Up',
 };
 
-const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'RunProfile', 'Pause']);
+const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'RunProfile', 'Pause', 'If', 'Else', 'EndIf']);
 
 export function getDisplayKey(key: string): string {
   if (!key) return '';
@@ -26,10 +26,19 @@ export function getDisplayKey(key: string): string {
 }
 
 export function getDisplayX(item: ActionItem): string {
+  // IF rows with a PixelColorMatch condition borrow the pixel coords for display —
+  // mirrors the C# ActionItem.DisplayX override. Image conditions stay blank
+  // (the matched-rect is dynamic per probe, no single XY).
+  if (item.actionType === 'If' && item.conditionType === 'PixelColorMatch') {
+    return item.pixelX != null ? String(item.pixelX) : '';
+  }
   return NO_COORD_TYPES.has(item.actionType) ? '' : String(item.x);
 }
 
 export function getDisplayY(item: ActionItem): string {
+  if (item.actionType === 'If' && item.conditionType === 'PixelColorMatch') {
+    return item.pixelY != null ? String(item.pixelY) : '';
+  }
   return NO_COORD_TYPES.has(item.actionType) ? '' : String(item.y);
 }
 
@@ -44,6 +53,10 @@ export function getDisplayY(item: ActionItem): string {
 const ACTION_COLOR_CACHE: Map<string, { bg: string; fg: string }> = new Map();
 
 function computeActionTypeColors(actionType: string): { bg: string; fg: string } {
+  // Check conditional types first — they share a single token regardless of which
+  // marker (If / Else / EndIf) so the whole block reads as one cohesive surface.
+  if (actionType === 'If' || actionType === 'Else' || actionType === 'EndIf')
+    return { bg: 'var(--color-action-if-bg)', fg: 'var(--color-action-if-fg)' };
   if (actionType.startsWith('Browser'))
     return { bg: 'var(--color-action-browser-bg)', fg: 'var(--color-action-browser-fg)' };
   if (actionType.includes('Click'))
@@ -85,5 +98,11 @@ export function getActionTypeIcon(actionType: string): string {
   if (actionType === 'WaitPixelColor') return 'Pipette';
   if (actionType === 'RunProfile') return 'Repeat2';
   if (actionType === 'Pause') return 'Hourglass';
+  // Conditional logic — Lucide's GitBranch is the universal "branch / decision"
+  // glyph and matches the mockup. Else uses the two-way swap arrows, EndIf uses
+  // a closing chevron (visually "block closes here").
+  if (actionType === 'If') return 'GitBranch';
+  if (actionType === 'Else') return 'ArrowRightLeft';
+  if (actionType === 'EndIf') return 'ChevronDown';
   return 'Zap';
 }

@@ -50,6 +50,12 @@ export interface ThemeUISettings {
   actionBrowserColor: string;
   actionRunProfileColor: string;
   actionPauseColor: string;
+  // Conditional / control-flow rows (If / Else / EndIf). Distinct hue from the two
+  // other purples in the palette (Mouse #a78bfa, Clicker mode #c084fc) — amber sits
+  // in the gold band but at a saturation/brightness that reads as "decision/branch"
+  // rather than "sendtext gold" (#d4a020). The token is consumed by the conditional
+  // row pill + rail + ghost "+ Add Else" button.
+  actionIfColor: string;
   fontMono: string;
   // When true, auto-switch between darkPresetId / lightPresetId based on the OS
   // prefers-color-scheme media query. ThemeContext listens to changes and updates
@@ -97,6 +103,13 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   // RunProfile's vivid blue by saturation (slate is desaturated grey-blue,
   // RunProfile is fully saturated).
   actionPauseColor: '#94a3b8',
+  // Amber — picked for conditional rows in the mockup pass. Distinct from Pause's
+  // slate (different hue family) and from SendText gold (#d4a020, darker/duller).
+  // Pause's v1 default used to be this exact hex (#fbbf24) — the v1→v2 migration
+  // at line 1579 specifically rewrites that case so users who never customized
+  // Pause silently get the new slate. Reusing the hex here is intentional and
+  // safe: the migration only swaps actionPauseColor, never actionIfColor.
+  actionIfColor: '#fbbf24',
   fontMono: 'Consolas',
   matchSystemTheme: false,
   darkPresetId: 'lavender-coal',
@@ -1664,6 +1677,11 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   parts.push(`--color-action-runprofile-bg: color-mix(in srgb, ${uiSettings.actionRunProfileColor} 10%, transparent);`);
   parts.push(`--color-action-pause-fg: ${uiSettings.actionPauseColor};`);
   parts.push(`--color-action-pause-bg: color-mix(in srgb, ${uiSettings.actionPauseColor} 10%, transparent);`);
+  parts.push(`--color-action-if-fg: ${uiSettings.actionIfColor};`);
+  parts.push(`--color-action-if-bg: color-mix(in srgb, ${uiSettings.actionIfColor} 10%, transparent);`);
+  // Tinted border for the conditional block scope rail. 35% alpha so it stays
+  // visible at depth-1 while still reading as a secondary structural cue.
+  parts.push(`--color-action-if-border: color-mix(in srgb, ${uiSettings.actionIfColor} 35%, transparent);`);
   // Font
   parts.push(`--font-mono: '${uiSettings.fontMono}', 'Courier New', monospace;`);
 

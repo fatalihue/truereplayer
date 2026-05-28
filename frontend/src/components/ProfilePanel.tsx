@@ -49,10 +49,18 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   ]);
   const convertibleActionCount = actions.reduce((n, a) => {
     if (CLICK_TYPES.has(a.actionType)) return n + 1;
-    if (a.actionType === 'WaitImage'
+    // Mirror the backend's HandleConvertCoordinates which translates both WaitImage
+    // and IF Image rows with a set search region, and both WaitPixelColor and IF
+    // Pixel rows with set coords. Without these branches the dialog under-reports
+    // how many rows will actually be converted when the profile uses conditionals.
+    const isImageProbe = a.actionType === 'WaitImage'
+      || (a.actionType === 'If' && a.conditionType === 'ImageFound');
+    if (isImageProbe
       && typeof a.waitImageSearchW === 'number' && a.waitImageSearchW > 0
       && typeof a.waitImageSearchH === 'number' && a.waitImageSearchH > 0) return n + 1;
-    if (a.actionType === 'WaitPixelColor'
+    const isPixelProbe = a.actionType === 'WaitPixelColor'
+      || (a.actionType === 'If' && a.conditionType === 'PixelColorMatch');
+    if (isPixelProbe
       && typeof a.pixelX === 'number' && typeof a.pixelY === 'number') return n + 1;
     return n;
   }, 0);

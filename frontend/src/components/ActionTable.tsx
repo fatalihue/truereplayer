@@ -1,6 +1,6 @@
-import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo, Fragment } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical, Timer, LayoutGrid, Check } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical, Timer, LayoutGrid, Check, GitBranch, ArrowRightLeft } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -34,6 +34,12 @@ function ActionIcon({ actionType }: { actionType: string }) {
   // delay action, Repeat2 (not Workflow) for sub-macro calls.
   if (actionType === 'RunProfile') return <Repeat2 size={size} />;
   if (actionType === 'Pause') return <Hourglass size={size} />;
+  // Conditional logic — GitBranch is the universal "branch / decision" glyph and
+  // matches the toolbar's + If button. Else uses the two-way swap arrows; EndIf
+  // closes the block with a ChevronDown.
+  if (actionType === 'If') return <GitBranch size={size} />;
+  if (actionType === 'Else') return <ArrowRightLeft size={size} />;
+  if (actionType === 'EndIf') return <ChevronDown size={size} />;
   return <Zap size={size} />;
 }
 
@@ -105,6 +111,62 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
     [dragIndices]
   );
   const [dropTarget, setDropTarget] = useState<number | null>(null);
+
+  // ── Conditional logic block map ────────────────────────────────────
+  // Single-pass O(n) walk over the action list produces 4 parallel structures used
+  // by every per-row decision below (rails, indentation, structural bg tint, skip
+  // propagation, "+ Add Else" ghost-row injection):
+  //   depth[i]      — nesting level of row i. Top-level IF / Else / EndIf are 0;
+  //                   their direct body rows are 1; a nested IF is 1 (the row that
+  //                   opens depth 2 for its own body), etc.
+  //   blockIfOf[i]  — index of the IF that contains row i. Self-references on IF
+  //                   rows. null on top-level non-conditional rows.
+  //   endIfOf       — IF index → matching ENDIF index. Used to detect "ENDIF without
+  //                   ELSE between" so we can render the inline ghost button.
+  //   hasElse       — Set of IF indices that already have an ELSE in their block.
+  //                   Drives whether the ghost button renders.
+  //
+  // Orphan ELSE / ENDIF rows (stack empty at the time they're seen) get depth=0 and
+  // a null blockIfOf — the load-time validator should have stripped them, but the
+  // grid stays graceful if a hand-edited profile bypassed validation. Cost: ~32 B
+  // per IF row in dictionary overhead, negligible at the action-counts users hit.
+  const blockInfo = useMemo(() => {
+    const n = actions.length;
+    const depth = new Array<number>(n).fill(0);
+    const blockIfOf = new Array<number | null>(n).fill(null);
+    const endIfOf = new Map<number, number>();
+    const hasElse = new Set<number>();
+    const stack: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const t = actions[i].actionType;
+      if (t === 'If') {
+        stack.push(i);
+        depth[i] = stack.length - 1;
+        blockIfOf[i] = i; // IF row self-references for skip propagation
+      } else if (t === 'Else') {
+        if (stack.length) {
+          const ifIdx = stack[stack.length - 1];
+          depth[i] = stack.length - 1;
+          blockIfOf[i] = ifIdx;
+          hasElse.add(ifIdx);
+        }
+      } else if (t === 'EndIf') {
+        if (stack.length) {
+          const ifIdx = stack[stack.length - 1];
+          depth[i] = stack.length - 1;
+          blockIfOf[i] = ifIdx;
+          endIfOf.set(ifIdx, i);
+          stack.pop();
+        }
+      } else {
+        // Non-structural body row — depth equals the number of currently-open IFs,
+        // and the containing block is the innermost open IF (top of stack).
+        depth[i] = stack.length;
+        if (stack.length) blockIfOf[i] = stack[stack.length - 1];
+      }
+    }
+    return { depth, blockIfOf, endIfOf, hasElse };
+  }, [actions]);
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number } | null>(null);
@@ -369,7 +431,14 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
 
     if (e.key === 'Delete' && selectedIndices.size > 0) {
       e.preventDefault();
-      send({ type: 'actions:delete', payload: { indices: Array.from(selectedIndices) } });
+      // Same single-IF safety as handleContextDelete: a lone-IF selection routes
+      // through actions:deleteConditional so the whole block goes with it.
+      const sel = Array.from(selectedIndices);
+      if (sel.length === 1 && actions[sel[0]]?.actionType === 'If') {
+        send({ type: 'actions:deleteConditional', payload: { ifRowIndex: sel[0] } });
+      } else {
+        send({ type: 'actions:delete', payload: { indices: sel } });
+      }
       setSelectedIndices(new Set());
     }
 
@@ -516,20 +585,45 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
     if (!isDraggable || e.button !== 0) return;
     // Don't initiate drag from input elements (inline editing)
     if ((e.target as HTMLElement).tagName === 'INPUT') return;
-    const indices = selectedIndices.has(idx)
+    // Block dragging Else / EndIf rows on their own — those are structural markers
+    // bound to their parent IF, and moving them in isolation would orphan the block.
+    const t = actions[idx]?.actionType;
+    if (t === 'Else' || t === 'EndIf') return;
+    let indices = selectedIndices.has(idx)
       ? Array.from(selectedIndices).sort((a, b) => a - b)
       : [idx];
+    // Drag an IF row solo → auto-expand the drag set to include the whole block
+    // (body + optional ELSE + matching ENDIF). Without this, dragging the IF alone
+    // would leave its body rows in place and the engine would treat them as
+    // unconditional. When the user already has a multi-select that includes the IF,
+    // respect their explicit selection — they may want to extract the IF + only
+    // some of its body rows (the reorder backend will renumber correctly and the
+    // load-time validator catches any imbalance the reorder leaves behind).
+    if (t === 'If' && !selectedIndices.has(idx)) {
+      const endIfIdx = blockInfo.endIfOf.get(idx);
+      if (endIfIdx !== undefined && endIfIdx > idx) {
+        indices = [];
+        for (let i = idx; i <= endIfIdx; i++) indices.push(i);
+      }
+    }
     dragState.current = { indices, startX: e.clientX, startY: e.clientY, started: false };
     dropTargetRef.current = null;
     dragOccurred.current = false;
-  }, [isDraggable, selectedIndices]);
+  }, [isDraggable, selectedIndices, actions, blockInfo]);
 
   useEffect(() => {
     // Recompute drop target whenever the cursor moves OR the scroll container scrolls
     // (auto-scroll changes which row is under the cursor without firing mousemove).
     const recomputeDropTarget = (clientY: number) => {
       if (!tbodyRef.current) return;
-      const rows = tbodyRef.current.querySelectorAll('tr');
+      // Filter out injected ghost rows ("+ Add Else branch") before computing the
+      // drop target. The ghost rows are visible but they're NOT part of the action
+      // list — counting them would shift every drop index by N (where N = ghost
+      // rows above the cursor), so the user would land their drop one slot off
+      // for every unclosed Else block above the drop site.
+      const rows = Array.from(tbodyRef.current.querySelectorAll('tr')).filter(
+        tr => !tr.querySelector('button[title="Insert an Else branch in this conditional block"]')
+      );
       let target: number | null = null;
       for (let i = 0; i < rows.length; i++) {
         const rect = rows[i].getBoundingClientRect();
@@ -745,10 +839,25 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
     const indices = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
       ? Array.from(selectedIndices)
       : [contextMenu.rowIndex];
+    // Special case: deleting an IF row alone removes the whole block (body +
+    // optional Else + matching EndIf) via the dedicated bridge message. Without
+    // this, the orphaned body rows would silently execute unconditionally —
+    // worse than the visible "block was here" tracking. The single-row check
+    // matters: a multi-select delete with an IF mixed in still routes through
+    // the regular actions:delete (user explicitly selected the rows; respect that).
+    if (indices.length === 1) {
+      const idx = indices[0];
+      if (actions[idx]?.actionType === 'If') {
+        send({ type: 'actions:deleteConditional', payload: { ifRowIndex: idx } });
+        setSelectedIndices(new Set());
+        closeContextMenu();
+        return;
+      }
+    }
     send({ type: 'actions:delete', payload: { indices } });
     setSelectedIndices(new Set());
     closeContextMenu();
-  }, [contextMenu, selectedIndices, send, closeContextMenu]);
+  }, [contextMenu, selectedIndices, send, closeContextMenu, actions]);
 
   // Resolve the "effective selection" for context-menu operations the same way
   // Duplicate/Delete do: if the right-clicked row is part of the multi-select,
@@ -935,7 +1044,14 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
             {columnVisibility.x && <col style={{ width: 65 }} />}
             {columnVisibility.y && <col style={{ width: 65 }} />}
             {columnVisibility.delay && <col style={{ width: 70 }} />}
-            {columnVisibility.notes && <col />}
+            {/* Notes column claims 100% of the remaining table width. In `table-fixed`,
+                a <col> without an explicit width gets ~0 and the leftover space sits
+                outside any cell — invisible for plain body rows (their bg is close to
+                the table container's bg) but very visible for conditional structural
+                rows where the tr's amber tint can't paint past the last filled td.
+                Forcing 100% here makes the cell expand to fill, so the row's bg covers
+                the full row width and the block reads as one continuous amber band. */}
+            {columnVisibility.notes && <col style={{ width: '100%' }} />}
             <col style={{ width: 24 }} />
           </colgroup>
           <tbody ref={tbodyRef}>
@@ -961,17 +1077,110 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
                         if (hasTimeout) return `${Math.round((action.timeout ?? 0) / 1000)}s`;
                         return '—';
                       })()
-                    : getDisplayKey(action.key);
+                    : action.actionType === 'If'
+                      ? (() => {
+                          // IF rows show the condition's primary identifier — image
+                          // filename or pixel hex. Mirrors the C# DisplayKey getter so
+                          // a backend push and a frontend re-render produce the same
+                          // string. Color swatch / NOT badge are rendered separately
+                          // below as DOM nodes (they're not plain text).
+                          if (action.conditionType === 'ImageFound') {
+                            const p = action.imagePath || '';
+                            if (!p) return '';
+                            const cut = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+                            return cut >= 0 ? p.slice(cut + 1) : p;
+                          }
+                          if (action.conditionType === 'PixelColorMatch') {
+                            return action.pixelColor || '';
+                          }
+                          return '';
+                        })()
+                      : getDisplayKey(action.key);
               const displayX = getDisplayX(action);
               const displayY = getDisplayY(action);
               const canEditXY = isMouseAction(action.actionType);
 
               const isDragged = dragIndexSet?.has(idx) ?? false;
-              const isSkipped = action.isSkipped;
+              // Skip propagation: when an IF row carries IsSkipped, every row inside
+              // that block (body + ELSE + matching ENDIF) renders with the strikethrough
+              // treatment too. blockIfOf points to the containing IF; self-references on
+              // the IF row mean its own isSkipped already covers it.
+              const blockIf = blockInfo.blockIfOf[idx];
+              const isInSkippedBlock = blockIf !== null && actions[blockIf]?.isSkipped === true;
+              const isSkipped = action.isSkipped || isInSkippedBlock;
               const showDropBefore = dropTarget === idx && !isDragged;
               const showDropAfter = dropTarget === idx + 1 && !isDragged && !(dragIndexSet?.has(idx + 1));
 
+              // Conditional structural rows (If / Else / EndIf) carry their own scope
+              // rail in addition to any outer-block rails, get a subtle tinted bg, and
+              // anchor the "+ Add Else" ghost row injected below.
+              const isStructural = action.actionType === 'If' || action.actionType === 'Else' || action.actionType === 'EndIf';
+              const depth = blockInfo.depth[idx] || 0;
+              // Rail count = depth (= rails for outer blocks) + 1 extra rail for the
+              // structural row's own scope. A top-level IF (depth=0, structural) renders
+              // 1 rail. A nested IF (depth=1, structural) renders 2 (outer + its own).
+              // Body rows render `depth` rails (no extra for self).
+              const railCount = isStructural ? depth + 1 : depth;
+              // Indent rule (user-requested):
+              //  • Body rows inside a TOP-LEVEL IF (depth=1) stay aligned with rows
+              //    outside the block — a single IF doesn't visually push its content
+              //    to the right. The rail to the left already conveys "this row is
+              //    in a block", so the extra indent felt redundant.
+              //  • Body rows inside a NESTED IF (depth ≥ 2) DO indent so the user
+               //   can see the nesting at a glance.
+              //  • Structural rows (If / Else / EndIf themselves) still indent per
+              //    depth so a nested IF/Else/EndIf sits past its outer rail (otherwise
+              //    the pill would overlap the rail visually).
+              const indentPx = isStructural ? depth * 14 : Math.max(0, depth - 1) * 14;
+
+              // Ghost "+ Add Else branch" row — rendered just BEFORE an EndIf row whose
+              // matching IF has no ELSE. Placing it before the EndIf keeps it visually
+              // tucked between the end of the body (or right after the IF for an empty
+              // block) and the closing marker — exactly where the user would think to
+              // click "add an else branch here". Disabled during recording/replay to
+              // avoid mid-run mutations.
+              const showAddElseBefore = action.actionType === 'EndIf'
+                && blockIf !== null
+                && !blockInfo.hasElse.has(blockIf);
+              const addElseDepth = showAddElseBefore && blockIf !== null ? blockInfo.depth[blockIf] : 0;
+
               return (
+                <Fragment key={action.id ?? idx}>
+                {showAddElseBefore && blockIf !== null && (
+                  <tr
+                    // Same amber tint AND height as structural rows so the block reads as
+                    // one uniform band. Earlier attempts used h-7 (28 px) for a thinner
+                    // "ghost feel", but that broke the visual rhythm — the user perceived
+                    // it as an incomplete row even though the color was identical. Matching
+                    // h-row makes the Add Else slot sit naturally inside the block strip.
+                    className="h-row border-b border-border-subtle relative pointer-events-none bg-[color-mix(in_srgb,var(--color-action-if-fg)_6%,transparent)]"
+                  >
+                    <td colSpan={99} className="p-0 relative">
+                      <button
+                        type="button"
+                        onClick={() => send({ type: 'actions:addElseBranch', payload: { ifRowIndex: blockIf } })}
+                        disabled={buttonStates.recordingActive || buttonStates.replayActive}
+                        className="pointer-events-auto inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[10.5px] font-medium rounded border border-dashed transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        style={{
+                          // Anchor the chip past the rails of the containing block so it
+                          // visually sits inside that block's scope at the same indent the
+                          // body rows use. 78 (col-2 boundary) + addElseDepth*14 (depth indent)
+                          // + 4 (default pl-1) lands the button just past the IF's rail.
+                          marginLeft: `${78 + addElseDepth * 14 + 4}px`,
+                          color: 'var(--color-action-if-fg)',
+                          borderColor: 'var(--color-action-if-border)',
+                          background: 'transparent',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-action-if-bg)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                        title="Insert an Else branch in this conditional block"
+                      >
+                        <Plus size={11} />
+                        Add Else branch
+                      </button>
+                    </td>
+                  </tr>
+                )}
                 <tr
                   // Prefer action.id for React reconciliation — without it, drag-reorder
                   // and undo/redo end up with the wrong DOM nodes mapped to actions,
@@ -979,7 +1188,7 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
                   // that didn't actually change. Falls back to idx for the brief window
                   // between an old-profile backend push (no id yet) and the next refresh
                   // after migration runs.
-                  key={action.id ?? idx}
+
                   ref={isHighlighted ? highlightedRowRef : undefined}
                   onMouseDown={(e) => handleRowMouseDown(idx, e)}
                   onClick={(e) => handleRowClick(idx, e)}
@@ -1008,9 +1217,14 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
                         ? 'bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)]'
                         : isSelected
                           ? 'bg-[rgba(96,205,255,0.08)]'
-                          : idx % 2 === 0
-                            ? 'bg-bg-surface'
-                            : 'bg-[rgba(255,255,255,0.02)]'
+                          : isStructural
+                            // Structural row tint replaces the odd/even striping so the
+                            // whole IF / ELSE / ENDIF row group reads as a cohesive scope
+                            // marker, distinct from the body rows it brackets.
+                            ? 'bg-[color-mix(in_srgb,var(--color-action-if-fg)_6%,transparent)]'
+                            : idx % 2 === 0
+                              ? 'bg-bg-surface'
+                              : 'bg-[rgba(255,255,255,0.02)]'
                   } hover:bg-bg-elevated`}
                 >
                   {/* Drop indicator — accent line with a small leading circle and a soft
@@ -1042,8 +1256,32 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
                       the cursor switches to grab/grabbing on hover/drag, which is
                       affordance enough. An earlier draft swapped in a GripVertical icon
                       on hover but it competed visually with the checkbox and added
-                      noise to a dense grid. */}
+                      noise to a dense grid.
+                      Also hosts the conditional-block rails as absolutely-positioned
+                      siblings of the Checkbox. They anchor to the <tr> (the nearest
+                      position:relative ancestor — see the row's className above) rather
+                      than this td, so `left: 78px` is measured from the row's left edge.
+                      Placing the rails INSIDE an existing td (vs a separate colSpan=99
+                      overlay td) is mandatory: an absolute-positioned td still consumes
+                      a column slot in `table-fixed` layout, which would shift every
+                      subsequent td (checkbox / # / Action / Key / X / Y / Delay / Notes)
+                      one column to the right — the alignment bug we hit before this fix. */}
                   <td className="w-7">
+                    {railCount > 0 && Array.from({ length: railCount }, (_, i) => {
+                      const isInnermost = i === railCount - 1;
+                      const strong = isStructural && isInnermost;
+                      return (
+                        <div
+                          key={`rail-${i}`}
+                          className="absolute top-0 bottom-0 pointer-events-none"
+                          style={{
+                            left: `${78 + i * 14}px`,
+                            width: strong ? '3px' : '2px',
+                            background: strong ? 'var(--color-action-if-fg)' : 'var(--color-action-if-border)',
+                          }}
+                        />
+                      );
+                    })}
                     <div className="flex items-center justify-center">
                       <Checkbox
                         checked={isSelected}
@@ -1067,7 +1305,13 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
 
                   {/* Action type pill */}
                   {columnVisibility.action && (
-                  <td className="pl-1">
+                  <td
+                    className="pl-1"
+                    // Extra left padding per nesting level pushes the pill to the right
+                    // of all rails. 14 px per level matches the rail spacing so the pill
+                    // always sits just past its innermost rail.
+                    style={indentPx > 0 ? { paddingLeft: `${4 + indentPx}px` } : undefined}
+                  >
                     <span
                       className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium"
                       style={{ background: colors.bg, color: colors.fg }}
@@ -1084,6 +1328,13 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
                         : action.actionType === 'RunProfile' ? 'Run Profile'
                         : action.actionType === 'Pause' ? 'Pause'
                         : action.actionType === 'HoldKey' ? 'Hold Key'
+                        // Conditional labels are intentionally lowercase to read as
+                        // "code keywords" (matches the mockup). IF varies by condition
+                        // family so the user sees the probe type without opening Sheet.
+                        : action.actionType === 'If'
+                          ? (action.conditionType === 'PixelColorMatch' ? 'if pixel' : 'if image')
+                        : action.actionType === 'Else' ? 'else'
+                        : action.actionType === 'EndIf' ? 'endif'
                         : action.actionType}
                     </span>
                   </td>
@@ -1139,6 +1390,31 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
                           }
                         }}
                       >
+                        {/* IF rows render extra leading nodes inside the chip: a NOT
+                            badge when the condition is negated (IFNOT semantic), and a
+                            color swatch for pixel-color conditions. Both go BEFORE the
+                            displayKey text so the chip reads "[NOT][swatch] payload"
+                            in natural reading order. */}
+                        {action.actionType === 'If' && action.conditionNegate && (
+                          <span
+                            className="mr-1 px-1 py-px rounded text-[9.5px] font-bold tracking-wider border"
+                            style={{
+                              background: 'var(--color-action-if-bg)',
+                              color: 'var(--color-action-if-fg)',
+                              borderColor: 'var(--color-action-if-border)',
+                            }}
+                            title="Negated condition — the TRUE branch fires when the probe FAILS (IFNOT)"
+                          >
+                            NOT
+                          </span>
+                        )}
+                        {action.actionType === 'If' && action.conditionType === 'PixelColorMatch' && action.pixelColor && (
+                          <span
+                            className="mr-1 inline-block w-2.5 h-2.5 rounded-sm border border-white/20"
+                            style={{ background: action.pixelColor }}
+                            title={`Target colour: ${action.pixelColor}`}
+                          />
+                        )}
                         {/* SendText payloads can contain `{Enter}` / `{delay:500}` /
                             `{Clipboard:...}` tokens. Render them as the same pink chips
                             used in the Lexical-based Edit Text dialog so the cell mirrors
@@ -1294,6 +1570,7 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
                       opens the row's context menu (was previously the "…" button). */}
                   <td />
                 </tr>
+                </Fragment>
               );
             })}
           </tbody>
