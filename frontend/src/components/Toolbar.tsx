@@ -535,11 +535,11 @@ export function Toolbar(_props: ToolbarProps) {
           {/* Wait — sub-picker for the two blocking-probe variants. Replaces the
               previous standalone Wait Image + Wait Pixel buttons; the consolidated
               entry mirrors how the Conditional button groups Image/Pixel probes for
-              IF rows. Inside the menu, Pixel sits above Image so the cheaper GDI
-              path appears first (same order the standalone buttons used). Both
-              menu items keep their original bridge messages — the row-insert UX
-              (overlay opens immediately, row materializes only after a successful
-              capture) is unchanged. */}
+              IF rows. Item order matches the Conditional menu (Image first, then
+              Pixel) so a user who learned one picker reads the other the same way.
+              Both menu items keep their original bridge messages — the row-insert
+              UX (overlay opens immediately, row materializes only after a
+              successful capture) is unchanged. */}
           <div className="relative" ref={waitMenuRef}>
             <button
               tabIndex={-1}
@@ -560,24 +560,24 @@ export function Toolbar(_props: ToolbarProps) {
                   onClick={() => {
                     const sel = selectionRef.current;
                     const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-                    send({ type: 'actions:insertWaitPixelColor', payload: { insertIndex } });
-                    setShowWaitMenu(false);
-                  }}
-                >
-                  <Pipette size={12} className="text-accent-light" />
-                  Wait for Pixel Color…
-                </button>
-                <button
-                  className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
-                  onClick={() => {
-                    const sel = selectionRef.current;
-                    const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
                     send({ type: 'actions:insertAction', payload: { actionType: 'WaitImage', insertIndex } });
                     setShowWaitMenu(false);
                   }}
                 >
                   <ScanSearch size={12} className="text-accent-light" />
                   Wait for Image…
+                </button>
+                <button
+                  className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
+                  onClick={() => {
+                    const sel = selectionRef.current;
+                    const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                    send({ type: 'actions:insertWaitPixelColor', payload: { insertIndex } });
+                    setShowWaitMenu(false);
+                  }}
+                >
+                  <Pipette size={12} className="text-accent-light" />
+                  Wait for Pixel Color…
                 </button>
               </div>
             )}
