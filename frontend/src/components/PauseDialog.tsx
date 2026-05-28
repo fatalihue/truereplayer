@@ -249,20 +249,23 @@ export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border-subtle">
-          <button
-            onClick={onClose}
-            className="px-4 py-1.5 text-xs font-medium text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle rounded transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={!hotkey && timeoutSeconds === 0}
-            className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Add
-          </button>
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border-subtle">
+          <span className="text-[11px] text-text-tertiary">Enter to confirm · Esc to cancel</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="px-4 py-1.5 text-xs font-medium text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle rounded transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={!hotkey && timeoutSeconds === 0}
+              className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Add
+            </button>
+          </div>
         </div>
       </div>
     </div>

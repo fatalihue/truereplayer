@@ -232,6 +232,27 @@ export function KeystrokeCaptureDialog({
         tabIndex={-1}
         className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[440px] max-w-[90vw] flex flex-col outline-none"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // Enter confirms ONLY when a numeric input is focused — in that state the
+          // backend capture is paused (handleFocusIn at line 162) so the Enter press
+          // doesn't double as a captured combo. Outside of input focus, Enter is
+          // captured as the "Enter" hotkey by the backend hook and arrives via
+          // 'hotkey:captured', so we deliberately do NOT confirm on it here. Esc
+          // always closes — outside the capture pad, Esc isn't a valid hotkey.
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            onClose();
+          }
+          if (e.key === 'Enter') {
+            const focusedTag = (document.activeElement as HTMLElement | null)?.tagName;
+            if (focusedTag === 'INPUT' && captured !== null) {
+              e.preventDefault();
+              e.stopPropagation();
+              handleConfirm();
+            }
+          }
+        }}
       >
         {/* Header */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
@@ -406,22 +427,29 @@ export function KeystrokeCaptureDialog({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border-subtle">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-1.5 text-xs font-medium text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle rounded transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleConfirm}
-            disabled={captured === null}
-            className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isEditing ? 'Save' : 'Insert'}
-          </button>
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border-subtle">
+          {/* Hint qualifies Enter — outside of input focus the backend hook captures
+              Enter as the bound key, so the user gets no confirm-via-Enter from the
+              capture pad. The numeric fields below (Times / Gap / Hold duration) pause
+              capture on focus, which is when Enter actually confirms. */}
+          <span className="text-[11px] text-text-tertiary">Enter (in number fields) to confirm · Esc to cancel</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-1.5 text-xs font-medium text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle rounded transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirm}
+              disabled={captured === null}
+              className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isEditing ? 'Save' : 'Add'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -673,7 +673,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
         <div className="flex items-center justify-between px-4 py-3 border-t border-border-subtle shrink-0">
           <div className="flex items-center gap-3">
             <span className="text-[11px] text-text-tertiary">{text.length} chars</span>
-            <span className="text-[11px] text-text-tertiary">Ctrl+Enter to confirm</span>
+            <span className="text-[11px] text-text-tertiary">Ctrl+Enter to confirm · Esc to cancel</span>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -687,7 +687,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
               disabled={!text.trim()}
               className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Confirm
+              {mode === 'add' ? 'Add' : 'Save'}
             </button>
           </div>
         </div>
