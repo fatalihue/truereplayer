@@ -1311,21 +1311,39 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   )}
 
                   {/* Key */}
-                  {columnVisibility.key && (
+                  {columnVisibility.key && (() => {
+                    // Compute group membership once so the dblclick router and the
+                    // td-level cursor class don't drift out of sync. Group A = inline
+                    // edit / specialised dialog; Group B = open Sheet; Group C = no-op
+                    // (Click variants in all their forms, Scroll, Else, EndIf).
+                    const isGroupA =
+                      action.actionType === 'SendText'
+                      || action.actionType === 'RunProfile'
+                      || action.actionType === 'Keystroke'
+                      || action.actionType === 'HoldKey'
+                      || action.actionType.startsWith('Key'); // KeyDown / KeyUp
+                    const isGroupB =
+                      action.actionType === 'WaitImage'
+                      || action.actionType === 'WaitPixelColor'
+                      || action.actionType === 'Pause'
+                      || action.actionType.startsWith('Browser')
+                      || action.actionType === 'If';
+                    // td-level cursor mirrors the chip's intent so EMPTY cells (WaitImage /
+                    // WaitPixelColor with no value yet) still show the right affordance.
+                    // When a chip is rendered, its own cursor class wins inside the chip
+                    // hitbox; the td cursor only paints the surrounding padding.
+                    const tdCursor = isGroupA
+                      ? 'cursor-text'
+                      : isGroupB
+                        ? 'cursor-pointer'
+                        : '';
+                    return (
                   <td
-                    className="pl-1"
-                    // Dblclick handler at the <td> level so EMPTY cells (WaitImage —
-                    // whose Key column is intentionally blank because the image lives
-                    // in the Sheet thumbnail — and WaitPixelColor when no colour is
-                    // set yet) still respond. Without this, only rows with a rendered
-                    // chip below could be edited via dblclick. We re-dispatch the
-                    // chip's onDoubleClick logic if a chip exists (it bubbles through
-                    // anyway), and add the Group B / Sheet route for the empty-cell
-                    // case. Re-entry into inline-edit on KeyDown/KeyUp rows is guarded
-                    // by the editingCell check.
+                    className={`pl-1 ${tdCursor}`}
+                    // Dblclick at the <td> level so EMPTY cells respond. Re-entry into
+                    // inline-edit on KeyDown/KeyUp rows is guarded by the editingCell check.
                     onDoubleClick={() => {
                       if (editingCell?.index === idx && editingCell.field === 'key') return;
-                      // Group A — specialized inline edit / dialog. Same as chip path.
                       if (action.actionType === 'SendText') {
                         setSendTextEdit({ index: idx, text: action.key });
                       } else if (action.actionType === 'RunProfile') {
@@ -1334,19 +1352,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         setKeystrokeEdit({ index: idx });
                       } else if (action.actionType.startsWith('Key')) {
                         startEdit(idx, 'key', action.key);
-                      } else if (
-                        // Group B — open Sheet for fuller editing. Covers actions
-                        // whose Key cell may be empty (WaitImage / WaitPixelColor)
-                        // or hosts a derived identifier (Pause / Browser* / If).
-                        action.actionType === 'WaitImage'
-                        || action.actionType === 'WaitPixelColor'
-                        || action.actionType === 'Pause'
-                        || action.actionType.startsWith('Browser')
-                        || action.actionType === 'If'
-                      ) {
+                      } else if (isGroupB) {
                         onOpenSheet?.(idx);
                       }
-                      // Group C (LeftClick variants, Scroll, Else, EndIf) — no-op.
+                      // Group C — LeftClick / RightClick / MiddleClick and all their
+                      // *Down/*Up variants, Scroll, Else, EndIf — fall through with no
+                      // dblclick action. Their Key cell has no editable meaning.
                     }}
                   >
                     {editingCell?.index === idx && editingCell.field === 'key' ? (
@@ -1460,7 +1471,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       </span>
                     ) : null}
                   </td>
-                  )}
+                    );
+                  })()}
 
                   {/* X */}
                   {columnVisibility.x && (

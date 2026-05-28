@@ -642,7 +642,15 @@ export function Toolbar(_props: ToolbarProps) {
               <Globe size={14} />
             </button>
             {showBrowserMenu && (
-              <div className="absolute top-full left-0 mt-1 w-44 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1">
+              <div className="absolute top-full left-0 mt-1 w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1">
+                {/* Header pill matches the sibling Wait / Conditional dropdowns so the
+                    three menus read as one family. Width also bumped 44 → 56 for the
+                    same reason — long labels like "Navigate to URL" got close to the
+                    edge at w-44, and the size discrepancy was visible when two menus
+                    happened to open near each other during a UX sweep. */}
+                <div className="px-3 py-1 text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
+                  Insert Browser Action
+                </div>
                 {([
                   { type: 'BrowserClick', label: 'Left Click' },
                   { type: 'BrowserRightClick', label: 'Right Click' },

@@ -25,6 +25,10 @@ export interface NumberInputProps {
   ariaLabel?: string;
   // Optional onBlur — some call sites need to react to commit (e.g. validate then re-clamp).
   onBlur?: () => void;
+  // Auto-focus on mount — useful inside modal dialogs where React's plain `autoFocus`
+  // attribute is unreliable across portals. Forwards to the inner <input>; ignored on
+  // re-renders, only the first mount focuses (so toggling it back to false won't blur).
+  autoFocus?: boolean;
 }
 
 // Always-visible [−] [input] [+] number control. Replaces the platform's tiny hover-only
@@ -50,7 +54,23 @@ export function NumberInput({
   id,
   ariaLabel,
   onBlur,
+  autoFocus = false,
 }: NumberInputProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Mount-only focus. React's `autoFocus` attribute is honoured by the JSX runtime via a
+  // node.focus() call after mount, but portal/modal mounting in WebView2 has occasionally
+  // raced with that — an explicit ref + useEffect is reliable. Selecting the text (instead
+  // of just placing the caret) lets the user immediately overwrite the pre-filled default.
+  useEffect(() => {
+    if (!autoFocus) return;
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus();
+    input.select();
+    // empty deps — fire exactly once after first paint. Toggling autoFocus later won't
+    // re-focus (matches the native HTML autofocus contract).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Local string state so the user can type freely (clear the field, type a partial
   // value like "" or "1" while heading toward "12") without the parent thrashing. Null
   // value → empty text so the placeholder shows; user has to type or click + to set.
@@ -140,6 +160,7 @@ export function NumberInput({
         <Minus size={12} />
       </button>
       <input
+        ref={inputRef}
         id={id}
         type="number"
         value={text}

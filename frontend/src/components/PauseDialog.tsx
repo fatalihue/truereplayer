@@ -55,8 +55,12 @@ export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
     }
   }, []);
 
-  // Focus the timeout input by default — the most common Pause is "wait N seconds".
-  // If the user wants a hotkey instead they click the field to switch.
+  // Cleanup-only effect — disarm the hotkey capture idle timer on unmount so a stray
+  // setTimeout doesn't fire blur() against a torn-down ref. Auto-focus of the timeout
+  // input is delegated to <NumberInput autoFocus /> below, which has direct ref access
+  // (the dialog historically tried to claim "focus the timeout input" here but never
+  // actually called focus() — keyboard users opening the dialog and pressing Enter got
+  // a no-op until the autoFocus prop landed).
   useEffect(() => {
     return () => disarmCaptureTimer();
   }, [disarmCaptureTimer]);
@@ -107,13 +111,17 @@ export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
 
   const handleDialogKeyDown = (e: React.KeyboardEvent) => {
     // Enter confirms unless the hotkey field is armed (Enter would otherwise be
-    // captured as the bound key — surprising). Escape always closes.
+    // captured as the bound key — surprising). Escape always closes. Both stop
+    // propagation so the CommandPalette / global keydown listeners don't double-handle
+    // the same press (Escape used to bubble up to the app-level handler).
     if (e.key === 'Enter' && !hotkeyFocused) {
       e.preventDefault();
+      e.stopPropagation();
       handleConfirm();
     }
     if (e.key === 'Escape') {
       e.preventDefault();
+      e.stopPropagation();
       onClose();
     }
   };
@@ -122,7 +130,12 @@ export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onKeyDown={(e) => e.stopPropagation()}
-      onClick={onClose}
+      // Backdrop click closes the dialog UNLESS the user is mid-hotkey-capture — in
+      // that state the low-level hook is enabled and an accidental backdrop click
+      // would unmount the dialog before the field's blur cleanup fires, leaving a
+      // window where the global hook stays armed. Forcing a click on the hotkey field
+      // (or anywhere inside the dialog) first lets the normal cleanup path run.
+      onClick={() => { if (!hotkeyFocused) onClose(); }}
     >
       <div
         className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[440px] max-w-[90vw] flex flex-col"
@@ -181,6 +194,7 @@ export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
                 inputWidth="w-24"
                 inputHeight="h-9"
                 ariaLabel="Pause timeout in seconds"
+                autoFocus
               />
               <span className="text-xs text-text-tertiary">seconds</span>
             </div>
