@@ -338,6 +338,13 @@ namespace TrueReplayer.Controllers
 
             Directory.CreateDirectory(profileDir);
 
+            // Sweep any orphan temp files left behind by a previous atomic-save that hit
+            // the rare "AV held the temp past both the move retry AND the cleanup Delete"
+            // path. Without this, leaked temps accumulate over time and clutter the
+            // user's Profiles directory. Matches Path.GetRandomFileName() format strictly
+            // so real .json / .png / user files stay untouched. Idempotent + cheap.
+            FileHelper.CleanupOrphanTemps(profileDir);
+
             var files = Directory.GetFiles(profileDir, "*.json")
                 .Where(f => !string.Equals(Path.GetFileName(f), "profile-order.json", StringComparison.OrdinalIgnoreCase))
                 .ToList();

@@ -97,6 +97,58 @@ namespace TrueReplayer.Services
         }
 
         /// <summary>
+        /// Sweeps a directory for orphan temp files left behind by
+        /// WriteAllTextAtomic / WriteAllTextAtomicAsync when both the File.Move
+        /// retry AND the catch-block cleanup failed (typically: antivirus held
+        /// the temp file long enough that even the cleanup's Delete couldn't
+        /// touch it). Matches the exact shape of Path.GetRandomFileName():
+        /// 8 lowercase alphanumeric chars + '.' + 3 lowercase alphanumeric chars
+        /// — so real .json profiles, .png reference images, etc. are untouched.
+        ///
+        /// Safe to call at startup. Logs deletions to DiagnosticLog but never throws.
+        /// </summary>
+        public static void CleanupOrphanTemps(string directory)
+        {
+            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory)) return;
+            try
+            {
+                foreach (var path in Directory.EnumerateFiles(directory))
+                {
+                    var name = Path.GetFileName(path);
+                    // Path.GetRandomFileName() output is exactly 12 chars: 8 + '.' + 3.
+                    if (name.Length != 12 || name[8] != '.') continue;
+                    bool looksLikeRandom = true;
+                    for (int i = 0; i < name.Length; i++)
+                    {
+                        if (i == 8) continue; // the literal '.' between name and extension
+                        char c = name[i];
+                        // The runtime produces lowercase alphanumeric; case-folding here
+                        // would risk catching legitimate user files with uppercase names.
+                        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')))
+                        {
+                            looksLikeRandom = false;
+                            break;
+                        }
+                    }
+                    if (!looksLikeRandom) continue;
+                    try
+                    {
+                        File.Delete(path);
+                        DiagnosticLog.Info($"[FileHelper] Cleaned orphan temp file: {path}");
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Info($"[FileHelper] Failed to clean orphan temp '{path}': {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Info($"[FileHelper] CleanupOrphanTemps('{directory}') failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Async version of WriteAllTextAtomic.
         /// </summary>
         public static async Task WriteAllTextAtomicAsync(string filePath, string content)
