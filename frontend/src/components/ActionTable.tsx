@@ -1917,8 +1917,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                 <button
                   onMouseEnter={onMouse}
                   onClick={() => {
-                    navigator.clipboard.writeText(row.key ?? '');
-                    showToast('URL copied', 'success');
+                    navigator.clipboard.writeText(row.key ?? '')
+                      .then(() => showToast('URL copied', 'success'))
+                      .catch(() => showToast('Copy failed', 'error'));
                     closeContextMenu();
                   }}
                   className={cls}
@@ -1936,8 +1937,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                 <button
                   onMouseEnter={onMouse}
                   onClick={() => {
-                    navigator.clipboard.writeText(row.key ?? '');
-                    showToast('Selector copied', 'success');
+                    navigator.clipboard.writeText(row.key ?? '')
+                      .then(() => showToast('Selector copied', 'success'))
+                      .catch(() => showToast('Copy failed', 'error'));
                     closeContextMenu();
                   }}
                   className={cls}
@@ -1954,8 +1956,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                 <button
                   onMouseEnter={onMouse}
                   onClick={() => {
-                    navigator.clipboard.writeText(row.key ?? '');
-                    showToast('Text copied', 'success');
+                    navigator.clipboard.writeText(row.key ?? '')
+                      .then(() => showToast('Text copied', 'success'))
+                      .catch(() => showToast('Copy failed', 'error'));
                     closeContextMenu();
                   }}
                   className={cls}
@@ -1980,8 +1983,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                 <button
                   onMouseEnter={onMouse}
                   onClick={() => {
-                    navigator.clipboard.writeText(`${row.x ?? 0}, ${row.y ?? 0}`);
-                    showToast(`Copied ${row.x ?? 0}, ${row.y ?? 0}`, 'success');
+                    navigator.clipboard.writeText(`${row.x ?? 0}, ${row.y ?? 0}`)
+                      .then(() => showToast(`Copied ${row.x ?? 0}, ${row.y ?? 0}`, 'success'))
+                      .catch(() => showToast('Copy failed', 'error'));
                     closeContextMenu();
                   }}
                   className={cls}

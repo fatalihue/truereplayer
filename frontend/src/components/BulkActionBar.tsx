@@ -92,7 +92,7 @@ export function BulkActionBar({
           <div className="flex items-center gap-1">
             <span className="text-[10px] text-text-disabled uppercase">{activeInput === 'notes' ? 'Notes' : activeInput}</span>
             <input
-              type={activeInput === 'notes' ? 'text' : 'text'}
+              type="text"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleConfirm(); if (e.key === 'Escape') setActiveInput(null); }}

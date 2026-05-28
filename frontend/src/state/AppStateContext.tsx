@@ -84,7 +84,14 @@ const initialState: AppState = {
 function appStateReducer(state: AppState, message: IncomingMessage): AppState {
   switch (message.type) {
     case 'state:init':
-      return { ...initialState, ...message.payload, profileOrder: message.payload.profileOrder ?? initialState.profileOrder };
+      // Deep-merge settings (and guard profileOrder) so a partial state:init payload can't wipe
+      // defaultSettings — every settings.* read downstream would otherwise crash the UI.
+      return {
+        ...initialState,
+        ...message.payload,
+        settings: { ...initialState.settings, ...(message.payload.settings ?? {}) },
+        profileOrder: message.payload.profileOrder ?? initialState.profileOrder,
+      };
     case 'status:changed':
       // New run starting → reset Clicker counter to zero so we don't carry over the
       // previous run's totals. Other transitions (replaying → ready, recording, etc.)

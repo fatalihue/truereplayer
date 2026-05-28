@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { useBridge } from '../bridge/BridgeContext';
 
 export type ToastType = 'success' | 'error' | 'info';
@@ -43,8 +43,16 @@ function inferType(message: string): ToastType {
 export function ToastProvider({ children }: { children: ReactNode }) {
   const { subscribe } = useBridge();
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  // Track auto-dismiss timers so they can be cancelled on manual dismiss and on unmount —
+  // otherwise a pending timer (up to 8s for errors) fires setToasts after the provider is gone.
+  const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
   const dismissToast = useCallback((id: number) => {
+    const timer = timersRef.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      timersRef.current.delete(id);
+    }
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
@@ -56,9 +64,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const duration = options.duration
       ?? (options.action ? 6000 : (resolvedType === 'error' ? 8000 : 3000));
     setToasts(prev => [...prev, { id, message, type: resolvedType, action: options.action }]);
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      timersRef.current.delete(id);
       setToasts(prev => prev.filter(t => t.id !== id));
     }, duration);
+    timersRef.current.set(id, timer);
+  }, []);
+
+  // Cancel any still-pending auto-dismiss timers when the provider unmounts.
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach(clearTimeout);
+      timers.clear();
+    };
   }, []);
 
   useEffect(() => {

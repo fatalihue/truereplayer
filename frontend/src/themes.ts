@@ -1472,7 +1472,13 @@ export function hslToHex(h: number, s: number, l: number): string {
 
 /** Convert any color string to hex (handles rgba() and hex) */
 export function toHex(color: string): string {
-  if (color.startsWith('#')) return color.length === 7 ? color : color;
+  if (color.startsWith('#')) {
+    // Normalize to #RRGGBB for <input type="color">: pass #RRGGBB through, expand #RGB
+    // shorthand, and drop the alpha from #RRGGBBAA. Malformed lengths fall through below.
+    if (color.length === 7) return color;
+    if (color.length === 4) return `#${color[1]}${color[1]}${color[2]}${color[2]}${color[3]}${color[3]}`;
+    if (color.length === 9) return color.slice(0, 7);
+  }
   const m = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
   if (m) return rgbToHex(+m[1], +m[2], +m[3]);
   return '#000000';
