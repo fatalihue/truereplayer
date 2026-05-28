@@ -3657,6 +3657,19 @@ namespace TrueReplayer
             }
         }
 
+        // Guards against a malicious/buggy WebView payload smuggling path separators or
+        // traversal into a profile name that later feeds Path.Combine / File.Move. The
+        // persisted name must be a bare file name (no directory components, no invalid chars).
+        private static bool IsSafeProfileName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            if (name == "." || name == "..") return false;
+            string baseName = name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ? name[..^5] : name;
+            if (string.IsNullOrWhiteSpace(baseName)) return false;
+            if (baseName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return false;
+            return true;
+        }
+
         private async void HandleProfileCreate(JsonElement payload)
         {
             string name = payload.GetProperty("name").GetString() ?? "";
@@ -3665,6 +3678,11 @@ namespace TrueReplayer
                 ? fp.GetString() : null;
 
             if (string.IsNullOrEmpty(name)) return;
+            if (!IsSafeProfileName(name))
+            {
+                SendMessage("alert:show", new { message = "Invalid profile name." });
+                return;
+            }
 
             string profileDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
@@ -3796,6 +3814,11 @@ namespace TrueReplayer
             string oldName = payload.GetProperty("oldName").GetString() ?? "";
             string newName = payload.GetProperty("newName").GetString() ?? "";
             if (string.IsNullOrEmpty(oldName) || string.IsNullOrEmpty(newName)) return;
+            if (!IsSafeProfileName(newName))
+            {
+                SendMessage("alert:show", new { message = "Invalid profile name." });
+                return;
+            }
 
             var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == oldName);
             if (entry == null) return;

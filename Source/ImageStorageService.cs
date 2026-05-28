@@ -40,14 +40,15 @@ namespace TrueReplayer.Services
         /// </summary>
         public static Bitmap? LoadReferenceImage(string profileName, string imagePath)
         {
-            if (string.IsNullOrEmpty(imagePath)) return null;
-
-            string fullPath = Path.Combine(GetImageDirectory(profileName), imagePath);
+            if (!TryResolveImageFile(profileName, imagePath, out string fullPath)) return null;
             if (!File.Exists(fullPath)) return null;
 
-            // Load into memory to avoid file lock
+            // Load into a detached bitmap: System.Drawing.Bitmap keeps a reference to its
+            // backing stream for its lifetime, so copy into an independent Bitmap before the
+            // MemoryStream is disposed — otherwise later pixel access / Save throws GDI+ errors.
             using var stream = new MemoryStream(File.ReadAllBytes(fullPath));
-            return new Bitmap(stream);
+            using var loaded = new Bitmap(stream);
+            return new Bitmap(loaded);
         }
 
         /// <summary>
@@ -55,9 +56,8 @@ namespace TrueReplayer.Services
         /// </summary>
         public static void DeleteReferenceImage(string profileName, string imagePath)
         {
-            if (string.IsNullOrEmpty(imagePath)) return;
+            if (!TryResolveImageFile(profileName, imagePath, out string fullPath)) return;
 
-            string fullPath = Path.Combine(GetImageDirectory(profileName), imagePath);
             try { if (File.Exists(fullPath)) File.Delete(fullPath); }
             catch { /* best effort */ }
         }
@@ -67,9 +67,7 @@ namespace TrueReplayer.Services
         /// </summary>
         public static string? ReadAsBase64(string profileName, string imagePath)
         {
-            if (string.IsNullOrEmpty(imagePath)) return null;
-
-            string fullPath = Path.Combine(GetImageDirectory(profileName), imagePath);
+            if (!TryResolveImageFile(profileName, imagePath, out string fullPath)) return null;
             if (!File.Exists(fullPath)) return null;
 
             return Convert.ToBase64String(File.ReadAllBytes(fullPath));
@@ -94,10 +92,14 @@ namespace TrueReplayer.Services
         /// </summary>
         public static void SaveFromBase64(string base64Data, string profileName, string filename)
         {
-            string dir = GetImageDirectory(profileName);
-            Directory.CreateDirectory(dir);
+            // filename originates from an imported .trprofile (untrusted). Resolve it to a
+            // sanitized path inside the profile's image dir, rejecting traversal/invalid names.
+            // The same Path.GetFileName reduction runs on the read side (LoadReferenceImage et
+            // al.), so a name like "..\\x.png" maps to "x.png" consistently and the action's
+            // ImagePath still resolves after import.
+            if (!TryResolveImageFile(profileName, filename, out string fullPath)) return;
 
-            string fullPath = Path.Combine(dir, filename);
+            Directory.CreateDirectory(GetImageDirectory(profileName));
             File.WriteAllBytes(fullPath, Convert.FromBase64String(base64Data));
         }
 
@@ -107,9 +109,7 @@ namespace TrueReplayer.Services
         /// </summary>
         public static string? CloneReferenceImage(string srcProfile, string srcImagePath, string dstProfile)
         {
-            if (string.IsNullOrEmpty(srcImagePath)) return null;
-
-            string srcFullPath = Path.Combine(GetImageDirectory(srcProfile), srcImagePath);
+            if (!TryResolveImageFile(srcProfile, srcImagePath, out string srcFullPath)) return null;
             if (!File.Exists(srcFullPath)) return null;
 
             string dstDir = GetImageDirectory(dstProfile);
@@ -207,6 +207,36 @@ namespace TrueReplayer.Services
         /// the directory names returned by enumeration.
         /// </summary>
         public static string GetSanitizedProfileFolder(string profileName) => SanitizeFolderName(profileName);
+
+        /// <summary>
+        /// Resolves an untrusted image file name to a full path guaranteed to live directly
+        /// inside the profile's image directory. Strips directory components (defeats "..\\"
+        /// and absolute-path traversal) and rejects names with invalid characters. Returns
+        /// false (empty path) when the name can't be safely resolved.
+        /// </summary>
+        private static bool TryResolveImageFile(string profileName, string untrustedName, out string fullPath)
+        {
+            fullPath = string.Empty;
+            if (string.IsNullOrEmpty(untrustedName)) return false;
+
+            // Reduce to a bare file name: "..\\..\\evil.png" -> "evil.png", "C:\\x\\y.png" -> "y.png".
+            string safeName = Path.GetFileName(untrustedName);
+            if (string.IsNullOrEmpty(safeName)) return false;
+            if (safeName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return false;
+
+            string dir = GetImageDirectory(profileName);
+            string candidate = Path.Combine(dir, safeName);
+
+            // Defense in depth: confirm the resolved path stays under the image directory.
+            string canonicalDir = Path.GetFullPath(dir);
+            if (!canonicalDir.EndsWith(Path.DirectorySeparatorChar))
+                canonicalDir += Path.DirectorySeparatorChar;
+            if (!Path.GetFullPath(candidate).StartsWith(canonicalDir, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            fullPath = candidate;
+            return true;
+        }
 
         private static string SanitizeFolderName(string name)
         {

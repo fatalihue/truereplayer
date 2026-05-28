@@ -964,6 +964,17 @@ namespace TrueReplayer.Services
                     dispatcherQueue.TryEnqueue(() => OnLoopProgress?.Invoke(capturedFinal, loopProgressTotal));
                 }
 
+                // Release any button/key the replay left pressed when it was cancelled. This
+                // runs after the replay task has fully completed, so an in-flight SimulateMouse/
+                // SimulateKey (whose Thread.Sleep window Stop's own ResetMouseState may have
+                // raced) has finished and recorded its state — closing the stuck-button/key
+                // race. Idempotent with Stop()'s reset (lock-guarded, no-op when nothing down).
+                if (token.IsCancellationRequested)
+                {
+                    ResetMouseState();
+                    ResetKeyState();
+                }
+
                 _callStack.Clear();
                 NotifyChainChanged();
             }
@@ -1127,7 +1138,7 @@ namespace TrueReplayer.Services
                             int gap = Math.Max(0, Math.Min(5000, action.RepeatDelayMs ?? ActionItem.DefaultRepeatDelayMs));
                             for (int r = 0; r < repeats; r++) {
                                 if (token.IsCancellationRequested) break;
-                                SimulateKeystroke(action.Key);
+                                SimulateKeystroke(action.Key, token);
                                 if (r < repeats - 1 && gap > 0) {
                                     try { await Task.Delay(gap, token); }
                                     catch (OperationCanceledException) { break; }
@@ -1135,12 +1146,12 @@ namespace TrueReplayer.Services
                             }
                             break;
                         }
-                        case "LeftClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN); _simLeftDown = true; break;
-                        case "LeftClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP); _simLeftDown = false; break;
-                        case "RightClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTDOWN); _simRightDown = true; break;
-                        case "RightClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTUP); _simRightDown = false; break;
-                        case "MiddleClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN); _simMiddleDown = true; break;
-                        case "MiddleClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEUP); _simMiddleDown = false; break;
+                        case "LeftClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN); break;
+                        case "LeftClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP); break;
+                        case "RightClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTDOWN); break;
+                        case "RightClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTUP); break;
+                        case "MiddleClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN); break;
+                        case "MiddleClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEUP); break;
                         case "ScrollUp": SimulateScroll(120); break;
                         case "ScrollDown": SimulateScroll(-120); break;
                         case "SendText": await SimulateClipboardPaste(action.Key, token); break;
@@ -1546,22 +1557,36 @@ namespace TrueReplayer.Services
         // logic in SimulateKey which is case-insensitive at the VK lookup.
         private readonly HashSet<string> _simulatedKeysDown = new(StringComparer.OrdinalIgnoreCase);
 
+        // Serializes mutation/inspection of the simulated-input "currently down" state
+        // (_simLeftDown/_simRightDown/_simMiddleDown and _simulatedKeysDown) so Stop()'s
+        // ResetMouseState/ResetKeyState (UI/hotkey thread) can't race the replay thread
+        // mid-dispatch and leave a button/key stuck or corrupt the HashSet.
+        private readonly object _simInputLock = new();
+
         private void ResetMouseState()
         {
-            if (!_simLeftDown && !_simRightDown && !_simMiddleDown) return;
-            NativeMethods.GetCursorPos(out var pos);
-            if (_simLeftDown)   { SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_LEFTUP);   _simLeftDown = false; }
-            if (_simRightDown)  { SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_RIGHTUP);  _simRightDown = false; }
-            if (_simMiddleDown) { SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_MIDDLEUP); _simMiddleDown = false; }
+            lock (_simInputLock)
+            {
+                if (!_simLeftDown && !_simRightDown && !_simMiddleDown) return;
+                NativeMethods.GetCursorPos(out var pos);
+                // pos is already absolute screen space — coordsAreProfileSpace:false skips the
+                // relative-offset resolution (which would mis-place, or even suppress, the UP).
+                if (_simLeftDown)   SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_LEFTUP,   coordsAreProfileSpace: false);
+                if (_simRightDown)  SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_RIGHTUP,  coordsAreProfileSpace: false);
+                if (_simMiddleDown) SimulateMouse(pos.x, pos.y, NativeMethods.MOUSEEVENTF_MIDDLEUP, coordsAreProfileSpace: false);
+            }
         }
 
         private void ResetKeyState()
         {
-            if (_simulatedKeysDown.Count == 0) return;
-            // Snapshot first — SimulateKey(_, false) calls Remove() on the set, mutating it
-            // mid-iteration. Copy-then-iterate avoids InvalidOperationException.
-            var pending = _simulatedKeysDown.ToArray();
-            foreach (var key in pending) SimulateKey(key, false);
+            lock (_simInputLock)
+            {
+                if (_simulatedKeysDown.Count == 0) return;
+                // Snapshot first — SimulateKey(_, false) calls Remove() on the set, mutating it
+                // mid-iteration. Copy-then-iterate avoids InvalidOperationException.
+                var pending = _simulatedKeysDown.ToArray();
+                foreach (var key in pending) SimulateKey(key, false);
+            }
         }
 
         private void SimulateScroll(int delta)
@@ -1701,7 +1726,21 @@ namespace TrueReplayer.Services
                     }
                 }
             };
-            NativeMethods.SendInput(1, new[] { clickInput }, inputSize);
+            lock (_simInputLock)
+            {
+                NativeMethods.SendInput(1, new[] { clickInput }, inputSize);
+
+                // Track currently-pressed buttons here (atomic with the SendInput) so
+                // ResetMouseState releases exactly what's down. Living inside SimulateMouse
+                // means the missing-target early-return above never leaves a flag set — which
+                // previously caused a spurious UP on Stop — and Stop can't observe a torn state.
+                if ((mouseEvent & NativeMethods.MOUSEEVENTF_LEFTDOWN) != 0) _simLeftDown = true;
+                else if ((mouseEvent & NativeMethods.MOUSEEVENTF_LEFTUP) != 0) _simLeftDown = false;
+                if ((mouseEvent & NativeMethods.MOUSEEVENTF_RIGHTDOWN) != 0) _simRightDown = true;
+                else if ((mouseEvent & NativeMethods.MOUSEEVENTF_RIGHTUP) != 0) _simRightDown = false;
+                if ((mouseEvent & NativeMethods.MOUSEEVENTF_MIDDLEDOWN) != 0) _simMiddleDown = true;
+                else if ((mouseEvent & NativeMethods.MOUSEEVENTF_MIDDLEUP) != 0) _simMiddleDown = false;
+            }
         }
 
         // Matches {clipboard} or {clipboard:modifier[:arg]...}
@@ -2593,7 +2632,7 @@ namespace TrueReplayer.Services
         // event arrives. Without it, fast apps (some games, terminals) can drop the
         // modifier from their state machine and treat the keystroke as if only the key
         // was pressed bare. 10 ms is below human-perceptible latency.
-        private void SimulateKeystroke(string keystroke)
+        private void SimulateKeystroke(string keystroke, CancellationToken token = default)
         {
             if (string.IsNullOrWhiteSpace(keystroke)) return;
             var parts = keystroke.Split('+');
@@ -2619,18 +2658,28 @@ namespace TrueReplayer.Services
             foreach (var m in new[] { "Win", "Ctrl", "Shift", "Alt" })
                 if (modifiers.Contains(m)) SimulateKey(m, true);
 
-            Thread.Sleep(10); // let target app's input system register the modifier set
+            try
+            {
+                Thread.Sleep(10); // let target app's input system register the modifier set
 
-            // Key tap (down → up)
-            SimulateKey(target, true);
-            SimulateKey(target, false);
+                // If Stop landed while the modifiers were going down, skip the target tap —
+                // but still fall through to the finally so the modifiers are released.
+                if (token.IsCancellationRequested) return;
 
-            // Modifiers up in REVERSE order. Mirrors physical typing — release the last-
-            // pressed first. Some apps watch for transient modifier states; doing this
-            // out of order can leave them in a stuck modifier state until the user
-            // physically presses + releases the same modifier themselves.
-            foreach (var m in new[] { "Alt", "Shift", "Ctrl", "Win" })
-                if (modifiers.Contains(m)) SimulateKey(m, false);
+                // Key tap (down → up)
+                SimulateKey(target, true);
+                SimulateKey(target, false);
+            }
+            finally
+            {
+                // Modifiers up in REVERSE order. Mirrors physical typing — release the last-
+                // pressed first. Some apps watch for transient modifier states; doing this
+                // out of order can leave them in a stuck modifier state until the user
+                // physically presses + releases the same modifier themselves. In a finally so a
+                // cancelled combo (or a throw in the tap) never leaves a modifier stuck down.
+                foreach (var m in new[] { "Alt", "Shift", "Ctrl", "Win" })
+                    if (modifiers.Contains(m)) SimulateKey(m, false);
+            }
         }
 
         private void SimulateKey(string key, bool isDown)
@@ -2659,15 +2708,16 @@ namespace TrueReplayer.Services
                 }
             };
 
-            NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
+            lock (_simInputLock)
+            {
+                NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
 
-            // Track pressed-but-not-released keys so ResetKeyState (called from Stop) can
-            // emit the missing KEYUP. Mirrors the _simLeftDown/_simRightDown/_simMiddleDown
-            // mouse pattern above. Modifier-only keystrokes (SimulateKeystroke) press +
-            // release modifiers synchronously inside the same function call, so this Add+
-            // Remove balance is always preserved by the end of that flow.
-            if (isDown) _simulatedKeysDown.Add(key);
-            else _simulatedKeysDown.Remove(key);
+                // Track pressed-but-not-released keys (atomic with the SendInput) so
+                // ResetKeyState (called from Stop, on another thread) sees a consistent set
+                // and emits the missing KEYUP. Mirrors the mouse flag pattern above.
+                if (isDown) _simulatedKeysDown.Add(key);
+                else _simulatedKeysDown.Remove(key);
+            }
         }
     }
 }
