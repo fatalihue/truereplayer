@@ -202,7 +202,28 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   }, []);
   useEffect(() => () => clearTestTimeout(), [clearTestTimeout]);
 
-  // Listen for pick element result + test result from extension
+  // Latest-value refs for the in-flight request ids, so the bridge subscription below can be a
+  // stable one-time subscription instead of re-subscribing on every requestId change — a churn
+  // that could drop a bridge response arriving in the unsubscribed gap (Test/Pick stuck "…").
+  const testRequestIdRef = useRef(testRequestId);
+  const testMatchRequestIdRef = useRef(testMatchRequestId);
+  const pickPositionRequestIdRef = useRef(pickPositionRequestId);
+  const pickColorRequestIdRef = useRef(pickColorRequestId);
+  const testPixelRequestIdRef = useRef(testPixelRequestId);
+  // Configure-region is fire-and-forget (no UI state), so a plain ref tracks the in-flight
+  // request and guards waitimage:searchRegionSet against a stale reply landing on a different
+  // action after the user switched (the panel doesn't remount on action change).
+  const searchRegionRequestIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    testRequestIdRef.current = testRequestId;
+    testMatchRequestIdRef.current = testMatchRequestId;
+    pickPositionRequestIdRef.current = pickPositionRequestId;
+    pickColorRequestIdRef.current = pickColorRequestId;
+    testPixelRequestIdRef.current = testPixelRequestId;
+  });
+
+  // Listen for pick element result + test result from extension. Subscribed once (stable deps);
+  // current request ids are read from the refs above so this never tears down mid-flight.
   useEffect(() => {
     return subscribe((msg) => {
       if (msg.type === 'browser:pickResult') {
@@ -223,14 +244,14 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       } else if (msg.type === 'browser:testResult') {
         const r = msg.payload as BrowserTestResult;
         // Only react if it's the test we triggered
-        if (testRequestId && r.requestId === testRequestId) {
+        if (testRequestIdRef.current && r.requestId === testRequestIdRef.current) {
           clearTestTimeout();
           setTestResult(r);
           setTestRequestId(null);
         }
       } else if (msg.type === 'image:testMatchResult') {
         const r = msg.payload as { requestId: string; found: boolean; score: number; x: number; y: number; w: number; h: number; error?: string };
-        if (testMatchRequestId && r.requestId === testMatchRequestId) {
+        if (testMatchRequestIdRef.current && r.requestId === testMatchRequestIdRef.current) {
           clearTestMatchTimeout();
           setTestMatchResult({ found: r.found, score: r.score, x: r.x, y: r.y, w: r.w, h: r.h, error: r.error });
           setTestMatchRequestId(null);
@@ -253,14 +274,18 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
         }
       } else if (msg.type === 'waitimage:searchRegionSet') {
         const r = msg.payload as { requestId: string; cancelled: boolean; x?: number; y?: number; w?: number; h?: number };
-        // We only ever have one configure-region session at a time per panel instance;
-        // accepting any non-cancelled result is safe.
-        if (!r.cancelled && r.w && r.h && r.w > 0 && r.h > 0) {
-          setWaitImageSearchRegion({ x: r.x ?? 0, y: r.y ?? 0, w: r.w, h: r.h });
+        // Guard against a stale reply: only apply when it matches the configure-region request
+        // we last initiated. The panel doesn't remount when the user switches actions, so a late
+        // reply could otherwise overwrite a different action's search region.
+        if (searchRegionRequestIdRef.current && r.requestId === searchRegionRequestIdRef.current) {
+          searchRegionRequestIdRef.current = null;
+          if (!r.cancelled && r.w && r.h && r.w > 0 && r.h > 0) {
+            setWaitImageSearchRegion({ x: r.x ?? 0, y: r.y ?? 0, w: r.w, h: r.h });
+          }
         }
       } else if (msg.type === 'mouse:positionPicked') {
         const r = msg.payload as { requestId: string; cancelled: boolean; x?: number; y?: number };
-        if (pickPositionRequestId && r.requestId === pickPositionRequestId) {
+        if (pickPositionRequestIdRef.current && r.requestId === pickPositionRequestIdRef.current) {
           if (!r.cancelled && r.x != null && r.y != null) {
             setX(String(r.x));
             setY(String(r.y));
@@ -272,7 +297,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
         // the user gets all the metadata of the click; they can still tweak any of
         // the three before saving.
         const r = msg.payload as { requestId: string; cancelled: boolean; x?: number; y?: number; hex?: string };
-        if (pickColorRequestId && r.requestId === pickColorRequestId) {
+        if (pickColorRequestIdRef.current && r.requestId === pickColorRequestIdRef.current) {
           if (!r.cancelled && r.x != null && r.y != null && r.hex) {
             setPixelX(String(r.x));
             setPixelY(String(r.y));
@@ -282,13 +307,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
         }
       } else if (msg.type === 'pixel:testMatchResult') {
         const r = msg.payload as { requestId: string; matches: boolean; sampledHex?: string | null; error?: string };
-        if (testPixelRequestId && r.requestId === testPixelRequestId) {
+        if (testPixelRequestIdRef.current && r.requestId === testPixelRequestIdRef.current) {
           setTestPixelResult({ matches: r.matches, sampledHex: r.sampledHex, error: r.error });
           setTestPixelRequestId(null);
         }
       }
     });
-  }, [subscribe, testRequestId, clearTestTimeout, testMatchRequestId, clearTestMatchTimeout, pickPositionRequestId, pickColorRequestId, testPixelRequestId]);
+  }, [subscribe, clearTestTimeout, clearTestMatchTimeout]);
 
   // Sync local state from action. This is intentionally an effect-driven seed: keeping
   // local state lets the user edit freely before saving, while the dependency on `action`
@@ -819,6 +844,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   // can ESC to keep it as-is or drag a new one to overwrite.
   const handleConfigureSearchRegion = useCallback(() => {
     const requestId = Math.random().toString(36).slice(2, 10);
+    searchRegionRequestIdRef.current = requestId;
     const r = waitImageSearchRegion;
     send({
       type: 'waitimage:configureSearchRegion',

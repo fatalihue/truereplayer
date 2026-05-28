@@ -91,6 +91,13 @@ namespace TrueReplayer
         private static System.Threading.Timer? _holdDebounceTimer;
         private static volatile bool _holdConfirmed = false;
 
+        // Serializes the WhilePressed hold state (_activeHoldProfile/_activeHoldVkCode/
+        // _holdConfirmed/_holdDebounceTimer) across the three threads that touch it: the hook
+        // thread (key down/up), the debounce Timer's ThreadPool callback, and the bridge/UI
+        // thread (ClearActiveHold on replay end). Without it the timer's check-then-fire could
+        // race a concurrent clear and fire PROFILE_HOLD for an already-released key.
+        private static readonly object _holdLock = new();
+
         // OnRelease: when the profile hotkey key-down is swallowed, we remember which profile
         // is pending a release-fire and which physical vkCode will trigger it. Tracking by
         // vkCode (not composed key) so users who release the modifier before the main key
@@ -255,11 +262,14 @@ namespace TrueReplayer
         /// </summary>
         public static void ClearActiveHold()
         {
-            _activeHoldProfile = null;
-            _activeHoldVkCode = 0;
-            _holdConfirmed = false;
-            _holdDebounceTimer?.Dispose();
-            _holdDebounceTimer = null;
+            lock (_holdLock)
+            {
+                _activeHoldProfile = null;
+                _activeHoldVkCode = 0;
+                _holdConfirmed = false;
+                _holdDebounceTimer?.Dispose();
+                _holdDebounceTimer = null;
+            }
         }
 
         /// <summary>
@@ -951,25 +961,36 @@ namespace TrueReplayer
                                 {
                                     LastTriggerHotkey = key;
                                     if (needsMenuCancel) InjectMenuCancelKey();
-                                    _activeHoldProfile = matchedProfile;
-                                    _activeHoldVkCode = vkCode;
-                                    _holdConfirmed = false;
                                     // Debounce: only fire PROFILE_HOLD after the key has been held
                                     // long enough to be "intentional" — stops accidental brushes
                                     // from kicking off the infinite-loop replay.
                                     var profileCapture = matchedProfile;
                                     var vkCapture = vkCode;
-                                    _holdDebounceTimer?.Dispose();
-                                    _holdDebounceTimer = new System.Threading.Timer(_ =>
+                                    lock (_holdLock)
                                     {
-                                        // Confirm the hold is still on the same physical key
-                                        // (user hasn't released or pressed a different hotkey).
-                                        if (_activeHoldVkCode == vkCapture && _activeHoldProfile == profileCapture)
+                                        _activeHoldProfile = matchedProfile;
+                                        _activeHoldVkCode = vkCode;
+                                        _holdConfirmed = false;
+                                        _holdDebounceTimer?.Dispose();
+                                        _holdDebounceTimer = new System.Threading.Timer(_ =>
                                         {
-                                            _holdConfirmed = true;
-                                            OnHotkeyPressed?.Invoke($"PROFILE_HOLD::{profileCapture}");
-                                        }
-                                    }, null, WhilePressedDebounceMs, System.Threading.Timeout.Infinite);
+                                            // Confirm-and-fire under the lock so a concurrent
+                                            // key-up / ClearActiveHold can't clear the hold between
+                                            // the check and the fire decision. The PROFILE_HOLD
+                                            // invoke runs outside the lock to avoid holding it
+                                            // across an event handler.
+                                            bool fire = false;
+                                            lock (_holdLock)
+                                            {
+                                                if (_activeHoldVkCode == vkCapture && _activeHoldProfile == profileCapture)
+                                                {
+                                                    _holdConfirmed = true;
+                                                    fire = true;
+                                                }
+                                            }
+                                            if (fire) OnHotkeyPressed?.Invoke($"PROFILE_HOLD::{profileCapture}");
+                                        }, null, WhilePressedDebounceMs, System.Threading.Timeout.Infinite);
+                                    }
                                 }
                                 return (IntPtr)1;
 
@@ -1071,12 +1092,19 @@ namespace TrueReplayer
                 if (!isDown && _activeHoldVkCode == vkCode && _activeHoldProfile != null
                     && MainController.Instance != null && !MainController.Instance.IsRecording())
                 {
-                    var heldProfile = _activeHoldProfile;
-                    bool wasConfirmed = _holdConfirmed;
-                    _holdDebounceTimer?.Dispose();
-                    _holdDebounceTimer = null;
-                    ClearActiveHold();
-                    _holdConfirmed = false;
+                    string? heldProfile;
+                    bool wasConfirmed;
+                    lock (_holdLock)
+                    {
+                        heldProfile = _activeHoldProfile;
+                        // Capture wasConfirmed in the same critical section as the clear so the
+                        // timer's confirm-and-fire and this release are mutually exclusive: either
+                        // the timer already fired (wasConfirmed true → we send STOP), or its
+                        // post-clear check fails and it never fires. ClearActiveHold disposes the
+                        // timer and nulls the hold state under the same (reentrant) lock.
+                        wasConfirmed = _holdConfirmed;
+                        ClearActiveHold();
+                    }
 
                     // Only fire PROFILE_STOP if the hold was actually confirmed (replay had
                     // started or is about to start). If released before the debounce window
