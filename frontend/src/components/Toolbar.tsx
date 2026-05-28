@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, LayoutGrid, Check } from 'lucide-react';
+import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -27,15 +27,14 @@ export const defaultColumnVisibility: ColumnVisibility = {
   notes: true,
 };
 
-// Columns-visibility lives in App state and is mirrored to ActionTable; the toggle
-// BUTTON now lives in the toolbar because the previous home (a dead 24 px column
-// at the right edge of the grid header) wasted a full-width column slot in every
-// body row for what is essentially a one-click view preference. Theme Editor still
-// mounts at the App level via cmd:themeeditor.
-interface ToolbarProps {
-  columnVisibility: ColumnVisibility;
-  onColumnVisibilityChange: (vis: ColumnVisibility) => void;
-}
+// Toggle Columns button is currently DISABLED — the code below is preserved in
+// comments for when the user decides on a final home for it. The grid header's
+// trailing 24 px column was already removed (no row-spacer waste either way), so
+// the only thing missing right now is the actual toggle UI. ActionTable still
+// receives columnVisibility from App so columns render correctly; users just
+// can't change which columns are visible until the button is re-enabled here
+// (or moved somewhere else entirely).
+type ToolbarProps = Record<string, never>;
 
 /**
  * Profile-name display that gracefully degrades:
@@ -103,43 +102,47 @@ function ResponsiveProfileName({ name, actionCount }: { name: string; actionCoun
   );
 }
 
-export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarProps) {
+export function Toolbar(_props: ToolbarProps) {
   const { toolbar, buttonStates, actions, activeProfile } = useAppState();
   const { send } = useBridge();
-  // Columns dropdown — moved here from the grid header so the grid no longer
-  // needs a dedicated 24 px column for a single icon (the body rows were
-  // wasting space on an always-empty <td /> spacer). Same behaviour as before:
-  // click toggles the dropdown, outside click / Esc dismisses.
-  const [showColDropdown, setShowColDropdown] = useState(false);
-  const colDropdownRef = useRef<HTMLDivElement>(null);
-  const columnDefinitions: { key: keyof ColumnVisibility; label: string }[] = [
-    { key: 'action', label: 'Action' },
-    { key: 'key', label: 'Key' },
-    { key: 'x', label: 'X' },
-    { key: 'y', label: 'Y' },
-    { key: 'delay', label: 'Delay' },
-    { key: 'notes', label: 'Notes' },
-  ];
-  useEffect(() => {
-    if (!showColDropdown) return;
-    const onDown = (e: MouseEvent) => {
-      if (colDropdownRef.current && !colDropdownRef.current.contains(e.target as Node)) {
-        setShowColDropdown(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      setShowColDropdown(false);
-    };
-    window.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey, true);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey, true);
-    };
-  }, [showColDropdown]);
+  /* DISABLED — Toggle Columns dropdown.
+   * Re-enable by:
+   *   1. Changing ToolbarProps back to { columnVisibility, onColumnVisibilityChange }
+   *      and threading those props from App.tsx
+   *   2. Uncommenting the block below + the button render further down
+   *   3. Restoring the LayoutGrid / Check icon imports
+   *
+   * const [showColDropdown, setShowColDropdown] = useState(false);
+   * const colDropdownRef = useRef<HTMLDivElement>(null);
+   * const columnDefinitions: { key: keyof ColumnVisibility; label: string }[] = [
+   *   { key: 'action', label: 'Action' },
+   *   { key: 'key', label: 'Key' },
+   *   { key: 'x', label: 'X' },
+   *   { key: 'y', label: 'Y' },
+   *   { key: 'delay', label: 'Delay' },
+   *   { key: 'notes', label: 'Notes' },
+   * ];
+   * useEffect(() => {
+   *   if (!showColDropdown) return;
+   *   const onDown = (e: MouseEvent) => {
+   *     if (colDropdownRef.current && !colDropdownRef.current.contains(e.target as Node)) {
+   *       setShowColDropdown(false);
+   *     }
+   *   };
+   *   const onKey = (e: KeyboardEvent) => {
+   *     if (e.key !== 'Escape') return;
+   *     e.preventDefault();
+   *     e.stopPropagation();
+   *     setShowColDropdown(false);
+   *   };
+   *   window.addEventListener('mousedown', onDown);
+   *   window.addEventListener('keydown', onKey, true);
+   *   return () => {
+   *     window.removeEventListener('mousedown', onDown);
+   *     window.removeEventListener('keydown', onKey, true);
+   *   };
+   * }, [showColDropdown]);
+   */
   const selectionRef = useSelectionRef();
   const [showSendTextDialog, setShowSendTextDialog] = useState(false);
   const [showBrowserMenu, setShowBrowserMenu] = useState(false);
@@ -393,10 +396,10 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
             <Redo2 size={14} />
           </button>
 
-          {/* Toggle Columns — view preference for the grid. Lives next to Undo/Redo
-              because both are "what the user sees / sees recently" controls rather
-              than insert actions. Was in the grid's own 24 px right slot before;
-              moving it here let us drop the dead slot from every row. */}
+          {/* DISABLED — Toggle Columns button.
+              See the commented state block at the top of this component for the
+              re-enable steps. The trailing grid column was already cleaned up so
+              re-enabling here is purely additive.
           <div className="relative" ref={colDropdownRef}>
             <button
               tabIndex={-1}
@@ -440,6 +443,7 @@ export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarP
           </div>
 
           <div className="w-px h-4 bg-border-subtle mx-1" />
+          */}
 
           {/* ── Insert actions ─────────────────────────────────────────────
               Direct buttons replace the previous "Add Actions" dropdown. Order

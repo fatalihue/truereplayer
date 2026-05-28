@@ -30,7 +30,11 @@ function AppShell() {
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const [sheetActionIndex, setSheetActionIndex] = useState<number | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>(defaultColumnVisibility);
+  // setter prefixed with _ so the strict noUnusedLocals lint allows it through —
+  // the Toggle Columns toolbar button is currently disabled so nothing mutates
+  // columnVisibility right now. Keep the state pair intact so re-enabling the
+  // button later is a one-line rename rather than re-introducing the state.
+  const [columnVisibility, _setColumnVisibility] = useState<ColumnVisibility>(defaultColumnVisibility);
   // Theme Editor is mounted at the App level (not inside Toolbar) because its
   // open/close trigger now comes from multiple surfaces (Settings panel's
   // Appearance section, Command Palette, future shortcuts). Listens to the
@@ -135,10 +139,11 @@ function AppShell() {
         {/* Center: Toolbar + Table + Action Bar */}
         <div className="flex-1 flex flex-col gap-1 min-w-0">
           <ExtensionUpdateBanner />
-          <Toolbar
-            columnVisibility={columnVisibility}
-            onColumnVisibilityChange={setColumnVisibility}
-          />
+          {/* Toolbar takes no props right now — Toggle Columns is disabled there
+              (see Toolbar.tsx) so columnVisibility / setColumnVisibility don't
+              need to thread through. ActionTable still receives columnVisibility
+              directly from this same state below. */}
+          <Toolbar />
           {isClicker ? (
             <ClickerDashboard />
           ) : (
