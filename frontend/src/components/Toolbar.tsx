@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch } from 'lucide-react';
+import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, Eye } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -154,6 +154,13 @@ export function Toolbar(_props: ToolbarProps) {
   // open/close lifecycle so the outside-click handler can dismiss it the same way.
   const [showConditionalMenu, setShowConditionalMenu] = useState(false);
   const conditionalMenuRef = useRef<HTMLDivElement>(null);
+  // Wait dropdown — consolidates the previous standalone Wait Image + Wait Pixel
+  // buttons into one entry. Both options share the "block-until-condition" probe
+  // family, so a sub-picker mirrors how the Conditional button groups Image / Pixel
+  // probes for IF rows. Same lifecycle (outside-click / Escape dismiss) as the other
+  // toolbar menus; separate state so the menus close independently of each other.
+  const [showWaitMenu, setShowWaitMenu] = useState(false);
+  const waitMenuRef = useRef<HTMLDivElement>(null);
   const [showNavigateDialog, setShowNavigateDialog] = useState(false);
   const [showRunProfileDialog, setShowRunProfileDialog] = useState(false);
   // Pause modal (Pattern B normalization) — was an insert-then-Sheet flow before;
@@ -273,6 +280,30 @@ export function Toolbar(_props: ToolbarProps) {
       document.removeEventListener('keydown', keyHandler, true);
     };
   }, [showConditionalMenu]);
+
+  // Same outside-click + Escape dismiss for the Wait dropdown. Kept as its own
+  // effect (rather than folded with Conditional) so opening one doesn't close the
+  // other unexpectedly if they overlap.
+  useEffect(() => {
+    if (!showWaitMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (waitMenuRef.current && !waitMenuRef.current.contains(e.target as Node)) {
+        setShowWaitMenu(false);
+      }
+    };
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      setShowWaitMenu(false);
+    };
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('keydown', keyHandler, true);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('keydown', keyHandler, true);
+    };
+  }, [showWaitMenu]);
 
   // Ctrl+Z / Ctrl+Y keyboard shortcuts for undo/redo
   useEffect(() => {
@@ -448,11 +479,14 @@ export function Toolbar(_props: ToolbarProps) {
           {/* ── Insert actions ─────────────────────────────────────────────
               Direct buttons replace the previous "Add Actions" dropdown. Order
               groups input intent first (keystroke → text), then waits/checks
-              ordered cheapest-first (Pause → pixel watch → image search), then
+              ordered cheapest-first (Pause → Wait dropdown → Conditional), then
               the cross-surface helpers (Browser dropdown, sub-macro), ending
-              with the destructive Clear All. Move Up / Move Down moved to the
-              BulkActionBar (only useful with a selection); click x3 / scroll
-              inserts removed long ago because Recording does them better. */}
+              with the destructive Clear All. Wait Image + Wait Pixel collapsed
+              into a single Wait dropdown to match how the Conditional button
+              groups the same Image/Pixel probe family. Move Up / Move Down moved
+              to the BulkActionBar (only useful with a selection); click x3 /
+              scroll inserts removed long ago because Recording does them
+              better. */}
 
           {/* Send Keystroke — unified keyboard insert (Press 1×, Press N×, or
               Hold for X ms; mode toggle lives inside the dialog). */}
@@ -498,39 +532,56 @@ export function Toolbar(_props: ToolbarProps) {
             <Hourglass size={14} />
           </button>
 
-          {/* Wait for Pixel Color — single-pixel GDI watch, much lighter than
-              WaitImage. Listed before Wait Image so the cheaper option appears
-              first. Uses the dedicated insertWaitPixelColor message so the screen
-              overlay opens immediately (same UX as WaitImage); the row is only
-              created after a successful click, never as an empty placeholder. */}
-          <button
-            tabIndex={-1}
-            onClick={() => {
-              const sel = selectionRef.current;
-              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-              send({ type: 'actions:insertWaitPixelColor', payload: { insertIndex } });
-            }}
-            disabled={buttonStates.recordingActive || buttonStates.replayActive}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Insert Wait for Pixel Color action"
-          >
-            <Pipette size={14} />
-          </button>
-
-          {/* Wait for Image — OpenCV template match with optional ROI. */}
-          <button
-            tabIndex={-1}
-            onClick={() => {
-              const sel = selectionRef.current;
-              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
-              send({ type: 'actions:insertAction', payload: { actionType: 'WaitImage', insertIndex } });
-            }}
-            disabled={buttonStates.recordingActive || buttonStates.replayActive}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Insert Wait for Image action"
-          >
-            <ScanSearch size={14} />
-          </button>
+          {/* Wait — sub-picker for the two blocking-probe variants. Replaces the
+              previous standalone Wait Image + Wait Pixel buttons; the consolidated
+              entry mirrors how the Conditional button groups Image/Pixel probes for
+              IF rows. Inside the menu, Pixel sits above Image so the cheaper GDI
+              path appears first (same order the standalone buttons used). Both
+              menu items keep their original bridge messages — the row-insert UX
+              (overlay opens immediately, row materializes only after a successful
+              capture) is unchanged. */}
+          <div className="relative" ref={waitMenuRef}>
+            <button
+              tabIndex={-1}
+              onClick={() => setShowWaitMenu(!showWaitMenu)}
+              disabled={buttonStates.recordingActive || buttonStates.replayActive}
+              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+              data-tip="Insert Wait (Image / Pixel Color)"
+            >
+              <Eye size={14} />
+            </button>
+            {showWaitMenu && (
+              <div className="absolute top-full left-0 mt-1 w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1">
+                <div className="px-3 py-1 text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
+                  Insert Wait
+                </div>
+                <button
+                  className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
+                  onClick={() => {
+                    const sel = selectionRef.current;
+                    const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                    send({ type: 'actions:insertWaitPixelColor', payload: { insertIndex } });
+                    setShowWaitMenu(false);
+                  }}
+                >
+                  <Pipette size={12} className="text-accent-light" />
+                  Wait for Pixel Color…
+                </button>
+                <button
+                  className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
+                  onClick={() => {
+                    const sel = selectionRef.current;
+                    const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                    send({ type: 'actions:insertAction', payload: { actionType: 'WaitImage', insertIndex } });
+                    setShowWaitMenu(false);
+                  }}
+                >
+                  <ScanSearch size={12} className="text-accent-light" />
+                  Wait for Image…
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Conditional logic — sits with the probe-based insertors (Pause / Pixel /
               Image) because the active picker options reuse those probes as the IF
