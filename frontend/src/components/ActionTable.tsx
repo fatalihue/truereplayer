@@ -1312,7 +1312,43 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
                   {/* Key */}
                   {columnVisibility.key && (
-                  <td className="pl-1">
+                  <td
+                    className="pl-1"
+                    // Dblclick handler at the <td> level so EMPTY cells (WaitImage —
+                    // whose Key column is intentionally blank because the image lives
+                    // in the Sheet thumbnail — and WaitPixelColor when no colour is
+                    // set yet) still respond. Without this, only rows with a rendered
+                    // chip below could be edited via dblclick. We re-dispatch the
+                    // chip's onDoubleClick logic if a chip exists (it bubbles through
+                    // anyway), and add the Group B / Sheet route for the empty-cell
+                    // case. Re-entry into inline-edit on KeyDown/KeyUp rows is guarded
+                    // by the editingCell check.
+                    onDoubleClick={() => {
+                      if (editingCell?.index === idx && editingCell.field === 'key') return;
+                      // Group A — specialized inline edit / dialog. Same as chip path.
+                      if (action.actionType === 'SendText') {
+                        setSendTextEdit({ index: idx, text: action.key });
+                      } else if (action.actionType === 'RunProfile') {
+                        setRunProfileEdit({ index: idx, profileName: action.key, repeatCount: action.repeatCount ?? 1 });
+                      } else if (action.actionType === 'Keystroke' || action.actionType === 'HoldKey') {
+                        setKeystrokeEdit({ index: idx });
+                      } else if (action.actionType.startsWith('Key')) {
+                        startEdit(idx, 'key', action.key);
+                      } else if (
+                        // Group B — open Sheet for fuller editing. Covers actions
+                        // whose Key cell may be empty (WaitImage / WaitPixelColor)
+                        // or hosts a derived identifier (Pause / Browser* / If).
+                        action.actionType === 'WaitImage'
+                        || action.actionType === 'WaitPixelColor'
+                        || action.actionType === 'Pause'
+                        || action.actionType.startsWith('Browser')
+                        || action.actionType === 'If'
+                      ) {
+                        onOpenSheet?.(idx);
+                      }
+                      // Group C (LeftClick variants, Scroll, Else, EndIf) — no-op.
+                    }}
+                  >
                     {editingCell?.index === idx && editingCell.field === 'key' ? (
                       <input
                         ref={editInputRef}
@@ -1328,9 +1364,20 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     ) : displayKey ? (
                       <span
                         className={`inline-flex items-center translate-y-[-2px] px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input max-w-[104px] truncate ${
+                          // Group A — Key cell IS the primary editor for this action
+                          // (text body, profile picker, keystroke combo, single key).
+                          // cursor-text reflects "you can type / edit" semantics; dblclick
+                          // routes to the specialized dialog or inline capture.
                           action.actionType === 'SendText' || action.actionType.startsWith('Key') || action.actionType === 'HoldKey' || action.actionType === 'RunProfile'
                             ? 'cursor-text hover:text-accent-light'
-                            : ''
+                            // Group B — Key cell shows a derived identifier (image
+                            // filename, pixel hex, selector, etc.). dblclick opens the
+                            // full Sheet panel for editing; cursor-pointer signals the
+                            // chip is interactive without implying inline edit.
+                            : action.actionType === 'WaitImage' || action.actionType === 'WaitPixelColor' || action.actionType === 'Pause'
+                              || action.actionType.startsWith('Browser') || action.actionType === 'If'
+                              ? 'cursor-pointer hover:text-accent-light'
+                              : ''
                         }`}
                         title={
                           action.actionType === 'SendText' ? action.key
@@ -1341,24 +1388,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           : action.actionType.startsWith('Browser') ? action.key
                           : undefined
                         }
-                        onDoubleClick={() => {
-                          if (action.actionType === 'SendText') {
-                            setSendTextEdit({ index: idx, text: action.key });
-                          } else if (action.actionType === 'RunProfile') {
-                            setRunProfileEdit({ index: idx, profileName: action.key, repeatCount: action.repeatCount ?? 1 });
-                          } else if (action.actionType === 'Keystroke' || action.actionType === 'HoldKey') {
-                            // Both Keystroke and HoldKey rows open the unified capture
-                            // dialog — it picks Press / Hold based on the row's
-                            // ActionType and lets the user switch mid-edit. Inline
-                            // single-key edit (used by KeyDown/KeyUp below) would
-                            // silently drop modifiers from a combo and lose the
-                            // hold-duration context, so we always go through the
-                            // dialog for these two types.
-                            setKeystrokeEdit({ index: idx });
-                          } else if (action.actionType.startsWith('Key')) {
-                            startEdit(idx, 'key', action.key);
-                          }
-                        }}
+                        // dblclick handler lives on the parent <td> (see above) so
+                        // empty Key cells (WaitImage, WaitPixelColor with no value)
+                        // also respond. Events bubble from this span to the td.
                       >
                         {/* IF rows render extra leading nodes inside the chip: a NOT
                             badge when the condition is negated (IFNOT semantic), and a
