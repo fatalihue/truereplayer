@@ -1025,7 +1025,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               const displayKey = action.actionType === 'WaitImage'
                 ? ''
                 : action.actionType === 'RunProfile'
-                  ? (action.repeatCount && action.repeatCount > 1 ? `${action.key} ×${action.repeatCount}` : action.key)
+                  // ×N moved to the Action pill (see the pill render below) so the
+                  // Key column shows only the profile name and long names no longer
+                  // truncate the repeat-count badge out of view.
+                  ? action.key
                   : action.actionType === 'Pause'
                     ? (() => {
                         const hasHotkey = !!action.key;
@@ -1294,6 +1297,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         : action.actionType === 'Else' ? 'else'
                         : action.actionType === 'EndIf' ? 'endif'
                         : action.actionType}
+                      {/* Repeat indicator — Keystroke press-cycles + RunProfile sub-call
+                          counts. Lives inside the Action pill instead of the Key column
+                          because long profile names used to push "×N" past the Key
+                          col's truncation point and hide the repetition from the user.
+                          Only renders when count > 1 (default 1 = no badge). */}
+                      {(action.actionType === 'Keystroke' || action.actionType === 'RunProfile')
+                        && (action.repeatCount ?? 1) > 1 && (
+                          <span className="ml-0.5 opacity-75">×{action.repeatCount}</span>
+                        )}
                     </span>
                   </td>
                   )}
@@ -1381,23 +1393,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         {action.actionType === 'SendText'
                           ? <SendTextPreview text={action.key} />
                           : displayKey}
-                        {/* × N badge for Keystroke actions with repeatCount > 1.
-                            Click opens the recapture dialog so the user can adjust the
-                            count (and gap, under Advanced) without leaving the grid.
-                            stopPropagation prevents the parent span's double-click handler
-                            from also firing — single click on the badge is enough. */}
-                        {action.actionType === 'Keystroke' && (action.repeatCount ?? 1) > 1 && (
-                          <span
-                            className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold tabular-nums bg-[color-mix(in_srgb,var(--color-accent)_18%,transparent)] text-accent-light hover:bg-[color-mix(in_srgb,var(--color-accent)_28%,transparent)] cursor-pointer transition-colors"
-                            title={`Press cycles: ${action.repeatCount}${action.repeatDelayMs != null ? ` · ${action.repeatDelayMs} ms gap` : ''}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setKeystrokeEdit({ index: idx });
-                            }}
-                          >
-                            × {action.repeatCount}
-                          </span>
-                        )}
+                        {/* The Keystroke × N badge that used to live here moved to
+                            the Action pill so it stays visible even when the Key
+                            column is narrow. The original badge was clickable to
+                            reopen the recapture dialog; that affordance is now
+                            covered by double-clicking the Key chip (line above),
+                            which already routes to setKeystrokeEdit for Keystroke /
+                            HoldKey rows. */}
                         {/* Hold-duration badge for HoldKey rows. Same visual treatment as
                             the × N badge so the two repeat-flavoured key actions look like
                             siblings. Click reopens the unified Keystroke dialog (in Hold
