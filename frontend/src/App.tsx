@@ -135,13 +135,15 @@ function AppShell() {
         {/* Center: Toolbar + Table + Action Bar */}
         <div className="flex-1 flex flex-col gap-1 min-w-0">
           <ExtensionUpdateBanner />
-          <Toolbar />
+          <Toolbar
+            columnVisibility={columnVisibility}
+            onColumnVisibilityChange={setColumnVisibility}
+          />
           {isClicker ? (
             <ClickerDashboard />
           ) : (
             <ActionTable
               columnVisibility={columnVisibility}
-              onColumnVisibilityChange={setColumnVisibility}
               onOpenSheet={handleOpenSheet}
             />
           )}

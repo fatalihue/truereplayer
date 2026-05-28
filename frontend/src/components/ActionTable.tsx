@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo, Fragment } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical, Timer, LayoutGrid, Check, GitBranch, ArrowRightLeft } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical, Timer, GitBranch, ArrowRightLeft } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -51,14 +51,14 @@ interface EditingCell {
 
 interface ActionTableProps {
   columnVisibility: ColumnVisibility;
-  // Mutator for the columns-visibility dropdown that now lives in the grid header.
-  // Was previously owned by the global Toolbar; the prop drill is unchanged on the
-  // App side (App passes both visibility + setter to ActionTable instead of Toolbar).
-  onColumnVisibilityChange: (vis: ColumnVisibility) => void;
+  // The toggle UI lives in Toolbar now (the grid no longer wastes a 24 px column
+  // on a single icon). App still drives the visibility state and passes it down
+  // here read-only; the mutator goes to Toolbar instead. ActionTable consumes
+  // only the current visibility map.
   onOpenSheet?: (index: number) => void;
 }
 
-export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpenSheet }: ActionTableProps) {
+export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps) {
   const { actions, highlightedActionIndex, buttonStates, activeProfile, pauseState } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
@@ -189,26 +189,10 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
   // are a property of the grid, not a global preference. The dropdown opens
   // anchored to the header's right edge; click-outside closes it via the effect
   // below (mirrors the same pattern the Toolbar used).
-  const [showColDropdown, setShowColDropdown] = useState(false);
-  const colDropdownRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!showColDropdown) return;
-    const onDown = (e: MouseEvent) => {
-      if (colDropdownRef.current && !colDropdownRef.current.contains(e.target as Node)) {
-        setShowColDropdown(false);
-      }
-    };
-    window.addEventListener('mousedown', onDown);
-    return () => window.removeEventListener('mousedown', onDown);
-  }, [showColDropdown]);
-  const columns: { key: keyof ColumnVisibility; label: string }[] = [
-    { key: 'action', label: 'Action' },
-    { key: 'key', label: 'Key' },
-    { key: 'x', label: 'X' },
-    { key: 'y', label: 'Y' },
-    { key: 'delay', label: 'Delay' },
-    { key: 'notes', label: 'Notes' },
-  ];
+  // Column-visibility STATE flows through props from App down to ActionTable; the
+  // toggle UI (button + dropdown) moved to the Toolbar (see Toolbar.tsx) so the
+  // grid no longer burns a dedicated 24 px column on a single icon. ActionTable
+  // just consumes columnVisibility now and renders accordingly.
   const { showToast } = useToast();
   const contextMenuEnabled = !buttonStates.recordingActive && !buttonStates.replayActive;
 
@@ -965,13 +949,15 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
         style={{ gridTemplateColumns: [
           '28px', '50px',
           ...(columnVisibility.action ? ['140px'] : []),
-          // 100 + 12 px reclaimed from the trailing toggle-columns slot.
           ...(columnVisibility.key ? ['112px'] : []),
           ...(columnVisibility.x ? ['65px'] : []),
           ...(columnVisibility.y ? ['65px'] : []),
           ...(columnVisibility.delay ? ['70px'] : []),
+          // The Notes column claims all remaining width (1fr). The Toggle Columns
+          // button used to live in a dedicated 24 px column to its right; that
+          // column was a dead data slot in every body row, so we moved the button
+          // inline with the Notes header text instead — see below.
           ...(columnVisibility.notes ? ['1fr'] : []),
-          '24px',
         ].join(' ') }}
       >
         <span className="flex items-center justify-center">
@@ -999,50 +985,6 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
         {columnVisibility.y && <span className="text-xs font-semibold text-text-tertiary pl-2">Y</span>}
         {columnVisibility.delay && <span className="text-xs font-semibold text-text-tertiary pl-2">Delay</span>}
         {columnVisibility.notes && <span className="text-xs font-semibold text-text-tertiary pl-2 pr-2">Notes</span>}
-        {/* Columns toggle — anchored in the row-actions slot at the right edge of
-            the header. Clicking opens a dropdown to show/hide each column. Moved
-            here from the global Toolbar because column visibility is a grid-level
-            preference and reads more naturally next to the header it controls. */}
-        <span className="flex items-center justify-center relative" ref={colDropdownRef}>
-          <button
-            type="button"
-            onClick={() => setShowColDropdown(prev => !prev)}
-            className={`p-1 rounded transition-colors ${
-              showColDropdown
-                ? 'bg-bg-elevated text-accent-light'
-                : 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary'
-            }`}
-            title="Toggle columns"
-          >
-            <LayoutGrid size={12} />
-          </button>
-          {showColDropdown && (
-            <div
-              className="absolute right-0 top-[calc(100%+4px)] min-w-[150px] p-1 bg-bg-card border border-border-default rounded-lg z-50"
-              style={{ animation: 'fade-in 0.12s ease-out', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
-            >
-              <div className="px-2.5 py-1.5 text-[11px] font-semibold text-text-tertiary">
-                Toggle columns
-              </div>
-              {columns.map(col => (
-                <button
-                  key={col.key}
-                  onClick={() => onColumnVisibilityChange({ ...columnVisibility, [col.key]: !columnVisibility[col.key] })}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
-                >
-                  <div className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center shrink-0 ${
-                    columnVisibility[col.key]
-                      ? 'bg-accent-solid border-accent-solid'
-                      : 'border-border-default'
-                  }`}>
-                    {columnVisibility[col.key] && <Check size={10} className="text-white" />}
-                  </div>
-                  {col.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </span>
       </div>
 
       {/* Body */}
@@ -1064,7 +1006,6 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
                 Forcing 100% here makes the cell expand to fill, so the row's bg covers
                 the full row width and the block reads as one continuous amber band. */}
             {columnVisibility.notes && <col style={{ width: '100%' }} />}
-            <col style={{ width: 24 }} />
           </colgroup>
           <tbody ref={tbodyRef}>
             {actions.map((action, idx) => {
@@ -1578,9 +1519,6 @@ export function ActionTable({ columnVisibility, onColumnVisibilityChange, onOpen
                   </td>
                   )}
 
-                  {/* Spacer to match the header's 24 px Toggle-Columns slot. Right-click
-                      opens the row's context menu (was previously the "…" button). */}
-                  <td />
                 </tr>
                 </Fragment>
               );

@@ -1528,7 +1528,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 type="text"
                 readOnly
                 value={pauseHotkeyFocused ? '' : (key || '')}
-                placeholder="New key..."
+                placeholder="Click to capture…"
                 onFocus={() => {
                   setPauseHotkeyFocused(true);
                   armKeyCaptureTimer();
@@ -2051,7 +2051,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 onFocus={() => { setKeyFieldFocused(true); armKeyCaptureTimer(); }}
                 onBlur={() => { setKeyFieldFocused(false); disarmKeyCaptureTimer(); }}
                 onKeyDown={handleKeyCapture}
-                placeholder="New key..."
+                placeholder="Click to capture…"
                 className={`w-full h-8 px-2 text-ui font-mono bg-bg-input border rounded outline-none cursor-pointer placeholder:text-accent-light/50 ${
                   keyFieldFocused
                     ? 'text-accent-light border-accent-solid animate-pulse'

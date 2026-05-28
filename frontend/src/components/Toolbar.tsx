@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch } from 'lucide-react';
+import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, LayoutGrid, Check } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -27,10 +27,15 @@ export const defaultColumnVisibility: ColumnVisibility = {
   notes: true,
 };
 
-// Toolbar takes no props now — column visibility lives in ActionTable (where the
-// header-anchored toggle button lives), and Theme Editor mounts at the App level
-// (Settings → Appearance + Command Palette both trigger it via cmd:themeeditor).
-type ToolbarProps = Record<string, never>;
+// Columns-visibility lives in App state and is mirrored to ActionTable; the toggle
+// BUTTON now lives in the toolbar because the previous home (a dead 24 px column
+// at the right edge of the grid header) wasted a full-width column slot in every
+// body row for what is essentially a one-click view preference. Theme Editor still
+// mounts at the App level via cmd:themeeditor.
+interface ToolbarProps {
+  columnVisibility: ColumnVisibility;
+  onColumnVisibilityChange: (vis: ColumnVisibility) => void;
+}
 
 /**
  * Profile-name display that gracefully degrades:
@@ -98,9 +103,43 @@ function ResponsiveProfileName({ name, actionCount }: { name: string; actionCoun
   );
 }
 
-export function Toolbar(_props: ToolbarProps) {
+export function Toolbar({ columnVisibility, onColumnVisibilityChange }: ToolbarProps) {
   const { toolbar, buttonStates, actions, activeProfile } = useAppState();
   const { send } = useBridge();
+  // Columns dropdown — moved here from the grid header so the grid no longer
+  // needs a dedicated 24 px column for a single icon (the body rows were
+  // wasting space on an always-empty <td /> spacer). Same behaviour as before:
+  // click toggles the dropdown, outside click / Esc dismisses.
+  const [showColDropdown, setShowColDropdown] = useState(false);
+  const colDropdownRef = useRef<HTMLDivElement>(null);
+  const columnDefinitions: { key: keyof ColumnVisibility; label: string }[] = [
+    { key: 'action', label: 'Action' },
+    { key: 'key', label: 'Key' },
+    { key: 'x', label: 'X' },
+    { key: 'y', label: 'Y' },
+    { key: 'delay', label: 'Delay' },
+    { key: 'notes', label: 'Notes' },
+  ];
+  useEffect(() => {
+    if (!showColDropdown) return;
+    const onDown = (e: MouseEvent) => {
+      if (colDropdownRef.current && !colDropdownRef.current.contains(e.target as Node)) {
+        setShowColDropdown(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      setShowColDropdown(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [showColDropdown]);
   const selectionRef = useSelectionRef();
   const [showSendTextDialog, setShowSendTextDialog] = useState(false);
   const [showBrowserMenu, setShowBrowserMenu] = useState(false);
@@ -353,6 +392,52 @@ export function Toolbar(_props: ToolbarProps) {
           >
             <Redo2 size={14} />
           </button>
+
+          {/* Toggle Columns — view preference for the grid. Lives next to Undo/Redo
+              because both are "what the user sees / sees recently" controls rather
+              than insert actions. Was in the grid's own 24 px right slot before;
+              moving it here let us drop the dead slot from every row. */}
+          <div className="relative" ref={colDropdownRef}>
+            <button
+              tabIndex={-1}
+              type="button"
+              onClick={() => setShowColDropdown(prev => !prev)}
+              className={`p-1.5 rounded transition-colors ${
+                showColDropdown
+                  ? 'bg-bg-elevated text-accent-light'
+                  : 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary'
+              }`}
+              data-tip="Toggle columns"
+            >
+              <LayoutGrid size={14} />
+            </button>
+            {showColDropdown && (
+              <div
+                className="absolute right-0 top-[calc(100%+4px)] min-w-[150px] p-1 bg-bg-card border border-border-default rounded-lg z-50"
+                style={{ animation: 'fade-in 0.12s ease-out', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
+              >
+                <div className="px-2.5 py-1.5 text-[11px] font-semibold text-text-tertiary">
+                  Toggle columns
+                </div>
+                {columnDefinitions.map(col => (
+                  <button
+                    key={col.key}
+                    onClick={() => onColumnVisibilityChange({ ...columnVisibility, [col.key]: !columnVisibility[col.key] })}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
+                  >
+                    <div className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center shrink-0 ${
+                      columnVisibility[col.key]
+                        ? 'bg-accent-solid border-accent-solid'
+                        : 'border-border-default'
+                    }`}>
+                      {columnVisibility[col.key] && <Check size={10} className="text-white" />}
+                    </div>
+                    {col.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <div className="w-px h-4 bg-border-subtle mx-1" />
 

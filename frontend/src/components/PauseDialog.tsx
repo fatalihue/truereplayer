@@ -28,7 +28,11 @@ interface PauseDialogProps {
  */
 export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
   const [hotkey, setHotkey] = useState('');
-  const [timeoutSeconds, setTimeoutSeconds] = useState(0);
+  // Default 1 s — matches the most common "small synchronization pause" use case
+  // (insert a quick wait between two automation steps). Users who want a longer
+  // pause hit the preset chips below; users who want a hotkey-only Pause clear
+  // the timeout via the ∞ preset.
+  const [timeoutSeconds, setTimeoutSeconds] = useState(1);
   const [hotkeyFocused, setHotkeyFocused] = useState(false);
   const hotkeyInputRef = useRef<HTMLInputElement>(null);
   const captureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -142,7 +146,7 @@ export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
                 type="text"
                 readOnly
                 value={hotkeyFocused ? '' : hotkey}
-                placeholder={hotkeyFocused ? 'Press any key…' : 'Click to capture (optional)'}
+                placeholder={hotkeyFocused ? 'Press any key…' : 'Click to capture…'}
                 onFocus={() => { setHotkeyFocused(true); armCaptureTimer(); }}
                 onBlur={() => { setHotkeyFocused(false); disarmCaptureTimer(); }}
                 className={`w-full h-9 px-3 pr-8 text-sm font-mono text-text-primary bg-bg-input border rounded outline-none transition-colors ${
@@ -165,7 +169,8 @@ export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
             </div>
           </div>
 
-          {/* Timeout — seconds. 0 = no timeout configured. */}
+          {/* Timeout — seconds. 0 (selected via the ∞ preset) means "no timeout";
+              the Pause then only resumes via the hotkey above. */}
           <div>
             <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT</label>
             <div className="flex items-center gap-2">
@@ -178,6 +183,38 @@ export function PauseDialog({ onConfirm, onClose }: PauseDialogProps) {
                 ariaLabel="Pause timeout in seconds"
               />
               <span className="text-xs text-text-tertiary">seconds</span>
+            </div>
+            {/* Same preset set + visual treatment SheetPanel uses for the Pause editor.
+                Keeping the two surfaces parallel means muscle memory carries over: a
+                user who knows 1s/5s/30s/1m/5m/∞ from the Sheet sees the same chips
+                here. ∞ (secs=0) pairs with a captured hotkey to form a "wait forever
+                until the user presses X" Pause. */}
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {([
+                { label: '1s', secs: 1 },
+                { label: '5s', secs: 5 },
+                { label: '30s', secs: 30 },
+                { label: '1m', secs: 60 },
+                { label: '5m', secs: 300 },
+                { label: '∞', secs: 0 },
+              ] as const).map(p => {
+                const isActive = timeoutSeconds === p.secs;
+                return (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() => setTimeoutSeconds(p.secs)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                      isActive
+                        ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
+                        : 'text-text-tertiary border-border-default bg-bg-elevated hover:text-text-secondary hover:bg-bg-card'
+                    }`}
+                    title={p.secs === 0 ? 'No timeout — resume by hotkey only' : `Wait ${p.label}`}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
