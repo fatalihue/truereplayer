@@ -489,6 +489,15 @@ namespace TrueReplayer
 
         private static IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
+            // A low-level hook must never let an exception escape — it can unhook itself or crash
+            // the process. Run the real handler guarded; on failure log and pass the event through.
+            try { return MouseHookCallbackCore(nCode, wParam, lParam); }
+            catch (Exception ex) { try { TrueReplayer.Services.DiagnosticLog.Error("MouseHookCallback", ex); } catch { } }
+            return NativeMethods.CallNextHookEx(_mouseHookId, nCode, wParam, lParam);
+        }
+
+        private static IntPtr MouseHookCallbackCore(int nCode, IntPtr wParam, IntPtr lParam)
+        {
             if (nCode < 0)
                 return NativeMethods.CallNextHookEx(_mouseHookId, nCode, wParam, lParam);
 
@@ -686,6 +695,15 @@ namespace TrueReplayer
         }
 
         private static IntPtr KeyboardHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+        {
+            // A low-level hook must never let an exception escape — it can unhook itself or crash
+            // the process. Run the real handler guarded; on failure log and pass the event through.
+            try { return KeyboardHookCallbackCore(nCode, wParam, lParam); }
+            catch (Exception ex) { try { TrueReplayer.Services.DiagnosticLog.Error("KeyboardHookCallback", ex); } catch { } }
+            return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
+        }
+
+        private static IntPtr KeyboardHookCallbackCore(int nCode, IntPtr wParam, IntPtr lParam)
         {
             if (nCode >= 0)
             {
