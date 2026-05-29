@@ -55,13 +55,20 @@ namespace TrueReplayer.Services
                 try
                 {
                     _pipeServer?.Dispose();
-                    // Allow non-elevated processes (e.g. NativeHost launched by Chrome) to connect
-                    // even when TrueReplayer runs as Administrator
+                    // Restrict the pipe to the current interactive user's SID. The Chrome-launched
+                    // NativeHost runs as the SAME user (even when TrueReplayer is elevated — a UAC
+                    // split token keeps the same User SID), so it still connects, while other local
+                    // users/accounts are denied. Previously granted to Everyone (WorldSid), which
+                    // let any local process drive the browser bridge.
                     var pipeSecurity = new PipeSecurity();
-                    pipeSecurity.AddAccessRule(new PipeAccessRule(
-                        new SecurityIdentifier(WellKnownSidType.WorldSid, null),
-                        PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
-                        AccessControlType.Allow));
+                    var currentUserSid = WindowsIdentity.GetCurrent().User;
+                    if (currentUserSid != null)
+                    {
+                        pipeSecurity.AddAccessRule(new PipeAccessRule(
+                            currentUserSid,
+                            PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
+                            AccessControlType.Allow));
+                    }
                     _pipeServer = NamedPipeServerStreamAcl.Create(PipeName, PipeDirection.InOut, 1,
                         PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 0, 0, pipeSecurity);
 
