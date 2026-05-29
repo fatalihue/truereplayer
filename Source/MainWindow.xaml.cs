@@ -854,6 +854,9 @@ namespace TrueReplayer
                 actionRecorder.RecordMouseAction(button, x, y, isDown, scrollDelta);
             };
 
+            // Pairs the Escape KeyUp with a cancel-gesture Escape KeyDown so the orphan up
+            // doesn't leak into the recording. Mutated only on the (serialized) hook thread.
+            bool suppressNextEscapeUp = false;
             InputHookManager.OnKeyEvent += (key, isDown) =>
             {
                 if (isDown && key == "Escape")
@@ -873,9 +876,20 @@ namespace TrueReplayer
                             action.IsInsertionPoint = false;
                             action.IsVisuallyDeselected = true;
                         }
+                        // Insert-mode cancel keeps recording active, so swallow this Escape's
+                        // matching KeyUp too — otherwise a lone Escape KeyUp leaks into the macro.
+                        suppressNextEscapeUp = true;
                         return;
                     }
                     // If not in any special mode, fall through to recording
+                }
+
+                // Drop the KeyUp paired with a cancel-gesture Escape down (handled above) so the
+                // cancel keystroke leaves no trace in the recording.
+                if (!isDown && key == "Escape" && suppressNextEscapeUp)
+                {
+                    suppressNextEscapeUp = false;
+                    return;
                 }
 
                 if (!mainController.IsRecording()) return;
