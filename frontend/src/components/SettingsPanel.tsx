@@ -346,11 +346,10 @@ function ClickerSection({
   );
 }
 
-function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
+function HotkeyInput({ value, settingKey, onChange }: {
   value: string;
   settingKey: string;
   onChange: (key: string, hotkey: string) => void;
-  onFocusChange?: (focused: boolean) => void;
 }) {
   const { send, subscribe } = useBridge();
   const [localValue, setLocalValue] = useState(value);
@@ -429,8 +428,8 @@ function HotkeyInput({ value, settingKey, onChange, onFocusChange }: {
       type="text"
       readOnly
       value={localValue}
-      onFocus={() => { setIsFocused(true); setLocalValue(''); onFocusChange?.(true); send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } }); armCaptureTimer(); }}
-      onBlur={() => { setIsFocused(false); setLocalValue(value); onFocusChange?.(false); send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } }); disarmCaptureTimer(); }}
+      onFocus={() => { setIsFocused(true); setLocalValue(''); send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } }); armCaptureTimer(); }}
+      onBlur={() => { setIsFocused(false); setLocalValue(value); send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } }); disarmCaptureTimer(); }}
       className={`w-[110px] h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
         isFocused
           ? 'text-accent-light border-accent-solid animate-pulse'
@@ -462,10 +461,6 @@ export function SettingsPanel() {
 
   const changeHotkey = (settingKey: string, hotkey: string) => {
     send({ type: 'settings:change', payload: { key: settingKey, value: hotkey } });
-  };
-
-  const handleHotkeyFocusChange = (_focused: boolean) => {
-    // Hotkey inputs no longer suppress global hotkeys
   };
 
   return (
@@ -619,7 +614,6 @@ export function SettingsPanel() {
                   value={settings.recordingHotkey}
                   settingKey="recordingHotkey"
                   onChange={changeHotkey}
-                  onFocusChange={handleHotkeyFocusChange}
                 />
               </SettingRow>
               <SettingRow label="Replay">
@@ -627,7 +621,6 @@ export function SettingsPanel() {
                   value={settings.replayHotkey}
                   settingKey="replayHotkey"
                   onChange={changeHotkey}
-                  onFocusChange={handleHotkeyFocusChange}
                 />
               </SettingRow>
               <SettingRow label="Profile Keys">
@@ -635,7 +628,6 @@ export function SettingsPanel() {
                   value={settings.profileKeyToggleHotkey}
                   settingKey="profileKeyToggleHotkey"
                   onChange={changeHotkey}
-                  onFocusChange={handleHotkeyFocusChange}
                 />
               </SettingRow>
               <SettingRow label="Foreground">
@@ -643,7 +635,6 @@ export function SettingsPanel() {
                   value={settings.foregroundHotkey}
                   settingKey="foregroundHotkey"
                   onChange={changeHotkey}
-                  onFocusChange={handleHotkeyFocusChange}
                 />
               </SettingRow>
               <SettingRow label="Mode" tooltip="Switch between Macro and Clicker modes">
@@ -651,7 +642,6 @@ export function SettingsPanel() {
                   value={settings.modeToggleHotkey}
                   settingKey="modeToggleHotkey"
                   onChange={changeHotkey}
-                  onFocusChange={handleHotkeyFocusChange}
                 />
               </SettingRow>
             </Section>

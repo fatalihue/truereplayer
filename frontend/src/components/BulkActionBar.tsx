@@ -3,7 +3,6 @@ import { Clock, Trash2, X, Crosshair, MessageSquare, Eye, EyeOff, ArrowUpToLine,
 
 interface BulkActionBarProps {
   selectedCount: number;
-  selectedIndices: Set<number>;
   allSelectedSkipped: boolean;
   // True when no selection can move further in that direction (first row selected
   // for Up, last row selected for Down). Disables the corresponding button rather
@@ -22,7 +21,6 @@ interface BulkActionBarProps {
 
 export function BulkActionBar({
   selectedCount,
-  selectedIndices: _selectedIndices,
   allSelectedSkipped,
   canMoveUp,
   canMoveDown,

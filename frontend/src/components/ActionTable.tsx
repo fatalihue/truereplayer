@@ -1762,7 +1762,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         return (
         <BulkActionBar
           selectedCount={selectedIndices.size}
-          selectedIndices={selectedIndices}
           allSelectedSkipped={selSorted.every(i => actions[i]?.isSkipped)}
           canMoveUp={canMoveUp}
           canMoveDown={canMoveDown}
