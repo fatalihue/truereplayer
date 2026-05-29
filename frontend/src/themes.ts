@@ -1717,6 +1717,19 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
 
 // ── Import/Export ──
 
+// Accepts only strings safe to interpolate into a CSS value: hex / rgb()/rgba() / hsl()/hsla()
+// / named colors. Rejects characters that could break out of the declaration (`;` `{` `}` `:`),
+// which is the CSS-injection vector when an imported theme's color flows into root.style.cssText.
+function isSafeCssColor(v: unknown): boolean {
+  return typeof v === 'string' && v.length > 0 && v.length <= 64 && /^[#0-9a-zA-Z.,%()/\s-]+$/.test(v);
+}
+
+// Font-family token interpolated as `'${fontMono}', ...` — letters/digits/space/_/- only, so a
+// quote / `;` / `{}` can't escape the rule.
+function isSafeFontFamily(v: unknown): boolean {
+  return typeof v === 'string' && v.length > 0 && v.length <= 64 && /^[a-zA-Z0-9 _-]+$/.test(v);
+}
+
 export function validateExportedTheme(data: unknown): data is ExportedTheme {
   if (!data || typeof data !== 'object') return false;
   const d = data as Record<string, unknown>;
@@ -1724,12 +1737,25 @@ export function validateExportedTheme(data: unknown): data is ExportedTheme {
   if (!d.colors || typeof d.colors !== 'object') return false;
   const colors = d.colors as Record<string, unknown>;
   for (const key of THEME_COLOR_KEYS) {
-    if (typeof colors[key] !== 'string') return false;
+    // Must be a safe CSS color, not merely a string — these flow verbatim into
+    // root.style.cssText in applyThemeConfig, so an unvalidated value is a CSS-injection vector.
+    if (!isSafeCssColor(colors[key])) return false;
   }
   if (!d.uiSettings || typeof d.uiSettings !== 'object') return false;
   const ui = d.uiSettings as Record<string, unknown>;
   if (typeof ui.fontSize !== 'number' || typeof ui.borderRadius !== 'number' || typeof ui.rowHeight !== 'number') return false;
   if (ui.zoom !== undefined && typeof ui.zoom !== 'number') return false;
+  // uiSettings color fields are interpolated into cssText (incl. color-mix) — when present they
+  // must be safe colors. Missing fields are tolerated (merged over DEFAULT_UI_SETTINGS on import).
+  const UI_COLOR_FIELDS = [
+    'recordingColor', 'replayColor', 'clickerColor', 'actionMouseColor', 'actionKeyColor',
+    'actionScrollColor', 'actionSendTextColor', 'actionWaitImageColor', 'actionPixelColorColor',
+    'actionBrowserColor', 'actionRunProfileColor', 'actionPauseColor', 'actionIfColor',
+  ];
+  for (const f of UI_COLOR_FIELDS) {
+    if (ui[f] !== undefined && !isSafeCssColor(ui[f])) return false;
+  }
+  if (ui.fontMono !== undefined && !isSafeFontFamily(ui.fontMono)) return false;
   return true;
 }
 
