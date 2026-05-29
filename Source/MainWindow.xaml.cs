@@ -188,10 +188,27 @@ namespace TrueReplayer
             // CreateWithOptionsAsync is the WinRT projection's name for the 3-arg factory
             // (the net462 dll exposes plain CreateAsync, but the .NET 8 WinMD-backed
             // projection renamed it with the "WithOptions" suffix per WinRT convention).
-            var envOptions = new Microsoft.Web.WebView2.Core.CoreWebView2EnvironmentOptions();
-            var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateWithOptionsAsync(
-                null, userDataFolder, envOptions);
-            await WebView.EnsureCoreWebView2Async(env);
+            // Creating the WebView2 environment can fail hard (Edge WebView2 Runtime missing or
+            // corrupt, user-data folder locked). The global UnhandledException handler keeps the
+            // process alive, but every recovery affordance below (tray Reload UI, ProcessFailed,
+            // watchdog) is wired AFTER this await — so a failure here would otherwise leave a
+            // silent blank window with no way back. Surface an actionable message and bail.
+            try
+            {
+                var envOptions = new Microsoft.Web.WebView2.Core.CoreWebView2EnvironmentOptions();
+                var env = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateWithOptionsAsync(
+                    null, userDataFolder, envOptions);
+                await WebView.EnsureCoreWebView2Async(env);
+            }
+            catch (Exception ex)
+            {
+                Services.DiagnosticLog.Error("InitializeWebView: WebView2 environment creation failed", ex);
+                NativeMethods.MessageBoxW(hwnd,
+                    "TrueReplayer couldn't start its UI because the Microsoft Edge WebView2 Runtime " +
+                    "failed to initialize.\n\nInstall or repair the WebView2 Runtime, then restart TrueReplayer.",
+                    "TrueReplayer", NativeMethods.MB_ICONERROR);
+                return;
+            }
 
             // Create bridge and register message handler BEFORE navigation
             // to ensure no messages from React are missed

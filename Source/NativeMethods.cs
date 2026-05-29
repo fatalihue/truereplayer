@@ -162,6 +162,11 @@ namespace TrueReplayer.Interop
 
         public const uint GA_ROOT = 2;
 
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+
+        public const uint MB_ICONERROR = 0x00000010;
+
         public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
         [DllImport("user32.dll")]
