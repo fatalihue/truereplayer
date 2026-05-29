@@ -91,7 +91,17 @@ namespace TrueReplayer.Helpers
                 NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
                 IntPtr hProcess = NativeMethods.OpenProcess(
                     NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-                if (hProcess == IntPtr.Zero) return false;
+                if (hProcess == IntPtr.Zero)
+                {
+                    // Most common silent cause of "hotkey/replay doesn't fire": the target is
+                    // elevated and TrueReplayer isn't, so OpenProcess fails with ACCESS_DENIED (5).
+                    // Log the Win32 error so it's diagnosable from the session log instead of being
+                    // indistinguishable from "window not in foreground".
+                    int err = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+                    TrueReplayer.Services.DiagnosticLog.Warn(
+                        $"WindowMatcher: OpenProcess failed for '{target.ProcessName}' (pid {pid}), Win32 error {err}");
+                    return false;
+                }
 
                 try
                 {

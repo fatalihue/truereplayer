@@ -392,9 +392,8 @@ namespace TrueReplayer.Services
         private const int WM_USER = 0x0400;
         private const int WM_LBUTTONDBLCLK = 0x0203;
         private const int WM_RBUTTONUP = 0x0205;
-        private const int WM_SYSCOMMAND = 0x0112;
         private const int WM_GETMINMAXINFO = 0x0024;
-        private const int SC_MINIMIZE = 0xF020;
+        private const int WM_DISPLAYCHANGE = 0x007E;
         private const int SW_RESTORE = 9;
         private const uint SWP_NOMOVE = 0x0002;
         private const uint SWP_NOSIZE = 0x0001;
@@ -477,6 +476,12 @@ namespace TrueReplayer.Services
                 {
                     TrayIconService.ShowContextMenu();
                 }
+            }
+            else if (msg == WM_DISPLAYCHANGE)
+            {
+                // Monitor/resolution/DPI change — drop the cached virtual-screen bounds so replay
+                // coordinate normalization uses the new geometry instead of stale metrics.
+                NativeMethods.VirtualScreen.Invalidate();
             }
             return HwndHookManager.CallOriginalWndProc(hwnd, msg, wParam, lParam);
         }

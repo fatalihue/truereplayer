@@ -35,7 +35,7 @@ namespace TrueReplayer.Services
 
                 // Prune old sessions
                 var existing = Directory.GetFiles(LogDirectory, "Session-*.log")
-                    .OrderByDescending(f => f)
+                    .OrderByDescending(File.GetLastWriteTimeUtc)
                     .ToList();
                 foreach (var old in existing.Skip(MaxSessionFiles - 1))
                 {
