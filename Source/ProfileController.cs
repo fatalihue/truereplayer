@@ -1464,7 +1464,10 @@ namespace TrueReplayer.Controllers
                         {
                             try { File.Delete(entry.FilePath); } catch { }
                         }
+                        // Remove the deleted profile from every order bucket — not just Pinned —
+                        // so its name can't linger as a ghost in UngroupedOrder.
                         _profileOrder.Pinned.Remove(item);
+                        _profileOrder.UngroupedOrder.Remove(item);
                     }
                 }
                 else

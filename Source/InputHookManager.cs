@@ -44,8 +44,11 @@ namespace TrueReplayer
         private static IntPtr _mouseHookId = IntPtr.Zero;
         private static IntPtr _keyboardHookId = IntPtr.Zero;
 
-        private static NativeMethods.LowLevelMouseProc _mouseProc = MouseHookCallback;
-        private static NativeMethods.LowLevelKeyboardProc _keyboardProc = KeyboardHookCallback;
+        // readonly: these MUST stay alive for the process lifetime — SetWindowsHookEx keeps only
+        // a native pointer to the delegate, so if the managed reference were ever reassigned the
+        // old thunk could be GC'd and the next input event would crash. readonly enforces that.
+        private static readonly NativeMethods.LowLevelMouseProc _mouseProc = MouseHookCallback;
+        private static readonly NativeMethods.LowLevelKeyboardProc _keyboardProc = KeyboardHookCallback;
 
         private static DateTime? lastAltRightPressTime = null;
 
