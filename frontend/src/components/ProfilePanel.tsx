@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Search, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink, Info, Hash } from 'lucide-react';
 import type { ProfileEntry, ImportPreviewPayload, ImportConflictResolution } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -34,6 +34,14 @@ const FOLDER_COLORS = [
   '#00CC6A', '#00B7C3', '#FFFFFF', '#8E8E8E', '#444444',
 ];
 
+// Native click action types — used to count coordinates that would benefit from a
+// Convert to Relative/Absolute pass. Module-scoped so it isn't rebuilt every render.
+const CONVERTIBLE_CLICK_TYPES = new Set([
+  'LeftClickDown', 'LeftClickUp',
+  'RightClickDown', 'RightClickUp',
+  'MiddleClickDown', 'MiddleClickUp',
+]);
+
 export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePanelProps) {
   const { profiles, profileOrder, actions } = useAppState();
 
@@ -42,13 +50,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   // hint when the user toggles UseRelativeCoordinates. Kept in sync with the backend's
   // HandleConvertCoordinates filter (clicks + WaitImage with search region + WaitPixel
   // with pixel set) — change both together if the filter ever changes.
-  const CLICK_TYPES = new Set([
-    'LeftClickDown', 'LeftClickUp',
-    'RightClickDown', 'RightClickUp',
-    'MiddleClickDown', 'MiddleClickUp',
-  ]);
-  const convertibleActionCount = actions.reduce((n, a) => {
-    if (CLICK_TYPES.has(a.actionType)) return n + 1;
+  const convertibleActionCount = useMemo(() => actions.reduce((n, a) => {
+    if (CONVERTIBLE_CLICK_TYPES.has(a.actionType)) return n + 1;
     // Mirror the backend's HandleConvertCoordinates which translates both WaitImage
     // and IF Image rows with a set search region, and both WaitPixelColor and IF
     // Pixel rows with set coords. Without these branches the dialog under-reports
@@ -63,7 +66,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     if (isPixelProbe
       && typeof a.pixelX === 'number' && typeof a.pixelY === 'number') return n + 1;
     return n;
-  }, 0);
+  }, 0), [actions]);
   const { send, subscribe } = useBridge();
   // Stable refcount slot for hotkey:capture — assign-hotkey dialog can be triggered
   // while Settings has its hotkey field focused (modal-over-modal isn't blocked at the
