@@ -883,7 +883,11 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       const dy = e.clientY - dragStartPos.current.y;
       // Require 5px movement to start drag
       if (!dragActive.current && Math.abs(dx) + Math.abs(dy) < 5) return;
-      if (!dragActive.current) document.body.style.cursor = 'grabbing';
+      if (!dragActive.current) {
+        document.body.style.cursor = 'grabbing';
+        // Signal the actions grid that a profile drag began (it shows an insertion rail).
+        window.dispatchEvent(new CustomEvent('profiledrag:start', { detail: { profileName: dragProfile } }));
+      }
       dragActive.current = true;
       cursorY.current = e.clientY;
       setDragCursorPos({ x: e.clientX, y: e.clientY });
@@ -906,12 +910,21 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       maybeKickAutoScroll(e.clientY);
     };
 
-    const handleMouseUp = () => {
-      if (dragActive.current && dragProfile && dropTarget) {
+    const handleMouseUp = (e: MouseEvent) => {
+      const wasActive = dragActive.current;
+      if (wasActive && dragProfile && dropTarget) {
         const targetFolder = dropTarget === '__ungrouped__' ? null : dropTarget;
         const currentFolder = getProfileFolder(dragProfile);
         if (currentFolder !== targetFolder) {
           sendWithTransition({ type: 'profile:moveToFolder', payload: { profileName: dragProfile, folderName: targetFolder } });
+        }
+      } else if (wasActive && dragProfile) {
+        // Not over a folder/ungrouped zone — did we drop on the actions grid? If so, hand off
+        // to ActionTable, which opens a pre-filled Run Profile dialog at the drop position.
+        // The floating preview is pointer-events:none, so elementFromPoint hits the grid.
+        const overGrid = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-actions-grid]');
+        if (overGrid) {
+          window.dispatchEvent(new CustomEvent('profiledrag:dropOnGrid', { detail: { profileName: dragProfile, clientY: e.clientY } }));
         }
       }
       document.body.style.cursor = '';
@@ -924,12 +937,14 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         cancelAnimationFrame(autoScrollRaf.current);
         autoScrollRaf.current = null;
       }
+      if (wasActive) window.dispatchEvent(new Event('profiledrag:end'));
     };
 
     // Esc cancels an in-progress profile drag — restores state without moving.
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || !dragActive.current) return;
       e.stopPropagation();
+      window.dispatchEvent(new Event('profiledrag:end')); // clear the grid's insertion rail
       document.body.style.cursor = '';
       dragStartPos.current = null;
       dragActive.current = false;

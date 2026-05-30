@@ -176,7 +176,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const [submenuFlip, setSubmenuFlip] = useState(false);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const [sendTextInsert, setSendTextInsert] = useState<{ insertIndex: number } | null>(null);
-  const [runProfileInsert, setRunProfileInsert] = useState<{ insertIndex: number } | null>(null);
+  const [runProfileInsert, setRunProfileInsert] = useState<{ insertIndex: number; profileName?: string } | null>(null);
   // Pause insert from the right-click submenu (Pattern B). Same dialog the toolbar
   // mounts; opens config-first so Cancel never leaves an empty row in the grid.
   const [pauseInsert, setPauseInsert] = useState<{ insertIndex: number } | null>(null);
@@ -557,6 +557,23 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const dragOccurred = useRef(false);
   const dropTargetRef = useRef<number | null>(null);
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
+
+  // Shared row-measurement: maps a cursor Y to an insertion index (0..N) across the action
+  // rows, skipping injected "Add Else" ghost rows. Used by both row-reorder and the
+  // profile→Run Profile drag-drop so both land on the same index for a given cursor Y.
+  const computeInsertIndexFromY = useCallback((clientY: number): number | null => {
+    if (!tbodyRef.current) return null;
+    const rows = Array.from(tbodyRef.current.querySelectorAll('tr')).filter(
+      tr => !tr.querySelector('button[title="Insert an Else branch in this conditional block"]')
+    );
+    let target: number | null = null;
+    for (let i = 0; i < rows.length; i++) {
+      const rect = rows[i].getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) { target = i; break; }
+      if (i === rows.length - 1) target = i + 1;
+    }
+    return target;
+  }, []);
   const DRAG_THRESHOLD = 5;
   // Auto-scroll zone: when the cursor is within this many pixels of the scroll container's
   // top or bottom edge during a drag, scroll the container automatically. Without this,
@@ -603,26 +620,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     // Recompute drop target whenever the cursor moves OR the scroll container scrolls
     // (auto-scroll changes which row is under the cursor without firing mousemove).
     const recomputeDropTarget = (clientY: number) => {
-      if (!tbodyRef.current) return;
-      // Filter out injected ghost rows ("+ Add Else branch") before computing the
-      // drop target. The ghost rows are visible but they're NOT part of the action
-      // list — counting them would shift every drop index by N (where N = ghost
-      // rows above the cursor), so the user would land their drop one slot off
-      // for every unclosed Else block above the drop site.
-      const rows = Array.from(tbodyRef.current.querySelectorAll('tr')).filter(
-        tr => !tr.querySelector('button[title="Insert an Else branch in this conditional block"]')
-      );
-      let target: number | null = null;
-      for (let i = 0; i < rows.length; i++) {
-        const rect = rows[i].getBoundingClientRect();
-        if (clientY < rect.top + rect.height / 2) {
-          target = i;
-          break;
-        }
-        if (i === rows.length - 1) {
-          target = i + 1;
-        }
-      }
+      const target = computeInsertIndexFromY(clientY);
       dropTargetRef.current = target;
       setDropTarget(target);
     };
@@ -749,7 +747,57 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         autoScrollRaf.current = null;
       }
     };
-  }, [send]);
+  }, [send, computeInsertIndexFromY]);
+
+  // ── Drag a profile from the ProfilePanel onto the grid → Run Profile action ──
+  // ProfilePanel owns the (mouse-based) drag and signals via window events. While a profile is
+  // dragged we reuse the row-reorder insertion rail (driven by dropTarget); on drop we open a
+  // pre-filled Run Profile dialog at the drop index. Subscribed once — volatile values are read
+  // from a ref so an in-flight drag isn't dropped by a re-subscribe.
+  const profileDragCtx = useRef({ recording: false, replaying: false, activeProfile: null as string | null, actionCount: 0 });
+  profileDragCtx.current = {
+    recording: buttonStates.recordingActive,
+    replaying: buttonStates.replayActive,
+    activeProfile,
+    actionCount: actions.length,
+  };
+  useEffect(() => {
+    let dragging = false;
+    const onMove = (e: MouseEvent) => setDropTarget(computeInsertIndexFromY(e.clientY));
+    const onStart = () => {
+      const c = profileDragCtx.current;
+      if (c.recording || c.replaying) return; // don't reshape the list mid-capture/replay
+      dragging = true;
+      window.addEventListener('mousemove', onMove);
+    };
+    const onEnd = () => {
+      if (!dragging) return;
+      dragging = false;
+      window.removeEventListener('mousemove', onMove);
+      setDropTarget(null);
+    };
+    const onDrop = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail as { profileName?: string; clientY?: number } | undefined;
+      if (!detail?.profileName || typeof detail.clientY !== 'number') return;
+      const c = profileDragCtx.current;
+      if (c.recording || c.replaying) return;
+      if (detail.profileName === c.activeProfile) {
+        showToast("A profile can't run itself", 'error');
+        return;
+      }
+      const insertIndex = computeInsertIndexFromY(detail.clientY) ?? c.actionCount;
+      setRunProfileInsert({ insertIndex, profileName: detail.profileName });
+    };
+    window.addEventListener('profiledrag:start', onStart);
+    window.addEventListener('profiledrag:end', onEnd);
+    window.addEventListener('profiledrag:dropOnGrid', onDrop as EventListener);
+    return () => {
+      window.removeEventListener('profiledrag:start', onStart);
+      window.removeEventListener('profiledrag:end', onEnd);
+      window.removeEventListener('profiledrag:dropOnGrid', onDrop as EventListener);
+      window.removeEventListener('mousemove', onMove);
+    };
+  }, [computeInsertIndexFromY, showToast]);
 
   const isMouseAction = (actionType: string) =>
     actionType.includes('Click') || actionType.includes('Middle');
@@ -989,7 +1037,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       </div>
 
       {/* Body */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div ref={scrollRef} data-actions-grid className="flex-1 overflow-y-auto">
         <table className="w-full table-fixed">
           <colgroup>
             <col style={{ width: 28 }} />
@@ -1700,6 +1748,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       {runProfileInsert && (
         <RunProfileDialog
           excludeProfileName={activeProfile ?? undefined}
+          initial={runProfileInsert.profileName ? { profileName: runProfileInsert.profileName, repeatCount: 1 } : undefined}
           onConfirm={(profileName, repeatCount) => {
             send({ type: 'actions:addRunProfile', payload: { profileName, repeatCount, insertIndex: runProfileInsert.insertIndex } });
             setRunProfileInsert(null);
