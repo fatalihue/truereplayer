@@ -761,9 +761,54 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     activeProfile,
     actionCount: actions.length,
   };
+  // Dedicated RAF for the profile-drag auto-scroll — decoupled from the row-reorder's
+  // autoScrollRaf so the two can never cancel each other.
+  const profileScrollRaf = useRef<number | null>(null);
   useEffect(() => {
     let dragging = false;
-    const onMove = (e: MouseEvent) => setDropTarget(computeInsertIndexFromY(e.clientY));
+    let lastY = 0;
+    const stopScroll = () => {
+      if (profileScrollRaf.current !== null) {
+        cancelAnimationFrame(profileScrollRaf.current);
+        profileScrollRaf.current = null;
+      }
+    };
+    // Mirror the row-reorder auto-scroll: while the cursor sits in the top/bottom edge zone,
+    // scroll the list (ramping by proximity) and keep the insertion rail in sync — so dropping
+    // into a long, already-scrolled list works without scrolling by hand first.
+    const tick = () => {
+      const container = scrollRef.current;
+      if (!container || !dragging) { profileScrollRaf.current = null; return; }
+      const rect = container.getBoundingClientRect();
+      let delta = 0;
+      if (lastY < rect.top + AUTOSCROLL_ZONE) {
+        const intensity = (rect.top + AUTOSCROLL_ZONE - lastY) / AUTOSCROLL_ZONE;
+        delta = -AUTOSCROLL_MAX_SPEED * Math.min(1, Math.max(0, intensity));
+      } else if (lastY > rect.bottom - AUTOSCROLL_ZONE) {
+        const intensity = (lastY - (rect.bottom - AUTOSCROLL_ZONE)) / AUTOSCROLL_ZONE;
+        delta = AUTOSCROLL_MAX_SPEED * Math.min(1, Math.max(0, intensity));
+      }
+      if (delta !== 0) {
+        container.scrollTop += delta;
+        setDropTarget(computeInsertIndexFromY(lastY));
+        profileScrollRaf.current = requestAnimationFrame(tick);
+      } else {
+        profileScrollRaf.current = null;
+      }
+    };
+    const onMove = (e: MouseEvent) => {
+      lastY = e.clientY;
+      setDropTarget(computeInsertIndexFromY(e.clientY));
+      if (profileScrollRaf.current === null) {
+        const container = scrollRef.current;
+        if (container) {
+          const rect = container.getBoundingClientRect();
+          if (e.clientY < rect.top + AUTOSCROLL_ZONE || e.clientY > rect.bottom - AUTOSCROLL_ZONE) {
+            profileScrollRaf.current = requestAnimationFrame(tick);
+          }
+        }
+      }
+    };
     const onStart = () => {
       const c = profileDragCtx.current;
       if (c.recording || c.replaying) return; // don't reshape the list mid-capture/replay
@@ -774,6 +819,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       if (!dragging) return;
       dragging = false;
       window.removeEventListener('mousemove', onMove);
+      stopScroll();
       setDropTarget(null);
     };
     const onDrop = (ev: Event) => {
@@ -796,6 +842,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       window.removeEventListener('profiledrag:end', onEnd);
       window.removeEventListener('profiledrag:dropOnGrid', onDrop as EventListener);
       window.removeEventListener('mousemove', onMove);
+      stopScroll();
     };
   }, [computeInsertIndexFromY, showToast]);
 
