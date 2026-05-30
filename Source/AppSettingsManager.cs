@@ -123,12 +123,11 @@ namespace TrueReplayer.Services
             profile.ModeToggleHotkey = s.ModeToggleHotkey;
             profile.ProfileKeyEnabled = s.ProfileKeyEnabled;
 
-            // Sync Run on Startup registry key with saved setting
-            // On first install, setting defaults to true but registry key doesn't exist yet
-            if (s.RunOnStartup && !Services.TrayIconService.IsRunOnStartup())
-                Services.TrayIconService.SetRunOnStartup(true);
-            else if (!s.RunOnStartup && Services.TrayIconService.IsRunOnStartup())
-                Services.TrayIconService.SetRunOnStartup(false);
+            // Sync the Run on Startup registry key with the saved setting on every launch. Uses a
+            // value-aware reconcile (not just "does the key exist") so a stale entry — e.g. one
+            // left by an older version or a moved/deleted copy — is rewritten to point at the
+            // current exe instead of silently failing to autostart.
+            Services.TrayIconService.SyncStartupRegistration(s.RunOnStartup);
         }
 
         private static string GetPath()

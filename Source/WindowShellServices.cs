@@ -181,18 +181,64 @@ namespace TrueReplayer.Services
 
         public static void SetRunOnStartup(bool enable)
         {
-            using var key = Registry.CurrentUser.OpenSubKey(StartupRegistryKey, true);
-            if (key == null) return;
-
-            if (enable)
-                key.SetValue(StartupValueName, $"\"{Environment.ProcessPath}\" --startup");
-            else
-                key.DeleteValue(StartupValueName, false);
-
-            // Persist to appsettings
+            // Persist the user's intent regardless of where we're running from.
             var settings = AppSettingsManager.Load();
             settings.RunOnStartup = enable;
             AppSettingsManager.Save(settings);
+
+            // Only the installed build owns the Run key. A dev/portable copy writing its own
+            // (transient) path here is what previously left a dangling autostart entry when that
+            // copy was later moved or deleted — guard against polluting it.
+            if (!IsInstalledLocation()) return;
+            WriteStartupKey(enable);
+        }
+
+        /// <summary>
+        /// Startup self-heal: makes the Run key match the saved RunOnStartup intent AND point at
+        /// THIS (current) exe. Rewrites a stale/missing entry — e.g. one left by a previous
+        /// version, a moved install, or a now-deleted copy — so autostart can't silently break.
+        /// No-op from non-installed (dev/portable) copies so they can't pollute the key.
+        /// </summary>
+        public static void SyncStartupRegistration(bool desired)
+        {
+            if (!IsInstalledLocation()) return;
+            using var key = Registry.CurrentUser.OpenSubKey(StartupRegistryKey, true);
+            if (key == null) return;
+
+            string expected = StartupValue;
+            string? current = key.GetValue(StartupValueName) as string;
+            if (desired)
+            {
+                if (!string.Equals(current, expected, StringComparison.OrdinalIgnoreCase))
+                    key.SetValue(StartupValueName, expected); // create or fix a stale path
+            }
+            else if (current != null)
+            {
+                key.DeleteValue(StartupValueName, false);
+            }
+        }
+
+        private static string StartupValue => $"\"{Environment.ProcessPath}\" --startup";
+
+        private static void WriteStartupKey(bool enable)
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(StartupRegistryKey, true);
+            if (key == null) return;
+            if (enable)
+                key.SetValue(StartupValueName, StartupValue);
+            else
+                key.DeleteValue(StartupValueName, false);
+        }
+
+        // True only when running from the Velopack install location
+        // (%LocalAppData%\TrueReplayer\...). Dev (bin\) and portable copies return false.
+        private static bool IsInstalledLocation()
+        {
+            var p = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(p)) return false;
+            string installRoot = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TrueReplayer");
+            return p.StartsWith(installRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
         }
 
         /// Callback invoked after tray menu toggles a setting, so bridge can push updated state to UI.
