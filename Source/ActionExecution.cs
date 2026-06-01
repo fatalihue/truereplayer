@@ -17,7 +17,7 @@ namespace TrueReplayer.Services
     public class RecordingService
     {
         private readonly ActionRecorder recorder;
-        private readonly Func<bool> getMouse, getScroll, getKeyboard;
+        private readonly Func<bool> getMouse, getScroll, getKeyboard, getCombined;
         private readonly Action<DateTime> setLastActionTime;
         private readonly Action<string>? onStatusChanged;
         private readonly Action<string, bool>? onButtonStateChanged; // (text, isRecording)
@@ -29,6 +29,7 @@ namespace TrueReplayer.Services
             Func<bool> getMouse,
             Func<bool> getScroll,
             Func<bool> getKeyboard,
+            Func<bool> getCombined,
             Action<DateTime> setLastActionTime,
             Action<string>? onStatusChanged = null,
             Action<string, bool>? onButtonStateChanged = null)
@@ -37,6 +38,7 @@ namespace TrueReplayer.Services
             this.getMouse = getMouse;
             this.getScroll = getScroll;
             this.getKeyboard = getKeyboard;
+            this.getCombined = getCombined;
             this.setLastActionTime = setLastActionTime;
             this.onStatusChanged = onStatusChanged;
             this.onButtonStateChanged = onButtonStateChanged;
@@ -55,6 +57,7 @@ namespace TrueReplayer.Services
             recorder.RecordMouse = getMouse();
             recorder.RecordScroll = getScroll();
             recorder.RecordKeyboard = getKeyboard();
+            recorder.RecordCombined = getCombined();
             recorder.UseRelativeCoordinates = Models.UserProfile.Current.UseRelativeCoordinates;
             recorder.Start();
             setLastActionTime(DateTime.Now);
@@ -83,6 +86,7 @@ namespace TrueReplayer.Services
             recorder.RecordMouse = captureType == CaptureType.Mouse;
             recorder.RecordScroll = captureType == CaptureType.Scroll;
             recorder.RecordKeyboard = captureType == CaptureType.Keyboard;
+            recorder.RecordCombined = getCombined();
             recorder.Start();
             setLastActionTime(DateTime.Now);
             onStatusChanged?.Invoke("recording");
@@ -479,8 +483,23 @@ namespace TrueReplayer.Services
         public bool RecordMouse { get; set; } = true;
         public bool RecordScroll { get; set; } = true;
         public bool RecordKeyboard { get; set; } = true;
+        // When true, a key press / mouse click is recorded as ONE action (Keystroke / *Click)
+        // instead of the paired Down+Up. Set per-session from the global toggle in Start().
+        public bool RecordCombined { get; set; } = false;
         public bool UseRelativeCoordinates { get; set; } = false;
         public bool IsCaptureMode => _captureType != CaptureType.None;
+
+        // ── Combined-mode keyboard grouping state ──
+        // Modifiers are folded into the following key so "Ctrl+C", "Shift+A" (capitals) and
+        // "Shift+1" (symbols) reproduce correctly. _heldMods = modifiers physically down now;
+        // _sessionMods = union seen since the first modifier of the current chord went down
+        // (used to emit a lone-modifier tap on release); _sessionUsed = a key/click already
+        // consumed the held modifiers, so releasing them must NOT emit a stray Keystroke.
+        private readonly HashSet<string> _heldMods = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _sessionMods = new(StringComparer.OrdinalIgnoreCase);
+        private bool _sessionUsed;
+        private static readonly HashSet<string> ModifierKeyNames =
+            new(StringComparer.OrdinalIgnoreCase) { "Ctrl", "Shift", "Alt", "Win" };
 
         public ActionRecorder(
             ObservableCollection<ActionItem> actions,
@@ -507,6 +526,9 @@ namespace TrueReplayer.Services
         {
             _isRecording = false;
             _pressedKeys.Clear();
+            _heldMods.Clear();
+            _sessionMods.Clear();
+            _sessionUsed = false;
             insertIndex = null;
             _lastActionTime = null;
             foreach (var action in _actions) action.IsInsertionPoint = false;
@@ -561,7 +583,12 @@ namespace TrueReplayer.Services
 
             bool complete = _captureType switch
             {
-                CaptureType.Mouse or CaptureType.Scroll => _captureActionCount >= _captureTargetCount,
+                // Combined mode records a click as ONE event (press only), so Mouse capture
+                // completes after 1 action instead of the paired Down+Up's 2. Evaluated live
+                // here (not baked into _captureTargetCount in StartCapture) because RecordCombined
+                // is assigned by StartCaptureRecording, which runs just AFTER StartCapture.
+                CaptureType.Mouse => _captureActionCount >= (RecordCombined ? 1 : 2),
+                CaptureType.Scroll => _captureActionCount >= _captureTargetCount,
                 CaptureType.Keyboard => _captureKeyWasPressed && _pressedKeys.Count == 0,
                 _ => false
             };
@@ -597,6 +624,9 @@ namespace TrueReplayer.Services
         public void RecordKeyboardAction(string key, bool isDown)
         {
             if (!_isRecording || !RecordKeyboard) return;
+            if (RecordCombined) { RecordKeyboardCombined(key, isDown); return; }
+
+            // ── Paired mode (legacy, unchanged) ──
             var actionType = isDown ? "KeyDown" : "KeyUp";
             int delay = GetDelayForNewAction();
 
@@ -615,31 +645,118 @@ namespace TrueReplayer.Services
             }
         }
 
+        // Combined mode: one event per press, emitted on key-DOWN; the key-up is ignored
+        // (no hold capture — the user adds a HoldKey action manually if they want a hold).
+        // A held modifier folds into the next key so combos / capitals / symbols replay right.
+        private void RecordKeyboardCombined(string key, bool isDown)
+        {
+            if (ModifierKeyNames.Contains(key))
+            {
+                if (isDown)
+                {
+                    if (_heldMods.Count == 0) { _sessionUsed = false; _sessionMods.Clear(); }
+                    _heldMods.Add(key);
+                    _sessionMods.Add(key);
+                }
+                else
+                {
+                    _heldMods.Remove(key);
+                    // Modifier(s) pressed and released with no key/click in between → record the
+                    // lone tap as a single Keystroke ("Shift", "Ctrl+Shift", …). Emitted only
+                    // once the whole chord is released so multi-modifier taps fold together.
+                    if (_heldMods.Count == 0 && !_sessionUsed && _sessionMods.Count > 0)
+                    {
+                        // Set the capture flag BEFORE AddAction — AddAction runs CheckCaptureCompletion
+                        // synchronously, and the Keyboard arm needs _captureKeyWasPressed already true.
+                        // This modifier-up is BOTH the emitter and the terminal event (no follow-up
+                        // event to complete the capture), so setting it after would hang capture mode.
+                        if (_captureType == CaptureType.Keyboard) _captureKeyWasPressed = true;
+                        AddAction(new ActionItem { ActionType = "Keystroke", Key = BuildCombo(_sessionMods, null), Delay = GetDelayForNewAction() });
+                        _sessionMods.Clear();
+                    }
+                }
+                return;
+            }
+
+            // Non-modifier key.
+            if (isDown && !_pressedKeys.Contains(key))
+            {
+                string combo = _heldMods.Count > 0 ? BuildCombo(_heldMods, key) : key;
+                AddAction(new ActionItem { ActionType = "Keystroke", Key = combo, Delay = GetDelayForNewAction() });
+                _pressedKeys.Add(key);
+                if (_heldMods.Count > 0) _sessionUsed = true;
+                if (_captureType == CaptureType.Keyboard) _captureKeyWasPressed = true;
+            }
+            else if (!isDown)
+            {
+                _pressedKeys.Remove(key);
+                // Combined mode emits nothing on key-up, but keyboard capture completes on
+                // release (_captureKeyWasPressed && no keys held). Paired mode triggers this
+                // via the KeyUp's AddAction; here we call it directly. Self-guards when idle.
+                CheckCaptureCompletion();
+            }
+        }
+
+        // Joins modifiers (+ optional target key) into the canonical "Win+Ctrl+Shift+Alt+Key"
+        // form SimulateKeystroke parses — identical to what the manual "Send Keystroke" insert
+        // and the hotkey capture produce, so replay of a recorded combo matches exactly.
+        private static string BuildCombo(HashSet<string> mods, string? target)
+        {
+            var parts = new List<string>();
+            if (mods.Contains("Win")) parts.Add("Win");
+            if (mods.Contains("Ctrl")) parts.Add("Ctrl");
+            if (mods.Contains("Shift")) parts.Add("Shift");
+            if (mods.Contains("Alt")) parts.Add("Alt");
+            if (!string.IsNullOrEmpty(target)) parts.Add(target);
+            return string.Join("+", parts);
+        }
+
         public void RecordMouseAction(string button, int x, int y, bool isDown, int scrollDelta = 0)
         {
             if (!_isRecording) return;
             // In capture mode, only accept the specific mouse button
             if (_captureType == CaptureType.Mouse && _captureMouseButton != null && button != _captureMouseButton)
                 return;
-            string actionType = button switch
-            {
-                "Left" => isDown ? "LeftClickDown" : "LeftClickUp",
-                "Right" => isDown ? "RightClickDown" : "RightClickUp",
-                "Middle" => isDown ? "MiddleClickDown" : "MiddleClickUp",
-                "Scroll" => scrollDelta > 0 ? "ScrollUp" : "ScrollDown",
-                _ => ""
-            };
 
-            if (string.IsNullOrEmpty(actionType) || (button == "Scroll" && !RecordScroll) || (button != "Scroll" && !RecordMouse)) return;
+            bool isScroll = button == "Scroll";
+            if ((isScroll && !RecordScroll) || (!isScroll && !RecordMouse)) return;
+
+            // Combined mode records a click as ONE event captured on the press; the release is
+            // ignored (no drag/hold capture — use paired mode for those). Scroll is unaffected.
+            if (RecordCombined && !isScroll && !isDown) return;
+
+            string actionType = isScroll
+                ? (scrollDelta > 0 ? "ScrollUp" : "ScrollDown")
+                : RecordCombined
+                    ? button switch
+                    {
+                        "Left" => "LeftClick",
+                        "Right" => "RightClick",
+                        "Middle" => "MiddleClick",
+                        _ => ""
+                    }
+                    : button switch
+                    {
+                        "Left" => isDown ? "LeftClickDown" : "LeftClickUp",
+                        "Right" => isDown ? "RightClickDown" : "RightClickUp",
+                        "Middle" => isDown ? "MiddleClickDown" : "MiddleClickUp",
+                        _ => ""
+                    };
+
+            if (string.IsNullOrEmpty(actionType)) return;
 
             int delay = GetDelayForNewAction();
 
-            if (button == "Scroll")
+            if (isScroll)
             {
                 AddAction(new ActionItem { ActionType = actionType, Delay = delay });
             }
             else
             {
+                // A click consumes any held-modifier session so its (ignored) release doesn't
+                // later emit a stray lone-modifier Keystroke. Modifier+click isn't encoded as a
+                // unit in combined mode — the click is recorded without the modifier.
+                if (RecordCombined && _heldMods.Count > 0) _sessionUsed = true;
                 int recX = x, recY = y;
                 if (UseRelativeCoordinates)
                 {
@@ -1152,6 +1269,30 @@ namespace TrueReplayer.Services
                         case "RightClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTUP); break;
                         case "MiddleClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN); break;
                         case "MiddleClickUp": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEUP); break;
+                        // Combined-mode clicks: one row = press + release at the same point.
+                        // SimulateMouse moves the cursor and embeds the position in each event,
+                        // so the two calls land the down/up together (the second move is a no-op).
+                        // The release is skipped if the press cancelled the replay (e.g. a missing
+                        // target window with relative coords calls _cts.Cancel via
+                        // ReportMissingTargetWindow) — this matches paired mode, where the loop
+                        // breaks after the *Down action and the *Up never fires, so only ONE error
+                        // surfaces. A button left pressed mid-cancel is released by StartAsync's
+                        // finally (ResetMouseState), so skipping the up can't leave it stuck.
+                        case "LeftClick":
+                            SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN);
+                            if (!token.IsCancellationRequested)
+                                SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP);
+                            break;
+                        case "RightClick":
+                            SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTDOWN);
+                            if (!token.IsCancellationRequested)
+                                SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTUP);
+                            break;
+                        case "MiddleClick":
+                            SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN);
+                            if (!token.IsCancellationRequested)
+                                SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEUP);
+                            break;
                         case "ScrollUp": SimulateScroll(120); break;
                         case "ScrollDown": SimulateScroll(-120); break;
                         case "SendText": await SimulateClipboardPaste(action.Key, token); break;

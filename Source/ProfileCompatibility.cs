@@ -69,6 +69,17 @@ namespace TrueReplayer.Services
                                       string.Equals(a.ActionType, "Keystroke", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 0, 0), "HoldKey/Keystroke"),
 
+            // Combined-mode single clicks (LeftClick/RightClick/MiddleClick — press+release in one
+            // row). Builds without the replay switch cases silently skip the click, so pin the
+            // profile the moment one appears. Pinned to the build that introduces them (2.3.4) so an
+            // own-build export → import round-trips cleanly — IsCompatible would reject a pin above
+            // the running version. BUMP this in lockstep with the app version if these features are
+            // later released under a higher number (e.g. 2.4.0).
+            (p => p.Actions.Any(a => string.Equals(a.ActionType, "LeftClick", StringComparison.OrdinalIgnoreCase) ||
+                                      string.Equals(a.ActionType, "RightClick", StringComparison.OrdinalIgnoreCase) ||
+                                      string.Equals(a.ActionType, "MiddleClick", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 3, 4), "Combined clicks (LeftClick/RightClick/MiddleClick)"),
+
             // Restore Size split from Restore Position in 2.0.5; older builds only honour Position.
             (p => p.RestoreSize,
                 new Version(2, 0, 5), "RestoreSize"),

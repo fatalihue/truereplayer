@@ -72,6 +72,7 @@ namespace TrueReplayer
                 () => bridge?.RecordMouse ?? true,
                 () => bridge?.RecordScroll ?? true,
                 () => bridge?.RecordKeyboard ?? true,
+                () => bridge?.RecordCombinedInput ?? true,
                 time => mainController.SetLastActionTime(time),
                 status => bridge?.PushStatusChange(status),
                 (text, isActive) => bridge?.PushButtonStates()
@@ -229,6 +230,24 @@ namespace TrueReplayer
 
             // Block browser-like keys (F3=Find, F5=Refresh, F7=Caret, F12=DevTools)
             WebView.CoreWebView2.Settings.AreBrowserAcceleratorKeysEnabled = false;
+
+            // Suppress WebView2's built-in permission prompts. The WebView hosts ONLY our own
+            // trusted local UI, so any permission request necessarily comes from the app's own
+            // code. ClipboardRead is auto-granted because the "paste" buttons (Sheet coords,
+            // theme import) call navigator.clipboard.readText() on an explicit user click —
+            // without this, WebView2 shows its native "allow clipboard?" dialog the first time
+            // and remembers the choice (a stray Block then silently breaks paste). Every other
+            // permission kind (camera, mic, geolocation, notifications, file access, …) is
+            // denied: the app uses none of them, and handling the event guarantees NO permission
+            // prompt of any kind ever surfaces. Note: this does not affect downloads (theme
+            // export) — those are a separate DownloadStarting flow and remain as normal feedback.
+            WebView.CoreWebView2.PermissionRequested += (s, e) =>
+            {
+                e.State = e.PermissionKind == Microsoft.Web.WebView2.Core.CoreWebView2PermissionKind.ClipboardRead
+                    ? Microsoft.Web.WebView2.Core.CoreWebView2PermissionState.Allow
+                    : Microsoft.Web.WebView2.Core.CoreWebView2PermissionState.Deny;
+                e.Handled = true;
+            };
 
             WebView.CoreWebView2.WebMessageReceived += (s, e) =>
             {

@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo, Fragment } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Eye, EyeOff, Link, GripVertical, Timer, GitBranch, ArrowRightLeft } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -12,7 +12,6 @@ import { SendTextDialog } from './SendTextDialog';
 import { SendTextPreview } from './SendTextPreview';
 import { RunProfileDialog } from './RunProfileDialog';
 import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
-import { PauseDialog } from './PauseDialog';
 import { BulkActionBar } from './BulkActionBar';
 import { Checkbox, CheckboxBox } from './Checkbox';
 import type { ColumnVisibility } from './Toolbar';
@@ -172,19 +171,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number } | null>(null);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
-  const [activeSubmenu, setActiveSubmenu] = useState<'below' | null>(null);
+  const [activeSubmenu, setActiveSubmenu] = useState<'more' | null>(null);
   const [submenuFlip, setSubmenuFlip] = useState(false);
   const contextMenuRef = useRef<HTMLDivElement>(null);
-  const [sendTextInsert, setSendTextInsert] = useState<{ insertIndex: number } | null>(null);
+  // Drives the RunProfile insert dialog. Opened by dragging a profile onto the grid
+  // (the 'profiledrag:dropOnGrid' handler) — pre-filled with the dropped profile's name.
   const [runProfileInsert, setRunProfileInsert] = useState<{ insertIndex: number; profileName?: string } | null>(null);
-  // Pause insert from the right-click submenu (Pattern B). Same dialog the toolbar
-  // mounts; opens config-first so Cancel never leaves an empty row in the grid.
-  const [pauseInsert, setPauseInsert] = useState<{ insertIndex: number } | null>(null);
-  // Insert flow for the right-click submenu's "Send Keystroke…" entry. The
-  // dialog handles Press / Hold internally via its Mode toggle so we don't carry
-  // a mode flag through this state any more — the dialog's onConfirm result
-  // tells us which bridge message to dispatch (Keystroke vs HoldKey).
-  const [keystrokeCaptureInsert, setKeystrokeCaptureInsert] = useState<{ insertIndex: number } | null>(null);
   // Columns-toggle dropdown — moved here from the global Toolbar because columns
   // are a property of the grid, not a global preference. The dropdown opens
   // anchored to the header's right edge; click-outside closes it via the effect
@@ -352,8 +344,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         if (x + rect.width > window.innerWidth - 8) {
           x = Math.max(8, window.innerWidth - rect.width - 8);
         }
-        // Flip submenu to left if not enough space on the right for menu + submenu (~170px)
-        setSubmenuFlip(x + rect.width + 174 > window.innerWidth);
+        // Flip submenu to the left if there isn't room on the right for the menu + the "More"
+        // submenu (min-w-[210px] + 4px gap ≈ 214px — keep this in sync with that class).
+        setSubmenuFlip(x + rect.width + 214 > window.innerWidth);
         setMenuPos({ x, y });
       });
     }
@@ -415,7 +408,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
   // Handle keyboard on the table container
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (editingCell || sendTextEdit || sendTextInsert) return;
+    if (editingCell || sendTextEdit) return;
 
     if (e.key === 'Delete' && selectedIndices.size > 0) {
       e.preventDefault();
@@ -439,7 +432,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       e.preventDefault();
       setSelectedIndices(new Set());
     }
-  }, [editingCell, sendTextEdit, sendTextInsert, selectedIndices, send, actions]);
+  }, [editingCell, sendTextEdit, selectedIndices, send, actions]);
 
   // Handle edit input key events
   const handleEditKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -868,51 +861,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     setActiveSubmenu(null);
   }, []);
 
-  const handleInsertAction = useCallback((actionType: string) => {
-    if (!contextMenu) return;
-    const insertIndex = contextMenu.rowIndex + 1;
-    // Four special cases that need a dialog before they can produce a real action:
-    // SendText needs body text, SendKey needs a single captured key, SendKeystroke
-    // needs a captured combo, RunProfile needs the target profile name + repeat
-    // count. Plain inserts (Pause, WaitImage) go through the generic insertAction
-    // path.
-    if (actionType === 'SendText') {
-      setSendTextInsert({ insertIndex });
-      closeContextMenu();
-      return;
-    }
-    if (actionType === 'SendKeystroke') {
-      // Unified entry — the dialog's Mode toggle picks Press vs Hold; both legacy
-      // entries (Send Key / Press Key × N / Hold Key) routed here too now.
-      setKeystrokeCaptureInsert({ insertIndex });
-      closeContextMenu();
-      return;
-    }
-    if (actionType === 'WaitPixelColor') {
-      // Dedicated bridge message — backend opens the screen overlay in pointPick
-      // mode and only inserts the row after the user clicks a pixel. Matches the
-      // WaitImage flow so the two "wait for screen condition" actions behave the
-      // same way (capture-first, not insert-then-configure).
-      send({ type: 'actions:insertWaitPixelColor', payload: { insertIndex } });
-      closeContextMenu();
-      return;
-    }
-    if (actionType === 'RunProfile') {
-      setRunProfileInsert({ insertIndex });
-      closeContextMenu();
-      return;
-    }
-    if (actionType === 'Pause') {
-      // Pattern-B normalization mirror of the toolbar's Pause button: open the
-      // config-first dialog instead of inserting an empty row and auto-opening
-      // the Sheet. Cancel here leaves the grid untouched.
-      setPauseInsert({ insertIndex });
-      closeContextMenu();
-      return;
-    }
-    send({ type: 'actions:insertAction', payload: { actionType, insertIndex } });
-    closeContextMenu();
-  }, [contextMenu, send, closeContextMenu]);
 
 
 
@@ -1015,22 +963,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     setSelectedIndices(newSel);
     closeContextMenu();
   }, [contextMenu, contextSelectionIndices, actions, send, closeContextMenu]);
-
-  // Submenu items — mirrors the toolbar's Add Action dropdown so users see the
-  // same vocabulary regardless of entry point. Click x3 + KeyPress + Scrolls were
-  // removed in the toolbar pass because recording captures them natively; same
-  // reasoning here. Send Text is also omitted because the toolbar already has a
-  // dedicated button for it — keeping it here too was redundant.
-  const submenuItems = [
-    // Send Keystroke — unified entry. The dialog's own Press/Hold toggle replaces
-    // the four legacy entries (Send Key, Send Keystroke, Press × N, Hold Key);
-    // they all opened slightly different dialogs for slices of the same intent.
-    { type: 'SendKeystroke', label: 'Send Keystroke…', icon: Keyboard },
-    { type: 'Pause', label: 'Pause', icon: Hourglass },
-    { type: 'WaitImage', label: 'Wait for Image', icon: ScanSearch },
-    { type: 'WaitPixelColor', label: 'Wait for Pixel Color', icon: Pipette },
-    { type: 'RunProfile', label: 'Run Profile', icon: Repeat2 },
-  ] as const;
 
   return (
     <div
@@ -1380,7 +1312,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         : action.actionType === 'BrowserType' ? 'Input Text'
                         : action.actionType === 'BrowserSelectOption' ? 'Select Option'
                         : action.actionType === 'BrowserWaitElement' ? 'Wait'
-                        : action.actionType === 'BrowserNavigate' ? 'Navigate to URL'
+                        : action.actionType === 'BrowserNavigate' ? 'Open URL'
                         : action.actionType === 'RunProfile' ? 'Run Profile'
                         : action.actionType === 'Pause' ? 'Pause'
                         : action.actionType === 'HoldKey' ? 'Hold Key'
@@ -1718,16 +1650,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         />
       )}
 
-      {sendTextInsert && (
-        <SendTextDialog
-          mode="add"
-          onConfirm={(text) => {
-            send({ type: 'actions:addSendText', payload: { text, insertIndex: sendTextInsert.insertIndex } });
-            setSendTextInsert(null);
-          }}
-          onClose={() => setSendTextInsert(null)}
-        />
-      )}
 
       {/* Unified edit dialog for both Keystroke and HoldKey rows. Seeds Mode from
           the row's ActionType so the dialog opens already showing the right fields.
@@ -1789,9 +1711,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         />
       )}
 
-      {/* Insert-flow dialogs for the context menu's Insert Action submenu — Send
-          Text (body), Send Keystroke (capture + Press/Hold), Run Profile (picker),
-          Pause (hotkey + timeout). */}
+      {/* RunProfile insert dialog — opened by dragging a profile onto the grid
+          (pre-filled with the dropped profile). The context-menu insert path was
+          removed, but drag-to-insert still uses this. */}
       {runProfileInsert && (
         <RunProfileDialog
           excludeProfileName={activeProfile ?? undefined}
@@ -1804,45 +1726,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         />
       )}
 
-      {pauseInsert && (
-        <PauseDialog
-          onConfirm={(key, timeoutSeconds) => {
-            const timeoutMs = Math.max(0, Math.round(timeoutSeconds * 1000));
-            send({
-              type: 'actions:insertPause',
-              payload: { key, timeoutMs, insertIndex: pauseInsert.insertIndex },
-            });
-            setPauseInsert(null);
-          }}
-          onClose={() => setPauseInsert(null)}
-        />
-      )}
-
-      {keystrokeCaptureInsert && (
-        <KeystrokeCaptureDialog
-          onConfirm={(result) => {
-            const insertIndex = keystrokeCaptureInsert.insertIndex;
-            if (result.actionType === 'HoldKey') {
-              send({
-                type: 'actions:insertHoldKey',
-                payload: { key: result.key, insertIndex, holdDurationMs: result.holdDurationMs },
-              });
-            } else {
-              // Omit repeat fields for the implicit defaults so the bridge payload
-              // stays minimal and the C# side keeps RepeatDelayMs null on disk.
-              const payload: { keystroke: string; insertIndex: number; repeat?: number; repeatDelayMs?: number } =
-                { keystroke: result.key, insertIndex };
-              if (result.repeat > 1) {
-                payload.repeat = result.repeat;
-                if (result.repeatDelayMs !== 30) payload.repeatDelayMs = result.repeatDelayMs;
-              }
-              send({ type: 'actions:insertKeystroke', payload });
-            }
-            setKeystrokeCaptureInsert(null);
-          }}
-          onClose={() => setKeystrokeCaptureInsert(null)}
-        />
-      )}
 
       {/* Bulk Action Bar — inline at bottom. Reordering (Move Up / Move Down)
           lives here now instead of on the global toolbar because the operation
@@ -1916,44 +1799,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           className="fixed z-50 min-w-[180px] py-1 bg-bg-card border border-border-default rounded-md shadow-lg"
           style={{ left: menuPos.x, top: menuPos.y }}
         >
-          {/* Insert Action (inserts below selected row) */}
-          <div
-            className="relative"
-            onMouseEnter={() => setActiveSubmenu('below')}
-            onMouseLeave={() => setActiveSubmenu(null)}
-          >
-            <button
-              className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-            >
-              <span className="flex items-center gap-2.5">
-                <Plus size={13} className="text-text-tertiary" />
-                Insert Action
-              </span>
-              <ChevronRight size={12} className="text-text-disabled" />
-            </button>
-            {activeSubmenu === 'below' && (
-              <div className={`absolute top-0 min-w-[170px] bg-transparent ${submenuFlip ? 'right-full' : 'left-full'}`} style={submenuFlip ? { paddingRight: '4px' } : { paddingLeft: '4px' }}>
-                <div className="py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
-                  {submenuItems.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <button
-                        key={item.type}
-                        onClick={() => handleInsertAction(item.type)}
-                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-                      >
-                        <Icon size={13} className="text-text-tertiary" />
-                        {item.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="my-1 border-t border-border-subtle" />
-
           {/* Edit — specialized dialogs for SendText / RunProfile / Keystroke
               (which all carry a single primary payload that has its own capture flow);
               others fall back to the generic sheet panel which edits delay / comment /
@@ -2065,14 +1910,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             }
 
             // Clicks: copy the coordinate pair as "x, y" for quick reuse / debugging.
-            // Native clicks are recorded as DOWN/UP pairs — actionType is one of
-            // LeftClickDown, LeftClickUp, RightClickDown, RightClickUp, MiddleClickDown,
-            // MiddleClickUp (NOT the unsuffixed "LeftClick" form, which only exists in
-            // the SheetPanel's family-switcher dropdown — never as a stored action).
-            // An earlier draft checked the unsuffixed names and silently missed every
-            // real click row; user reported "Copy Coordinates doesn't appear for clicks"
-            // because of this. The regex accepts the optional suffix so legacy or
-            // synthesized data without Down/Up still works too.
+            // Paired-mode clicks are DOWN/UP pairs (LeftClickDown, LeftClickUp, …); combined
+            // mode records the unsuffixed single-click form (LeftClick, RightClick, MiddleClick).
+            // An earlier draft checked only the unsuffixed names and silently missed every
+            // paired click row; user reported "Copy Coordinates doesn't appear for clicks"
+            // because of this. The optional-suffix regex matches BOTH shapes.
             if (/^(Left|Right|Middle)Click(Down|Up)?$/.test(row.actionType ?? '')) {
               return (
                 <button
@@ -2136,113 +1978,113 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             Duplicate
           </button>
 
-          {/* Select Similar */}
-          <button
-            onMouseEnter={() => setActiveSubmenu(null)}
-            onClick={() => {
-              const ref = actions[contextMenu.rowIndex];
-              if (!ref) { closeContextMenu(); return; }
-              const similar = new Set<number>();
-              actions.forEach((a, i) => {
-                if (a.actionType === ref.actionType && a.key === ref.key && a.x === ref.x && a.y === ref.y)
-                  similar.add(i);
-              });
-              setSelectedIndices(similar);
-              showToast(`Selected ${similar.size} similar action(s)`, 'success');
-              closeContextMenu();
-            }}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          {/* More ▸ — lower-frequency tools tucked into a submenu so the top level stays
+              short. Grouped by purpose: select-similar, paired↔combined conversion, and
+              Down/Up repeat collapse. (Skip lives in the bulk bar; Insert in the toolbar.) */}
+          <div
+            className="relative"
+            onMouseEnter={() => setActiveSubmenu('more')}
+            onMouseLeave={() => setActiveSubmenu(null)}
           >
-            <CheckCheck size={13} className="text-text-tertiary" />
-            Select Similar
-          </button>
+            <button className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors">
+              <span className="flex items-center gap-2.5">
+                <MoreHorizontal size={13} className="text-text-tertiary" />
+                More
+              </span>
+              <ChevronRight size={12} className="text-text-disabled" />
+            </button>
+            {activeSubmenu === 'more' && (
+              <div className={`absolute top-0 min-w-[210px] bg-transparent ${submenuFlip ? 'right-full' : 'left-full'}`} style={submenuFlip ? { paddingRight: '4px' } : { paddingLeft: '4px' }}>
+                <div className="py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
+                  {/* Select Similar */}
+                  <button
+                    onClick={() => {
+                      const ref = actions[contextMenu.rowIndex];
+                      if (!ref) { closeContextMenu(); return; }
+                      const similar = new Set<number>();
+                      actions.forEach((a, i) => {
+                        if (a.actionType === ref.actionType && a.key === ref.key && a.x === ref.x && a.y === ref.y)
+                          similar.add(i);
+                      });
+                      setSelectedIndices(similar);
+                      showToast(`Selected ${similar.size} similar action(s)`, 'success');
+                      closeContextMenu();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                  >
+                    <CheckCheck size={13} className="text-text-tertiary" />
+                    Select Similar
+                  </button>
 
-          {/* Skip / Enable — toggles isSkipped on the right-clicked row (or the
-              selected rows if the right-clicked one is in the selection, matching
-              the Duplicate/Delete pattern above). Skipped actions stay in the
-              list but are bypassed during replay; visually rendered with line-
-              through + reduced opacity in the table. Universal — applies to any
-              action type. */}
-          {(() => {
-            const row = actions[contextMenu.rowIndex];
-            if (!row) return null;
-            const indices = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
-              ? Array.from(selectedIndices)
-              : [contextMenu.rowIndex];
-            // Use the right-clicked row's state as the toggle reference: if it's
-            // currently skipped, the action says "Enable"; otherwise "Skip".
-            const isSkipped = !!row.isSkipped;
-            return (
-              <button
-                onMouseEnter={() => setActiveSubmenu(null)}
-                onClick={() => {
-                  send({ type: 'actions:toggleSkip', payload: { indices } });
-                  closeContextMenu();
-                }}
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-              >
-                {isSkipped
-                  ? <Eye size={13} className="text-text-tertiary" />
-                  : <EyeOff size={13} className="text-text-tertiary" />
-                }
-                {isSkipped ? 'Enable' : 'Skip during replay'}
-              </button>
-            );
-          })()}
+                  <div className="my-1 border-t border-border-subtle" />
 
-          {/* Collapse to × N / Expand × N — fold consecutive Down/Up pairs of the
-              same key into one Keystroke × N row (and back). Both items render
-              always, with disabled state styled cinza when the validators fail,
-              so users discover the feature even when their current selection
-              wouldn't qualify. v1 blocks modifier combos in the Expand path. */}
-          {(() => {
-            const indices = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
-              ? Array.from(selectedIndices).sort((a, b) => a - b)
-              : [contextMenu.rowIndex];
-            // Contiguity check — gaps in the multi-select disqualify collapse.
-            let contiguous = true;
-            for (let i = 1; i < indices.length; i++) {
-              if (indices[i] !== indices[i - 1] + 1) { contiguous = false; break; }
-            }
-            // No upstream .filter(Boolean): canCollapse / canExpand both reject
-            // undefined entries internally, so the menu-render and handler paths
-            // see the exact same `rows` shape. Drifting filters caused a subtle
-            // bug pre-audit where stale selection could enable the menu while
-            // the handler would have rejected.
-            const rows = indices.map(i => actions[i]);
-            const collapseOk = contiguous && canCollapse(rows) !== null;
-            const expandOk = indices.length === 1 && canExpand(rows[0]);
-            return (
-              <>
-                <button
-                  onMouseEnter={() => setActiveSubmenu(null)}
-                  onClick={collapseOk ? handleCollapseToRepeat : undefined}
-                  disabled={!collapseOk}
-                  className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-xs transition-colors ${
-                    collapseOk
-                      ? 'text-text-primary hover:bg-bg-elevated cursor-pointer'
-                      : 'text-text-disabled cursor-default'
-                  }`}
-                >
-                  <ChevronsDownUp size={13} className={collapseOk ? 'text-text-tertiary' : 'text-text-disabled'} />
-                  Collapse to × N
-                </button>
-                <button
-                  onMouseEnter={() => setActiveSubmenu(null)}
-                  onClick={expandOk ? handleExpandRepeat : undefined}
-                  disabled={!expandOk}
-                  className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-xs transition-colors ${
-                    expandOk
-                      ? 'text-text-primary hover:bg-bg-elevated cursor-pointer'
-                      : 'text-text-disabled cursor-default'
-                  }`}
-                >
-                  <ChevronsUpDown size={13} className={expandOk ? 'text-text-tertiary' : 'text-text-disabled'} />
-                  Expand × N
-                </button>
-              </>
-            );
-          })()}
+                  {/* Convert all actions between paired (Down/Up) and combined (Keystroke /
+                      HoldKey / Click) forms. Whole-profile + undoable — the on-demand
+                      counterpart to the record-time "Combined Actions" toggle. */}
+                  <button
+                    onClick={() => { send({ type: 'actions:convertMode', payload: { direction: 'toCombined' } }); setSelectedIndices(new Set<number>()); closeContextMenu(); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                  >
+                    <Combine size={13} className="text-text-tertiary" />
+                    Convert all to Combined
+                  </button>
+                  <button
+                    onClick={() => { send({ type: 'actions:convertMode', payload: { direction: 'toPaired' } }); setSelectedIndices(new Set<number>()); closeContextMenu(); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                  >
+                    <Split size={13} className="text-text-tertiary" />
+                    Convert all to Paired
+                  </button>
+
+                  <div className="my-1 border-t border-border-subtle" />
+
+                  {/* Collapse to × N / Expand × N — fold consecutive Down/Up pairs of the same
+                      key into one Keystroke × N row (and back). Disabled (greyed) when the
+                      current selection wouldn't qualify, so the feature stays discoverable. */}
+                  {(() => {
+                    const indices = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
+                      ? Array.from(selectedIndices).sort((a, b) => a - b)
+                      : [contextMenu.rowIndex];
+                    let contiguous = true;
+                    for (let i = 1; i < indices.length; i++) {
+                      if (indices[i] !== indices[i - 1] + 1) { contiguous = false; break; }
+                    }
+                    const rows = indices.map(i => actions[i]);
+                    const collapseOk = contiguous && canCollapse(rows) !== null;
+                    const expandOk = indices.length === 1 && canExpand(rows[0]);
+                    return (
+                      <>
+                        <button
+                          onClick={collapseOk ? handleCollapseToRepeat : undefined}
+                          disabled={!collapseOk}
+                          className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-xs transition-colors ${
+                            collapseOk
+                              ? 'text-text-primary hover:bg-bg-elevated cursor-pointer'
+                              : 'text-text-disabled cursor-default'
+                          }`}
+                        >
+                          <ChevronsDownUp size={13} className={collapseOk ? 'text-text-tertiary' : 'text-text-disabled'} />
+                          Collapse to × N
+                        </button>
+                        <button
+                          onClick={expandOk ? handleExpandRepeat : undefined}
+                          disabled={!expandOk}
+                          className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-xs transition-colors ${
+                            expandOk
+                              ? 'text-text-primary hover:bg-bg-elevated cursor-pointer'
+                              : 'text-text-disabled cursor-default'
+                          }`}
+                        >
+                          <ChevronsUpDown size={13} className={expandOk ? 'text-text-tertiary' : 'text-text-disabled'} />
+                          Expand × N
+                        </button>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+          </div>
 
           <div className="my-1 border-t border-border-subtle" />
 

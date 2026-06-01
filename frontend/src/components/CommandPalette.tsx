@@ -44,11 +44,11 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   const selectionRef = useSelectionRef();
   const [query, setQuery] = useState('');
 
-  // Insert position helper: matches the toolbar's behavior — after the last selected
+  // Insert position helper: matches the toolbar's behavior — before the first selected
   // action, or at the end of the list when nothing is selected.
   const computeInsertIndex = useCallback(() => {
     const sel = selectionRef.current;
-    return sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+    return sel.size > 0 ? Math.min(...sel) : actions.length;
   }, [actions.length, selectionRef]);
   const [focusedIndex, setFocusedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);

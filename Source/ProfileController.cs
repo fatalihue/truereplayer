@@ -1368,6 +1368,29 @@ namespace TrueReplayer.Controllers
                 if (!allReferenced.Contains(entry.Name))
                     _profileOrder.UngroupedOrder.Add(entry.Name);
             }
+
+            // Heal duplicate folder names (case-insensitive) that may have slipped in before the
+            // create/rename guards existed. Duplicates break every by-Name folder lookup (delete /
+            // colour / folder-inherited target all hit the FIRST match, orphaning the rest), so we
+            // trim names and suffix the later collisions "Name (2)", "Name (3)", … Persisted only
+            // when something actually changed; deterministic, so it re-heals on every load anyway.
+            var seenFolderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            bool folderNamesChanged = false;
+            foreach (var folder in _profileOrder.Folders)
+            {
+                var baseName = (folder.Name ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(baseName)) baseName = "Folder";
+                var unique = baseName;
+                int suffix = 2;
+                while (seenFolderNames.Contains(unique)) unique = $"{baseName} ({suffix++})";
+                if (!string.Equals(unique, folder.Name, StringComparison.Ordinal))
+                {
+                    folder.Name = unique;
+                    folderNamesChanged = true;
+                }
+                seenFolderNames.Add(unique);
+            }
+            if (folderNamesChanged) await SaveProfileOrderAsync();
         }
 
         public async Task SaveProfileOrderAsync()
@@ -1431,22 +1454,43 @@ namespace TrueReplayer.Controllers
             await SaveProfileOrderAsync();
         }
 
-        public async Task CreateFolderAsync(string folderName, string color)
+        // Returns false (changing nothing) when a folder with the same name already exists —
+        // compared trimmed + case-insensitively so "Work", "work" and "Work " can't coexist.
+        // Duplicate folder names break folder identity (every folder lookup is by Name), so the
+        // bridge surfaces a toast on false instead of the old silent no-op.
+        public async Task<bool> CreateFolderAsync(string folderName, string color)
         {
-            if (_profileOrder.Folders.Any(f => f.Name == folderName))
-                return;
+            folderName = (folderName ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(folderName)) return false;
+            if (_profileOrder.Folders.Any(f => string.Equals(f.Name, folderName, StringComparison.OrdinalIgnoreCase)))
+                return false;
             _profileOrder.Folders.Insert(0, new ProfileFolder { Name = folderName, Color = color });
             await SaveProfileOrderAsync();
+            return true;
         }
 
-        public async Task RenameFolderAsync(string oldName, string newName)
+        // Returns false (without renaming) when the target name is empty or already used by a
+        // DIFFERENT folder (trimmed + case-insensitive). Renaming a folder onto an existing name
+        // used to silently create two folders sharing a name, which corrupts every by-Name lookup
+        // (delete / colour / folder-inherited target all hit the wrong one).
+        public async Task<bool> RenameFolderAsync(string oldName, string newName)
         {
+            newName = (newName ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(newName)) return false;
             var folder = _profileOrder.Folders.FirstOrDefault(f => f.Name == oldName);
-            if (folder != null)
-            {
-                folder.Name = newName;
-                await SaveProfileOrderAsync();
-            }
+            if (folder == null) return false;
+            // Exact-same-name (ordinal) rename is a no-op → success. A pure re-casing of self
+            // ("Work" → "work") is intentionally NOT short-circuited here — it falls through to the
+            // collision check below, which excludes THIS folder via ReferenceEquals and then applies
+            // a real rename. Do NOT switch this to OrdinalIgnoreCase: that would silently drop
+            // legitimate case-only renames.
+            if (string.Equals(folder.Name, newName, StringComparison.Ordinal)) return true;
+            if (_profileOrder.Folders.Any(f => !ReferenceEquals(f, folder)
+                    && string.Equals(f.Name, newName, StringComparison.OrdinalIgnoreCase)))
+                return false;
+            folder.Name = newName;
+            await SaveProfileOrderAsync();
+            return true;
         }
 
         public async Task DeleteFolderAsync(string folderName, bool deleteProfiles = false)

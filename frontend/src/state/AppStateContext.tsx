@@ -36,6 +36,7 @@ const defaultSettings = {
   recordMouse: true,
   recordScroll: true,
   recordKeyboard: true,
+  recordCombinedInput: true,
   profileKeyEnabled: true,
   browserSelectorEnabled: true,
   recordingHotkey: 'Ctrl+PageUp',

@@ -89,6 +89,8 @@ namespace TrueReplayer
         public bool RecordMouse { get; set; } = true;
         public bool RecordScroll { get; set; } = true;
         public bool RecordKeyboard { get; set; } = true;
+        // Combined recording toggle (single Keystroke / *Click vs paired Down+Up). Default ON.
+        public bool RecordCombinedInput { get; set; } = true;
         public bool ProfileKeyEnabled { get; set; } = true;
         public bool BrowserSelectorEnabled { get; set; } = false;
 
@@ -200,7 +202,7 @@ namespace TrueReplayer
                         for (int i = actions.Count - 1; i >= 0 && i >= actions.Count - 4; i--)
                         {
                             var a = actions[i];
-                            if (a.ActionType is "LeftClickDown" or "LeftClickUp" or "RightClickDown" or "RightClickUp"
+                            if (a.ActionType is "LeftClickDown" or "LeftClickUp" or "RightClickDown" or "RightClickUp" or "LeftClick" or "RightClick"
                                 && a.RecordedAt >= cutoff)
                                 actions.RemoveAt(i);
                         }
@@ -335,7 +337,7 @@ namespace TrueReplayer
                         {
                             var a = actions[i];
                             if (a.RecordedAt < cutoff) continue;
-                            if (a.ActionType is "LeftClickDown" or "LeftClickUp" or "RightClickDown" or "RightClickUp")
+                            if (a.ActionType is "LeftClickDown" or "LeftClickUp" or "RightClickDown" or "RightClickUp" or "LeftClick" or "RightClick")
                                 actions.RemoveAt(i);
                             else if (a.ActionType == "BrowserClick" && a.Key == selector)
                                 actions.RemoveAt(i);
@@ -415,6 +417,7 @@ namespace TrueReplayer
             RecordMouse = saved.RecordMouse;
             RecordScroll = saved.RecordScroll;
             RecordKeyboard = saved.RecordKeyboard;
+            RecordCombinedInput = saved.RecordCombinedInput;
             ProfileKeyEnabled = saved.ProfileKeyEnabled;
             BrowserSelectorEnabled = saved.BrowserSelectorEnabled;
         }
@@ -485,6 +488,7 @@ namespace TrueReplayer
                     case "actions:bulkUpdateComment": HandleBulkUpdateComment(payload); break;
                     case "actions:toggleSkip": HandleActionsToggleSkip(payload); break;
                     case "actions:reorder": HandleActionsReorder(payload); break;
+                    case "actions:convertMode": HandleConvertActionMode(payload); break;
                     case "actions:insertAction": HandleInsertAction(payload); break;
                     case "actions:addElseBranch": HandleActionsAddElseBranch(payload); break;
                     case "actions:insertConditional": HandleActionsInsertConditional(payload); break;
@@ -770,6 +774,75 @@ namespace TrueReplayer
             PushActionsUpdate();
         }
 
+        /// <summary>
+        /// Swaps the live action collection for a freshly-computed list, suppressing per-item
+        /// CollectionChanged so only ONE PushActionsUpdate fires. Mirrors
+        /// <see cref="RestoreActionsFromSnapshot"/>; used by bulk structural rewrites
+        /// (e.g. paired↔combined conversion) where the row count itself changes.
+        /// </summary>
+        private void ReplaceActions(IReadOnlyList<ActionItem> newActions)
+        {
+            actions.CollectionChanged -= OnActionsChanged;
+            try
+            {
+                actions.Clear();
+                foreach (var item in newActions)
+                {
+                    item.RowNumber = actions.Count + 1;
+                    actions.Add(item);
+                }
+            }
+            finally
+            {
+                actions.CollectionChanged += OnActionsChanged;
+            }
+            PushActionsUpdate();
+        }
+
+        /// <summary>
+        /// Converts every action in the active profile between the paired (KeyDown+KeyUp /
+        /// *ClickDown+*ClickUp) and combined (Keystroke / HoldKey / *Click) representations.
+        /// Whole-profile + undoable; the actual transform lives in
+        /// <see cref="ActionModeConverter"/>. No-ops (already fully in the target form) push
+        /// nothing to the undo stack and just report "nothing to convert".
+        /// </summary>
+        private void HandleConvertActionMode(JsonElement payload)
+        {
+            string direction = payload.TryGetProperty("direction", out var d) ? d.GetString() ?? "" : "";
+            bool toCombined = direction == "toCombined";
+            if (!toCombined && direction != "toPaired") return;
+            if (actions.Count == 0) return;
+
+            var input = actions.ToList();
+            var output = toCombined
+                ? ActionModeConverter.ToCombined(input)
+                : ActionModeConverter.ToPaired(input);
+
+            // No-op guard: identical length AND identical type sequence means nothing folded /
+            // expanded (e.g. the profile was already in the target form). Skip the undo entry
+            // and the misleading "converted N" toast.
+            bool changed = output.Count != input.Count;
+            for (int i = 0; !changed && i < output.Count; i++)
+                if (output[i].ActionType != input[i].ActionType) changed = true;
+            if (!changed)
+            {
+                SendMessage("alert:show", new { message = "Nothing to convert" });
+                return;
+            }
+
+            PushUndoState();
+            ReplaceActions(output);
+            HasUnsavedChanges = true;
+            mainController.UpdateButtonStates();
+
+            SendMessage("alert:show", new
+            {
+                message = toCombined
+                    ? $"Converted to combined — {output.Count} actions"
+                    : $"Converted to paired — {output.Count} actions"
+            });
+        }
+
         public bool CanUndo => _undoStack.Count > 0;
         public bool CanRedo => _redoStack.Count > 0;
 
@@ -917,6 +990,7 @@ namespace TrueReplayer
                     recordMouse = RecordMouse,
                     recordScroll = RecordScroll,
                     recordKeyboard = RecordKeyboard,
+                    recordCombinedInput = RecordCombinedInput,
                     profileKeyEnabled = ProfileKeyEnabled,
                     browserSelectorEnabled = BrowserSelectorEnabled,
                     recordingHotkey = profile.RecordingHotkey,
@@ -1232,6 +1306,7 @@ namespace TrueReplayer
                     recordMouse = RecordMouse,
                     recordScroll = RecordScroll,
                     recordKeyboard = RecordKeyboard,
+                    recordCombinedInput = RecordCombinedInput,
                     profileKeyEnabled = ProfileKeyEnabled,
                     browserSelectorEnabled = BrowserSelectorEnabled,
                     recordingHotkey = profile.RecordingHotkey,
@@ -1418,18 +1493,18 @@ namespace TrueReplayer
         {
             if (payload.TryGetProperty("indices", out var arr) && arr.ValueKind == JsonValueKind.Array)
             {
-                // Pick MAX index — the global Recording hotkey reads this to know where to drop
-                // new actions, and the convention everywhere else (toolbar add-action, ActionBar
-                // Record button) is "insert AFTER the last selected row". Min was the wrong end:
-                // it pushed existing rows down instead of flowing the new ones below the selection.
+                // Pick MIN index — new actions are inserted BEFORE the first selected row, so the
+                // selected row(s) flow DOWN past the newly added ones. The global Recording hotkey
+                // reads this to know where to drop recorded actions; mirrors the frontend add-action
+                // convention (toolbar / ActionBar / command palette / paste all use Math.min(...sel)).
                 // Null when no selection → recorder treats it as "append at end".
-                int? max = null;
+                int? min = null;
                 foreach (var el in arr.EnumerateArray())
                 {
                     int val = el.GetInt32();
-                    if (max == null || val > max) max = val;
+                    if (min == null || val < min) min = val;
                 }
-                SelectedInsertIndex = max == null ? null : max + 1;
+                SelectedInsertIndex = min;
             }
             else
             {
@@ -1876,8 +1951,9 @@ namespace TrueReplayer
                 if (idx >= 0 && idx < actions.Count)
                 {
                     var a = actions[idx];
-                    // Only apply X/Y to mouse click actions
-                    if (a.ActionType is not ("LeftClickDown" or "LeftClickUp" or "RightClickDown" or "RightClickUp" or "MiddleClickDown" or "MiddleClickUp"))
+                    // Only apply X/Y to mouse click actions (paired halves + combined single clicks)
+                    if (a.ActionType is not ("LeftClickDown" or "LeftClickUp" or "RightClickDown" or "RightClickUp" or "MiddleClickDown" or "MiddleClickUp"
+                        or "LeftClick" or "RightClick" or "MiddleClick"))
                         continue;
                     if (axis == "x")
                         a.X = isOffset ? a.X + val : val;
@@ -3693,7 +3769,14 @@ namespace TrueReplayer
                 name += ".json";
 
             string fullPath = Path.Combine(profileDir, name);
-            if (File.Exists(fullPath)) return;
+            if (File.Exists(fullPath))
+            {
+                // Silent no-op before — now surfaces a toast so the user knows why nothing
+                // happened. The frontend dialog also blocks this inline, but a hotkey / race
+                // could still reach here, so it stays defended on the backend too.
+                SendMessage("alert:show", new { message = $"A profile named \"{Path.GetFileNameWithoutExtension(name)}\" already exists" });
+                return;
+            }
 
             var profile = UserProfile.Default;
             await SettingsManager.SaveProfileAsync(fullPath, profile);
@@ -3831,7 +3914,10 @@ namespace TrueReplayer
 
             // Allow case-only rename (e.g. "teste" → "TESTE") on case-insensitive file systems
             if (File.Exists(newFilePath) && !string.Equals(entry.FilePath, newFilePath, StringComparison.OrdinalIgnoreCase))
+            {
+                SendMessage("alert:show", new { message = $"A profile named \"{Path.GetFileNameWithoutExtension(newFileName)}\" already exists" });
                 return;
+            }
 
             try
             {
@@ -4421,7 +4507,7 @@ namespace TrueReplayer
 
             PushUndoState();
 
-            var clickTypes = new HashSet<string> { "LeftClickDown", "LeftClickUp", "RightClickDown", "RightClickUp", "MiddleClickDown", "MiddleClickUp" };
+            var clickTypes = new HashSet<string> { "LeftClickDown", "LeftClickUp", "RightClickDown", "RightClickUp", "MiddleClickDown", "MiddleClickUp", "LeftClick", "RightClick", "MiddleClick" };
             int converted = 0;
 
             // Sign of the translation: subtract window origin to go absolute→relative,
@@ -5102,7 +5188,13 @@ namespace TrueReplayer
                 ? colorProp.GetString() ?? "#60CDFF"
                 : "#60CDFF";
             if (string.IsNullOrEmpty(name)) return;
-            await profileController.CreateFolderAsync(name, color);
+            bool created = await profileController.CreateFolderAsync(name, color);
+            if (!created)
+            {
+                SendMessage("alert:show", new { message = $"A folder named \"{name.Trim()}\" already exists" });
+                PushProfilesUpdate(); // re-sync so any optimistic UI state reverts
+                return;
+            }
             PushProfilesUpdate();
         }
 
@@ -5111,7 +5203,13 @@ namespace TrueReplayer
             string oldName = payload.GetProperty("oldName").GetString() ?? "";
             string newName = payload.GetProperty("newName").GetString() ?? "";
             if (string.IsNullOrEmpty(oldName) || string.IsNullOrEmpty(newName)) return;
-            await profileController.RenameFolderAsync(oldName, newName);
+            bool renamed = await profileController.RenameFolderAsync(oldName, newName);
+            if (!renamed)
+            {
+                SendMessage("alert:show", new { message = $"A folder named \"{newName.Trim()}\" already exists" });
+                PushProfilesUpdate(); // revert the inline rename back to the stored name
+                return;
+            }
             PushProfilesUpdate();
         }
 
@@ -5782,6 +5880,7 @@ namespace TrueReplayer
             RecordMouse = defaults.RecordMouse;
             RecordScroll = defaults.RecordScroll;
             RecordKeyboard = defaults.RecordKeyboard;
+            RecordCombinedInput = defaults.RecordCombinedInput;
             ProfileKeyEnabled = defaults.ProfileKeyEnabled;
             BrowserSelectorEnabled = defaults.BrowserSelectorEnabled;
 
@@ -5848,6 +5947,7 @@ namespace TrueReplayer
                 RecordMouse = RecordMouse,
                 RecordScroll = RecordScroll,
                 RecordKeyboard = RecordKeyboard,
+                RecordCombinedInput = RecordCombinedInput,
                 RecordingHotkey = UserProfile.Current.RecordingHotkey,
                 ReplayHotkey = UserProfile.Current.ReplayHotkey,
                 ProfileKeyToggleHotkey = UserProfile.Current.ProfileKeyToggleHotkey,
@@ -6059,6 +6159,9 @@ namespace TrueReplayer
                     break;
                 case "recordKeyboard":
                     RecordKeyboard = valueElement.GetBoolean();
+                    break;
+                case "recordCombinedInput":
+                    RecordCombinedInput = valueElement.GetBoolean();
                     break;
                 case "profileKeyEnabled":
                     ProfileKeyEnabled = valueElement.GetBoolean();

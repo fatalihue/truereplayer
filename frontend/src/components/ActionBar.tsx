@@ -105,10 +105,10 @@ export function ActionBar() {
           <button
             onClick={() => {
               const sel = selectionRef.current;
-              // Match the toolbar's add-action behaviour: insert AFTER the last selected
-              // row (so new recordings flow downward, not above the selection), or append
+              // Match the toolbar's add-action behaviour: insert BEFORE the first selected
+              // row (so the selected row flows downward past the new actions), or append
               // to the end when nothing is selected.
-              const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+              const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
               send({ type: 'recording:toggle', payload: { insertIndex } });
             }}
             disabled={!buttonStates.recordEnabled}

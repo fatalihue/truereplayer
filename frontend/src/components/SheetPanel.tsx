@@ -979,14 +979,16 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const showKey = isKeyAction || isSendText;
   const showCoords = !noCoordTypes.has(actionType);
 
-  // Mouse clicks are stored as paired Down/Up events (LeftClickDown, LeftClickUp, etc.).
-  // The Action Type picker only offers the unsuffixed names; baseActionType strips the
-  // Down/Up suffix so the picker can match-highlight the right button, and clickHalfSuffix
-  // lets us preserve the press/release half when the user switches between click types.
-  const clickHalfMatch = actionType.match(/^((?:Left|Right|Middle)Click)(Down|Up)$/);
+  // Mouse clicks come in two shapes: paired halves (LeftClickDown/Up, …) and combined single
+  // clicks (LeftClick, …) recorded in combined mode. The Action Type picker only offers the
+  // unsuffixed names; baseActionType strips any Down/Up suffix so the picker highlights the
+  // right button, and clickHalfSuffix (null for a combined click) preserves the press/release
+  // half when switching between click types. The optional-suffix regex matches both shapes, so
+  // isClickHalf here means "is a click row" (coords + Pick/Copy/Paste buttons apply to both).
+  const clickHalfMatch = actionType.match(/^((?:Left|Right|Middle)Click)(Down|Up)?$/);
   const isClickHalf = clickHalfMatch !== null;
   const clickHalfBase = clickHalfMatch ? clickHalfMatch[1] : null;
-  const clickHalfSuffix = clickHalfMatch ? (clickHalfMatch[2] as 'Down' | 'Up') : null;
+  const clickHalfSuffix = clickHalfMatch?.[2] ? (clickHalfMatch[2] as 'Down' | 'Up') : null;
   const baseActionType = clickHalfBase ?? actionType;
 
   // Detect which family the current action belongs to, so the picker can offer only
@@ -1041,7 +1043,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   : actionType === 'BrowserRightClick' ? 'Right Click'
                   : actionType === 'BrowserType' ? 'Input Text'
                   : actionType === 'BrowserWaitElement' ? 'Wait'
-                  : actionType === 'BrowserNavigate' ? 'Navigate to URL'
+                  : actionType === 'BrowserNavigate' ? 'Open URL'
                   : actionType === 'BrowserSelectOption' ? 'Select Option'
                   : isClickHalf
                     ? `${(clickHalfBase ?? '').replace('Click', '')} Click`

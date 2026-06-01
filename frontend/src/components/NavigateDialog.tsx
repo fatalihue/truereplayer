@@ -48,7 +48,7 @@ export function NavigateDialog({ onConfirm, onClose }: NavigateDialogProps) {
         {/* Header */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
           <Globe size={14} className="text-[#60cdff]" />
-          <h3 className="text-sm font-semibold text-text-primary">Navigate to URL</h3>
+          <h3 className="text-sm font-semibold text-text-primary">Open URL</h3>
         </div>
 
         {/* Body */}

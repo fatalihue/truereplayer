@@ -258,6 +258,7 @@ export interface SettingsState {
   recordMouse: boolean;
   recordScroll: boolean;
   recordKeyboard: boolean;
+  recordCombinedInput: boolean;
   profileKeyEnabled: boolean;
   browserSelectorEnabled: boolean;
   recordingHotkey: string;
@@ -493,6 +494,7 @@ export type OutgoingMessage =
   | { type: 'profile:load'; payload: Record<string, never> }
   | { type: 'profile:reset'; payload: Record<string, never> }
   | { type: 'settings:change'; payload: { key: string; value: string | boolean | number | object | null } }
+  | { type: 'actions:convertMode'; payload: { direction: 'toCombined' | 'toPaired' } }
   | { type: 'actions:addSendText'; payload: { text: string; insertIndex?: number } }
   | { type: 'actions:editSendText'; payload: { index: number; text: string } }
   | { type: 'actions:bulkUpdateDelay'; payload: { indices: number[]; delay: number } }

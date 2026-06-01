@@ -194,7 +194,7 @@ export function Toolbar(_props: ToolbarProps) {
   useEffect(() => {
     const onPause = () => {
       const sel = selectionRef.current;
-      pauseDialogInsertIndex.current = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+      pauseDialogInsertIndex.current = sel.size > 0 ? Math.min(...sel) : actions.length;
       setShowPauseDialog(true);
     };
     window.addEventListener('cmd:pause', onPause);
@@ -209,7 +209,7 @@ export function Toolbar(_props: ToolbarProps) {
   useEffect(() => {
     const onSendKeystroke = () => {
       const sel = selectionRef.current;
-      keystrokeCaptureInsertIndex.current = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+      keystrokeCaptureInsertIndex.current = sel.size > 0 ? Math.min(...sel) : actions.length;
       setShowKeystrokeCapture(true);
     };
     window.addEventListener('cmd:sendkeystroke', onSendKeystroke);
@@ -327,7 +327,7 @@ export function Toolbar(_props: ToolbarProps) {
       if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
         e.preventDefault();
         const sel = selectionRef.current;
-        const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+        const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
         send({ type: 'actions:paste', payload: { insertIndex } });
       }
       // Alt+↑/↓ to reorder the selected rows. Mirrors the Move Up/Move Down
@@ -494,7 +494,7 @@ export function Toolbar(_props: ToolbarProps) {
             tabIndex={-1}
             onClick={() => {
               const sel = selectionRef.current;
-              keystrokeCaptureInsertIndex.current = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+              keystrokeCaptureInsertIndex.current = sel.size > 0 ? Math.min(...sel) : actions.length;
               setShowKeystrokeCapture(true);
             }}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
@@ -522,7 +522,7 @@ export function Toolbar(_props: ToolbarProps) {
             tabIndex={-1}
             onClick={() => {
               const sel = selectionRef.current;
-              pauseDialogInsertIndex.current = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+              pauseDialogInsertIndex.current = sel.size > 0 ? Math.min(...sel) : actions.length;
               setShowPauseDialog(true);
             }}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
@@ -559,7 +559,7 @@ export function Toolbar(_props: ToolbarProps) {
                   className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
                   onClick={() => {
                     const sel = selectionRef.current;
-                    const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                    const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
                     send({ type: 'actions:insertAction', payload: { actionType: 'WaitImage', insertIndex } });
                     setShowWaitMenu(false);
                   }}
@@ -571,7 +571,7 @@ export function Toolbar(_props: ToolbarProps) {
                   className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
                   onClick={() => {
                     const sel = selectionRef.current;
-                    const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                    const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
                     send({ type: 'actions:insertWaitPixelColor', payload: { insertIndex } });
                     setShowWaitMenu(false);
                   }}
@@ -606,7 +606,7 @@ export function Toolbar(_props: ToolbarProps) {
                   className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
                   onClick={() => {
                     const sel = selectionRef.current;
-                    const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                    const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
                     send({ type: 'actions:insertConditional', payload: { conditionType: 'ImageFound', insertIndex } });
                     setShowConditionalMenu(false);
                   }}
@@ -618,7 +618,7 @@ export function Toolbar(_props: ToolbarProps) {
                   className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
                   onClick={() => {
                     const sel = selectionRef.current;
-                    const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                    const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
                     send({ type: 'actions:insertConditional', payload: { conditionType: 'PixelColorMatch', insertIndex } });
                     setShowConditionalMenu(false);
                   }}
@@ -657,7 +657,7 @@ export function Toolbar(_props: ToolbarProps) {
                   { type: 'BrowserType', label: 'Input Text' },
                   { type: 'BrowserSelectOption', label: 'Select Option' },
                   { type: 'BrowserWaitElement', label: 'Wait' },
-                  { type: 'BrowserNavigate', label: 'Navigate to URL' },
+                  { type: 'BrowserNavigate', label: 'Open URL' },
                 ] as const).map((item) => (
                   <button
                     key={item.type}
@@ -668,7 +668,7 @@ export function Toolbar(_props: ToolbarProps) {
                         setShowNavigateDialog(true);
                       } else {
                         const sel = selectionRef.current;
-                        const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+                        const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
                         send({ type: 'actions:addBrowserAction', payload: { actionType: item.type, selector: '', insertIndex } });
                         setShowBrowserMenu(false);
                       }
@@ -718,7 +718,7 @@ export function Toolbar(_props: ToolbarProps) {
           mode="add"
           onConfirm={(text) => {
             const sel = selectionRef.current;
-            const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : undefined;
+            const insertIndex = sel.size > 0 ? Math.min(...sel) : undefined;
             send({ type: 'actions:addSendText', payload: { text, insertIndex } });
             setShowSendTextDialog(false);
           }}
@@ -731,7 +731,7 @@ export function Toolbar(_props: ToolbarProps) {
           excludeProfileName={activeProfile ?? undefined}
           onConfirm={(profileName, repeatCount) => {
             const sel = selectionRef.current;
-            const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : undefined;
+            const insertIndex = sel.size > 0 ? Math.min(...sel) : undefined;
             send({ type: 'actions:addRunProfile', payload: { profileName, repeatCount, insertIndex } });
             setShowRunProfileDialog(false);
           }}
@@ -743,7 +743,7 @@ export function Toolbar(_props: ToolbarProps) {
         <NavigateDialog
           onConfirm={(url, newTab) => {
             const sel = selectionRef.current;
-            const insertIndex = sel.size > 0 ? Math.max(...sel) + 1 : actions.length;
+            const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
             send({ type: 'actions:addBrowserAction', payload: { actionType: 'BrowserNavigate', selector: url, newTab, insertIndex } });
             setShowNavigateDialog(false);
           }}

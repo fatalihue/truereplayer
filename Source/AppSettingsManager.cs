@@ -53,6 +53,12 @@ namespace TrueReplayer.Services
             public bool RecordMouse { get; set; } = true;
             public bool RecordScroll { get; set; } = true;
             public bool RecordKeyboard { get; set; } = true;
+            // Combined recording: when ON, a key press / mouse click is captured as a SINGLE
+            // Keystroke / *Click action instead of the paired Down+Up. Default ON — turning the
+            // toggle OFF restores the exact legacy paired behaviour. Consumed by ActionRecorder's
+            // combined branch. Also the value the Reset-settings flow restores (it reads this
+            // class default), so resetting returns to combined recording.
+            public bool RecordCombinedInput { get; set; } = true;
             // Hotkeys
             public string RecordingHotkey { get; set; } = "Ctrl+PageUp";
             public string ReplayHotkey { get; set; } = "Ctrl+PageDown";

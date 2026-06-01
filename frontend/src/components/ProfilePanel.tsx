@@ -40,6 +40,8 @@ const CONVERTIBLE_CLICK_TYPES = new Set([
   'LeftClickDown', 'LeftClickUp',
   'RightClickDown', 'RightClickUp',
   'MiddleClickDown', 'MiddleClickUp',
+  // Combined-mode single clicks carry coordinates too.
+  'LeftClick', 'RightClick', 'MiddleClick',
 ]);
 
 export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePanelProps) {
@@ -671,19 +673,34 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   const confirmCreate = () => {
     const name = dialogValue.trim();
-    if (name) {
-      send({ type: 'profile:create', payload: { name, folder: selectedFolder || undefined } });
-    }
+    if (!name) { setShowCreateDialog(false); return; }
+    // Block duplicate names client-side (mirrors the backend File.Exists guard, case-insensitive
+    // like the Windows file system) so the dialog stays open for a quick fix.
+    if (profiles.some(p => p.name.toLowerCase() === name.toLowerCase())) return;
+    send({ type: 'profile:create', payload: { name, folder: selectedFolder || undefined } });
     setShowCreateDialog(false);
   };
 
   const confirmRename = () => {
     const newName = dialogValue.trim();
-    if (newName && showRenameDialog && newName !== showRenameDialog) {
-      send({ type: 'profile:rename', payload: { oldName: showRenameDialog, newName } });
+    if (!newName || !showRenameDialog || newName === showRenameDialog) {
+      setShowRenameDialog(null);
+      return;
     }
+    // Block collisions with OTHER profiles client-side (mirrors the backend); keep dialog open.
+    if (profiles.some(p => p.name !== showRenameDialog && p.name.toLowerCase() === newName.toLowerCase())) return;
+    send({ type: 'profile:rename', payload: { oldName: showRenameDialog, newName } });
     setShowRenameDialog(null);
   };
+
+  // Duplicate-name state for the profile dialogs' button-disable + inline hint (mirrors the
+  // backend File.Exists guard: case-insensitive, like the file system). Rename excludes the
+  // profile being renamed (re-typing its own name / a pure re-casing is allowed).
+  const dialogValueLc = dialogValue.trim().toLowerCase();
+  const createProfileNameTaken = !!dialogValueLc
+    && profiles.some(p => p.name.toLowerCase() === dialogValueLc);
+  const renameProfileNameTaken = !!dialogValueLc
+    && profiles.some(p => p.name !== showRenameDialog && p.name.toLowerCase() === dialogValueLc);
 
   // ── Folder handlers ──
   const handleCreateFolder = () => {
@@ -694,9 +711,11 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   const confirmCreateFolder = () => {
     const name = folderDialogName.trim();
-    if (name) {
-      send({ type: 'profile:createFolder', payload: { name, color: folderDialogColor } });
-    }
+    if (!name) { setShowCreateFolderDialog(false); return; }
+    // Block duplicate names client-side (mirrors the backend guard) so the dialog stays open
+    // for a quick fix instead of closing and surfacing a toast after the round-trip.
+    if ((profileOrder?.folders ?? []).some(f => f.name.toLowerCase() === name.toLowerCase())) return;
+    send({ type: 'profile:createFolder', payload: { name, color: folderDialogColor } });
     setShowCreateFolderDialog(false);
   };
 
@@ -708,11 +727,23 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   const confirmRenameFolder = () => {
     const newName = folderDialogName.trim();
-    if (newName && showRenameFolderDialog && newName !== showRenameFolderDialog) {
-      send({ type: 'profile:renameFolder', payload: { oldName: showRenameFolderDialog, newName } });
+    if (!newName || !showRenameFolderDialog || newName === showRenameFolderDialog) {
+      setShowRenameFolderDialog(null);
+      return;
     }
+    // Block collisions with OTHER folders client-side (mirrors the backend); keep the dialog open.
+    if ((profileOrder?.folders ?? []).some(f => f.name !== showRenameFolderDialog && f.name.toLowerCase() === newName.toLowerCase())) return;
+    send({ type: 'profile:renameFolder', payload: { oldName: showRenameFolderDialog, newName } });
     setShowRenameFolderDialog(null);
   };
+
+  // Duplicate-name state for the folder dialogs' button-disable + inline hint (mirrors the
+  // backend reject: trimmed, case-insensitive). Rename excludes the folder being renamed.
+  const folderDialogNameLc = folderDialogName.trim().toLowerCase();
+  const createFolderNameTaken = !!folderDialogNameLc
+    && (profileOrder?.folders ?? []).some(f => f.name.toLowerCase() === folderDialogNameLc);
+  const renameFolderNameTaken = !!folderDialogNameLc
+    && (profileOrder?.folders ?? []).some(f => f.name !== showRenameFolderDialog && f.name.toLowerCase() === folderDialogNameLc);
 
   const handleDeleteFolder = (folderName: string) => {
     setFolderContextMenu(null);
@@ -1795,6 +1826,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               placeholder="Profile name..."
               className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
             />
+            {createProfileNameTaken && (
+              <p className="text-[11px] text-recording mt-2">A profile named "{dialogValue.trim()}" already exists.</p>
+            )}
             <div className="flex justify-end gap-2 mt-4">
               <button
                 onClick={() => setShowCreateDialog(false)}
@@ -1804,7 +1838,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               </button>
               <button
                 onClick={confirmCreate}
-                className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors"
+                disabled={!dialogValue.trim() || createProfileNameTaken}
+                className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
               >
                 Create
               </button>
@@ -1827,6 +1862,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               placeholder="New name..."
               className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
             />
+            {renameProfileNameTaken && (
+              <p className="text-[11px] text-recording mt-2">A profile named "{dialogValue.trim()}" already exists.</p>
+            )}
             <div className="flex justify-end gap-2 mt-4">
               <button
                 onClick={() => setShowRenameDialog(null)}
@@ -1836,7 +1874,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               </button>
               <button
                 onClick={confirmRename}
-                className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors"
+                disabled={!dialogValue.trim() || renameProfileNameTaken}
+                className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
               >
                 Rename
               </button>
@@ -2194,6 +2233,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 />
               ))}
             </div>
+            {createFolderNameTaken && (
+              <p className="text-[11px] text-recording mt-2">A folder named "{folderDialogName.trim()}" already exists.</p>
+            )}
             <div className="flex justify-end gap-2 mt-4">
               <button
                 onClick={() => setShowCreateFolderDialog(false)}
@@ -2203,7 +2245,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               </button>
               <button
                 onClick={confirmCreateFolder}
-                disabled={!folderDialogName.trim()}
+                disabled={!folderDialogName.trim() || createFolderNameTaken}
                 className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
               >
                 Create
@@ -2230,6 +2272,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               placeholder="New folder name..."
               className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
             />
+            {renameFolderNameTaken && (
+              <p className="text-[11px] text-recording mt-2">A folder named "{folderDialogName.trim()}" already exists.</p>
+            )}
             <div className="flex justify-end gap-2 mt-4">
               <button
                 onClick={() => setShowRenameFolderDialog(null)}
@@ -2239,7 +2284,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               </button>
               <button
                 onClick={confirmRenameFolder}
-                disabled={!folderDialogName.trim()}
+                disabled={!folderDialogName.trim() || renameFolderNameTaken}
                 className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
               >
                 Rename

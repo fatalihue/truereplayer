@@ -594,6 +594,9 @@ export function SettingsPanel() {
               <SettingRow label="Keyboard">
                 <Toggle isOn={settings.recordKeyboard} onChange={(v) => changeSetting('recordKeyboard', v)} />
               </SettingRow>
+              <SettingRow label="Combined Actions" tooltip="Record each key press and mouse click as a single action (Keystroke / Click) instead of separate Down + Up rows. Modifiers fold into the key (Ctrl+C, Shift+A). Holds and drags aren't captured in this mode — leave it off, or add a HoldKey row, for those.">
+                <Toggle isOn={settings.recordCombinedInput} onChange={(v) => changeSetting('recordCombinedInput', v)} />
+              </SettingRow>
               <SettingRow label="Profile Keys" danger={!settings.profileKeyEnabled}>
                 <Toggle isOn={settings.profileKeyEnabled} onChange={(v) => changeSetting('profileKeyEnabled', v)} />
               </SettingRow>
