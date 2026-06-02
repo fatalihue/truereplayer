@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Search, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink, Info, Hash } from 'lucide-react';
+import { Search, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink, Info, MoreHorizontal, Hash } from 'lucide-react';
 import type { ProfileEntry, ImportPreviewPayload, ImportConflictResolution } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -100,6 +100,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [showRenameFolderDialog, setShowRenameFolderDialog] = useState<string | null>(null);
   const [showFolderTargetDialog, setShowFolderTargetDialog] = useState<string | null>(null);
   const [showMoveToFolderMenu, setShowMoveToFolderMenu] = useState<string | null>(null);
+  // Profile context-menu "More ▸" submenu (Edit info / Duplicate / Open in Explorer).
+  const [showProfileMoreMenu, setShowProfileMoreMenu] = useState<string | null>(null);
   const [folderContextMenu, setFolderContextMenu] = useState<{ x: number; y: number; folderName: string } | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [showFolderColorPicker, setShowFolderColorPicker] = useState<string | null>(null);
@@ -1520,13 +1522,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             <Pencil size={13} className="text-text-tertiary" />
             Rename
           </button>
-          <button
-            onClick={() => handleShowInfo(contextMenu.profileName)}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-          >
-            <Info size={13} className="text-text-tertiary" />
-            Edit info…
-          </button>
 
           {/* Move to Folder submenu */}
           <div
@@ -1635,25 +1630,50 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
           <div className="my-1 border-t border-border-subtle" />
 
-          {/* ── Advanced — low-frequency / debug entry points ──
-              Duplicate is occasional ("make a variant of this profile"); Open
-              in Explorer is debug-tier ("show me the .json on disk"). Both used
-              to sit between Rename and Triggers, where they crowded out the
-              actions the user actually came here for. */}
-          <button
-            onClick={() => handleDuplicate(contextMenu.profileName)}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          {/* ── More ▸ — low-frequency entry points tucked into a submenu so the top
+              level stays focused on rename / triggers / state. Mirrors the grid context
+              menu's "More". Edit info (metadata), Duplicate (make a variant), Open in
+              Explorer (debug: show the .json on disk). */}
+          <div
+            className="relative"
+            onMouseEnter={() => setShowProfileMoreMenu(contextMenu.profileName)}
+            onMouseLeave={() => setShowProfileMoreMenu(null)}
           >
-            <Copy size={13} className="text-text-tertiary" />
-            Duplicate
-          </button>
-          <button
-            onClick={() => { handleOpenFolder(contextMenu.profileName); setContextMenu(null); }}
-            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-          >
-            <ExternalLink size={13} className="text-text-tertiary" />
-            Open in Explorer
-          </button>
+            <button
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+            >
+              <MoreHorizontal size={13} className="text-text-tertiary" />
+              More
+              <ChevronRight size={11} className="ml-auto text-text-tertiary" />
+            </button>
+            {showProfileMoreMenu === contextMenu.profileName && (
+              <div className="absolute left-full top-0 bg-transparent" style={{ paddingLeft: '4px' }}>
+                <div className="py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60] whitespace-nowrap">
+                  <button
+                    onClick={() => handleShowInfo(contextMenu.profileName)}
+                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                  >
+                    <Info size={13} className="text-text-tertiary" />
+                    Edit info…
+                  </button>
+                  <button
+                    onClick={() => handleDuplicate(contextMenu.profileName)}
+                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                  >
+                    <Copy size={13} className="text-text-tertiary" />
+                    Duplicate
+                  </button>
+                  <button
+                    onClick={() => { handleOpenFolder(contextMenu.profileName); setContextMenu(null); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                  >
+                    <ExternalLink size={13} className="text-text-tertiary" />
+                    Open in Explorer
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           <div className="my-1 border-t border-border-subtle" />
 
