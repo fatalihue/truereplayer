@@ -87,8 +87,9 @@ namespace TrueReplayer.Services
                 "BrowserClick" => "Left Click",
                 "BrowserRightClick" => "Right Click",
                 "BrowserType" => "Input Text",
+                "BrowserSelectOption" => "Select Option",
                 "BrowserWaitElement" => "Wait",
-                "BrowserNavigate" => "Navigate",
+                "BrowserNavigate" => "Open URL",
                 "RunProfile" => "Run Profile",
                 _ => SplitCamelCase(type)
             };

@@ -5,7 +5,7 @@ import {
   Trash2, PinOff, Pin, Download, Upload, MonitorDown, Shield, Minimize2, RefreshCw,
   Hourglass, ScanSearch, Repeat2, Undo2, Redo2, ClipboardPaste, Files, Replace,
   FolderPlus, Palette, PanelLeft, DownloadCloud, Table2, Keyboard,
-  MousePointerClick, Pipette, Crosshair,
+  MousePointerClick, Pipette, Crosshair, Combine, Split, GitBranch,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -116,6 +116,14 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             onAction: () => { send({ type: 'settings:change', payload: { key: 'useCursorClick', value: !settings.useCursorClick } }); onClose(); },
           },
           {
+            // Combined Actions recording mode toggle (records each press as one Keystroke/Click
+            // instead of paired Down/Up). Mirrors the Settings -> Recording switch.
+            id: 'combinedmode',
+            label: settings.recordCombinedInput ? 'Disable Combined Actions' : 'Enable Combined Actions',
+            icon: <Combine size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'settings:change', payload: { key: 'recordCombinedInput', value: !settings.recordCombinedInput } }); onClose(); },
+          },
+          {
             id: 'undo', label: 'Undo', shortcut: 'Ctrl+Z',
             icon: <Undo2 size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:undo', payload: {} }); onClose(); },
@@ -153,6 +161,18 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             onAction: () => { send({ type: 'actions:insertWaitPixelColor', payload: { insertIndex: computeInsertIndex() } }); onClose(); },
           },
           {
+            // Conditional (IF ... ENDIF) blocks — image- and pixel-driven. Mirrors the Toolbar's
+            // Conditional menu; inserts the block, the user configures the probe in the grid.
+            id: 'ifimage', label: 'Insert Conditional: Image Found',
+            icon: <GitBranch size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'ImageFound', insertIndex: computeInsertIndex() } }); onClose(); },
+          },
+          {
+            id: 'ifpixel', label: 'Insert Conditional: Pixel Color',
+            icon: <GitBranch size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'PixelColorMatch', insertIndex: computeInsertIndex() } }); onClose(); },
+          },
+          {
             id: 'pause', label: 'Insert Pause',
             icon: <Hourglass size={14} className="text-text-secondary" />,
             // Pattern B normalization — fire the cmd:pause event so the Toolbar
@@ -184,6 +204,18 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             id: 'convertabsolute', label: 'Convert Coordinates to Absolute',
             icon: <Replace size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:convertCoordinates', payload: { direction: 'toAbsolute' } }); onClose(); },
+          },
+          {
+            // Convert the whole profile between paired (Down/Up) and combined (Keystroke/Click)
+            // representations — the on-demand counterpart to the Combined Actions toggle.
+            id: 'converttocombined', label: 'Convert Actions to Combined',
+            icon: <Combine size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:convertMode', payload: { direction: 'toCombined' } }); onClose(); },
+          },
+          {
+            id: 'converttopaired', label: 'Convert Actions to Paired',
+            icon: <Split size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:convertMode', payload: { direction: 'toPaired' } }); onClose(); },
           },
           {
             id: 'clearactions', label: 'Clear All Actions',
