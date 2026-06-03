@@ -236,6 +236,13 @@ export interface SettingsState {
   enableLoop: boolean;
   loopInterval: string;
   loopIntervalEnabled: boolean;
+  // Smooth mouse movement (interpolated cursor path) — fixes games like Roblox that ignore a
+  // single large jump. Off = legacy instant move. moveStepPx/moveStepDelay/moveClickDelay are
+  // numeric strings (same convention as customDelay).
+  smoothMovement: boolean;
+  moveStepPx: string;
+  moveStepDelay: string;
+  moveClickDelay: string;
   useCursorClick: boolean;
   cursorClickButton: string;
   // Clicker v2 — dedicated Clicker settings, decoupled from the active profile. Stored

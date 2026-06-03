@@ -25,6 +25,12 @@ namespace TrueReplayer.Services
             public int LoopCount { get; set; } = 0;
             public bool LoopIntervalEnabled { get; set; } = false;
             public int LoopInterval { get; set; } = 200;
+            // Smooth mouse movement — interpolated cursor path so games that reject a single
+            // large "teleport" (e.g. Roblox) follow the cursor. See ActionReplayer.SmoothMovement.
+            public bool SmoothMovement { get; set; } = true;
+            public int MoveStepPx { get; set; } = 20;
+            public int MoveStepDelayMs { get; set; } = 2;
+            public int MoveClickDelayMs { get; set; } = 10;
             public bool UseCursorClick { get; set; } = false;
             public string CursorClickButton { get; set; } = "Left";
             // Clicker v2 — dedicated Clicker settings, independent of the active profile.
@@ -122,6 +128,12 @@ namespace TrueReplayer.Services
             profile.LoopCount = s.LoopCount;
             profile.LoopIntervalEnabled = s.LoopIntervalEnabled;
             profile.LoopInterval = s.LoopInterval;
+            // Smooth-movement settings live on ActionReplayer statics (global runtime config),
+            // not on the profile — load them straight into those statics.
+            ActionReplayer.SmoothMovement = s.SmoothMovement;
+            ActionReplayer.MoveStepPx = s.MoveStepPx;
+            ActionReplayer.MoveStepDelayMs = s.MoveStepDelayMs;
+            ActionReplayer.MoveClickDelayMs = s.MoveClickDelayMs;
             profile.RecordingHotkey = s.RecordingHotkey;
             profile.ReplayHotkey = s.ReplayHotkey;
             profile.ProfileKeyToggleHotkey = s.ProfileKeyToggleHotkey;

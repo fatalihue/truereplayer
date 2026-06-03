@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, Download, MousePointerClick, Palette } from 'lucide-react';
+import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, Download, MousePointerClick, Palette, Move } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -581,6 +581,27 @@ export function SettingsPanel() {
                 />
                 <Toggle isOn={settings.loopIntervalEnabled} onChange={(v) => changeSetting('loopIntervalEnabled', v)} />
               </SettingRow>
+            </Section>
+
+            {/* Movement — interpolated cursor path. Required for games (Roblox) that ignore a
+                single large jump; off = legacy instant move. */}
+            <Section icon={Move} iconColor="#51cf66" title="Movement">
+              <SettingRow label="Smooth movement" tooltip="Move the cursor along a path to the target instead of jumping straight there. Required for games like Roblox that ignore a single large jump. Off = legacy instant move.">
+                <Toggle isOn={settings.smoothMovement} onChange={(v) => changeSetting('smoothMovement', v)} />
+              </SettingRow>
+              {settings.smoothMovement && (
+                <>
+                  <SettingRow label="Path step" tooltip="Max pixels per step along the path. Lower = smoother / more reliable, slightly slower. ~20 works well for Roblox.">
+                    <SettingInput value={settings.moveStepPx} onCommit={(v) => changeSetting('moveStepPx', v)} width="w-[80px]" suffix="px" />
+                  </SettingRow>
+                  <SettingRow label="Step delay" tooltip="Pause between path steps (ms).">
+                    <SettingInput value={settings.moveStepDelay} onCommit={(v) => changeSetting('moveStepDelay', v)} width="w-[80px]" suffix="ms" />
+                  </SettingRow>
+                  <SettingRow label="Click delay" tooltip="Gap after reaching the target before the click fires (ms).">
+                    <SettingInput value={settings.moveClickDelay} onCommit={(v) => changeSetting('moveClickDelay', v)} width="w-[80px]" suffix="ms" />
+                  </SettingRow>
+                </>
+              )}
             </Section>
 
             {/* Recording */}

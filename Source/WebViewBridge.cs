@@ -971,6 +971,10 @@ namespace TrueReplayer
                     enableLoop = EnableLoop,
                     loopInterval = LoopInterval,
                     loopIntervalEnabled = LoopIntervalEnabled,
+                    smoothMovement = ActionReplayer.SmoothMovement,
+                    moveStepPx = ActionReplayer.MoveStepPx.ToString(),
+                    moveStepDelay = ActionReplayer.MoveStepDelayMs.ToString(),
+                    moveClickDelay = ActionReplayer.MoveClickDelayMs.ToString(),
                     useCursorClick = UseCursorClick,
                     cursorClickButton = CursorClickButton,
                     cursorClickDelay = CursorClickDelay,
@@ -1287,6 +1291,10 @@ namespace TrueReplayer
                     enableLoop = EnableLoop,
                     loopInterval = LoopInterval,
                     loopIntervalEnabled = LoopIntervalEnabled,
+                    smoothMovement = ActionReplayer.SmoothMovement,
+                    moveStepPx = ActionReplayer.MoveStepPx.ToString(),
+                    moveStepDelay = ActionReplayer.MoveStepDelayMs.ToString(),
+                    moveClickDelay = ActionReplayer.MoveClickDelayMs.ToString(),
                     useCursorClick = UseCursorClick,
                     cursorClickButton = CursorClickButton,
                     cursorClickDelay = CursorClickDelay,
@@ -5864,6 +5872,13 @@ namespace TrueReplayer
             EnableLoop = defaults.EnableLoop;
             LoopInterval = defaults.LoopInterval.ToString();
             LoopIntervalEnabled = defaults.LoopIntervalEnabled;
+            // Smooth-movement settings live on ActionReplayer statics (not bridge props) — reset
+            // those too, otherwise the runtime + the UI (PushSettingsLoaded reads the statics)
+            // would keep the user's old values while disk holds the defaults.
+            ActionReplayer.SmoothMovement = defaults.SmoothMovement;
+            ActionReplayer.MoveStepPx = defaults.MoveStepPx;
+            ActionReplayer.MoveStepDelayMs = defaults.MoveStepDelayMs;
+            ActionReplayer.MoveClickDelayMs = defaults.MoveClickDelayMs;
             UseCursorClick = defaults.UseCursorClick;       // preserved above
             CursorClickButton = defaults.CursorClickButton; // preserved above
             // Reset Clicker v2 settings to real defaults
@@ -5924,6 +5939,10 @@ namespace TrueReplayer
                 LoopCount = int.TryParse(LoopCount, out var c) ? c : 0,
                 LoopIntervalEnabled = LoopIntervalEnabled,
                 LoopInterval = int.TryParse(LoopInterval, out var li) ? li : 200,
+                SmoothMovement = ActionReplayer.SmoothMovement,
+                MoveStepPx = ActionReplayer.MoveStepPx,
+                MoveStepDelayMs = ActionReplayer.MoveStepDelayMs,
+                MoveClickDelayMs = ActionReplayer.MoveClickDelayMs,
                 UseCursorClick = UseCursorClick,
                 CursorClickButton = CursorClickButton,
                 // Clicker v2 — persist the dedicated Clicker settings alongside the legacy ones.
@@ -6089,6 +6108,22 @@ namespace TrueReplayer
                     break;
                 case "loopIntervalEnabled":
                     LoopIntervalEnabled = valueElement.GetBoolean();
+                    break;
+                // Smooth mouse movement (interpolated cursor path). See ActionReplayer.SmoothMovement.
+                case "smoothMovement":
+                    ActionReplayer.SmoothMovement = valueElement.GetBoolean();
+                    break;
+                case "moveStepPx":
+                    if (int.TryParse(valueElement.GetString(), out int mvStep))
+                        ActionReplayer.MoveStepPx = Math.Clamp(mvStep, 0, 2000);
+                    break;
+                case "moveStepDelay":
+                    if (int.TryParse(valueElement.GetString(), out int mvStepDelay))
+                        ActionReplayer.MoveStepDelayMs = Math.Clamp(mvStepDelay, 0, 100);
+                    break;
+                case "moveClickDelay":
+                    if (int.TryParse(valueElement.GetString(), out int mcDelay))
+                        ActionReplayer.MoveClickDelayMs = Math.Clamp(mcDelay, 0, 1000);
                     break;
                 case "useCursorClick":
                     SetCursorClickMode(valueElement.GetBoolean());

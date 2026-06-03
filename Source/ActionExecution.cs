@@ -811,6 +811,21 @@ namespace TrueReplayer.Services
 
     public class ActionReplayer
     {
+        // ── Smooth mouse movement ─────────────────────────────────────────────────────
+        // Some apps/games (notably Roblox) reject a single large "teleport" of the cursor —
+        // they only follow movement that progresses through intermediate positions, like a
+        // physical mouse. When SmoothMovement is on, SimulateMouse walks a straight path from
+        // the current cursor to the target in steps of at most MoveStepPx pixels, pausing
+        // MoveStepDelayMs between steps. MoveClickDelayMs is the gap before the click fires.
+        // When off, it jumps straight to the target (legacy behaviour). These are persisted in
+        // appsettings.json and loaded into these statics by AppSettingsManager.ApplyGlobalSettings;
+        // the UI edits them through the settings:change keys smoothMovement / moveStepPx /
+        // moveStepDelay / moveClickDelay.
+        public static bool SmoothMovement = true;
+        public static int MoveStepPx = 20;
+        public static int MoveStepDelayMs = 2;
+        public static int MoveClickDelayMs = 10;
+
         private readonly ObservableCollection<ActionItem> _actions;
         private readonly DispatcherQueue dispatcherQueue;
         private readonly BrowserBridgeService? _browserBridge;
@@ -1830,43 +1845,55 @@ namespace TrueReplayer.Services
 
             int inputSize = Marshal.SizeOf(typeof(NativeMethods.INPUT));
 
-            // Step 1: SetCursorPos (for apps using GetCursorPos)
-            NativeMethods.SetCursorPos(x, y);
-
-            // Step 2: SendInput MOVE (for apps using Raw Input)
-            var moveInput = new NativeMethods.INPUT
+            // ── Move the cursor to (x,y), then build the click event. ──────────────────────
+            // Roblox (and similar) reject a single large "teleport" move — they only follow
+            // movement that progresses through intermediate positions, like a physical mouse.
+            // So when SmoothMovement is on we INTERPOLATE: walk a straight path from the current
+            // cursor to the target in steps of at most MoveStepPx pixels, pausing MoveStepDelayMs
+            // between steps. SmoothMovement off (or MoveStepPx == 0) jumps straight (legacy).
+            void MoveAbs(int tx, int ty)
             {
-                type = NativeMethods.INPUT_MOUSE,
-                U = new NativeMethods.InputUnion
+                int nx = (int)(((double)(tx - vx) * 65535) / Math.Max(1, vw - 1));
+                int ny = (int)(((double)(ty - vy) * 65535) / Math.Max(1, vh - 1));
+                NativeMethods.SetCursorPos(tx, ty); // for apps reading GetCursorPos
+                var mv = new NativeMethods.INPUT
                 {
-                    mi = new NativeMethods.MOUSEINPUT
-                    {
-                        dx = absoluteX,
-                        dy = absoluteY,
-                        dwFlags = posFlags,
-                    }
+                    type = NativeMethods.INPUT_MOUSE,
+                    U = new NativeMethods.InputUnion { mi = new NativeMethods.MOUSEINPUT { dx = nx, dy = ny, dwFlags = posFlags } }
+                };
+                NativeMethods.SendInput(1, new[] { mv }, inputSize); // for apps reading Raw Input
+            }
+
+            int stepPx = MoveStepPx;
+            if (SmoothMovement && stepPx > 0 && NativeMethods.GetCursorPos(out var start) && (start.x != x || start.y != y))
+            {
+                int pathDx = x - start.x;
+                int pathDy = y - start.y;
+                double dist = Math.Sqrt((double)pathDx * pathDx + (double)pathDy * pathDy);
+                int steps = Math.Max(1, (int)Math.Ceiling(dist / stepPx));
+                for (int i = 1; i <= steps; i++)
+                {
+                    double t = (double)i / steps;
+                    MoveAbs(start.x + (int)Math.Round(pathDx * t), start.y + (int)Math.Round(pathDy * t));
+                    if (i < steps && MoveStepDelayMs > 0) Thread.Sleep(MoveStepDelayMs);
                 }
-            };
-            NativeMethods.SendInput(1, new[] { moveInput }, inputSize);
+            }
+            else
+            {
+                MoveAbs(x, y); // single jump (SmoothMovement off, MoveStepPx == 0, GetCursorPos failed, or at target)
+            }
 
-            // Step 3: Wait for the target app to process the move (~1 frame)
-            Thread.Sleep(10);
-
-            // Step 4: Fire button/scroll with position embedded in the event
             var clickInput = new NativeMethods.INPUT
             {
                 type = NativeMethods.INPUT_MOUSE,
                 U = new NativeMethods.InputUnion
                 {
-                    mi = new NativeMethods.MOUSEINPUT
-                    {
-                        dx = absoluteX,
-                        dy = absoluteY,
-                        mouseData = (uint)mouseData,
-                        dwFlags = mouseEvent | posFlags,
-                    }
+                    mi = new NativeMethods.MOUSEINPUT { dx = absoluteX, dy = absoluteY, mouseData = (uint)mouseData, dwFlags = mouseEvent | posFlags }
                 }
             };
+
+            // Small gap so the app registers the final position before the button fires.
+            Thread.Sleep(Math.Max(0, MoveClickDelayMs));
             lock (_simInputLock)
             {
                 NativeMethods.SendInput(1, new[] { clickInput }, inputSize);
