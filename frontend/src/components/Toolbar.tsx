@@ -8,6 +8,7 @@ import { RunProfileDialog } from './RunProfileDialog';
 import { NavigateDialog } from './NavigateDialog';
 import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
 import { PauseDialog } from './PauseDialog';
+import { useFlyoutFlip } from '../hooks/useFlyoutFlip';
 
 export interface ColumnVisibility {
   action: boolean;
@@ -175,6 +176,11 @@ export function Toolbar(_props: ToolbarProps) {
   const [showKeystrokeCapture, setShowKeystrokeCapture] = useState(false);
   const keystrokeCaptureInsertIndex = useRef<number>(0);
   const browserMenuRef = useRef<HTMLDivElement>(null);
+  // Each toolbar dropdown opens downward (`top-full left-0`); flip it up/right near the
+  // viewport bottom/right edge so it isn't clipped. Measured on open by useFlyoutFlip.
+  const waitFlyout = useFlyoutFlip(showWaitMenu, 'below');
+  const conditionalFlyout = useFlyoutFlip(showConditionalMenu, 'below');
+  const browserFlyout = useFlyoutFlip(showBrowserMenu, 'below');
 
   // Listen for command palette trigger
   useEffect(() => {
@@ -551,7 +557,7 @@ export function Toolbar(_props: ToolbarProps) {
               <ScanEye size={14} />
             </button>
             {showWaitMenu && (
-              <div className="absolute top-full left-0 mt-1 w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1">
+              <div ref={waitFlyout.ref} className={`absolute w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1 ${waitFlyout.flipX ? 'right-0' : 'left-0'} ${waitFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
                 <div className="px-3 py-1 text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
                   Insert Wait
                 </div>
@@ -597,7 +603,7 @@ export function Toolbar(_props: ToolbarProps) {
               <GitBranch size={14} />
             </button>
             {showConditionalMenu && (
-              <div className="absolute top-full left-0 mt-1 w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1">
+              <div ref={conditionalFlyout.ref} className={`absolute w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1 ${conditionalFlyout.flipX ? 'right-0' : 'left-0'} ${conditionalFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
                 <div className="px-3 py-1 text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
                   Insert Conditional
                 </div>
@@ -642,7 +648,7 @@ export function Toolbar(_props: ToolbarProps) {
               <Globe size={14} />
             </button>
             {showBrowserMenu && (
-              <div className="absolute top-full left-0 mt-1 w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1">
+              <div ref={browserFlyout.ref} className={`absolute w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1 ${browserFlyout.flipX ? 'right-0' : 'left-0'} ${browserFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
                 {/* Header pill matches the sibling Wait / Conditional dropdowns so the
                     three menus read as one family. Width also bumped 44 → 56 for the
                     same reason — long labels like "Navigate to URL" got close to the

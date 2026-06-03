@@ -15,6 +15,7 @@ import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
 import { BulkActionBar } from './BulkActionBar';
 import { Checkbox, CheckboxBox } from './Checkbox';
 import type { ColumnVisibility } from './Toolbar';
+import { useFlyoutFlip } from '../hooks/useFlyoutFlip';
 
 function ActionIcon({ actionType }: { actionType: string }) {
   const size = 12;
@@ -172,7 +173,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number } | null>(null);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [activeSubmenu, setActiveSubmenu] = useState<'more' | null>(null);
-  const [submenuFlip, setSubmenuFlip] = useState(false);
+  // The "More ▸" submenu opens to the side; flip it left/up when the context menu sits
+  // near the right/bottom edge so it isn't clipped. Measured on open by useFlyoutFlip,
+  // which replaced an earlier right-edge-only heuristic computed in the menu-position pass.
+  const moreFlyout = useFlyoutFlip(activeSubmenu === 'more', 'side');
   const contextMenuRef = useRef<HTMLDivElement>(null);
   // Drives the RunProfile insert dialog. Opened by dragging a profile onto the grid
   // (the 'profiledrag:dropOnGrid' handler) — pre-filled with the dropped profile's name.
@@ -344,9 +348,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         if (x + rect.width > window.innerWidth - 8) {
           x = Math.max(8, window.innerWidth - rect.width - 8);
         }
-        // Flip submenu to the left if there isn't room on the right for the menu + the "More"
-        // submenu (min-w-[210px] + 4px gap ≈ 214px — keep this in sync with that class).
-        setSubmenuFlip(x + rect.width + 214 > window.innerWidth);
         setMenuPos({ x, y });
       });
     }
@@ -1994,7 +1995,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               <ChevronRight size={12} className="text-text-disabled" />
             </button>
             {activeSubmenu === 'more' && (
-              <div className={`absolute top-0 min-w-[210px] bg-transparent ${submenuFlip ? 'right-full' : 'left-full'}`} style={submenuFlip ? { paddingRight: '4px' } : { paddingLeft: '4px' }}>
+              <div ref={moreFlyout.ref} className={`absolute min-w-[210px] bg-transparent ${moreFlyout.flipX ? 'right-full' : 'left-full'} ${moreFlyout.flipY ? 'bottom-0' : 'top-0'}`} style={moreFlyout.flipX ? { paddingRight: '4px' } : { paddingLeft: '4px' }}>
                 <div className="py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
                   {/* Select Similar */}
                   <button

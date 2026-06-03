@@ -11,6 +11,7 @@ import { SecurityWarningModal } from './SecurityWarningModal';
 import { ImportPreviewDialog } from './ImportPreviewDialog';
 import { ProfileInfoDialog } from './ProfileInfoDialog';
 import { useToast } from '../state/ToastContext';
+import { useFlyoutFlip } from '../hooks/useFlyoutFlip';
 
 interface ContextMenuState {
   x: number;
@@ -271,6 +272,18 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     }
   }, [folderContextMenu, folderMenuPos]);
 
+  // Submenu flip — each of the three context-menu submenus (Move to folder, More,
+  // and the folder Color picker) opens to the side with `left-full top-0`, which
+  // clips when the parent menu sits near the right or bottom edge. useFlyoutFlip
+  // measures on open and tells us which way to flip. The open flags mirror the
+  // render conditions below so the hook and the JSX stay in lockstep.
+  const moveMenuOpen = !!contextMenu && showMoveToFolderMenu === contextMenu.profileName;
+  const moveFlyout = useFlyoutFlip(moveMenuOpen, 'side');
+  const moreMenuOpen = !!contextMenu && showProfileMoreMenu === contextMenu.profileName;
+  const moreFlyout = useFlyoutFlip(moreMenuOpen, 'side');
+  const colorMenuOpen = !!folderContextMenu && showFolderColorPicker === folderContextMenu.folderName;
+  const colorFlyout = useFlyoutFlip(colorMenuOpen, 'side');
+
   // Focus dialog input when opened
   useEffect(() => {
     if ((showCreateDialog || showRenameDialog) && dialogInputRef.current) {
@@ -409,6 +422,13 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   const handleContextMenu = useCallback((e: React.MouseEvent, name: string) => {
     e.preventDefault();
+    // Clear any submenu left open from a previous menu. Otherwise, re-right-clicking the
+    // same profile would re-satisfy `showXMenu === profileName` and auto-open the submenu
+    // *during* the new menu's off-screen measurement pass, so useFlyoutFlip would measure
+    // garbage coordinates and never re-flip. Submenus should only open via genuine hover,
+    // after the menu has settled at its final position.
+    setShowMoveToFolderMenu(null);
+    setShowProfileMoreMenu(null);
     setContextMenu({ x: e.clientX, y: e.clientY, profileName: name });
   }, []);
 
@@ -814,6 +834,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const handleFolderContextMenu = (e: React.MouseEvent, folderName: string) => {
     e.preventDefault();
     e.stopPropagation();
+    // Clear a stale color-picker submenu so it can't auto-open during the menu's off-screen
+    // measurement pass (see handleContextMenu for why that breaks useFlyoutFlip).
+    setShowFolderColorPicker(null);
     setFolderContextMenu({ x: e.clientX, y: e.clientY, folderName });
   };
 
@@ -1569,8 +1592,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               Move to folder
               <ChevronRight size={11} className="ml-auto text-text-tertiary" />
             </button>
-            {showMoveToFolderMenu === contextMenu.profileName && (
-              <div className="absolute left-full top-0 bg-transparent" style={{ paddingLeft: '4px' }}>
+            {moveMenuOpen && (
+              <div
+                ref={moveFlyout.ref}
+                className={`absolute bg-transparent ${moveFlyout.flipX ? 'right-full' : 'left-full'} ${moveFlyout.flipY ? 'bottom-0' : 'top-0'}`}
+                style={moveFlyout.flipX ? { paddingRight: '4px' } : { paddingLeft: '4px' }}
+              >
               <div className="py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60] whitespace-nowrap">
                 {(profileOrder?.folders ?? []).map(f => (
                   <button
@@ -1679,8 +1706,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               More
               <ChevronRight size={11} className="ml-auto text-text-tertiary" />
             </button>
-            {showProfileMoreMenu === contextMenu.profileName && (
-              <div className="absolute left-full top-0 bg-transparent" style={{ paddingLeft: '4px' }}>
+            {moreMenuOpen && (
+              <div
+                ref={moreFlyout.ref}
+                className={`absolute bg-transparent ${moreFlyout.flipX ? 'right-full' : 'left-full'} ${moreFlyout.flipY ? 'bottom-0' : 'top-0'}`}
+                style={moreFlyout.flipX ? { paddingRight: '4px' } : { paddingLeft: '4px' }}
+              >
                 <div className="py-1 bg-bg-card border border-border-default rounded-md shadow-lg z-[60] whitespace-nowrap">
                   <button
                     onClick={() => handleShowInfo(contextMenu.profileName)}
@@ -1762,8 +1793,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               Color
               <ChevronRight size={11} className="ml-auto text-text-tertiary" />
             </button>
-            {showFolderColorPicker === folderContextMenu.folderName && (
-              <div className="absolute left-full top-0 min-w-0 bg-transparent" style={{ paddingLeft: '4px' }}>
+            {colorMenuOpen && (
+              <div
+                ref={colorFlyout.ref}
+                className={`absolute min-w-0 bg-transparent ${colorFlyout.flipX ? 'right-full' : 'left-full'} ${colorFlyout.flipY ? 'bottom-0' : 'top-0'}`}
+                style={colorFlyout.flipX ? { paddingRight: '4px' } : { paddingLeft: '4px' }}
+              >
               <div className="p-2.5 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
                 <div className="flex flex-wrap gap-1.5" style={{ width: '156px' }}>
                   {FOLDER_COLORS.map(c => (
