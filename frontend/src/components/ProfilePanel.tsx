@@ -182,6 +182,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     : profiles;
 
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  // Same role as menuPos, but for the folder context menu. Kept separate so the two
+  // menus can be open-measured independently.
+  const [folderMenuPos, setFolderMenuPos] = useState<{ x: number; y: number } | null>(null);
 
   // Close context menu on click outside or Escape
   useEffect(() => {
@@ -237,6 +240,36 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       });
     }
   }, [contextMenu, menuPos]);
+
+  // Folder context menu positioning — same off-screen-measure-then-reposition dance
+  // as the profile menu above, so right-clicking a folder near the bottom (or right
+  // edge) doesn't leave the menu clipped by the viewport.
+  useEffect(() => {
+    if (!folderContextMenu) { setFolderMenuPos(null); return; }
+    setFolderMenuPos({ x: -9999, y: -9999 });
+  }, [folderContextMenu]);
+
+  useEffect(() => {
+    if (!folderContextMenu || !folderMenuPos) return;
+    if (folderMenuPos.x === -9999) {
+      requestAnimationFrame(() => {
+        const el = folderMenuRef.current;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        let x = folderContextMenu.x;
+        let y = folderContextMenu.y;
+        // If menu would overflow bottom, move it up
+        if (y + rect.height > window.innerHeight - 8) {
+          y = Math.max(8, folderContextMenu.y - rect.height);
+        }
+        // If menu would overflow right, move it left
+        if (x + rect.width > window.innerWidth - 8) {
+          x = Math.max(8, window.innerWidth - rect.width - 8);
+        }
+        setFolderMenuPos({ x, y });
+      });
+    }
+  }, [folderContextMenu, folderMenuPos]);
 
   // Focus dialog input when opened
   useEffect(() => {
@@ -1692,7 +1725,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       )}
 
       {/* Folder Context Menu */}
-      {folderContextMenu && (
+      {folderContextMenu && folderMenuPos && (
         // Folder context menu — grouped top-to-bottom by scope and time:
         //   - Identity (apply to this folder itself)     → Rename · Color ▸
         //   - Triggers (configure children, setup-time)  → Window target…
@@ -1707,7 +1740,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         <div
           ref={folderMenuRef}
           className="fixed z-50 min-w-[160px] py-1 bg-bg-card border border-border-default rounded-md shadow-lg"
-          style={{ left: folderContextMenu.x, top: folderContextMenu.y }}
+          style={{ left: folderMenuPos.x, top: folderMenuPos.y }}
         >
           {/* ── Identity (this folder) ── */}
           <button
