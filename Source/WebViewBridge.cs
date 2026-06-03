@@ -375,7 +375,17 @@ namespace TrueReplayer
             EnableLoop = saved.EnableLoop;
             LoopInterval = saved.LoopInterval.ToString();
             LoopIntervalEnabled = saved.LoopIntervalEnabled;
-            UseCursorClick = saved.UseCursorClick;
+            // Always start in Macro mode. The persisted UseCursorClick is intentionally NOT
+            // restored: TrueReplayer must boot into Macro even if the user exited while in
+            // Clicker mode, or the app crashed while in it. Switching to Clicker is a deliberate
+            // in-session action and is never carried across launches. Clear the persisted flag
+            // too so appsettings.json stays consistent with the forced-Macro startup.
+            UseCursorClick = false;
+            if (saved.UseCursorClick)
+            {
+                saved.UseCursorClick = false;
+                AppSettingsManager.Save(saved);
+            }
             CursorClickButton = saved.CursorClickButton;
             // Clicker v2 — migrate from the legacy "Clicker reuses profile settings" behaviour
             // on first launch after upgrade. The sentinel CursorClickDelayMs == -1 means
