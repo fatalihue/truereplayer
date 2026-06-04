@@ -110,10 +110,42 @@ namespace TrueReplayer
                 // profile-key foreground check. "No Profile" maps to null so the gate
                 // short-circuits (no profile → no target → no gating, fires as before).
                 InputHookManager.ActiveProfileName = value == "No Profile" ? null : value;
+
+                // Leaving a profile (deselect, delete-active, reset-settings — every path that
+                // lands on "No Profile") must wipe the per-profile window/target context off the
+                // shared static UserProfile.Current. While no profile is active, the recorder
+                // (StartRecording reads UseRelativeCoordinates), the Replay button (reads
+                // TargetWindow / rel-coords) and save-as-new-profile (ProfileController bakes
+                // these fields in) all fall back to UserProfile.Current — so a leftover target +
+                // relative coords from the previously-loaded profile would silently leak into a
+                // brand-new recording. Centralised here so the invariant holds for every
+                // "No Profile" transition, present and future. Selecting a real profile assigns
+                // UserProfile.Current first, so this branch never runs for that path.
+                if (value == "No Profile")
+                    ResetCurrentProfileWindowContext();
             }
         }
         public string? CurrentProfilePath { get; set; }
         public bool HasUnsavedChanges { get; set; }
+
+        // Clears ONLY the per-profile (serialized) window/target fields on the shared static
+        // profile, so they don't leak across a "No Profile" transition (see the CurrentProfileName
+        // setter for the full rationale). The [JsonIgnore] globals on UserProfile.Current —
+        // hotkeys, AlwaysOnTop, ProfileKeyEnabled, record toggles, loop/delay — are deliberately
+        // left untouched because that object doubles as the live global-settings holder.
+        private static void ResetCurrentProfileWindowContext()
+        {
+            var cur = UserProfile.Current;
+            cur.TargetWindow = null;
+            cur.UseRelativeCoordinates = false;
+            cur.BringToFocus = false;
+            cur.RestorePosition = false;
+            cur.RestoreSize = false;
+            cur.WindowX = 0;
+            cur.WindowY = 0;
+            cur.WindowWidth = 0;
+            cur.WindowHeight = 0;
+        }
 
         private readonly BrowserBridgeService? browserBridge;
 
@@ -4436,17 +4468,7 @@ namespace TrueReplayer
                 profile.WindowHeight = 0;
                 await profileController.SaveProfileByNameAsync(name, profile);
                 if (CurrentProfileName == name)
-                {
-                    UserProfile.Current.TargetWindow = null;
-                    UserProfile.Current.UseRelativeCoordinates = false;
-                    UserProfile.Current.BringToFocus = false;
-                    UserProfile.Current.RestorePosition = false;
-                    UserProfile.Current.RestoreSize = false;
-                    UserProfile.Current.WindowX = 0;
-                    UserProfile.Current.WindowY = 0;
-                    UserProfile.Current.WindowWidth = 0;
-                    UserProfile.Current.WindowHeight = 0;
-                }
+                    ResetCurrentProfileWindowContext();
                 await profileController.RefreshProfileListAsync(true);
                 InputHookManager.RegisterProfileWindowTargets(profileController.GetProfileWindowTargets(), profileController.GetBringToFocusProfiles());
                 PushProfilesUpdate();
