@@ -82,6 +82,22 @@ namespace TrueReplayer
             // Register Native Messaging Host for Chrome Extension
             RegisterNativeMessagingHost();
 
+            // Always boot into a consistent "ready to replay" state: Macro mode + Profile Keys ON.
+            // Neither Clicker mode nor a paused-Profile-Keys state is restored from a previous
+            // session. Rationale: if the user launched TrueReplayer, they want to replay macros;
+            // they can switch to Clicker or pause Profile Keys in-session, but neither carries
+            // across launches. Normalize the PERSISTED flags here, at the entry point, BEFORE any
+            // UI / tray icon / bridge reads them, so the tray icon and the window start consistent.
+            // (Doing this later — e.g. in the bridge — left the tray icon, created earlier from the
+            // file, stuck on the wrong state.)
+            var startupSettings = AppSettingsManager.Load();
+            if (startupSettings.UseCursorClick || !startupSettings.ProfileKeyEnabled)
+            {
+                startupSettings.UseCursorClick = false;
+                startupSettings.ProfileKeyEnabled = true;
+                AppSettingsManager.Save(startupSettings);
+            }
+
             global::WinRT.ComWrappersSupport.InitializeComWrappers();
             Application.Start(p =>
             {

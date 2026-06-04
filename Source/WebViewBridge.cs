@@ -375,17 +375,10 @@ namespace TrueReplayer
             EnableLoop = saved.EnableLoop;
             LoopInterval = saved.LoopInterval.ToString();
             LoopIntervalEnabled = saved.LoopIntervalEnabled;
-            // Always start in Macro mode. The persisted UseCursorClick is intentionally NOT
-            // restored: TrueReplayer must boot into Macro even if the user exited while in
-            // Clicker mode, or the app crashed while in it. Switching to Clicker is a deliberate
-            // in-session action and is never carried across launches. Clear the persisted flag
-            // too so appsettings.json stays consistent with the forced-Macro startup.
+            // Always start in Macro mode (never restore Clicker across launches). The PERSISTED
+            // flag is already normalized to Macro in Program.Main — before the tray icon reads it —
+            // so `saved.UseCursorClick` is false here; we force the runtime value too, defensively.
             UseCursorClick = false;
-            if (saved.UseCursorClick)
-            {
-                saved.UseCursorClick = false;
-                AppSettingsManager.Save(saved);
-            }
             CursorClickButton = saved.CursorClickButton;
             // Clicker v2 — migrate from the legacy "Clicker reuses profile settings" behaviour
             // on first launch after upgrade. The sentinel CursorClickDelayMs == -1 means
@@ -428,7 +421,10 @@ namespace TrueReplayer
             RecordScroll = saved.RecordScroll;
             RecordKeyboard = saved.RecordKeyboard;
             RecordCombinedInput = saved.RecordCombinedInput;
-            ProfileKeyEnabled = saved.ProfileKeyEnabled;
+            // Profile Keys always start ON (never restore a paused state across launches) — the
+            // persisted flag is already normalized to true in Program.Main before the tray icon
+            // reads it; force the runtime value here too, defensively. See also UseCursorClick above.
+            ProfileKeyEnabled = true;
             BrowserSelectorEnabled = saved.BrowserSelectorEnabled;
         }
 
