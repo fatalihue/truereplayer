@@ -155,7 +155,7 @@ export function UpdateOverlay() {
         <div
           style={{
             ...titleStyle,
-            ...(isComplete || isInstalling ? { color: '#6bcb77' } : {}),
+            ...(isComplete || isInstalling ? { color: 'var(--color-replay)' } : {}),
           }}
         >
           {phase.step === 'checking' && 'Verificando atualizações'}
@@ -180,8 +180,8 @@ export function UpdateOverlay() {
         {isChecking ? null : isComplete ? (
           <div style={versionRowStyle}>
             <div style={{ ...versionChipStyle, ...versionChipNewStyle, minWidth: 120 }}>
-              <div style={{ ...versionLabelStyle, color: '#60CDFF' }}>Versão atual</div>
-              <div style={{ ...versionValueStyle, color: '#60CDFF' }}>v{version}</div>
+              <div style={{ ...versionLabelStyle, color: 'var(--color-accent)' }}>Versão atual</div>
+              <div style={{ ...versionValueStyle, color: 'var(--color-accent)' }}>v{version}</div>
             </div>
           </div>
         ) : (
@@ -192,8 +192,8 @@ export function UpdateOverlay() {
             </div>
             <div style={versionArrowStyle}>&#10132;</div>
             <div style={{ ...versionChipStyle, ...versionChipNewStyle }}>
-              <div style={{ ...versionLabelStyle, color: '#60CDFF' }}>Nova versão</div>
-              <div style={{ ...versionValueStyle, color: '#60CDFF' }}>v{version}</div>
+              <div style={{ ...versionLabelStyle, color: 'var(--color-accent)' }}>Nova versão</div>
+              <div style={{ ...versionValueStyle, color: 'var(--color-accent)' }}>v{version}</div>
             </div>
           </div>
         )}
@@ -240,7 +240,7 @@ export function UpdateOverlay() {
               {phase.step === 'downloading' && (
                 <div style={progressMetaStyle}>
                   <span>Baixando...</span>
-                  <span style={{ color: '#60CDFF', fontWeight: 600 }}>{phase.percent}%</span>
+                  <span style={{ color: 'var(--color-accent)', fontWeight: 600 }}>{phase.percent}%</span>
                 </div>
               )}
             </div>
@@ -260,10 +260,10 @@ export function UpdateOverlay() {
             style={primaryButtonStyle}
             onClick={handleAccept}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'linear-gradient(180deg, #0b88e4, #0072c4)';
+              e.currentTarget.style.background = 'linear-gradient(180deg, var(--color-accent-hover), var(--color-accent-solid))';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'linear-gradient(180deg, #0078D4, #0065B3)';
+              e.currentTarget.style.background = 'linear-gradient(180deg, var(--color-accent-solid), color-mix(in srgb, var(--color-accent-solid) 82%, #000))';
             }}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -316,11 +316,17 @@ const keyframes = `
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: #5c5c5c;
+  background: var(--color-text-disabled);
 }
 `;
 
-/* ── Styles ── */
+/* ── Styles ──
+   Colors are pulled from the active theme's CSS custom properties (set on :root by
+   themes.ts → applyTheme) so the update splash tracks whatever theme the user has
+   selected. Accent elements use --color-accent / --color-accent-solid / --color-accent-hover;
+   the success (complete) state uses --color-replay; surfaces and text use the --color-bg-* /
+   --color-text-* / --color-border-* tokens. Non-color depth (drop shadows) and the dark
+   modal scrim stay fixed on purpose — a neutral dark backdrop reads well under any theme. */
 const overlayStyle: React.CSSProperties = {
   position: 'fixed',
   inset: 0,
@@ -343,8 +349,8 @@ const cardStyle: React.CSSProperties = {
   position: 'relative',
   width: '88%',
   maxWidth: 420,
-  background: 'rgba(45, 45, 45, 0.88)',
-  border: '1px solid rgba(255, 255, 255, 0.08)',
+  background: 'color-mix(in srgb, var(--color-bg-card) 92%, transparent)',
+  border: '1px solid var(--color-border-default)',
   borderRadius: 14,
   padding: '28px 28px 24px',
   boxShadow: '0 24px 80px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(255,255,255,0.04)',
@@ -374,19 +380,19 @@ const checkBadgeStyle: React.CSSProperties = {
   width: 22,
   height: 22,
   borderRadius: '50%',
-  background: 'linear-gradient(135deg, #0E7A0D, #6bcb77)',
+  background: 'linear-gradient(135deg, color-mix(in srgb, var(--color-replay) 60%, #000), var(--color-replay))',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  boxShadow: '0 2px 6px rgba(14, 122, 13, 0.4)',
-  border: '2px solid #2d2d2d',
+  boxShadow: '0 2px 6px color-mix(in srgb, var(--color-replay) 40%, transparent)',
+  border: '2px solid var(--color-bg-card)',
 };
 
 const titleStyle: React.CSSProperties = {
   textAlign: 'center',
   fontSize: 17,
   fontWeight: 600,
-  color: '#ffffff',
+  color: 'var(--color-text-primary)',
   letterSpacing: -0.2,
   marginBottom: 4,
 };
@@ -394,7 +400,7 @@ const titleStyle: React.CSSProperties = {
 const subtitleStyle: React.CSSProperties = {
   textAlign: 'center',
   fontSize: 11,
-  color: '#9a9a9a',
+  color: 'var(--color-text-tertiary)',
   marginBottom: 18,
 };
 
@@ -410,21 +416,21 @@ const versionChipStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  background: 'rgba(255, 255, 255, 0.04)',
-  border: '1px solid rgba(255, 255, 255, 0.06)',
+  background: 'var(--color-bg-elevated)',
+  border: '1px solid var(--color-border-subtle)',
   borderRadius: 8,
   padding: '8px 14px',
   minWidth: 80,
 };
 
 const versionChipNewStyle: React.CSSProperties = {
-  background: 'rgba(96, 205, 255, 0.08)',
-  borderColor: 'rgba(96, 205, 255, 0.25)',
+  background: 'color-mix(in srgb, var(--color-accent) 8%, transparent)',
+  borderColor: 'color-mix(in srgb, var(--color-accent) 25%, transparent)',
 };
 
 const versionLabelStyle: React.CSSProperties = {
   fontSize: 9,
-  color: '#7a7a7a',
+  color: 'var(--color-text-tertiary)',
   textTransform: 'uppercase',
   letterSpacing: 0.8,
   marginBottom: 2,
@@ -433,12 +439,12 @@ const versionLabelStyle: React.CSSProperties = {
 const versionValueStyle: React.CSSProperties = {
   fontSize: 14,
   fontWeight: 600,
-  color: '#c5c5c5',
+  color: 'var(--color-text-secondary)',
   fontVariantNumeric: 'tabular-nums',
 };
 
 const versionArrowStyle: React.CSSProperties = {
-  color: '#60CDFF',
+  color: 'var(--color-accent)',
   fontSize: 14,
 };
 
@@ -449,7 +455,7 @@ const changelogStyle: React.CSSProperties = {
 const changelogTitleStyle: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 600,
-  color: '#c5c5c5',
+  color: 'var(--color-text-secondary)',
   marginBottom: 8,
   display: 'flex',
   alignItems: 'center',
@@ -460,7 +466,7 @@ const changelogDotStyle: React.CSSProperties = {
   width: 5,
   height: 5,
   borderRadius: '50%',
-  background: '#60CDFF',
+  background: 'var(--color-accent)',
   display: 'inline-block',
 };
 
@@ -473,7 +479,7 @@ const changelogListStyle: React.CSSProperties = {
 const changelogItemStyle: React.CSSProperties = {
   position: 'relative',
   fontSize: 11.5,
-  color: '#b5b5b5',
+  color: 'var(--color-text-secondary)',
   padding: '3px 0 3px 16px',
   lineHeight: 1.4,
 };
@@ -485,7 +491,7 @@ const progressContainerStyle: React.CSSProperties = {
 const progressTrackStyle: React.CSSProperties = {
   width: '100%',
   height: 6,
-  background: '#3a3a3a',
+  background: 'color-mix(in srgb, var(--color-text-primary) 12%, transparent)',
   borderRadius: 3,
   overflow: 'hidden',
   position: 'relative',
@@ -493,11 +499,11 @@ const progressTrackStyle: React.CSSProperties = {
 
 const progressFillStyle: React.CSSProperties = {
   height: '100%',
-  background: 'linear-gradient(90deg, #0078D4, #60CDFF)',
+  background: 'linear-gradient(90deg, var(--color-accent-solid), var(--color-accent))',
   borderRadius: 3,
   width: '0%',
   transition: 'width 0.3s ease',
-  boxShadow: '0 0 10px rgba(96, 205, 255, 0.35)',
+  boxShadow: '0 0 10px color-mix(in srgb, var(--color-accent) 35%, transparent)',
 };
 
 const progressMetaStyle: React.CSSProperties = {
@@ -505,21 +511,21 @@ const progressMetaStyle: React.CSSProperties = {
   justifyContent: 'space-between',
   marginTop: 6,
   fontSize: 10.5,
-  color: '#9a9a9a',
+  color: 'var(--color-text-tertiary)',
   fontVariantNumeric: 'tabular-nums',
 };
 
 const statusStyle: React.CSSProperties = {
   textAlign: 'center',
   fontSize: 11.5,
-  color: '#9a9a9a',
+  color: 'var(--color-text-tertiary)',
   marginTop: 4,
 };
 
 const hintStyle: React.CSSProperties = {
   marginTop: 14,
   fontSize: 10,
-  color: '#7a7a7a',
+  color: 'var(--color-text-tertiary)',
   textAlign: 'center',
 };
 
@@ -532,12 +538,12 @@ const primaryButtonStyle: React.CSSProperties = {
   height: 36,
   border: 'none',
   borderRadius: 8,
-  background: 'linear-gradient(180deg, #0078D4, #0065B3)',
+  background: 'linear-gradient(180deg, var(--color-accent-solid), color-mix(in srgb, var(--color-accent-solid) 82%, #000))',
   color: 'white',
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',
-  boxShadow: '0 2px 6px rgba(0, 120, 212, 0.35)',
+  boxShadow: '0 2px 6px color-mix(in srgb, var(--color-accent-solid) 35%, transparent)',
   transition: 'background 0.15s ease',
   fontFamily: 'inherit',
 };
