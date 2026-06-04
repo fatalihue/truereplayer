@@ -880,6 +880,18 @@ namespace TrueReplayer.Services
             _getProfileName = getProfileName;
         }
 
+        // The profile whose action list is CURRENTLY executing. During a RunProfile sub-call this
+        // is the sub-profile (top of the call stack), NOT the root profile shown in the UI.
+        // _getProfileName always returns the UI's active profile, so image-based actions that
+        // resolve their reference image per-profile (WaitImage, If/ImageFound) must use THIS
+        // instead — otherwise a sub-profile's image is looked up under the parent's folder, fails
+        // to load, and the action silently no-ops (WaitImage: skips the wait + OnTimeout policy;
+        // If/ImageFound: always reads "not found"). The call stack always holds at least the root
+        // (pushed in StartAsync) by the time any action runs; the _getProfileName fallback only
+        // guards the degenerate empty-stack case.
+        private string CurrentExecutingProfileName =>
+            _callStack.Count > 0 ? _callStack[^1] : (_getProfileName?.Invoke() ?? "default");
+
         public void SetProfileLookup(Func<string, Task<Models.UserProfile?>> lookup)
         {
             _profileLookup = lookup;
@@ -2194,7 +2206,10 @@ namespace TrueReplayer.Services
         {
             if (string.IsNullOrEmpty(action.ImagePath)) return;
 
-            string profileName = _getProfileName?.Invoke() ?? "default";
+            // Resolve from the executing profile, not the UI's active one — see
+            // CurrentExecutingProfileName. Using _getProfileName here made WaitImage a silent
+            // no-op when run via RunProfile (image lives in the sub-profile's folder).
+            string profileName = CurrentExecutingProfileName;
             var referenceImage = ImageStorageService.LoadReferenceImage(profileName, action.ImagePath);
             if (referenceImage == null) return;
 
@@ -2443,7 +2458,10 @@ namespace TrueReplayer.Services
         {
             if (string.IsNullOrEmpty(action.ImagePath)) return false;
 
-            string profileName = _getProfileName?.Invoke() ?? "default";
+            // Executing profile, not the UI's active one — see CurrentExecutingProfileName. With
+            // _getProfileName an If/ImageFound inside a RunProfile'd sub-profile always read
+            // "not found" (image lives in the sub-profile's folder), forcing the FALSE branch.
+            string profileName = CurrentExecutingProfileName;
             var referenceImage = ImageStorageService.LoadReferenceImage(profileName, action.ImagePath);
             if (referenceImage == null) return false;
 
