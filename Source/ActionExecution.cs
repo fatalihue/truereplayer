@@ -826,6 +826,31 @@ namespace TrueReplayer.Services
         public static int MoveStepDelayMs = 2;
         public static int MoveClickDelayMs = 10;
 
+        // ── Focus click ───────────────────────────────────────────────────────────────
+        // Opt-in per-action flag (ActionItem.IsFocusClick) honoured by combined clicks. A
+        // single click on a very small target — e.g. a Roblox text field while the window is at
+        // its minimum size — lands but doesn't give the field keyboard focus. Replaying the click
+        // TWICE a few pixels apart (what users do by hand) makes the second click settle inside
+        // the field and focus it. FocusClickOffsetPx is the second click's down-right offset from
+        // the recorded point (in recorded/profile space, so the window-relative translation in
+        // SimulateMouse applies to it too); FocusClickGapMs is the pause between the two clicks.
+        // Static so a future settings knob can tune them; defaults match the manual workaround.
+        public static int FocusClickOffsetPx = 5;
+        public static int FocusClickGapMs = 60;
+
+        // Fires the second "focus" click for an IsFocusClick combined click: a short pause, then
+        // a full press/release FocusClickOffsetPx down-right of the recorded point. Skips if the
+        // replay was cancelled mid-sequence (mirrors how the primary click's release is gated).
+        private void FocusTap(int x, int y, uint down, uint up, CancellationToken token)
+        {
+            if (FocusClickGapMs > 0) Thread.Sleep(FocusClickGapMs);
+            if (token.IsCancellationRequested) return;
+            int fx = x + FocusClickOffsetPx, fy = y + FocusClickOffsetPx;
+            SimulateMouse(fx, fy, down);
+            if (!token.IsCancellationRequested)
+                SimulateMouse(fx, fy, up);
+        }
+
         private readonly ObservableCollection<ActionItem> _actions;
         private readonly DispatcherQueue dispatcherQueue;
         private readonly BrowserBridgeService? _browserBridge;
@@ -1309,16 +1334,22 @@ namespace TrueReplayer.Services
                             SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN);
                             if (!token.IsCancellationRequested)
                                 SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP);
+                            if (action.IsFocusClick && !token.IsCancellationRequested)
+                                FocusTap(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN, NativeMethods.MOUSEEVENTF_LEFTUP, token);
                             break;
                         case "RightClick":
                             SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTDOWN);
                             if (!token.IsCancellationRequested)
                                 SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTUP);
+                            if (action.IsFocusClick && !token.IsCancellationRequested)
+                                FocusTap(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTDOWN, NativeMethods.MOUSEEVENTF_RIGHTUP, token);
                             break;
                         case "MiddleClick":
                             SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN);
                             if (!token.IsCancellationRequested)
                                 SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEUP);
+                            if (action.IsFocusClick && !token.IsCancellationRequested)
+                                FocusTap(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN, NativeMethods.MOUSEEVENTF_MIDDLEUP, token);
                             break;
                         case "ScrollUp": SimulateScroll(120); break;
                         case "ScrollDown": SimulateScroll(-120); break;

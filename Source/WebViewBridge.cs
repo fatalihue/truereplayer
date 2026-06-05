@@ -525,6 +525,7 @@ namespace TrueReplayer
                     case "actions:bulkUpdateCoord": HandleBulkUpdateCoord(payload); break;
                     case "actions:bulkUpdateComment": HandleBulkUpdateComment(payload); break;
                     case "actions:toggleSkip": HandleActionsToggleSkip(payload); break;
+                    case "actions:toggleFocusClick": HandleActionsToggleFocusClick(payload); break;
                     case "actions:reorder": HandleActionsReorder(payload); break;
                     case "actions:convertMode": HandleConvertActionMode(payload); break;
                     case "actions:insertAction": HandleInsertAction(payload); break;
@@ -726,6 +727,7 @@ namespace TrueReplayer
                 browserText = a.BrowserText ?? "",
                 newTab = a.NewTab,
                 isSkipped = a.IsSkipped,
+                isFocusClick = a.IsFocusClick,
                 repeatCount = a.RepeatCount,
                 // Keystroke × N inter-cycle gap. Forwarded so the edit dialog can
                 // restore the user's chosen delay (and the Keystroke replay loop
@@ -1245,6 +1247,7 @@ namespace TrueReplayer
                     browserText = a.BrowserText ?? "",
                     newTab = a.NewTab,
                     isSkipped = a.IsSkipped,
+                    isFocusClick = a.IsFocusClick,
                     repeatCount = a.RepeatCount,
                     // Mirror PushActionsUpdate — repeatDelayMs (Keystroke gap) and
                     // holdDurationMs (HoldKey duration) need to ride along on the
@@ -2052,6 +2055,33 @@ namespace TrueReplayer
 
             foreach (var idx in indices)
                 actions[idx].IsSkipped = newState;
+
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+        }
+
+        // Toggle the per-action "focus click" flag on the selected COMBINED click actions
+        // (LeftClick / RightClick / MiddleClick). A focus click replays as two clicks a few
+        // pixels apart so a small target (e.g. a Roblox text field at minimum window size)
+        // actually receives focus — see ActionReplayer.FocusTap. Smart toggle mirrors Skip:
+        // if every targeted click is already on, turn all off; otherwise turn all on. Non-click
+        // indices are filtered out (the menu only offers this on clicks — defence in depth) so a
+        // mixed selection never flips a flag the replay would ignore.
+        private void HandleActionsToggleFocusClick(JsonElement payload)
+        {
+            PushUndoState();
+            var indices = payload.GetProperty("indices").EnumerateArray()
+                .Select(e => e.GetInt32())
+                .Where(i => i >= 0 && i < actions.Count)
+                .Where(i => actions[i].ActionType is "LeftClick" or "RightClick" or "MiddleClick")
+                .ToList();
+            if (indices.Count == 0) return;
+
+            bool allOn = indices.All(i => actions[i].IsFocusClick);
+            bool newState = !allOn;
+
+            foreach (var idx in indices)
+                actions[idx].IsFocusClick = newState;
 
             HasUnsavedChanges = true;
             PushActionsUpdate();

@@ -25,6 +25,10 @@ export interface ActionItem {
   browserText: string;
   newTab: boolean;
   isSkipped: boolean;
+  // When true, a combined click is replayed twice a few pixels apart so a small target
+  // (e.g. a Roblox text field at minimum window size) actually receives focus. Shown as a
+  // small icon in the Action pill (no grid column); toggled from the row context menu.
+  isFocusClick?: boolean;
   repeatCount?: number;
   // Keystroke action: ms gap between consecutive press cycles when repeatCount > 1.
   // null/undefined = use the global default (30 ms; matches ActionItem.DefaultRepeatDelayMs
@@ -508,6 +512,7 @@ export type OutgoingMessage =
   | { type: 'actions:bulkUpdateCoord'; payload: { indices: number[]; axis: 'x' | 'y'; value: string } }
   | { type: 'actions:bulkUpdateComment'; payload: { indices: number[]; comment: string } }
   | { type: 'actions:toggleSkip'; payload: { indices: number[] } }
+  | { type: 'actions:toggleFocusClick'; payload: { indices: number[] } }
   | { type: 'actions:reorder'; payload: { indices: number[]; targetIndex: number } }
   | { type: 'actions:insertAction'; payload: { actionType: string; insertIndex: number } }
   // Pause insert (Pattern B normalization) — replaces the old "insertAction with

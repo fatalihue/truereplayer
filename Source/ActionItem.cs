@@ -159,6 +159,13 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
         public bool IsSkipped { get; set; }
 
+        // When true, a combined click (LeftClick / RightClick / MiddleClick) is replayed TWICE a
+        // few pixels apart so a small target actually receives focus — see ActionReplayer.FocusTap.
+        // Opt-in per action (never auto-applied; would double-fire buttons). Persisted so a saved
+        // profile keeps the flag; default false omits it from the JSON (JsonIgnore-when-default).
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool IsFocusClick { get; set; }
+
         // RunProfile action: how many times to invoke the called profile back-to-back.
         // Keystroke action: how many press-cycles (down→up) to emit consecutively, so a
         // user can express "press Enter 5×" as ONE row instead of 5 Down/Up pairs.
@@ -396,6 +403,7 @@ namespace TrueReplayer.Models
             TypeDelay = TypeDelay,
             SelectMatchMode = SelectMatchMode,
             IsSkipped = IsSkipped,
+            IsFocusClick = IsFocusClick,
             RepeatCount = RepeatCount,
             RepeatDelayMs = RepeatDelayMs,
             HoldDurationMs = HoldDurationMs,

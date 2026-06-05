@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo, Fragment } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal } from 'lucide-react';
+import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -1334,6 +1334,14 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         && (action.repeatCount ?? 1) > 1 && (
                           <span className="ml-0.5 opacity-75">×{action.repeatCount}</span>
                         )}
+                      {/* Focus-click indicator — a small icon inside the Action pill (never a new
+                          column) marking combined clicks that replay twice to focus a small
+                          target. Only renders when the per-action flag is on, so off-rows stay
+                          clean. Toggled from the row context menu ("Focus click"). */}
+                      {action.isFocusClick
+                        && /^(Left|Right|Middle)Click$/.test(action.actionType) && (
+                          <Focus size={11} className="ml-0.5 opacity-80" />
+                        )}
                     </span>
                   </td>
                   )}
@@ -1967,6 +1975,37 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             }
 
             return null;
+          })()}
+
+          {/* Focus click — combined clicks only. Toggles the per-action flag that replays the
+              click TWICE a few pixels apart so a small target (e.g. a Roblox text field at the
+              window's minimum size) actually receives focus. The state shows as a small icon in
+              the Action pill (no grid column). Acts on the effective selection (the right-clicked
+              row, or the whole multi-selection when the row is part of it), filtered to clicks. */}
+          {(() => {
+            const row = actions[contextMenu.rowIndex];
+            if (!row || !/^(Left|Right|Middle)Click$/.test(row.actionType ?? '')) return null;
+            const eff = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
+              ? Array.from(selectedIndices).sort((a, b) => a - b)
+              : [contextMenu.rowIndex];
+            const clickIdx = eff.filter(i => /^(Left|Right|Middle)Click$/.test(actions[i]?.actionType ?? ''));
+            const allOn = clickIdx.length > 0 && clickIdx.every(i => actions[i]?.isFocusClick);
+            return (
+              <button
+                onMouseEnter={() => setActiveSubmenu(null)}
+                onClick={() => {
+                  send({ type: 'actions:toggleFocusClick', payload: { indices: clickIdx } });
+                  closeContextMenu();
+                }}
+                className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+              >
+                <span className="flex items-center gap-2.5">
+                  <Focus size={13} className="text-text-tertiary" />
+                  Focus click
+                </span>
+                {allOn && <Check size={12} className="text-accent-light" />}
+              </button>
+            );
           })()}
 
           {/* Duplicate */}
