@@ -411,6 +411,14 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (editingCell || sendTextEdit) return;
 
+    // Don't hijack grid shortcuts (Ctrl+A select-all, Delete, Escape) while the user is typing in
+    // an input/textarea that lives inside the grid container — notably the BulkActionBar's
+    // delay/x/y/notes fields. Those don't set editingCell, so without this guard their keydowns
+    // bubble here and Ctrl+A selected every row (and Delete could delete rows) instead of acting on
+    // the field's own text. Mirrors the editable-target guard in App.tsx's global shortcut handler.
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+
     if (e.key === 'Delete' && selectedIndices.size > 0) {
       e.preventDefault();
       // Same single-IF safety as handleContextDelete: a lone-IF selection routes
