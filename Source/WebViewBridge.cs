@@ -2915,7 +2915,7 @@ namespace TrueReplayer
                         screenshot,
                         regionOnly: false,
                         pointPick: true,
-                        hintText: "Click on the pixel to watch — colour and coords are captured  •  ESC to cancel");
+                        hintText: "Click the pixel to watch — colour + coords captured  •  Scroll to zoom  •  ESC to cancel");
                     overlay.ShowDialog();
                     selection = overlay.GetSelectionAsync().Result;
                 });
@@ -3287,7 +3287,7 @@ namespace TrueReplayer
                         screenshot,
                         regionOnly: false,
                         pointPick: true,
-                        hintText: "Click on the pixel to watch — colour and coords are captured  •  ESC to cancel");
+                        hintText: "Click the pixel to watch — colour + coords captured  •  Scroll to zoom  •  ESC to cancel");
                     overlay.ShowDialog();
                     selection = overlay.GetSelectionAsync().Result;
                 });

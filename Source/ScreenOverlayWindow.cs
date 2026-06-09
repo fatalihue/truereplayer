@@ -97,7 +97,7 @@ namespace TrueReplayer.Services
             }
 
             _hintText = hintText ?? (pointPick
-                ? "Click anywhere to pick a position  •  ESC to cancel"
+                ? "Click to pick  •  Scroll to zoom  •  ESC to cancel"
                 : seeded
                     ? "Drag to redraw the region  •  ESC to keep current"
                     : "Click and drag to select a region  •  ESC to cancel");
@@ -116,6 +116,7 @@ namespace TrueReplayer.Services
             MouseDown += OnMouseDown;
             MouseMove += OnMouseMove;
             MouseUp += OnMouseUp;
+            MouseWheel += OnMouseWheel;
         }
 
         public Task<RegionSelectionResult?> GetSelectionAsync() => _tcs.Task;
@@ -283,19 +284,41 @@ namespace TrueReplayer.Services
             Invalidate(dirty);
         }
 
-        // Magnifier sizing constants — kept on the type so ComputeCursorLabelRect
-        // and DrawMagnifier agree without copy-pasting numbers. 11×11 grid (odd so
-        // the centre pixel sits exactly on the cursor) at 13 px each = 143 px disc,
-        // plus a label and gap below.
-        private const int MagPixelCount = 11;
-        private const int MagPixelSize = 13;
-        private const int MagDiameter = MagPixelCount * MagPixelSize;
+        // Mouse-wheel zoom for the magnifier (PowerToys-style). Scroll up = zoom in (fewer, larger
+        // source pixels), down = zoom out. The cursor doesn't move, so a full invalidate repaints
+        // the resized disc in place; wheel events are low-frequency so the full repaint is cheap.
+        private void OnMouseWheel(object? sender, MouseEventArgs e)
+        {
+            int prev = _zoomIndex;
+            if (e.Delta > 0) _zoomIndex = Math.Max(0, _zoomIndex - 1);
+            else if (e.Delta < 0) _zoomIndex = Math.Min(ZoomLevels.Length - 1, _zoomIndex + 1);
+            if (_zoomIndex != prev) Invalidate();
+        }
+
+        // Magnifier zoom — PowerToys-style mouse-wheel zoom. Each level is (source-pixel count
+        // across the disc, on-screen px per pixel); counts are ODD so the centre pixel sits exactly
+        // under the cursor. Scrolling up steps toward fewer/larger pixels (more magnification).
+        // Index 2 (11 × 13 = 143 px disc) is the original fixed magnifier. The disc size varies a
+        // little per level; ComputeCursorLabelRect / DrawMagnifier read these as LIVE values so the
+        // layout + flip-on-edge logic always tracks the current zoom.
+        private static readonly (int count, int size)[] ZoomLevels =
+        {
+            (7, 24),   // 168 px disc — most zoomed in
+            (9, 18),   // 162 px
+            (11, 13),  // 143 px — default
+            (15, 11),  // 165 px
+            (21, 9),   // 189 px — most zoomed out
+        };
+        private int _zoomIndex = 2;
+        private int MagPixelCount => ZoomLevels[_zoomIndex].count;
+        private int MagPixelSize => ZoomLevels[_zoomIndex].size;
+        private int MagDiameter => MagPixelCount * MagPixelSize;
         private const int MagLabelGap = 8;
-        // Two-line chip: X/Y coords + sampled HEX. Must match the actual rendered height so
-        // the flip-on-edge logic in DrawMagnifier + GetCurrentMagnifierRect lands cleanly.
-        private const int MagLabelHeight = 40;
+        // Three-line chip: X/Y coords + HEX + RGB. Must match the rendered height so the
+        // flip-on-edge logic in DrawMagnifier + ComputeCursorLabelRect lands cleanly.
+        private const int MagLabelHeight = 56;
         private const int MagOffset = 20;
-        private const int MagTotalHeight = MagDiameter + MagLabelGap + MagLabelHeight;
+        private int MagTotalHeight => MagDiameter + MagLabelGap + MagLabelHeight;
 
         // Approximates the magnifier's bounding box for OnMouseMove's invalidate. The
         // actual paint rect is captured back into _lastCursorLabelRect inside DrawMagnifier
@@ -418,35 +441,50 @@ namespace TrueReplayer.Services
             //      need the colour; suppress the line to keep the chip compact.
             string coordText = $"X: {absX}  Y: {absY}";
             bool showHex = _pointPick;
-            string hexText = "—";
+            Color? sampled = null;
             if (showHex
                 && _cursorPoint.X >= 0 && _cursorPoint.X < _screenshot.Width
                 && _cursorPoint.Y >= 0 && _cursorPoint.Y < _screenshot.Height)
             {
-                hexText = TrueReplayer.Services.PixelColorService.ToHex(
-                    _screenshot.GetPixel(_cursorPoint.X, _cursorPoint.Y));
+                sampled = _screenshot.GetPixel(_cursorPoint.X, _cursorPoint.Y);
             }
+            string hexText = sampled.HasValue
+                ? TrueReplayer.Services.PixelColorService.ToHex(sampled.Value)
+                : "—";
+            // RGB readout alongside HEX — PowerToys shows multiple formats; this is the second one.
+            string rgbText = sampled.HasValue
+                ? $"RGB  {sampled.Value.R}, {sampled.Value.G}, {sampled.Value.B}"
+                : "";
 
             using var coordFont = new Font("Segoe UI", 10f, FontStyle.Regular);
-            using var hexFont = new Font("Consolas", 9.5f, FontStyle.Regular);
+            using var hexFont = new Font("Consolas", 10.5f, FontStyle.Bold);
+            using var rgbFont = new Font("Consolas", 9f, FontStyle.Regular);
             var coordSize = g.MeasureString(coordText, coordFont);
             var hexSize = showHex ? g.MeasureString(hexText, hexFont) : SizeF.Empty;
+            var rgbSize = (showHex && rgbText.Length > 0) ? g.MeasureString(rgbText, rgbFont) : SizeF.Empty;
 
-            // Chip sized per content — full height when HEX is shown, half when not.
-            float chipW = Math.Max(coordSize.Width, hexSize.Width) + 14;
+            // Chip sized per content — full (3-line) height when picking colour, compact otherwise.
+            float chipW = Math.Max(coordSize.Width, Math.Max(hexSize.Width, rgbSize.Width)) + 16;
             float chipH = showHex ? MagLabelHeight : (coordSize.Height + 6);
             float chipX = magX + (MagDiameter - chipW) / 2;
             float chipY = magY + MagDiameter + MagLabelGap;
-            using (var chipBg = new SolidBrush(Color.FromArgb(220, 0, 0, 0)))
+            using (var chipBg = new SolidBrush(Color.FromArgb(225, 0, 0, 0)))
                 g.FillRoundedRectangle(chipBg, chipX, chipY, chipW, chipH, 5);
             using (var chipFg = new SolidBrush(Color.FromArgb(255, 96, 205, 255)))
+            using (var rgbFg = new SolidBrush(Color.FromArgb(210, 197, 197, 197)))
             {
                 float coordX = chipX + (chipW - coordSize.Width) / 2;
                 g.DrawString(coordText, coordFont, chipFg, coordX, chipY + 3);
                 if (showHex)
                 {
                     float hexX = chipX + (chipW - hexSize.Width) / 2;
-                    g.DrawString(hexText, hexFont, chipFg, hexX, chipY + 3 + coordSize.Height + 1);
+                    float hexY = chipY + 3 + coordSize.Height + 1;
+                    g.DrawString(hexText, hexFont, chipFg, hexX, hexY);
+                    if (rgbText.Length > 0)
+                    {
+                        float rgbX = chipX + (chipW - rgbSize.Width) / 2;
+                        g.DrawString(rgbText, rgbFont, rgbFg, rgbX, hexY + hexSize.Height + 1);
+                    }
                 }
             }
 
