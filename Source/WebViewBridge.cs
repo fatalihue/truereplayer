@@ -165,12 +165,47 @@ namespace TrueReplayer
         // instance so Dispose can stop the timer (and the lambdas can read/clear it).
         private System.Threading.Timer? _selectInteractionTimer;
         private DateTime? _selectInteractionStart;
+        // Keys spared by the native-typing cleanup in the TypingCaptured handler: they
+        // don't change the field's value, so the captured BrowserType text can't replay
+        // their effect (submit, focus move, dismiss). "Return" is the raw name the
+        // keyboard hook records (WinForms Keys enum); the friendlier variants are
+        // included defensively in case the hook's naming changes. Backspace/Delete are
+        // deliberately NOT spared — their effect is already reflected in the captured value.
+        private static readonly HashSet<string> PreservedTypingKeys =
+            new(StringComparer.OrdinalIgnoreCase) { "Return", "Enter", "Tab", "Escape", "Esc" };
+
         private void EndSelectInteraction()
         {
             InputHookManager.SuppressMouseRecording = false;
             _selectInteractionTimer?.Dispose();
             _selectInteractionTimer = null;
+            var interactionStart = _selectInteractionStart;
             _selectInteractionStart = null;
+
+            // Cancel paths (blur, Esc, safety timeout) never reach the SelectChanged
+            // cleanup, so the race-leaked LeftClickDown from opening the dropdown — and
+            // the Esc tap that dismissed it — used to survive as orphan rows. Native
+            // click rows inside the window are leaks by definition: the OS mouse hook
+            // was suppressed for the whole interaction, so only the pre-flag race can
+            // have produced them. (The picked path also runs this, harmlessly — the
+            // SelectChanged handler does its own, wider cleanup right after.)
+            if (interactionStart == null || !recordingService.IsRecording) return;
+            bool removedAny = false;
+            for (int i = actions.Count - 1; i >= 0 && i >= actions.Count - 8; i--)
+            {
+                var a = actions[i];
+                if (a.RecordedAt < interactionStart.Value) continue;
+                bool isNativeClick = a.ActionType is "LeftClickDown" or "LeftClickUp"
+                    or "RightClickDown" or "RightClickUp" or "LeftClick" or "RightClick";
+                bool isEscTap = a.ActionType is "KeyDown" or "KeyUp" or "Keystroke"
+                    && (a.Key is "Escape" or "Esc");
+                if (isNativeClick || isEscTap)
+                {
+                    actions.RemoveAt(i);
+                    removedAny = true;
+                }
+            }
+            if (removedAny) HasUnsavedChanges = true;
         }
 
         public WebViewBridge(
@@ -268,6 +303,29 @@ namespace TrueReplayer
                     {
                         if (!recordingService.IsRecording) return;
                         if (string.IsNullOrEmpty(text)) return;
+
+                        // The keys this typing produced were ALSO recorded natively by the OS
+                        // keyboard hook — left in place they'd double-type at replay (native
+                        // keystrokes + BrowserType text). Walk the contiguous key-row tail and
+                        // wipe them BEFORE locating the BrowserType: long bursts (>8 rows) used
+                        // to push the field's action out of the 8-row search window below,
+                        // producing a duplicate BrowserType instead of filling the original.
+                        // Non-text keys (Enter/Tab/Esc) are preserved — they carry intent
+                        // (submit / focus move) that the captured value can't express. Native
+                        // click rows are skipped, not a stop: the outside-click that blurred
+                        // the field reaches the OS hook before this message clears the pipe,
+                        // so its LeftClickDown may already sit at the tail (the ElementClicked
+                        // dedup removes it moments later). The walk stops at any other row
+                        // (normally the BrowserType created by the field click), so keys typed
+                        // before the field was focused survive.
+                        for (int i = actions.Count - 1; i >= 0; i--)
+                        {
+                            var row = actions[i];
+                            if (row.ActionType is "LeftClickDown" or "LeftClickUp" or "RightClickDown"
+                                or "RightClickUp" or "LeftClick" or "RightClick") continue;
+                            if (row.ActionType is not ("KeyDown" or "KeyUp" or "Keystroke")) break;
+                            if (!PreservedTypingKeys.Contains(row.Key ?? "")) actions.RemoveAt(i);
+                        }
 
                         for (int i = actions.Count - 1; i >= 0 && i >= actions.Count - 8; i--)
                         {

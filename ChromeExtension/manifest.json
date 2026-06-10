@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "TrueReplayer Browser Bridge",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwazyeknawBCL7EngJGTu44GtVsQFy9EvR0hobkOlV0be/5q3QMPUIHqYN52lF0to2GW/9I1FBw+ZmnUGpxmmpwatW9wgtNSFgv9Jp14FPgibX4Hd6YFe43bqQaymUG0tWnmwyrM9zdT0cdn1R2gRVANOp6N0+jzd4CfXZsZbNBNi6hWqBLFBcPVEW3QGG1DrJ2lPNgBHd1EHeg9fsiUPbJTecL3t2N+7KlxBRhJo7qusurum2vnalVATlayVVUG9TVybXVw1ok7dYoPell/P+ot05ZouAMul7bAOTQ26y8XFKScSpxRPM8ouT/KCIMKpFfDZWIFJs9AnB+/gTUOM8QIDAQAB",
-  "version": "1.4.2",
+  "version": "1.4.4",
   "description": "Connect TrueReplayer to browser elements for coordinate-free automation",
   "permissions": ["activeTab", "alarms", "nativeMessaging", "tabs"],
   "background": {

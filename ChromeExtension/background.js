@@ -207,6 +207,9 @@ function connect() {
               typeAppend: msg.typeAppend,
               typePaste: msg.typePaste,
               typeDelay: msg.typeDelay,
+              // BrowserSelectOption — without this forward, content.js falls back to
+              // 'text' matching and "Match by Value/Index" silently misbehaves.
+              selectMatchMode: msg.selectMatchMode,
             }).then((response) => {
               // Forward response — preserves response.success and response.error (object form)
               sendToNative({

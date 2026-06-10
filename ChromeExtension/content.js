@@ -228,13 +228,26 @@
     chrome.runtime.sendMessage({ type: 'selectInteractionStart' });
   }
 
-  // blur on a <select> — covers the "user opened then cancelled" path (Esc or click
-  // outside the popup without picking). Without this, the suppress flag would only clear
-  // via the safety timeout, eating any unrelated clicks the user makes immediately after.
+  // blur on a <select> — covers the "user opened then cancelled by clicking outside" path.
+  // Without this, the suppress flag would only clear via the safety timeout, eating any
+  // unrelated clicks the user makes immediately after.
   function onSelectBlur(e) {
     if (!recording) return;
     if (!e.target || e.target.tagName !== 'SELECT') return;
     chrome.runtime.sendMessage({ type: 'selectInteractionEnd' });
+  }
+
+  // Esc dismisses a native <select> popup WITHOUT blurring the element — no blur, no
+  // change, so neither bracket-closer above fires and the suppress flag would sit until
+  // the 15 s safety timeout. Close the bracket explicitly on Esc while a <select> has
+  // focus. (The backend also wipes the Esc tap the OS keyboard hook recorded.)
+  function onRecordKeyDown(e) {
+    if (!recording) return;
+    if (e.key !== 'Escape') return;
+    const el = document.activeElement;
+    if (el && el.tagName === 'SELECT') {
+      chrome.runtime.sendMessage({ type: 'selectInteractionEnd' });
+    }
   }
 
   // Captures changes to native <select> dropdowns. The companion to the SELECT skip
@@ -278,6 +291,7 @@
     document.addEventListener('change', onSelectChange, true);
     document.addEventListener('mousedown', onSelectMouseDown, true);
     document.addEventListener('blur', onSelectBlur, true);
+    document.addEventListener('keydown', onRecordKeyDown, true);
   }
 
   function stopRecording() {
@@ -291,6 +305,7 @@
     document.removeEventListener('change', onSelectChange, true);
     document.removeEventListener('mousedown', onSelectMouseDown, true);
     document.removeEventListener('blur', onSelectBlur, true);
+    document.removeEventListener('keydown', onRecordKeyDown, true);
   }
 
   // ── Pick Element Mode (single-pick for edit panel) ──
@@ -1263,4 +1278,16 @@
         sendResponse({ ok: true });
     }
   });
+
+  // Recording state arrives via 'setRecording' broadcasts, but a page loaded
+  // MID-recording (the user navigated while recording) gets a fresh content script
+  // that never saw the broadcast — browser events on the new page silently stopped
+  // being captured. Pull the current state from the background on load so recording
+  // survives navigations.
+  try {
+    chrome.runtime.sendMessage({ type: 'getStatus' }, (status) => {
+      if (chrome.runtime.lastError) return;
+      if (status && status.recording) startRecording();
+    });
+  } catch { /* extension context invalidated (e.g. extension was reloaded) */ }
 })();

@@ -14,7 +14,7 @@ namespace TrueReplayer.Services
     public class BrowserBridgeService : IDisposable
     {
         private const string PipeName = "TrueReplayerBridge";
-        public const string ExpectedExtensionVersion = "1.4.2";
+        public const string ExpectedExtensionVersion = "1.4.4";
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
         private NamedPipeServerStream? _pipeServer;
         private StreamReader? _reader;
@@ -435,10 +435,10 @@ namespace TrueReplayer.Services
             var seconds = timeoutMs / 1000;
             return command switch
             {
-                "click" => $"Left Click timed out after {seconds}s. Element not found or not visible.",
-                "rightClick" => $"Right Click timed out after {seconds}s. Element not found or not visible.",
-                "type" => $"Input Text timed out after {seconds}s. Target field not found or not visible.",
-                "waitElement" => $"Wait timed out after {seconds}s. Element not found on the page.",
+                "click" => $"Click Element timed out after {seconds}s. Element not found or not visible.",
+                "rightClick" => $"Right Click Element timed out after {seconds}s. Element not found or not visible.",
+                "type" => $"Type Text timed out after {seconds}s. Target field not found or not visible.",
+                "waitElement" => $"Wait Element timed out after {seconds}s. Element not found on the page.",
                 "navigate" => $"Page didn't finish loading after {seconds}s.",
                 "selectOption" => $"Select Option timed out after {seconds}s. The <select> element wasn't found.",
                 _ => $"Browser action timed out after {seconds}s."
