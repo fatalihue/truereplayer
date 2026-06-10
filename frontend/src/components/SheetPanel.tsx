@@ -116,6 +116,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const [isPicking, setIsPicking] = useState(false);
 
   // #6, #7, #5 — new browser fields
+  // Rare-key chips (Escape/Backspace/Delete/arrows) live behind a "⋯" expander so the
+  // default palette stays at the two rows users actually reach for. Ephemeral on
+  // purpose — collapses again when the panel remounts for another action.
+  const [showMoreTypeChips, setShowMoreTypeChips] = useState(false);
   const [waitMode, setWaitMode] = useState<string>('appears');
   const [urlWaitPattern, setUrlWaitPattern] = useState('');
   const [postNavigateSelector, setPostNavigateSelector] = useState('');
@@ -1039,10 +1043,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   : isIf ? 'If'
                   : isElse ? 'Else'
                   : isEndIf ? 'End If'
-                  : actionType === 'BrowserClick' ? 'Left Click'
-                  : actionType === 'BrowserRightClick' ? 'Right Click'
-                  : actionType === 'BrowserType' ? 'Input Text'
-                  : actionType === 'BrowserWaitElement' ? 'Wait'
+                  : actionType === 'BrowserClick' ? 'Click Element'
+                  : actionType === 'BrowserRightClick' ? 'Right Click Element'
+                  : actionType === 'BrowserType' ? 'Type Text'
+                  : actionType === 'BrowserWaitElement' ? 'Wait Element'
                   : actionType === 'BrowserNavigate' ? 'Open URL'
                   : actionType === 'BrowserSelectOption' ? 'Select Option'
                   : isClickHalf
@@ -1855,15 +1859,32 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   apiRef={browserTextEditorRef}
                 />
               </div>
-              {/* Data placeholders — replaced with values before typing. Names match the
-                  SendText dialog's chip palette so users don't have to learn two vocabularies.
-                  insertText() drops the token at the cursor inside the Lexical editor; the
-                  TokenAutoTransformPlugin immediately converts it into a chip. Gold hover
-                  is shared across every chip button (data + action + arrows) so the palette
-                  reads as one cohesive control instead of three different categories. */}
+              {/* Chip palette — two visible rows of the tokens users actually reach for,
+                  rare keys behind the "⋯" expander. Names match the SendText dialog's
+                  vocabulary so users don't have to learn two. insertText() drops the
+                  token at the cursor inside the Lexical editor; the
+                  TokenAutoTransformPlugin immediately converts it into a chip. Gold
+                  hover is shared across every chip button so the palette reads as one
+                  cohesive control. */}
               <div className="flex flex-wrap gap-1 mt-2">
                 {[
-                  { var: '{Clipboard}', label: 'Clipboard' },
+                  { var: '{Clipboard}', label: 'Clipboard', title: 'Inserts the clipboard value at this position' },
+                  { var: '{Enter}', label: 'Enter', title: 'Press Enter key at this position' },
+                  { var: '{Tab}', label: 'Tab', title: 'Press Tab key at this position' },
+                ].map(item => (
+                  <button
+                    key={item.var}
+                    type="button"
+                    onClick={() => browserTextEditorRef.current?.insertText(item.var)}
+                    className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
+                    title={item.title}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-1 mt-1">
+                {[
                   { var: '{Date}', label: 'Date' },
                   { var: '{Time}', label: 'Time' },
                   { var: '{DateTime}', label: 'DateTime' },
@@ -1878,51 +1899,46 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     {item.label}
                   </button>
                 ))}
+                {/* "⋯" expander — accent "active" state while open mirrors the SendText
+                    Advanced chip's toggle affordance. */}
+                <button
+                  type="button"
+                  onClick={() => setShowMoreTypeChips(v => !v)}
+                  className={`px-2 py-0.5 text-[11px] font-mono border rounded transition-colors ${
+                    showMoreTypeChips
+                      ? 'text-accent-light bg-accent-solid/15 border-accent-solid/50'
+                      : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40'
+                  }`}
+                  title={showMoreTypeChips ? 'Hide extra keys' : 'More keys (Escape, Backspace, Delete, arrows)'}
+                >
+                  ⋯
+                </button>
               </div>
-              {/* Action keys — dispatched as keydown/keyup at this position. Full words to
-                  match the SendText vocabulary. Set is what the extension's BrowserType
-                  command actually supports (enter / tab / escape / backspace / delete /
-                  up / down / left / right). */}
-              <div className="flex flex-wrap gap-1 mt-1">
-                {[
-                  { var: '{Enter}', label: 'Enter' },
-                  { var: '{Tab}', label: 'Tab' },
-                  { var: '{Escape}', label: 'Escape' },
-                  { var: '{Backspace}', label: 'Backspace' },
-                  { var: '{Delete}', label: 'Delete' },
-                ].map(item => (
-                  <button
-                    key={item.var}
-                    type="button"
-                    onClick={() => browserTextEditorRef.current?.insertText(item.var)}
-                    className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
-                    title={`Press ${item.label} key at this position`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-              {/* Arrow keys — second row so the chip set doesn't sprawl. The extension
-                  supports them; useful for inputs that respond to arrow navigation
-                  (sliders, listboxes, date pickers). */}
-              <div className="flex flex-wrap gap-1 mt-1">
-                {[
-                  { var: '{Up}', label: 'Up' },
-                  { var: '{Down}', label: 'Down' },
-                  { var: '{Left}', label: 'Left' },
-                  { var: '{Right}', label: 'Right' },
-                ].map(item => (
-                  <button
-                    key={item.var}
-                    type="button"
-                    onClick={() => browserTextEditorRef.current?.insertText(item.var)}
-                    className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
-                    title={`Press ${item.label} arrow key at this position`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
+              {/* Rare keys — everything the extension's BrowserType parser supports
+                  beyond the common set (escape / backspace / delete / arrows). */}
+              {showMoreTypeChips && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {[
+                    { var: '{Escape}', label: 'Escape' },
+                    { var: '{Backspace}', label: 'Backspace' },
+                    { var: '{Delete}', label: 'Delete' },
+                    { var: '{Up}', label: 'Up' },
+                    { var: '{Down}', label: 'Down' },
+                    { var: '{Left}', label: 'Left' },
+                    { var: '{Right}', label: 'Right' },
+                  ].map(item => (
+                    <button
+                      key={item.var}
+                      type="button"
+                      onClick={() => browserTextEditorRef.current?.insertText(item.var)}
+                      className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
+                      title={`Press ${item.label} key at this position`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             )}
 
@@ -1989,7 +2005,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   <option value="index">Index (0-based)</option>
                 </select>
                 <div className="text-[10px] text-text-tertiary mt-1 leading-tight">
-                  Only works on native &lt;select&gt; elements. For React-Select / Select2 use BrowserClick.
+                  Only works on native &lt;select&gt; elements. For React-Select / Select2 use Click Element.
                 </div>
               </div>
             </>

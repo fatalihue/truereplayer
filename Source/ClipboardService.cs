@@ -84,11 +84,11 @@ namespace TrueReplayer.Services
             return type switch
             {
                 "WaitImage" => "Wait Image",
-                "BrowserClick" => "Left Click",
-                "BrowserRightClick" => "Right Click",
-                "BrowserType" => "Input Text",
+                "BrowserClick" => "Click Element",
+                "BrowserRightClick" => "Right Click Element",
+                "BrowserType" => "Type Text",
                 "BrowserSelectOption" => "Select Option",
-                "BrowserWaitElement" => "Wait",
+                "BrowserWaitElement" => "Wait Element",
                 "BrowserNavigate" => "Open URL",
                 "RunProfile" => "Run Profile",
                 _ => SplitCamelCase(type)

@@ -53,11 +53,11 @@ Capturadas automaticamente durante a gravação. Cada linha pode ser editada ou 
 
 ## Ações de Navegador
 Disponíveis quando a [extensão Chrome](ChromeExtension) está instalada e conectada.
-- **Browser Click / Right Click** — clica em um seletor CSS
-- **Browser Type** — digita em um campo (modo append ou paste, delay por caractere configurável)
-- **Browser Select Option** — escolhe uma `<option>` de `<select>` por texto, value ou índice
-- **Browser Wait Element** — aguarda elemento aparecer, sumir, habilitar ou bater texto
-- **Browser Navigate** — abre uma URL (mesma aba ou nova); espera opcional por URL/seletor após o load
+- **Click Element / Right Click Element** — clica em um seletor CSS
+- **Type Text** — digita em um campo (modo append ou paste, delay por caractere configurável)
+- **Select Option** — escolhe uma `<option>` de `<select>` por texto, value ou índice
+- **Wait Element** — aguarda elemento aparecer, sumir, habilitar ou bater texto
+- **Open URL** — abre uma URL (mesma aba ou nova); espera opcional por URL/seletor após o load
 
 ---
 

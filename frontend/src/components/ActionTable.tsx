@@ -1316,11 +1316,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       <ActionIcon actionType={action.actionType} />
                       {action.actionType === 'WaitImage' ? 'Wait Image'
                         : action.actionType === 'WaitPixelColor' ? 'Pixel Color'
-                        : action.actionType === 'BrowserClick' ? 'Left Click'
-                        : action.actionType === 'BrowserRightClick' ? 'Right Click'
-                        : action.actionType === 'BrowserType' ? 'Input Text'
+                        // Browser labels carry "Element"/"Text" so they never read as the
+                        // desktop LeftClick/SendText pills — ambiguity fix (P2).
+                        : action.actionType === 'BrowserClick' ? 'Click Element'
+                        : action.actionType === 'BrowserRightClick' ? 'Right Click Element'
+                        : action.actionType === 'BrowserType' ? 'Type Text'
                         : action.actionType === 'BrowserSelectOption' ? 'Select Option'
-                        : action.actionType === 'BrowserWaitElement' ? 'Wait'
+                        : action.actionType === 'BrowserWaitElement' ? 'Wait Element'
                         : action.actionType === 'BrowserNavigate' ? 'Open URL'
                         : action.actionType === 'RunProfile' ? 'Run Profile'
                         : action.actionType === 'Pause' ? 'Pause'

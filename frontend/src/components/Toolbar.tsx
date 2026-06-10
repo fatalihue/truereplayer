@@ -658,11 +658,11 @@ export function Toolbar(_props: ToolbarProps) {
                   Insert Browser Action
                 </div>
                 {([
-                  { type: 'BrowserClick', label: 'Left Click' },
-                  { type: 'BrowserRightClick', label: 'Right Click' },
-                  { type: 'BrowserType', label: 'Input Text' },
+                  { type: 'BrowserClick', label: 'Click Element' },
+                  { type: 'BrowserRightClick', label: 'Right Click Element' },
+                  { type: 'BrowserType', label: 'Type Text' },
                   { type: 'BrowserSelectOption', label: 'Select Option' },
-                  { type: 'BrowserWaitElement', label: 'Wait' },
+                  { type: 'BrowserWaitElement', label: 'Wait Element' },
                   { type: 'BrowserNavigate', label: 'Open URL' },
                 ] as const).map((item) => (
                   <button

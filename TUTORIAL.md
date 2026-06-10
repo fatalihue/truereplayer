@@ -53,11 +53,11 @@ Captured automatically during Recording. Each row can be edited or duplicated af
 
 ## Browser Actions
 Available when the [Chrome extension](ChromeExtension) is installed and connected.
-- **Browser Click / Right Click** — click a CSS selector
-- **Browser Type** — type into a field (append or paste mode, configurable per-char delay)
-- **Browser Select Option** — pick a `<select>` option by text, value, or index
-- **Browser Wait Element** — wait for an element to appear, disappear, become enabled, or match text
-- **Browser Navigate** — open a URL (same tab or new tab); optional URL/selector wait after load
+- **Click Element / Right Click Element** — click a CSS selector
+- **Type Text** — type into a field (append or paste mode, configurable per-char delay)
+- **Select Option** — pick a `<select>` option by text, value, or index
+- **Wait Element** — wait for an element to appear, disappear, become enabled, or match text
+- **Open URL** — open a URL (same tab or new tab); optional URL/selector wait after load
 
 ---
 

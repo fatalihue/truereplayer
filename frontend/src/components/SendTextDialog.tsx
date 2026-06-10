@@ -112,8 +112,12 @@ function SnippetEditForm({
 // ── Variable definitions (organized by group, all chip/grid style) ──
 
 interface VarChipItem { var: string; label: string; action?: 'transform'; breakAfter?: boolean }
-interface VarGroup { label: string; items: VarChipItem[] }
+interface VarGroup { label: string; items: VarChipItem[]; collapsible?: boolean }
 
+// Two visible groups carry the tokens users actually reach for (mirrors the
+// BrowserType chip palette in SheetPanel: Clipboard/Enter/Tab + Date/Time/DateTime).
+// Everything else — rare keys and navigation — lives in a collapsed "More keys"
+// group so the panel doesn't sprawl.
 const VARIABLE_GROUPS: VarGroup[] = [
   {
     label: 'Clipboard',
@@ -123,28 +127,24 @@ const VARIABLE_GROUPS: VarGroup[] = [
     ],
   },
   {
-    label: 'Action Keys',
+    label: 'Common',
     items: [
       { var: '{enter}', label: 'Enter' },
       { var: '{tab}', label: 'Tab' },
-      { var: '{space}', label: 'Space', breakAfter: true },
-      { var: '{backspace}', label: 'Backspace' },
-      { var: '{delete}', label: 'Delete' },
-      { var: '{escape}', label: 'Escape' },
-    ],
-  },
-  {
-    label: 'Utility',
-    items: [
+      { var: '{delay:500}', label: 'Delay', breakAfter: true },
       { var: '{date}', label: 'Date' },
       { var: '{time}', label: 'Time' },
       { var: '{datetime}', label: 'DateTime' },
-      { var: '{delay:500}', label: 'Delay' },
     ],
   },
   {
-    label: 'Navigation',
+    label: 'More Keys',
+    collapsible: true,
     items: [
+      { var: '{space}', label: 'Space' },
+      { var: '{backspace}', label: 'Backspace' },
+      { var: '{delete}', label: 'Delete' },
+      { var: '{escape}', label: 'Escape', breakAfter: true },
       { var: '{home}', label: 'Home' },
       { var: '{end}', label: 'End' },
       { var: '{pageup}', label: 'PageUp' },
@@ -264,6 +264,9 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
   const [deletingSnippetId, setDeletingSnippetId] = useState<string | null>(null);
   const [snippetFilter, setSnippetFilter] = useState('');
   const [transformOpen, setTransformOpen] = useState(false);
+  // "More Keys" group starts collapsed — rare keys (Space/Backspace/arrows/…) only
+  // show on demand so the Variables panel stays compact.
+  const [moreKeysOpen, setMoreKeysOpen] = useState(false);
   const lexicalApiRef = useRef<LexicalEditorHandle | null>(null);
 
   useEffect(() => {
@@ -458,9 +461,23 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                 <div className="relative flex-1 min-h-0 overflow-y-auto">
                   {VARIABLE_GROUPS.map((group) => (
                     <div key={group.label}>
-                      <div className="px-3 py-1.5 text-[10px] font-semibold text-text-tertiary uppercase tracking-wide border-b border-border-subtle">
-                        {group.label}
-                      </div>
+                      {group.collapsible ? (
+                        // Collapsible header — whole row toggles. Chevron flips to signal
+                        // state; collapsed by default so rare keys don't crowd the panel.
+                        <button
+                          type="button"
+                          onClick={() => setMoreKeysOpen((v) => !v)}
+                          className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-semibold text-text-tertiary uppercase tracking-wide border-b border-border-subtle hover:text-text-primary transition-colors"
+                        >
+                          {group.label}
+                          <ChevronRight size={12} className={`transition-transform ${moreKeysOpen ? 'rotate-90' : ''}`} />
+                        </button>
+                      ) : (
+                        <div className="px-3 py-1.5 text-[10px] font-semibold text-text-tertiary uppercase tracking-wide border-b border-border-subtle">
+                          {group.label}
+                        </div>
+                      )}
+                      {(!group.collapsible || moreKeysOpen) && (
                       <div className="flex flex-wrap gap-1 px-3 py-2">
                         {group.items.map((item) => (
                           <React.Fragment key={item.var}>
@@ -499,6 +516,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                           </React.Fragment>
                         ))}
                       </div>
+                      )}
                     </div>
                   ))}
                   {/* Tip */}
