@@ -1450,15 +1450,18 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 const showDropAfter = dragFolder && dropFolderIndex === folderIdx + 1 && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder) && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder) + 1;
                 return (
                   <div key={folder.name}>
+                    {/* Insertion gap — a real (layout-affecting) slot so neighbouring
+                        folders physically part to open space, matching the grid's drag
+                        language (replaces the old accent rail line). */}
                     {showDropBefore && (
-                      <div className="flex items-center gap-1 mx-1 my-1">
-                        <div className="w-1.5 h-1.5 rounded-full bg-accent-solid shrink-0" />
-                        <div
-                          className="flex-1 h-[3px] bg-accent-solid rounded-full"
-                          style={{ boxShadow: '0 0 6px color-mix(in srgb, var(--color-accent) 60%, transparent)' }}
-                        />
-                        <div className="w-1.5 h-1.5 rounded-full bg-accent-solid shrink-0" />
-                      </div>
+                      <div
+                        className="drop-gap-slot mx-1 my-1 rounded border-2 border-dashed overflow-hidden"
+                        style={{
+                          height: '30px',
+                          borderColor: 'color-mix(in srgb, var(--color-accent) 45%, transparent)',
+                          background: 'color-mix(in srgb, var(--color-accent) 6%, transparent)',
+                        }}
+                      />
                     )}
                     <div
                       ref={(el) => { if (el) folderRefs.current.set(folder.name, el); else folderRefs.current.delete(folder.name); }}
@@ -1519,14 +1522,14 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       )}
                     </div>
                     {showDropAfter && (
-                      <div className="flex items-center gap-1 mx-1 my-1">
-                        <div className="w-1.5 h-1.5 rounded-full bg-accent-solid shrink-0" />
-                        <div
-                          className="flex-1 h-[3px] bg-accent-solid rounded-full"
-                          style={{ boxShadow: '0 0 6px color-mix(in srgb, var(--color-accent) 60%, transparent)' }}
-                        />
-                        <div className="w-1.5 h-1.5 rounded-full bg-accent-solid shrink-0" />
-                      </div>
+                      <div
+                        className="drop-gap-slot mx-1 my-1 rounded border-2 border-dashed overflow-hidden"
+                        style={{
+                          height: '30px',
+                          borderColor: 'color-mix(in srgb, var(--color-accent) 45%, transparent)',
+                          background: 'color-mix(in srgb, var(--color-accent) 6%, transparent)',
+                        }}
+                      />
                     )}
                   </div>
                 );
@@ -2510,16 +2513,30 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         );
       })()}
 
-      {/* Floating drag preview — shared by profile drag and folder drag. Sits 32×32px
-          off the cursor to clear the Windows "grabbing" cursor visual. Identical UX to
-          the ActionTable chip. */}
+      {/* Floating drag ghost — shared by profile drag and folder drag. Centred on
+          the cursor with the same lifted-card treatment (tilt, shadow, translucency)
+          as the ActionTable's dnd-kit DragOverlay, so both panels speak the same
+          drag language. transform-based positioning keeps it on the compositor. */}
       {dragCursorPos !== null && (dragProfile || dragFolder) && (
         <div
-          className="fixed pointer-events-none z-50 flex items-center gap-1.5 px-2.5 py-1 rounded bg-bg-card border border-accent-solid/60 shadow-lg text-[11px] text-text-primary"
-          style={{ left: dragCursorPos.x + 32, top: dragCursorPos.y + 32 }}
+          className="fixed pointer-events-none z-50"
+          style={{
+            top: 0,
+            left: 0,
+            transform: `translate3d(${dragCursorPos.x}px, ${dragCursorPos.y}px, 0) translate(-50%, -50%) rotate(1.5deg)`,
+            willChange: 'transform',
+          }}
         >
-          {dragFolder ? <FolderOpen size={11} className="text-accent shrink-0" /> : <FilePlus size={11} className="text-accent shrink-0" />}
-          {dragFolder ?? dragProfile}
+          <div
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-bg-card border border-border-default text-[11px] font-medium text-text-primary"
+            style={{
+              opacity: 0.88,
+              boxShadow: '0 12px 32px rgba(0,0,0,0.5), 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent)',
+            }}
+          >
+            {dragFolder ? <FolderOpen size={12} className="text-accent shrink-0" /> : <FilePlus size={12} className="text-accent shrink-0" />}
+            {dragFolder ?? dragProfile}
+          </div>
         </div>
       )}
 

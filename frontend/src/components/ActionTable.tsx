@@ -1,5 +1,10 @@
 import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo, Fragment } from 'react';
 import { createPortal } from 'react-dom';
+import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, closestCenter, pointerWithin } from '@dnd-kit/core';
+import type { CollisionDetection, DragStartEvent, DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import { snapCenterToCursor } from '@dnd-kit/modifiers';
+import { CSS } from '@dnd-kit/utilities';
 import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
@@ -51,6 +56,46 @@ interface EditingCell {
   // two separate actions:edit messages (field x, field y) so the backend
   // contract stays untouched.
   field: 'delay' | 'comment' | 'coords' | 'key';
+}
+
+// Pointer sensor that refuses to start a drag from interactive elements —
+// inline editors, checkboxes, chip buttons, selects. Combined with the 8 px
+// activation distance this keeps single-click-to-edit fully functional: a
+// plain click never becomes a drag, and selecting text inside an inline
+// editor never moves rows.
+// Pointer-first collision detection: "over" is the row under the CURSOR, not
+// the row nearest the (chip-sized, offset) DragOverlay rect — closestCenter on
+// the overlay drifted the target a couple of rows ahead of where the user was
+// pointing. Falls back to closestCenter when the pointer sits outside every
+// row (e.g. in the empty area below a short list).
+const pointerFirstCollision: CollisionDetection = (args) => {
+  const hits = pointerWithin(args);
+  return hits.length > 0 ? hits : closestCenter(args);
+};
+
+class RowPointerSensor extends PointerSensor {
+  static activators = [{
+    eventName: 'onPointerDown' as const,
+    handler: ({ nativeEvent }: { nativeEvent: PointerEvent }) => {
+      if (nativeEvent.button !== 0) return false;
+      const target = nativeEvent.target as HTMLElement | null;
+      if (target?.closest('input, textarea, select, button, [contenteditable="true"]')) return false;
+      return true;
+    },
+  }];
+}
+
+// Render-prop shell: gives each <tr> its useSortable wiring (hooks can't be
+// called inside actions.map directly) while keeping the large row JSX in
+// ActionTable's own lexical scope — extracting the whole row into a component
+// would mean threading 30+ closure values through props.
+function SortableRowShell({ id, disabled, children }: {
+  id: string;
+  disabled: boolean;
+  children: (s: ReturnType<typeof useSortable>) => React.ReactNode;
+}) {
+  const sortable = useSortable({ id, disabled });
+  return <>{children(sortable)}</>;
 }
 
 // Friendly pill label — shared between the grid's Action pill and the floating
@@ -602,11 +647,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     }
   }, [armKeyCaptureTimer, disarmKeyCaptureTimer, editingCell, send]);
 
-  // Drag & drop via mouse events (HTML5 drag API doesn't work in WebView2)
+  // Drag & drop via dnd-kit (sortable preset): neighbours slide live while the
+  // row is dragged, the ghost rides in a DragOverlay, and the drop commits the
+  // same actions:reorder payload the old mouse-event implementation produced.
   const isDraggable = !buttonStates.recordingActive && !buttonStates.replayActive && !editingCell;
-  const dragState = useRef<{ indices: number[]; startX: number; startY: number; started: boolean } | null>(null);
   const dragOccurred = useRef(false);
-  const dropTargetRef = useRef<number | null>(null);
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
   // FLIP-on-drop: at mouseup (before the reorder round-trips through the
   // backend) we snapshot every row's viewport top keyed by action id. When the
@@ -665,29 +710,23 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     }
     return target;
   }, []);
-  // 8 px (was 5) — with single-click-to-edit on cells, a jittery click must not
-  // be promoted to a drag, or the click event gets suppressed and the edit never
-  // opens. 8 px still feels instant for a deliberate drag.
-  const DRAG_THRESHOLD = 8;
-  // Auto-scroll zone: when the cursor is within this many pixels of the scroll container's
-  // top or bottom edge during a drag, scroll the container automatically. Without this,
-  // reordering across long lists (50+ actions) is impossible without dropping and re-grabbing.
+  // Auto-scroll zone for the PROFILE drag only (row reorder now uses dnd-kit's
+  // built-in auto-scroll): when the cursor is within this many pixels of the
+  // scroll container's top or bottom edge, scroll the container automatically.
   const AUTOSCROLL_ZONE = 40;
   const AUTOSCROLL_MAX_SPEED = 14; // px per animation frame
-  const autoScrollRaf = useRef<number | null>(null);
-  const cursorY = useRef(0);
-  // Cursor X/Y in state — only used to position the floating drag preview chip, which
-  // renders a "N items" counter near the cursor during a multi-row drag.
-  const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
 
-  const handleRowMouseDown = useCallback((idx: number, e: React.MouseEvent) => {
-    if (!isDraggable || e.button !== 0) return;
-    // Don't initiate drag from input elements (inline editing)
-    if ((e.target as HTMLElement).tagName === 'INPUT') return;
-    // Block dragging Else / EndIf rows on their own — those are structural markers
-    // bound to their parent IF, and moving them in isolation would orphan the block.
-    const t = actions[idx]?.actionType;
-    if (t === 'Else' || t === 'EndIf') return;
+  // ── dnd-kit row reorder ──────────────────────────────────────────────
+  // Sortable ids are the backend action ids (stable across reorders); the
+  // index fallback only exists for the brief pre-migration window where an
+  // old profile's rows have no id yet.
+  const sortableIds = useMemo(() => actions.map((a, i) => a.id ?? `row-${i}`), [actions]);
+  const sensors = useSensors(useSensor(RowPointerSensor, { activationConstraint: { distance: 8 } }));
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+
+  const handleDragStart = useCallback((ev: DragStartEvent) => {
+    const idx = sortableIds.indexOf(String(ev.active.id));
+    if (idx < 0) return;
     let indices = selectedIndices.has(idx)
       ? Array.from(selectedIndices).sort((a, b) => a - b)
       : [idx];
@@ -698,6 +737,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     // respect their explicit selection — they may want to extract the IF + only
     // some of its body rows (the reorder backend will renumber correctly and the
     // load-time validator catches any imbalance the reorder leaves behind).
+    const t = actions[idx]?.actionType;
     if (t === 'If' && !selectedIndices.has(idx)) {
       const endIfIdx = blockInfo.endIfOf.get(idx);
       if (endIfIdx !== undefined && endIfIdx > idx) {
@@ -705,148 +745,63 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         for (let i = idx; i <= endIfIdx; i++) indices.push(i);
       }
     }
-    dragState.current = { indices, startX: e.clientX, startY: e.clientY, started: false };
-    dropTargetRef.current = null;
-    dragOccurred.current = false;
-  }, [isDraggable, selectedIndices, actions, blockInfo]);
+    // Suppress the click that fires after the drop — handleRowClick consumes and
+    // resets the flag (same contract as the old mouse-event implementation).
+    dragOccurred.current = true;
+    setActiveDragId(String(ev.active.id));
+    setDragIndices(indices);
+  }, [sortableIds, selectedIndices, actions, blockInfo]);
 
+  const handleDragEnd = useCallback((ev: DragEndEvent) => {
+    const indices = dragIndices ?? [];
+    setActiveDragId(null);
+    setDragIndices(null);
+    const { active, over } = ev;
+    if (!over || indices.length === 0) return;
+    const a = sortableIds.indexOf(String(active.id));
+    const o = sortableIds.indexOf(String(over.id));
+    if (a < 0 || o < 0 || a === o) return;
+    // Dropping onto a row that's part of the dragged set is a no-op (the slot
+    // is inside the moving block).
+    if (indices.includes(o)) return;
+    // dnd-kit sortable semantics: the active row lands AT `over`'s position
+    // (arrayMove). The backend expects the insertion slot measured against the
+    // ORIGINAL array (0..N): moving down → the slot after `over`; moving up →
+    // the slot at `over`.
+    const target = a < o ? o + 1 : o;
+    // FLIP "first" snapshot — capture where every row sits NOW (transforms
+    // included, i.e. exactly where the user sees them); the useLayoutEffect on
+    // [actions] plays the inverted deltas once the reordered array lands, so
+    // the brief transform-reset frame between drop and backend push never
+    // reads as a teleport.
+    if (tbodyRef.current && document.documentElement.getAttribute('data-animations') === 'true') {
+      const map = new Map<string, number>();
+      tbodyRef.current.querySelectorAll<HTMLTableRowElement>('tr[data-row-id]').forEach(tr => {
+        const id = tr.getAttribute('data-row-id');
+        if (id) map.set(id, tr.getBoundingClientRect().top);
+      });
+      pendingFlipRects.current = { map, at: performance.now() };
+    }
+    send({ type: 'actions:reorder', payload: { indices, targetIndex: target } });
+    setSelectedIndices(new Set());
+  }, [dragIndices, sortableIds, send]);
+
+  // Esc (handled natively by dnd-kit) cancels the drag — clear the visual state;
+  // dragOccurred stays set so the click fired on pointer release is suppressed.
+  const handleDragCancel = useCallback(() => {
+    setActiveDragId(null);
+    setDragIndices(null);
+  }, []);
+
+  // DEV-only test hook: the preview harness flips page visibility at every async
+  // boundary, which makes dnd-kit cancel any synthetic drag mid-flight — real
+  // pointer drags in the app are unaffected, but it makes the end-to-end path
+  // untestable from eval scripts. Exposing the handlers lets tests drive the
+  // start/end contract (drag-set expansion + drop-index math) deterministically.
   useEffect(() => {
-    // Recompute drop target whenever the cursor moves OR the scroll container scrolls
-    // (auto-scroll changes which row is under the cursor without firing mousemove).
-    const recomputeDropTarget = (clientY: number) => {
-      const target = computeInsertIndexFromY(clientY);
-      dropTargetRef.current = target;
-      setDropTarget(target);
-    };
-
-    // Auto-scroll loop — runs only while the cursor sits in a border zone of the
-    // scroll container. Speed ramps up the closer the cursor is to the edge.
-    const tickAutoScroll = () => {
-      const container = scrollRef.current;
-      if (!container || !dragState.current?.started) {
-        autoScrollRaf.current = null;
-        return;
-      }
-      const rect = container.getBoundingClientRect();
-      const y = cursorY.current;
-      let delta = 0;
-      if (y < rect.top + AUTOSCROLL_ZONE) {
-        const intensity = (rect.top + AUTOSCROLL_ZONE - y) / AUTOSCROLL_ZONE;
-        delta = -AUTOSCROLL_MAX_SPEED * Math.min(1, Math.max(0, intensity));
-      } else if (y > rect.bottom - AUTOSCROLL_ZONE) {
-        const intensity = (y - (rect.bottom - AUTOSCROLL_ZONE)) / AUTOSCROLL_ZONE;
-        delta = AUTOSCROLL_MAX_SPEED * Math.min(1, Math.max(0, intensity));
-      }
-      if (delta !== 0) {
-        // While auto-scrolling, the drop gap re-mounts at a new index every tick —
-        // replaying its grow animation each frame reads as flicker on long lists.
-        // The flag lets CSS suppress the animation until the scroll settles.
-        container.dataset.autoscrolling = 'true';
-        container.scrollTop += delta;
-        recomputeDropTarget(y);
-        autoScrollRaf.current = requestAnimationFrame(tickAutoScroll);
-      } else {
-        delete container.dataset.autoscrolling;
-        autoScrollRaf.current = null;
-      }
-    };
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!dragState.current || !tbodyRef.current) return;
-      // Check threshold before starting drag
-      if (!dragState.current.started) {
-        const dx = e.clientX - dragState.current.startX;
-        const dy = e.clientY - dragState.current.startY;
-        if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
-        dragState.current.started = true;
-        dragOccurred.current = true;
-        setDragIndices(dragState.current.indices);
-      }
-      e.preventDefault(); // Prevent text selection while dragging
-      cursorY.current = e.clientY;
-      setCursorPos({ x: e.clientX, y: e.clientY });
-      recomputeDropTarget(e.clientY);
-      // Kick off the auto-scroll loop only if the cursor is actually in an edge zone —
-      // otherwise we'd schedule a RAF per mousemove just to read the position and bail,
-      // wasting cycles on a cursor moving comfortably inside the list.
-      if (autoScrollRaf.current === null) {
-        const container = scrollRef.current;
-        if (container) {
-          const rect = container.getBoundingClientRect();
-          const inZone = e.clientY < rect.top + AUTOSCROLL_ZONE || e.clientY > rect.bottom - AUTOSCROLL_ZONE;
-          if (inZone) autoScrollRaf.current = requestAnimationFrame(tickAutoScroll);
-        }
-      }
-    };
-
-    const handleMouseUp = () => {
-      if (!dragState.current) return;
-      if (dragState.current.started) {
-        const indices = dragState.current.indices;
-        const target = dropTargetRef.current;
-
-        if (target !== null && indices.length > 0) {
-          // FLIP "first" snapshot — capture where every row sits NOW; the
-          // useLayoutEffect on [actions] plays the inverted deltas once the
-          // reordered array lands. (This replaced the old startViewTransition
-          // wrapper: VT without per-element names only cross-faded the whole
-          // table — no slide, and it froze interaction for the duration.)
-          if (tbodyRef.current && document.documentElement.getAttribute('data-animations') === 'true') {
-            const map = new Map<string, number>();
-            tbodyRef.current.querySelectorAll<HTMLTableRowElement>('tr[data-row-id]').forEach(tr => {
-              const id = tr.getAttribute('data-row-id');
-              if (id) map.set(id, tr.getBoundingClientRect().top);
-            });
-            pendingFlipRects.current = { map, at: performance.now() };
-          }
-          send({ type: 'actions:reorder', payload: { indices, targetIndex: target } });
-          setSelectedIndices(new Set());
-        }
-
-        setDragIndices(null);
-        setDropTarget(null);
-      }
-
-      dragState.current = null;
-      dropTargetRef.current = null;
-      setCursorPos(null);
-      if (scrollRef.current) delete scrollRef.current.dataset.autoscrolling;
-      if (autoScrollRaf.current !== null) {
-        cancelAnimationFrame(autoScrollRaf.current);
-        autoScrollRaf.current = null;
-      }
-    };
-
-    // Esc cancels an in-progress drag — reverts state without committing the reorder.
-    // Standard DnD ergonomic; without it the user is stuck until they release the button.
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || !dragState.current?.started) return;
-      e.stopPropagation();
-      setDragIndices(null);
-      setDropTarget(null);
-      setCursorPos(null);
-      dragState.current = null;
-      dropTargetRef.current = null;
-      if (scrollRef.current) delete scrollRef.current.dataset.autoscrolling;
-      if (autoScrollRaf.current !== null) {
-        cancelAnimationFrame(autoScrollRaf.current);
-        autoScrollRaf.current = null;
-      }
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-    document.addEventListener('keydown', handleKeyDown, true);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.removeEventListener('keydown', handleKeyDown, true);
-      if (autoScrollRaf.current !== null) {
-        cancelAnimationFrame(autoScrollRaf.current);
-        autoScrollRaf.current = null;
-      }
-    };
-  }, [send, computeInsertIndexFromY]);
+    if (!import.meta.env.DEV) return;
+    (window as unknown as Record<string, unknown>).__dndTest = { handleDragStart, handleDragEnd, handleDragCancel };
+  }, [handleDragStart, handleDragEnd, handleDragCancel]);
 
   // ── Drag a profile from the ProfilePanel onto the grid → Run Profile action ──
   // ProfilePanel owns the (mouse-based) drag and signals via window events. While a profile is
@@ -1122,7 +1077,18 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         {columnVisibility.notes && <span className="text-xs font-semibold text-text-tertiary pl-2 pr-2">Notes</span>}
       </div>
 
-      {/* Body */}
+      {/* Body — DndContext/SortableContext drive the live-sliding row reorder.
+          Default measuring (rects captured once at drag start) is REQUIRED here:
+          MeasuringStrategy.Always re-measures rows mid-slide with their live
+          transforms applied, which makes the `over` target drift ahead of the
+          cursor and corrupts the drop index. */}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={pointerFirstCollision}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
       <div ref={scrollRef} data-actions-grid className="flex-1 overflow-y-auto">
         <table className="w-full table-fixed">
           <colgroup>
@@ -1143,6 +1109,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                 the full row width and the block reads as one continuous amber band. */}
             {columnVisibility.notes && <col style={{ width: '100%' }} />}
           </colgroup>
+          <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
           <tbody ref={tbodyRef}>
             {actions.map((action, idx) => {
               const colors = getActionTypeColors(action.actionType);
@@ -1200,12 +1167,14 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               const blockIf = blockInfo.blockIfOf[idx];
               const isInSkippedBlock = blockIf !== null && actions[blockIf]?.isSkipped === true;
               const isSkipped = action.isSkipped || isInSkippedBlock;
-              // Insertion gap — a real row that opens above this one when it is the
-              // current drop position. Suppressed when dropping there would be a
-              // no-op (the slot sits immediately above or below a dragged row).
-              const showGapBefore = dropTarget === idx
-                && !(dragIndexSet?.has(idx))
-                && !(idx > 0 && dragIndexSet?.has(idx - 1));
+              // Profile-drag insertion preview — rows at/below the drop position
+              // slide down one row height (transform, not layout) so the list
+              // physically parts to open space, matching the dnd-kit row-reorder
+              // language. dropTarget is only ever set by the profile-drag flow.
+              const profileShift = dropTarget !== null && idx >= dropTarget;
+              const profileDragTransition = dropTarget !== null
+                ? 'transform 150ms cubic-bezier(0.2, 0, 0, 1)'
+                : undefined;
 
               // Conditional structural rows (If / Else / EndIf) carry their own scope
               // rail in addition to any outer-block rails, get a subtle tinted bg, and
@@ -1244,22 +1213,21 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                 && !blockInfo.hasElse.has(blockIf);
               const addElseDepth = showAddElseBefore && blockIf !== null ? blockInfo.depth[blockIf] : 0;
 
+              // Else / EndIf rows can't be dragged on their own — structural markers
+              // bound to their parent IF; moving them in isolation would orphan the
+              // block. (Dragging the IF row carries the whole block instead.)
+              const rowSortDisabled = !isDraggable
+                || action.actionType === 'Else'
+                || action.actionType === 'EndIf';
+
               return (
-                <Fragment key={action.id ?? idx}>
-                {showGapBefore && (
-                  <tr data-drop-gap className="pointer-events-none">
-                    <td colSpan={99} className="p-0">
-                      <div
-                        className="drop-gap-slot mx-2 my-[3px] rounded border-2 border-dashed overflow-hidden"
-                        style={{
-                          height: 'calc(var(--ui-row-height) - 6px)',
-                          borderColor: 'color-mix(in srgb, var(--color-accent) 45%, transparent)',
-                          background: 'color-mix(in srgb, var(--color-accent) 6%, transparent)',
-                        }}
-                      />
-                    </td>
-                  </tr>
-                )}
+                <SortableRowShell key={action.id ?? idx} id={action.id ?? `row-${idx}`} disabled={rowSortDisabled}>
+                {(sortable) => (
+                <Fragment>
+                {/* Stays mounted during a row drag — sortable rects are measured once
+                    at drag start, so unmounting it mid-drag would leave every rect
+                    below it stale by one row height. It isn't a sortable item, so it
+                    won't slide with its neighbours; a minor cosmetic trade-off. */}
                 {showAddElseBefore && blockIf !== null && (
                   <tr
                     // Same amber tint AND height as structural rows so the block reads as
@@ -1267,6 +1235,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     // "ghost feel", but that broke the visual rhythm — the user perceived
                     // it as an incomplete row even though the color was identical. Matching
                     // h-row makes the Add Else slot sit naturally inside the block strip.
+                    // Shifts with its neighbours during a profile-drag insert preview —
+                    // it isn't a sortable item, so it needs the transform applied by hand.
+                    style={{
+                      transform: profileShift ? 'translateY(var(--ui-row-height))' : undefined,
+                      transition: profileDragTransition,
+                    }}
                     className="h-row border-b border-border-subtle relative pointer-events-none bg-[color-mix(in_srgb,var(--color-action-if-fg)_6%,transparent)]"
                   >
                     <td colSpan={99} className="p-0 relative">
@@ -1303,26 +1277,42 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   // between an old-profile backend push (no id yet) and the next refresh
                   // after migration runs.
 
-                  ref={isHighlighted ? highlightedRowRef : undefined}
+                  // Combined ref: dnd-kit needs the node for measuring/transforms, and
+                  // the highlighted row keeps its scroll-into-view ref.
+                  ref={(el) => {
+                    sortable.setNodeRef(el);
+                    if (isHighlighted) {
+                      (highlightedRowRef as React.MutableRefObject<HTMLTableRowElement | null>).current = el;
+                    }
+                  }}
                   // data-row-id feeds the FLIP-on-drop measurement (see the
                   // pendingFlipRects layout effect). Only rows with a real backend
                   // id participate — index-keyed fallbacks can't be tracked across
                   // a reorder.
                   data-row-id={action.id ?? undefined}
-                  onMouseDown={(e) => handleRowMouseDown(idx, e)}
+                  {...sortable.listeners}
                   onClick={(e) => handleRowClick(idx, e)}
                   onContextMenu={(e) => handleRowContextMenu(idx, e)}
                   // Paused rows use the pause-action colour (purple by default) instead of
                   // the accent-blue "running" tint, plus a soft pulse to mirror the status-bar
-                  // PAUSED indicator. Other highlight states fall back to the existing rules.
-                  style={isPausedHere ? { backgroundColor: 'color-mix(in srgb, var(--color-action-pause-fg) 18%, transparent)' } : undefined}
+                  // PAUSED indicator. The transform/transition pair is dnd-kit's live
+                  // slide for row reorder; the profileShift branch reuses the same
+                  // language for profiles dragged over the grid (rows at/below the
+                  // insert point slide down one slot to open space).
+                  style={{
+                    ...(isPausedHere ? { backgroundColor: 'color-mix(in srgb, var(--color-action-pause-fg) 18%, transparent)' } : null),
+                    transform: sortable.transform
+                      ? CSS.Translate.toString(sortable.transform)
+                      : (profileShift ? 'translateY(var(--ui-row-height))' : undefined),
+                    transition: sortable.transition ?? profileDragTransition,
+                  }}
                   className={`group h-row border-b border-border-subtle transition-colors relative ${
                     // Cursor signals draggability: grabbing during an active drag, grab on
-                    // hover when the row can be dragged, default otherwise (e.g. while
-                    // recording/replaying or editing a cell).
+                    // hover when THIS row can be dragged (per-row — Else/EndIf are pinned
+                    // to their block), default otherwise (recording/replaying/editing).
                     dragIndices !== null
                       ? 'cursor-grabbing'
-                      : isDraggable
+                      : !rowSortDisabled
                         ? 'cursor-grab'
                         : 'cursor-default'
                   } ${
@@ -1716,9 +1706,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
                 </tr>
                 </Fragment>
+                )}
+                </SortableRowShell>
               );
             })}
-            {/* Trailing insertion gap — drop position past the last row. */}
+            {/* Trailing insertion gap — drop position past the last row
+                (profile drag only — row reorder slides live via dnd-kit). */}
             {dropTarget === actions.length && actions.length > 0
               && !(dragIndexSet?.has(actions.length - 1)) && (
               <tr data-drop-gap className="pointer-events-none">
@@ -1735,66 +1728,60 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               </tr>
             )}
           </tbody>
+          </SortableContext>
         </table>
 
         {/* Empty state */}
         {actions.length === 0 && <MacroEmptyState />}
       </div>
 
-      {/* Floating drag ghost — a translucent replica of the (first) picked-up row
-          with a lifted-card shadow and a slight tilt, Sortable style. Multi-row
-          drags add a "+N" count badge. Offset (+32, +32) clears the Windows
-          "grabbing" cursor bounds in any DPI/scaling; pointer-events-none keeps
-          it out of hit-testing. `transform: translate3d(...)` instead of
-          `left/top` so the ghost rides the GPU compositor layer — each mousemove
-          only retriggers a composite, never a layout/paint of the surrounding
-          tree. */}
-      {dragIndices !== null && cursorPos !== null && (() => {
-        const primary = actions[dragIndices[0]];
-        if (!primary) return null;
-        const ghostColors = getActionTypeColors(primary.actionType);
-        const ghostDetail = isMouseAction(primary.actionType)
-          ? `${primary.x}, ${primary.y}`
-          : getDisplayKey(primary.key);
-        return (
-          <div
-            className="fixed pointer-events-none z-50"
-            style={{
-              top: 0,
-              left: 0,
-              transform: `translate3d(${cursorPos.x + 32}px, ${cursorPos.y + 32}px, 0) rotate(1.5deg)`,
-              willChange: 'transform',
-            }}
-          >
-            <div
-              className="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-bg-card border border-border-default w-[300px]"
-              style={{
-                opacity: 0.88,
-                boxShadow: '0 12px 32px rgba(0,0,0,0.5), 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent)',
-              }}
-            >
-              <GripVertical size={12} className="text-text-disabled shrink-0" />
-              <span
-                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium shrink-0"
-                style={{ background: ghostColors.bg, color: ghostColors.fg }}
+      {/* Drag ghost — a translucent replica of the grabbed row with a lifted-card
+          shadow and a slight tilt, Sortable style. Multi-row drags add a "+N"
+          count badge. DragOverlay tracks the pointer (and survives auto-scroll);
+          dropAnimation is null because the FLIP-on-drop settle handles the
+          landing — the default overlay animation would fly the ghost back to the
+          row's OLD slot, since the array only reorders after the backend push. */}
+      <DragOverlay dropAnimation={null} modifiers={[snapCenterToCursor]}>
+        {dragIndices !== null && activeDragId !== null && (() => {
+          const primary = actions[sortableIds.indexOf(activeDragId)];
+          if (!primary) return null;
+          const ghostColors = getActionTypeColors(primary.actionType);
+          const ghostDetail = isMouseAction(primary.actionType)
+            ? `${primary.x}, ${primary.y}`
+            : getDisplayKey(primary.key);
+          return (
+            <div className="pointer-events-none" style={{ transform: 'rotate(1.5deg)' }}>
+              <div
+                className="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-bg-card border border-border-default w-[300px]"
+                style={{
+                  opacity: 0.88,
+                  boxShadow: '0 12px 32px rgba(0,0,0,0.5), 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent)',
+                }}
               >
-                <ActionIcon actionType={primary.actionType} />
-                {actionPillLabel(primary)}
-              </span>
-              {ghostDetail && (
-                <span className="text-xs font-mono text-text-secondary truncate flex-1">
-                  {ghostDetail}
+                <GripVertical size={12} className="text-text-disabled shrink-0" />
+                <span
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium shrink-0"
+                  style={{ background: ghostColors.bg, color: ghostColors.fg }}
+                >
+                  <ActionIcon actionType={primary.actionType} />
+                  {actionPillLabel(primary)}
                 </span>
-              )}
-              {dragIndices.length > 1 && (
-                <span className="ml-auto shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-accent-solid text-white">
-                  +{dragIndices.length - 1}
-                </span>
-              )}
+                {ghostDetail && (
+                  <span className="text-xs font-mono text-text-secondary truncate flex-1">
+                    {ghostDetail}
+                  </span>
+                )}
+                {dragIndices.length > 1 && (
+                  <span className="ml-auto shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-accent-solid text-white">
+                    +{dragIndices.length - 1}
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
+      </DragOverlay>
+      </DndContext>
 
       {sendTextEdit && (
         <SendTextDialog
