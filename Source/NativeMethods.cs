@@ -125,6 +125,12 @@ namespace TrueReplayer.Interop
         [DllImport("user32.dll")]
         public static extern int GetSystemMetrics(int nIndex);
 
+        // System double-click time (ms) — the same threshold the OS uses to pair two
+        // clicks into a double-click. Used by the recorder's DoubleClick merge so
+        // recording agrees with what the target app itself perceived.
+        [DllImport("user32.dll")]
+        public static extern uint GetDoubleClickTime();
+
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
 

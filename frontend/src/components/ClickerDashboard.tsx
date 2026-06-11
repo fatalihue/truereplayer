@@ -49,9 +49,9 @@ export function ClickerDashboard() {
       style={{
         background: 'linear-gradient(135deg, rgba(192,132,252,0.05), rgba(192,132,252,0.01))',
         borderColor: 'var(--color-clicker-border)',
-        // Kept above 0.5 so the post-run dim still reads legibly on the dark gradient.
-        opacity: isReplaying ? 1 : 0.65,
-        transition: 'opacity 200ms',
+        // No post-run dim — the panel used to drop to 65% opacity when the run
+        // finished, which read as a washed-out "glass" layer and hurt text
+        // legibility. The "· finished" label already signals the state.
       }}
     >
       {/* tabular-nums prevents digit-width jitter as the count climbs. */}
@@ -106,7 +106,10 @@ export function ClickerDashboard() {
         </div>
       )}
 
-      <div className="text-[11px] text-text-disabled font-mono text-center max-w-[480px]">
+      {/* Config recall (button · Hold X ms · every X ms …) — text-secondary, not
+          text-disabled, so it stays readable. The faded disabled colour blended
+          into the gradient and was hard to make out. */}
+      <div className="text-[11px] text-text-secondary font-mono text-center max-w-[480px]">
         {configBits.join('  ·  ')}
       </div>
 
@@ -156,7 +159,9 @@ export function ClickerDashboard() {
 function StatCell({ value, label, dim = false }: { value: string; label: string; dim?: boolean }) {
   return (
     <div
-      className={`flex flex-col items-center py-2 px-1 rounded border border-border-subtle bg-bg-surface/40 ${dim ? 'opacity-40' : ''}`}
+      // Solid surface (was bg-bg-surface/40) — the translucent cells contributed
+      // to the glassy look and made the numbers harder to read on the gradient.
+      className={`flex flex-col items-center py-2 px-1 rounded border border-border-subtle bg-bg-surface ${dim ? 'opacity-40' : ''}`}
     >
       <div className="text-[18px] font-mono font-semibold text-text-primary tabular-nums leading-tight">
         {value}

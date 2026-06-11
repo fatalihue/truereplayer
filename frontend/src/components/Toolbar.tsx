@@ -12,18 +12,17 @@ import { useFlyoutFlip } from '../hooks/useFlyoutFlip';
 
 export interface ColumnVisibility {
   action: boolean;
-  key: boolean;
-  x: boolean;
-  y: boolean;
+  // Merged column: the old Key + X + Y trio collapsed into a single "Details"
+  // column (key/text/combo for keyboard-ish actions, "x, y" for mouse actions,
+  // condition payload for If rows). One toggle controls all of it.
+  details: boolean;
   delay: boolean;
   notes: boolean;
 }
 
 export const defaultColumnVisibility: ColumnVisibility = {
   action: true,
-  key: true,
-  x: true,
-  y: true,
+  details: true,
   delay: true,
   notes: true,
 };

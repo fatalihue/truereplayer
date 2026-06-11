@@ -79,6 +79,11 @@ namespace TrueReplayer.Services
                                       string.Equals(a.ActionType, "MiddleClick", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 4, 0), "Combined clicks (LeftClick/RightClick/MiddleClick)"),
 
+            // DoubleClick (two press/release pairs replayed as one row) shipped in 2.5.4 —
+            // older builds have no replay switch case and would silently skip it.
+            (p => p.Actions.Any(a => string.Equals(a.ActionType, "DoubleClick", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 5, 4), "Double click"),
+
             // Restore Size split from Restore Position in 2.0.5; older builds only honour Position.
             (p => p.RestoreSize,
                 new Version(2, 0, 5), "RestoreSize"),

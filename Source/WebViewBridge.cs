@@ -2060,7 +2060,7 @@ namespace TrueReplayer
                     var a = actions[idx];
                     // Only apply X/Y to mouse click actions (paired halves + combined single clicks)
                     if (a.ActionType is not ("LeftClickDown" or "LeftClickUp" or "RightClickDown" or "RightClickUp" or "MiddleClickDown" or "MiddleClickUp"
-                        or "LeftClick" or "RightClick" or "MiddleClick"))
+                        or "LeftClick" or "RightClick" or "MiddleClick" or "DoubleClick"))
                         continue;
                     if (axis == "x")
                         a.X = isOffset ? a.X + val : val;
@@ -4631,7 +4631,7 @@ namespace TrueReplayer
 
             PushUndoState();
 
-            var clickTypes = new HashSet<string> { "LeftClickDown", "LeftClickUp", "RightClickDown", "RightClickUp", "MiddleClickDown", "MiddleClickUp", "LeftClick", "RightClick", "MiddleClick" };
+            var clickTypes = new HashSet<string> { "LeftClickDown", "LeftClickUp", "RightClickDown", "RightClickUp", "MiddleClickDown", "MiddleClickUp", "LeftClick", "RightClick", "MiddleClick", "DoubleClick" };
             int converted = 0;
 
             // Sign of the translation: subtract window origin to go absolute→relative,

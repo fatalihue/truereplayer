@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, Download, MousePointerClick, Palette, Move } from 'lucide-react';
+import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Move } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -12,12 +12,24 @@ function Section({ icon: Icon, iconColor, title, children, defaultOpen = true }:
   children: React.ReactNode;
   defaultOpen?: boolean;
 }) {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
+  // Open/closed state survives restarts, keyed by title (titles are stable
+  // identifiers — 'Execution', 'Recording', …). Falls back to defaultOpen the
+  // first time a section is ever seen.
+  const [isOpen, setIsOpen] = useState(() => {
+    const saved = localStorage.getItem(`ui:settings-section:${title}`);
+    return saved === null ? defaultOpen : saved === '1';
+  });
+  const toggleOpen = () => {
+    setIsOpen(prev => {
+      localStorage.setItem(`ui:settings-section:${title}`, prev ? '0' : '1');
+      return !prev;
+    });
+  };
 
   return (
     <div className="bg-bg-surface border border-border-subtle rounded-ui overflow-hidden">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={toggleOpen}
         className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-bg-card transition-colors"
       >
         <Icon size={14} style={{ color: iconColor }} />
@@ -190,13 +202,9 @@ function ClickerSection({
   };
 
   return (
-    <div
-      className="bg-bg-surface rounded-ui overflow-hidden"
-      style={{
-        border: '1px solid color-mix(in srgb, var(--color-clicker) 35%, transparent)',
-        boxShadow: '0 0 0 1px color-mix(in srgb, var(--color-clicker) 12%, transparent) inset',
-      }}
-    >
+    // Same neutral border as every other Section — the purple icon + title are
+    // identity enough (an earlier clicker-tinted border read as too loud).
+    <div className="bg-bg-surface border border-border-subtle rounded-ui overflow-hidden">
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-bg-card transition-colors"
@@ -440,7 +448,12 @@ function HotkeyInput({ value, settingKey, onChange }: {
   );
 }
 
-export function SettingsPanel() {
+interface SettingsPanelProps {
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+}
+
+export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsPanelProps) {
   const { settings, settingsResetEpoch } = useAppState();
   const { send, subscribe } = useBridge();
   const selectionRef = useSelectionRef();
@@ -463,8 +476,35 @@ export function SettingsPanel() {
     send({ type: 'settings:change', payload: { key: settingKey, value: hotkey } });
   };
 
+  // Collapsed: a slim strip mirroring ProfilePanel's collapsed state on the
+  // opposite edge — expand chevron up top (pointing left, where the panel will
+  // grow back into) and a vertical SETTINGS label so the strip stays identifiable.
+  if (collapsed) {
+    return (
+      <div className="w-12 flex flex-col shrink-0 overflow-hidden bg-bg-surface border border-border-subtle rounded-ui transition-[width] duration-200">
+        <div className="flex items-center justify-center border-b border-border-subtle shrink-0 h-[47px]">
+          <button
+            onClick={onToggleCollapse}
+            className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+            data-tip="Expand settings" data-tip-pos="left"
+          >
+            <ChevronsLeft size={14} />
+          </button>
+        </div>
+        <div className="flex-1 flex items-start justify-center pt-3">
+          <span
+            className="text-[10px] font-semibold text-text-tertiary tracking-wider"
+            style={{ writingMode: 'vertical-rl' }}
+          >
+            SETTINGS
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="w-[220px] flex flex-col shrink-0 overflow-hidden bg-bg-surface border border-border-subtle rounded-ui">
+    <div className="w-[220px] flex flex-col shrink-0 overflow-hidden bg-bg-surface border border-border-subtle rounded-ui transition-[width] duration-200">
       {/* Tab Bar — explicit 44 px height (matches the Toolbar's measured rendered height in
           the centre column) so the section header below this tab bar lines up vertically
           with the action grid's column-header row in the centre. Without this, the tab
@@ -491,6 +531,15 @@ export function SettingsPanel() {
         >
           Global
         </button>
+        {onToggleCollapse && (
+          <button
+            onClick={onToggleCollapse}
+            className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors shrink-0"
+            data-tip="Collapse settings panel" data-tip-pos="left"
+          >
+            <ChevronsRight size={14} />
+          </button>
+        )}
       </div>
 
       {/* Tab Content */}
@@ -615,7 +664,7 @@ export function SettingsPanel() {
               <SettingRow label="Keyboard">
                 <Toggle isOn={settings.recordKeyboard} onChange={(v) => changeSetting('recordKeyboard', v)} />
               </SettingRow>
-              <SettingRow label="Combined Actions" tooltip="Record each key press and mouse click as a single action (Keystroke / Click) instead of separate Down + Up rows. Modifiers fold into the key (Ctrl+C, Shift+A). Holds and drags aren't captured in this mode — leave it off, or add a HoldKey row, for those.">
+              <SettingRow label="Combined Actions" tooltip="Record each key press and mouse click as a single action (Keystroke / Click) instead of separate Down + Up rows. Two quick left clicks merge into a Double Click automatically. Modifiers fold into the key (Ctrl+C, Shift+A). Holds and drags aren't captured in this mode — leave it off, or add a HoldKey row, for those.">
                 <Toggle isOn={settings.recordCombinedInput} onChange={(v) => changeSetting('recordCombinedInput', v)} />
               </SettingRow>
               <SettingRow label="Profile Keys" danger={!settings.profileKeyEnabled}>

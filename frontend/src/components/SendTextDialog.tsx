@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Smile, Clock, BookmarkPlus, Trash2, ChevronRight, ChevronLeft, Wand2, Pencil, Search, Check, X } from 'lucide-react';
+import { Smile, Clock, BookmarkPlus, Trash2, ChevronRight, Wand2, Pencil, Search, Check, X } from 'lucide-react';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import type { EmojiClickData } from 'emoji-picker-react';
 import { LexicalTokenEditor, type LexicalEditorHandle } from './lexical/LexicalTokenEditor';
@@ -255,8 +255,9 @@ type PanelType = 'emoji' | 'variables' | 'snippets';
 
 export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: SendTextDialogProps) {
   const [text, setText] = useState(initialText);
-  const [activePanel, setActivePanel] = useState<PanelType | null>('variables');
-  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  // The side panel is always visible (user request — no collapse), with one of
+  // the three tools active; Variables is the default.
+  const [activePanel, setActivePanel] = useState<PanelType>('variables');
   const [snippets, setSnippets] = useState<Snippet[]>(loadSnippets);
   const [snippetName, setSnippetName] = useState('');
   const [savingSnippet, setSavingSnippet] = useState(false);
@@ -343,24 +344,20 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
 
   const selectPanel = (panel: PanelType) => {
     setActivePanel(panel);
-    setPanelCollapsed(false);
-  };
-
-  const toggleCollapse = () => {
-    setPanelCollapsed(prev => !prev);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       e.preventDefault();
+      // One Esc closes the dialog (used to take two — the first only collapsed
+      // the side panel). In-progress snippet edits still get their own Esc step
+      // so a stray press can't discard typed snippet data AND the dialog.
       if (savingSnippet) {
         setSavingSnippet(false);
       } else if (deletingSnippetId !== null) {
         setDeletingSnippetId(null);
       } else if (editingSnippetId !== null) {
         setEditingSnippetId(null);
-      } else if (!panelCollapsed) {
-        setPanelCollapsed(true);
       } else {
         onClose();
       }
@@ -403,14 +400,6 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
             <button type="button" onClick={() => selectPanel('snippets')} className={tabBtnClass(activePanel === 'snippets')} title="Snippets">
               <BookmarkPlus size={14} /> Snippets
             </button>
-            <button
-              type="button"
-              onClick={toggleCollapse}
-              className="ml-1 p-1.5 text-text-tertiary hover:text-text-primary hover:bg-bg-card rounded transition-colors"
-              title={panelCollapsed ? 'Show panel' : 'Hide panel'}
-            >
-              {panelCollapsed ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
-            </button>
           </div>
         </div>
 
@@ -428,8 +417,8 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
             </div>
           </div>
 
-          {/* Right: collapsible side panel */}
-          {activePanel && !panelCollapsed && (
+          {/* Right: side panel — always visible, tool selected via the header tabs */}
+          {(
             <div className="w-[300px] shrink-0 border-l border-border-subtle flex flex-col">
               {/* ── Emoji Panel ── */}
               {activePanel === 'emoji' && (

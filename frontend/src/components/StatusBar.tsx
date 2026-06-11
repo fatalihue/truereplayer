@@ -4,6 +4,7 @@ import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { usePauseTick } from '../hooks/usePauseTick';
 import { formatClickerStats } from '../utils/clickerFormat';
+import { APP_VERSION } from '../appVersion';
 
 export function StatusBar() {
   const { statusBar, status, highlightedActionIndex, replayChain, pauseState, settings, clickerStats, loopProgress } = useAppState();
@@ -163,7 +164,7 @@ export function StatusBar() {
           uses flex-1, so a second flex-1 here would split available space and squeeze the
           chain label. */}
       {!isReplaying && <div className="flex-1" />}
-      <span className="text-[11px] text-text-disabled shrink-0 ml-3">v2.5.3</span>
+      <span className="text-[11px] text-text-disabled shrink-0 ml-3">{APP_VERSION}</span>
     </div>
   );
 }

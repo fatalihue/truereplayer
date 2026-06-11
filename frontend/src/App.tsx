@@ -30,6 +30,10 @@ function AppShell() {
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const [sheetActionIndex, setSheetActionIndex] = useState<number | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Settings panel collapse persists across restarts (unlike the profiles
+  // sidebar, which is a transient workspace toggle) — users who tuck it away
+  // tend to want it to stay tucked away.
+  const [settingsCollapsed, setSettingsCollapsed] = useState(() => localStorage.getItem('ui:settingsCollapsed') === '1');
   // setter prefixed with _ so the strict noUnusedLocals lint allows it through —
   // the Toggle Columns toolbar button is currently disabled so nothing mutates
   // columnVisibility right now. Keep the state pair intact so re-enabling the
@@ -104,6 +108,13 @@ function AppShell() {
     setSidebarCollapsed(prev => !prev);
   }, []);
 
+  const handleToggleSettings = useCallback(() => {
+    setSettingsCollapsed(prev => {
+      localStorage.setItem('ui:settingsCollapsed', prev ? '0' : '1');
+      return !prev;
+    });
+  }, []);
+
   // Command palette triggers — sidebar toggle is in App state, so listen here
   useEffect(() => {
     const handler = () => setSidebarCollapsed(prev => !prev);
@@ -128,8 +139,8 @@ function AppShell() {
       {/* Title Bar */}
       <TitleBar onOpenCommandPalette={handleOpenCommandPalette} />
 
-      {/* Main Content: 3-column layout */}
-      <div className="flex-1 flex gap-1 px-2 py-1 min-h-0">
+      {/* Main Content: 3-column layout — 1px gutters between panels (user request) */}
+      <div className="flex-1 flex gap-px px-2 py-1 min-h-0">
         {/* Left: Profiles */}
         <ProfilePanel
           collapsed={sidebarCollapsed}
@@ -137,7 +148,7 @@ function AppShell() {
         />
 
         {/* Center: Toolbar + Table + Action Bar */}
-        <div className="flex-1 flex flex-col gap-1 min-w-0">
+        <div className="flex-1 flex flex-col gap-px min-w-0">
           <ExtensionUpdateBanner />
           {/* Toolbar takes no props right now — Toggle Columns is disabled there
               (see Toolbar.tsx) so columnVisibility / setColumnVisibility don't
@@ -156,7 +167,10 @@ function AppShell() {
         </div>
 
         {/* Right: Settings */}
-        <SettingsPanel />
+        <SettingsPanel
+          collapsed={settingsCollapsed}
+          onToggleCollapse={handleToggleSettings}
+        />
       </div>
 
       {/* Status Bar */}

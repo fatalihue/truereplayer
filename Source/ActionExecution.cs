@@ -489,6 +489,19 @@ namespace TrueReplayer.Services
         public bool UseRelativeCoordinates { get; set; } = false;
         public bool IsCaptureMode => _captureType != CaptureType.None;
 
+        // ── Double-click merge state ──
+        // The merge is always active in combined mode (two LeftClicks within the SYSTEM
+        // double-click time and SM_CX/CYDOUBLECLK rectangle collapse into one DoubleClick
+        // row); paired mode records raw Down/Up rows and never merges.
+        // _lastAdded tracks the most recent row from ANY AddAction (a keystroke between
+        // two clicks must break the pair); the click fields remember where/when the last
+        // combined LeftClick physically landed, in SCREEN coords — the recorded X/Y may
+        // be window-relative, which would break the distance check.
+        private ActionItem? _lastAdded;
+        private ActionItem? _lastCombinedLeftClick;
+        private int _lastClickScreenX, _lastClickScreenY;
+        private long _lastClickTickMs;
+
         // ── Combined-mode keyboard grouping state ──
         // Modifiers are folded into the following key so "Ctrl+C", "Shift+A" (capitals) and
         // "Shift+1" (symbols) reproduce correctly. _heldMods = modifiers physically down now;
@@ -520,6 +533,11 @@ namespace TrueReplayer.Services
         {
             _isRecording = true;
             _lastActionTime = null;
+            // A click from a previous session must never pair with the first click of
+            // this one — the wall-clock gap check would usually reject it anyway, but a
+            // quick stop/start inside the double-click window shouldn't merge across.
+            _lastCombinedLeftClick = null;
+            _lastAdded = null;
         }
 
         public void Stop()
@@ -531,6 +549,8 @@ namespace TrueReplayer.Services
             _sessionUsed = false;
             insertIndex = null;
             _lastActionTime = null;
+            _lastCombinedLeftClick = null;
+            _lastAdded = null;
             foreach (var action in _actions) action.IsInsertionPoint = false;
             ClearCapture();
         }
@@ -757,6 +777,45 @@ namespace TrueReplayer.Services
                 // later emit a stray lone-modifier Keystroke. Modifier+click isn't encoded as a
                 // unit in combined mode — the click is recorded without the modifier.
                 if (RecordCombined && _heldMods.Count > 0) _sessionUsed = true;
+
+                // Double-click merge: this LeftClick is the second half of a system
+                // double-click → upgrade the previous row in place instead of adding a
+                // new one. Always on in combined mode (paired mode keeps raw Down/Up
+                // rows untouched). Conditions: Left button + the previous row is still
+                // the most recently added action (consecutive) + within
+                // GetDoubleClickTime and the SM_CX/CYDOUBLECLK rectangle, both measured
+                // the way Windows itself pairs clicks. Skipped in capture mode (capture
+                // flows count actions and complete after exactly one click). The merged
+                // row keeps the FIRST click's coords/delay; tracking resets after a
+                // merge so a triple-click records DoubleClick + LeftClick.
+                if (RecordCombined && button == "Left"
+                    && _captureType == CaptureType.None
+                    && _lastCombinedLeftClick != null
+                    && ReferenceEquals(_lastCombinedLeftClick, _lastAdded)
+                    && _lastCombinedLeftClick.ActionType == "LeftClick")
+                {
+                    long nowMs = Environment.TickCount64;
+                    int maxW = Math.Max(2, NativeMethods.GetSystemMetrics(36) / 2); // SM_CXDOUBLECLK is full rect width
+                    int maxH = Math.Max(2, NativeMethods.GetSystemMetrics(37) / 2);
+                    if (nowMs - _lastClickTickMs <= NativeMethods.GetDoubleClickTime()
+                        && Math.Abs(x - _lastClickScreenX) <= maxW
+                        && Math.Abs(y - _lastClickScreenY) <= maxH)
+                    {
+                        var merged = _lastCombinedLeftClick;
+                        merged.ActionType = "DoubleClick";
+                        _lastCombinedLeftClick = null;
+                        // An in-place property mutation only raises PropertyChanged — the
+                        // bridge pushes the grid on COLLECTION changes. Re-assigning the
+                        // same instance at its index raises a Replace event, so the
+                        // upgraded row shows immediately (not only after the next action
+                        // happens to be recorded or the profile reloads).
+                        int mi = _actions.IndexOf(merged);
+                        if (mi >= 0) _actions[mi] = merged;
+                        _onActionAdded?.Invoke();
+                        return;
+                    }
+                }
+
                 int recX = x, recY = y;
                 if (UseRelativeCoordinates)
                 {
@@ -783,7 +842,21 @@ namespace TrueReplayer.Services
                         }
                     }
                 }
-                AddAction(new ActionItem { ActionType = actionType, X = recX, Y = recY, Delay = delay });
+                var clickAction = new ActionItem { ActionType = actionType, X = recX, Y = recY, Delay = delay };
+                AddAction(clickAction);
+                // Arm (or reset) the double-click tracker. Screen coords, not recX/recY —
+                // relative recording rewrites those and would corrupt the distance check.
+                if (RecordCombined && actionType == "LeftClick")
+                {
+                    _lastCombinedLeftClick = clickAction;
+                    _lastClickScreenX = x;
+                    _lastClickScreenY = y;
+                    _lastClickTickMs = Environment.TickCount64;
+                }
+                else
+                {
+                    _lastCombinedLeftClick = null;
+                }
             }
         }
 
@@ -799,6 +872,7 @@ namespace TrueReplayer.Services
                 _actions.Add(action);
             }
 
+            _lastAdded = action;
             _onActionAdded?.Invoke();
 
             if (_captureType != CaptureType.None)
@@ -837,6 +911,12 @@ namespace TrueReplayer.Services
         // Static so a future settings knob can tune them; defaults match the manual workaround.
         public static int FocusClickOffsetPx = 5;
         public static int FocusClickGapMs = 60;
+
+        // Gap between the two press/release pairs of a DoubleClick replay. 50 ms sits
+        // comfortably below any system double-click time (default 500 ms, minimum 200)
+        // while still letting slower apps process the first click. Static so a future
+        // settings knob can tune it.
+        public static int DoubleClickGapMs = 50;
 
         // Fires the second "focus" click for an IsFocusClick combined click: a short pause, then
         // a full press/release FocusClickOffsetPx down-right of the recorded point. Skips if the
@@ -1350,6 +1430,28 @@ namespace TrueReplayer.Services
                                 SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEUP);
                             if (action.IsFocusClick && !token.IsCancellationRequested)
                                 FocusTap(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN, NativeMethods.MOUSEEVENTF_MIDDLEUP, token);
+                            break;
+                        // Two full left press/release pairs at the SAME point with a gap well
+                        // below GetDoubleClickTime, so the target app pairs them into a real
+                        // double-click. The cursor only travels once — the second pair's move
+                        // is a no-op because SimulateMouse sees it's already on target, which
+                        // also keeps the clicks inside the SM_CX/CYDOUBLECLK rectangle.
+                        // IsFocusClick is intentionally ignored here (a focus tap after a
+                        // double-click would read as a triple-click to the target).
+                        case "DoubleClick":
+                            SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN);
+                            if (!token.IsCancellationRequested)
+                                SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP);
+                            if (!token.IsCancellationRequested)
+                            {
+                                if (DoubleClickGapMs > 0) Thread.Sleep(DoubleClickGapMs);
+                                if (!token.IsCancellationRequested)
+                                {
+                                    SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN);
+                                    if (!token.IsCancellationRequested)
+                                        SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP);
+                                }
+                            }
                             break;
                         case "ScrollUp": SimulateScroll(120); break;
                         case "ScrollDown": SimulateScroll(-120); break;

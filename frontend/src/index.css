@@ -240,6 +240,70 @@ html, body, #root {
   50% { opacity: 0.4; }
 }
 
+/* REC-mode badge pulse — the TitleBar "Recording" badge emits an expanding red
+   ring while recording (replaced an earlier full-viewport frame the user found
+   too loud). Static badge when animations are off. */
+@keyframes rec-badge-pulse {
+  from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-recording) 60%, transparent); }
+  to   { box-shadow: 0 0 0 8px transparent; }
+}
+
+html[data-animations="true"] .rec-badge-pulse {
+  animation: rec-badge-pulse 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Sheet panel slider — themed range input used by the Slider primitive
+   (components/sheet/Slider.tsx). WebView2 is Chromium-only, so the -webkit
+   pseudo-elements cover every runtime this app has. */
+.sheet-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--color-bg-elevated);
+  outline: none;
+}
+
+.sheet-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-accent-solid);
+  border: 2px solid var(--color-bg-surface);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.sheet-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+.sheet-slider:disabled {
+  opacity: 0.4;
+}
+
+/* Drag-and-drop insertion gap — a real (layout-affecting) slot row that opens
+   at the drop position so neighbouring rows physically slide apart, Sortable
+   style. The grow animation only plays when global animations are on; with
+   them off the gap still appears (it IS the drop indicator), just instantly. */
+@keyframes drop-gap-in {
+  from { height: 0; opacity: 0; }
+}
+
+html[data-animations="true"] .drop-gap-slot {
+  animation: drop-gap-in 120ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* While the drag auto-scroll is running, the gap re-mounts at a new index every
+   frame — replaying the grow animation that fast reads as flicker. Freeze it
+   until the scroll settles (the flag is set by the auto-scroll loop). */
+[data-autoscrolling="true"] .drop-gap-slot {
+  animation: none;
+}
+
 /* Kbd tag utilities */
 @utility kbd {
   display: inline-flex;

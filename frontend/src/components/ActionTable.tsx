@@ -1,6 +1,6 @@
-import { useRef, useEffect, useState, useCallback, useMemo, Fragment } from 'react';
+import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo, Fragment } from 'react';
 import { createPortal } from 'react-dom';
-import { Mouse, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus } from 'lucide-react';
+import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -13,6 +13,7 @@ import { SendTextPreview } from './SendTextPreview';
 import { RunProfileDialog } from './RunProfileDialog';
 import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
 import { BulkActionBar } from './BulkActionBar';
+import { MacroEmptyState } from './MacroEmptyState';
 import { Checkbox, CheckboxBox } from './Checkbox';
 import type { ColumnVisibility } from './Toolbar';
 import { useFlyoutFlip } from '../hooks/useFlyoutFlip';
@@ -46,7 +47,38 @@ function ActionIcon({ actionType }: { actionType: string }) {
 
 interface EditingCell {
   index: number;
-  field: 'delay' | 'comment' | 'x' | 'y' | 'key';
+  // 'coords' edits the merged "x, y" pair in the Details column — committed as
+  // two separate actions:edit messages (field x, field y) so the backend
+  // contract stays untouched.
+  field: 'delay' | 'comment' | 'coords' | 'key';
+}
+
+// Friendly pill label — shared between the grid's Action pill and the floating
+// drag ghost so the picked-up row reads identically to its in-grid sibling.
+function actionPillLabel(action: ActionItem): string {
+  switch (action.actionType) {
+    case 'WaitImage': return 'Wait Image';
+    case 'WaitPixelColor': return 'Pixel Color';
+    // Browser labels carry "Element"/"Text" so they never read as the
+    // desktop LeftClick/SendText pills — ambiguity fix (P2).
+    case 'BrowserClick': return 'Click Element';
+    case 'BrowserRightClick': return 'Right Click Element';
+    case 'BrowserType': return 'Type Text';
+    case 'BrowserSelectOption': return 'Select Option';
+    case 'BrowserWaitElement': return 'Wait Element';
+    case 'BrowserNavigate': return 'Open URL';
+    case 'RunProfile': return 'Run Profile';
+    case 'Pause': return 'Pause';
+    case 'HoldKey': return 'Hold Key';
+    case 'DoubleClick': return 'Double Click';
+    // Conditional labels are intentionally lowercase to read as "code keywords"
+    // (matches the mockup). IF varies by condition family so the user sees the
+    // probe type without opening Sheet.
+    case 'If': return action.conditionType === 'PixelColorMatch' ? 'if pixel' : 'if image';
+    case 'Else': return 'else';
+    case 'EndIf': return 'endif';
+    default: return action.actionType;
+  }
 }
 
 interface ActionTableProps {
@@ -270,11 +302,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     prevProfileRef.current = activeProfile;
   }, [activeProfile]);
 
-  // Focus edit input when entering edit mode
+  // Focus edit input when entering edit mode. No auto-select — the user asked
+  // for the caret to land at the end of the existing value instead of the whole
+  // text being selected (a stray keystroke was wiping values).
   useEffect(() => {
     if (editingCell && editInputRef.current) {
-      editInputRef.current.focus();
-      editInputRef.current.select();
+      const el = editInputRef.current;
+      el.focus();
+      const len = el.value.length;
+      try { el.setSelectionRange(len, len); } catch { /* non-text input types */ }
     }
   }, [editingCell]);
 
@@ -395,6 +431,19 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   // Commit the edit
   const commitEdit = useCallback(() => {
     if (!editingCell) return;
+    if (editingCell.field === 'coords') {
+      // Merged "x, y" editor — accepts "123,456", "123, 456" or "123 456"
+      // (same forgiving formats as the Sheet panel's Paste-coords button).
+      // Both numbers are required; anything else cancels silently rather than
+      // half-updating one axis.
+      const m = editValue.trim().match(/^(-?\d+)\s*[,;\s]\s*(-?\d+)$/);
+      if (m) {
+        send({ type: 'actions:edit', payload: { index: editingCell.index, field: 'x', value: m[1] } });
+        send({ type: 'actions:edit', payload: { index: editingCell.index, field: 'y', value: m[2] } });
+      }
+      setEditingCell(null);
+      return;
+    }
     send({
       type: 'actions:edit',
       payload: { index: editingCell.index, field: editingCell.field, value: editValue },
@@ -559,14 +608,54 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const dragOccurred = useRef(false);
   const dropTargetRef = useRef<number | null>(null);
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
+  // FLIP-on-drop: at mouseup (before the reorder round-trips through the
+  // backend) we snapshot every row's viewport top keyed by action id. When the
+  // reordered actions array lands, the layout effect below inverts each moved
+  // row's delta and plays it back to zero — rows visibly slide into their new
+  // slots instead of teleporting. Timestamped so a stale snapshot (reorder
+  // rejected / unrelated update arriving much later) is discarded.
+  const pendingFlipRects = useRef<{ map: Map<string, number>; at: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const pending = pendingFlipRects.current;
+    if (!pending) return;
+    pendingFlipRects.current = null;
+    if (!tbodyRef.current) return;
+    if (performance.now() - pending.at > 800) return;
+    // Tame the settle on big grids (user feedback: "many actions → animation too
+    // aggressive"). Two culls, dnd-kit-style: rows outside the visible scroll
+    // area never animate (nobody sees them, but dozens of simultaneous WAAPI
+    // animations make the visible ones feel chaotic), and rows whose delta
+    // exceeds the viewport height snap into place instead of flying across it.
+    const view = scrollRef.current?.getBoundingClientRect();
+    const maxFly = view ? view.height : 600;
+    tbodyRef.current.querySelectorAll<HTMLTableRowElement>('tr[data-row-id]').forEach(tr => {
+      const id = tr.getAttribute('data-row-id');
+      if (!id) return;
+      const oldTop = pending.map.get(id);
+      if (oldTop === undefined) return;
+      const rect = tr.getBoundingClientRect();
+      if (view && (rect.bottom < view.top || rect.top > view.bottom)) return;
+      const delta = oldTop - rect.top;
+      if (Math.abs(delta) < 2 || Math.abs(delta) > maxFly) return;
+      tr.animate(
+        [{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' }],
+        { duration: 180, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
+      );
+    });
+  }, [actions]);
 
   // Shared row-measurement: maps a cursor Y to an insertion index (0..N) across the action
   // rows, skipping injected "Add Else" ghost rows. Used by both row-reorder and the
   // profile→Run Profile drag-drop so both land on the same index for a given cursor Y.
   const computeInsertIndexFromY = useCallback((clientY: number): number | null => {
     if (!tbodyRef.current) return null;
+    // Skip injected non-action rows: "+ Add Else" ghosts AND the animated
+    // drop-gap slot (a layout-affecting row — including it would offset every
+    // index below the gap by one and make the target oscillate as the gap moves).
     const rows = Array.from(tbodyRef.current.querySelectorAll('tr')).filter(
-      tr => !tr.querySelector('button[title="Insert an Else branch in this conditional block"]')
+      tr => !tr.hasAttribute('data-drop-gap')
+        && !tr.querySelector('button[title="Insert an Else branch in this conditional block"]')
     );
     let target: number | null = null;
     for (let i = 0; i < rows.length; i++) {
@@ -576,7 +665,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     }
     return target;
   }, []);
-  const DRAG_THRESHOLD = 5;
+  // 8 px (was 5) — with single-click-to-edit on cells, a jittery click must not
+  // be promoted to a drag, or the click event gets suppressed and the edit never
+  // opens. 8 px still feels instant for a deliberate drag.
+  const DRAG_THRESHOLD = 8;
   // Auto-scroll zone: when the cursor is within this many pixels of the scroll container's
   // top or bottom edge during a drag, scroll the container automatically. Without this,
   // reordering across long lists (50+ actions) is impossible without dropping and re-grabbing.
@@ -646,10 +738,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         delta = AUTOSCROLL_MAX_SPEED * Math.min(1, Math.max(0, intensity));
       }
       if (delta !== 0) {
+        // While auto-scrolling, the drop gap re-mounts at a new index every tick —
+        // replaying its grow animation each frame reads as flicker on long lists.
+        // The flag lets CSS suppress the animation until the scroll settles.
+        container.dataset.autoscrolling = 'true';
         container.scrollTop += delta;
         recomputeDropTarget(y);
         autoScrollRaf.current = requestAnimationFrame(tickAutoScroll);
       } else {
+        delete container.dataset.autoscrolling;
         autoScrollRaf.current = null;
       }
     };
@@ -689,22 +786,20 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         const target = dropTargetRef.current;
 
         if (target !== null && indices.length > 0) {
-          // View Transitions wraps the reorder in a snapshot/animate cycle when supported.
-          // The browser captures the "before" state, lets the bridge update the actions
-          // array via React (the inner promise tick gives reconciliation time), then
-          // animates the diff. Chromium 111+ (which WebView2 ships); silent no-op on older.
-          const doReorder = () => send({ type: 'actions:reorder', payload: { indices, targetIndex: target } });
-          const vt = (document as unknown as { startViewTransition?: (cb: () => void | Promise<void>) => unknown }).startViewTransition;
-          if (typeof vt === 'function') {
-            vt.call(document, () => {
-              doReorder();
-              // Bridge round-trip is local + sync-ish; give React ~50ms to commit the
-              // new ordering before View Transitions snapshots the "after" state.
-              return new Promise<void>(resolve => setTimeout(resolve, 50));
+          // FLIP "first" snapshot — capture where every row sits NOW; the
+          // useLayoutEffect on [actions] plays the inverted deltas once the
+          // reordered array lands. (This replaced the old startViewTransition
+          // wrapper: VT without per-element names only cross-faded the whole
+          // table — no slide, and it froze interaction for the duration.)
+          if (tbodyRef.current && document.documentElement.getAttribute('data-animations') === 'true') {
+            const map = new Map<string, number>();
+            tbodyRef.current.querySelectorAll<HTMLTableRowElement>('tr[data-row-id]').forEach(tr => {
+              const id = tr.getAttribute('data-row-id');
+              if (id) map.set(id, tr.getBoundingClientRect().top);
             });
-          } else {
-            doReorder();
+            pendingFlipRects.current = { map, at: performance.now() };
           }
+          send({ type: 'actions:reorder', payload: { indices, targetIndex: target } });
           setSelectedIndices(new Set());
         }
 
@@ -715,6 +810,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       dragState.current = null;
       dropTargetRef.current = null;
       setCursorPos(null);
+      if (scrollRef.current) delete scrollRef.current.dataset.autoscrolling;
       if (autoScrollRaf.current !== null) {
         cancelAnimationFrame(autoScrollRaf.current);
         autoScrollRaf.current = null;
@@ -731,6 +827,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       setCursorPos(null);
       dragState.current = null;
       dropTargetRef.current = null;
+      if (scrollRef.current) delete scrollRef.current.dataset.autoscrolling;
       if (autoScrollRaf.current !== null) {
         cancelAnimationFrame(autoScrollRaf.current);
         autoScrollRaf.current = null;
@@ -753,7 +850,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
   // ── Drag a profile from the ProfilePanel onto the grid → Run Profile action ──
   // ProfilePanel owns the (mouse-based) drag and signals via window events. While a profile is
-  // dragged we reuse the row-reorder insertion rail (driven by dropTarget); on drop we open a
+  // dragged we reuse the row-reorder insertion gap (driven by dropTarget); on drop we open a
   // pre-filled Run Profile dialog at the drop index. Subscribed once — volatile values are read
   // from a ref so an in-flight drag isn't dropped by a re-subscribe.
   const profileDragCtx = useRef({ recording: false, replaying: false, activeProfile: null as string | null, actionCount: 0 });
@@ -770,13 +867,14 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     let dragging = false;
     let lastY = 0;
     const stopScroll = () => {
+      if (scrollRef.current) delete scrollRef.current.dataset.autoscrolling;
       if (profileScrollRaf.current !== null) {
         cancelAnimationFrame(profileScrollRaf.current);
         profileScrollRaf.current = null;
       }
     };
     // Mirror the row-reorder auto-scroll: while the cursor sits in the top/bottom edge zone,
-    // scroll the list (ramping by proximity) and keep the insertion rail in sync — so dropping
+    // scroll the list (ramping by proximity) and keep the insertion gap in sync — so dropping
     // into a long, already-scrolled list works without scrolling by hand first.
     const tick = () => {
       const container = scrollRef.current;
@@ -791,10 +889,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         delta = AUTOSCROLL_MAX_SPEED * Math.min(1, Math.max(0, intensity));
       }
       if (delta !== 0) {
+        // Same flicker guard as the row-reorder auto-scroll: the gap re-mounts at
+        // a new index every tick, so its grow animation is frozen until the
+        // scroll settles (see [data-autoscrolling] in index.css).
+        container.dataset.autoscrolling = 'true';
         container.scrollTop += delta;
         setDropTarget(computeInsertIndexFromY(lastY));
         profileScrollRaf.current = requestAnimationFrame(tick);
       } else {
+        delete container.dataset.autoscrolling;
         profileScrollRaf.current = null;
       }
     };
@@ -984,15 +1087,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         className="grid items-center h-row border-b border-border-subtle shrink-0"
         style={{ gridTemplateColumns: [
           '28px', '50px',
-          // Action (152) + Key (124) absorb the 24 px previously held by the
-          // (now-removed) Toggle Columns trailing slot — split 12 / 12 between
-          // the two text-heaviest columns so long labels like "Navigate to URL"
-          // and combo keystrokes ("Ctrl+Shift+R") get more breathing room
-          // before truncation. Notes (1fr) keeps the rest of the available width.
+          // Details (240) replaces the old Key (124) + X (65) + Y (65) trio —
+          // key/text/combo for keyboard-ish actions, "x, y" for mouse actions,
+          // condition payload for If rows, all in one cell. Was 190 at first;
+          // widened after user feedback that Notes (1fr) ended up too large.
           ...(columnVisibility.action ? ['152px'] : []),
-          ...(columnVisibility.key ? ['124px'] : []),
-          ...(columnVisibility.x ? ['65px'] : []),
-          ...(columnVisibility.y ? ['65px'] : []),
+          ...(columnVisibility.details ? ['240px'] : []),
           ...(columnVisibility.delay ? ['70px'] : []),
           ...(columnVisibility.notes ? ['1fr'] : []),
         ].join(' ') }}
@@ -1017,9 +1117,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         </span>
         <span className="text-xs font-semibold text-text-tertiary pl-3">#</span>
         {columnVisibility.action && <span className="text-xs font-semibold text-text-tertiary pl-1">Action</span>}
-        {columnVisibility.key && <span className="text-xs font-semibold text-text-tertiary pl-1">Key</span>}
-        {columnVisibility.x && <span className="text-xs font-semibold text-text-tertiary pl-2">X</span>}
-        {columnVisibility.y && <span className="text-xs font-semibold text-text-tertiary pl-2">Y</span>}
+        {columnVisibility.details && <span className="text-xs font-semibold text-text-tertiary pl-1">Details</span>}
         {columnVisibility.delay && <span className="text-xs font-semibold text-text-tertiary pl-2">Delay</span>}
         {columnVisibility.notes && <span className="text-xs font-semibold text-text-tertiary pl-2 pr-2">Notes</span>}
       </div>
@@ -1030,14 +1128,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           <colgroup>
             <col style={{ width: 28 }} />
             <col style={{ width: 50 }} />
-            {/* Action 152 + Key 124 match the header's gridTemplateColumns — both
-                gained 12 px from the reclaimed Toggle Columns slot so longer labels
-                ("Navigate to URL") and combo keystrokes ("Ctrl+Shift+R") have more
-                room before truncation. */}
+            {/* Action 152 + Details 240 match the header's gridTemplateColumns.
+                Details holds what used to be Key + X + Y, so chips and coord
+                strings share the same 240 px lane. */}
             {columnVisibility.action && <col style={{ width: 152 }} />}
-            {columnVisibility.key && <col style={{ width: 124 }} />}
-            {columnVisibility.x && <col style={{ width: 65 }} />}
-            {columnVisibility.y && <col style={{ width: 65 }} />}
+            {columnVisibility.details && <col style={{ width: 240 }} />}
             {columnVisibility.delay && <col style={{ width: 70 }} />}
             {/* Notes column claims 100% of the remaining table width. In `table-fixed`,
                 a <col> without an explicit width gets ~0 and the leftover space sits
@@ -1105,14 +1200,22 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               const blockIf = blockInfo.blockIfOf[idx];
               const isInSkippedBlock = blockIf !== null && actions[blockIf]?.isSkipped === true;
               const isSkipped = action.isSkipped || isInSkippedBlock;
-              const showDropBefore = dropTarget === idx && !isDragged;
-              const showDropAfter = dropTarget === idx + 1 && !isDragged && !(dragIndexSet?.has(idx + 1));
+              // Insertion gap — a real row that opens above this one when it is the
+              // current drop position. Suppressed when dropping there would be a
+              // no-op (the slot sits immediately above or below a dragged row).
+              const showGapBefore = dropTarget === idx
+                && !(dragIndexSet?.has(idx))
+                && !(idx > 0 && dragIndexSet?.has(idx - 1));
 
               // Conditional structural rows (If / Else / EndIf) carry their own scope
               // rail in addition to any outer-block rails, get a subtle tinted bg, and
               // anchor the "+ Add Else" ghost row injected below.
               const isStructural = action.actionType === 'If' || action.actionType === 'Else' || action.actionType === 'EndIf';
               const depth = blockInfo.depth[idx] || 0;
+              // Body rows of a conditional block (depth ≥ 1, non-structural) get a
+              // softer wash of the same IF hue so the whole block reads as one band,
+              // not just its If/Else/EndIf brackets.
+              const isInBlock = !isStructural && depth > 0;
               // Rail count = depth (= rails for outer blocks) + 1 extra rail for the
               // structural row's own scope. A top-level IF (depth=0, structural) renders
               // 1 rail. A nested IF (depth=1, structural) renders 2 (outer + its own).
@@ -1143,6 +1246,20 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
               return (
                 <Fragment key={action.id ?? idx}>
+                {showGapBefore && (
+                  <tr data-drop-gap className="pointer-events-none">
+                    <td colSpan={99} className="p-0">
+                      <div
+                        className="drop-gap-slot mx-2 my-[3px] rounded border-2 border-dashed overflow-hidden"
+                        style={{
+                          height: 'calc(var(--ui-row-height) - 6px)',
+                          borderColor: 'color-mix(in srgb, var(--color-accent) 45%, transparent)',
+                          background: 'color-mix(in srgb, var(--color-accent) 6%, transparent)',
+                        }}
+                      />
+                    </td>
+                  </tr>
+                )}
                 {showAddElseBefore && blockIf !== null && (
                   <tr
                     // Same amber tint AND height as structural rows so the block reads as
@@ -1187,6 +1304,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   // after migration runs.
 
                   ref={isHighlighted ? highlightedRowRef : undefined}
+                  // data-row-id feeds the FLIP-on-drop measurement (see the
+                  // pendingFlipRects layout effect). Only rows with a real backend
+                  // id participate — index-keyed fallbacks can't be tracked across
+                  // a reorder.
+                  data-row-id={action.id ?? undefined}
                   onMouseDown={(e) => handleRowMouseDown(idx, e)}
                   onClick={(e) => handleRowClick(idx, e)}
                   onContextMenu={(e) => handleRowContextMenu(idx, e)}
@@ -1211,44 +1333,26 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     isPausedHere
                       ? 'animate-pulse'
                       : isHighlighted
-                        ? 'bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)]'
+                        ? 'bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] hover:bg-bg-elevated'
                         : isSelected
-                          ? 'bg-[rgba(96,205,255,0.08)]'
+                          ? 'bg-[color-mix(in_srgb,var(--color-accent)_8%,transparent)] hover:bg-bg-elevated'
                           : isStructural
                             // Structural row tint replaces the odd/even striping so the
                             // whole IF / ELSE / ENDIF row group reads as a cohesive scope
-                            // marker, distinct from the body rows it brackets.
-                            ? 'bg-[color-mix(in_srgb,var(--color-action-if-fg)_6%,transparent)]'
-                            : idx % 2 === 0
-                              ? 'bg-bg-surface'
-                              : 'bg-[rgba(255,255,255,0.02)]'
-                  } hover:bg-bg-elevated`}
+                            // marker, distinct from the body rows it brackets. Hovering
+                            // mixes the IF hue into the elevated colour instead of using
+                            // plain bg-elevated, so the block tint survives the hover.
+                            ? 'bg-[color-mix(in_srgb,var(--color-action-if-fg)_6%,transparent)] hover:bg-[color-mix(in_srgb,var(--color-action-if-fg)_10%,var(--color-bg-elevated))]'
+                            : isInBlock
+                              ? 'bg-[color-mix(in_srgb,var(--color-action-if-fg)_3%,transparent)] hover:bg-[color-mix(in_srgb,var(--color-action-if-fg)_7%,var(--color-bg-elevated))]'
+                              : idx % 2 === 0
+                                ? 'bg-bg-surface hover:bg-bg-elevated'
+                                // Odd-row stripe: a whisper of text-primary instead of a
+                                // fixed white overlay — follows the theme (darkens on
+                                // light themes) and keeps the zebra deliberately subtle.
+                                : 'bg-[color-mix(in_srgb,var(--color-text-primary)_1.5%,transparent)] hover:bg-bg-elevated'
+                  }`}
                 >
-                  {/* Drop indicator — accent line with a small leading circle and a soft
-                      glow. The circle anchors the eye on where the drop "starts" (left edge
-                      of the column area) and reads as more deliberate than a bare hairline.
-                      box-shadow uses var(--color-accent) so it follows theme accents. */}
-                  {showDropBefore && (
-                    <td colSpan={99} className="absolute top-0 left-0 right-0 h-0 p-0 border-0">
-                      <div
-                        className="absolute top-[-2px] left-2 right-2 h-[3px] rounded-full bg-accent-solid"
-                        style={{ boxShadow: '0 0 6px color-mix(in srgb, var(--color-accent) 60%, transparent)' }}
-                      >
-                        <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-accent-solid" />
-                      </div>
-                    </td>
-                  )}
-                  {showDropAfter && (
-                    <td colSpan={99} className="absolute bottom-0 left-0 right-0 h-0 p-0 border-0">
-                      <div
-                        className="absolute bottom-[-2px] left-2 right-2 h-[3px] rounded-full bg-accent-solid"
-                        style={{ boxShadow: '0 0 6px color-mix(in srgb, var(--color-accent) 60%, transparent)' }}
-                      >
-                        <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-accent-solid" />
-                      </div>
-                    </td>
-                  )}
-
                   {/* Checkbox — the entire row is the drag target (handleRowMouseDown);
                       the cursor switches to grab/grabbing on hover/drag, which is
                       affordance enough. An earlier draft swapped in a GripVertical icon
@@ -1314,27 +1418,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       style={{ background: colors.bg, color: colors.fg }}
                     >
                       <ActionIcon actionType={action.actionType} />
-                      {action.actionType === 'WaitImage' ? 'Wait Image'
-                        : action.actionType === 'WaitPixelColor' ? 'Pixel Color'
-                        // Browser labels carry "Element"/"Text" so they never read as the
-                        // desktop LeftClick/SendText pills — ambiguity fix (P2).
-                        : action.actionType === 'BrowserClick' ? 'Click Element'
-                        : action.actionType === 'BrowserRightClick' ? 'Right Click Element'
-                        : action.actionType === 'BrowserType' ? 'Type Text'
-                        : action.actionType === 'BrowserSelectOption' ? 'Select Option'
-                        : action.actionType === 'BrowserWaitElement' ? 'Wait Element'
-                        : action.actionType === 'BrowserNavigate' ? 'Open URL'
-                        : action.actionType === 'RunProfile' ? 'Run Profile'
-                        : action.actionType === 'Pause' ? 'Pause'
-                        : action.actionType === 'HoldKey' ? 'Hold Key'
-                        // Conditional labels are intentionally lowercase to read as
-                        // "code keywords" (matches the mockup). IF varies by condition
-                        // family so the user sees the probe type without opening Sheet.
-                        : action.actionType === 'If'
-                          ? (action.conditionType === 'PixelColorMatch' ? 'if pixel' : 'if image')
-                        : action.actionType === 'Else' ? 'else'
-                        : action.actionType === 'EndIf' ? 'endif'
-                        : action.actionType}
+                      {actionPillLabel(action)}
                       {/* Repeat indicator — Keystroke press-cycles + RunProfile sub-call
                           counts. Lives inside the Action pill instead of the Key column
                           because long profile names used to push "×N" past the Key
@@ -1356,12 +1440,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   </td>
                   )}
 
-                  {/* Key */}
-                  {columnVisibility.key && (() => {
+                  {/* Details — the merged Key + X + Y column. Keyboard-ish actions
+                      render their key/text/combo chip, mouse actions render the
+                      "x, y" coordinate pair, If-pixel rows render both (hex chip +
+                      probe coords). */}
+                  {columnVisibility.details && (() => {
                     // Compute group membership once so the dblclick router and the
                     // td-level cursor class don't drift out of sync. Group A = inline
-                    // edit / specialised dialog; Group B = open Sheet; Group C = no-op
-                    // (Click variants in all their forms, Scroll, Else, EndIf).
+                    // edit / specialised dialog; Group B = open Sheet; mouse rows =
+                    // inline "x, y" edit; the rest (Scroll, Else, EndIf) = no-op.
                     const isGroupA =
                       action.actionType === 'SendText'
                       || action.actionType === 'RunProfile'
@@ -1382,31 +1469,62 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       ? 'cursor-text'
                       : isGroupB
                         ? 'cursor-pointer'
-                        : '';
+                        : canEditXY
+                          ? 'cursor-text'
+                          : '';
                     return (
                   <td
                     className={`pl-1 ${tdCursor}`}
-                    // Dblclick at the <td> level so EMPTY cells respond. Re-entry into
-                    // inline-edit on KeyDown/KeyUp rows is guarded by the editingCell check.
-                    onDoubleClick={() => {
-                      if (editingCell?.index === idx && editingCell.field === 'key') return;
+                    // SINGLE click at the <td> level so EMPTY cells respond too.
+                    // Guards, in order: an open editor anywhere means this click is a
+                    // commit-elsewhere/focus click, not an edit request; a click right
+                    // after a drag is the drop release (handleRowClick consumes and
+                    // resets the flag); modifier clicks are selection gestures and
+                    // bubble to the row handler untouched. When the click IS an edit,
+                    // stopPropagation keeps the row's select/deselect toggle out of it.
+                    onClick={(e) => {
+                      if (editingCell) return;
+                      if (dragOccurred.current) return;
+                      if (e.ctrlKey || e.metaKey || e.shiftKey) return;
                       if (action.actionType === 'SendText') {
+                        e.stopPropagation();
                         setSendTextEdit({ index: idx, text: action.key });
                       } else if (action.actionType === 'RunProfile') {
+                        e.stopPropagation();
                         setRunProfileEdit({ index: idx, profileName: action.key, repeatCount: action.repeatCount ?? 1 });
                       } else if (action.actionType === 'Keystroke' || action.actionType === 'HoldKey') {
+                        e.stopPropagation();
                         setKeystrokeEdit({ index: idx });
                       } else if (action.actionType.startsWith('Key')) {
+                        // Key capture swallows the user's next keypress — too sharp a
+                        // tool to arm on a stray click. First click selects the row
+                        // (bubbles through), a second click on the cell starts capture.
+                        if (!isSelected) return;
+                        e.stopPropagation();
                         startEdit(idx, 'key', action.key);
                       } else if (isGroupB) {
+                        e.stopPropagation();
                         onOpenSheet?.(idx);
+                      } else if (canEditXY) {
+                        e.stopPropagation();
+                        startEdit(idx, 'coords', `${action.x}, ${action.y}`);
                       }
-                      // Group C — LeftClick / RightClick / MiddleClick and all their
-                      // *Down/*Up variants, Scroll, Else, EndIf — fall through with no
-                      // dblclick action. Their Key cell has no editable meaning.
+                      // Scroll, Else, EndIf — fall through with no click action.
+                      // Their Details cell has no editable meaning.
                     }}
                   >
-                    {editingCell?.index === idx && editingCell.field === 'key' ? (
+                    {editingCell?.index === idx && editingCell.field === 'coords' ? (
+                      <input
+                        ref={editInputRef}
+                        type="text"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onKeyDown={handleEditKeyDown}
+                        onBlur={commitEdit}
+                        placeholder="x, y"
+                        className="w-[100px] h-6 px-1 text-xs font-mono text-text-primary bg-bg-input border border-accent-solid rounded outline-none"
+                      />
+                    ) : editingCell?.index === idx && editingCell.field === 'key' ? (
                       <input
                         ref={editInputRef}
                         type="text"
@@ -1416,11 +1534,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         onFocus={armKeyCaptureTimer}
                         onKeyDown={handleKeyCaptureKeyDown}
                         onBlur={() => { disarmKeyCaptureTimer(); cancelEdit(); }}
-                        className="w-[104px] h-6 px-1 text-xs font-mono text-accent-light bg-bg-input border border-accent-solid rounded outline-none placeholder:text-accent-light/50 animate-pulse"
+                        className="w-[220px] h-6 px-1 text-xs font-mono text-accent-light bg-bg-input border border-accent-solid rounded outline-none placeholder:text-accent-light/50 animate-pulse"
                       />
-                    ) : displayKey ? (
+                    ) : (<>
+                    {displayKey ? (
                       <span
-                        className={`inline-flex items-center translate-y-[-2px] px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input max-w-[104px] truncate ${
+                        className={`inline-flex items-center translate-y-[-2px] px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input max-w-[220px] truncate ${
                           // Group A — Key cell IS the primary editor for this action
                           // (text body, profile picker, keystroke combo, single key).
                           // cursor-text reflects "you can type / edit" semantics; dblclick
@@ -1516,61 +1635,36 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         })()}
                       </span>
                     ) : null}
+                    {/* Coordinate pair — mouse actions show (and inline-edit) their
+                        "x, y" here; If-pixel rows append the probe point after the
+                        hex chip (read-only — the probe is edited via the Sheet).
+                        Click handling lives on the parent <td> so the whole cell is
+                        one edit target. */}
+                    {displayX !== '' && (
+                      <span
+                        className={`text-xs font-mono text-text-secondary tabular-nums ${displayKey ? 'ml-1.5' : ''} ${canEditXY ? 'cursor-text hover:text-text-primary' : ''}`}
+                      >
+                        {displayX}, {displayY}
+                      </span>
+                    )}
+                    </>)}
                   </td>
                     );
                   })()}
 
-                  {/* X */}
-                  {columnVisibility.x && (
-                  <td className="pl-2">
-                    {editingCell?.index === idx && editingCell.field === 'x' ? (
-                      <input
-                        ref={editInputRef}
-                        type="text"
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onKeyDown={handleEditKeyDown}
-                        onBlur={commitEdit}
-                        className="w-14 h-6 px-1 text-xs font-mono text-text-primary bg-bg-input border border-accent-solid rounded outline-none"
-                      />
-                    ) : (
-                      <span
-                        className={`text-xs font-mono text-text-secondary ${canEditXY ? 'cursor-text hover:text-text-primary' : ''}`}
-                        onDoubleClick={() => canEditXY && startEdit(idx, 'x', String(action.x))}
-                      >
-                        {displayX}
-                      </span>
-                    )}
-                  </td>
-                  )}
-
-                  {/* Y */}
-                  {columnVisibility.y && (
-                  <td className="pl-2">
-                    {editingCell?.index === idx && editingCell.field === 'y' ? (
-                      <input
-                        ref={editInputRef}
-                        type="text"
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onKeyDown={handleEditKeyDown}
-                        onBlur={commitEdit}
-                        className="w-14 h-6 px-1 text-xs font-mono text-text-primary bg-bg-input border border-accent-solid rounded outline-none"
-                      />
-                    ) : (
-                      <span
-                        className={`text-xs font-mono text-text-secondary ${canEditXY ? 'cursor-text hover:text-text-primary' : ''}`}
-                        onDoubleClick={() => canEditXY && startEdit(idx, 'y', String(action.y))}
-                      >
-                        {displayY}
-                      </span>
-                    )}
-                  </td>
-                  )}
-
-                  {/* Delay */}
+                  {/* Delay — single click anywhere in the cell opens the editor
+                      (same guard chain as the Details cell). */}
                   {columnVisibility.delay && (
-                  <td className="pl-2">
+                  <td
+                    className="pl-2 cursor-text"
+                    onClick={(e) => {
+                      if (editingCell) return;
+                      if (dragOccurred.current) return;
+                      if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+                      e.stopPropagation();
+                      startEdit(idx, 'delay', String(action.delay >= 0 ? action.delay : 0));
+                    }}
+                  >
                     {editingCell?.index === idx && editingCell.field === 'delay' ? (
                       <input
                         ref={editInputRef}
@@ -1582,19 +1676,26 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         className="w-16 h-6 px-1 text-xs font-mono text-text-primary bg-bg-input border border-accent-solid rounded outline-none"
                       />
                     ) : (
-                      <span
-                        className="text-xs font-mono text-text-secondary cursor-text hover:text-text-primary"
-                        onDoubleClick={() => startEdit(idx, 'delay', String(action.delay >= 0 ? action.delay : 0))}
-                      >
+                      <span className="text-xs font-mono text-text-secondary hover:text-text-primary">
                         {action.delay >= 0 ? action.delay : 0}
                       </span>
                     )}
                   </td>
                   )}
 
-                  {/* Notes */}
+                  {/* Notes \u2014 single click anywhere in the cell opens the editor
+                      (same guard chain as the Details cell). */}
                   {columnVisibility.notes && (
-                  <td className="pl-2 pr-2">
+                  <td
+                    className="pl-2 pr-2 cursor-text"
+                    onClick={(e) => {
+                      if (editingCell) return;
+                      if (dragOccurred.current) return;
+                      if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+                      e.stopPropagation();
+                      startEdit(idx, 'comment', action.comment);
+                    }}
+                  >
                     {editingCell?.index === idx && editingCell.field === 'comment' ? (
                       <input
                         ref={editInputRef}
@@ -1606,10 +1707,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         className="w-full h-6 px-1 text-xs text-text-primary bg-bg-input border border-accent-solid rounded outline-none"
                       />
                     ) : (
-                      <span
-                        className="text-xs text-text-tertiary truncate block cursor-text hover:text-text-secondary"
-                        onDoubleClick={() => startEdit(idx, 'comment', action.comment)}
-                      >
+                      <span className="text-xs text-text-tertiary truncate block hover:text-text-secondary">
                         {action.comment || '\u00A0'}
                       </span>
                     )}
@@ -1620,42 +1718,83 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                 </Fragment>
               );
             })}
+            {/* Trailing insertion gap — drop position past the last row. */}
+            {dropTarget === actions.length && actions.length > 0
+              && !(dragIndexSet?.has(actions.length - 1)) && (
+              <tr data-drop-gap className="pointer-events-none">
+                <td colSpan={99} className="p-0">
+                  <div
+                    className="drop-gap-slot mx-2 my-[3px] rounded border-2 border-dashed overflow-hidden"
+                    style={{
+                      height: 'calc(var(--ui-row-height) - 6px)',
+                      borderColor: 'color-mix(in srgb, var(--color-accent) 45%, transparent)',
+                      background: 'color-mix(in srgb, var(--color-accent) 6%, transparent)',
+                    }}
+                  />
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
 
         {/* Empty state */}
-        {actions.length === 0 && (
-          <div className="flex items-center justify-center h-full min-h-[200px] text-text-disabled text-sm">
-            No actions recorded
-          </div>
-        )}
+        {actions.length === 0 && <MacroEmptyState />}
       </div>
 
-      {/* Floating drag preview — follows the cursor with a "N items" badge so the user
-          knows what's being moved during a multi-row drag. The Windows "grabbing" cursor
-          is ~32×32px and the user reported the chip getting covered at smaller offsets;
-          push it to (+32, +32) so the chip clears the cursor bounds in any DPI/scaling.
-          pointer-events-none keeps it out of hit-testing. */}
-      {dragIndices !== null && cursorPos !== null && (
-        <div
-          className="fixed pointer-events-none z-50 flex items-center gap-1.5 px-2.5 py-1 rounded bg-bg-card border border-accent-solid/60 shadow-lg text-[11px] text-text-primary"
-          // `transform: translate3d(...)` instead of `left/top` so the chip rides
-          // on the GPU compositor layer — each mousemove only retriggers a
-          // composite, never a layout/paint of the surrounding tree. `top:0;
-          // left:0` anchors the transform origin, `willChange:transform` hints
-          // the browser to promote the element ahead of time. Saves a layout
-          // pass per pointermove in the DnD hot loop.
-          style={{
-            top: 0,
-            left: 0,
-            transform: `translate3d(${cursorPos.x + 32}px, ${cursorPos.y + 32}px, 0)`,
-            willChange: 'transform',
-          }}
-        >
-          <GripVertical size={11} className="text-accent shrink-0" />
-          {dragIndices.length === 1 ? '1 item' : `${dragIndices.length} items`}
-        </div>
-      )}
+      {/* Floating drag ghost — a translucent replica of the (first) picked-up row
+          with a lifted-card shadow and a slight tilt, Sortable style. Multi-row
+          drags add a "+N" count badge. Offset (+32, +32) clears the Windows
+          "grabbing" cursor bounds in any DPI/scaling; pointer-events-none keeps
+          it out of hit-testing. `transform: translate3d(...)` instead of
+          `left/top` so the ghost rides the GPU compositor layer — each mousemove
+          only retriggers a composite, never a layout/paint of the surrounding
+          tree. */}
+      {dragIndices !== null && cursorPos !== null && (() => {
+        const primary = actions[dragIndices[0]];
+        if (!primary) return null;
+        const ghostColors = getActionTypeColors(primary.actionType);
+        const ghostDetail = isMouseAction(primary.actionType)
+          ? `${primary.x}, ${primary.y}`
+          : getDisplayKey(primary.key);
+        return (
+          <div
+            className="fixed pointer-events-none z-50"
+            style={{
+              top: 0,
+              left: 0,
+              transform: `translate3d(${cursorPos.x + 32}px, ${cursorPos.y + 32}px, 0) rotate(1.5deg)`,
+              willChange: 'transform',
+            }}
+          >
+            <div
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-bg-card border border-border-default w-[300px]"
+              style={{
+                opacity: 0.88,
+                boxShadow: '0 12px 32px rgba(0,0,0,0.5), 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent)',
+              }}
+            >
+              <GripVertical size={12} className="text-text-disabled shrink-0" />
+              <span
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium shrink-0"
+                style={{ background: ghostColors.bg, color: ghostColors.fg }}
+              >
+                <ActionIcon actionType={primary.actionType} />
+                {actionPillLabel(primary)}
+              </span>
+              {ghostDetail && (
+                <span className="text-xs font-mono text-text-secondary truncate flex-1">
+                  {ghostDetail}
+                </span>
+              )}
+              {dragIndices.length > 1 && (
+                <span className="ml-auto shrink-0 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-accent-solid text-white">
+                  +{dragIndices.length - 1}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {sendTextEdit && (
         <SendTextDialog
@@ -1744,7 +1883,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           onClose={() => setRunProfileInsert(null)}
         />
       )}
-
 
       {/* Bulk Action Bar — inline at bottom. Reordering (Move Up / Move Down)
           lives here now instead of on the global toolbar because the operation
@@ -2014,6 +2152,38 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   Focus click
                 </span>
                 {allOn && <Check size={12} className="text-accent-light" />}
+              </button>
+            );
+          })()}
+
+          {/* Convert Left Click ↔ Double Click — quick toggle for combined left clicks,
+              so a recorded LeftClick can become a DoubleClick (and back) without opening
+              the Sheet. Acts on the effective selection filtered to the convertible type.
+              Backend-wise it's just an actionType field edit. */}
+          {(() => {
+            const row = actions[contextMenu.rowIndex];
+            if (!row || (row.actionType !== 'LeftClick' && row.actionType !== 'DoubleClick')) return null;
+            const fromType = row.actionType;
+            const toType = fromType === 'LeftClick' ? 'DoubleClick' : 'LeftClick';
+            const eff = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
+              ? Array.from(selectedIndices).sort((a, b) => a - b)
+              : [contextMenu.rowIndex];
+            const convertIdx = eff.filter(i => actions[i]?.actionType === fromType);
+            if (convertIdx.length === 0) return null;
+            return (
+              <button
+                onMouseEnter={() => setActiveSubmenu(null)}
+                onClick={() => {
+                  for (const i of convertIdx) {
+                    send({ type: 'actions:edit', payload: { index: i, field: 'actionType', value: toType } });
+                  }
+                  closeContextMenu();
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+              >
+                <MousePointerClick size={13} className="text-text-tertiary" />
+                Convert to {toType === 'DoubleClick' ? 'Double Click' : 'Left Click'}
+                {convertIdx.length > 1 && <span className="text-text-disabled">({convertIdx.length})</span>}
               </button>
             );
           })()}

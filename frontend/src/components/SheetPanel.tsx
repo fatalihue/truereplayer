@@ -9,6 +9,8 @@ import { NumberInput } from './common/NumberInput';
 import { ImageCropper } from './ImageCropper';
 import { LexicalTokenEditor, type LexicalEditorHandle } from './lexical/LexicalTokenEditor';
 import { getDisplayKey } from '../utils/displayUtils';
+import { Field } from './sheet/Field';
+import { Slider } from './sheet/Slider';
 
 interface SheetPanelProps {
   actionIndex: number | null;
@@ -27,6 +29,7 @@ type ActionFamily = 'click' | 'key' | 'scroll';
 const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
   click: [
     { value: 'LeftClick', label: 'Left Click' },
+    { value: 'DoubleClick', label: 'Double Click' },
     { value: 'RightClick', label: 'Right Click' },
     { value: 'MiddleClick', label: 'Mid Click' },
   ],
@@ -989,7 +992,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   // right button, and clickHalfSuffix (null for a combined click) preserves the press/release
   // half when switching between click types. The optional-suffix regex matches both shapes, so
   // isClickHalf here means "is a click row" (coords + Pick/Copy/Paste buttons apply to both).
-  const clickHalfMatch = actionType.match(/^((?:Left|Right|Middle)Click)(Down|Up)?$/);
+  // Double is in the button alternation so DoubleClick joins the click family
+  // (picker chips + coords/Pick/Copy/Paste). A "DoubleClickDown" never exists,
+  // so the optional suffix simply never matches for it.
+  const clickHalfMatch = actionType.match(/^((?:Left|Right|Middle|Double)Click)(Down|Up)?$/);
   const isClickHalf = clickHalfMatch !== null;
   const clickHalfBase = clickHalfMatch ? clickHalfMatch[1] : null;
   const clickHalfSuffix = clickHalfMatch?.[2] ? (clickHalfMatch[2] as 'Down' | 'Up') : null;
@@ -1049,6 +1055,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   : actionType === 'BrowserWaitElement' ? 'Wait Element'
                   : actionType === 'BrowserNavigate' ? 'Open URL'
                   : actionType === 'BrowserSelectOption' ? 'Select Option'
+                  : actionType === 'DoubleClick' ? 'Double Click'
                   : isClickHalf
                     ? `${(clickHalfBase ?? '').replace('Click', '')} Click`
                     : actionType}
@@ -1072,10 +1079,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               shape). Cross-family conversions aren't offered: users who want to swap families
               record a new action — it's faster and avoids leaving half-filled fields behind. */}
           {!isWaitImage && !isBrowser && !isPause && showTypePicker && (
-          <div>
-            <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">ACTION TYPE</label>
+          <Field label="Action Type">
             <div className="flex flex-wrap gap-1.5">
-              {familyOptions.map(t => {
+              {familyOptions
+                // Editing a paired half (Down/Up)? Don't offer Double Click — it's a
+                // combined-only unit; converting just one half would orphan its twin.
+                .filter(t => !(clickHalfSuffix && t.value === 'DoubleClick'))
+                .map(t => {
                 // When editing a click half (LeftClickDown / LeftClickUp / etc.), picking
                 // another click type must preserve the suffix so the engine still dispatches
                 // the action — `RightClick` alone is silently skipped by the replay switch.
@@ -1101,7 +1111,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 );
               })}
             </div>
-          </div>
+          </Field>
           )}
 
           {/* CONDITION — IF rows only. Two stacked controls:
@@ -1118,8 +1128,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               the probe configuration. */}
           {isIf && (
           <>
-            <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">CONDITION</label>
+            <Field label="Condition">
               <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
                 <button
                   type="button"
@@ -1146,10 +1155,12 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   NOT Found
                 </button>
               </div>
-            </div>
+            </Field>
 
-            <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">ON PROBE ERROR</label>
+            <Field
+              label="On Probe Error"
+              hint="Default: probe exception falls through to the FALSE branch so the replay continues. Halt rethrows so flaky probes don't silently mask bugs."
+            >
               <select
                 value={ifOnProbeError}
                 onChange={(e) => setIfOnProbeError(e.target.value === 'Halt' ? 'Halt' : 'TreatAsFalse')}
@@ -1158,11 +1169,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 <option value="TreatAsFalse">Treat as false (default)</option>
                 <option value="Halt">Halt replay</option>
               </select>
-              <div className="text-[10px] text-text-tertiary mt-1">
-                Default: probe exception falls through to the FALSE branch so the replay continues.
-                Halt rethrows so flaky probes don't silently mask bugs.
-              </div>
-            </div>
+            </Field>
           </>
           )}
 
@@ -1175,8 +1182,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           <>
             {/* Thumbnail + Recapture + Test match — thumbnail is clickable to open the cropper
                 for fine-tuning the reference (no need to revisit the screen state). */}
-            <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">REFERENCE IMAGE</label>
+            <Field label="Reference Image">
               <button
                 type="button"
                 onClick={() => action?.imageBase64 && setCropperOpen(true)}
@@ -1200,7 +1206,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   on the captured reference (one regenerates it, the other validates
                   it against the live screen) so they're sibling operations on the
                   same artefact. */}
-              <div className="mt-2 flex gap-2">
+              <div className="mt-2 flex gap-2.5">
                 <button
                   onClick={() => {
                     // Don't close the panel — backend handles minimise/overlay/save
@@ -1259,15 +1265,14 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   )}
                 </div>
               )}
-            </div>
+            </Field>
 
             {/* Search Region (ROI) — placed right under the Test result so the auto-set
                 feedback sits next to the field it just modified. Label + display row carry
                 the meaning; Configure button's title attribute keeps the discovery hint
                 on hover. */}
-            <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">SEARCH REGION</label>
-              <div className="flex items-center gap-2">
+            <Field label="Search Region">
+              <div className="flex items-center gap-2.5">
                 <div className="flex-1 px-2 py-1.5 text-[11px] font-mono bg-bg-input border border-border-default rounded text-text-secondary">
                   {waitImageSearchRegion
                     ? `${waitImageSearchRegion.x}, ${waitImageSearchRegion.y}  ·  ${waitImageSearchRegion.w} × ${waitImageSearchRegion.h}`
@@ -1290,34 +1295,30 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   </button>
                 )}
               </div>
-            </div>
+            </Field>
 
             {/* TOLERANCE — own row with helper text. Mirrors Pixel's tolerance section
                 (which also sits before the time-axis fields) so the two probe editors
                 read in parallel: "what to look for → search region → how forgiving →
                 wait behavior → test it". */}
-            <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TOLERANCE (%)</label>
-              <NumberInput
+            <Field
+              label="Tolerance (%)"
+              hint="80% is a reasonable default. Raise toward 95 for stricter matches; drop below 70 for compressed / scaled UI elements."
+            >
+              <Slider
                 value={parseInt(confidence, 10) || 80}
-                onChange={(n) => setConfidence(String(n))}
                 min={10}
                 max={100}
                 step={5}
-                inputWidth="w-full"
-                inputHeight="h-8"
-                ariaLabel="Tolerance percent"
+                onChange={(n) => setConfidence(String(n))}
+                suffix="%"
               />
-              <div className="text-[10px] text-text-tertiary mt-1">
-                80% is a reasonable default. Raise toward 95 for stricter matches; drop below 70 for compressed / scaled UI elements.
-              </div>
-            </div>
+            </Field>
 
             {/* WAIT UNTIL — WaitImage only. IF rows route "wait for absence" via the
                 CONDITION section's Found / NOT Found toggle. */}
             {!isIf && (
-            <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">WAIT UNTIL</label>
+            <Field label="Wait Until">
               <select
                 value={waitImageInvert ? 'disappears' : 'appears'}
                 onChange={(e) => setWaitImageInvert(e.target.value === 'disappears')}
@@ -1326,7 +1327,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 <option value="appears">Image appears</option>
                 <option value="disappears">Image disappears</option>
               </select>
-            </div>
+            </Field>
             )}
 
             {/* TIMEOUT + ON TIMEOUT — WaitImage only. Side-by-side row identical in
@@ -1336,8 +1337,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 up to the next integer second on commit. */}
             {!isIf && (
             <div className="flex gap-2.5">
-              <div className="flex-1">
-                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
+              <Field label="Timeout (s)" className="flex-1">
                 <NumberInput
                   value={(() => { const n = parseFloat(timeout); return Number.isFinite(n) && n > 0 ? n : 1; })()}
                   onChange={(n) => setTimeout_(String(n))}
@@ -1346,9 +1346,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   inputHeight="h-8"
                   ariaLabel="Timeout in seconds"
                 />
-              </div>
-              <div className="flex-1">
-                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">ON TIMEOUT</label>
+              </Field>
+              <Field label="On Timeout" className="flex-1">
                 <select
                   value={waitImageOnTimeout}
                   onChange={(e) => setWaitImageOnTimeout(e.target.value)}
@@ -1357,7 +1356,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   <option value="StopReplay">Stop replay</option>
                   <option value="Continue">Continue to next</option>
                 </select>
-              </div>
+              </Field>
             </div>
             )}
 
@@ -1369,15 +1368,14 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 the checkbox — <label>'s for-control activation only works for native
                 form controls, not for the <button>-based Checkbox component. */}
             {!isIf && !waitImageInvert && (
-              <div>
-                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">AFTER MATCH</label>
+              <Field label="After Match">
                 <Checkbox
                   checked={waitImageClickOnMatch}
                   onChange={setWaitImageClickOnMatch}
                   label="Click on found location"
                   title="Left-clicks the centre of the matched region as soon as it's found."
                 />
-              </div>
+              </Field>
             )}
 
           </>
@@ -1396,9 +1394,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 target colour). Keeping them in the same block — Pick inline with
                 the X/Y inputs, Test match on the row below — clusters the
                 "configure the probe" and "validate the probe" actions visually. */}
-            <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">PIXEL TO WATCH</label>
-              <div className="flex items-center gap-2">
+            <Field label="Pixel to Watch">
+              <div className="flex items-center gap-2.5">
                 <input
                   type="text"
                   value={pixelX}
@@ -1454,15 +1451,14 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   </div>
                 )}
               </div>
-            </div>
+            </Field>
 
             {/* TARGET COLOUR — swatch + hex input. The eyedropper above writes both, but
                 the user can also type or paste a hex code directly. Normalisation
                 (uppercase + leading #) happens on Save, not on every keystroke, so the
                 input stays predictable while editing. */}
-            <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TARGET COLOUR</label>
-              <div className="flex items-center gap-2">
+            <Field label="Target Colour">
+              <div className="flex items-center gap-2.5">
                 <span
                   className="w-7 h-7 rounded border border-border-default shrink-0"
                   style={{ background: /^#?[0-9A-Fa-f]{6}$/.test(pixelColor.trim()) ? (pixelColor.trim().startsWith('#') ? pixelColor.trim() : '#' + pixelColor.trim()) : 'transparent' }}
@@ -1476,42 +1472,29 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   className="flex-1 h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
                 />
               </div>
-            </div>
+            </Field>
 
             {/* TOLERANCE — per-channel band. Slider + numeric input so users can either
                 drag for feel or type an exact value. Range capped at 50 (out of 255)
                 because anything higher starts matching unrelated colours; expert users
                 who really want > 50 can still type it. */}
-            <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TOLERANCE (PER CHANNEL)</label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min="0"
-                  max="50"
-                  value={pixelTolerance}
-                  onChange={(e) => setPixelTolerance(e.target.value)}
-                  className="flex-1 accent-accent-solid"
-                />
-                <input
-                  type="text"
-                  value={pixelTolerance}
-                  onChange={(e) => setPixelTolerance(e.target.value)}
-                  className="w-14 h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
-                />
-                <span className="text-[11px] text-text-tertiary">/ 255</span>
-              </div>
-              <div className="text-[10px] text-text-tertiary mt-1">
-                0 = exact match. Try 5–15 for game UI colours that compress slightly.
-              </div>
-            </div>
+            <Field
+              label="Tolerance (Per Channel)"
+              hint="0 = exact match. Try 5–15 for game UI colours that compress slightly."
+            >
+              <Slider
+                value={parseInt(pixelTolerance, 10) || 0}
+                min={0}
+                max={255}
+                onChange={(n) => setPixelTolerance(String(n))}
+              />
+            </Field>
 
             {/* WAIT UNTIL — WaitPixelColor only. Same shape (own row, dropdown) and
                 same label as the WaitImage editor above. IF rows express the same
                 concept via the CONDITION section's Found / NOT Found toggle. */}
             {!isIf && (
-            <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">WAIT UNTIL</label>
+            <Field label="Wait Until">
               <select
                 value={pixelInvert ? 'stopsMatching' : 'matches'}
                 onChange={(e) => setPixelInvert(e.target.value === 'stopsMatching')}
@@ -1520,7 +1503,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 <option value="matches">Colour matches</option>
                 <option value="stopsMatching">Colour stops matching</option>
               </select>
-            </div>
+            </Field>
             )}
 
             {/* TIMEOUT + ON TIMEOUT — WaitPixelColor only. Side-by-side row identical
@@ -1530,8 +1513,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 would clamp to 1 on the first +/- click and silently lose precision. */}
             {!isIf && (
             <div className="flex gap-2.5">
-              <div className="flex-1">
-                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
+              <Field label="Timeout (s)" className="flex-1">
                 <NumberInput
                   value={(() => { const n = parseFloat(timeout); return Number.isFinite(n) && n > 0 ? n : 1; })()}
                   onChange={(n) => setTimeout_(String(n))}
@@ -1540,9 +1522,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   inputHeight="h-8"
                   ariaLabel="Timeout in seconds"
                 />
-              </div>
-              <div className="flex-1">
-                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">ON TIMEOUT</label>
+              </Field>
+              <Field label="On Timeout" className="flex-1">
                 <select
                   value={pixelOnTimeout}
                   onChange={(e) => setPixelOnTimeout(e.target.value)}
@@ -1551,7 +1532,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   <option value="StopReplay">Stop replay</option>
                   <option value="Continue">Continue to next</option>
                 </select>
-              </div>
+              </Field>
             </div>
             )}
 
@@ -1561,15 +1542,14 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 not the <button>-based Checkbox. IF rows route click via a regular
                 LeftClick in the TRUE branch. */}
             {!isIf && !pixelInvert && (
-              <div>
-                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">AFTER MATCH</label>
+              <Field label="After Match">
                 <Checkbox
                   checked={pixelClickOnMatch}
                   onChange={setPixelClickOnMatch}
                   label="Click on found location"
                   title="Left-clicks the watched pixel (X, Y) as soon as it matches the target colour."
                 />
-              </div>
+              </Field>
             )}
 
           </>
@@ -1578,8 +1558,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           {/* Pause Settings */}
           {isPause && (
           <>
-            <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">RESUME HOTKEY</label>
+            <Field label="Resume Hotkey">
               {/* Same capture pattern as the KeyDown/KeyUp Key field (and the grid / Settings
                   hotkeys): focus → empty + "New key..." + accent pulse; Esc is a regular
                   captured key (users CAN bind Pause-resume to Escape); cancel is click-away
@@ -1608,9 +1587,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     : 'text-text-primary border-border-default'
                 }`}
               />
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s) — 0 = infinite</label>
+            </Field>
+            <Field label="Timeout (s) — 0 = infinite">
               <NumberInput
                 value={parseInt(timeout, 10) || 0}
                 onChange={(n) => setTimeout_(String(n))}
@@ -1652,7 +1630,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   );
                 })}
               </div>
-            </div>
+            </Field>
 
             {/* Foot-gun warning — if neither a resume hotkey nor a timeout is set, the
                 Pause is silently skipped at replay time (ExecutePause early-returns). Save
@@ -1687,8 +1665,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
           <>
             {/* Selector / URL */}
             <div>
-              <label className="flex items-center gap-1.5 text-[11px] font-semibold text-text-tertiary mb-1.5">
-                {isBrowserNavigate ? 'URL' : 'CSS SELECTOR'}
+              <label className="flex items-center gap-1.5 text-[11px] font-semibold text-text-tertiary uppercase tracking-wide mb-1.5">
+                {isBrowserNavigate ? 'URL' : 'CSS Selector'}
                 {/* #2 — Tier shield indicator (only for non-Navigate selectors) */}
                 {!isBrowserNavigate && selectorForTier && (
                   <span title={`${tierMeta.label} selector`} style={{ color: tierMeta.color, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
@@ -1765,7 +1743,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             {!isBrowserNavigate && !isBrowserType && !isBrowserSelect && (
             <div>
               <label
-                className="block text-[11px] font-semibold text-text-tertiary mb-1.5"
+                className="block text-[11px] font-semibold text-text-tertiary uppercase tracking-wide mb-1.5"
                 title="Takes priority over CSS selector when filled"
               >
                 TEXT MATCH
@@ -1809,7 +1787,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             <>
               <div>
                 <label
-                  className="block text-[11px] font-semibold text-text-tertiary mb-1.5"
+                  className="block text-[11px] font-semibold text-text-tertiary uppercase tracking-wide mb-1.5"
                   title="Optional. Wait until URL matches glob (*) or /regex/. Useful for redirects."
                 >
                   URL PATTERN
@@ -1824,7 +1802,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               </div>
               <div>
                 <label
-                  className="block text-[11px] font-semibold text-text-tertiary mb-1.5"
+                  className="block text-[11px] font-semibold text-text-tertiary uppercase tracking-wide mb-1.5"
                   title="Optional. Wait for element to appear after page load."
                 >
                   WAIT ELEMENT
@@ -1845,8 +1823,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 inline chips directly inside the input — no separate preview row needed.
                 Chip buttons below insert at the cursor via the imperative handle. */}
             {isBrowserType && (
-            <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TEXT TO TYPE</label>
+            <Field label="Text to Type">
               <div className="min-h-8 bg-bg-input border border-border-default rounded focus-within:border-accent-solid text-ui font-mono">
                 <LexicalTokenEditor
                   /* Key by actionIndex so opening a different action re-initialises the
@@ -1939,7 +1916,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   ))}
                 </div>
               )}
-            </div>
+            </Field>
             )}
 
             {/* #5 — Type options */}
@@ -1983,8 +1960,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 option inside the <select>. */}
             {isBrowserSelect && (
             <>
-              <div>
-                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">OPTION</label>
+              <Field label="Option">
                 <input
                   type="text"
                   value={browserText}
@@ -1992,9 +1968,11 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
                   placeholder={selectMatchMode === 'index' ? '0' : selectMatchMode === 'value' ? 'option-value' : 'Option label'}
                 />
-              </div>
-              <div>
-                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">MATCH BY</label>
+              </Field>
+              <Field
+                label="Match By"
+                hint="Only works on native <select> elements. For React-Select / Select2 use Click Element."
+              >
                 <select
                   value={selectMatchMode}
                   onChange={(e) => setSelectMatchMode(e.target.value as 'text' | 'value' | 'index')}
@@ -2004,17 +1982,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   <option value="value">Value (option's value attribute)</option>
                   <option value="index">Index (0-based)</option>
                 </select>
-                <div className="text-[10px] text-text-tertiary mt-1 leading-tight">
-                  Only works on native &lt;select&gt; elements. For React-Select / Select2 use Click Element.
-                </div>
-              </div>
+              </Field>
             </>
             )}
 
             {/* #6 — WaitElement mode */}
             {isBrowserWait && (
-            <div>
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">WAIT CONDITION</label>
+            <Field label="Wait Condition">
               <select
                 value={waitMode}
                 onChange={(e) => setWaitMode(e.target.value)}
@@ -2043,7 +2017,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   <span>Text-match mode needs a value in the Text Match field. Otherwise this Wait will time out.</span>
                 </div>
               )}
-            </div>
+            </Field>
             )}
 
             {/* Timeout — every browser action. The engine reads action.Timeout for all
@@ -2051,8 +2025,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 editor should expose it consistently. Previously BrowserType was the only
                 one hidden, silently locking it to the 5 s default. */}
             {(isBrowserWait || actionType === 'BrowserClick' || actionType === 'BrowserRightClick' || isBrowserType || isBrowserNavigate || isBrowserSelect) && (
-            <div className="w-1/2">
-              <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">TIMEOUT (s)</label>
+            <Field label="Timeout (s)">
               <NumberInput
                 value={parseInt(timeout, 10) || 1}
                 onChange={(n) => setTimeout_(String(n))}
@@ -2061,7 +2034,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 inputHeight="h-8"
                 ariaLabel="Timeout in seconds"
               />
-            </div>
+            </Field>
             )}
 
             {/* #3 — Test action */}
@@ -2108,10 +2081,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               value goes through getDisplayKey() so it matches the grid's display rules
               (e.g. raw `D3` shows as `3`, raw `162` shows as `Ctrl`). */}
           {showKey && (
-          <div>
-            <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">
-              {isSendText ? 'TEXT' : 'KEY'}
-            </label>
+          <Field label={isSendText ? 'Text' : 'Key'}>
             {isKeyAction ? (
               // Capture-mode visual matches the grid's Key column edit, the SettingsPanel
               // global hotkey inputs, and the ProfilePanel Assign Hotkey dialog. While
@@ -2141,7 +2111,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
               />
             )}
-          </div>
+          </Field>
           )}
 
           {/* X / Y — Pick button (only on click halves, since scroll actions don't really
@@ -2149,8 +2119,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               screen to fill both coords without manual typing or re-recording. */}
           {showCoords && (
             <div className="flex gap-2.5">
-              <div className="flex-1">
-                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">X</label>
+              <Field label="X" className="flex-1">
                 {/* x === '' means "no override" — the action keeps its recorded coord.
                     Pass null so the "—" placeholder shows instead of "0" which would be
                     a legitimate top-left coordinate but is here ambiguous with unset. */}
@@ -2163,9 +2132,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   inputHeight="h-8"
                   ariaLabel="X coordinate"
                 />
-              </div>
-              <div className="flex-1">
-                <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">Y</label>
+              </Field>
+              <Field label="Y" className="flex-1">
                 <NumberInput
                   value={y === '' ? null : (Number.isFinite(parseInt(y, 10)) ? parseInt(y, 10) : null)}
                   onChange={(n) => setY(String(n))}
@@ -2175,7 +2143,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   inputHeight="h-8"
                   ariaLabel="Y coordinate"
                 />
-              </div>
+              </Field>
               {isClickHalf && (
                 <div className="flex flex-col justify-end gap-1">
                   <div className="flex gap-1">
@@ -2227,8 +2195,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               the engine walks past with zero work. Keeping the field would just invite
               users to set a value that gets silently ignored. */}
           {!isConditional && (
-          <div>
-            <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">DELAY (ms)</label>
+          <Field label="Delay (ms)">
             <NumberInput
               value={parseInt(delay, 10) || 0}
               onChange={(n) => setDelay(String(n))}
@@ -2237,19 +2204,18 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               inputHeight="h-8"
               ariaLabel="Delay in milliseconds"
             />
-          </div>
+          </Field>
           )}
 
           {/* Notes */}
-          <div>
-            <label className="block text-[11px] font-semibold text-text-tertiary mb-1.5">NOTES</label>
+          <Field label="Notes">
             <textarea
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               className="w-full h-16 px-2 py-1.5 text-xs bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid resize-y"
               placeholder="Add a note..."
             />
-          </div>
+          </Field>
         </div>
 
         {/* Footer */}
