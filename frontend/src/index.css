@@ -156,6 +156,16 @@ html, body, #root {
   top: 50%;
   transform: translateY(-50%);
 }
+/* Left position variant (buttons hugging the right window edge — e.g. the
+   settings panel rail; the default below-centred tip would overflow the
+   window and get clipped) */
+[data-tip-pos="left"]::after {
+  bottom: auto;
+  left: auto;
+  right: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+}
 
 .drag-region {
   -webkit-app-region: drag;

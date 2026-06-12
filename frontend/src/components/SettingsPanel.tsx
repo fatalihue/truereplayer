@@ -27,7 +27,9 @@ function Section({ icon: Icon, iconColor, title, children, defaultOpen = true }:
   };
 
   return (
-    <div className="bg-bg-surface border border-border-subtle rounded-ui overflow-hidden">
+    // data-section lets the collapsed-rail icons scroll their target into view
+    // after the panel expands (see expandToSection in SettingsPanel).
+    <div data-section={title} className="bg-bg-surface border border-border-subtle rounded-ui overflow-hidden">
       <button
         onClick={toggleOpen}
         className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-bg-card transition-colors"
@@ -204,7 +206,7 @@ function ClickerSection({
   return (
     // Same neutral border as every other Section — the purple icon + title are
     // identity enough (an earlier clicker-tinted border read as too loud).
-    <div className="bg-bg-surface border border-border-subtle rounded-ui overflow-hidden">
+    <div data-section="Clicker" className="bg-bg-surface border border-border-subtle rounded-ui overflow-hidden">
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-bg-card transition-colors"
@@ -476,35 +478,97 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
     send({ type: 'settings:change', payload: { key: settingKey, value: hotkey } });
   };
 
-  // Collapsed: a slim strip mirroring ProfilePanel's collapsed state on the
-  // opposite edge — expand chevron up top (pointing left, where the panel will
-  // grow back into) and a vertical SETTINGS label so the strip stays identifiable.
+  // ── Collapsed rail → expand straight into a section ──
+  // Clicking a rail icon expands the panel on the right tab with the target
+  // section open and scrolled into view. The open flag is written to
+  // localStorage BEFORE expanding because Sections read it in their useState
+  // initializer (they're unmounted while the panel is collapsed).
+  const pendingScrollSection = useRef<string | null>(null);
+  useEffect(() => {
+    if (collapsed || !pendingScrollSection.current) return;
+    const title = pendingScrollSection.current;
+    pendingScrollSection.current = null;
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-section="${title}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+  }, [collapsed]);
+  const expandToSection = (tab: 'profile' | 'global', sectionTitle: string) => {
+    localStorage.setItem(`ui:settings-section:${sectionTitle}`, '1');
+    setActiveTab(tab);
+    pendingScrollSection.current = sectionTitle;
+    onToggleCollapse?.();
+  };
+
+  // Rail entries mirror the sections of each tab (profile side swaps to the
+  // Clicker panel when Clicker mode is on, like the expanded panel does).
+  // `onClick` overrides the default expand-to-section behaviour — Appearance
+  // uses it to open the Theme Editor straight from the rail, matching the
+  // expanded panel's Appearance button (which is itself a direct action, not a
+  // collapsible section).
+  type RailEntry = { tab: 'profile' | 'global'; title: string; icon: React.ElementType; color: string; onClick?: () => void };
+  const railProfile: RailEntry[] =
+    settings.useCursorClick
+      ? [{ tab: 'profile', title: 'Clicker', icon: MousePointerClick, color: 'var(--color-clicker)' }]
+      : [
+          { tab: 'profile', title: 'Execution', icon: Timer, color: '#ffd93d' },
+          { tab: 'profile', title: 'Movement', icon: Move, color: '#51cf66' },
+          { tab: 'profile', title: 'Recording', icon: Mic, color: '#ff6b6b' },
+        ];
+  const railGlobal: RailEntry[] = [
+    { tab: 'global', title: 'Hotkeys', icon: Zap, color: '#60cdff' },
+    { tab: 'global', title: 'Window', icon: Monitor, color: '#7a8599' },
+    { tab: 'global', title: 'Appearance', icon: Palette, color: '#c084fc', onClick: () => window.dispatchEvent(new CustomEvent('cmd:themeeditor')) },
+    { tab: 'global', title: 'Updates', icon: Download, color: '#6bcb77' },
+  ];
+
+  // Collapsed: a slim icon rail — one button per section (tooltips name them on
+  // hover; clicking expands the panel on the right tab with that section open
+  // and scrolled into view). No overflow-hidden here: the tooltips render to
+  // the LEFT of the rail, outside the strip's box, and would be clipped.
   if (collapsed) {
     return (
-      <div className="w-12 flex flex-col shrink-0 overflow-hidden bg-bg-surface border border-border-subtle rounded-ui transition-[width] duration-200">
+      <div className="w-12 flex flex-col shrink-0 bg-bg-surface border border-border-subtle rounded-ui transition-[width] duration-200">
         <div className="flex items-center justify-center border-b border-border-subtle shrink-0 h-[47px]">
           <button
             onClick={onToggleCollapse}
             className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-            data-tip="Expand settings" data-tip-pos="left"
+            data-tip="Expand" data-tip-pos="left"
           >
             <ChevronsLeft size={14} />
           </button>
         </div>
-        <div className="flex-1 flex items-start justify-center pt-3">
-          <span
-            className="text-[10px] font-semibold text-text-tertiary tracking-wider"
-            style={{ writingMode: 'vertical-rl' }}
-          >
-            SETTINGS
-          </span>
+        <div className="flex-1 flex flex-col items-center gap-1 py-2">
+          {railProfile.map(s => (
+            <button
+              key={s.title}
+              onClick={s.onClick ?? (() => expandToSection(s.tab, s.title))}
+              data-tip={s.title} data-tip-pos="left"
+              className="w-8 h-8 flex items-center justify-center rounded hover:bg-bg-elevated transition-colors shrink-0"
+            >
+              <s.icon size={15} style={{ color: s.color }} />
+            </button>
+          ))}
+          <div className="w-6 my-1 border-t border-border-subtle shrink-0" />
+          {railGlobal.map(s => (
+            <button
+              key={s.title}
+              onClick={s.onClick ?? (() => expandToSection(s.tab, s.title))}
+              data-tip={s.title} data-tip-pos="left"
+              className="w-8 h-8 flex items-center justify-center rounded hover:bg-bg-elevated transition-colors shrink-0"
+            >
+              <s.icon size={15} style={{ color: s.color }} />
+            </button>
+          ))}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="w-[220px] flex flex-col shrink-0 overflow-hidden bg-bg-surface border border-border-subtle rounded-ui transition-[width] duration-200">
+    // No overflow-hidden: the collapse button's tooltip renders to the left of
+    // the tab bar and would be clipped at the panel edge (scrolling is handled
+    // by the tab-content div below).
+    <div className="w-[220px] flex flex-col shrink-0 bg-bg-surface border border-border-subtle rounded-ui transition-[width] duration-200">
       {/* Tab Bar — explicit 44 px height (matches the Toolbar's measured rendered height in
           the centre column) so the section header below this tab bar lines up vertically
           with the action grid's column-header row in the centre. Without this, the tab
@@ -535,7 +599,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
           <button
             onClick={onToggleCollapse}
             className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors shrink-0"
-            data-tip="Collapse settings panel" data-tip-pos="left"
+            data-tip="Collapse" data-tip-pos="left"
           >
             <ChevronsRight size={14} />
           </button>
@@ -767,6 +831,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 accents, font-only toggles, etc.) swap back to <Section> with the
                 children inside. */}
             <button
+              data-section="Appearance"
               onClick={() => window.dispatchEvent(new CustomEvent('cmd:themeeditor'))}
               title="Customise colours, font, row height, and per-action accents."
               className="w-full flex items-center gap-2 px-3 py-2.5 bg-bg-surface border border-border-subtle rounded-ui hover:bg-bg-card transition-colors"
