@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { X, Check, RotateCcw, Download, Upload, Clipboard, ClipboardPaste, Pipette } from 'lucide-react';
+import { X, Check, RotateCcw, Download, Upload, Clipboard, ClipboardPaste, Pipette, ChevronDown, ChevronRight, Dices, LayoutGrid, Droplets, SlidersHorizontal, FileJson2 } from 'lucide-react';
 import { NumberInput } from './common/NumberInput';
+import { Toggle } from './common/Toggle';
 import {
   themes,
   DEFAULT_UI_SETTINGS,
@@ -21,12 +22,22 @@ interface ThemeEditorProps {
 
 type TabId = 'presets' | 'colors' | 'appearance' | 'import-export';
 
-const TABS: { id: TabId; label: string }[] = [
-  { id: 'presets', label: 'Presets' },
-  { id: 'colors', label: 'Colors' },
-  { id: 'appearance', label: 'Appearance' },
-  { id: 'import-export', label: 'Import / Export' },
+const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
+  { id: 'presets', label: 'Presets', icon: LayoutGrid },
+  { id: 'colors', label: 'Colors', icon: Droplets },
+  { id: 'appearance', label: 'Appearance', icon: SlidersHorizontal },
+  { id: 'import-export', label: 'Import / Export', icon: FileJson2 },
 ];
+
+// Single source for the small uppercase group label every tab uses — the tabs
+// had drifted across three slightly different font-size/tracking combos.
+function GroupLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[10px] font-semibold text-text-disabled tracking-wider mb-1.5">
+      {children}
+    </div>
+  );
+}
 
 // ── Color Section Groupings ──
 
@@ -358,6 +369,8 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
   const [presetSearch, setPresetSearch] = useState('');
   const [presetFilter, setPresetFilter] = useState<'all' | ThemeTag>('all');
   const [savePresetName, setSavePresetName] = useState('');
+  // Import/Export tab — name embedded in the exported JSON (was hardcoded 'My Theme').
+  const [exportName, setExportName] = useState('My Theme');
   // Colors tab — Hex vs HSL picker mode and a transient palette of recently-used colors.
   // Recent colors do not persist across editor opens; they're a within-session
   // affordance for reusing the same color across multiple slots.
@@ -421,22 +434,24 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
   // ── Export handlers ──
 
   const handleExportFile = useCallback(() => {
-    const theme = exportTheme('My Theme');
+    const name = exportName.trim() || 'My Theme';
+    const theme = exportTheme(name);
     const blob = new Blob([JSON.stringify(theme, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'truereplay-theme.json';
+    // Filename derived from the theme name so multiple exports don't collide.
+    a.download = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'theme'}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [exportTheme]);
+  }, [exportTheme, exportName]);
 
   const handleCopyClipboard = useCallback(async () => {
-    const theme = exportTheme('My Theme');
+    const theme = exportTheme(exportName.trim() || 'My Theme');
     await navigator.clipboard.writeText(JSON.stringify(theme, null, 2));
     setCopySuccess(true);
     setTimeout(() => setCopySuccess(false), 2000);
-  }, [exportTheme]);
+  }, [exportTheme, exportName]);
 
   // ── Import handlers ──
 
@@ -503,12 +518,13 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 py-2.5 text-xs font-medium transition-colors ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium transition-colors ${
                 activeTab === tab.id
                   ? 'text-accent border-b-2 border-accent'
-                  : 'text-text-tertiary hover:text-text-primary'
+                  : 'text-text-tertiary hover:text-text-primary border-b-2 border-transparent'
               }`}
             >
+              <tab.icon size={13} />
               {tab.label}
             </button>
           ))}
@@ -646,10 +662,11 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                           selectPreset(pool[Math.floor(Math.random() * pool.length)].id);
                         }}
                         disabled={noPick}
-                        className="ml-auto px-2.5 py-0.5 text-[10px] rounded-full border border-border-default text-text-tertiary hover:text-text-primary hover:border-accent-solid/40 hover:bg-bg-elevated disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        className="ml-auto flex items-center gap-1 px-2.5 py-0.5 text-[10px] rounded-full border border-border-default text-text-tertiary hover:text-text-primary hover:border-accent-solid/40 hover:bg-bg-elevated disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         title={noPick ? 'No other presets in this filter' : 'Pick a random preset from the current filter'}
                       >
-                        🎲 Surprise me
+                        <Dices size={11} />
+                        Surprise me
                       </button>
                     );
                   })()}
@@ -667,7 +684,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                 {/* Custom presets section */}
                 {filteredCustom.length > 0 && (
                   <>
-                    <div className="text-[10px] font-semibold text-text-disabled tracking-wider pt-1">MY THEMES</div>
+                    <div className="text-[10px] font-semibold text-text-disabled tracking-wider pt-1">My Themes</div>
                     <div className="grid grid-cols-4 gap-3">
                       {filteredCustom.map(renderCard)}
                     </div>
@@ -735,11 +752,11 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
 
           {/* ═══ Tab 2: Colors ═══ */}
           {activeTab === 'colors' && (
-            <div className="p-3 space-y-1">
+            <div className="p-4 space-y-2">
               {/* Hex/HSL toggle — global across all color sections. HSL is much better for
                   fine-tuning lightness or saturation while locking hue. */}
               <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] font-semibold text-text-disabled tracking-wider">PICKER MODE</span>
+                <span className="text-[10px] font-semibold text-text-disabled tracking-wider">Picker Mode</span>
                 <div className="flex gap-1">
                   <button
                     onClick={() => setColorMode('hex')}
@@ -762,14 +779,33 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
 
               {COLOR_SECTIONS.map(section => {
                 const isCollapsed = collapsedSections.has(section.title);
+                const overriddenCount = section.keys.filter(k => k in config.colorOverrides).length;
                 return (
                   <div key={section.title} className="border border-border-subtle rounded-md overflow-hidden">
                     <button
                       onClick={() => toggleSection(section.title)}
-                      className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-bg-card transition-colors"
+                      className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-bg-card transition-colors"
                     >
+                      {isCollapsed
+                        ? <ChevronRight size={12} className="text-text-tertiary shrink-0" />
+                        : <ChevronDown size={12} className="text-text-tertiary shrink-0" />}
                       <span className="text-xs font-semibold text-text-primary">{section.title}</span>
-                      <span className="text-xs text-text-disabled">{isCollapsed ? '+' : '-'}</span>
+                      {overriddenCount > 0 && (
+                        <span className="px-1.5 py-px rounded-full text-[9px] font-medium bg-accent-solid/15 text-accent border border-accent-solid/30">
+                          {overriddenCount} modified
+                        </span>
+                      )}
+                      {/* Swatch strip — the section's current colors at a glance, most
+                          useful while the section is collapsed. */}
+                      <span className="ml-auto flex gap-0.5">
+                        {section.keys.map(k => (
+                          <span
+                            key={k}
+                            className="w-3 h-3 rounded-sm border border-border-default"
+                            style={{ backgroundColor: resolvedColors[k] }}
+                          />
+                        ))}
+                      </span>
                     </button>
                     {!isCollapsed && (
                       <div className="px-3 pb-1.5">
@@ -833,12 +869,12 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
 
           {/* ═══ Tab 3: Appearance ═══ */}
           {activeTab === 'appearance' && (
-            <div className="p-3 space-y-2">
+            <div className="p-4 space-y-4">
               {/* Density presets — apply a coordinated bundle (fontSize + rowHeight + borderRadius)
                   rather than asking the user to dial each slider individually. The fine-tune
                   sliders below remain for users who want to drift away from a preset. */}
               <div>
-                <div className="text-[11px] font-semibold text-text-disabled mb-1">DENSITY</div>
+                <GroupLabel>Density</GroupLabel>
                 {(() => {
                   const DENSITY_PRESETS = [
                     { id: 'compact', name: 'Compact', fontSize: 12, rowHeight: 28, borderRadius: 2 },
@@ -890,7 +926,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
 
               {/* Layout fine-tuners */}
               <div>
-                <div className="text-[11px] font-semibold text-text-disabled mb-0.5">FINE-TUNE</div>
+                <GroupLabel>Fine-tune</GroupLabel>
                 <SliderSetting
                   label="Font Size"
                   value={config.uiSettings.fontSize}
@@ -929,9 +965,11 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                 />
               </div>
 
-              {/* Semantic Colors */}
+              {/* Semantic Colors — 2-col grid halves the vertical footprint of what
+                  used to be a long single-column list. */}
               <div>
-                <div className="text-[11px] font-semibold text-text-disabled mb-0.5">SEMANTIC COLORS</div>
+                <GroupLabel>Semantic Colors</GroupLabel>
+                <div className="grid grid-cols-2 gap-x-4">
                 <AppearanceColorRow
                   label="Recording"
                   value={config.uiSettings.recordingColor}
@@ -950,11 +988,13 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                   defaultValue={DEFAULT_UI_SETTINGS.clickerColor}
                   onChange={(v) => setUISetting('clickerColor', v)}
                 />
+                </div>
               </div>
 
               {/* Action Type Colors */}
               <div>
-                <div className="text-[11px] font-semibold text-text-disabled mb-0.5">ACTION TYPES</div>
+                <GroupLabel>Action Types</GroupLabel>
+                <div className="grid grid-cols-2 gap-x-4">
                 <AppearanceColorRow
                   label="Mouse"
                   value={config.uiSettings.actionMouseColor}
@@ -1015,11 +1055,12 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                   defaultValue={DEFAULT_UI_SETTINGS.actionIfColor}
                   onChange={(v) => setUISetting('actionIfColor', v)}
                 />
+                </div>
               </div>
 
               {/* Font */}
               <div>
-                <div className="text-[11px] font-semibold text-text-disabled mb-0.5">FONT</div>
+                <GroupLabel>Font</GroupLabel>
                 <div className="flex items-center gap-2 py-0.5">
                   <span className="text-xs text-text-secondary w-[100px]">Monospace</span>
                   <select
@@ -1047,22 +1088,16 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
 
               {/* System */}
               <div>
-                <div className="text-[11px] font-semibold text-text-disabled mb-0.5">SYSTEM</div>
+                <GroupLabel>System</GroupLabel>
                 <div className="flex items-center justify-between py-1.5">
                   <div className="flex flex-col">
                     <span className="text-xs text-text-secondary">Match Windows theme</span>
                     <span className="text-[10px] text-text-tertiary">Auto-switch dark / light when the OS does</span>
                   </div>
-                  <button
-                    onClick={() => setUISetting('matchSystemTheme', !config.uiSettings.matchSystemTheme)}
-                    className={`relative w-8 h-4 rounded-full transition-colors ${
-                      config.uiSettings.matchSystemTheme ? 'bg-accent-solid' : 'bg-bg-elevated border border-border-default'
-                    }`}
-                  >
-                    <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${
-                      config.uiSettings.matchSystemTheme ? 'left-[18px]' : 'left-0.5'
-                    }`} />
-                  </button>
+                  <Toggle
+                    isOn={config.uiSettings.matchSystemTheme}
+                    onChange={(v) => setUISetting('matchSystemTheme', v)}
+                  />
                 </div>
 
                 {config.uiSettings.matchSystemTheme && (
@@ -1099,16 +1134,10 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                     <span className="text-xs text-text-secondary">Enable animations</span>
                     <span className="text-[10px] text-text-tertiary">Theme switch transitions and hover effects</span>
                   </div>
-                  <button
-                    onClick={() => setUISetting('enableAnimations', !config.uiSettings.enableAnimations)}
-                    className={`relative w-8 h-4 rounded-full transition-colors ${
-                      config.uiSettings.enableAnimations ? 'bg-accent-solid' : 'bg-bg-elevated border border-border-default'
-                    }`}
-                  >
-                    <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${
-                      config.uiSettings.enableAnimations ? 'left-[18px]' : 'left-0.5'
-                    }`} />
-                  </button>
+                  <Toggle
+                    isOn={config.uiSettings.enableAnimations}
+                    onChange={(v) => setUISetting('enableAnimations', v)}
+                  />
                 </div>
               </div>
 
@@ -1121,7 +1150,17 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
             <div className="p-4 space-y-5">
               {/* Export */}
               <div>
-                <h3 className="text-xs font-semibold text-text-primary mb-3">Export</h3>
+                <GroupLabel>Export current theme</GroupLabel>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs text-text-secondary w-[60px]">Name</span>
+                  <input
+                    type="text"
+                    value={exportName}
+                    onChange={(e) => setExportName(e.target.value)}
+                    placeholder="My Theme"
+                    className="flex-1 max-w-[260px] h-7 px-2 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                  />
+                </div>
                 <div className="flex gap-2">
                   <button
                     onClick={handleExportFile}
@@ -1138,11 +1177,14 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                     {copySuccess ? 'Copied!' : 'Copy to Clipboard'}
                   </button>
                 </div>
+                <p className="mt-2 text-[10px] text-text-tertiary">
+                  Bundles the base preset, your color overrides and every appearance setting into a single JSON.
+                </p>
               </div>
 
               {/* Import */}
               <div>
-                <h3 className="text-xs font-semibold text-text-primary mb-3">Import</h3>
+                <GroupLabel>Import a theme</GroupLabel>
                 <div className="flex gap-2 mb-3">
                   <button
                     onClick={() => fileInputRef.current?.click()}
@@ -1218,86 +1260,129 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
           </button>
         </div>
 
-        {/* Live Preview — right-side column spanning body+footer rows. Mocks a dense
-            slice of the app (profile row, action table with all 8 pill types, buttons,
-            tabs, form, text hierarchy, status bar) so the user can see practically every
-            theme token at once. Uses the same CSS vars the rest of the app reads, so it
-            updates in real time as the user mexe in any tab.
+        {/* Live Preview — a MINIATURE OF THE APP rather than a flat list of chips.
+            Title bar, toolbar, action grid, action bar and status bar are framed as
+            a tiny window so every color shows in the context it actually appears in:
+            zebra striping, the selected row, a conditional block (structural tint +
+            body wash + rails), all 10 action pill tones, the hotkey chip, the
+            semantic buttons and the text hierarchy. Reads the same CSS vars the real
+            app does, so it updates live from any tab — including --ui-row-height
+            (mini rows scale at 60%) and --ui-border-radius.
 
-            The pane's content is non-interactive (pointer-events: none) since the buttons
-            and inputs inside are mock — clicking would do nothing and confuse the user.
-            The header label and "Active" chip are static text, so this is harmless. */}
-        {/* Live preview: trimmed to the 3 sections that move the needle on theme swaps
-            — the action grid (pill colours), the semantic buttons (recording/replay/clicker
-            + primary/ghost), and the status bar (accent + replay tints). The previous 8-
-            section layout (profile row, tabs+slider, form, text hierarchy) was scrollable
-            noise: the data it visualised was either redundant with these three or already
-            visible behind the open dialog. Removing overflow-y-auto enforces "must fit". */}
-        <div className="col-start-2 row-start-3 row-span-2 bg-bg-base p-3 flex flex-col gap-3 select-none [&_button]:pointer-events-none [&_input]:pointer-events-none">
-          {/* Header */}
-          <div className="flex items-center justify-between pb-2 border-b border-border-subtle">
-            <span className="text-[10px] font-semibold text-text-tertiary tracking-wider">LIVE PREVIEW</span>
-            <span
-              className="inline-flex items-center gap-1 px-1.5 py-px rounded-full text-[9px] border"
-              style={{
-                background: 'var(--color-replay-bg)',
-                color: 'var(--color-replay)',
-                borderColor: 'color-mix(in srgb, var(--color-replay) 30%, transparent)',
-              }}
-            >
-              <span className="w-1 h-1 rounded-full" style={{ background: 'var(--color-replay)' }} />
-              Active
-            </span>
+            Content is non-interactive (pointer-events: none on buttons/inputs):
+            everything inside is mock. */}
+        <div className="col-start-2 row-start-3 row-span-2 bg-bg-base p-3 flex flex-col gap-2 select-none overflow-hidden [&_button]:pointer-events-none [&_input]:pointer-events-none">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold text-text-tertiary tracking-wider">Live Preview</span>
+            <span className="text-[9px] text-text-disabled">updates as you edit</span>
           </div>
 
-          {/* Action table — exercises every pill color */}
-          <div className="flex flex-col gap-1">
-            <span className="text-[9px] font-semibold text-text-disabled tracking-wider">ACTIONS</span>
-            <div className="flex flex-col gap-[2px]">
-              {[
-                { n: 1, pill: 'KeyDown', label: 'Ctrl+S', delay: '50 ms', tone: ['--color-action-key-bg', '--color-action-key-fg'] },
-                { n: 2, pill: 'LeftClick', label: 'at (320, 180)', delay: '120 ms', tone: ['--color-action-mouse-bg', '--color-action-mouse-fg'], active: true },
-                { n: 3, pill: 'ScrollUp', label: '×3', delay: '80 ms', tone: ['--color-action-scroll-bg', '--color-action-scroll-fg'] },
-                { n: 4, pill: 'SendText', label: '"Hello {date}"', delay: '200 ms', tone: ['--color-action-sendtext-bg', '--color-action-sendtext-fg'] },
-                { n: 5, pill: 'WaitImage', label: 'btn-ok.png', delay: '—', tone: ['--color-action-waitimage-bg', '--color-action-waitimage-fg'] },
-                { n: 6, pill: 'Pause', label: 'until Ctrl+Space', delay: '—', tone: ['--color-action-pause-bg', '--color-action-pause-fg'] },
-                { n: 7, pill: 'RunProfile', label: 'Sub-flow ×2', delay: '—', tone: ['--color-action-runprofile-bg', '--color-action-runprofile-fg'] },
-                { n: 8, pill: 'BrowserClick', label: 'button.submit', delay: '100 ms', tone: ['--color-action-browser-bg', '--color-action-browser-fg'] },
-                { n: 9, pill: 'if image', label: 'btn-ok.png', delay: '—', tone: ['--color-action-if-bg', '--color-action-if-fg'] },
-              ].map(row => (
-                <div
-                  key={row.n}
-                  className={`grid grid-cols-[16px_70px_1fr_auto] items-center gap-1.5 px-2 py-[3px] text-[11px] ${row.active ? 'bg-bg-elevated' : 'bg-bg-card'}`}
-                  style={{
-                    borderRadius: 'var(--ui-border-radius)',
-                    boxShadow: row.active ? 'inset 2px 0 0 var(--color-accent)' : undefined,
-                  }}
-                >
-                  <span className="font-mono text-[9px] text-text-tertiary text-right">{row.n}</span>
-                  <span
-                    className="px-1 py-px rounded font-mono text-[9px] text-center border"
-                    style={{
-                      background: `var(${row.tone[0]})`,
-                      color: `var(${row.tone[1]})`,
-                      borderColor: `color-mix(in srgb, var(${row.tone[1]}) 30%, transparent)`,
-                    }}
-                  >{row.pill}</span>
-                  <span className="text-text-secondary truncate">{row.label}</span>
-                  {/* Delay column uses text-secondary (matches the real ActionTable). The
-                      derived --color-delay variable is a different concept — it's used as a
-                      warning tint elsewhere (e.g. "Pause without trigger" callout). */}
-                  <span className={`font-mono text-[9px] ${row.delay === '—' ? 'text-text-disabled' : 'text-text-secondary'}`}>{row.delay}</span>
-                </div>
-              ))}
+          {/* ── Mini app window ── */}
+          <div
+            className="flex flex-col border border-border-default overflow-hidden shadow-lg"
+            style={{ borderRadius: 'calc(var(--ui-border-radius) + 4px)' }}
+          >
+            {/* Title bar */}
+            <div className="flex items-center gap-1.5 px-2.5 h-8 bg-bg-base border-b border-border-subtle shrink-0">
+              <span className="w-3.5 h-3.5 rounded bg-accent-solid flex items-center justify-center text-[8px] font-bold text-white">T</span>
+              <span className="text-[10px] text-text-secondary">TrueReplayer</span>
+              <span className="flex-1" />
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-px rounded-full text-[9px] border"
+                style={{
+                  background: 'var(--color-replay-bg)',
+                  color: 'var(--color-replay)',
+                  borderColor: 'color-mix(in srgb, var(--color-replay) 25%, transparent)',
+                }}
+              >
+                <span className="w-1 h-1 rounded-full" style={{ background: 'var(--color-replay)' }} />
+                Ready
+              </span>
             </div>
-          </div>
 
-          {/* Buttons — recording / replay / clicker + primary / ghost */}
-          <div className="flex flex-col gap-1">
-            <span className="text-[9px] font-semibold text-text-disabled tracking-wider">BUTTONS</span>
-            <div className="flex flex-wrap gap-1.5">
+            {/* Toolbar */}
+            <div className="flex items-center gap-1.5 px-2.5 h-8 bg-bg-surface border-b border-border-subtle shrink-0">
+              <span className="text-[10px] font-medium text-text-primary truncate">My Macro</span>
+              <span
+                className="px-1.5 py-px rounded font-mono text-[8px] border"
+                style={{
+                  background: 'var(--color-hotkey-bg)',
+                  color: 'var(--color-hotkey-fg)',
+                  borderColor: 'var(--color-hotkey-border)',
+                }}
+              >F8</span>
+              <span className="flex-1" />
+              <button className="px-2 py-0.5 text-[9px] text-white bg-accent-solid" style={{ borderRadius: 'var(--ui-border-radius)' }}>Save</button>
+              <button className="px-2 py-0.5 text-[9px] text-text-secondary bg-bg-elevated border border-border-default" style={{ borderRadius: 'var(--ui-border-radius)' }}>Load</button>
+            </div>
+
+            {/* Grid header */}
+            <div className="grid grid-cols-[16px_68px_1fr_34px] gap-1.5 items-center px-2 h-5 bg-bg-surface border-b border-border-subtle shrink-0">
+              <span />
+              <span className="text-[8px] font-semibold text-text-tertiary">Action</span>
+              <span className="text-[8px] font-semibold text-text-tertiary">Details</span>
+              <span className="text-[8px] font-semibold text-text-tertiary">Delay</span>
+            </div>
+
+            {/* Rows — real grid semantics: zebra / selected / structural / in-block */}
+            {(() => {
+              const evenBg = 'var(--color-bg-surface)';
+              const oddBg = 'color-mix(in srgb, var(--color-text-primary) 1.5%, transparent)';
+              const selectedBg = 'color-mix(in srgb, var(--color-accent) 8%, transparent)';
+              const structuralBg = 'color-mix(in srgb, var(--color-action-if-fg) 6%, transparent)';
+              const inBlockBg = 'color-mix(in srgb, var(--color-action-if-fg) 3%, transparent)';
+              const rows: { n: number; pill: string; label: string; delay: string; tone: [string, string]; bg: string; rail?: 'strong' | 'thin'; selected?: boolean }[] = [
+                { n: 1, pill: 'KeyDown', label: 'Ctrl+S', delay: '50', tone: ['--color-action-key-bg', '--color-action-key-fg'], bg: evenBg },
+                { n: 2, pill: 'LeftClick', label: '1742, 388', delay: '120', tone: ['--color-action-mouse-bg', '--color-action-mouse-fg'], bg: selectedBg, selected: true },
+                { n: 3, pill: 'ScrollUp', label: '×3', delay: '80', tone: ['--color-action-scroll-bg', '--color-action-scroll-fg'], bg: oddBg },
+                { n: 4, pill: 'SendText', label: '"Hello {date}"', delay: '200', tone: ['--color-action-sendtext-bg', '--color-action-sendtext-fg'], bg: evenBg },
+                { n: 5, pill: 'if image', label: 'btn-ok.png', delay: '—', tone: ['--color-action-if-bg', '--color-action-if-fg'], bg: structuralBg, rail: 'strong' },
+                { n: 6, pill: 'WaitImage', label: 'btn-ok.png', delay: '—', tone: ['--color-action-waitimage-bg', '--color-action-waitimage-fg'], bg: inBlockBg, rail: 'thin' },
+                { n: 7, pill: 'BrowserClick', label: 'button.submit', delay: '100', tone: ['--color-action-browser-bg', '--color-action-browser-fg'], bg: inBlockBg, rail: 'thin' },
+                { n: 8, pill: 'endif', label: '', delay: '—', tone: ['--color-action-if-bg', '--color-action-if-fg'], bg: structuralBg, rail: 'strong' },
+                { n: 9, pill: 'PixelColor', label: '#ff8800', delay: '—', tone: ['--color-action-pixelcolor-bg', '--color-action-pixelcolor-fg'], bg: oddBg },
+                { n: 10, pill: 'Pause', label: 'until F9', delay: '—', tone: ['--color-action-pause-bg', '--color-action-pause-fg'], bg: evenBg },
+                { n: 11, pill: 'RunProfile', label: 'Sub-flow ×2', delay: '—', tone: ['--color-action-runprofile-bg', '--color-action-runprofile-fg'], bg: oddBg },
+              ];
+              return (
+                <div className="flex flex-col bg-bg-surface">
+                  {rows.map(row => (
+                    <div
+                      key={row.n}
+                      className="relative grid grid-cols-[16px_68px_1fr_34px] gap-1.5 items-center px-2 border-b border-border-subtle"
+                      style={{
+                        // Mini rows track the Row Height slider at 60% scale, so the
+                        // Appearance tab's density changes are visible right here.
+                        height: 'calc(var(--ui-row-height) * 0.6)',
+                        background: row.bg,
+                        boxShadow: row.selected
+                          ? 'inset 2px 0 0 var(--color-accent)'
+                          : row.rail
+                            ? `inset 2px 0 0 ${row.rail === 'strong' ? 'var(--color-action-if-fg)' : 'var(--color-action-if-border)'}`
+                            : undefined,
+                      }}
+                    >
+                      <span className="font-mono text-[8px] text-text-disabled text-right">{row.n}</span>
+                      <span
+                        className="px-1 py-px rounded font-mono text-[8px] text-center truncate border"
+                        style={{
+                          background: `var(${row.tone[0]})`,
+                          color: `var(${row.tone[1]})`,
+                          borderColor: `color-mix(in srgb, var(${row.tone[1]}) 30%, transparent)`,
+                        }}
+                      >{row.pill}</span>
+                      <span className="text-[9px] text-text-secondary truncate">{row.label}</span>
+                      <span className={`font-mono text-[8px] ${row.delay === '—' ? 'text-text-disabled' : 'text-text-secondary'}`}>{row.delay}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {/* Action bar */}
+            <div className="flex items-center gap-1.5 px-2.5 h-9 bg-bg-surface border-t border-border-subtle shrink-0">
               <button
-                className="px-2.5 py-1 text-[10px] border"
+                className="px-2 py-0.5 text-[9px] border"
                 style={{
                   borderRadius: 'var(--ui-border-radius)',
                   background: 'var(--color-recording-bg)',
@@ -1306,7 +1391,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                 }}
               >● Recording</button>
               <button
-                className="px-2.5 py-1 text-[10px] border"
+                className="px-2 py-0.5 text-[9px] border"
                 style={{
                   borderRadius: 'var(--ui-border-radius)',
                   background: 'var(--color-replay-bg)',
@@ -1314,50 +1399,56 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                   borderColor: 'color-mix(in srgb, var(--color-replay) 30%, transparent)',
                 }}
               >▶ Replay</button>
+              <span className="flex-1" />
               <button
-                className="px-2.5 py-1 text-[10px] border"
+                className="px-2 py-0.5 text-[9px] border"
                 style={{
                   borderRadius: 'var(--ui-border-radius)',
                   background: 'var(--color-clicker-bg)',
                   color: 'var(--color-clicker)',
                   borderColor: 'var(--color-clicker-border)',
                 }}
-              >⨯ Clicker</button>
+              >Clicker</button>
             </div>
-            <div className="flex gap-1.5">
-              <button
-                className="px-2.5 py-1 text-[10px] text-white bg-accent-solid border border-accent-solid"
-                style={{ borderRadius: 'var(--ui-border-radius)' }}
-              >Set Target</button>
-              <button
-                className="px-2.5 py-1 text-[10px] text-text-secondary bg-bg-elevated border border-border-default"
-                style={{ borderRadius: 'var(--ui-border-radius)' }}
-              >Cancel</button>
+
+            {/* Status bar */}
+            <div className="flex items-center gap-1 px-2.5 h-6 bg-bg-base border-t border-border-subtle text-[9px] text-text-tertiary shrink-0">
+              <span>~/Macros</span>
+              <span className="text-text-disabled">·</span>
+              <span>11 actions</span>
+              <span className="flex-1" />
+              <span style={{ color: 'var(--color-replay)' }}>Ready</span>
             </div>
           </div>
 
-          {/* Status bar with a hotkey chip baked in — the chip keeps preview coverage
-              for the --color-hotkey-{bg,fg,border} variables that the trimmed Profile
-              row used to exercise. Real ProfilePanel rows render hotkeys this way too,
-              so a theme tweak shows up in the preview without re-opening the dialog. */}
-          <div
-            className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-text-tertiary bg-bg-card border border-border-subtle mt-auto"
-            style={{ borderRadius: 'var(--ui-border-radius)' }}
-          >
-            <span>📁 ~/Macros</span>
-            <span className="text-text-disabled">·</span>
-            <span>8 actions</span>
-            <span className="text-text-disabled">·</span>
-            <span
-              className="px-1.5 py-px rounded font-mono text-[9px] border"
-              style={{
-                background: 'var(--color-hotkey-bg)',
-                color: 'var(--color-hotkey-fg)',
-                borderColor: 'var(--color-hotkey-border)',
-              }}
-            >Ctrl F8</span>
-            <span className="text-text-disabled">·</span>
-            <span style={{ color: 'var(--color-replay)' }}>Ready</span>
+          {/* Below the window: text hierarchy + controls sample */}
+          <div className="grid grid-cols-2 gap-2 mt-auto">
+            <div
+              className="px-2.5 py-2 bg-bg-card border border-border-subtle space-y-0.5"
+              style={{ borderRadius: 'var(--ui-border-radius)' }}
+            >
+              <div className="text-[10px] text-text-primary">Primary text</div>
+              <div className="text-[10px] text-text-secondary">Secondary text</div>
+              <div className="text-[10px] text-text-tertiary">Tertiary text</div>
+              <div className="text-[10px] text-text-disabled">Disabled text</div>
+            </div>
+            <div
+              className="px-2.5 py-2 bg-bg-card border border-border-subtle flex flex-col gap-1.5"
+              style={{ borderRadius: 'var(--ui-border-radius)' }}
+            >
+              {/* Mock input — focused state (accent border) since that's the variant
+                  users most want to check against the background. */}
+              <div
+                className="h-6 px-2 flex items-center text-[9px] font-mono text-text-primary bg-bg-input border border-accent-solid"
+                style={{ borderRadius: 'var(--ui-border-radius)' }}
+              >
+                1742, 388
+              </div>
+              <div className="flex gap-1.5">
+                <button className="px-2 py-0.5 text-[9px] text-white bg-accent-solid" style={{ borderRadius: 'var(--ui-border-radius)' }}>OK</button>
+                <button className="px-2 py-0.5 text-[9px] text-text-secondary bg-bg-elevated border border-border-default" style={{ borderRadius: 'var(--ui-border-radius)' }}>Cancel</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
