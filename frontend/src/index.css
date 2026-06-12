@@ -166,6 +166,16 @@ html, body, #root {
   top: 50%;
   transform: translateY(-50%);
 }
+/* Below, anchored to the element's LEFT edge, extending right. For icons near
+   the left window edge (e.g. the profile/folder target icons in the left
+   sidebar) the default centred tip extends left and clips a long name; this
+   variant grows into the content area instead, so the full name always shows. */
+[data-tip-pos="below-start"]::after {
+  top: calc(100% + 6px);
+  left: 0;
+  right: auto;
+  transform: none;
+}
 
 .drag-region {
   -webkit-app-region: drag;

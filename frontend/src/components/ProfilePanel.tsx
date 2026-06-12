@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Search, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink, Info, MoreHorizontal, Hash } from 'lucide-react';
+import { Search, SearchX, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink, Info, MoreHorizontal, Hash } from 'lucide-react';
 import type { ProfileEntry, ImportPreviewPayload, ImportConflictResolution } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -885,6 +885,36 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     return null;
   }, [profileOrder?.folders]);
 
+  // Window-target tooltip label: show the .exe name (user request). The stored
+  // process name may or may not carry the extension depending on what was typed
+  // in the target dialog, so normalise to "<name>.exe". Falls back to the window
+  // title when there's no process name, and to a generic label otherwise.
+  const targetLabel = (procName?: string | null, windowTitle?: string | null): string => {
+    if (procName) return /\.exe$/i.test(procName) ? procName : `${procName}.exe`;
+    if (windowTitle) return windowTitle;
+    return 'Window target';
+  };
+
+  // Folder colour for the collapsed rail's avatar dot — tells which folder a
+  // profile lives in without expanding the panel. null = ungrouped (no dot).
+  const getProfileFolderColor = useCallback((name: string): string | null => {
+    for (const f of profileOrder?.folders ?? []) {
+      if (f.items.includes(name)) return f.color;
+    }
+    return null;
+  }, [profileOrder?.folders]);
+
+  // Collapsed-rail "search" action: expand the panel with the search field
+  // already focused (mirrors the SettingsPanel rail's expand-into-section flow).
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const pendingFocusSearch = useRef(false);
+  useEffect(() => {
+    if (!collapsed && pendingFocusSearch.current) {
+      pendingFocusSearch.current = false;
+      requestAnimationFrame(() => searchInputRef.current?.focus());
+    }
+  }, [collapsed]);
+
   // ── Drag & Drop handlers (mouse-based, works in WebView2) ──
   const dragStartPos = useRef<{ x: number; y: number } | null>(null);
   const dragActive = useRef(false);
@@ -1208,25 +1238,34 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         {p.appIconBase64 && p.hasWindowTarget && (
           <RemovableChip
             variant="circle"
-            removeTitle={`Remove window target (${p.effectiveTargetProcessName ?? 'target'})`}
+            removeTitle={`Remove window target (${targetLabel(p.effectiveTargetProcessName)})`}
+            tip={targetLabel(p.effectiveTargetProcessName)}
             onRemove={(e) => { e.stopPropagation(); handleRemoveWindowTarget(p.name); }}
             className="w-3.5 h-3.5"
           >
-            <img
-              src={`data:image/png;base64,${p.appIconBase64}`}
-              alt=""
-              title={p.effectiveTargetProcessName ?? ''}
-              className="w-3.5 h-3.5 object-contain pointer-events-none"
-            />
+            {/* No tooltip here — the RemovableChip wrapper carries it (the chip-level
+                tip already embeds the .exe name via removeTitle, and a second tip
+                on this span would stack on top of it). */}
+            <span className="flex">
+              <img
+                src={`data:image/png;base64,${p.appIconBase64}`}
+                alt=""
+                className="w-3.5 h-3.5 object-contain pointer-events-none"
+              />
+            </span>
           </RemovableChip>
         )}
         {p.appIconBase64 && !p.hasWindowTarget && (
-          <img
-            src={`data:image/png;base64,${p.appIconBase64}`}
-            alt=""
-            title={p.effectiveTargetProcessName ?? ''}
-            className="w-3.5 h-3.5 shrink-0 object-contain pointer-events-none opacity-55"
-          />
+          // Inherited folder target — no tooltip (user request): the faded icon
+          // is just a passive "this row inherits a target" cue, and the source
+          // is managed on the folder, not here.
+          <span className="shrink-0 flex">
+            <img
+              src={`data:image/png;base64,${p.appIconBase64}`}
+              alt=""
+              className="w-3.5 h-3.5 object-contain pointer-events-none opacity-55"
+            />
+          </span>
         )}
 
         <span
@@ -1244,24 +1283,19 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           // Crosshair stays as a "this row IS gated" cue. Removal via hover ✕ overlay.
           <RemovableChip
             variant="circle"
-            removeTitle={`Remove window target (${p.windowTargetProcessName || p.windowTargetWindowTitle || 'target'})`}
+            removeTitle={`Remove window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`}
+            tip={targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)}
             onRemove={(e) => { e.stopPropagation(); handleRemoveWindowTarget(p.name); }}
           >
-            <span
-              data-tip={p.windowTargetProcessName || p.windowTargetWindowTitle || 'Window target set'}
-              data-tip-pos="end"
-            >
+            <span>
               <Crosshair size={11} className="text-text-tertiary" />
             </span>
           </RemovableChip>
         ) : (!p.appIconBase64 && p.hasEffectiveTarget && p.effectiveTargetSource === 'folder') && (
           // Inherited from folder AND no icon resolved — fall back to the faded crosshair.
           // Removal must happen from the folder, not the row, so no ✕ overlay here.
-          <span
-            className="shrink-0 opacity-50"
-            data-tip={p.effectiveTargetProcessName || p.effectiveTargetWindowTitle || 'Window target'}
-            data-tip-pos="end"
-          >
+          // No tooltip (user request) — passive inherited-target cue only.
+          <span className="shrink-0 opacity-50">
             <Crosshair size={11} className="text-text-tertiary" />
           </span>
         )}
@@ -1296,11 +1330,15 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         )}
 
         {p.hotstring && (
+          // Same visual tokens as the hotkey KbdTag chips (.kbd: elevated bg,
+          // default border, secondary text) so the two trigger chips read as
+          // siblings \u2014 the old accent-hover text made hotstrings look like a
+          // different kind of thing.
           <RemovableChip
             removeTitle={`Remove hotstring "${p.hotstring}"`}
             onRemove={(e) => { e.stopPropagation(); handleRemoveHotstring(p.name); }}
-            className="px-1.5 py-0.5 rounded text-[11px] font-mono bg-hotkey-bg border border-hotkey-border text-accent-hover"
-          ><span title={p.hotstringInstant ? 'Hotstring (instant)' : 'Hotstring (terminator)'}>
+            className="px-1.5 py-0.5 rounded text-[11px] font-mono bg-bg-elevated border border-border-default text-text-secondary"
+          ><span>
             {p.hotstringInstant ? '\u26A1' : '\u21B5'}{p.hotstring}
             </span>
           </RemovableChip>
@@ -1317,10 +1355,19 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   return (
     <>
-      <div className={`flex flex-col bg-bg-surface border border-border-subtle rounded-ui overflow-hidden shrink-0 transition-[width] duration-200 ${collapsed ? 'w-12' : 'w-[260px]'}`}>
+      {/* No overflow-hidden on the panel root: the data-tip tooltips (pos right/end)
+          render outside the strip's box and would be clipped — same fix as the
+          SettingsPanel. */}
+      <div className={`flex flex-col bg-bg-surface border border-border-subtle rounded-ui shrink-0 transition-[width] duration-200 ${collapsed ? 'w-12' : 'w-[260px]'}`}>
         {collapsed ? (
           <>
-            <div className="flex items-center justify-center pt-3 pb-2">
+            {/* Collapsed rail — mirrors the SettingsPanel rail: quick actions up
+                top (new profile / search-and-expand), then profile avatars with
+                an accent ring on the active one and a folder-colour dot. Capped
+                at 10 avatars (a "+N" chip expands the panel) instead of an
+                overflow-y-auto list: a scrolling rail would clip the right-side
+                tooltips, and past ~10 the expanded panel is the better tool. */}
+            <div className="flex flex-col items-center gap-1 pt-3 pb-2">
               <button
                 onClick={onToggleCollapse}
                 className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
@@ -1328,21 +1375,58 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               >
                 <ChevronsRight size={14} />
               </button>
+              <button
+                onClick={handleCreate}
+                className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+                data-tip="New profile" data-tip-pos="right"
+              >
+                <FilePlus size={14} />
+              </button>
+              <button
+                onClick={() => { pendingFocusSearch.current = true; onToggleCollapse?.(); }}
+                className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+                data-tip="Search profiles" data-tip-pos="right"
+              >
+                <Search size={14} />
+              </button>
+              <div className="w-6 my-1 border-t border-border-subtle" />
             </div>
-            <div className="flex-1 overflow-y-auto flex flex-col items-center gap-1 px-1 pb-2">
-              {filtered.map((p) => (
+            <div className="flex-1 flex flex-col items-center gap-1 px-1 pb-2">
+              {filtered.slice(0, 10).map((p) => {
+                const folderColor = getProfileFolderColor(p.name);
+                return (
+                  <button
+                    key={p.name}
+                    onClick={(e) => { send({ type: 'profile:click', payload: { name: p.name } }); (e.target as HTMLElement).blur(); }}
+                    onContextMenu={(e) => handleContextMenu(e, p.name)}
+                    className={`relative w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold transition-colors shrink-0 ${
+                      p.isActive
+                        ? 'bg-[color-mix(in_srgb,var(--color-accent)_16%,transparent)] text-accent'
+                        : 'bg-bg-elevated text-text-secondary hover:bg-bg-card'
+                    } ${p.isDisabled ? 'opacity-40' : ''}`}
+                    style={p.isActive ? { boxShadow: '0 0 0 2px var(--color-accent)' } : undefined}
+                    data-tip={p.hotkey ? `${p.name} · ${p.hotkey}` : p.name}
+                    data-tip-pos="right"
+                  >
+                    {p.name.charAt(0).toUpperCase()}
+                    {folderColor && (
+                      <span
+                        className="absolute -right-px -bottom-px w-[9px] h-[9px] rounded-full border-2 border-bg-surface"
+                        style={{ background: folderColor }}
+                      />
+                    )}
+                  </button>
+                );
+              })}
+              {filtered.length > 10 && (
                 <button
-                  key={p.name}
-                  onClick={(e) => { send({ type: 'profile:click', payload: { name: p.name } }); (e.target as HTMLElement).blur(); }}
-                  onContextMenu={(e) => handleContextMenu(e, p.name)}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold transition-colors ${
-                    p.isActive ? 'bg-accent-solid text-white' : 'bg-bg-elevated text-text-secondary hover:bg-bg-card'
-                  } ${p.isDisabled ? 'opacity-40' : ''}`}
-                  title={p.name}
+                  onClick={onToggleCollapse}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-semibold bg-bg-elevated text-text-tertiary hover:bg-bg-card hover:text-text-primary transition-colors shrink-0"
+                  data-tip={`${filtered.length - 10} more — expand`} data-tip-pos="right"
                 >
-                  {p.name.charAt(0).toUpperCase()}
+                  +{filtered.length - 10}
                 </button>
-              ))}
+              )}
             </div>
           </>
         ) : (
@@ -1405,6 +1489,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               <Search size={13} className="text-text-disabled shrink-0" />
             )}
             <input
+              ref={searchInputRef}
               type="text"
               placeholder="Search profiles..."
               value={searchQuery}
@@ -1425,8 +1510,36 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         {/* Profile List - Sectioned */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-1.5 pb-1">
           {isSearching ? (
-            // Flat search results
-            filtered.map(renderProfileRow)
+            // Flat search results — with an explicit empty state instead of the
+            // silent blank list the panel used to show.
+            filtered.length > 0 ? (
+              filtered.map(renderProfileRow)
+            ) : (
+              <div className="flex flex-col items-center gap-1.5 px-3 py-8 text-center select-none">
+                <SearchX size={22} className="text-text-disabled" />
+                <span className="text-xs font-medium text-text-secondary">No results for "{trimmedQuery}"</span>
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="text-[11px] text-accent hover:text-accent-hover transition-colors"
+                >
+                  Clear search
+                </button>
+              </div>
+            )
+          ) : profiles.length === 0 ? (
+            // First-run empty state — mirrors the Macro/Clicker empty-state
+            // vocabulary (icon, one-liner, action).
+            <div className="flex flex-col items-center gap-1.5 px-3 py-8 text-center select-none">
+              <FolderOpen size={24} className="text-text-disabled" />
+              <span className="text-xs font-medium text-text-secondary">No profiles yet</span>
+              <span className="text-[11px] text-text-tertiary leading-snug">Record a macro and save it, or create an empty profile to start.</span>
+              <button
+                onClick={handleCreate}
+                className="mt-1 px-3 py-1 rounded text-[11px] text-white bg-accent-solid hover:bg-accent-solid/85 transition-colors"
+              >
+                + New profile
+              </button>
+            </div>
           ) : (
             <>
               {/* Pinned Section */}
@@ -1468,7 +1581,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       className={`rounded transition-colors ${isDragOver ? 'bg-accent-solid/20 ring-2 ring-accent-solid/50' : ''} ${isFolderDragging ? 'opacity-50' : ''}`}
                     >
                       <div
-                        className={`w-full flex items-center gap-1.5 px-2 py-1.5 mt-1 rounded text-left hover:bg-bg-card transition-colors group cursor-grab active:cursor-grabbing select-none ${selectedFolder === folder.name ? 'bg-bg-card ring-1 ring-accent-solid/30' : ''}`}
+                        // px-2.5 / gap-2 matches the profile rows — folders used to sit
+                        // 2px tighter for no reason, which read as misalignment.
+                        className={`w-full flex items-center gap-2 px-2.5 py-1.5 mt-1 rounded text-left hover:bg-bg-card transition-colors group cursor-grab active:cursor-grabbing select-none ${selectedFolder === folder.name ? 'bg-bg-card ring-1 ring-accent-solid/30' : ''}`}
                         onMouseDown={(e) => handleFolderMouseDown(e, folder.name)}
                         onClick={() => { if (!folderDragActive.current) setSelectedFolder(prev => prev === folder.name ? null : folder.name); }}
                         onContextMenu={(e) => handleFolderContextMenu(e, folder.name)}
@@ -1487,29 +1602,29 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         {folder.appIconBase64 && (
                           <RemovableChip
                             variant="circle"
-                            removeTitle={`Remove folder target (${folder.windowTargetProcessName ?? 'target'})`}
+                            removeTitle={`Remove folder target (${targetLabel(folder.windowTargetProcessName)})`}
+                            tip={targetLabel(folder.windowTargetProcessName)}
                             onRemove={(e) => { e.stopPropagation(); handleRemoveFolderWindowTarget(folder.name); }}
                             className={`w-3.5 h-3.5 ${folderAllDisabled ? 'opacity-40' : ''}`}
                           >
-                            <img
-                              src={`data:image/png;base64,${folder.appIconBase64}`}
-                              alt=""
-                              title={folder.windowTargetProcessName ?? ''}
-                              className="w-3.5 h-3.5 object-contain pointer-events-none"
-                            />
+                            <span className="flex">
+                              <img
+                                src={`data:image/png;base64,${folder.appIconBase64}`}
+                                alt=""
+                                className="w-3.5 h-3.5 object-contain pointer-events-none"
+                              />
+                            </span>
                           </RemovableChip>
                         )}
                         <span className={`text-xs font-medium flex-1 truncate ${folderAllDisabled ? 'text-text-disabled' : 'text-text-secondary'}`}>{folder.name}</span>
                         {folder.hasWindowTarget && !folder.appIconBase64 && (
                           <RemovableChip
                             variant="circle"
-                            removeTitle={`Remove folder target (${folder.windowTargetProcessName || folder.windowTargetWindowTitle || 'target'})`}
+                            removeTitle={`Remove folder target (${targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)})`}
+                            tip={targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)}
                             onRemove={(e) => { e.stopPropagation(); handleRemoveFolderWindowTarget(folder.name); }}
                           >
-                            <span
-                              data-tip={folder.windowTargetProcessName || folder.windowTargetWindowTitle || 'Window Target'}
-                              data-tip-pos="end"
-                            >
+                            <span>
                               <Crosshair size={10} className="text-text-tertiary" />
                             </span>
                           </RemovableChip>
@@ -1593,7 +1708,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             >
               <ArrowRightFromLine size={13} className="text-text-tertiary" />
               Move to folder
-              <ChevronRight size={11} className="ml-auto text-text-tertiary" />
+              <ChevronRight size={12} className="ml-auto text-text-tertiary" />
             </button>
             {moveMenuOpen && (
               <div
@@ -1610,7 +1725,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       getProfileFolder(contextMenu.profileName) === f.name ? 'text-accent' : 'text-text-primary'
                     }`}
                   >
-                    <FolderOpen size={11} style={{ color: f.color }} />
+                    <FolderOpen size={12} style={{ color: f.color }} />
                     {f.name}
                   </button>
                 ))}
@@ -1621,7 +1736,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       onClick={() => handleMoveToFolder(contextMenu.profileName, null)}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
                     >
-                      <FolderMinus size={11} className="text-text-tertiary" />
+                      <FolderMinus size={12} className="text-text-tertiary" />
                       Remove from folder
                     </button>
                   </>
@@ -1707,7 +1822,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             >
               <MoreHorizontal size={13} className="text-text-tertiary" />
               More
-              <ChevronRight size={11} className="ml-auto text-text-tertiary" />
+              <ChevronRight size={12} className="ml-auto text-text-tertiary" />
             </button>
             {moreMenuOpen && (
               <div
@@ -1794,7 +1909,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             >
               <Palette size={13} className="text-text-tertiary" />
               Color
-              <ChevronRight size={11} className="ml-auto text-text-tertiary" />
+              <ChevronRight size={12} className="ml-auto text-text-tertiary" />
             </button>
             {colorMenuOpen && (
               <div
@@ -1809,8 +1924,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       key={c}
                       onClick={() => handleSetFolderColor(folderContextMenu.folderName, c)}
                       className="w-[26px] h-[26px] rounded-full border-2 hover:scale-110 transition-transform"
-                      style={{ backgroundColor: c, borderColor: (profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName)?.color === c ? 'white' : 'transparent' }}
-                      title={c}
+                      style={{ backgroundColor: c, borderColor: (profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName)?.color === c ? 'var(--color-text-primary)' : 'transparent' }}
+                      data-tip={c}
                     />
                   ))}
                 </div>
@@ -2020,7 +2135,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
             {/* Trigger Mode */}
             <div className="mt-4">
-              <div className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1.5">Trigger Mode</div>
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-text-disabled mb-1.5">Trigger Mode</div>
               <div className="grid grid-cols-2 gap-1.5">
                 {([
                   { id: 'onPress', label: 'On Press', help: 'Fires once when the key is pressed down.' },
@@ -2036,7 +2151,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
                         : 'bg-transparent border-border-default text-text-tertiary hover:text-text-secondary hover:border-border-strong'
                     }`}
-                    title={opt.help}
+                    data-tip={opt.help}
                   >
                     {opt.label}
                   </button>
@@ -2229,7 +2344,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         checked={folderAllSelected}
                         indeterminate={folderSomeSelected && !folderAllSelected}
                       />
-                      <FolderOpen size={11} style={{ color: f.color }} className="shrink-0" />
+                      <FolderOpen size={12} style={{ color: f.color }} className="shrink-0" />
                       <span className="text-xs font-medium text-text-secondary truncate">{f.name}</span>
                       <span className="ml-auto text-[10px] text-text-disabled">{visibleItems.filter(n => exportSelection[n]).length}/{visibleItems.length}</span>
                     </button>

@@ -3,7 +3,11 @@ import { type ReactNode } from 'react';
 interface RemovableChipProps {
   children: ReactNode;                  // chip content (KbdTag, app icon, hotstring text, etc.)
   onRemove: (e: React.MouseEvent) => void;
-  removeTitle?: string;                 // tooltip on the ✕ button — explain what gets removed
+  removeTitle?: string;                 // aria-label on the ✕ button (screen readers only)
+  // Optional instant tooltip on the whole chip (data-tip). Targets pass the
+  // .exe name; hotkey/hotstring chips pass nothing — their content is already
+  // self-explanatory and the red ✕ speaks for itself.
+  tip?: string;
   // Right-edge ✕ overlay shape. "edge" = full-height right strip with rounded-r (kbd-like chips).
   // "circle" = small circular overlay (matches the existing window-target/crosshair icons).
   variant?: 'edge' | 'circle';
@@ -21,6 +25,7 @@ export function RemovableChip({
   children,
   onRemove,
   removeTitle = 'Remove',
+  tip,
   variant = 'edge',
   className = '',
 }: RemovableChipProps) {
@@ -29,12 +34,20 @@ export function RemovableChip({
     : 'absolute inset-0 rounded-full flex items-center justify-center text-[9px] font-bold text-white bg-recording hover:bg-red-500 transition-colors';
 
   return (
-    <span className={`group shrink-0 relative ${className}`}>
+    // The optional tooltip lives on the OUTER span, never on the ✕ button: the
+    // [data-tip] CSS rule is unlayered and forces position: relative, which
+    // overrides the button's Tailwind `absolute` (unlayered beats @layer
+    // utilities) and threw the ✕ out of the chip onto its own line. The outer
+    // span is already position: relative, so attaching the tip here is
+    // layout-safe. below-start keeps long names from clipping at the panel edge.
+    <span
+      className={`group shrink-0 relative ${className}`}
+      {...(tip ? { 'data-tip': tip, 'data-tip-pos': 'below-start' } : {})}
+    >
       {children}
       <button
         type="button"
         onClick={onRemove}
-        title={removeTitle}
         aria-label={removeTitle}
         className={`hidden group-hover:inline-flex ${btnClass}`}
       >
