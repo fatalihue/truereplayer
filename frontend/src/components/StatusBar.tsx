@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { Play, Pause as PauseIcon, MousePointerClick } from 'lucide-react';
+import { Play, Pause as PauseIcon, MousePointerClick, Folder, ListOrdered, Gauge, Clock, Repeat } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { usePauseTick } from '../hooks/usePauseTick';
 import { formatClickerStats } from '../utils/clickerFormat';
 import { APP_VERSION } from '../appVersion';
+
+// Thin vertical divider between status segments.
+const Sep = () => <div className="w-px h-3 bg-border-subtle mx-3 shrink-0" />;
 
 export function StatusBar() {
   const { statusBar, status, highlightedActionIndex, replayChain, pauseState, settings, clickerStats, loopProgress } = useAppState();
@@ -48,122 +51,142 @@ export function StatusBar() {
     ? Math.max(0, Math.ceil((pauseState.timeoutMs - (Date.now() - pauseState.startedAt)) / 1000))
     : 0;
 
+  // Clicker mode shows whether it's mid-run (live stats) or idle (config summary).
+  const clickerRunning = isReplaying || clickerStats.count > 0;
+  // Target rate from the per-click delay (the configured cadence, not the measured
+  // one which the live stats below already report). Falls back to 0 on a bad value.
+  const targetCps = (() => {
+    const d = parseInt(settings.cursorClickDelay, 10);
+    return d > 0 ? Math.round(1000 / d) : 0;
+  })();
+
   return (
-    <div className="flex items-center h-[26px] px-4 bg-bg-base border-t border-border-subtle shrink-0">
+    <div className="flex items-center h-[26px] px-4 bg-bg-base border-t border-border-subtle shrink-0 text-[11px]">
       {isClicker ? (
-        <span className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color: 'var(--color-clicker)' }}>
-          <MousePointerClick size={11} />
-          Clicker mode
-        </span>
-      ) : (
-        <span className="text-[11px] text-text-disabled">{statusBar.directory}</span>
-      )}
-      <div className="w-px h-3 bg-border-subtle mx-3" />
-      <span className="text-[11px] text-text-disabled">{statusBar.profileName ?? 'No profile'}</span>
-      <div className="w-px h-3 bg-border-subtle mx-3" />
-      <span className="text-[11px] text-text-disabled">{statusBar.actionCount} actions</span>
-
-      {/* Macro loop counter — sits at the panel level (not nested in the progress block)
-          so it survives the replaying→ready transition. The progress block above unmounts
-          on status:ready, taking its inline contents with it; the counter needs to keep
-          showing the final "Loop 100/100" briefly after the run ends, mirroring how the
-          Clicker stats below persists past run-end. `loopProgress.active` is the gate —
-          the backend only flips it true for genuine loops (>1 iteration or infinite), so
-          single-shot replays never render this. total === 0 → infinite (∞). */}
-      {!isClicker && loopProgress.active && (
-        <>
-          <div className="w-px h-3 bg-border-subtle mx-3" />
-          <span className="text-[11px] font-mono text-text-secondary shrink-0">
-            Loop <strong className="text-text-primary">{loopProgress.current}</strong>
-            <span className="text-text-disabled">/</span>
-            <strong className="text-text-primary">{loopProgress.total === 0 ? '∞' : loopProgress.total}</strong>
-          </span>
-        </>
-      )}
-
-      {/* Clicker live stats — shows during a Clicker run AND after it ends (so the user
-          can read the final total without it vanishing instantly). The reducer wipes
-          clickerStats only when a NEW run starts via status:changed → 'replaying',
-          which keeps post-run values intact. Gate: in Clicker mode + (currently running
-          OR a previous run actually clicked something). */}
-      {isClicker && (isReplaying || clickerStats.count > 0) && (() => {
-        // Renamed to avoid shadowing the outer `elapsed` number (Replay-mode timer above).
-        const { elapsed: clickerElapsed, rateLabel } = formatClickerStats(clickerStats.count, clickerStats.elapsedMs);
-        return (
-          <>
-            <div className="w-px h-3 bg-border-subtle mx-3" />
-            <span className="flex items-center gap-2 text-[11px] font-mono" style={{ color: 'var(--color-clicker)' }}>
+        /* ── CLICKER MODE ── profile/action-count are meaningless here, so the bar
+            shows the clicker's own context instead: button + target rate when idle,
+            live Clicked/rate/elapsed once it's running. */
+        clickerRunning ? (() => {
+          const { elapsed: clickerElapsed, rateLabel } = formatClickerStats(clickerStats.count, clickerStats.elapsedMs);
+          return (
+            <span className="flex items-center gap-2 font-mono" style={{ color: 'var(--color-clicker)' }}>
+              <MousePointerClick size={11} className="shrink-0" />
               <span className="text-text-secondary">Clicked</span>
               <strong className="text-text-primary">{clickerStats.count.toLocaleString()}</strong>
               <span className="text-text-disabled">·</span>
               <strong className="text-text-primary">{rateLabel}/s</strong>
               <span className="text-text-disabled">·</span>
-              <strong className="text-text-primary">{clickerElapsed}</strong>
+              <span className="flex items-center gap-1 text-text-secondary"><Clock size={10} />{clickerElapsed}</span>
             </span>
+          );
+        })() : (
+          <>
+            <span className="flex items-center gap-1.5 font-medium" style={{ color: 'var(--color-clicker)' }}>
+              <MousePointerClick size={11} />
+              Clicker
+            </span>
+            <Sep />
+            <span className="text-text-secondary">{settings.cursorClickButton} button</span>
+            {targetCps > 0 && (
+              <>
+                <Sep />
+                <span className="flex items-center gap-1.5 text-text-tertiary">
+                  <Gauge size={11} />
+                  <span className="text-text-secondary font-mono">~{targetCps}/s</span>
+                </span>
+              </>
+            )}
           </>
-        );
-      })()}
-
-      {/* Replay progress section — Macro mode only. Clicker runs use the dedicated
-          "Clicked X · Y/s · MM:SS" block above (which carries the meaningful numbers
-          for that mode). Without this guard, Clicker runs would render BOTH blocks, plus
-          a meaningless "0 / 0" progress bar since Clicker has no recorded actions. */}
-      {!isClicker && isReplaying && (
+        )
+      ) : (
+        /* ── MACRO MODE ── idle shows the active profile + action count; a live replay
+            replaces them with the progress read-out (which already carries the count
+            via current/total). The loop counter persists across the run→ready edge. */
         <>
-          <div className="w-px h-3 bg-border-subtle mx-3" />
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            <Play size={10} className="text-accent shrink-0" fill="currentColor" />
-            <span className="text-[11px] font-medium font-mono text-accent shrink-0">
-              {current} / {total}
-            </span>
-            <div className="h-[2px] bg-bg-elevated rounded-full overflow-hidden shrink-0" style={{ flex: '0 1 160px' }}>
-              <div
-                className="h-full bg-accent-solid rounded-full transition-[width] duration-300"
-                style={{ width: `${pct}%` }}
-              />
+          {!isReplaying && (
+            <>
+              <span className="flex items-center gap-1.5 text-text-tertiary">
+                <Folder size={11} />
+                <span className="text-text-primary font-medium">{statusBar.profileName ?? 'No profile'}</span>
+              </span>
+              <Sep />
+              <span className="flex items-center gap-1.5 text-text-tertiary">
+                <ListOrdered size={11} />
+                <span className="text-text-secondary">{statusBar.actionCount} actions</span>
+              </span>
+            </>
+          )}
+
+          {isReplaying && (
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <Play size={10} className="text-accent shrink-0" fill="currentColor" />
+              <span className="text-[11px] font-medium font-mono text-accent shrink-0">
+                {current} / {total}
+              </span>
+              <div className="h-[2px] bg-bg-elevated rounded-full overflow-hidden shrink-0" style={{ flex: '0 1 160px' }}>
+                <div
+                  className="h-full bg-accent-solid rounded-full transition-[width] duration-300"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <span className="flex items-center gap-1 text-[11px] text-text-tertiary font-mono shrink-0">
+                <Clock size={10} />{minutes}:{seconds}
+              </span>
+              {chainLabel && (
+                <>
+                  <div className="w-px h-3 bg-border-subtle shrink-0" />
+                  <span
+                    className="flex items-center gap-1.5 text-[11px] font-mono whitespace-nowrap"
+                    style={{ color: 'var(--color-action-runprofile-fg)' }}
+                    title={chainLabel}
+                  >
+                    <Repeat size={10} />
+                    {chainLabel}
+                  </span>
+                </>
+              )}
+              {pauseState.isPaused && (
+                <>
+                  <div className="w-px h-3 bg-border-subtle shrink-0" />
+                  <PauseIcon size={10} className="shrink-0" style={{ color: 'var(--color-action-pause-fg)' }} fill="currentColor" />
+                  <span className="text-[11px] font-medium whitespace-nowrap" style={{ color: 'var(--color-action-pause-fg)' }}>
+                    PAUSED
+                    {pauseState.hotkey && ` — Press ${pauseState.hotkey}`}
+                    {pauseState.hotkey && pauseState.timeoutMs > 0 ? ' or ' : pauseState.timeoutMs > 0 ? ' — ' : ''}
+                    {pauseState.timeoutMs > 0 && `wait ${pauseRemainingSec}s`}
+                  </span>
+                  <button
+                    onClick={() => send({ type: 'replay:resume', payload: {} })}
+                    className="px-2 py-0.5 text-[10px] font-medium rounded border border-border-default text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors shrink-0"
+                    title="Resume replay"
+                  >
+                    Resume
+                  </button>
+                </>
+              )}
             </div>
-            <span className="text-[11px] text-text-disabled font-mono shrink-0">
-              {minutes}:{seconds}
-            </span>
-            {chainLabel && (
-              <>
-                <div className="w-px h-3 bg-border-subtle shrink-0" />
-                <span
-                  className="text-[11px] font-mono whitespace-nowrap"
-                  style={{ color: 'var(--color-action-runprofile-fg)' }}
-                  title={chainLabel}
-                >
-                  Running {chainLabel}
-                </span>
-              </>
-            )}
-            {pauseState.isPaused && (
-              <>
-                <div className="w-px h-3 bg-border-subtle shrink-0" />
-                <PauseIcon size={10} className="shrink-0" style={{ color: 'var(--color-action-pause-fg)' }} fill="currentColor" />
-                <span className="text-[11px] font-medium whitespace-nowrap" style={{ color: 'var(--color-action-pause-fg)' }}>
-                  PAUSED
-                  {pauseState.hotkey && ` — Press ${pauseState.hotkey}`}
-                  {pauseState.hotkey && pauseState.timeoutMs > 0 ? ' or ' : pauseState.timeoutMs > 0 ? ' — ' : ''}
-                  {pauseState.timeoutMs > 0 && `wait ${pauseRemainingSec}s`}
-                </span>
-                <button
-                  onClick={() => send({ type: 'replay:resume', payload: {} })}
-                  className="px-2 py-0.5 text-[10px] font-medium rounded border border-border-default text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors shrink-0"
-                  title="Resume replay"
-                >
-                  Resume
-                </button>
-              </>
-            )}
-          </div>
+          )}
+
+          {/* Loop counter — survives the replaying→ready transition (the backend keeps
+              loopProgress.active true briefly after the final iteration) so the user can
+              read the final "Loop 100/100". total === 0 → infinite (∞). */}
+          {loopProgress.active && (
+            <>
+              <Sep />
+              <span className="flex items-center gap-1.5 text-[11px] font-mono text-text-secondary shrink-0">
+                <Repeat size={10} className="text-text-tertiary" />
+                Loop <strong className="text-text-primary">{loopProgress.current}</strong>
+                <span className="text-text-disabled">/</span>
+                <strong className="text-text-primary">{loopProgress.total === 0 ? '∞' : loopProgress.total}</strong>
+              </span>
+            </>
+          )}
         </>
       )}
 
-      {/* Spacer only when not replaying — during replay the progress section above already
-          uses flex-1, so a second flex-1 here would split available space and squeeze the
-          chain label. */}
-      {!isReplaying && <div className="flex-1" />}
+      {/* Spacer only when the replay progress row isn't already using flex-1 — otherwise
+          two flex-1 elements would split the space and squeeze the chain label. */}
+      {!(isReplaying && !isClicker) && <div className="flex-1" />}
       <span className="text-[11px] text-text-disabled shrink-0 ml-3">{APP_VERSION}</span>
     </div>
   );

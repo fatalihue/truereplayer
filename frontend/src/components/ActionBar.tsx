@@ -112,7 +112,7 @@ export function ActionBar() {
               send({ type: 'recording:toggle', payload: { insertIndex } });
             }}
             disabled={!buttonStates.recordEnabled}
-            className={`flex items-center gap-2 px-5 py-2 rounded text-[13px] font-semibold text-white transition-colors ${recordBtnClass} ${PRIMARY_BTN} disabled:opacity-40 disabled:cursor-not-allowed`}
+            className={`flex items-center gap-2 px-5 py-2 rounded text-[13px] font-semibold text-white transition-colors ${recordBtnClass} ${PRIMARY_BTN} ${isRecording ? 'record-btn-glow' : ''} disabled:opacity-40 disabled:cursor-not-allowed`}
           >
             {isRecording
               ? <Square size={11} fill="white" className="shrink-0" />

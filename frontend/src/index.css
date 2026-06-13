@@ -272,6 +272,18 @@ html[data-animations="true"] .rec-badge-pulse {
   animation: rec-badge-pulse 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+/* REC-mode glow on the primary "Pause" button (the record button while recording).
+   A soft outer glow in the recording red — complements the TitleBar badge (same red)
+   without repeating its expanding ring. Static when animations are off. */
+@keyframes record-btn-glow {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50%      { box-shadow: 0 0 14px 2px color-mix(in srgb, var(--color-recording) 60%, transparent); }
+}
+
+html[data-animations="true"] .record-btn-glow {
+  animation: record-btn-glow 1.6s ease-in-out infinite;
+}
+
 /* Sheet panel slider — themed range input used by the Slider primitive
    (components/sheet/Slider.tsx). WebView2 is Chromium-only, so the -webkit
    pseudo-elements cover every runtime this app has. */
