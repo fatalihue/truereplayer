@@ -536,6 +536,28 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     });
   }, [editingCell]);
 
+  // When the bulk bar first appears, keep the just-clicked row clear of it. The bar
+  // is now an overlay (it no longer shrinks the scroll viewport — selecting used to
+  // reflow the list and hide the clicked bottom row behind the bar). The row the
+  // user clicked can still sit in the bottom strip the bar floats over, so scroll it
+  // up: the grid's scroll-padding-bottom (applied while the bar shows) makes
+  // scrollIntoView land the row above the bar, and the matching padding-bottom gives
+  // the very last row the extra room it needs to clear it.
+  const prevBulkBarVisible = useRef(false);
+  useEffect(() => {
+    const visible = selectedIndices.size > 0 && !buttonStates.recordingActive && !buttonStates.replayActive;
+    if (visible && !prevBulkBarVisible.current) {
+      const idx = lastClickedIndex.current;
+      const grid = scrollRef.current;
+      const id = idx != null ? actions[idx]?.id : null;
+      if (grid && id != null) {
+        const rowEl = grid.querySelector(`[data-row-id="${window.CSS.escape(String(id))}"]`);
+        if (rowEl) requestAnimationFrame(() => rowEl.scrollIntoView({ block: 'nearest' }));
+      }
+    }
+    prevBulkBarVisible.current = visible;
+  }, [selectedIndices, buttonStates.recordingActive, buttonStates.replayActive, actions]);
+
   // Start editing a cell
   const startEdit = useCallback((index: number, field: EditingCell['field'], currentValue: string) => {
     setEditingCell({ index, field });
@@ -1100,9 +1122,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     closeContextMenu();
   }, [contextMenu, contextSelectionIndices, actions, send, closeContextMenu]);
 
+  // The bulk bar floats over the grid (see the overlay render below). Drives the
+  // scroll-area padding so a selection never hides the bottom rows behind it.
+  const bulkBarVisible = selectedIndices.size > 0 && !buttonStates.recordingActive && !buttonStates.replayActive;
+
   return (
     <div
-      className="flex-1 bg-bg-surface border border-border-subtle rounded-ui overflow-hidden flex flex-col outline-none"
+      className="relative flex-1 bg-bg-surface border border-border-subtle rounded-ui overflow-hidden flex flex-col outline-none"
       tabIndex={0}
       onKeyDown={handleKeyDown}
     >
@@ -1158,7 +1184,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
       >
-      <div ref={scrollRef} data-actions-grid className="flex-1 overflow-y-auto">
+      <div
+        ref={scrollRef}
+        data-actions-grid
+        // pb-9 / scroll-pb-9 only while the floating bulk bar is shown: gives the
+        // last row room to scroll above the bar and makes scrollIntoView respect it.
+        className={`flex-1 overflow-y-auto ${bulkBarVisible ? 'pb-9 scroll-pb-9' : ''}`}
+      >
         <table className="w-full table-fixed">
           <colgroup>
             <col style={{ width: 28 }} />
@@ -1966,18 +1998,20 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         />
       )}
 
-      {/* Bulk Action Bar — inline at bottom. Reordering (Move Up / Move Down)
-          lives here now instead of on the global toolbar because the operation
-          requires a selection by definition — keeping it on the toolbar created
-          two grey-buttons-90%-of-the-time. canMoveUp/Down disable the buttons
-          when the selection is already at the start / end of the list, so the
-          same affordance rule the keyboard shortcut already used (no-op at
-          edges) is visible on the button state. */}
-      {selectedIndices.size > 0 && !buttonStates.recordingActive && !buttonStates.replayActive && (() => {
+      {/* Bulk Action Bar — FLOATS over the grid (absolute, bottom) instead of being
+          an inline flex child. As a flex child it shrank the scroll viewport every
+          time a selection appeared/cleared, reflowing the list and hiding the just-
+          clicked bottom row behind the bar. As an overlay the list never moves; the
+          scroll area's pb-9/scroll-pb-9 (above) + the scrollIntoView effect keep the
+          bottom rows reachable above it. Reordering (Move Up / Move Down) lives here
+          because it requires a selection by definition; canMoveUp/Down disable the
+          buttons at the list edges, mirroring the Alt+↑/↓ hotkey's no-op-at-edges. */}
+      {bulkBarVisible && (() => {
         const selSorted = Array.from(selectedIndices).sort((a, b) => a - b);
         const canMoveUp = selSorted.length > 0 && selSorted[0] > 0;
         const canMoveDown = selSorted.length > 0 && selSorted[selSorted.length - 1] < actions.length - 1;
         return (
+        <div className="absolute inset-x-0 bottom-0 z-20">
         <BulkActionBar
           selectedCount={selectedIndices.size}
           allSelectedSkipped={selSorted.every(i => actions[i]?.isSkipped)}
@@ -2028,6 +2062,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             );
           }}
         />
+        </div>
         );
       })()}
 
