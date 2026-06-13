@@ -148,8 +148,11 @@ function ProbeDetails({ action }: { action: ActionItem }) {
   const isImage = action.actionType === 'WaitImage'
     || (isIf && action.conditionType === 'ImageFound');
 
+  // align-middle sets the inline-flex baseline to the cell's vertical centre; the
+  // -2px optical nudge then lands the thumbnail/icon exactly on the Action pill's
+  // centre (without align-middle the image sat ~4px high).
   return (
-    <span className="inline-flex items-center gap-1.5 translate-y-[-2px] text-xs min-w-0">
+    <span className="inline-flex items-center gap-1.5 align-middle translate-y-[-2px] text-xs min-w-0">
       {isIf && (
         <span className="inline-flex items-center gap-1 px-1.5 py-px rounded text-[9px] bg-bg-elevated text-text-tertiary shrink-0">
           {isImage ? <ScanSearch size={10} /> : <Pipette size={10} />}
