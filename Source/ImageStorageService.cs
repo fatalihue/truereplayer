@@ -9,11 +9,65 @@ namespace TrueReplayer.Services
 {
     public static class ImageStorageService
     {
+        // Reference images live under %LocalAppData%\TrueReplayer\Images — the same
+        // machine-local root as the WebView2 data and logs. They were previously in
+        // %AppData% (Roaming), but Roaming is the wrong home for large binary crops
+        // (it bloats the roaming profile and slows domain logins), and keeping them
+        // in Local consolidates all app-internal storage to one place (only Documents
+        // — perfis/settings — stays separate as user-facing data).
+        private static bool _legacyMigrationChecked;
+
         private static string GetBaseDirectory()
         {
-            return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            string baseDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "TrueReplayer", "Images");
+            // One-shot, lazy migration the first time any image op resolves the base
+            // dir — no startup wiring needed, and the bool guard keeps it off the hot
+            // path after the first call.
+            if (!_legacyMigrationChecked)
+            {
+                _legacyMigrationChecked = true;
+                TryMigrateLegacyImages(baseDir);
+            }
+            return baseDir;
+        }
+
+        // Moves any images left in the old Roaming location into the new Local one.
+        // Per-profile-dir merge (never clobbers an existing Local subdir), then drops
+        // the old root if it ends up empty. Best-effort: failures are logged, not fatal.
+        private static void TryMigrateLegacyImages(string newBaseDir)
+        {
+            try
+            {
+                string oldBase = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "TrueReplayer", "Images");
+                if (!Directory.Exists(oldBase)) return; // nothing legacy to migrate
+
+                Directory.CreateDirectory(newBaseDir);
+                foreach (var oldDir in Directory.EnumerateDirectories(oldBase))
+                {
+                    string dest = Path.Combine(newBaseDir, Path.GetFileName(oldDir));
+                    if (!Directory.Exists(dest))
+                        try { Directory.Move(oldDir, dest); } catch { /* best effort */ }
+                }
+                // Defensive: relocate any loose PNGs sitting at the old root too.
+                foreach (var f in Directory.EnumerateFiles(oldBase, "*.png"))
+                {
+                    string dest = Path.Combine(newBaseDir, Path.GetFileName(f));
+                    if (!File.Exists(dest))
+                        try { File.Move(f, dest); } catch { /* best effort */ }
+                }
+                if (!Directory.EnumerateFileSystemEntries(oldBase).Any())
+                    try { Directory.Delete(oldBase); } catch { /* best effort */ }
+
+                DiagnosticLog.Info("[Images] Migrated reference images from Roaming to LocalAppData");
+            }
+            catch (Exception ex)
+            {
+                try { DiagnosticLog.Info($"[Images] Legacy image migration failed: {ex.Message}"); } catch { }
+            }
         }
 
         public static string GetImageDirectory(string profileName)
