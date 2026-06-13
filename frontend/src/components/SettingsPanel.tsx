@@ -78,9 +78,10 @@ function Section({ icon: Icon, iconColor, title, children, defaultOpen = true }:
         {isOpen ? <ChevronDown size={13} className="text-text-tertiary" /> : <ChevronRight size={13} className="text-text-tertiary" />}
       </button>
       {isOpen && (
-        // Inset group: rows separated by inset hairlines (divide-y), no per-row border.
-        // overflow-hidden clips the danger row's tint to the rounded corners.
-        <div className="bg-bg-card border border-border-subtle rounded-ui overflow-hidden divide-y divide-border-subtle">
+        // Inset group: same bg as the panel (the border + hairlines do the grouping —
+        // a lighter fill read as a strange mismatch). overflow-hidden clips row hovers
+        // to the rounded corners.
+        <div className="bg-bg-surface border border-border-subtle rounded-ui overflow-hidden divide-y divide-border-subtle">
           {children}
         </div>
       )}
@@ -608,7 +609,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
     // No overflow-hidden: the collapse button's tooltip renders to the left of
     // the tab bar and would be clipped at the panel edge (scrolling is handled
     // by the tab-content div below).
-    <div className="w-[220px] flex flex-col shrink-0 bg-bg-surface border border-border-subtle rounded-ui transition-[width] duration-200">
+    <div className="w-[250px] flex flex-col shrink-0 bg-bg-surface border border-border-subtle rounded-ui transition-[width] duration-200">
       {/* Tab Bar — explicit 44 px height (matches the Toolbar's measured rendered height in
           the centre column) so the section header below this tab bar lines up vertically
           with the action grid's column-header row in the centre. Without this, the tab
@@ -746,13 +747,13 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               {settings.smoothMovement && (
                 <>
                   <SettingRow label="Path step" tooltip="Max pixels per step along the path. Lower = smoother / more reliable, slightly slower. ~20 works well for Roblox.">
-                    <SettingInput value={settings.moveStepPx} onCommit={(v) => changeSetting('moveStepPx', v)} width="w-[80px]" suffix="px" />
+                    <SettingInput value={settings.moveStepPx} onCommit={(v) => changeSetting('moveStepPx', v)} width="w-[80px]" />
                   </SettingRow>
                   <SettingRow label="Step delay" tooltip="Pause between path steps (ms).">
-                    <SettingInput value={settings.moveStepDelay} onCommit={(v) => changeSetting('moveStepDelay', v)} width="w-[80px]" suffix="ms" />
+                    <SettingInput value={settings.moveStepDelay} onCommit={(v) => changeSetting('moveStepDelay', v)} width="w-[80px]" />
                   </SettingRow>
                   <SettingRow label="Click delay" tooltip="Gap after reaching the target before the click fires (ms).">
-                    <SettingInput value={settings.moveClickDelay} onCommit={(v) => changeSetting('moveClickDelay', v)} width="w-[80px]" suffix="ms" />
+                    <SettingInput value={settings.moveClickDelay} onCommit={(v) => changeSetting('moveClickDelay', v)} width="w-[80px]" />
                   </SettingRow>
                 </>
               )}
@@ -877,7 +878,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               data-section="Appearance"
               onClick={() => window.dispatchEvent(new CustomEvent('cmd:themeeditor'))}
               title="Customise colours, font, row height, and per-action accents."
-              className="w-full flex items-center gap-2 px-3 h-9 bg-bg-card border border-border-subtle rounded-ui hover:bg-bg-elevated transition-colors"
+              className="w-full flex items-center gap-2 px-3 h-9 bg-bg-surface border border-border-subtle rounded-ui hover:bg-bg-elevated transition-colors"
             >
               <Palette size={13} style={{ color: '#c084fc' }} />
               <span className="text-xs font-semibold text-text-secondary flex-1 text-left">Appearance</span>
