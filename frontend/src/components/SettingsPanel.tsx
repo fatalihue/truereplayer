@@ -27,7 +27,7 @@ function CheckRow({ label, checked, onChange, tooltip, danger, dangerTooltip }: 
       type="button"
       onClick={() => onChange(!checked)}
       title={danger ? dangerTooltip ?? tooltip : tooltip}
-      className="relative w-full flex items-center gap-2.5 h-8 px-3 text-left transition-colors hover:bg-bg-elevated"
+      className="relative w-full flex items-center gap-2.5 h-8 px-2.5 text-left transition-colors hover:bg-bg-elevated"
     >
       {danger && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-sm bg-recording" />}
       <span className={`w-[17px] h-[17px] rounded border flex items-center justify-center shrink-0 transition-colors ${
@@ -78,10 +78,10 @@ function Section({ icon: Icon, iconColor, title, children, defaultOpen = true }:
         {isOpen ? <ChevronDown size={13} className="text-text-tertiary" /> : <ChevronRight size={13} className="text-text-tertiary" />}
       </button>
       {isOpen && (
-        // Inset group: same bg as the panel (the border + hairlines do the grouping —
-        // a lighter fill read as a strange mismatch). overflow-hidden clips row hovers
-        // to the rounded corners.
-        <div className="bg-bg-surface border border-border-subtle rounded-ui overflow-hidden divide-y divide-border-subtle">
+        // Inset group: same bg as the panel, just a border around it. Rows are spaced
+        // (space-y) like the old cards — NO per-row divider lines (those read as an ugly
+        // grid). The group border + the gap between groups do all the separating.
+        <div className="bg-bg-surface border border-border-subtle rounded-ui overflow-hidden py-1 space-y-1">
           {children}
         </div>
       )}
@@ -94,7 +94,7 @@ function SettingRow({ label, tooltip, children, danger }: { label: string; toolt
   // (e.g. Profile Keys OFF) is impossible to miss when glancing at the panel.
   return (
     <div
-      className="relative flex items-center justify-between min-h-8 px-3 gap-2"
+      className="relative flex items-center justify-between min-h-8 px-2.5 gap-2"
       title={tooltip}
     >
       {/* Danger = thin red left accent + red icon/label (replaces the old full-row red wash). */}
@@ -188,7 +188,6 @@ function ClickerSection({
   onChange: (key: string, value: string | boolean | number | object | null) => void;
 }) {
   const { send } = useBridge();
-  const [isOpen, setIsOpen] = useState(true);
   // Unit toggle for the Rate row: 'ms' shows the raw delay; '/s' shows clicks per second
   // computed from delay (1000 / ms). Backend always stores ms — the toggle is display-only.
   // Default is 'ms' (more conventional for typical users); reset bounces this back to 'ms'
@@ -245,19 +244,9 @@ function ClickerSection({
   };
 
   return (
-    // Same neutral border as every other Section — the purple icon + title are
-    // identity enough (an earlier clicker-tinted border read as too loud).
-    <div data-section="Clicker" className="bg-bg-surface border border-border-subtle rounded-ui overflow-hidden">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-bg-card transition-colors"
-      >
-        <MousePointerClick size={14} style={{ color: 'var(--color-clicker)' }} />
-        <span className="text-ui font-semibold flex-1 text-left" style={{ color: 'var(--color-clicker)' }}>Clicker</span>
-        {isOpen ? <ChevronDown size={14} className="text-text-tertiary" /> : <ChevronRight size={14} className="text-text-tertiary" />}
-      </button>
-      {isOpen && (
-        <div className="px-3 pb-3 space-y-1">
+    // Uses the shared Section so it matches macro mode exactly (header above a single
+    // inset group, same row layout). Purple icon/title keep the "you're in Clicker" cue.
+    <Section icon={MousePointerClick} iconColor="var(--color-clicker)" title="Clicker">
           {/* Layout mirrors the Execution panel exactly: label | input | toggle. The Rate
               row puts the /s ↔ ms <select> in the toggle column so the column always lines
               up across rows. Hold has no toggle (0 ms is a valid value, no on/off needed)
@@ -275,7 +264,7 @@ function ClickerSection({
               <option value="Right">Right</option>
               <option value="Middle">Middle</option>
             </select>
-            <div className="w-10" />
+            <div className="w-7" />
           </SettingRow>
           <SettingRow label="Rate" tooltip="Click rate (clicks per second) vs (delay)">
             <SettingInput
@@ -290,7 +279,7 @@ function ClickerSection({
             <select
               value={unit}
               onChange={(e) => setUnit(e.target.value as 'ms' | 'cps')}
-              className="w-10 h-5 pl-1 text-[11px] text-text-secondary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid font-mono cursor-pointer"
+              className="w-7 h-5 text-center text-[11px] text-text-secondary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid font-mono cursor-pointer appearance-none"
               title="Unit"
             >
               <option value="cps">/s</option>
@@ -310,7 +299,7 @@ function ClickerSection({
             <SettingInput value={hold} onCommit={(v) => onChange('cursorClickHold', v)} width="w-[80px]" />
             {/* Hold has no on/off — 0 ms is a valid value. Spacer keeps the input column
                 aligned with the rows that do have a toggle (matches Toggle's w-10 footprint). */}
-            <div className="w-10" />
+            <div className="w-7" />
           </SettingRow>
           <SettingRow label="Position" tooltip="Random ±px offset around the cursor (anti-cheat detection). Mutually exclusive with Area.">
             <SettingInput
@@ -391,9 +380,7 @@ function ClickerSection({
             />
             <CompactToggle isOn={useInterval} onChange={(v) => onChange('cursorClickUseInterval', v)} />
           </SettingRow>
-        </div>
-      )}
-    </div>
+    </Section>
   );
 }
 
@@ -609,7 +596,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
     // No overflow-hidden: the collapse button's tooltip renders to the left of
     // the tab bar and would be clipped at the panel edge (scrolling is handled
     // by the tab-content div below).
-    <div className="w-[250px] flex flex-col shrink-0 bg-bg-surface border border-border-subtle rounded-ui transition-[width] duration-200">
+    <div className="w-[224px] flex flex-col shrink-0 bg-bg-surface border border-border-subtle rounded-ui transition-[width] duration-200">
       {/* Tab Bar — explicit 44 px height (matches the Toolbar's measured rendered height in
           the centre column) so the section header below this tab bar lines up vertically
           with the action grid's column-header row in the centre. Without this, the tab
@@ -649,7 +636,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
 
       {/* Tab Content — more vertical gap between groups now that each section is a
           floating header + inset (not a tight stack of bordered cards). */}
-      <div className="flex-1 overflow-y-auto space-y-3 px-2.5 py-2">
+      <div className="flex-1 overflow-y-auto space-y-3 px-1 py-2">
         {activeTab === 'profile' ? (
           <>
             {/* Clicker mode swaps the Execution + Recording stack for a dedicated panel.
@@ -748,12 +735,16 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 <>
                   <SettingRow label="Path step" tooltip="Max pixels per step along the path. Lower = smoother / more reliable, slightly slower. ~20 works well for Roblox.">
                     <SettingInput value={settings.moveStepPx} onCommit={(v) => changeSetting('moveStepPx', v)} width="w-[80px]" />
+                    {/* spacer = toggle column, so these inputs line up with Execution's. */}
+                    <span className="w-7 shrink-0" aria-hidden />
                   </SettingRow>
                   <SettingRow label="Step delay" tooltip="Pause between path steps (ms).">
                     <SettingInput value={settings.moveStepDelay} onCommit={(v) => changeSetting('moveStepDelay', v)} width="w-[80px]" />
+                    <span className="w-7 shrink-0" aria-hidden />
                   </SettingRow>
                   <SettingRow label="Click delay" tooltip="Gap after reaching the target before the click fires (ms).">
                     <SettingInput value={settings.moveClickDelay} onCommit={(v) => changeSetting('moveClickDelay', v)} width="w-[80px]" />
+                    <span className="w-7 shrink-0" aria-hidden />
                   </SettingRow>
                 </>
               )}
