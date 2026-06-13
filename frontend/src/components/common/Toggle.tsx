@@ -2,14 +2,22 @@ interface ToggleProps {
   isOn: boolean;
   onChange: (value: boolean) => void;
   disabled?: boolean;
+  // 'sm' = the compact 28×16 switch used in the redesigned Settings panel; default
+  // keeps the original 40×20 size for every other surface (dialogs, etc.).
+  size?: 'default' | 'sm';
 }
 
-export function Toggle({ isOn, onChange, disabled = false }: ToggleProps) {
+export function Toggle({ isOn, onChange, disabled = false, size = 'default' }: ToggleProps) {
+  const sm = size === 'sm';
+  const track = sm ? 'w-7 h-4' : 'w-10 h-5';
+  const knob = sm
+    ? `w-3 h-3 top-[2px] ${isOn ? 'left-[14px]' : 'left-[2px]'}`
+    : `w-3.5 h-3.5 top-[2px] ${isOn ? 'left-[22px]' : 'left-[2px]'}`;
   return (
     <button
       type="button"
       onClick={() => !disabled && onChange(!isOn)}
-      className={`relative w-10 h-5 rounded-full transition-colors border ${
+      className={`relative ${track} rounded-full transition-colors border ${
         disabled
           ? 'bg-bg-card border-border-subtle opacity-40 cursor-not-allowed'
           : isOn
@@ -17,11 +25,7 @@ export function Toggle({ isOn, onChange, disabled = false }: ToggleProps) {
             : 'bg-bg-card border-border-strong cursor-pointer'
       }`}
     >
-      <div
-        className={`absolute top-[2px] w-3.5 h-3.5 rounded-full bg-white transition-[left] ${
-          isOn ? 'left-[22px]' : 'left-[2px]'
-        }`}
-      />
+      <div className={`absolute rounded-full bg-white transition-[left] ${knob}`} />
     </button>
   );
 }

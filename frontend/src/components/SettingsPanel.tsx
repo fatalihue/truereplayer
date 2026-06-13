@@ -1,9 +1,47 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Move } from 'lucide-react';
+import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Move, Check, AlertTriangle } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { Toggle } from './common/Toggle';
+
+// Compact 28×16 switch — the redesigned Settings panel uses the smaller size for every
+// on/off control; other surfaces (dialogs) keep the default 40×20 Toggle.
+function CompactToggle(props: { isOn: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return <Toggle {...props} size="sm" />;
+}
+
+// Checkbox row — the independent Recording capture flags read better as a multi-select
+// list than as a stack of identical switches. `danger` paints a thin red left accent +
+// faint tint when the flag is off and that's a risky state (e.g. Profile Keys off).
+function CheckRow({ label, checked, onChange, tooltip, danger, dangerTooltip }: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  tooltip?: string;
+  danger?: boolean;
+  dangerTooltip?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      title={danger ? dangerTooltip ?? tooltip : tooltip}
+      className="relative w-full flex items-center gap-2.5 h-8 px-3 text-left transition-colors hover:bg-bg-elevated"
+    >
+      {danger && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-sm bg-recording" />}
+      <span className={`w-[17px] h-[17px] rounded border flex items-center justify-center shrink-0 transition-colors ${
+        checked ? 'bg-accent-solid border-accent-solid' : 'border-border-strong'
+      }`}>
+        {checked && <Check size={12} className="text-white" strokeWidth={3} />}
+      </span>
+      <span className={`text-ui flex items-center gap-1.5 ${danger ? 'text-recording' : 'text-text-secondary'}`}>
+        {danger && <AlertTriangle size={12} className="shrink-0" />}
+        {label}
+      </span>
+    </button>
+  );
+}
 
 function Section({ icon: Icon, iconColor, title, children, defaultOpen = true }: {
   icon: React.ElementType;
@@ -27,19 +65,22 @@ function Section({ icon: Icon, iconColor, title, children, defaultOpen = true }:
   };
 
   return (
-    // data-section lets the collapsed-rail icons scroll their target into view
-    // after the panel expands (see expandToSection in SettingsPanel).
-    <div data-section={title} className="bg-bg-surface border border-border-subtle rounded-ui overflow-hidden">
+    // Grouped-insets layout: the header floats ABOVE a single rounded inset group
+    // instead of every section being a bordered card (that was the "boxy noise").
+    // data-section lets the collapsed-rail icons scroll their target into view.
+    <div data-section={title}>
       <button
         onClick={toggleOpen}
-        className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-bg-card transition-colors"
+        className="group w-full flex items-center gap-2 px-1 py-1.5"
       >
-        <Icon size={14} style={{ color: iconColor }} />
-        <span className="text-ui font-semibold text-text-primary flex-1 text-left">{title}</span>
-        {isOpen ? <ChevronDown size={14} className="text-text-tertiary" /> : <ChevronRight size={14} className="text-text-tertiary" />}
+        <Icon size={13} style={{ color: iconColor }} />
+        <span className="text-xs font-semibold text-text-secondary flex-1 text-left group-hover:text-text-primary transition-colors">{title}</span>
+        {isOpen ? <ChevronDown size={13} className="text-text-tertiary" /> : <ChevronRight size={13} className="text-text-tertiary" />}
       </button>
       {isOpen && (
-        <div className="px-3 pb-3 space-y-1">
+        // Inset group: rows separated by inset hairlines (divide-y), no per-row border.
+        // overflow-hidden clips the danger row's tint to the rounded corners.
+        <div className="bg-bg-card border border-border-subtle rounded-ui overflow-hidden divide-y divide-border-subtle">
           {children}
         </div>
       )}
@@ -52,17 +93,16 @@ function SettingRow({ label, tooltip, children, danger }: { label: string; toolt
   // (e.g. Profile Keys OFF) is impossible to miss when glancing at the panel.
   return (
     <div
-      className={
-        danger
-          ? 'flex items-center justify-between py-1 px-2 -mx-1 rounded bg-red-500/20 border border-red-500/60 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.25)]'
-          : 'flex items-center justify-between py-1'
-      }
+      className="relative flex items-center justify-between min-h-8 px-3 gap-2"
       title={tooltip}
     >
-      <span className={danger ? 'text-ui font-semibold text-red-200' : 'text-ui text-text-secondary'}>
+      {/* Danger = thin red left accent + red icon/label (replaces the old full-row red wash). */}
+      {danger && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-sm bg-recording" />}
+      <span className={`text-ui flex items-center gap-1.5 min-w-0 ${danger ? 'text-recording' : 'text-text-secondary'}`}>
+        {danger && <AlertTriangle size={12} className="shrink-0" />}
         {label}
       </span>
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2.5 shrink-0">
         {children}
       </div>
     </div>
@@ -263,7 +303,7 @@ function ClickerSection({
               onEnter={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
               width="w-[80px]"
             />
-            <Toggle isOn={useRateJitter} onChange={(v) => onChange('cursorClickUseJitter', v)} />
+            <CompactToggle isOn={useRateJitter} onChange={(v) => onChange('cursorClickUseJitter', v)} />
           </SettingRow>
           <SettingRow label="Hold" tooltip="How long button stays pressed (ms). 10 = normal click; 50-200 = slow click">
             <SettingInput value={hold} onCommit={(v) => onChange('cursorClickHold', v)} width="w-[80px]" />
@@ -282,7 +322,7 @@ function ClickerSection({
               )}
               width="w-[80px]"
             />
-            <Toggle
+            <CompactToggle
               isOn={usePositionJitter}
               onChange={(v) => setExclusive(
                 { key: 'cursorClickUsePositionJitter', on: usePositionJitter },
@@ -323,7 +363,7 @@ function ClickerSection({
                 </button>
               )}
             </div>
-            <Toggle
+            <CompactToggle
               isOn={useArea}
               onChange={(v) => setExclusive(
                 { key: 'cursorClickUseArea', on: useArea },
@@ -339,7 +379,7 @@ function ClickerSection({
               onEnter={() => activateIfOff(useLoops, 'cursorClickUseLoops')}
               width="w-[80px]"
             />
-            <Toggle isOn={useLoops} onChange={(v) => onChange('cursorClickUseLoops', v)} />
+            <CompactToggle isOn={useLoops} onChange={(v) => onChange('cursorClickUseLoops', v)} />
           </SettingRow>
           <SettingRow label="Interval" tooltip="Pause between loop (ms)">
             <SettingInput
@@ -348,7 +388,7 @@ function ClickerSection({
               onEnter={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
               width="w-[80px]"
             />
-            <Toggle isOn={useInterval} onChange={(v) => onChange('cursorClickUseInterval', v)} />
+            <CompactToggle isOn={useInterval} onChange={(v) => onChange('cursorClickUseInterval', v)} />
           </SettingRow>
         </div>
       )}
@@ -606,8 +646,9 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
         )}
       </div>
 
-      {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto space-y-1 p-1">
+      {/* Tab Content — more vertical gap between groups now that each section is a
+          floating header + inset (not a tight stack of bordered cards). */}
+      <div className="flex-1 overflow-y-auto space-y-3 px-2.5 py-2">
         {activeTab === 'profile' ? (
           <>
             {/* Clicker mode swaps the Execution + Recording stack for a dedicated panel.
@@ -653,7 +694,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   }}
                   width="w-[80px]"
                 />
-                <Toggle isOn={settings.useCustomDelay} onChange={(v) => changeSetting('useCustomDelay', v)} />
+                <CompactToggle isOn={settings.useCustomDelay} onChange={(v) => changeSetting('useCustomDelay', v)} />
               </SettingRow>
               <SettingRow label="Jitter" tooltip="Random ±% applied to each delay (anti-cheat detection)">
                 <SettingInput
@@ -666,7 +707,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   }}
                   width="w-[80px]"
                 />
-                <Toggle isOn={settings.useDelayVariation} onChange={(v) => changeSetting('useDelayVariation', v)} />
+                <CompactToggle isOn={settings.useDelayVariation} onChange={(v) => changeSetting('useDelayVariation', v)} />
               </SettingRow>
               <SettingRow label="Loops" tooltip="Number of times to repeat. 0 = infinite">
                 <SettingInput
@@ -679,7 +720,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   }}
                   width="w-[80px]"
                 />
-                <Toggle isOn={settings.enableLoop} onChange={(v) => changeSetting('enableLoop', v)} />
+                <CompactToggle isOn={settings.enableLoop} onChange={(v) => changeSetting('enableLoop', v)} />
               </SettingRow>
               <SettingRow label="Interval" tooltip="Pause between loop (ms)">
                 <SettingInput
@@ -692,7 +733,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   }}
                   width="w-[80px]"
                 />
-                <Toggle isOn={settings.loopIntervalEnabled} onChange={(v) => changeSetting('loopIntervalEnabled', v)} />
+                <CompactToggle isOn={settings.loopIntervalEnabled} onChange={(v) => changeSetting('loopIntervalEnabled', v)} />
               </SettingRow>
             </Section>
 
@@ -700,7 +741,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 single large jump; off = legacy instant move. */}
             <Section icon={Move} iconColor="#51cf66" title="Movement">
               <SettingRow label="Smooth movement" tooltip="Move the cursor along a path to the target instead of jumping straight there. Required for games like Roblox that ignore a single large jump. Off = legacy instant move.">
-                <Toggle isOn={settings.smoothMovement} onChange={(v) => changeSetting('smoothMovement', v)} />
+                <CompactToggle isOn={settings.smoothMovement} onChange={(v) => changeSetting('smoothMovement', v)} />
               </SettingRow>
               {settings.smoothMovement && (
                 <>
@@ -717,26 +758,28 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               )}
             </Section>
 
-            {/* Recording */}
+            {/* Recording — the six capture flags are INDEPENDENT booleans, so they read
+                as a multi-select checkbox list rather than six identical switches (segmented
+                would be wrong — it implies pick-one). Profile Keys keeps the danger accent
+                when off (its shortcuts/hotstrings stop firing). */}
             <Section icon={Mic} iconColor="#ff6b6b" title="Recording">
-              <SettingRow label="Mouse Clicks">
-                <Toggle isOn={settings.recordMouse} onChange={(v) => changeSetting('recordMouse', v)} />
-              </SettingRow>
-              <SettingRow label="Mouse Scroll">
-                <Toggle isOn={settings.recordScroll} onChange={(v) => changeSetting('recordScroll', v)} />
-              </SettingRow>
-              <SettingRow label="Keyboard">
-                <Toggle isOn={settings.recordKeyboard} onChange={(v) => changeSetting('recordKeyboard', v)} />
-              </SettingRow>
-              <SettingRow label="Combined Actions" tooltip="Record each key press and mouse click as a single action (Keystroke / Click) instead of separate Down + Up rows. Two quick left clicks merge into a Double Click automatically. Modifiers fold into the key (Ctrl+C, Shift+A). Holds and drags aren't captured in this mode — leave it off, or add a HoldKey row, for those.">
-                <Toggle isOn={settings.recordCombinedInput} onChange={(v) => changeSetting('recordCombinedInput', v)} />
-              </SettingRow>
-              <SettingRow label="Profile Keys" danger={!settings.profileKeyEnabled}>
-                <Toggle isOn={settings.profileKeyEnabled} onChange={(v) => changeSetting('profileKeyEnabled', v)} />
-              </SettingRow>
-              <SettingRow label="Browser Actions" tooltip="Record CSS selectors from Chrome instead of mouse coordinates">
-                <Toggle isOn={settings.browserSelectorEnabled ?? true} onChange={(v) => changeSetting('browserSelectorEnabled', v)} />
-              </SettingRow>
+              <CheckRow label="Mouse Clicks" checked={settings.recordMouse} onChange={(v) => changeSetting('recordMouse', v)} />
+              <CheckRow label="Mouse Scroll" checked={settings.recordScroll} onChange={(v) => changeSetting('recordScroll', v)} />
+              <CheckRow label="Keyboard" checked={settings.recordKeyboard} onChange={(v) => changeSetting('recordKeyboard', v)} />
+              <CheckRow
+                label="Combined Actions"
+                tooltip="Record each key press and mouse click as a single action (Keystroke / Click) instead of separate Down + Up rows. Two quick left clicks merge into a Double Click automatically. Modifiers fold into the key (Ctrl+C, Shift+A). Holds and drags aren't captured in this mode — leave it off, or add a HoldKey row, for those."
+                checked={settings.recordCombinedInput}
+                onChange={(v) => changeSetting('recordCombinedInput', v)}
+              />
+              <CheckRow
+                label="Profile Keys"
+                checked={settings.profileKeyEnabled}
+                onChange={(v) => changeSetting('profileKeyEnabled', v)}
+                danger={!settings.profileKeyEnabled}
+                dangerTooltip="Profile shortcuts and hotstrings won't fire while this is off"
+              />
+              <CheckRow label="Browser Actions" tooltip="Record CSS selectors from Chrome instead of mouse coordinates" checked={settings.browserSelectorEnabled ?? true} onChange={(v) => changeSetting('browserSelectorEnabled', v)} />
             </Section>
               </>
             )}
@@ -786,19 +829,19 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             {/* Window */}
             <Section icon={Monitor} iconColor="#7a8599" title="Window">
               <SettingRow label="Always On Top">
-                <Toggle
+                <CompactToggle
                   isOn={settings.alwaysOnTop}
                   onChange={(v) => send({ type: 'window:alwaysOnTop', payload: { enabled: v } })}
                 />
               </SettingRow>
               <SettingRow label="System Tray">
-                <Toggle
+                <CompactToggle
                   isOn={settings.minimizeToTray}
                   onChange={(v) => send({ type: 'window:minimizeToTray', payload: { enabled: v } })}
                 />
               </SettingRow>
               <SettingRow label="Run on Startup">
-                <Toggle
+                <CompactToggle
                   isOn={settings.runOnStartup}
                   onChange={(v) => {
                     send({ type: 'window:runOnStartup', payload: { enabled: v } });
@@ -809,14 +852,14 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 />
               </SettingRow>
               <SettingRow label="Startup Minimized">
-                <Toggle
+                <CompactToggle
                   isOn={settings.startMinimized}
                   onChange={(v) => send({ type: 'window:startMinimized', payload: { enabled: v } })}
                   disabled={!settings.runOnStartup}
                 />
               </SettingRow>
               <SettingRow label="Run as Administrator" tooltip="Relaunch with admin privileges on startup. Required to record clicks on elevated apps.">
-                <Toggle
+                <CompactToggle
                   isOn={settings.runAsAdmin ?? false}
                   onChange={(v) => changeSetting('runAsAdmin', v)}
                 />
@@ -834,17 +877,17 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               data-section="Appearance"
               onClick={() => window.dispatchEvent(new CustomEvent('cmd:themeeditor'))}
               title="Customise colours, font, row height, and per-action accents."
-              className="w-full flex items-center gap-2 px-3 py-2.5 bg-bg-surface border border-border-subtle rounded-ui hover:bg-bg-card transition-colors"
+              className="w-full flex items-center gap-2 px-3 h-9 bg-bg-card border border-border-subtle rounded-ui hover:bg-bg-elevated transition-colors"
             >
-              <Palette size={14} style={{ color: '#c084fc' }} />
-              <span className="text-ui font-semibold text-text-primary flex-1 text-left">Appearance</span>
-              <ChevronRight size={14} className="text-text-tertiary" />
+              <Palette size={13} style={{ color: '#c084fc' }} />
+              <span className="text-xs font-semibold text-text-secondary flex-1 text-left">Appearance</span>
+              <ChevronRight size={13} className="text-text-tertiary" />
             </button>
 
             {/* Updates */}
             <Section icon={Download} iconColor="#6bcb77" title="Updates" defaultOpen={false}>
               <SettingRow label="Auto Check">
-                <Toggle isOn={true} onChange={() => {}} />
+                <CompactToggle isOn={true} onChange={() => {}} />
               </SettingRow>
               <button
                 onClick={() => {
@@ -852,7 +895,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   send({ type: 'update:check', payload: {} });
                 }}
                 disabled={updateStatus === 'checking'}
-                className="w-full flex items-center justify-center gap-1.5 mt-1 h-7 rounded text-xs text-text-secondary bg-bg-elevated border border-border-default hover:bg-bg-card hover:text-text-primary transition-colors disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-1.5 h-9 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors disabled:opacity-50"
               >
                 {updateStatus === 'checking' ? 'Checking...'
                   : updateStatus === 'up-to-date' ? '✓ Up to date'
