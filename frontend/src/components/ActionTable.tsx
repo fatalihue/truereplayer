@@ -116,14 +116,74 @@ function actionPillLabel(action: ActionItem): string {
     case 'Pause': return 'Pause';
     case 'HoldKey': return 'Hold Key';
     case 'DoubleClick': return 'Double Click';
-    // Conditional labels are intentionally lowercase to read as "code keywords"
-    // (matches the mockup). IF varies by condition family so the user sees the
-    // probe type without opening Sheet.
-    case 'If': return action.conditionType === 'PixelColorMatch' ? 'if pixel' : 'if image';
+    // Conditional labels are intentionally lowercase to read as "code keywords".
+    // The IF pill is uniform ("if") regardless of probe family — the image-vs-pixel
+    // distinction (and its payload) lives in the Details cell via ProbeDetails, so
+    // the grid reads as a clean "if … endif" block.
+    case 'If': return 'if';
     case 'Else': return 'else';
     case 'EndIf': return 'endif';
     default: return action.actionType;
   }
+}
+
+// Whether a row is an image/pixel PROBE — the standalone Wait actions or an IF
+// whose condition uses one of those probes. These share a unified Details payload
+// (ProbeDetails) so an image probe looks the same whether it's a Wait or an If.
+function isProbeAction(action: ActionItem): boolean {
+  return action.actionType === 'WaitImage'
+    || action.actionType === 'WaitPixelColor'
+    || (action.actionType === 'If' && (action.conditionType === 'ImageFound' || action.conditionType === 'PixelColorMatch'));
+}
+
+// Standardized Details payload for the four probe rows. IMAGE → reference
+// thumbnail (never the GUID filename); PIXEL → colour swatch + hex + x,y. IF rows
+// additionally get a small type tag, since their pill is the generic "if"; Wait
+// rows skip the tag because their own pill already names the type. (The NOT/IFNOT
+// modifier and the image confidence % live elsewhere — the Action pill and the
+// Sheet panel respectively — to keep this cell to just "what is matched".)
+function ProbeDetails({ action }: { action: ActionItem }) {
+  const isIf = action.actionType === 'If';
+  const isImage = action.actionType === 'WaitImage'
+    || (isIf && action.conditionType === 'ImageFound');
+
+  return (
+    <span className="inline-flex items-center gap-1.5 translate-y-[-2px] text-xs min-w-0">
+      {isIf && (
+        <span className="inline-flex items-center gap-1 px-1.5 py-px rounded text-[9px] bg-bg-elevated text-text-tertiary shrink-0">
+          {isImage ? <ScanSearch size={10} /> : <Pipette size={10} />}
+          {isImage ? 'image' : 'pixel'}
+        </span>
+      )}
+      {isImage ? (
+        <>
+          {action.imageBase64 ? (
+            <img
+              src={`data:image/png;base64,${action.imageBase64}`}
+              alt=""
+              className="h-4 w-auto max-w-[48px] rounded-sm border border-border-default object-contain pointer-events-none shrink-0"
+            />
+          ) : (
+            <ScanSearch size={13} className="text-text-tertiary shrink-0" />
+          )}
+        </>
+      ) : (
+        <>
+          {action.pixelColor && (
+            <span
+              className="inline-block w-2.5 h-2.5 rounded-sm border border-white/20 shrink-0"
+              style={{ background: action.pixelColor }}
+              title={`Target colour: ${action.pixelColor}`}
+            />
+          )}
+          <span className="font-mono text-text-secondary truncate">
+            {action.pixelColor}
+            {action.pixelX != null && action.pixelY != null ? ` · ${action.pixelX}, ${action.pixelY}` : ''}
+          </span>
+        </>
+      )}
+    </span>
+  );
 }
 
 interface ActionTableProps {
@@ -1413,6 +1473,19 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     >
                       <ActionIcon actionType={action.actionType} />
                       {actionPillLabel(action)}
+                      {/* NOT badge — negated IF (IFNOT). Lives in the Action pill next
+                          to "if" so the pill reads "if NOT"; the Details cell stays
+                          focused on the probe payload. Solid fill (if-fg on the row's
+                          surface) so it reads as an emphatic modifier on the keyword. */}
+                      {action.actionType === 'If' && action.conditionNegate && (
+                        <span
+                          className="ml-0.5 px-1 rounded text-[9px] font-bold tracking-wider"
+                          style={{ background: 'var(--color-action-if-fg)', color: 'var(--color-bg-surface)' }}
+                          title="Negated condition — the TRUE branch fires when the probe FAILS (IFNOT)"
+                        >
+                          NOT
+                        </span>
+                      )}
                       {/* Repeat indicator — Keystroke press-cycles + RunProfile sub-call
                           counts. Lives inside the Action pill instead of the Key column
                           because long profile names used to push "×N" past the Key
@@ -1528,6 +1601,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         onBlur={() => { disarmKeyCaptureTimer(); cancelEdit(); }}
                         className="w-[220px] h-6 px-1 text-xs font-mono text-accent-light bg-bg-input border border-accent-solid rounded outline-none placeholder:text-accent-light/50 animate-pulse"
                       />
+                    ) : isProbeAction(action) ? (
+                      // Image/pixel probe (Wait* or If) — unified payload, no GUID.
+                      <ProbeDetails action={action} />
                     ) : (<>
                     {displayKey ? (
                       <span
@@ -1560,31 +1636,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         // empty Key cells (WaitImage, WaitPixelColor with no value)
                         // also respond. Events bubble from this span to the td.
                       >
-                        {/* IF rows render extra leading nodes inside the chip: a NOT
-                            badge when the condition is negated (IFNOT semantic), and a
-                            color swatch for pixel-color conditions. Both go BEFORE the
-                            displayKey text so the chip reads "[NOT][swatch] payload"
-                            in natural reading order. */}
-                        {action.actionType === 'If' && action.conditionNegate && (
-                          <span
-                            className="mr-1 px-1 py-px rounded text-[9.5px] font-bold tracking-wider border"
-                            style={{
-                              background: 'var(--color-action-if-bg)',
-                              color: 'var(--color-action-if-fg)',
-                              borderColor: 'var(--color-action-if-border)',
-                            }}
-                            title="Negated condition — the TRUE branch fires when the probe FAILS (IFNOT)"
-                          >
-                            NOT
-                          </span>
-                        )}
-                        {((action.actionType === 'If' && action.conditionType === 'PixelColorMatch') || action.actionType === 'WaitPixelColor') && action.pixelColor && (
-                          <span
-                            className="mr-1 inline-block w-2.5 h-2.5 rounded-sm border border-white/20"
-                            style={{ background: action.pixelColor }}
-                            title={`Target colour: ${action.pixelColor}`}
-                          />
-                        )}
+                        {/* Probe rows (Wait Image / Pixel, If image / pixel) render via
+                            ProbeDetails above — the NOT badge + swatch live there now. */}
                         {/* SendText payloads can contain `{Enter}` / `{delay:500}` /
                             `{Clipboard:...}` tokens. Render them as the same pink chips
                             used in the Lexical-based Edit Text dialog so the cell mirrors
