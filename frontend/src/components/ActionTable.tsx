@@ -1675,9 +1675,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             the action; the badge just communicates the duration. */}
                         {action.actionType === 'HoldKey' && (() => {
                           const ms = action.holdDurationMs && action.holdDurationMs > 0 ? action.holdDurationMs : 1000;
-                          const label = ms >= 1000 && ms % 100 === 0
-                            ? `${(ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1)}s`
-                            : `${ms}ms`;
+                          // Always milliseconds (was "1s"/"1.5s" for clean seconds) so every
+                          // action duration reads in the same unit across the grid.
+                          const label = `${ms}ms`;
                           return (
                             <span
                               className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold tabular-nums bg-[color-mix(in_srgb,var(--color-accent)_18%,transparent)] text-accent-light hover:bg-[color-mix(in_srgb,var(--color-accent)_28%,transparent)] cursor-pointer transition-colors"

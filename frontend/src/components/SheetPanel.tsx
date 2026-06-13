@@ -345,10 +345,11 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       setY(String(action.y || ''));
       setDelay(String(action.delay));
       setComment(action.comment || '');
-      // Pause defaults timeout to 0 (infinite); other actions default to 5000ms.
+      // Timeout edited in milliseconds (matches the grid + dialogs). Pause defaults
+      // to 0 (infinite); other actions default to 5000ms.
       setTimeout_(action.actionType === 'Pause'
-        ? String((action.timeout ?? 0) / 1000)
-        : String((action.timeout || 5000) / 1000));
+        ? String(action.timeout ?? 0)
+        : String(action.timeout || 5000));
       setConfidence(String(Math.round((action.confidence || 0.8) * 100)));
       setBrowserText(action.browserText || '');
       setNewTab(action.newTab || false);
@@ -446,7 +447,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     // waitImageClickOnMatch) are gated inside so they don't leak into IF rows.
     if (actionType === 'WaitImage' || _isIfImage) {
       if (actionType === 'WaitImage') {
-        const newTimeoutMs = Math.max(1, parseFloat(timeout) || 5) * 1000;
+        const newTimeoutMs = Math.max(1000, parseFloat(timeout) || 5000);
         if (newTimeoutMs !== (action.timeout || 5000)) {
           send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(Math.round(newTimeoutMs)) } });
         }
@@ -489,7 +490,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     // pixelInvert, pixelClickOnMatch) are gated inside so they don't leak into IF rows.
     if (actionType === 'WaitPixelColor' || _isIfPixel) {
       if (actionType === 'WaitPixelColor') {
-        const newTimeoutMs = Math.max(1, parseFloat(timeout) || 5) * 1000;
+        const newTimeoutMs = Math.max(1000, parseFloat(timeout) || 5000);
         if (newTimeoutMs !== (action.timeout || 5000)) {
           send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(Math.round(newTimeoutMs)) } });
         }
@@ -549,11 +550,11 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       }
     }
 
-    // Pause-specific fields: timeout in seconds. Hotkey shares the `key` field with other action
-    // types (already saved above by the generic key-equality check). Default seconds=0 = infinite.
+    // Pause-specific fields: timeout in milliseconds. Hotkey shares the `key` field with other
+    // action types (already saved above by the generic key-equality check). Default ms=0 = infinite.
     if (actionType === 'Pause') {
-      const parsedSecs = parseFloat(timeout);
-      const newTimeoutMs = isNaN(parsedSecs) || parsedSecs < 0 ? 0 : Math.round(parsedSecs * 1000);
+      const parsedMs = parseFloat(timeout);
+      const newTimeoutMs = isNaN(parsedMs) || parsedMs < 0 ? 0 : Math.round(parsedMs);
       if (newTimeoutMs !== (action.timeout || 0)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(newTimeoutMs) } });
       }
@@ -564,7 +565,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       send({ type: 'actions:edit', payload: { index: actionIndex, field: 'browserText', value: browserText } });
     }
     if (actionType === 'BrowserWaitElement' || actionType === 'BrowserClick' || actionType === 'BrowserRightClick') {
-      const newTimeoutMs = Math.max(1, parseFloat(timeout) || 5) * 1000;
+      const newTimeoutMs = Math.max(1000, parseFloat(timeout) || 5000);
       if (newTimeoutMs !== (action.timeout || 5000)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(Math.round(newTimeoutMs)) } });
       }
@@ -771,7 +772,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     setTestRequestId(requestId);
     setTestResult(null);
     const effectiveKey = textMatch.trim() ? buildTextSelector(textMode, textMatch.trim()) : key;
-    const timeoutMs = Math.max(1, parseFloat(timeout) || 5) * 1000;
+    const timeoutMs = Math.max(1000, parseFloat(timeout) || 5000);
     const tdParsed = typeDelay.trim() === '' ? null : parseInt(typeDelay, 10);
 
     // Safety timeout — recover the UI if the bridge never responds (extension crash, pipe drop).
@@ -1331,20 +1332,20 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             )}
 
             {/* TIMEOUT + ON TIMEOUT — WaitImage only. Side-by-side row identical in
-                shape to the Pixel editor's matching block. parseFloat (not parseInt)
-                preserves sub-second timeouts (e.g. 0.5) so they survive a render
-                round-trip. min={0.1} keeps NumberInput's clamp from rounding fractions
-                up to the next integer second on commit. */}
+                shape to the Pixel editor's matching block. Edited in milliseconds
+                (min 1000 — the backend clamps non-Pause timeouts to ≥1s anyway), step
+                1000 so the +/- spinner moves a second at a time. */}
             {!isIf && (
             <div className="flex gap-2.5">
-              <Field label="Timeout (s)" className="flex-1">
+              <Field label="Timeout (ms)" className="flex-1">
                 <NumberInput
-                  value={(() => { const n = parseFloat(timeout); return Number.isFinite(n) && n > 0 ? n : 1; })()}
+                  value={(() => { const n = parseFloat(timeout); return Number.isFinite(n) && n > 0 ? n : 5000; })()}
                   onChange={(n) => setTimeout_(String(n))}
-                  min={0.1}
+                  min={1000}
+                  step={1000}
                   inputWidth="w-full"
                   inputHeight="h-8"
-                  ariaLabel="Timeout in seconds"
+                  ariaLabel="Timeout in milliseconds"
                 />
               </Field>
               <Field label="On Timeout" className="flex-1">
@@ -1508,20 +1509,19 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             )}
 
             {/* TIMEOUT + ON TIMEOUT — WaitPixelColor only. Side-by-side row identical
-                in shape to the WaitImage editor above (was a single inline row with a
-                raw text input). parseFloat + min={0.1} preserve the sub-second timeouts
-                that the previous raw text input allowed — without them, a stored 0.5
-                would clamp to 1 on the first +/- click and silently lose precision. */}
+                in shape to the WaitImage editor above. Edited in milliseconds (min 1000,
+                step 1000) — same unit as every other action duration. */}
             {!isIf && (
             <div className="flex gap-2.5">
-              <Field label="Timeout (s)" className="flex-1">
+              <Field label="Timeout (ms)" className="flex-1">
                 <NumberInput
-                  value={(() => { const n = parseFloat(timeout); return Number.isFinite(n) && n > 0 ? n : 1; })()}
+                  value={(() => { const n = parseFloat(timeout); return Number.isFinite(n) && n > 0 ? n : 5000; })()}
                   onChange={(n) => setTimeout_(String(n))}
-                  min={0.1}
+                  min={1000}
+                  step={1000}
                   inputWidth="w-full"
                   inputHeight="h-8"
-                  ariaLabel="Timeout in seconds"
+                  ariaLabel="Timeout in milliseconds"
                 />
               </Field>
               <Field label="On Timeout" className="flex-1">
@@ -1589,42 +1589,43 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 }`}
               />
             </Field>
-            <Field label="Timeout (s) — 0 = infinite">
+            <Field label="Timeout (ms) — 0 = infinite">
               <NumberInput
                 value={parseInt(timeout, 10) || 0}
                 onChange={(n) => setTimeout_(String(n))}
                 min={0}
+                step={1000}
                 inputWidth="w-full"
                 inputHeight="h-8"
-                ariaLabel="Timeout in seconds"
+                ariaLabel="Timeout in milliseconds"
               />
               {/* Quick presets — covers the 90% of real-world pauses (a second, a few seconds,
-                  a minute, a few minutes, indefinite wait). The Manual input above still
-                  works for anything in between. Active preset is highlighted to show which
-                  value is currently set. */}
+                  a minute, a few minutes, indefinite wait). Labels stay human-readable while
+                  the values they set are milliseconds. The Manual input above still works for
+                  anything in between. Active preset is highlighted to show what's set. */}
               <div className="flex flex-wrap gap-1 mt-1.5">
                 {([
-                  { label: '1s', secs: 1 },
-                  { label: '5s', secs: 5 },
-                  { label: '30s', secs: 30 },
-                  { label: '1m', secs: 60 },
-                  { label: '5m', secs: 300 },
-                  { label: '∞', secs: 0 },
+                  { label: '1s', ms: 1000 },
+                  { label: '5s', ms: 5000 },
+                  { label: '30s', ms: 30000 },
+                  { label: '1m', ms: 60000 },
+                  { label: '5m', ms: 300000 },
+                  { label: '∞', ms: 0 },
                 ] as const).map(p => {
                   const parsed = parseFloat(timeout);
-                  const currentSecs = isNaN(parsed) ? 0 : parsed;
-                  const isActive = currentSecs === p.secs;
+                  const currentMs = isNaN(parsed) ? 0 : parsed;
+                  const isActive = currentMs === p.ms;
                   return (
                     <button
                       key={p.label}
                       type="button"
-                      onClick={() => setTimeout_(String(p.secs))}
+                      onClick={() => setTimeout_(String(p.ms))}
                       className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
                         isActive
                           ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
                           : 'text-text-tertiary border-border-default bg-bg-elevated hover:text-text-secondary hover:bg-bg-card'
                       }`}
-                      title={p.secs === 0 ? 'Wait forever (resume hotkey only)' : `Wait ${p.label}`}
+                      title={p.ms === 0 ? 'Wait forever (resume hotkey only)' : `Wait ${p.label}`}
                     >
                       {p.label}
                     </button>
@@ -2026,14 +2027,15 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 editor should expose it consistently. Previously BrowserType was the only
                 one hidden, silently locking it to the 5 s default. */}
             {(isBrowserWait || actionType === 'BrowserClick' || actionType === 'BrowserRightClick' || isBrowserType || isBrowserNavigate || isBrowserSelect) && (
-            <Field label="Timeout (s)">
+            <Field label="Timeout (ms)">
               <NumberInput
-                value={parseInt(timeout, 10) || 1}
+                value={parseInt(timeout, 10) || 5000}
                 onChange={(n) => setTimeout_(String(n))}
-                min={1}
+                min={1000}
+                step={1000}
                 inputWidth="w-full"
                 inputHeight="h-8"
-                ariaLabel="Timeout in seconds"
+                ariaLabel="Timeout in milliseconds"
               />
             </Field>
             )}

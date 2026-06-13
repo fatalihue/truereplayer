@@ -216,10 +216,9 @@ export function KeystrokeCaptureDialog({
     }
   };
 
-  // Duration readout — show seconds for clean multiples of 1000, otherwise ms.
-  const durationLabel = holdMs >= 1000 && holdMs % 100 === 0
-    ? `${(holdMs / 1000).toFixed(holdMs % 1000 === 0 ? 0 : 1)} s`
-    : `${holdMs} ms`;
+  // Duration readout — always milliseconds, matching the grid badge and every other
+  // action duration (was seconds for clean multiples of 1000).
+  const durationLabel = `${holdMs} ms`;
 
   // Title flips by intent: edit vs insert, then by mode.
   const title = isEditing

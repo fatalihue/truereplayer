@@ -123,10 +123,9 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
     onConfirm((captured ?? '').trim(), Math.max(0, timeoutMs));
   };
 
-  // Human-readable timeout for the mode hint.
-  const timeoutLabel = timeoutMs >= 1000 && timeoutMs % 1000 === 0
-    ? `${timeoutMs / 1000} second${timeoutMs === 1000 ? '' : 's'}`
-    : `${timeoutMs} ms`;
+  // Timeout for the mode hint — always milliseconds, consistent with the grid and
+  // the ms NumberInput above (was "X second(s)" for clean multiples).
+  const timeoutLabel = `${timeoutMs} ms`;
 
   return (
     <div
