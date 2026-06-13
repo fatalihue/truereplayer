@@ -536,18 +536,23 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     });
   }, [editingCell]);
 
-  // When the bulk bar first appears, keep the just-clicked row clear of it. The bar
-  // is now an overlay (it no longer shrinks the scroll viewport — selecting used to
-  // reflow the list and hide the clicked bottom row behind the bar). The row the
-  // user clicked can still sit in the bottom strip the bar floats over, so scroll it
-  // up: the grid's scroll-padding-bottom (applied while the bar shows) makes
-  // scrollIntoView land the row above the bar, and the matching padding-bottom gives
-  // the very last row the extra room it needs to clear it.
+  // When the bulk bar FIRST appears, keep a freshly single-selected row clear of it.
+  // The bar is an overlay (it no longer shrinks the scroll viewport), but a row in the
+  // bottom strip the bar floats over would be partly hidden — scrollIntoView lifts it
+  // (the grid's scroll-padding-bottom makes it land above the bar; the matching
+  // padding-bottom gives the very last row room to clear it).
+  //
+  // Crucially this drives off the SELECTION itself, not lastClickedIndex: checkbox /
+  // Ctrl+A / range / "select similar" never update lastClickedIndex, so the old code
+  // scrolled to a stale, often off-screen row — the list "jumped to an old position".
+  // Only a single-row selection scrolls (there's one unambiguous row to reveal);
+  // multi-selects leave the scroll exactly where it is. A row that's already visible
+  // is a no-op (block: 'nearest'), so middle-of-list clicks never move the list.
   const prevBulkBarVisible = useRef(false);
   useEffect(() => {
     const visible = selectedIndices.size > 0 && !buttonStates.recordingActive && !buttonStates.replayActive;
-    if (visible && !prevBulkBarVisible.current) {
-      const idx = lastClickedIndex.current;
+    if (visible && !prevBulkBarVisible.current && selectedIndices.size === 1) {
+      const idx = selectedIndices.values().next().value;
       const grid = scrollRef.current;
       const id = idx != null ? actions[idx]?.id : null;
       if (grid && id != null) {
