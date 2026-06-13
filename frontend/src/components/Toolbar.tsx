@@ -758,11 +758,10 @@ export function Toolbar(_props: ToolbarProps) {
 
       {showPauseDialog && (
         <PauseDialog
-          onConfirm={(key, timeoutSeconds) => {
-            const timeoutMs = Math.max(0, Math.round(timeoutSeconds * 1000));
+          onConfirm={(key, timeoutMs) => {
             send({
               type: 'actions:insertPause',
-              payload: { key, timeoutMs, insertIndex: pauseDialogInsertIndex.current },
+              payload: { key, timeoutMs: Math.max(0, Math.round(timeoutMs)), insertIndex: pauseDialogInsertIndex.current },
             });
             setShowPauseDialog(false);
           }}

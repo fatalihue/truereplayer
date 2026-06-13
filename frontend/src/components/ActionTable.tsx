@@ -17,6 +17,7 @@ import { SendTextDialog } from './SendTextDialog';
 import { SendTextPreview } from './SendTextPreview';
 import { RunProfileDialog } from './RunProfileDialog';
 import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
+import { PauseDialog } from './PauseDialog';
 import { BulkActionBar } from './BulkActionBar';
 import { MacroEmptyState } from './MacroEmptyState';
 import { Checkbox, CheckboxBox } from './Checkbox';
@@ -238,6 +239,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   // ActionType + key + duration / repeat fields directly from the action item to
   // pick the starting mode.
   const [keystrokeEdit, setKeystrokeEdit] = useState<{ index: number } | null>(null);
+  // Editing a Pause row reopens the PauseDialog (the same config-first window used
+  // to insert one) instead of the generic Sheet — the capture pad + timeout presets
+  // are a far better fit than the Sheet's flat field list. `index` is all we need;
+  // the dialog seeds its pad/timeout from the row's key + timeout.
+  const [pauseEdit, setPauseEdit] = useState<{ index: number } | null>(null);
   const [dragIndices, setDragIndices] = useState<number[] | null>(null);
   // Derived Set for O(1) membership checks inside the per-row render. The dragIndices
   // array stays as-is so the rest of the file (drag-preview chip, count display, payload
@@ -1193,11 +1199,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   ? action.key
                   : action.actionType === 'Pause'
                     ? (() => {
+                        // Timeout is stored in ms — show it as ms here (was seconds).
                         const hasHotkey = !!action.key;
-                        const hasTimeout = (action.timeout ?? 0) > 0;
-                        if (hasHotkey && hasTimeout) return `${action.key} / ${Math.round((action.timeout ?? 0) / 1000)}s`;
+                        const ms = action.timeout ?? 0;
+                        const hasTimeout = ms > 0;
+                        if (hasHotkey && hasTimeout) return `${action.key} / ${ms}ms`;
                         if (hasHotkey) return action.key;
-                        if (hasTimeout) return `${Math.round((action.timeout ?? 0) / 1000)}s`;
+                        if (hasTimeout) return `${ms}ms`;
                         return '—';
                       })()
                     : action.actionType === 'If'
@@ -1567,6 +1575,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         // (the earlier select-first guard was removed at user request).
                         e.stopPropagation();
                         startEdit(idx, 'key', action.key);
+                      } else if (action.actionType === 'Pause') {
+                        // Pause reopens its own dialog (capture pad + timeout), not
+                        // the Sheet — same window the toolbar uses to insert one.
+                        e.stopPropagation();
+                        setPauseEdit({ index: idx });
                       } else if (isGroupB) {
                         e.stopPropagation();
                         onOpenSheet?.(idx);
@@ -1899,6 +1912,30 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         );
       })()}
 
+      {/* Pause edit dialog — same window as the toolbar's Insert Pause, seeded from
+          the row. The dialog hands back the resume hotkey + timeout in ms; we diff
+          against the current row and emit only the changed fields as actions:edit. */}
+      {pauseEdit && (() => {
+        const editing = actions[pauseEdit.index];
+        return (
+          <PauseDialog
+            initialKey={editing?.key ?? ''}
+            initialTimeoutMs={editing?.timeout ?? 0}
+            onConfirm={(key, timeoutMs) => {
+              const idx = pauseEdit.index;
+              if (key !== (editing?.key ?? '')) {
+                send({ type: 'actions:edit', payload: { index: idx, field: 'key', value: key } });
+              }
+              if (timeoutMs !== (editing?.timeout ?? 0)) {
+                send({ type: 'actions:edit', payload: { index: idx, field: 'timeout', value: String(Math.round(timeoutMs)) } });
+              }
+              setPauseEdit(null);
+            }}
+            onClose={() => setPauseEdit(null)}
+          />
+        );
+      })()}
+
       {runProfileEdit && (
         <RunProfileDialog
           initial={{ profileName: runProfileEdit.profileName, repeatCount: runProfileEdit.repeatCount }}
@@ -2018,6 +2055,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                 // Both share the unified Send Keystroke dialog now — the dialog
                 // seeds Press / Hold mode based on the row's ActionType.
                 setKeystrokeEdit({ index: contextMenu.rowIndex });
+              } else if (rowAction?.actionType === 'Pause') {
+                // Pause reopens its own capture-pad dialog, not the Sheet.
+                setPauseEdit({ index: contextMenu.rowIndex });
               } else {
                 onOpenSheet?.(contextMenu.rowIndex);
               }
