@@ -82,6 +82,14 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showRenameDialog, setShowRenameDialog] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  // Confirmation gate for the inline ✕ removals (hotkey / hotstring / profile
+  // target / folder target). kind drives which handler runs on confirm; label
+  // is shown in the prompt. The 10s undo toast is the second safety net.
+  const [confirmRemoval, setConfirmRemoval] = useState<{
+    kind: 'hotkey' | 'hotstring' | 'profileTarget' | 'folderTarget';
+    name: string;
+    label: string;
+  } | null>(null);
   const [showHotkeyDialog, setShowHotkeyDialog] = useState<string | null>(null);
   const [hotkeyCapture, setHotkeyCapture] = useState('...');
   const [hotkeyTriggerMode, setHotkeyTriggerMode] = useState<'onPress' | 'onRelease' | 'whilePressed' | 'toggle'>('onPress');
@@ -519,6 +527,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     if (prevHotkey) {
       showToast(`Removed hotkey ${prevHotkey} from "${name}"`, {
         type: 'success',
+        duration: 10000, // longer undo window for destructive metadata removals (user request)
         action: {
           label: 'Undo',
           onClick: () => send({ type: 'profile:assignHotkey', payload: { name, hotkey: prevHotkey, mode: prevMode } }),
@@ -545,6 +554,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     if (prevSeq) {
       showToast(`Removed hotstring "${prevSeq}" from "${name}"`, {
         type: 'success',
+        duration: 10000,
         action: {
           label: 'Undo',
           onClick: () => send({ type: 'profile:assignHotstring', payload: { name, sequence: prevSeq, instant: prevInstant } }),
@@ -582,6 +592,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       const label = prevProcess || prevTitle || 'target';
       showToast(`Removed folder target (${label}) from "${folderName}"`, {
         type: 'success',
+        duration: 10000,
         action: {
           label: 'Undo',
           onClick: () => send({
@@ -618,6 +629,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       pendingRemovalsRef.current.delete(name);
       showToast(`Removed window target (${prev.label}) from "${name}"`, {
         type: 'success',
+        duration: 10000,
         action: {
           label: 'Undo',
           onClick: () => send({
@@ -666,6 +678,18 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       restoreSize: prev?.restoreSize ?? false,
     });
     send({ type: 'profile:removeWindowTarget', payload: { name } });
+  };
+
+  // Runs the actual removal once the confirmation dialog is accepted. The
+  // individual handlers still fire their own 10s undo toast.
+  const runConfirmedRemoval = () => {
+    if (!confirmRemoval) return;
+    const { kind, name } = confirmRemoval;
+    setConfirmRemoval(null);
+    if (kind === 'hotkey') handleRemoveHotkey(name);
+    else if (kind === 'hotstring') handleRemoveHotstring(name);
+    else if (kind === 'profileTarget') handleRemoveWindowTarget(name);
+    else if (kind === 'folderTarget') handleRemoveFolderWindowTarget(name);
   };
 
   const confirmHotkey = () => {
@@ -913,6 +937,27 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       pendingFocusSearch.current = false;
       requestAnimationFrame(() => searchInputRef.current?.focus());
     }
+  }, [collapsed]);
+
+  // Collapsed-rail capacity: how many 32px avatars (+4px gap = 36px stride) fit
+  // in the measured strip height. A ResizeObserver keeps it in sync as the
+  // window resizes. When the profile count exceeds capacity the last slot
+  // becomes the "+N expand" chip, so the rail always fills the visible space
+  // exactly instead of a fixed cap of 10.
+  const railRef = useRef<HTMLDivElement>(null);
+  const [railCapacity, setRailCapacity] = useState(10);
+  useEffect(() => {
+    const el = railRef.current;
+    if (!el) return;
+    const measure = () => {
+      const h = el.clientHeight;
+      // N avatars take 36N − 4 px (no trailing gap) → N ≤ (H + 4) / 36.
+      setRailCapacity(Math.max(1, Math.floor((h + 4) / 36)));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [collapsed]);
 
   // ── Drag & Drop handlers (mouse-based, works in WebView2) ──
@@ -1238,9 +1283,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         {p.appIconBase64 && p.hasWindowTarget && (
           <RemovableChip
             variant="circle"
-            removeTitle={`Remove window target (${targetLabel(p.effectiveTargetProcessName)})`}
-            tip={targetLabel(p.effectiveTargetProcessName)}
-            onRemove={(e) => { e.stopPropagation(); handleRemoveWindowTarget(p.name); }}
+            removeTitle={`Remove window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`}
+            tip={targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)}
+            onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'profileTarget', name: p.name, label: `window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})` }); }}
             className="w-3.5 h-3.5"
           >
             {/* No tooltip here — the RemovableChip wrapper carries it (the chip-level
@@ -1285,7 +1330,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             variant="circle"
             removeTitle={`Remove window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`}
             tip={targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)}
-            onRemove={(e) => { e.stopPropagation(); handleRemoveWindowTarget(p.name); }}
+            onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'profileTarget', name: p.name, label: `window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})` }); }}
           >
             <span>
               <Crosshair size={11} className="text-text-tertiary" />
@@ -1323,7 +1368,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         {p.hotkey && (
           <RemovableChip
             removeTitle={`Remove hotkey ${p.hotkey}`}
-            onRemove={(e) => { e.stopPropagation(); handleRemoveHotkey(p.name); }}
+            onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'hotkey', name: p.name, label: `hotkey ${p.hotkey}` }); }}
           >
             <KbdTag combo={p.hotkey} />
           </RemovableChip>
@@ -1336,7 +1381,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           // different kind of thing.
           <RemovableChip
             removeTitle={`Remove hotstring "${p.hotstring}"`}
-            onRemove={(e) => { e.stopPropagation(); handleRemoveHotstring(p.name); }}
+            onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'hotstring', name: p.name, label: `hotstring "${p.hotstring}"` }); }}
             className="px-1.5 py-0.5 rounded text-[11px] font-mono bg-bg-elevated border border-border-default text-text-secondary"
           ><span>
             {p.hotstringInstant ? '\u26A1' : '\u21B5'}{p.hotstring}
@@ -1363,11 +1408,11 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           <>
             {/* Collapsed rail — mirrors the SettingsPanel rail: quick actions up
                 top (new profile / search-and-expand), then profile avatars with
-                an accent ring on the active one and a folder-colour dot. Capped
-                at 10 avatars (a "+N" chip expands the panel) instead of an
-                overflow-y-auto list: a scrolling rail would clip the right-side
-                tooltips, and past ~10 the expanded panel is the better tool. */}
-            <div className="flex flex-col items-center gap-1 pt-3 pb-2">
+                an accent ring on the active one and a folder-colour dot. Fills the
+                measured strip height; the last slot becomes a "+N expand" chip when
+                there are more profiles than fit (no scrolling — a scroll list would
+                clip the right-side tooltips). */}
+            <div className="flex flex-col items-center gap-1 pt-3 pb-2 shrink-0">
               <button
                 onClick={onToggleCollapse}
                 className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
@@ -1391,42 +1436,53 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               </button>
               <div className="w-6 my-1 border-t border-border-subtle" />
             </div>
-            <div className="flex-1 flex flex-col items-center gap-1 px-1 pb-2">
-              {filtered.slice(0, 10).map((p) => {
-                const folderColor = getProfileFolderColor(p.name);
+            <div ref={railRef} className="flex-1 flex flex-col items-center gap-1 px-1 pb-2 overflow-hidden">
+              {(() => {
+                // Show all when they fit; otherwise reserve the last slot for the
+                // "+N expand" chip (so visible = capacity − 1).
+                const fitsAll = filtered.length <= railCapacity;
+                const visible = fitsAll ? filtered : filtered.slice(0, Math.max(0, railCapacity - 1));
+                const overflow = filtered.length - visible.length;
                 return (
-                  <button
-                    key={p.name}
-                    onClick={(e) => { send({ type: 'profile:click', payload: { name: p.name } }); (e.target as HTMLElement).blur(); }}
-                    onContextMenu={(e) => handleContextMenu(e, p.name)}
-                    className={`relative w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold transition-colors shrink-0 ${
-                      p.isActive
-                        ? 'bg-[color-mix(in_srgb,var(--color-accent)_16%,transparent)] text-accent'
-                        : 'bg-bg-elevated text-text-secondary hover:bg-bg-card'
-                    } ${p.isDisabled ? 'opacity-40' : ''}`}
-                    style={p.isActive ? { boxShadow: '0 0 0 2px var(--color-accent)' } : undefined}
-                    data-tip={p.hotkey ? `${p.name} · ${p.hotkey}` : p.name}
-                    data-tip-pos="right"
-                  >
-                    {p.name.charAt(0).toUpperCase()}
-                    {folderColor && (
-                      <span
-                        className="absolute -right-px -bottom-px w-[9px] h-[9px] rounded-full border-2 border-bg-surface"
-                        style={{ background: folderColor }}
-                      />
+                  <>
+                    {visible.map((p) => {
+                      const folderColor = getProfileFolderColor(p.name);
+                      return (
+                        <button
+                          key={p.name}
+                          onClick={(e) => { send({ type: 'profile:click', payload: { name: p.name } }); (e.target as HTMLElement).blur(); }}
+                          onContextMenu={(e) => handleContextMenu(e, p.name)}
+                          className={`relative w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold transition-colors shrink-0 ${
+                            p.isActive
+                              ? 'bg-[color-mix(in_srgb,var(--color-accent)_16%,transparent)] text-accent'
+                              : 'bg-bg-elevated text-text-secondary hover:bg-bg-card'
+                          } ${p.isDisabled ? 'opacity-40' : ''}`}
+                          style={p.isActive ? { boxShadow: '0 0 0 2px var(--color-accent)' } : undefined}
+                          data-tip={p.hotkey ? `${p.name} · ${p.hotkey}` : p.name}
+                          data-tip-pos="right"
+                        >
+                          {p.name.charAt(0).toUpperCase()}
+                          {folderColor && (
+                            <span
+                              className="absolute -right-px -bottom-px w-[9px] h-[9px] rounded-full border-2 border-bg-surface"
+                              style={{ background: folderColor }}
+                            />
+                          )}
+                        </button>
+                      );
+                    })}
+                    {overflow > 0 && (
+                      <button
+                        onClick={onToggleCollapse}
+                        className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-semibold bg-bg-elevated text-text-tertiary hover:bg-bg-card hover:text-text-primary transition-colors shrink-0"
+                        data-tip={`${overflow} more — expand`} data-tip-pos="right"
+                      >
+                        +{overflow}
+                      </button>
                     )}
-                  </button>
+                  </>
                 );
-              })}
-              {filtered.length > 10 && (
-                <button
-                  onClick={onToggleCollapse}
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-semibold bg-bg-elevated text-text-tertiary hover:bg-bg-card hover:text-text-primary transition-colors shrink-0"
-                  data-tip={`${filtered.length - 10} more — expand`} data-tip-pos="right"
-                >
-                  +{filtered.length - 10}
-                </button>
-              )}
+              })()}
             </div>
           </>
         ) : (
@@ -1602,9 +1658,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         {folder.appIconBase64 && (
                           <RemovableChip
                             variant="circle"
-                            removeTitle={`Remove folder target (${targetLabel(folder.windowTargetProcessName)})`}
-                            tip={targetLabel(folder.windowTargetProcessName)}
-                            onRemove={(e) => { e.stopPropagation(); handleRemoveFolderWindowTarget(folder.name); }}
+                            removeTitle={`Remove folder target (${targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)})`}
+                            tip={targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)}
+                            onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'folderTarget', name: folder.name, label: `folder target (${targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)})` }); }}
                             className={`w-3.5 h-3.5 ${folderAllDisabled ? 'opacity-40' : ''}`}
                           >
                             <span className="flex">
@@ -1622,7 +1678,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                             variant="circle"
                             removeTitle={`Remove folder target (${targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)})`}
                             tip={targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)}
-                            onRemove={(e) => { e.stopPropagation(); handleRemoveFolderWindowTarget(folder.name); }}
+                            onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'folderTarget', name: folder.name, label: `folder target (${targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)})` }); }}
                           >
                             <span>
                               <Crosshair size={10} className="text-text-tertiary" />
@@ -1779,24 +1835,15 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
           <div className="my-1 border-t border-border-subtle" />
 
-          {/* ── State ── */}
-          {isPinned(contextMenu.profileName) ? (
-            <button
-              onClick={() => handleUnpinProfile(contextMenu.profileName)}
-              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-            >
-              <PinOff size={13} className="text-text-tertiary" />
-              Unpin
-            </button>
-          ) : (
-            <button
-              onClick={() => handlePinProfile(contextMenu.profileName)}
-              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-            >
-              <Pin size={13} className="text-text-tertiary" />
-              Pin
-            </button>
-          )}
+          {/* ── State ── Duplicate sits above Disable (promoted from the More
+              submenu at user request); Pin/Unpin moved INTO More. */}
+          <button
+            onClick={() => handleDuplicate(contextMenu.profileName)}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+          >
+            <Copy size={13} className="text-text-tertiary" />
+            Duplicate
+          </button>
 
           <button
             onClick={() => handleToggleDisable(contextMenu.profileName)}
@@ -1810,8 +1857,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
           {/* ── More ▸ — low-frequency entry points tucked into a submenu so the top
               level stays focused on rename / triggers / state. Mirrors the grid context
-              menu's "More". Edit info (metadata), Duplicate (make a variant), Open in
-              Explorer (debug: show the .json on disk). */}
+              menu's "More". Edit info (metadata), Pin/Unpin, Open in Explorer (debug:
+              show the .json on disk). */}
           <div
             className="relative"
             onMouseEnter={() => setShowProfileMoreMenu(contextMenu.profileName)}
@@ -1838,13 +1885,23 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                     <Info size={13} className="text-text-tertiary" />
                     Edit info…
                   </button>
-                  <button
-                    onClick={() => handleDuplicate(contextMenu.profileName)}
-                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-                  >
-                    <Copy size={13} className="text-text-tertiary" />
-                    Duplicate
-                  </button>
+                  {isPinned(contextMenu.profileName) ? (
+                    <button
+                      onClick={() => handleUnpinProfile(contextMenu.profileName)}
+                      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                    >
+                      <PinOff size={13} className="text-text-tertiary" />
+                      Unpin
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handlePinProfile(contextMenu.profileName)}
+                      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                    >
+                      <Pin size={13} className="text-text-tertiary" />
+                      Pin
+                    </button>
+                  )}
                   <button
                     onClick={() => { handleOpenFolder(contextMenu.profileName); setContextMenu(null); }}
                     className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
@@ -2111,6 +2168,35 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 className="px-4 py-1.5 text-xs text-white bg-recording hover:bg-recording/80 rounded transition-colors"
               >
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove-confirmation Dialog — gate for the inline ✕ removals (hotkey /
+          hotstring / profile target / folder target). Same shape as the delete
+          dialog; Enter confirms, Esc cancels. */}
+      {confirmRemoval && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onKeyDown={(e) => { if (e.key === 'Enter') runConfirmedRemoval(); else if (e.key === 'Escape') setConfirmRemoval(null); }}>
+          <div className="w-[340px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
+            <h3 className="text-sm font-semibold text-text-primary mb-3">Are you sure?</h3>
+            <p className="text-sm text-text-secondary">
+              Remove {confirmRemoval.label} from <span className="text-text-primary font-medium">'{confirmRemoval.name}'</span>?
+            </p>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setConfirmRemoval(null)}
+                className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
+              >
+                No
+              </button>
+              <button
+                autoFocus
+                onClick={runConfirmedRemoval}
+                className="px-4 py-1.5 text-xs text-white bg-recording hover:bg-recording/80 rounded transition-colors"
+              >
+                Yes, remove
               </button>
             </div>
           </div>
@@ -2611,7 +2697,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               setShowFolderTargetDialog(null);
             }}
             onRemove={() => {
-              send({ type: 'profile:removeFolderWindowTarget', payload: { folderName } });
+              // Route through the handler (not a bare send) so this path also gets
+              // the 10s undo toast, matching the profile-target dialog's onRemove.
+              handleRemoveFolderWindowTarget(folderName);
               setShowFolderTargetDialog(null);
             }}
             onCancel={() => setShowFolderTargetDialog(null)}

@@ -41,7 +41,11 @@ export function RemovableChip({
     // span is already position: relative, so attaching the tip here is
     // layout-safe. below-start keeps long names from clipping at the panel edge.
     <span
-      className={`group shrink-0 relative ${className}`}
+      // NAMED group (group/removable) so the ✕ reveals on hover of THIS chip only.
+      // An unnamed `group` also matched ancestor groups — e.g. the folder header
+      // row is a `group`, which made the folder-target ✕ appear when hovering
+      // anywhere on the folder name instead of just over its .exe icon.
+      className={`group/removable shrink-0 relative ${className}`}
       {...(tip ? { 'data-tip': tip, 'data-tip-pos': 'below-start' } : {})}
     >
       {children}
@@ -49,7 +53,7 @@ export function RemovableChip({
         type="button"
         onClick={onRemove}
         aria-label={removeTitle}
-        className={`hidden group-hover:inline-flex ${btnClass}`}
+        className={`hidden group-hover/removable:inline-flex ${btnClass}`}
       >
         ✕
       </button>

@@ -117,6 +117,16 @@ namespace TrueReplayer.Services
                         result.Add(up);
                         break;
                     }
+                    case "DoubleClick":
+                        // INTENTIONAL passthrough — do NOT expand to Down/Up/Down/Up.
+                        // A DoubleClick is a single semantic unit (replayed directly by
+                        // the engine in any mode). Expanding it would be LOSSY on a
+                        // round-trip: ToCombined re-merges each Down+Up pair into ONE
+                        // LeftClick, so a DoubleClick → 4 rows → 2 LeftClicks, silently
+                        // losing the double-click. Leaving it whole keeps the round-trip
+                        // exact and it still replays correctly under paired mode.
+                        result.Add(a);
+                        break;
                     case "Keystroke":
                         ExpandKeystroke(a, result);
                         break;

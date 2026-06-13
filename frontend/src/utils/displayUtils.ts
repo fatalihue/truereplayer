@@ -25,18 +25,26 @@ export function getDisplayKey(key: string): string {
   return DISPLAY_KEY_MAP[key] ?? key;
 }
 
+// Pixel-coordinate display applies to the standalone WaitPixelColor action AND
+// to IF rows whose condition is PixelColorMatch — both store the watched point
+// in pixelX/pixelY and show it in the Details column.
+function showsPixelCoords(item: ActionItem): boolean {
+  return item.actionType === 'WaitPixelColor'
+    || (item.actionType === 'If' && item.conditionType === 'PixelColorMatch');
+}
+
 export function getDisplayX(item: ActionItem): string {
-  // IF rows with a PixelColorMatch condition borrow the pixel coords for display —
-  // mirrors the C# ActionItem.DisplayX override. Image conditions stay blank
-  // (the matched-rect is dynamic per probe, no single XY).
-  if (item.actionType === 'If' && item.conditionType === 'PixelColorMatch') {
+  // Pixel probes (WaitPixelColor / IF PixelColorMatch) borrow the pixel coords
+  // for display — mirrors the C# ActionItem.DisplayX override. Image conditions
+  // stay blank (the matched-rect is dynamic per probe, no single XY).
+  if (showsPixelCoords(item)) {
     return item.pixelX != null ? String(item.pixelX) : '';
   }
   return NO_COORD_TYPES.has(item.actionType) ? '' : String(item.x);
 }
 
 export function getDisplayY(item: ActionItem): string {
-  if (item.actionType === 'If' && item.conditionType === 'PixelColorMatch') {
+  if (showsPixelCoords(item)) {
     return item.pixelY != null ? String(item.pixelY) : '';
   }
   return NO_COORD_TYPES.has(item.actionType) ? '' : String(item.y);

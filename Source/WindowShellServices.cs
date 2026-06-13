@@ -246,26 +246,39 @@ namespace TrueReplayer.Services
 
         /// Callback to apply Always On Top window state from the tray menu.
         public static Action<bool>? OnAlwaysOnTopChanged { get; set; }
+        /// Callback to switch Macro/Clicker mode from the tray menu (true = Clicker).
+        public static Action<bool>? OnSetMode { get; set; }
         public static Action? OnReloadUI { get; set; }
         public static Action? OnOpenDevTools { get; set; }
         public static Action? OnOpenLogsFolder { get; set; }
 
         public static async void ShowContextMenu()
         {
-            bool isAlwaysOnTop = UserProfile.Current.AlwaysOnTop;
-            bool isMinimizeToTray = UserProfile.Current.MinimizeToTray;
-            bool isStartup = IsRunOnStartup();
-            bool isStartMinimized = UserProfile.Current.StartMinimized;
-            bool isRunAsAdmin = AppSettingsManager.Load().RunAsAdmin;
+            // Current macro/clicker mode drives the checkmarks on the two mode items.
+            bool isClicker = AppSettingsManager.Load().UseCursorClick;
+
+            // ── Window category — temporarily disabled (kept for easy restore).
+            //    To bring it back: uncomment this block, the AppendMenu calls and the
+            //    cmd==5/6/3/4/7 handlers below.
+            // bool isAlwaysOnTop = UserProfile.Current.AlwaysOnTop;
+            // bool isMinimizeToTray = UserProfile.Current.MinimizeToTray;
+            // bool isStartup = IsRunOnStartup();
+            // bool isStartMinimized = UserProfile.Current.StartMinimized;
+            // bool isRunAsAdmin = AppSettingsManager.Load().RunAsAdmin;
 
             IntPtr hMenu = CreatePopupMenu();
             AppendMenu(hMenu, MF_STRING, 1, "Restore");
             AppendMenu(hMenu, MF_SEPARATOR, 0, null);
-            AppendMenu(hMenu, MF_STRING | (isAlwaysOnTop ? MF_CHECKED : 0), 5, "Always On Top");
-            AppendMenu(hMenu, MF_STRING | (isMinimizeToTray ? MF_CHECKED : 0), 6, "System Tray");
-            AppendMenu(hMenu, MF_STRING | (isStartup ? MF_CHECKED : 0), 3, "Run on Startup");
-            AppendMenu(hMenu, MF_STRING | (isStartMinimized ? MF_CHECKED : 0), 4, "Startup Minimized");
-            AppendMenu(hMenu, MF_STRING | (isRunAsAdmin ? MF_CHECKED : 0), 7, "Run as Administrator");
+            // Mode switch — mirrors the in-app Macro/Clicker toggle and the ScrollLock hotkey.
+            AppendMenu(hMenu, MF_STRING | (!isClicker ? MF_CHECKED : 0), 11, "Macro Mode");
+            AppendMenu(hMenu, MF_STRING | (isClicker ? MF_CHECKED : 0), 12, "Clicker Mode");
+            AppendMenu(hMenu, MF_SEPARATOR, 0, null);
+            // ── Window category — temporarily disabled (kept for easy restore).
+            // AppendMenu(hMenu, MF_STRING | (isAlwaysOnTop ? MF_CHECKED : 0), 5, "Always On Top");
+            // AppendMenu(hMenu, MF_STRING | (isMinimizeToTray ? MF_CHECKED : 0), 6, "System Tray");
+            // AppendMenu(hMenu, MF_STRING | (isStartup ? MF_CHECKED : 0), 3, "Run on Startup");
+            // AppendMenu(hMenu, MF_STRING | (isStartMinimized ? MF_CHECKED : 0), 4, "Startup Minimized");
+            // AppendMenu(hMenu, MF_STRING | (isRunAsAdmin ? MF_CHECKED : 0), 7, "Run as Administrator");
             AppendMenu(hMenu, MF_STRING, 8, "Reload UI");
             AppendMenu(hMenu, MF_STRING, 9, "Open DevTools");
             AppendMenu(hMenu, MF_STRING, 10, "Open Logs Folder");
@@ -278,43 +291,48 @@ namespace TrueReplayer.Services
             DestroyMenu(hMenu);
 
             if (cmd == 1) ShowWindow(hwnd, 9);
-            else if (cmd == 5)
-            {
-                UserProfile.Current.AlwaysOnTop = !isAlwaysOnTop;
-                OnAlwaysOnTopChanged?.Invoke(UserProfile.Current.AlwaysOnTop);
-                var settings = AppSettingsManager.Load();
-                settings.AlwaysOnTop = UserProfile.Current.AlwaysOnTop;
-                AppSettingsManager.Save(settings);
-                OnTraySettingChanged?.Invoke();
-            }
-            else if (cmd == 6)
-            {
-                UserProfile.Current.MinimizeToTray = !isMinimizeToTray;
-                var settings = AppSettingsManager.Load();
-                settings.MinimizeToTray = UserProfile.Current.MinimizeToTray;
-                AppSettingsManager.Save(settings);
-                OnTraySettingChanged?.Invoke();
-            }
-            else if (cmd == 3)
-            {
-                SetRunOnStartup(!isStartup);
-                OnTraySettingChanged?.Invoke();
-            }
-            else if (cmd == 4)
-            {
-                UserProfile.Current.StartMinimized = !isStartMinimized;
-                var settings = AppSettingsManager.Load();
-                settings.StartMinimized = UserProfile.Current.StartMinimized;
-                AppSettingsManager.Save(settings);
-                OnTraySettingChanged?.Invoke();
-            }
-            else if (cmd == 7)
-            {
-                var settings = AppSettingsManager.Load();
-                settings.RunAsAdmin = !isRunAsAdmin;
-                AppSettingsManager.Save(settings);
-                OnTraySettingChanged?.Invoke();
-            }
+            // Mode switch: only fire when it actually changes, so re-picking the
+            // current mode doesn't needlessly cancel a running replay/recording.
+            else if (cmd == 11) { if (isClicker) OnSetMode?.Invoke(false); }
+            else if (cmd == 12) { if (!isClicker) OnSetMode?.Invoke(true); }
+            // ── Window category — temporarily disabled (kept for easy restore).
+            // else if (cmd == 5)
+            // {
+            //     UserProfile.Current.AlwaysOnTop = !isAlwaysOnTop;
+            //     OnAlwaysOnTopChanged?.Invoke(UserProfile.Current.AlwaysOnTop);
+            //     var settings = AppSettingsManager.Load();
+            //     settings.AlwaysOnTop = UserProfile.Current.AlwaysOnTop;
+            //     AppSettingsManager.Save(settings);
+            //     OnTraySettingChanged?.Invoke();
+            // }
+            // else if (cmd == 6)
+            // {
+            //     UserProfile.Current.MinimizeToTray = !isMinimizeToTray;
+            //     var settings = AppSettingsManager.Load();
+            //     settings.MinimizeToTray = UserProfile.Current.MinimizeToTray;
+            //     AppSettingsManager.Save(settings);
+            //     OnTraySettingChanged?.Invoke();
+            // }
+            // else if (cmd == 3)
+            // {
+            //     SetRunOnStartup(!isStartup);
+            //     OnTraySettingChanged?.Invoke();
+            // }
+            // else if (cmd == 4)
+            // {
+            //     UserProfile.Current.StartMinimized = !isStartMinimized;
+            //     var settings = AppSettingsManager.Load();
+            //     settings.StartMinimized = UserProfile.Current.StartMinimized;
+            //     AppSettingsManager.Save(settings);
+            //     OnTraySettingChanged?.Invoke();
+            // }
+            // else if (cmd == 7)
+            // {
+            //     var settings = AppSettingsManager.Load();
+            //     settings.RunAsAdmin = !isRunAsAdmin;
+            //     AppSettingsManager.Save(settings);
+            //     OnTraySettingChanged?.Invoke();
+            // }
             else if (cmd == 8)
             {
                 OnReloadUI?.Invoke();

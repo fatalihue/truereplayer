@@ -1485,7 +1485,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               <Slider
                 value={parseInt(pixelTolerance, 10) || 0}
                 min={0}
-                max={255}
+                max={50}
+                inputMax={255}
                 onChange={(n) => setPixelTolerance(String(n))}
               />
             </Field>

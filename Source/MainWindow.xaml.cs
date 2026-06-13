@@ -265,6 +265,22 @@ namespace TrueReplayer
             {
                 DispatcherQueue.TryEnqueue(() => windowEventManager.UpdateAlwaysOnTop(enabled));
             };
+            // Macro/Clicker switch from the tray — same path as the ScrollLock hotkey
+            // and the in-app toggle: flip+cancel via SetCursorClickMode, persist, push
+            // to React, refresh the tray icon/tooltip.
+            TrayIconService.OnSetMode = (useClicker) =>
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (bridge == null) return;
+                    bridge.SetCursorClickMode(useClicker);
+                    var saved = AppSettingsManager.Load();
+                    saved.UseCursorClick = bridge.UseCursorClick;
+                    AppSettingsManager.Save(saved);
+                    bridge.PushSettingsLoaded();
+                    TrayIconService.UpdateTrayIcon();
+                });
+            };
             TrayIconService.OnReloadUI = () =>
             {
                 // User-initiated recovery from the tray. Start at level 1 by default, but if

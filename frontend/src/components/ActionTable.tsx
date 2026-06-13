@@ -1042,12 +1042,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         className="grid items-center h-row border-b border-border-subtle shrink-0"
         style={{ gridTemplateColumns: [
           '28px', '50px',
-          // Details (240) replaces the old Key (124) + X (65) + Y (65) trio —
+          // Details replaces the old Key (124) + X (65) + Y (65) trio —
           // key/text/combo for keyboard-ish actions, "x, y" for mouse actions,
-          // condition payload for If rows, all in one cell. Was 190 at first;
-          // widened after user feedback that Notes (1fr) ended up too large.
+          // condition payload for If rows, all in one cell. 190 → 240 → 280 px:
+          // widened in steps as Notes (1fr) kept ending up too large.
           ...(columnVisibility.action ? ['152px'] : []),
-          ...(columnVisibility.details ? ['240px'] : []),
+          ...(columnVisibility.details ? ['280px'] : []),
           ...(columnVisibility.delay ? ['70px'] : []),
           ...(columnVisibility.notes ? ['1fr'] : []),
         ].join(' ') }}
@@ -1094,11 +1094,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           <colgroup>
             <col style={{ width: 28 }} />
             <col style={{ width: 50 }} />
-            {/* Action 152 + Details 240 match the header's gridTemplateColumns.
+            {/* Action 152 + Details 280 match the header's gridTemplateColumns.
                 Details holds what used to be Key + X + Y, so chips and coord
-                strings share the same 240 px lane. */}
+                strings share the same 280 px lane (was 240). */}
             {columnVisibility.action && <col style={{ width: 152 }} />}
-            {columnVisibility.details && <col style={{ width: 240 }} />}
+            {columnVisibility.details && <col style={{ width: 280 }} />}
             {columnVisibility.delay && <col style={{ width: 70 }} />}
             {/* Notes column claims 100% of the remaining table width. In `table-fixed`,
                 a <col> without an explicit width gets ~0 and the leftover space sits
@@ -1122,6 +1122,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               const isSelected = selectedIndices.has(idx);
               const displayKey = action.actionType === 'WaitImage'
                 ? ''
+                : action.actionType === 'WaitPixelColor'
+                  // Standalone pixel-color wait mirrors the "if pixel" row: the hex
+                  // is the text, the swatch + coords render alongside (below).
+                  ? (action.pixelColor || '')
                 : action.actionType === 'RunProfile'
                   // ×N moved to the Action pill (see the pill render below) so the
                   // Key column shows only the profile name and long names no longer
@@ -1161,9 +1165,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
               const isDragged = dragIndexSet?.has(idx) ?? false;
               // Skip propagation: when an IF row carries IsSkipped, every row inside
-              // that block (body + ELSE + matching ENDIF) renders with the strikethrough
-              // treatment too. blockIfOf points to the containing IF; self-references on
-              // the IF row mean its own isSkipped already covers it.
+              // that block (body + ELSE + matching ENDIF) renders dimmed (opacity-40)
+              // too. blockIfOf points to the containing IF; self-references on the IF
+              // row mean its own isSkipped already covers it.
               const blockIf = blockInfo.blockIfOf[idx];
               const isInSkippedBlock = blockIf !== null && actions[blockIf]?.isSkipped === true;
               const isSkipped = action.isSkipped || isInSkippedBlock;
@@ -1318,7 +1322,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   } ${
                     isDragged ? 'opacity-40' : ''
                   } ${
-                    isSkipped ? 'opacity-40 [&_td]:line-through [&_td]:decoration-text-disabled [&_td]:decoration-[1px]' : ''
+                    isSkipped ? 'opacity-40' : ''
                   } ${
                     isPausedHere
                       ? 'animate-pulse'
@@ -1486,10 +1490,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         e.stopPropagation();
                         setKeystrokeEdit({ index: idx });
                       } else if (action.actionType.startsWith('Key')) {
-                        // Key capture swallows the user's next keypress — too sharp a
-                        // tool to arm on a stray click. First click selects the row
-                        // (bubbles through), a second click on the cell starts capture.
-                        if (!isSelected) return;
+                        // KeyDown/KeyUp edit on a single click like every other cell
+                        // (the earlier select-first guard was removed at user request).
                         e.stopPropagation();
                         startEdit(idx, 'key', action.key);
                       } else if (isGroupB) {
@@ -1576,7 +1578,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             NOT
                           </span>
                         )}
-                        {action.actionType === 'If' && action.conditionType === 'PixelColorMatch' && action.pixelColor && (
+                        {((action.actionType === 'If' && action.conditionType === 'PixelColorMatch') || action.actionType === 'WaitPixelColor') && action.pixelColor && (
                           <span
                             className="mr-1 inline-block w-2.5 h-2.5 rounded-sm border border-white/20"
                             style={{ background: action.pixelColor }}
