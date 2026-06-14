@@ -138,7 +138,7 @@ function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-14', suf
 function ClickerSection({
   button, rate, rateJitter, useRateJitter, hold, positionJitter, usePositionJitter,
   useArea, area,
-  loops, useLoops, interval, useInterval, startHotkey, pauseHotkey, onChange,
+  loops, useLoops, interval, useInterval, onChange,
 }: {
   button: string;
   rate: string;
@@ -153,8 +153,6 @@ function ClickerSection({
   useLoops: boolean;
   interval: string;
   useInterval: boolean;
-  startHotkey: string;
-  pauseHotkey: string;
   onChange: (key: string, value: string | boolean | number | object | null) => void;
 }) {
   const { send } = useBridge();
@@ -377,22 +375,15 @@ function ClickerSection({
             />
             <CompactToggle isOn={useInterval} onChange={(v) => onChange('cursorClickUseInterval', v)} />
           </SettingRow>
-          {/* Clicker-exclusive hotkeys — independent of the global macro hotkeys. They only
-              fire while in Clicker mode (and the global Recording/Replay hotkeys go inert here). */}
-          <SettingRow label="Start / Stop" tooltip="Hotkey to run/stop the clicker. Works only in Clicker mode — the global Replay hotkey does not start the clicker.">
-            <HotkeyInput value={startHotkey} settingKey="cursorClickStartHotkey" onChange={onChange} />
-          </SettingRow>
-          <SettingRow label="Pause / Resume" tooltip="Hotkey to pause/resume a running clicker. Works only in Clicker mode.">
-            <HotkeyInput value={pauseHotkey} settingKey="cursorClickPauseHotkey" onChange={onChange} />
-          </SettingRow>
     </Section>
   );
 }
 
-function HotkeyInput({ value, settingKey, onChange }: {
+function HotkeyInput({ value, settingKey, onChange, width = 'w-[110px]' }: {
   value: string;
   settingKey: string;
   onChange: (key: string, hotkey: string) => void;
+  width?: string;
 }) {
   const { send, subscribe } = useBridge();
   const [localValue, setLocalValue] = useState(value);
@@ -473,7 +464,7 @@ function HotkeyInput({ value, settingKey, onChange }: {
       value={localValue}
       onFocus={() => { setIsFocused(true); setLocalValue(''); send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } }); armCaptureTimer(); }}
       onBlur={() => { setIsFocused(false); setLocalValue(value); send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } }); disarmCaptureTimer(); }}
-      className={`w-[110px] h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
+      className={`${width} h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
         isFocused
           ? 'text-accent-light border-accent-solid animate-pulse'
           : 'text-accent border-border-default'
@@ -656,6 +647,19 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             {/* Clicker mode swaps the Execution + Recording stack for a dedicated panel.
                 Macro mode keeps the existing layout untouched. */}
             {settings.useCursorClick ? (
+              <>
+              {/* Clicker hotkeys — their own group, pinned above the Clicker settings.
+                  Decoupled from the global macro hotkeys; active only in Clicker mode. */}
+              <Section icon={Zap} iconColor="#60cdff" title="Hotkeys">
+                <SettingRow label="Start" tooltip="Run / stop the clicker.">
+                  <HotkeyInput value={settings.cursorClickStartHotkey} settingKey="cursorClickStartHotkey" onChange={changeHotkey} width="w-[80px]" />
+                  <span className="w-7 shrink-0" aria-hidden />
+                </SettingRow>
+                <SettingRow label="Pause" tooltip="Pause / resume the clicker.">
+                  <HotkeyInput value={settings.cursorClickPauseHotkey} settingKey="cursorClickPauseHotkey" onChange={changeHotkey} width="w-[80px]" />
+                  <span className="w-7 shrink-0" aria-hidden />
+                </SettingRow>
+              </Section>
               <ClickerSection
                 /* Remount on reset so the local /s ↔ ms unit toggle goes back to its
                    default ('ms'). Backend stays the source of truth for everything else. */
@@ -673,10 +677,9 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 useLoops={settings.cursorClickUseLoops}
                 interval={settings.cursorClickInterval}
                 useInterval={settings.cursorClickUseInterval}
-                startHotkey={settings.cursorClickStartHotkey}
-                pauseHotkey={settings.cursorClickPauseHotkey}
                 onChange={changeSetting}
               />
+              </>
             ) : (
               <>
             <Section icon={Timer} iconColor="#ffd93d" title="Execution">
