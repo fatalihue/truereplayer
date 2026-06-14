@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Move, Check, AlertTriangle } from 'lucide-react';
+import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Move, AlertTriangle } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -9,38 +9,6 @@ import { Toggle } from './common/Toggle';
 // on/off control; other surfaces (dialogs) keep the default 40×20 Toggle.
 function CompactToggle(props: { isOn: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return <Toggle {...props} size="sm" />;
-}
-
-// Checkbox row — the independent Recording capture flags read better as a multi-select
-// list than as a stack of identical switches. `danger` paints a thin red left accent +
-// faint tint when the flag is off and that's a risky state (e.g. Profile Keys off).
-function CheckRow({ label, checked, onChange, tooltip, danger, dangerTooltip }: {
-  label: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  tooltip?: string;
-  danger?: boolean;
-  dangerTooltip?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      title={danger ? dangerTooltip ?? tooltip : tooltip}
-      className="relative w-full flex items-center gap-2.5 h-8 px-2.5 text-left transition-colors hover:bg-bg-elevated"
-    >
-      {danger && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-sm bg-recording" />}
-      <span className={`w-[17px] h-[17px] rounded border flex items-center justify-center shrink-0 transition-colors ${
-        checked ? 'bg-accent-solid border-accent-solid' : 'border-border-strong'
-      }`}>
-        {checked && <Check size={12} className="text-white" strokeWidth={3} />}
-      </span>
-      <span className={`text-ui flex items-center gap-1.5 ${danger ? 'text-recording' : 'text-text-secondary'}`}>
-        {danger && <AlertTriangle size={12} className="shrink-0" />}
-        {label}
-      </span>
-    </button>
-  );
 }
 
 function Section({ icon: Icon, iconColor, title, children, defaultOpen = true }: {
@@ -750,28 +718,28 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               )}
             </Section>
 
-            {/* Recording — the six capture flags are INDEPENDENT booleans, so they read
-                as a multi-select checkbox list rather than six identical switches (segmented
-                would be wrong — it implies pick-one). Profile Keys keeps the danger accent
-                when off (its shortcuts/hotstrings stop firing). */}
+            {/* Recording — switches, same as every other on/off row. Profile Keys keeps
+                the danger accent (left bar + red icon/label) when off, since its shortcuts
+                and hotstrings stop firing. */}
             <Section icon={Mic} iconColor="#ff6b6b" title="Recording">
-              <CheckRow label="Mouse Clicks" checked={settings.recordMouse} onChange={(v) => changeSetting('recordMouse', v)} />
-              <CheckRow label="Mouse Scroll" checked={settings.recordScroll} onChange={(v) => changeSetting('recordScroll', v)} />
-              <CheckRow label="Keyboard" checked={settings.recordKeyboard} onChange={(v) => changeSetting('recordKeyboard', v)} />
-              <CheckRow
-                label="Combined Actions"
-                tooltip="Record each key press and mouse click as a single action (Keystroke / Click) instead of separate Down + Up rows. Two quick left clicks merge into a Double Click automatically. Modifiers fold into the key (Ctrl+C, Shift+A). Holds and drags aren't captured in this mode — leave it off, or add a HoldKey row, for those."
-                checked={settings.recordCombinedInput}
-                onChange={(v) => changeSetting('recordCombinedInput', v)}
-              />
-              <CheckRow
-                label="Profile Keys"
-                checked={settings.profileKeyEnabled}
-                onChange={(v) => changeSetting('profileKeyEnabled', v)}
-                danger={!settings.profileKeyEnabled}
-                dangerTooltip="Profile shortcuts and hotstrings won't fire while this is off"
-              />
-              <CheckRow label="Browser Actions" tooltip="Record CSS selectors from Chrome instead of mouse coordinates" checked={settings.browserSelectorEnabled ?? true} onChange={(v) => changeSetting('browserSelectorEnabled', v)} />
+              <SettingRow label="Mouse Clicks">
+                <CompactToggle isOn={settings.recordMouse} onChange={(v) => changeSetting('recordMouse', v)} />
+              </SettingRow>
+              <SettingRow label="Mouse Scroll">
+                <CompactToggle isOn={settings.recordScroll} onChange={(v) => changeSetting('recordScroll', v)} />
+              </SettingRow>
+              <SettingRow label="Keyboard">
+                <CompactToggle isOn={settings.recordKeyboard} onChange={(v) => changeSetting('recordKeyboard', v)} />
+              </SettingRow>
+              <SettingRow label="Combined Actions" tooltip="Record each key press and mouse click as a single action (Keystroke / Click) instead of separate Down + Up rows. Two quick left clicks merge into a Double Click automatically. Modifiers fold into the key (Ctrl+C, Shift+A). Holds and drags aren't captured in this mode — leave it off, or add a HoldKey row, for those.">
+                <CompactToggle isOn={settings.recordCombinedInput} onChange={(v) => changeSetting('recordCombinedInput', v)} />
+              </SettingRow>
+              <SettingRow label="Profile Keys" danger={!settings.profileKeyEnabled} tooltip="Profile shortcuts and hotstrings won't fire while this is off">
+                <CompactToggle isOn={settings.profileKeyEnabled} onChange={(v) => changeSetting('profileKeyEnabled', v)} />
+              </SettingRow>
+              <SettingRow label="Browser Actions" tooltip="Record CSS selectors from Chrome instead of mouse coordinates">
+                <CompactToggle isOn={settings.browserSelectorEnabled ?? true} onChange={(v) => changeSetting('browserSelectorEnabled', v)} />
+              </SettingRow>
             </Section>
               </>
             )}
