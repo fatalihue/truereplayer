@@ -130,17 +130,22 @@ function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-14', suf
   );
 }
 
-// Editable field + a preset dropdown (a combobox). The user types freely, or clicks the
-// chevron to pick a preset — replacing the standalone preset chips so the panel stays clean.
-// The menu uses plain absolute positioning (NOT a fixed portal): the page is rendered at a
-// ~0.95 UI zoom, which double-scales fixed coords, and absolute shares the field's coordinate
-// space so it lands exactly under the input. The Rate row sits near the top of its group, so
-// the short menu stays within the inset and isn't clipped. Closes on outside-click / Escape.
-function ComboInput({ value, onCommit, options, width = 'w-[80px]' }: {
+// Field + a dropdown of options (a combobox). Two modes share one visual identity so the
+// Clicker rows look uniform:
+//   • editable (Rate): type freely, or click the chevron to pick a preset.
+//   • picker   (Button): read-only — click the field or chevron to choose one of the options.
+// The input uses the SAME px-2 text-center font-mono box as SettingInput so the value is
+// centered identically across every row; the chevron floats over the right padding.
+// The menu uses plain absolute positioning (NOT a fixed portal): the page renders at a ~0.95
+// UI zoom, which double-scales fixed coords, and absolute shares the field's coordinate space
+// so it lands exactly under the input. These rows sit near the top of their group, so the
+// short menu stays within the inset and isn't clipped. Closes on outside-click / Escape.
+function ComboInput({ value, onCommit, options, width = 'w-[80px]', editable = true }: {
   value: string;
   onCommit: (v: string) => void;
   options: { value: string; label: string }[];
   width?: string;
+  editable?: boolean;
 }) {
   const [text, setText] = useState(value);
   const [open, setOpen] = useState(false);
@@ -164,16 +169,21 @@ function ComboInput({ value, onCommit, options, width = 'w-[80px]' }: {
     };
   }, [open]);
 
+  // Picker mode shows the selected option's label; editable mode shows the live text.
+  const shownValue = editable ? text : (options.find((o) => o.value === value)?.label ?? value);
+
   return (
     <div ref={wrapRef} className={`relative ${width}`}>
       <input
         type="text"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onFocus={() => { focused.current = true; }}
-        onBlur={() => { focused.current = false; onCommit(text); }}
-        onKeyDown={(e) => { if (e.key === 'Enter') { onCommit(text); (e.target as HTMLInputElement).blur(); } }}
-        className="w-full h-7 pl-2 pr-6 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
+        value={shownValue}
+        readOnly={!editable}
+        onChange={editable ? (e) => setText(e.target.value) : undefined}
+        onFocus={editable ? () => { focused.current = true; } : undefined}
+        onBlur={editable ? () => { focused.current = false; onCommit(text); } : undefined}
+        onKeyDown={editable ? (e) => { if (e.key === 'Enter') { onCommit(text); (e.target as HTMLInputElement).blur(); } } : undefined}
+        onClick={editable ? undefined : () => setOpen((o) => !o)}
+        className={`w-full h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid ${editable ? '' : 'cursor-pointer'}`}
       />
       <button
         type="button"
@@ -181,10 +191,12 @@ function ComboInput({ value, onCommit, options, width = 'w-[80px]' }: {
         // Keep the input's focus on chevron click so it doesn't blur-commit before opening.
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setOpen((o) => !o)}
-        className="absolute right-0 top-0 h-7 w-6 flex items-center justify-center text-text-tertiary hover:text-text-secondary"
-        aria-label="Choose a preset"
+        // Pinned to the right edge (justify-end) and slightly smaller so the longest centered
+        // value (e.g. "Middle") clears it — the text stays centered in the full field.
+        className="absolute right-0 top-0 h-7 w-6 flex items-center justify-end pr-1 text-text-tertiary hover:text-text-secondary"
+        aria-label={editable ? 'Choose a preset' : 'Choose an option'}
       >
-        <ChevronDown size={12} />
+        <ChevronDown size={11} />
       </button>
       {open && (
         <div className="absolute left-0 top-full mt-1 z-50 w-full bg-bg-card border border-border-default rounded-md shadow-lg py-1">
@@ -298,15 +310,18 @@ function ClickerSection({
               source of truth for "every Clicker setting". Left/Right/Middle, no on/off
               switch (always applied). Spacer matches the toggle column on the other rows. */}
           <SettingRow label="Button" tooltip="Mouse button to click">
-            <select
+            {/* Same combobox visual as Rate (read-only picker mode) so the two top rows match. */}
+            <ComboInput
+              editable={false}
               value={button}
-              onChange={(e) => onChange('cursorClickButton', e.target.value)}
-              className="w-[80px] h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid cursor-pointer text-center"
-            >
-              <option value="Left">Left</option>
-              <option value="Right">Right</option>
-              <option value="Middle">Middle</option>
-            </select>
+              onCommit={(v) => onChange('cursorClickButton', v)}
+              width="w-[80px]"
+              options={[
+                { value: 'Left', label: 'Left' },
+                { value: 'Right', label: 'Right' },
+                { value: 'Middle', label: 'Middle' },
+              ]}
+            />
             <div className="w-7" />
           </SettingRow>
           <SettingRow label="Rate" tooltip="Click rate — clicks per second (/s) or delay (ms). Type a value, or use the arrow to pick a preset.">
@@ -590,16 +605,23 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
   // expanded panel's Appearance button (which is itself a direct action, not a
   // collapsible section).
   type RailEntry = { tab: 'profile' | 'global'; title: string; icon: React.ElementType; color: string; onClick?: () => void };
+  // In Clicker mode the relevant hotkeys are the clicker Start/Pause group, which lives in the
+  // Profile tab (the global macro hotkeys are inert in Clicker mode). So the rail mirrors the
+  // expanded panel: Hotkeys then Clicker under Profile, and the Global group drops its now-
+  // redundant Hotkeys icon.
   const railProfile: RailEntry[] =
     settings.useCursorClick
-      ? [{ tab: 'profile', title: 'Clicker', icon: MousePointerClick, color: 'var(--color-clicker)' }]
+      ? [
+          { tab: 'profile', title: 'Hotkeys', icon: Zap, color: '#60cdff' },
+          { tab: 'profile', title: 'Clicker', icon: MousePointerClick, color: 'var(--color-clicker)' },
+        ]
       : [
           { tab: 'profile', title: 'Execution', icon: Timer, color: '#ffd93d' },
           { tab: 'profile', title: 'Movement', icon: Move, color: '#51cf66' },
           { tab: 'profile', title: 'Recording', icon: Mic, color: '#ff6b6b' },
         ];
   const railGlobal: RailEntry[] = [
-    { tab: 'global', title: 'Hotkeys', icon: Zap, color: '#60cdff' },
+    ...(settings.useCursorClick ? [] : [{ tab: 'global', title: 'Hotkeys', icon: Zap, color: '#60cdff' } as RailEntry]),
     { tab: 'global', title: 'Window', icon: Monitor, color: '#7a8599' },
     { tab: 'global', title: 'Appearance', icon: Palette, color: '#c084fc', onClick: () => window.dispatchEvent(new CustomEvent('cmd:themeeditor')) },
     { tab: 'global', title: 'Updates', icon: Download, color: '#6bcb77' },

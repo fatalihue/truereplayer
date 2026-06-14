@@ -44,16 +44,10 @@ export function ClickerDashboard() {
   }
 
   return (
-    <div
-      className="flex-1 flex flex-col items-center justify-center gap-6 rounded-ui border min-h-0 relative overflow-hidden px-4"
-      style={{
-        background: 'linear-gradient(135deg, rgba(192,132,252,0.05), rgba(192,132,252,0.01))',
-        borderColor: 'var(--color-clicker-border)',
-        // No post-run dim — the panel used to drop to 65% opacity when the run
-        // finished, which read as a washed-out "glass" layer and hurt text
-        // legibility. The "· finished" label already signals the state.
-      }}
-    >
+    // Standard theme surface (same as the macro ActionTable) — no purple glass gradient or
+    // clicker-tinted border. The clicker identity now lives only in the text/icon colours
+    // (--color-clicker), mirroring how macro mode keeps its green identity on text alone.
+    <div className="flex-1 flex flex-col items-center justify-center gap-6 rounded-ui border border-border-subtle bg-bg-surface min-h-0 relative overflow-hidden px-4">
       {/* tabular-nums prevents digit-width jitter as the count climbs. */}
       <div className="flex flex-col items-center">
         <div
@@ -119,8 +113,8 @@ export function ClickerDashboard() {
       {isReplaying && !pauseState.isPaused && (
         <button
           onClick={() => send({ type: 'clicker:pause', payload: {} })}
-          className="flex items-center gap-1.5 px-4 py-1.5 rounded-ui border text-[12px] font-medium transition-colors hover:bg-bg-elevated"
-          style={{ borderColor: 'var(--color-clicker-border)', color: 'var(--color-clicker)' }}
+          className="flex items-center gap-1.5 px-4 py-1.5 rounded-ui border border-border-default text-[12px] font-medium transition-colors hover:bg-bg-elevated"
+          style={{ color: 'var(--color-clicker)' }}
         >
           <PauseIcon size={13} fill="currentColor" /> Pause
         </button>
