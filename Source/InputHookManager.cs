@@ -75,6 +75,12 @@ namespace TrueReplayer
         /// </summary>
         public static volatile bool IsCursorClickMode = false;
 
+        // Clicker-exclusive hotkeys. Mirrored here from the bridge (like IsCursorClickMode) so the
+        // hook can match them with zero per-press allocation. Active ONLY while IsCursorClickMode;
+        // in macro mode they're inert (the global Recording/Replay hotkeys take over instead).
+        public static volatile string CursorClickStartHotkey = "PageDown";
+        public static volatile string CursorClickPauseHotkey = "PageUp";
+
         // Tracks VK codes currently held down to suppress Windows auto-repeat. Keyed by vkCode
         // (physical key) rather than the composed hotkey string, because the composed string can
         // change between key-down and key-up if the user releases modifiers in a different order
@@ -834,41 +840,52 @@ namespace TrueReplayer
                     // Global hotkeys — always OnPress, ignore auto-repeat
                     if (!isRepeat)
                     {
-                        if (key == UserProfile.Current.RecordingHotkey)
+                        // Run/Stop + Pause are MODE-EXCLUSIVE. In Clicker mode the dedicated
+                        // clicker hotkeys fire (and the global Recording/Replay hotkeys are inert);
+                        // in Macro mode it's the reverse. The same physical key can serve both —
+                        // the active mode decides which branch runs, so there's no real conflict.
+                        if (IsCursorClickMode)
                         {
-                            OnHotkeyPressed?.Invoke(key);
-                            return (IntPtr)1;
-                        }
-
-                        if (key == UserProfile.Current.ReplayHotkey)
-                        {
-                            // Gate by the active profile's window target — same foreground rule
-                            // profile keys already enforce. Without this the global Replay would
-                            // fire from any window even when the profile is bound to a specific
-                            // target, silently running clicks/keystrokes against whatever happens
-                            // to be in front. IsForegroundWindowMatch returns true when there's
-                            // no profile, no target configured, or the active profile is in
-                            // BringToFocus mode (it'll re-focus the target itself), so the gate
-                            // is a no-op in those cases — pre-existing setups don't change.
-                            // Clicker (Cursor Click) mode also skips the gate: it's mode-of-the-
-                            // app, doesn't replay a profile-bound macro, so the active profile's
-                            // target is semantically irrelevant.
-                            // Pass through (CallNextHookEx) instead of swallowing when the gate
-                            // rejects, so the user can still use the key for normal typing in
-                            // non-target apps. The toast for "target not running anywhere" is
-                            // emitted inside IsForegroundWindowMatch via OnProfileTargetMissing.
-                            var activeName = ActiveProfileName;
-                            if (!IsCursorClickMode
-                                && !string.IsNullOrEmpty(activeName)
-                                && !IsForegroundWindowMatch(activeName))
+                            if (key == CursorClickStartHotkey)
                             {
-                                return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
+                                OnHotkeyPressed?.Invoke("CLICKER_START");
+                                return (IntPtr)1;
                             }
-                            LastTriggerHotkey = key;
-                            OnHotkeyPressed?.Invoke(key);
-                            return (IntPtr)1;
+                            if (key == CursorClickPauseHotkey)
+                            {
+                                OnHotkeyPressed?.Invoke("CLICKER_PAUSE");
+                                return (IntPtr)1;
+                            }
+                        }
+                        else
+                        {
+                            if (key == UserProfile.Current.RecordingHotkey)
+                            {
+                                OnHotkeyPressed?.Invoke(key);
+                                return (IntPtr)1;
+                            }
+
+                            if (key == UserProfile.Current.ReplayHotkey)
+                            {
+                                // Gate by the active profile's window target — same foreground rule
+                                // profile keys already enforce. Pass through (CallNextHookEx) instead
+                                // of swallowing when the gate rejects, so the user can still type the
+                                // key in non-target apps. (Macro-only branch now, so the former
+                                // Clicker-mode bypass is no longer needed here.)
+                                var activeName = ActiveProfileName;
+                                if (!string.IsNullOrEmpty(activeName)
+                                    && !IsForegroundWindowMatch(activeName))
+                                {
+                                    return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
+                                }
+                                LastTriggerHotkey = key;
+                                OnHotkeyPressed?.Invoke(key);
+                                return (IntPtr)1;
+                            }
                         }
 
+                        // Utility hotkeys work in BOTH modes — Mode-toggle is how you leave
+                        // Clicker mode; Profile-keys toggle and Foreground are mode-agnostic.
                         if (key == UserProfile.Current.ProfileKeyToggleHotkey)
                         {
                             OnHotkeyPressed?.Invoke(key);
@@ -889,29 +906,33 @@ namespace TrueReplayer
                     }
                     else
                     {
-                        // Repeat press of a global hotkey — swallow, don't re-fire
-                        if (key == UserProfile.Current.RecordingHotkey
-                            || key == UserProfile.Current.ProfileKeyToggleHotkey
+                        // Auto-repeat of a hotkey — swallow so a held key doesn't re-fire.
+                        if (IsCursorClickMode)
+                        {
+                            if (key == CursorClickStartHotkey || key == CursorClickPauseHotkey)
+                                return (IntPtr)1;
+                        }
+                        else
+                        {
+                            if (key == UserProfile.Current.RecordingHotkey)
+                                return (IntPtr)1;
+                            // ReplayHotkey repeat mirrors the first-press gate: pass through when
+                            // the target isn't foreground, otherwise swallow.
+                            if (key == UserProfile.Current.ReplayHotkey)
+                            {
+                                var activeName = ActiveProfileName;
+                                if (!string.IsNullOrEmpty(activeName)
+                                    && !IsForegroundWindowMatch(activeName))
+                                {
+                                    return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
+                                }
+                                return (IntPtr)1;
+                            }
+                        }
+                        if (key == UserProfile.Current.ProfileKeyToggleHotkey
                             || key == UserProfile.Current.ForegroundHotkey
                             || key == UserProfile.Current.ModeToggleHotkey)
                         {
-                            return (IntPtr)1;
-                        }
-                        // ReplayHotkey repeat: mirror the first-press gate (including the
-                        // Clicker-mode bypass). If the active profile's target isn't foreground,
-                        // pass the repeat through so the user's natural typing in a non-target
-                        // app sees auto-repeats too. When the gate allows, swallow to prevent
-                        // the action from re-firing during a hold — the first press already
-                        // triggered it.
-                        if (key == UserProfile.Current.ReplayHotkey)
-                        {
-                            var activeName = ActiveProfileName;
-                            if (!IsCursorClickMode
-                                && !string.IsNullOrEmpty(activeName)
-                                && !IsForegroundWindowMatch(activeName))
-                            {
-                                return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
-                            }
                             return (IntPtr)1;
                         }
                     }

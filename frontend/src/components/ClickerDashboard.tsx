@@ -128,8 +128,15 @@ export function ClickerDashboard() {
 
       <div className="text-[11px] text-text-tertiary flex items-center gap-1.5">
         Press
-        <kbd className="kbd kbd-accent">{settings.replayHotkey}</kbd>
+        <kbd className="kbd kbd-accent">{settings.cursorClickStartHotkey}</kbd>
         to {isReplaying ? 'stop' : 'run again'}
+        {isReplaying && (
+          <>
+            <span className="opacity-40">·</span>
+            <kbd className="kbd kbd-accent">{settings.cursorClickPauseHotkey}</kbd>
+            to pause
+          </>
+        )}
       </div>
 
       {pauseState.isPaused && (

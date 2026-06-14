@@ -69,6 +69,21 @@ namespace TrueReplayer
             }
         }
         public string CursorClickButton { get; set; } = "Left";
+        // Clicker-exclusive hotkeys — mirrored to the hook on set (same pattern as
+        // UseCursorClick → IsCursorClickMode) so a global keypress matches with no per-press
+        // lookup. Default PageDown = Start/Stop, PageUp = Pause/Resume.
+        private string _cursorClickStartHotkey = "PageDown";
+        public string CursorClickStartHotkey
+        {
+            get => _cursorClickStartHotkey;
+            set { _cursorClickStartHotkey = value; InputHookManager.CursorClickStartHotkey = value; }
+        }
+        private string _cursorClickPauseHotkey = "PageUp";
+        public string CursorClickPauseHotkey
+        {
+            get => _cursorClickPauseHotkey;
+            set { _cursorClickPauseHotkey = value; InputHookManager.CursorClickPauseHotkey = value; }
+        }
         // Clicker v2 — dedicated Clicker settings, fully decoupled from the active profile.
         // Stored in AppSettings; mirrored here for fast access. Strings (not ints) to mirror
         // the existing pattern for delay/loop/interval which use textbox-backed values.
@@ -470,6 +485,9 @@ namespace TrueReplayer
             // so `saved.UseCursorClick` is false here; we force the runtime value too, defensively.
             UseCursorClick = false;
             CursorClickButton = saved.CursorClickButton;
+            // Mirror the saved clicker hotkeys into the hook (the property setters do the mirror).
+            CursorClickStartHotkey = saved.CursorClickStartHotkey;
+            CursorClickPauseHotkey = saved.CursorClickPauseHotkey;
             // Clicker v2 — migrate from the legacy "Clicker reuses profile settings" behaviour
             // on first launch after upgrade. The sentinel CursorClickDelayMs == -1 means
             // "fresh appsettings.json or freshly upgraded from v1.9.53 or earlier" — copy the
@@ -1076,6 +1094,8 @@ namespace TrueReplayer
                     moveClickDelay = ActionReplayer.MoveClickDelayMs.ToString(),
                     useCursorClick = UseCursorClick,
                     cursorClickButton = CursorClickButton,
+                    cursorClickStartHotkey = CursorClickStartHotkey,
+                    cursorClickPauseHotkey = CursorClickPauseHotkey,
                     cursorClickDelay = CursorClickDelay,
                     cursorClickDelayJitter = CursorClickDelayJitter,
                     cursorClickUseJitter = CursorClickUseJitter,
@@ -1397,6 +1417,8 @@ namespace TrueReplayer
                     moveClickDelay = ActionReplayer.MoveClickDelayMs.ToString(),
                     useCursorClick = UseCursorClick,
                     cursorClickButton = CursorClickButton,
+                    cursorClickStartHotkey = CursorClickStartHotkey,
+                    cursorClickPauseHotkey = CursorClickPauseHotkey,
                     cursorClickDelay = CursorClickDelay,
                     cursorClickDelayJitter = CursorClickDelayJitter,
                     cursorClickUseJitter = CursorClickUseJitter,
@@ -6005,6 +6027,8 @@ namespace TrueReplayer
             ActionReplayer.MoveClickDelayMs = defaults.MoveClickDelayMs;
             UseCursorClick = defaults.UseCursorClick;       // preserved above
             CursorClickButton = defaults.CursorClickButton; // preserved above
+            CursorClickStartHotkey = defaults.CursorClickStartHotkey;
+            CursorClickPauseHotkey = defaults.CursorClickPauseHotkey;
             // Reset Clicker v2 settings to real defaults
             CursorClickDelay = defaults.CursorClickDelayMs.ToString();
             CursorClickDelayJitter = defaults.CursorClickDelayJitterPct.ToString();
@@ -6069,6 +6093,8 @@ namespace TrueReplayer
                 MoveClickDelayMs = ActionReplayer.MoveClickDelayMs,
                 UseCursorClick = UseCursorClick,
                 CursorClickButton = CursorClickButton,
+                CursorClickStartHotkey = CursorClickStartHotkey,
+                CursorClickPauseHotkey = CursorClickPauseHotkey,
                 // Clicker v2 — persist the dedicated Clicker settings alongside the legacy ones.
                 CursorClickDelayMs = int.TryParse(CursorClickDelay, out var ccd) ? ccd : 100,
                 CursorClickDelayJitterPct = int.TryParse(CursorClickDelayJitter, out var ccdj) ? ccdj : 0,
@@ -6254,6 +6280,15 @@ namespace TrueReplayer
                     break;
                 case "cursorClickButton":
                     CursorClickButton = valueElement.GetString() ?? "Left";
+                    break;
+                // Clicker hotkeys — intentionally NOT in HotkeySettingKeys, so they skip the
+                // global-conflict check: the user may deliberately reuse a global hotkey (the two
+                // are mode-gated and never both fire). Setters mirror the value into the hook.
+                case "cursorClickStartHotkey":
+                    CursorClickStartHotkey = valueElement.GetString() ?? "PageDown";
+                    break;
+                case "cursorClickPauseHotkey":
+                    CursorClickPauseHotkey = valueElement.GetString() ?? "PageUp";
                     break;
                 // ── Clicker v2 settings (dedicated, decoupled from profile) ──
                 case "cursorClickDelay":

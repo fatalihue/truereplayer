@@ -138,7 +138,7 @@ function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-14', suf
 function ClickerSection({
   button, rate, rateJitter, useRateJitter, hold, positionJitter, usePositionJitter,
   useArea, area,
-  loops, useLoops, interval, useInterval, onChange,
+  loops, useLoops, interval, useInterval, startHotkey, pauseHotkey, onChange,
 }: {
   button: string;
   rate: string;
@@ -153,6 +153,8 @@ function ClickerSection({
   useLoops: boolean;
   interval: string;
   useInterval: boolean;
+  startHotkey: string;
+  pauseHotkey: string;
   onChange: (key: string, value: string | boolean | number | object | null) => void;
 }) {
   const { send } = useBridge();
@@ -374,6 +376,14 @@ function ClickerSection({
               width="w-[80px]"
             />
             <CompactToggle isOn={useInterval} onChange={(v) => onChange('cursorClickUseInterval', v)} />
+          </SettingRow>
+          {/* Clicker-exclusive hotkeys — independent of the global macro hotkeys. They only
+              fire while in Clicker mode (and the global Recording/Replay hotkeys go inert here). */}
+          <SettingRow label="Start / Stop" tooltip="Hotkey to run/stop the clicker. Works only in Clicker mode — the global Replay hotkey does not start the clicker.">
+            <HotkeyInput value={startHotkey} settingKey="cursorClickStartHotkey" onChange={onChange} />
+          </SettingRow>
+          <SettingRow label="Pause / Resume" tooltip="Hotkey to pause/resume a running clicker. Works only in Clicker mode.">
+            <HotkeyInput value={pauseHotkey} settingKey="cursorClickPauseHotkey" onChange={onChange} />
           </SettingRow>
     </Section>
   );
@@ -663,6 +673,8 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 useLoops={settings.cursorClickUseLoops}
                 interval={settings.cursorClickInterval}
                 useInterval={settings.cursorClickUseInterval}
+                startHotkey={settings.cursorClickStartHotkey}
+                pauseHotkey={settings.cursorClickPauseHotkey}
                 onChange={changeSetting}
               />
             ) : (

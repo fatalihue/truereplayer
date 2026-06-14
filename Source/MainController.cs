@@ -67,6 +67,9 @@ namespace TrueReplayer.Controllers
             replayService.ToggleCursorClickReplay(config);
         }
 
+        // Clicker pause hotkey — toggles pause/resume on a running click loop.
+        public void TogglePauseClicker() => replayService.TogglePauseClicker();
+
         public void CancelInsertMode()
         {
             recorder.SetInsertIndex(null);

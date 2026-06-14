@@ -648,6 +648,22 @@ namespace TrueReplayer
                         return;
                     }
 
+                    // Clicker-exclusive hotkeys (fired by the hook only while in Clicker mode).
+                    // CLICKER_START toggles the click loop; CLICKER_PAUSE toggles pause/resume.
+                    if (key == "CLICKER_START")
+                    {
+                        mainController.SetLastHotkeyPressed(key);
+                        mainController.ToggleCursorClickReplay(
+                            bridge?.BuildClickerConfig() ?? new ClickerRunConfig(
+                                100, false, 0, 1, 0, "Left", 10, 0, null));
+                        return;
+                    }
+                    if (key == "CLICKER_PAUSE")
+                    {
+                        mainController.TogglePauseClicker();
+                        return;
+                    }
+
                     bool isProfileTrigger = key.StartsWith("PROFILE::") || key.StartsWith("PROFILE_HOLD::") || key.StartsWith("PROFILE_TOGGLE::");
                     if (isProfileTrigger && (!UserProfile.Current.ProfileKeyEnabled || mainController.IsRecording()))
                     {

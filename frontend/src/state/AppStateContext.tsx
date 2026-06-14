@@ -18,6 +18,8 @@ const defaultSettings = {
   moveClickDelay: '10',
   useCursorClick: false,
   cursorClickButton: 'Left',
+  cursorClickStartHotkey: 'PageDown',
+  cursorClickPauseHotkey: 'PageUp',
   // Clicker v2 — defaults match the AppSettings backend (delay=100 ms, jitter=10 %,
   // hold=10 ms, position=10 px, interval=200 ms; every switch starts off). Real values
   // arrive on settings:loaded after the post-upgrade migration (which copies the legacy

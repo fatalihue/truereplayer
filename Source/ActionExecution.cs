@@ -198,6 +198,14 @@ namespace TrueReplayer.Services
             dispatcherQueue.TryEnqueue(() => OnReplayResumed?.Invoke());
         }
 
+        // Pause hotkey — toggles pause/resume on a running clicker (no-op if not running).
+        public void TogglePauseClicker()
+        {
+            if (!_clickerLoopActive) return;
+            if (_clickerPaused) ResumeClicker();
+            else PauseClicker();
+        }
+
         public void SetProfileNameProvider(Func<string> getProfileName)
         {
             replayer.SetProfileNameProvider(getProfileName);

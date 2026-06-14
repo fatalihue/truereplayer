@@ -249,6 +249,10 @@ export interface SettingsState {
   moveClickDelay: string;
   useCursorClick: boolean;
   cursorClickButton: string;
+  // Clicker-exclusive hotkeys (decoupled from the global macro hotkeys). Default
+  // PageDown = Start/Stop, PageUp = Pause/Resume.
+  cursorClickStartHotkey: string;
+  cursorClickPauseHotkey: string;
   // Clicker v2 — dedicated Clicker settings, decoupled from the active profile. Stored
   // server-side in AppSettings (global), edited through the new ClickerPanel.
   cursorClickDelay: string;

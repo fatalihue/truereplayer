@@ -19,7 +19,7 @@ export function ClickerEmptyState() {
       <div className="text-[12px] text-text-tertiary text-center max-w-[420px] px-4">
         Recorded actions and profile hotkeys are ignored.
         {' '}Press{' '}
-        <kbd className="kbd kbd-accent">{settings.replayHotkey}</kbd>
+        <kbd className="kbd kbd-accent">{settings.cursorClickStartHotkey}</kbd>
         {' '}to start clicking at cursor.
       </div>
     </div>
