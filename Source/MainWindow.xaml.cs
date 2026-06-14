@@ -278,6 +278,11 @@ namespace TrueReplayer
                     saved.UseCursorClick = bridge.UseCursorClick;
                     AppSettingsManager.Save(saved);
                     bridge.PushSettingsLoaded();
+                    // Mode drives the Replay/Click button's enabled-state + label, which live in
+                    // the separate 'button:states' message — without this the button stays
+                    // disabled/mislabeled until some later event refreshes it (matches the
+                    // in-app settings:change handler, which calls this for useCursorClick).
+                    bridge.PushButtonStates();
                     TrayIconService.UpdateTrayIcon();
                 });
             };
@@ -628,7 +633,9 @@ namespace TrueReplayer
                         // Same code path as the UI mode toggle — flip + cancel any running
                         // ops, persist, push to React, refresh tray. SetCursorClickMode
                         // handles flip+cancel; we own the persist+push+tray here because
-                        // the settings:change handler does those at the end of its switch.
+                        // the settings:change handler does those at the end of its switch —
+                        // including PushButtonStates(), which carries the Replay/Click button's
+                        // enabled-state + label (separate 'button:states' message).
                         if (bridge != null)
                         {
                             bridge.SetCursorClickMode(!bridge.UseCursorClick);
@@ -636,6 +643,7 @@ namespace TrueReplayer
                             saved.UseCursorClick = bridge.UseCursorClick;
                             AppSettingsManager.Save(saved);
                             bridge.PushSettingsLoaded();
+                            bridge.PushButtonStates();
                             TrayIconService.UpdateTrayIcon();
                         }
                         return;

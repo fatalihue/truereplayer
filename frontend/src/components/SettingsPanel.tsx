@@ -180,7 +180,12 @@ function ComboInput({ value, onCommit, options, width = 'w-[80px]', editable = t
         readOnly={!editable}
         onChange={editable ? (e) => setText(e.target.value) : undefined}
         onFocus={editable ? () => { focused.current = true; } : undefined}
-        onBlur={editable ? () => { focused.current = false; onCommit(text); } : undefined}
+        // After committing, snap the visible text back to the canonical `value`. When the commit
+        // is REJECTED (empty / non-numeric / <=0 — commitRate returns without changing anything),
+        // the parent doesn't change `value` and the keyed remount never fires, so without this the
+        // field would keep showing the bad text. When the commit is ACCEPTED the parent remounts
+        // via its key anyway, making this a harmless no-op. (Enter calls blur(), so it's covered too.)
+        onBlur={editable ? () => { focused.current = false; onCommit(text); setText(value); } : undefined}
         onKeyDown={editable ? (e) => { if (e.key === 'Enter') { onCommit(text); (e.target as HTMLInputElement).blur(); } } : undefined}
         onClick={editable ? undefined : () => setOpen((o) => !o)}
         className={`w-full h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid ${editable ? '' : 'cursor-pointer'}`}

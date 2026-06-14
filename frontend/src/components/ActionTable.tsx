@@ -1136,6 +1136,14 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       className="relative flex-1 bg-bg-surface border border-border-subtle rounded-ui overflow-hidden flex flex-col outline-none"
       tabIndex={0}
       onKeyDown={handleKeyDown}
+      // Reset the post-drag click-suppression flag at the START of every new pointer
+      // interaction (capture phase → runs before dnd-kit activates and before any click).
+      // Without this, a drag that ends via Escape-cancel or a drop outside any row — or even
+      // a normal drop, since dnd-kit suppresses the trailing click — leaves dragOccurred stuck
+      // true and silently swallows the user's NEXT click. handleDragStart re-sets it true once
+      // a real drag activates, so trailing-click suppression after a genuine drop still works.
+      // Mirrors the old mousedown-based reset that the dnd-kit migration dropped.
+      onPointerDownCapture={() => { dragOccurred.current = false; }}
     >
       {/* Header */}
       <div
