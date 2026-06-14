@@ -450,6 +450,7 @@ export type OutgoingMessage =
   | { type: 'recording:toggle'; payload: { insertIndex?: number } }
   | { type: 'replay:toggle'; payload: { loopEnabled: boolean; loopCount: string; intervalEnabled: boolean; intervalText: string } }
   | { type: 'replay:resume'; payload: Record<string, never> }
+  | { type: 'clicker:pause'; payload: Record<string, never> }
   | { type: 'actions:clear'; payload: Record<string, never> }
   | { type: 'actions:undo'; payload: Record<string, never> }
   | { type: 'actions:redo'; payload: Record<string, never> }

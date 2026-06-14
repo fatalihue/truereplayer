@@ -568,6 +568,7 @@ namespace TrueReplayer
                     case "recording:toggle": HandleRecordingToggle(payload); break;
                     case "replay:toggle": HandleReplayToggle(payload); break;
                     case "replay:resume": HandleReplayResume(payload); break;
+                    case "clicker:pause": replayService.PauseClicker(); break;
                     case "actions:clear": HandleActionsClear(); break;
                     case "actions:undo": HandleUndo(); break;
                     case "actions:redo": HandleRedo(); break;

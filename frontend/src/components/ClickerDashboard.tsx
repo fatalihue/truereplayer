@@ -113,6 +113,19 @@ export function ClickerDashboard() {
         {configBits.join('  ·  ')}
       </div>
 
+      {/* Pause — only while actively running and not already paused. Pausing freezes the
+          loop (and excludes the paused span from CPS); the overlay's Resume button below
+          resumes it. */}
+      {isReplaying && !pauseState.isPaused && (
+        <button
+          onClick={() => send({ type: 'clicker:pause', payload: {} })}
+          className="flex items-center gap-1.5 px-4 py-1.5 rounded-ui border text-[12px] font-medium transition-colors hover:bg-bg-elevated"
+          style={{ borderColor: 'var(--color-clicker-border)', color: 'var(--color-clicker)' }}
+        >
+          <PauseIcon size={13} fill="currentColor" /> Pause
+        </button>
+      )}
+
       <div className="text-[11px] text-text-tertiary flex items-center gap-1.5">
         Press
         <kbd className="kbd kbd-accent">{settings.replayHotkey}</kbd>

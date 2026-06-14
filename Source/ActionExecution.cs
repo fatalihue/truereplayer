@@ -164,9 +164,39 @@ namespace TrueReplayer.Services
         public event Action<string, int>? OnReplayPaused;
         public event Action? OnReplayResumed;
 
-        // Manual resume from UI button (status bar). Forwards to InputHookManager which fires the
-        // same callback the resume hotkey would.
-        public void ManualResume() => InputHookManager.TriggerReplayPauseListener();
+        // Manual resume from a UI button (status-bar Resume, or the Clicker dashboard).
+        // Resumes whichever is paused: a Clicker run (no-op if not paused) and/or a macro
+        // Pause action (TriggerReplayPauseListener is a no-op when no listener is registered).
+        public void ManualResume()
+        {
+            ResumeClicker();
+            InputHookManager.TriggerReplayPauseListener();
+        }
+
+        // ── Clicker pause/resume ──────────────────────────────────────────────
+        // The click loop (ToggleCursorClickReplay) awaits _clickerResumeTcs while paused and
+        // reuses the existing OnReplayPaused/OnReplayResumed events (already bridged) so the
+        // dashboard's pause overlay works. Pause is triggered from the dashboard Pause button
+        // (clicker:pause); resume from the overlay's Resume button (replay:resume → ManualResume).
+        private volatile bool _clickerLoopActive;
+        private volatile bool _clickerPaused;
+        private TaskCompletionSource<bool>? _clickerResumeTcs;
+
+        public void PauseClicker()
+        {
+            if (!_clickerLoopActive || _clickerPaused) return;
+            _clickerResumeTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _clickerPaused = true;
+            dispatcherQueue.TryEnqueue(() => OnReplayPaused?.Invoke("", 0));
+        }
+
+        public void ResumeClicker()
+        {
+            if (!_clickerPaused) return;
+            _clickerPaused = false;
+            _clickerResumeTcs?.TrySetResult(true);
+            dispatcherQueue.TryEnqueue(() => OnReplayResumed?.Invoke());
+        }
 
         public void SetProfileNameProvider(Func<string> getProfileName)
         {
@@ -280,6 +310,9 @@ namespace TrueReplayer.Services
             }
 
             IsReplaying = true;
+            _clickerLoopActive = true;
+            _clickerPaused = false;
+            _clickerResumeTcs = null;
             onButtonStateChanged?.Invoke("Stop", true);
             onStatusChanged?.Invoke("replaying");
 
@@ -325,6 +358,19 @@ namespace TrueReplayer.Services
 
                     while (!token.IsCancellationRequested && (isInfinite || iteration < loopCount))
                     {
+                        // Pause: stop clicking and wait for resume (or cancellation). Shift
+                        // startedAt forward by the paused span so CPS/elapsed exclude the pause.
+                        if (_clickerPaused)
+                        {
+                            var pauseBegan = DateTime.UtcNow;
+                            var resumeTask = _clickerResumeTcs;
+                            if (resumeTask != null)
+                            {
+                                await Task.WhenAny(resumeTask.Task, Task.Delay(Timeout.Infinite, token));
+                                token.ThrowIfCancellationRequested();
+                            }
+                            startedAt = startedAt.Add(DateTime.UtcNow - pauseBegan);
+                        }
                         iteration++;
 
                         int jitteredX, jitteredY;
@@ -433,6 +479,13 @@ namespace TrueReplayer.Services
                 catch (OperationCanceledException) { }
                 finally
                 {
+                    // Clear pause state so a stop-while-paused doesn't leave the loop "armed"
+                    // and the dashboard stuck on the PAUSED overlay.
+                    _clickerLoopActive = false;
+                    bool wasPaused = _clickerPaused;
+                    _clickerPaused = false;
+                    _clickerResumeTcs?.TrySetResult(true);
+
                     // Final flush so the UI lands on the exact end-state (e.g. "100/100" not
                     // "97/100") even if the loop ended between throttled pushes.
                     var finalCount = clickCount;
@@ -445,6 +498,7 @@ namespace TrueReplayer.Services
                         OnClickerStats?.Invoke(finalCount, finalElapsed);
                         if (emitFinalLoop)
                             OnLoopProgress?.Invoke(finalIteration, finalLoopTotal);
+                        if (wasPaused) OnReplayResumed?.Invoke();
                         ResetReplayState();
                     });
                 }

@@ -254,6 +254,33 @@ function ClickerSection({
               <option value="ms">ms</option>
             </select>
           </SettingRow>
+          {/* CPS quick-presets — one click sets the rate (and flips the unit to /s).
+              Active when the current delay matches that rate, regardless of display unit. */}
+          <div className="flex flex-wrap gap-1 px-2.5">
+            {[10, 25, 50, 100, 200].map((cps) => {
+              const active = Math.round(1000 / localDelayMs) === cps;
+              return (
+                <button
+                  key={cps}
+                  type="button"
+                  onClick={() => {
+                    const ms = Math.max(1, Math.round(1000 / cps));
+                    setUnit('cps');
+                    setLocalDelayMs(ms);
+                    onChange('cursorClickDelay', String(ms));
+                  }}
+                  className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                    active
+                      ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
+                      : 'text-text-tertiary border-border-default bg-bg-elevated hover:text-text-secondary hover:bg-bg-card'
+                  }`}
+                  title={`${cps} clicks per second`}
+                >
+                  {cps}/s
+                </button>
+              );
+            })}
+          </div>
           <SettingRow label="Jitter" tooltip="Random ±% applied to each delay (anti-cheat detection)">
             <SettingInput
               value={rateJitter}
