@@ -493,6 +493,15 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
     });
   }, [subscribe]);
 
+  // Entering Clicker mode jumps to the Profile tab — the Clicker settings live there, so
+  // landing on a stale Global section would hide them. Only fires on the macro→clicker
+  // transition, so the user can still open Global manually while in Clicker mode.
+  const prevClickerMode = useRef(settings.useCursorClick);
+  useEffect(() => {
+    if (settings.useCursorClick && !prevClickerMode.current) setActiveTab('profile');
+    prevClickerMode.current = settings.useCursorClick;
+  }, [settings.useCursorClick]);
+
   const changeSetting = (key: string, value: string | boolean | number | object | null) => {
     send({ type: 'settings:change', payload: { key, value } });
   };
