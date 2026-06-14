@@ -130,6 +130,81 @@ function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-14', suf
   );
 }
 
+// Editable field + a preset dropdown (a combobox). The user types freely, or clicks the
+// chevron to pick a preset — replacing the standalone preset chips so the panel stays clean.
+// The menu uses plain absolute positioning (NOT a fixed portal): the page is rendered at a
+// ~0.95 UI zoom, which double-scales fixed coords, and absolute shares the field's coordinate
+// space so it lands exactly under the input. The Rate row sits near the top of its group, so
+// the short menu stays within the inset and isn't clipped. Closes on outside-click / Escape.
+function ComboInput({ value, onCommit, options, width = 'w-[80px]' }: {
+  value: string;
+  onCommit: (v: string) => void;
+  options: { value: string; label: string }[];
+  width?: string;
+}) {
+  const [text, setText] = useState(value);
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const focused = useRef(false);
+
+  // Sync the external value in when not actively editing (matches SettingInput).
+  useEffect(() => { if (!focused.current) setText(value); }, [value]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className={`relative ${width}`}>
+      <input
+        type="text"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onFocus={() => { focused.current = true; }}
+        onBlur={() => { focused.current = false; onCommit(text); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') { onCommit(text); (e.target as HTMLInputElement).blur(); } }}
+        className="w-full h-7 pl-2 pr-6 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
+      />
+      <button
+        type="button"
+        tabIndex={-1}
+        // Keep the input's focus on chevron click so it doesn't blur-commit before opening.
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setOpen((o) => !o)}
+        className="absolute right-0 top-0 h-7 w-6 flex items-center justify-center text-text-tertiary hover:text-text-secondary"
+        aria-label="Choose a preset"
+      >
+        <ChevronDown size={12} />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 w-full bg-bg-card border border-border-default rounded-md shadow-lg py-1">
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setText(o.value); onCommit(o.value); setOpen(false); }}
+              className="w-full px-2 py-1 text-center text-[11px] font-mono text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Clicker v2 — dedicated section that replaces Execution + Recording in the Profile tab
 // when useCursorClick is on. Reads/writes the cursorClick* fields directly via settings:change,
 // so it's fully decoupled from the active profile's Delay/Jitter/Loop settings. Visual
@@ -234,15 +309,18 @@ function ClickerSection({
             </select>
             <div className="w-7" />
           </SettingRow>
-          <SettingRow label="Rate" tooltip="Click rate (clicks per second) vs (delay)">
-            <SettingInput
-              /* Key is based on (unit, localDelayMs) so the input remounts with the right
-                 displayValue whenever either changes — including when the user toggles the
-                 unit after typing a value, since commitRate updates localDelayMs optimistically. */
+          <SettingRow label="Rate" tooltip="Click rate — clicks per second (/s) or delay (ms). Type a value, or use the arrow to pick a preset.">
+            <ComboInput
+              /* Key on (unit, localDelayMs) so it remounts with the right displayValue when
+                 either changes — toggling the unit, or picking a preset (commitRate updates
+                 localDelayMs optimistically). */
               key={`rate-${unit}-${localDelayMs}`}
               value={displayValue}
               onCommit={commitRate}
               width="w-[80px]"
+              options={unit === 'cps'
+                ? [10, 25, 50, 100, 200].map((c) => ({ value: String(c), label: `${c}/s` }))
+                : [100, 40, 20, 10, 5].map((m) => ({ value: String(m), label: `${m} ms` }))}
             />
             <select
               value={unit}
@@ -254,33 +332,6 @@ function ClickerSection({
               <option value="ms">ms</option>
             </select>
           </SettingRow>
-          {/* CPS quick-presets — borderless "quick pick" numbers (the bordered chips read
-              as clutter in the narrow panel). One click sets the rate + flips the unit to /s;
-              the active rate is shown in accent. A single trailing "/s" carries the unit. */}
-          <div className="flex items-center justify-end gap-3 px-2.5 pt-0.5">
-            {[10, 25, 50, 100, 200].map((cps) => {
-              const active = Math.round(1000 / localDelayMs) === cps;
-              return (
-                <button
-                  key={cps}
-                  type="button"
-                  onClick={() => {
-                    const ms = Math.max(1, Math.round(1000 / cps));
-                    setUnit('cps');
-                    setLocalDelayMs(ms);
-                    onChange('cursorClickDelay', String(ms));
-                  }}
-                  className={`text-[11px] tabular-nums transition-colors ${
-                    active ? 'text-accent font-medium' : 'text-text-tertiary hover:text-text-secondary'
-                  }`}
-                  title={`${cps} clicks per second`}
-                >
-                  {cps}
-                </button>
-              );
-            })}
-            <span className="text-[10px] text-text-disabled">/s</span>
-          </div>
           <SettingRow label="Jitter" tooltip="Random ±% applied to each delay (anti-cheat detection)">
             <SettingInput
               value={rateJitter}
