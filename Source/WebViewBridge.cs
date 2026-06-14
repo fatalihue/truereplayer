@@ -1713,6 +1713,7 @@ namespace TrueReplayer
                     var label = !string.IsNullOrEmpty(effTarget.ProcessName)
                         ? effTarget.ProcessName
                         : effTarget.WindowTitle;
+                    DiagnosticLog.Warn($"Replay refused (button): target window not open [{label}], profile='{CurrentProfileName}'");
                     SendMessage("alert:show", new { message = $"Target window not open: {label}" });
                     return;
                 }

@@ -426,7 +426,7 @@ namespace TrueReplayer.Controllers
                     // by noticing missing entries.
                     var failedName = Path.GetFileNameWithoutExtension(file);
                     if (!string.IsNullOrEmpty(failedName)) _loadFailures.Add(failedName);
-                    System.Diagnostics.Debug.WriteLine($"Erro ao carregar perfil {file}: {ex}");
+                    DiagnosticLog.Error($"Profile load failed: '{failedName}' ({Path.GetFileName(file)})", ex);
                 }
             }
 
@@ -439,6 +439,32 @@ namespace TrueReplayer.Controllers
             InputHookManager.RegisterProfileWindowTargets(GetProfileWindowTargets(), GetBringToFocusProfiles());
             var hotstringMap = GetProfileHotstrings();
             InputHookManager.RegisterProfileHotstrings(hotstringMap);
+
+            // Diagnostic snapshot of what's actually ARMED after a (re)load — answers "is my
+            // hotkey even registered, and to which target?" without a repro. Fires on profile
+            // load/change (low frequency), so it's safe for the disk-per-write logger.
+            try
+            {
+                var targets = GetProfileWindowTargets();
+                string armed = map.Count == 0
+                    ? "none"
+                    : string.Join(", ", map.Select(kv =>
+                    {
+                        targets.TryGetValue(kv.Key, out var t);
+                        string tgt = t == null
+                            ? "any-window"
+                            : $"{t.ProcessName}{(string.IsNullOrEmpty(t.WindowTitle) ? "" : "/" + t.WindowTitle)}";
+                        return $"'{kv.Key}'={kv.Value}->[{tgt}]";
+                    }));
+                var skipped = ProfileEntries
+                    .Where(e => e.IsDisabled && !string.IsNullOrEmpty(e.Hotkey))
+                    .Select(e => $"'{e.Name}'({e.Hotkey})")
+                    .ToList();
+                DiagnosticLog.Info(
+                    $"Hotkeys armed ({map.Count}): {armed}. Hotstrings: {hotstringMap.Count}." +
+                    (skipped.Count > 0 ? $" Skipped (disabled w/ hotkey): {string.Join(", ", skipped)}." : ""));
+            }
+            catch (Exception ex) { DiagnosticLog.Info($"Hotkeys armed-summary log failed: {ex.Message}"); }
         }
 
         /// <summary>

@@ -589,10 +589,15 @@ namespace TrueReplayer
             {
                 DispatcherQueue.TryEnqueue(async () =>
                 {
+                    // Single anchor covering all hotkey dispatch sites — lets support confirm a
+                    // hotkey was actually received + dispatched (vs. gated, which the hook logs).
+                    Services.DiagnosticLog.Info($"Hotkey dispatched: {key}");
+
                     if (key == UserProfile.Current.ProfileKeyToggleHotkey)
                     {
                         bool newValue = !UserProfile.Current.ProfileKeyEnabled;
                         UserProfile.Current.ProfileKeyEnabled = newValue;
+                        Services.DiagnosticLog.Info($"Profile Keys {(newValue ? "ENABLED" : "DISABLED")} via toggle hotkey");
 
                         // Persist immediately. Without this, AppSettingsManager.ApplyGlobalSettings
                         // (called whenever a profile is loaded — including the next profile-hotkey

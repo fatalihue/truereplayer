@@ -94,7 +94,7 @@ namespace TrueReplayer.Services
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Erro ao salvar appsettings: {ex.Message}");
+                TrueReplayer.Services.DiagnosticLog.Error("Failed to save appsettings.json", ex);
             }
         }
 
@@ -112,7 +112,10 @@ namespace TrueReplayer.Services
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Erro ao carregar appsettings: {ex.Message}");
+                // Corrupt appsettings.json → silent fallback to defaults resets hotkeys, RunAsAdmin,
+                // ProfileKeyEnabled, etc. Make that durable in the session log, not just the debugger.
+                TrueReplayer.Services.DiagnosticLog.Error(
+                    "Failed to load appsettings.json — falling back to defaults (hotkeys / RunAsAdmin / ProfileKeyEnabled reset)", ex);
                 return new AppSettings();
             }
         }

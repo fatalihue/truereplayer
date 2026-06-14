@@ -62,6 +62,10 @@ namespace TrueReplayer.Services
             recorder.Start();
             setLastActionTime(DateTime.Now);
             onStatusChanged?.Invoke("recording");
+            DiagnosticLog.Info(
+                $"Recording start: mouse={recorder.RecordMouse}, scroll={recorder.RecordScroll}, " +
+                $"keyboard={recorder.RecordKeyboard}, combined={recorder.RecordCombined}, " +
+                $"relativeCoords={recorder.UseRelativeCoordinates}");
         }
 
         public void StopRecording()
@@ -70,6 +74,7 @@ namespace TrueReplayer.Services
             IsRecording = false;
             onButtonStateChanged?.Invoke("Recording", false);
             recorder.Stop();
+            DiagnosticLog.Info("Recording stopped");
             // Clear the <select>-interaction suppression flag in case the user hit Stop
             // mid-interaction. Without this the flag would persist up to 15 s before the
             // safety timer cleared it — and any clicks recorded in the next session
@@ -247,6 +252,18 @@ namespace TrueReplayer.Services
             replayer.SetBringToFocus(bringToFocus);
             replayer.SetForceInfiniteLoop(forceInfiniteLoop);
 
+            // Start banner — the single highest-value diagnostic line: records action count,
+            // loop config, the resolved window target, relative-coords, and the movement strategy
+            // (smooth/path vs jump — the Roblox-class issue). Without this no replay leaves any
+            // trace of having run or with what settings.
+            DiagnosticLog.Info(
+                $"Replay start: actions={actions.Count}, " +
+                $"loop={(loopCount == 0 ? "infinite" : loopCount.ToString())}, interval={loopInterval}ms, " +
+                $"relativeCoords={useRelativeCoords}, " +
+                $"target=[{(windowTarget == null ? "none" : $"{windowTarget.ProcessName} {windowTarget.WindowTitle}".Trim())}], " +
+                $"bringToFocus={bringToFocus}, forceInfinite={forceInfiniteLoop}, " +
+                $"smoothMovement={ActionReplayer.SmoothMovement} (step {ActionReplayer.MoveStepPx}px/{ActionReplayer.MoveStepDelayMs}ms, clickGap {ActionReplayer.MoveClickDelayMs}ms)");
+
             onStatusChanged?.Invoke("replaying");
 
             _ = replayer.StartAsync().ContinueWith(t =>
@@ -257,7 +274,15 @@ namespace TrueReplayer.Services
                     if (t.Exception?.InnerException is TimeoutException tex)
                         onStatusChanged?.Invoke($"error:{tex.Message}");
                     else if (t.Exception?.InnerException != null)
+                    {
+                        // Capture the type + stack — the user only sees the message in the status bar.
+                        DiagnosticLog.Error("Replay run faulted", t.Exception.InnerException);
                         onStatusChanged?.Invoke($"error:{t.Exception.InnerException.Message}");
+                    }
+                    else
+                    {
+                        DiagnosticLog.Info("Replay finished");
+                    }
                 });
             });
         }
@@ -323,6 +348,15 @@ namespace TrueReplayer.Services
             _clickerResumeTcs = null;
             onButtonStateChanged?.Invoke("Stop", true);
             onStatusChanged?.Invoke("replaying");
+
+            // Start banner for the clicker loop — records the resolved run config so "clicker does
+            // nothing / wrong rate / wrong place" is diagnosable. (Smooth-movement does NOT apply
+            // here — the loop clicks at the live cursor via SendInput, not the macro mouse path.)
+            DiagnosticLog.Info(
+                $"Clicker start: button={button}, rate={delay}ms, " +
+                $"loops={(loopCount == 0 ? "infinite" : loopCount.ToString())}, interval={loopInterval}ms, " +
+                $"hold={holdMs}ms, jitter={(useJitter ? jitterPercent + "%" : "off")}, posJitter={positionJitter}px, " +
+                $"area={(useArea ? $"{areaW}x{areaH}@{areaX},{areaY}" : "off")}");
 
             _cursorClickCts = new CancellationTokenSource();
             var token = _cursorClickCts.Token;
@@ -2007,6 +2041,7 @@ namespace TrueReplayer.Services
         private void ReportMissingTargetWindow()
         {
             var name = _windowTarget?.ProcessName ?? "target";
+            DiagnosticLog.Warn($"Replay aborted: relative-coords target window not found [{name} {_windowTarget?.WindowTitle}]".TrimEnd());
             OnReplayError?.Invoke($"Target window '{name}' not found — open it and retry");
             try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
         }

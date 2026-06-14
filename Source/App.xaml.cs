@@ -18,6 +18,18 @@ namespace TrueReplayer
             DiagnosticLog.Initialize(appVersion);
             DiagnosticLog.Info("App constructor: UnhandledException handler attached");
 
+            // Record this session's elevation up-front. The 'admin target while TrueReplayer
+            // isn't elevated' failure (hotkeys/replay silently no-op) is otherwise only
+            // inferable after-the-fact from an OpenProcess error deep in the log.
+            try
+            {
+                bool elevated = new System.Security.Principal.WindowsPrincipal(
+                        System.Security.Principal.WindowsIdentity.GetCurrent())
+                    .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+                DiagnosticLog.Info($"Process elevation: {(elevated ? "ADMIN (elevated)" : "standard (not elevated)")}");
+            }
+            catch (Exception ex) { DiagnosticLog.Warn($"Elevation check failed: {ex.Message}"); }
+
             // Prevent app termination from unhandled exceptions in async void handlers
             // (common in WebViewBridge profile/file I/O handlers). Log and continue —
             // individual operations may fail but the app stays responsive.

@@ -33,6 +33,11 @@ namespace TrueReplayer
         private static readonly Dictionary<string, DateTime> _lastTargetMissingFireUtc = new();
         private static readonly TimeSpan _targetMissingCooldown = TimeSpan.FromSeconds(3);
 
+        // Throttles the diagnostic "hotkey gate rejected" log (separate from the user toast
+        // above) so mashing a gated hotkey doesn't flood the session log. Keyed per profile.
+        private static readonly Dictionary<string, DateTime> _lastGateRejectLogUtc = new();
+        private static readonly TimeSpan _gateRejectLogCooldown = TimeSpan.FromSeconds(3);
+
         /// <summary>
         /// Fires when CaptureHotkeyMode is active and the user presses a key/combo. The string
         /// is the composed hotkey (e.g. "Win+Q", "Ctrl+Shift+F5", "ScrollUp"). The hook
@@ -371,19 +376,69 @@ namespace TrueReplayer
             // FindWindow walks the full window list which is cheap enough at hotkey-press rate.
             try
             {
-                if (TrueReplayer.Helpers.WindowMatcher.FindWindow(target, regex) == IntPtr.Zero)
+                bool notRunning = TrueReplayer.Helpers.WindowMatcher.FindWindow(target, regex) == IntPtr.Zero;
+                var now = DateTime.UtcNow;
+
+                // Diagnostic record (throttled, its own cooldown). This is the #1 "my hotkey does
+                // nothing" cause — log WHAT the target wanted vs WHAT was actually in front, so
+                // support can tell a ProcessName/title mismatch from "target not running" (and from
+                // the elevation case, already logged by WindowMatcher).
+                if (!_lastGateRejectLogUtc.TryGetValue(profileName, out var lastLog)
+                    || now - lastLog >= _gateRejectLogCooldown)
                 {
-                    var now = DateTime.UtcNow;
-                    if (!_lastTargetMissingFireUtc.TryGetValue(profileName, out var last)
-                        || now - last >= _targetMissingCooldown)
-                    {
-                        _lastTargetMissingFireUtc[profileName] = now;
-                        OnProfileTargetMissing?.Invoke(profileName);
-                    }
+                    _lastGateRejectLogUtc[profileName] = now;
+                    TrueReplayer.Services.DiagnosticLog.Info(
+                        $"Hotkey gate: profile '{profileName}' target [{DescribeTarget(target)}] did not match foreground [{DescribeWindow(hwnd)}] — target {(notRunning ? "is not running" : "is running but not in front")}.");
+                }
+
+                // Toast only when the target isn't running anywhere (existing behaviour).
+                if (notRunning
+                    && (!_lastTargetMissingFireUtc.TryGetValue(profileName, out var last)
+                        || now - last >= _targetMissingCooldown))
+                {
+                    _lastTargetMissingFireUtc[profileName] = now;
+                    OnProfileTargetMissing?.Invoke(profileName);
                 }
             }
             catch { /* hook must never throw — swallow any FindWindow / event-handler failure */ }
             return false;
+        }
+
+        // Human-readable target descriptor for the gate-rejection diagnostic log.
+        private static string DescribeTarget(WindowTarget target)
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(target.ProcessName)) parts.Add(target.ProcessName);
+            if (!string.IsNullOrEmpty(target.WindowTitle))
+                parts.Add($"title{(target.TitleMatchMode == "regex" ? "~" : ":")}\"{target.WindowTitle}\"");
+            return parts.Count > 0 ? string.Join(" ", parts) : "(empty target)";
+        }
+
+        // Describes a window as `proc.exe "Title"` for the gate-rejection diagnostic log. Only
+        // called on a (throttled) rejection, so the per-call StringBuilder allocation is fine.
+        private static string DescribeWindow(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return "no foreground window";
+            try
+            {
+                var title = new StringBuilder(256);
+                NativeMethods.GetWindowText(hwnd, title, title.Capacity);
+                NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+                string proc = "?";
+                IntPtr h = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+                if (h != IntPtr.Zero)
+                {
+                    try
+                    {
+                        var pb = new StringBuilder(512);
+                        if (NativeMethods.GetProcessImageFileName(h, pb, (uint)pb.Capacity) > 0)
+                            proc = System.IO.Path.GetFileName(pb.ToString());
+                    }
+                    finally { NativeMethods.CloseHandle(h); }
+                }
+                return $"{proc} \"{title}\"";
+            }
+            catch { return "unknown window"; }
         }
 
         #region Hotstring Helpers
