@@ -254,9 +254,10 @@ function ClickerSection({
               <option value="ms">ms</option>
             </select>
           </SettingRow>
-          {/* CPS quick-presets — one click sets the rate (and flips the unit to /s).
-              Active when the current delay matches that rate, regardless of display unit. */}
-          <div className="flex flex-wrap gap-1 px-2.5">
+          {/* CPS quick-presets — borderless "quick pick" numbers (the bordered chips read
+              as clutter in the narrow panel). One click sets the rate + flips the unit to /s;
+              the active rate is shown in accent. A single trailing "/s" carries the unit. */}
+          <div className="flex items-center justify-end gap-3 px-2.5 pt-0.5">
             {[10, 25, 50, 100, 200].map((cps) => {
               const active = Math.round(1000 / localDelayMs) === cps;
               return (
@@ -269,17 +270,16 @@ function ClickerSection({
                     setLocalDelayMs(ms);
                     onChange('cursorClickDelay', String(ms));
                   }}
-                  className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
-                    active
-                      ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
-                      : 'text-text-tertiary border-border-default bg-bg-elevated hover:text-text-secondary hover:bg-bg-card'
+                  className={`text-[11px] tabular-nums transition-colors ${
+                    active ? 'text-accent font-medium' : 'text-text-tertiary hover:text-text-secondary'
                   }`}
                   title={`${cps} clicks per second`}
                 >
-                  {cps}/s
+                  {cps}
                 </button>
               );
             })}
+            <span className="text-[10px] text-text-disabled">/s</span>
           </div>
           <SettingRow label="Jitter" tooltip="Random ±% applied to each delay (anti-cheat detection)">
             <SettingInput
