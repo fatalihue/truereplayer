@@ -42,6 +42,12 @@ namespace TrueReplayer.Services
         /// Checks GitHub Releases for a newer version.
         /// Returns the new version string, or null if up-to-date.
         /// </summary>
+        // Bounds the GitHub round-trip. Velopack's CheckForUpdatesAsync has no hard ceiling, so a
+        // slow/unreachable release server could leave the check pending indefinitely. With the
+        // startup splash now non-blocking this is no longer user-visible, but a bounded check keeps
+        // the manual "Check for Updates" responsive and stops a wedged background task lingering.
+        private static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(10);
+
         public static async Task<string?> CheckForUpdateAsync()
         {
             if (!_manager.IsInstalled)
@@ -49,12 +55,18 @@ namespace TrueReplayer.Services
 
             try
             {
-                _pendingUpdate = await _manager.CheckForUpdatesAsync();
+                var checkTask = _manager.CheckForUpdatesAsync();
+                if (await Task.WhenAny(checkTask, Task.Delay(CheckTimeout)) != checkTask)
+                {
+                    DiagnosticLog.Warn("[UpdateService] Update check timed out — release server slow/unreachable; treating as up-to-date this run");
+                    return null;
+                }
+                _pendingUpdate = await checkTask; // already completed
                 return _pendingUpdate?.TargetFullRelease?.Version?.ToString();
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[UpdateService] Check failed: {ex.Message}");
+                DiagnosticLog.Warn($"[UpdateService] Check failed: {ex.Message}");
                 return null;
             }
         }

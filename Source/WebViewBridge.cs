@@ -686,6 +686,24 @@ namespace TrueReplayer
                     case "window:reloadUI": try { var url = webView.Source; webView.Navigate(url); } catch { } break;
                     case "update:check": _ = CheckForUpdateAsync(); break;
                     case "update:apply": _ = HandleUpdateApply(); break;
+                    case "logs:openFolder":
+                        // Surfaces the diagnostic logs from the command palette (previously
+                        // reachable only via the tray menu). Mirrors TrayIconService.OnOpenLogsFolder.
+                        try
+                        {
+                            var logsDir = DiagnosticLog.LogDirectory;
+                            if (!string.IsNullOrEmpty(logsDir) && System.IO.Directory.Exists(logsDir))
+                                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                                {
+                                    FileName = "explorer.exe",
+                                    Arguments = $"\"{logsDir}\"",
+                                    UseShellExecute = true,
+                                });
+                            else
+                                DiagnosticLog.Warn("logs:openFolder — log directory missing");
+                        }
+                        catch (Exception ex) { DiagnosticLog.Error("logs:openFolder failed", ex); }
+                        break;
                     case "clipboard:read": _ = HandleClipboardRead(); break;
                     case "hotkey:suppress": HandleHotkeySuppress(payload); break;
                     case "hotkey:capture": HandleHotkeyCapture(payload); break;

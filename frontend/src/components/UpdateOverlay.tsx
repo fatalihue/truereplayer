@@ -3,7 +3,6 @@ import { useBridge } from '../bridge/BridgeContext';
 
 type Phase =
   | { step: 'hidden' }
-  | { step: 'checking' }
   | { step: 'available'; version: string; currentVersion: string; notes: string[] }
   | { step: 'downloading'; percent: number; version: string; currentVersion: string }
   | { step: 'installing'; version: string; currentVersion: string }
@@ -30,10 +29,12 @@ export function UpdateOverlay() {
 
       switch (msg.type) {
         case 'update:checking':
-          // Initial indeterminate "Checking for updates…" splash — fired by the backend
-          // at the very start of CheckForUpdateAsync. Lands a beat before update:available
-          // or update:none resolves it.
-          setPhase({ step: 'checking' });
+          // Non-blocking by design. The startup update check runs in the background, so the
+          // app must be visible and usable immediately — a slow or unreachable release server
+          // used to trap the user behind a full-screen blur before they could even see the UI.
+          // We show NOTHING during checking; the overlay appears only once an update is actually
+          // being downloaded/installed (or offered, in manual-gate mode). Manual "Check for
+          // Updates" still gets feedback from the Settings panel's own button state.
           break;
         case 'update:available':
           // In silent (auto-apply) mode, skip the gate and transition straight into the
@@ -105,12 +106,9 @@ export function UpdateOverlay() {
     send({ type: 'update:apply', payload: {} });
   };
 
-  // 'checking' is the only phase without version metadata (the check hasn't resolved yet).
-  // Every other field below tolerates that via the optional-chaining + isChecking gating
-  // in the JSX so the splash can render at app-start with just an indeterminate bar.
-  const isChecking = phase.step === 'checking';
-  const version = isChecking ? '' : phase.version;
-  const currentVersion = isChecking ? '' : phase.currentVersion;
+  // After the 'hidden' early-return above, every remaining phase carries version metadata.
+  const version = phase.version;
+  const currentVersion = phase.currentVersion;
   const isComplete = phase.step === 'complete';
   const isInstalling = phase.step === 'installing';
 
@@ -158,7 +156,6 @@ export function UpdateOverlay() {
             ...(isComplete || isInstalling ? { color: 'var(--color-replay)' } : {}),
           }}
         >
-          {phase.step === 'checking' && 'Verificando atualizações'}
           {phase.step === 'available' && 'Atualização disponível'}
           {phase.step === 'downloading' && 'Baixando atualização'}
           {phase.step === 'installing' && `Atualizando para v${version}`}
@@ -167,7 +164,6 @@ export function UpdateOverlay() {
 
         {/* Subtitle */}
         <div style={subtitleStyle}>
-          {phase.step === 'checking' && 'Conectando ao servidor de releases…'}
           {phase.step === 'available' && 'Uma nova versão do TrueReplayer está pronta'}
           {phase.step === 'downloading' && 'Não feche o aplicativo'}
           {phase.step === 'installing' && 'Encerrando TrueReplayer...'}
@@ -177,7 +173,7 @@ export function UpdateOverlay() {
         {/* Version chips (current ➜ new), or single chip for "complete".
             Hidden during 'checking' because we don't know the target version yet —
             the splash just shows the indeterminate progress bar in that state. */}
-        {isChecking ? null : isComplete ? (
+        {isComplete ? (
           <div style={versionRowStyle}>
             <div style={{ ...versionChipStyle, ...versionChipNewStyle, minWidth: 120 }}>
               <div style={{ ...versionLabelStyle, color: 'var(--color-accent)' }}>Versão atual</div>
@@ -220,20 +216,16 @@ export function UpdateOverlay() {
             Checking is indeterminate (40 % bar sliding across), matching the mockup —
             no percent shown since we have nothing to report yet. Downloading is the
             real percent. Installing pulses at 100 % while the apply runs. */}
-        {(phase.step === 'checking' || phase.step === 'downloading' || phase.step === 'installing') && (
+        {(phase.step === 'downloading' || phase.step === 'installing') && (
           <>
             <div style={progressContainerStyle}>
               <div style={progressTrackStyle}>
                 <div
                   style={{
                     ...progressFillStyle,
-                    ...(phase.step === 'checking'
-                      // No transform: 'none' here — the indeterminate keyframe drives transform
-                      // and inline 'none' would lose specificity battle, freezing the bar.
-                      ? { width: '40%', animation: 'update-indeterminate 1.8s ease-in-out infinite' }
-                      : phase.step === 'downloading'
-                        ? { width: `${phase.percent}%`, animation: 'none', transform: 'none' }
-                        : { width: '100%', animation: 'update-install-pulse 1.5s ease-in-out infinite', transform: 'none' }),
+                    ...(phase.step === 'downloading'
+                      ? { width: `${phase.percent}%`, animation: 'none', transform: 'none' }
+                      : { width: '100%', animation: 'update-install-pulse 1.5s ease-in-out infinite', transform: 'none' }),
                   }}
                 />
               </div>

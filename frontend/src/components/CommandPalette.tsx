@@ -2,10 +2,10 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Search, Circle, Play, Square, Type, Save, FolderOpen, RotateCcw, FilePlus,
-  Trash2, PinOff, Pin, Download, Upload, MonitorDown, Shield, Minimize2, RefreshCw,
-  Hourglass, ScanSearch, Repeat2, Undo2, Redo2, ClipboardPaste, Files, Replace,
-  FolderPlus, Palette, PanelLeft, DownloadCloud, Table2, Keyboard,
-  MousePointerClick, Pipette, Crosshair, Combine, Split, GitBranch,
+  Trash2, Download, Upload, RefreshCw,
+  Hourglass, ScanSearch, Repeat2, ClipboardPaste, Files, Replace,
+  FolderPlus, Palette, PanelLeft, Table2, Keyboard,
+  MousePointerClick, Pipette, Crosshair, Combine, Split, GitBranch, ScrollText,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -114,24 +114,6 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             icon: <MousePointerClick size={14} style={{ color: settings.useCursorClick ? 'var(--color-clicker)' : undefined }} className={settings.useCursorClick ? '' : 'text-text-secondary'} />,
             shortcut: settings.modeToggleHotkey,
             onAction: () => { send({ type: 'settings:change', payload: { key: 'useCursorClick', value: !settings.useCursorClick } }); onClose(); },
-          },
-          {
-            // Combined Actions recording mode toggle (records each press as one Keystroke/Click
-            // instead of paired Down/Up). Mirrors the Settings -> Recording switch.
-            id: 'combinedmode',
-            label: settings.recordCombinedInput ? 'Disable Combined Actions' : 'Enable Combined Actions',
-            icon: <Combine size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'settings:change', payload: { key: 'recordCombinedInput', value: !settings.recordCombinedInput } }); onClose(); },
-          },
-          {
-            id: 'undo', label: 'Undo', shortcut: 'Ctrl+Z',
-            icon: <Undo2 size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:undo', payload: {} }); onClose(); },
-          },
-          {
-            id: 'redo', label: 'Redo', shortcut: 'Ctrl+Y',
-            icon: <Redo2 size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:redo', payload: {} }); onClose(); },
           },
           {
             id: 'sendtext', label: 'Insert Send Text',
@@ -304,56 +286,21 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             icon: <RefreshCw size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'window:reloadUI', payload: {} }); onClose(); },
           },
-        ],
-      },
-      {
-        id: 'window',
-        title: 'WINDOW',
-        items: [
-          // Window toggles — short labels; icon state telegraphs the current direction
-          // (Pin vs PinOff for Always On Top; the others just show their concept icon).
-          // A trailing "✓" badge could carry the on/off state but the icon swap already
-          // does that job for Always On Top, and the rest don't need it.
           {
-            id: 'alwaysontop', label: 'Always On Top',
-            icon: settings.alwaysOnTop
-              ? <PinOff size={14} className="text-text-secondary" />
-              : <Pin size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'window:alwaysOnTop', payload: { enabled: !settings.alwaysOnTop } }); onClose(); },
-          },
-          {
-            id: 'systemtray', label: 'System Tray',
-            icon: <Minimize2 size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'window:minimizeToTray', payload: { enabled: !settings.minimizeToTray } }); onClose(); },
-          },
-          {
-            id: 'runonstartup', label: 'Run on Startup',
-            icon: <MonitorDown size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'window:runOnStartup', payload: { enabled: !settings.runOnStartup } }); onClose(); },
-          },
-          {
-            id: 'startminimized', label: 'Start Minimized',
-            icon: <Minimize2 size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'window:startMinimized', payload: { enabled: !settings.startMinimized } }); onClose(); },
-          },
-          {
-            id: 'runasadmin', label: 'Run as Admin',
-            icon: <Shield size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'settings:change', payload: { key: 'runAsAdmin', value: !settings.runAsAdmin } }); onClose(); },
+            // Opens %LocalAppData%\TrueReplayer\Logs in Explorer. Previously reachable only
+            // from the tray menu — surfaced here so users/support can grab the session log
+            // for diagnosing silent hotkey / replay issues without hunting for the folder.
+            id: 'openlogs', label: 'Open Logs Folder',
+            icon: <ScrollText size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'logs:openFolder', payload: {} }); onClose(); },
           },
         ],
       },
-      {
-        id: 'updates',
-        title: 'UPDATES',
-        items: [
-          {
-            id: 'checkupdates', label: 'Check for Updates',
-            icon: <DownloadCloud size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'update:check', payload: {} }); onClose(); },
-          },
-        ],
-      },
+      // WINDOW + UPDATES groups removed: every entry there (Always On Top, System Tray,
+      // Run on Startup, Start Minimized, Run as Admin, Check for Updates) is a 1:1 duplicate
+      // of a Settings-panel switch/button with its own feedback, so they only bloated the
+      // palette. The palette now focuses on actions, insertion, transforms, profile management,
+      // and view/diagnostic utilities that aren't one-click in the standard UI.
     ];
   }, [profiles, activeProfile, settings, buttonStates, send, onClose, computeInsertIndex]);
 

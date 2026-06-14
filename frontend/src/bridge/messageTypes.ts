@@ -590,6 +590,7 @@ export type OutgoingMessage =
   | { type: 'clipboard:read'; payload: Record<string, never> }
   | { type: 'update:check'; payload: Record<string, never> }
   | { type: 'update:apply'; payload: Record<string, never> }
+  | { type: 'logs:openFolder'; payload: Record<string, never> }
   | { type: 'actions:addBrowserAction'; payload: { actionType: string; selector: string; browserText?: string; newTab?: boolean; insertIndex?: number } }
   | { type: 'browser:toggleRecording'; payload: { enabled: boolean } }
   | { type: 'browser:pickElement'; payload: Record<string, never> }
