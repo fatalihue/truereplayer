@@ -216,7 +216,7 @@ namespace TrueReplayer.Services
         /// referencedByProfile maps profileName → set of ImagePath filenames that should be kept.
         /// Profiles without an entry have all their PNGs deleted (and the dir if it ends up empty).
         /// </summary>
-        public static int CleanupOrphanImages(IReadOnlyDictionary<string, HashSet<string>> referencedByProfile)
+        public static int CleanupOrphanImages(IReadOnlyDictionary<string, HashSet<string>> referencedByProfile, IReadOnlySet<string>? keepEntirelyFolders = null)
         {
             int deleted = 0;
             string baseDir = GetBaseDirectory();
@@ -227,6 +227,11 @@ namespace TrueReplayer.Services
                 string profileFolder = Path.GetFileName(profileDir);
                 // profileFolder is sanitized; map back is not exact, but referencedByProfile keys
                 // are sanitized via the same SanitizeFolderName used to write, so equivalent lookup.
+                // A profile that FAILED to load (corrupt/half-written JSON) is recorded in
+                // _loadFailures but has NO entry in referencedByProfile — without this skip its
+                // entire image folder would be treated as orphaned and deleted, losing the user's
+                // reference PNGs on a recoverable error. Keep such folders untouched.
+                if (keepEntirelyFolders?.Contains(profileFolder) == true) continue;
                 referencedByProfile.TryGetValue(profileFolder, out var referenced);
                 referenced ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 

@@ -518,6 +518,11 @@ namespace TrueReplayer.Controllers
         // Snapshot of WaitImage ImagePath references built during the last LoadProfileListAsync.
         // Consumed by the startup orphan-cleanup pass in MainWindow.
         public IReadOnlyDictionary<string, HashSet<string>> ReferencedImagesByProfile => _referencedImagesByProfile;
+        // Profiles that exist on disk but FAILED to load this pass, mapped to their sanitized image
+        // folder names. CleanupOrphanImages keeps these folders intact so a transient load failure
+        // (corrupt/half-written JSON) doesn't permanently delete the profile's reference PNGs.
+        public IReadOnlySet<string> FailedLoadFolders =>
+            _loadFailures.Select(ImageStorageService.GetSanitizedProfileFolder).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         public async Task RefreshProfileListAsync(bool suppressWatcher = false)
         {
@@ -1192,6 +1197,11 @@ namespace TrueReplayer.Controllers
             int imported = 0;
             int skipped = 0;
 
+            // Canonical Profiles dir (with trailing separator) for the containment check below.
+            string canonicalProfileDir = Path.GetFullPath(profileDir);
+            if (!canonicalProfileDir.EndsWith(Path.DirectorySeparatorChar))
+                canonicalProfileDir += Path.DirectorySeparatorChar;
+
             // Only iterate the entries the user actually selected. Maintains source order so
             // multi-profile imports feel deterministic.
             var toImport = envelope.Profiles.Where(p => selectedNames.Contains(p.Name)).ToList();
@@ -1202,6 +1212,15 @@ namespace TrueReplayer.Controllers
                 // Frontend already filters but a stale preview or hand-crafted message could slip
                 // through. Counted as skipped so the user sees the number.
                 if (!ProfileCompatibility.IsCompatible(entry.AppMinVersion, runningVersion))
+                {
+                    skipped++;
+                    continue;
+                }
+                // Authoritative path-traversal guard. entry.Name comes verbatim from the untrusted
+                // .trprofile envelope and feeds Path.Combine below; a name like "..\\..\\evil" would
+                // escape the Profiles dir. Reject anything that isn't a bare file name. Skipped+counted
+                // so a poisoned entry never silently writes outside the sandbox.
+                if (!IsSafeProfileName(entry.Name))
                 {
                     skipped++;
                     continue;
@@ -1268,6 +1287,15 @@ namespace TrueReplayer.Controllers
                 };
                 SettingsManager.MigrateRestoreSize(profile);
 
+                // Defense in depth: confirm the resolved write path stays directly inside the
+                // Profiles dir before writing. Also re-validates the rename-derived finalName
+                // ("name (N)"). Mirrors ImageStorageService.TryResolveImageFile's containment check.
+                if (!Path.GetFullPath(targetPath).StartsWith(canonicalProfileDir, StringComparison.OrdinalIgnoreCase))
+                {
+                    skipped++;
+                    continue;
+                }
+
                 await SettingsManager.SaveProfileAsync(targetPath, profile);
 
                 // Restore embedded WaitImage reference images
@@ -1290,6 +1318,20 @@ namespace TrueReplayer.Controllers
                 await MergeImportedOrganizationAsync(envelope.Organization!);
 
             return (imported, skipped, hasOrganization);
+        }
+
+        // Guards against a malicious/buggy .trprofile envelope smuggling path separators or
+        // traversal into a profile name that later feeds Path.Combine. The persisted name must be
+        // a bare file name (no directory components, no invalid chars). Mirrors
+        // WebViewBridge.IsSafeProfileName (kept local — different class, no shared owner for it).
+        private static bool IsSafeProfileName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            if (name == "." || name == "..") return false;
+            string baseName = name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ? name[..^5] : name;
+            if (string.IsNullOrWhiteSpace(baseName)) return false;
+            if (baseName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return false;
+            return true;
         }
 
         private async Task MergeImportedOrganizationAsync(ProfileExportOrganization org)

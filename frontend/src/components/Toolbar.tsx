@@ -310,18 +310,15 @@ export function Toolbar(_props: ToolbarProps) {
     };
   }, [showWaitMenu]);
 
-  // Ctrl+Z / Ctrl+Y keyboard shortcuts for undo/redo
+  // Toolbar-owned keyboard shortcuts: Ctrl+C copy, Ctrl+V paste, Alt+↑/↓ reorder.
+  // (Undo/redo are intentionally NOT here — App.tsx owns Ctrl+Z/Ctrl+Y; see below.)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') return;
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        send({ type: 'actions:undo', payload: {} });
-      }
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
-        e.preventDefault();
-        send({ type: 'actions:redo', payload: {} });
-      }
+      // Undo/Redo (Ctrl+Z / Ctrl+Y / Shift+Ctrl+Z) are intentionally NOT handled here.
+      // App.tsx owns those keystrokes globally — it preventDefaults and dispatches
+      // cmd:undo / cmd:redo, which the cmd-listener effect above forwards to the bridge.
+      // Handling them here too would fire undo/redo twice per keypress.
       if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
         const sel = selectionRef.current;
         if (sel.size > 0) {

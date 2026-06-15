@@ -4058,21 +4058,32 @@ namespace TrueReplayer
                 counter++;
             }
 
-            File.Copy(entry.FilePath, copyPath);
-            await profileController.RefreshProfileListAsync(true);
-
-            // Place the copy in the same folder as the original
-            var order = profileController.GetProfileOrder();
-            var folder = order.Folders.FirstOrDefault(f => f.Items.Contains(name));
-            if (folder != null)
+            try
             {
-                order.UngroupedOrder.Remove(copyName);
-                int idx = folder.Items.IndexOf(name);
-                folder.Items.Insert(idx + 1, copyName);
-                await profileController.SaveProfileOrderAsync();
-            }
+                File.Copy(entry.FilePath, copyPath);
+                await profileController.RefreshProfileListAsync(true);
 
-            PushProfilesUpdate();
+                // Place the copy in the same folder as the original
+                var order = profileController.GetProfileOrder();
+                var folder = order.Folders.FirstOrDefault(f => f.Items.Contains(name));
+                if (folder != null)
+                {
+                    order.UngroupedOrder.Remove(copyName);
+                    int idx = folder.Items.IndexOf(name);
+                    folder.Items.Insert(idx + 1, copyName);
+                    await profileController.SaveProfileOrderAsync();
+                }
+
+                PushProfilesUpdate();
+            }
+            catch (Exception ex)
+            {
+                // async void: an unhandled exception here would post to the dispatcher and crash
+                // the app. Mirror HandleProfileRename/HandleProfileDelete's catch (Debug.WriteLine)
+                // and additionally surface a toast so a recoverable I/O failure is visible.
+                System.Diagnostics.Debug.WriteLine($"[Bridge] Duplicate error: {ex.Message}");
+                SendMessage("alert:show", new { message = $"Could not duplicate \"{name}\": {ex.Message}" });
+            }
         }
 
         private async void HandleProfileRename(JsonElement payload)
@@ -5678,7 +5689,11 @@ namespace TrueReplayer
                 foreach (var el in namesProp.EnumerateArray())
                 {
                     var s = el.GetString();
-                    if (!string.IsNullOrEmpty(s)) selectedNames.Add(s);
+                    // Bridge-boundary guard: drop any selected name that isn't a bare file name so a
+                    // poisoned payload can never carry a traversal name into ConfirmImportAsync's
+                    // Path.Combine. ConfirmImportAsync re-validates entry.Name as the authoritative
+                    // backstop (defense in depth). Mirrors the guard on create/rename.
+                    if (!string.IsNullOrEmpty(s) && IsSafeProfileName(s)) selectedNames.Add(s);
                 }
             }
 

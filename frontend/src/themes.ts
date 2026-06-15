@@ -1748,7 +1748,7 @@ export function validateExportedTheme(data: unknown): data is ExportedTheme {
   if (typeof ui.fontSize !== 'number' || !(ui.fontSize >= 6 && ui.fontSize <= 48)) return false;
   if (typeof ui.borderRadius !== 'number' || !(ui.borderRadius >= 0 && ui.borderRadius <= 64)) return false;
   if (typeof ui.rowHeight !== 'number' || !(ui.rowHeight >= 12 && ui.rowHeight <= 120)) return false;
-  if (ui.zoom !== undefined && !(typeof ui.zoom === 'number' && ui.zoom >= 0.25 && ui.zoom <= 5)) return false;
+  if (ui.zoom !== undefined && !(typeof ui.zoom === 'number' && ui.zoom >= 25 && ui.zoom <= 500)) return false;
   // uiSettings color fields are interpolated into cssText (incl. color-mix) — when present they
   // must be safe colors. Missing fields are tolerated (merged over DEFAULT_UI_SETTINGS on import).
   const UI_COLOR_FIELDS = [
