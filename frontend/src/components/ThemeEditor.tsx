@@ -409,10 +409,13 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
 
   // Close on click outside (but not on title bar controls like maximize/restore)
   useEffect(() => {
+    // Height (px) of the window title-bar zone where clicks are ignored so that
+    // hitting the OS maximize/restore/close controls doesn't dismiss the editor.
+    const TITLE_BAR_GUARD_PX = 40;
     const handleClick = (e: MouseEvent) => {
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        // Ignore clicks on window title bar area (top 32px)
-        if (e.clientY < 40) return;
+        // Ignore clicks within the title-bar guard zone (see TITLE_BAR_GUARD_PX)
+        if (e.clientY < TITLE_BAR_GUARD_PX) return;
         onClose();
       }
     };

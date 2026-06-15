@@ -981,6 +981,12 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
 
             {/* Updates */}
             <Section icon={Download} iconColor="#6bcb77" title="Updates" defaultOpen={false}>
+              {/* Auto Check is intentionally inert for now: it always reads ON and its onChange
+                  is a deliberate no-op. The app auto-checks for updates on launch regardless, so
+                  there is no backend toggle to bind to yet. Kept visible as a UX placeholder so
+                  the control doesn't disappear when wiring lands. TODO: wire to a real
+                  settings:change key + backend flag (and drop the hardcoded isOn={true}) once an
+                  opt-out is supported. Until then, do NOT remove or rewire — it is user-visible. */}
               <SettingRow label="Auto Check">
                 <CompactToggle isOn={true} onChange={() => {}} />
               </SettingRow>

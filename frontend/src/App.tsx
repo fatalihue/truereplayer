@@ -56,8 +56,10 @@ function AppShell() {
   // useBridge access) listens and forwards to C#.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const ctrlOrMeta = e.ctrlKey || e.metaKey;
-      if (ctrlOrMeta && (e.key === 'k' || e.key === 'K')) {
+      // Windows-only app: gate shortcuts on Ctrl alone. metaKey (the Windows key)
+      // is intentionally excluded so Win+K/S/Z/Y don't trigger these.
+      const ctrl = e.ctrlKey;
+      if (ctrl && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
         setCmdPaletteOpen(prev => !prev);
         return;
@@ -67,7 +69,7 @@ function AppShell() {
       const tag = (e.target as HTMLElement)?.tagName;
       const inEditable = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable;
 
-      if (ctrlOrMeta && !inEditable) {
+      if (ctrl && !inEditable) {
         if (e.key === 's' || e.key === 'S') {
           e.preventDefault();
           window.dispatchEvent(new CustomEvent('cmd:save'));

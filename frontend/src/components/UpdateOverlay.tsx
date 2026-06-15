@@ -173,9 +173,7 @@ export function UpdateOverlay() {
           {phase.step === 'complete' && 'Você está agora na versão mais recente'}
         </div>
 
-        {/* Version chips (current ➜ new), or single chip for "complete".
-            Hidden during 'checking' because we don't know the target version yet —
-            the splash just shows the indeterminate progress bar in that state. */}
+        {/* Version chips (current ➜ new), or a single chip on the 'complete' phase. */}
         {isComplete ? (
           <div style={versionRowStyle}>
             <div style={{ ...versionChipStyle, ...versionChipNewStyle, minWidth: 120 }}>
@@ -215,10 +213,9 @@ export function UpdateOverlay() {
         )}
         {phase.step === 'complete' && <div style={{ height: 12 }} />}
 
-        {/* Progress bar (checking / downloading / installing).
-            Checking is indeterminate (40 % bar sliding across), matching the mockup —
-            no percent shown since we have nothing to report yet. Downloading is the
-            real percent. Installing pulses at 100 % while the apply runs. */}
+        {/* Progress bar (downloading / installing).
+            Downloading shows the real percent. Installing pins the bar at 100 % and
+            pulses (update-install-pulse) while the apply runs. */}
         {(phase.step === 'downloading' || phase.step === 'installing') && (
           <>
             <div style={progressContainerStyle}>

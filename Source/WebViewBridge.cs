@@ -814,10 +814,19 @@ namespace TrueReplayer
             return b64;
         }
 
-        public void PushActionsUpdate()
+        // Single source of truth for the per-action DTO sent to React. Both the
+        // actions:updated push (PushActionsUpdate) and the cold-start state:init
+        // payload (HandleUIReady) project actions identically — field names, order,
+        // base64-cache usage, and null handling MUST stay in lock-step (the Medium
+        // base64-cache fix previously had to be applied in both places). Keeping one
+        // copy here removes that drift risk. Each element is boxed as object so the
+        // anonymous shape can cross a method boundary; System.Text.Json serializes the
+        // runtime (anonymous) type for an `object`, so the wire JSON is unchanged
+        // (same pattern already used by cursorClickArea below).
+        private object[] ProjectActionsForFrontend()
         {
             string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
-            var actionsList = actions.Select((a, i) => new
+            return actions.Select((a, i) => (object)new
             {
                 // Stable id for React reconciliation. Brand-new actions inserted during this
                 // session have an Id assigned by ActionItem's default constructor; old-profile
@@ -899,7 +908,11 @@ namespace TrueReplayer
                 // BrowserSelectOption — match mode for choosing the <option>
                 selectMatchMode = a.SelectMatchMode
             }).ToArray();
+        }
 
+        public void PushActionsUpdate()
+        {
+            var actionsList = ProjectActionsForFrontend();
             SendMessage("actions:updated", new { actions = actionsList });
             PushToolbarUpdate();
             PushStatusBarUpdate();
@@ -1340,82 +1353,13 @@ namespace TrueReplayer
 
             // Send full state to React
             var profile = UserProfile.Current;
-            string stateInitProfileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
             SendMessage("state:init", new
             {
                 status = "ready",
-                actions = actions.Select((a, i) => new
-                {
-                    // Mirror PushActionsUpdate which DOES emit `id`. Omitting it on the
-                    // cold-start state:init payload meant React fell back to index keys
-                    // for the very first frame, then re-keyed when the next push arrived
-                    // — selection / highlight state could briefly land on the wrong row.
-                    id = a.Id,
-                    actionType = a.ActionType,
-                    key = a.Key ?? "",
-                    x = a.X,
-                    y = a.Y,
-                    delay = a.Delay,
-                    comment = a.Comment ?? "",
-                    rowNumber = i + 1,
-                    isInsertionPoint = a.IsInsertionPoint,
-                    shouldHighlight = a.ShouldHighlight,
-                    imagePath = a.ImagePath ?? "",
-                    timeout = a.Timeout,
-                    confidence = a.Confidence,
-                    imageBase64 = !string.IsNullOrEmpty(a.ImagePath) && (
-                            a.ActionType == "WaitImage"
-                            || (a.ActionType == "If" && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)))
-                        ? GetImageBase64Cached(stateInitProfileName, a.ImagePath)
-                        : "",
-                    // WaitImage extras — must match PushActionsUpdate so the editor restores
-                    // the right state on cold start. Without these, the editor saw undefined
-                    // for these fields and silently wiped them on the next save.
-                    waitImageOnTimeout = a.WaitImageOnTimeout,
-                    waitImageInvert = a.WaitImageInvert,
-                    waitImageClickOnMatch = a.WaitImageClickOnMatch,
-                    waitImageSearchX = a.WaitImageSearchX,
-                    waitImageSearchY = a.WaitImageSearchY,
-                    waitImageSearchW = a.WaitImageSearchW,
-                    waitImageSearchH = a.WaitImageSearchH,
-                    // WaitPixelColor — mirrors PushActionsUpdate, for the same reason as the
-                    // WaitImage extras above.
-                    pixelX = a.PixelX,
-                    pixelY = a.PixelY,
-                    pixelColor = a.PixelColor,
-                    pixelTolerance = a.PixelTolerance,
-                    pixelOnTimeout = a.PixelOnTimeout,
-                    pixelInvert = a.PixelInvert,
-                    pixelClickOnMatch = a.PixelClickOnMatch,
-                    // Conditional logic — same forwarding requirement as in
-                    // PushActionsUpdate. Without these, a cold start with an
-                    // IF row would arrive at React with conditionType=undefined,
-                    // collapsing the pill to "if image" fallback and clearing the
-                    // Negate / OnProbeError state in the Sheet.
-                    conditionType = a.ConditionType,
-                    conditionNegate = a.ConditionNegate,
-                    ifOnProbeError = a.IfOnProbeError,
-                    browserText = a.BrowserText ?? "",
-                    newTab = a.NewTab,
-                    isSkipped = a.IsSkipped,
-                    isFocusClick = a.IsFocusClick,
-                    repeatCount = a.RepeatCount,
-                    // Mirror PushActionsUpdate — repeatDelayMs (Keystroke gap) and
-                    // holdDurationMs (HoldKey duration) need to ride along on the
-                    // cold-start state:init payload, otherwise the editor opens at
-                    // the row's defaults rather than its saved values.
-                    repeatDelayMs = a.RepeatDelayMs,
-                    holdDurationMs = a.HoldDurationMs,
-                    // Browser action extras (Wait mode, Navigate post-checks, Type options) —
-                    // same fix as the WaitImage extras above.
-                    waitMode = a.WaitMode,
-                    urlWaitPattern = a.UrlWaitPattern,
-                    postNavigateSelector = a.PostNavigateSelector,
-                    typeAppend = a.TypeAppend,
-                    typePaste = a.TypePaste,
-                    typeDelay = a.TypeDelay,
-                    selectMatchMode = a.SelectMatchMode
-                }).ToArray(),
+                // Per-action DTO is projected by the shared ProjectActionsForFrontend()
+                // helper — identical to PushActionsUpdate's actions:updated payload so
+                // the cold-start state and subsequent pushes can never drift.
+                actions = ProjectActionsForFrontend(),
                 highlightedActionIndex = (int?)null,
                 profiles = profileController.ProfileEntries.Select(p => new
                 {

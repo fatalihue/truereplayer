@@ -597,6 +597,10 @@ namespace TrueReplayer.Services
         private ActionItem? _lastCombinedLeftClick;
         private int _lastClickScreenX, _lastClickScreenY;
         private long _lastClickTickMs;
+        // GetSystemMetrics indices for the system double-click tolerance rectangle — Win32 SM_* constants.
+        // SM_CXDOUBLECLK / SM_CYDOUBLECLK give the FULL width/height of the rectangle (centred on the
+        // first click) within which Windows itself pairs two clicks into a double-click.
+        private const int SM_CXDOUBLECLK = 36, SM_CYDOUBLECLK = 37;
 
         // ── Combined-mode keyboard grouping state ──
         // Modifiers are folded into the following key so "Ctrl+C", "Shift+A" (capitals) and
@@ -891,8 +895,12 @@ namespace TrueReplayer.Services
                     && _lastCombinedLeftClick.ActionType == "LeftClick")
                 {
                     long nowMs = Environment.TickCount64;
-                    int maxW = Math.Max(2, NativeMethods.GetSystemMetrics(36) / 2); // SM_CXDOUBLECLK is full rect width
-                    int maxH = Math.Max(2, NativeMethods.GetSystemMetrics(37) / 2);
+                    // SM_CX/CYDOUBLECLK are the FULL rectangle dimensions, but the distance check
+                    // measures the offset of each click from the rectangle's centre (the first
+                    // click), so the tolerance is HALF the metric per axis. Max(2, …) guards against
+                    // a degenerate 0/1-px metric collapsing the rectangle and never merging.
+                    int maxW = Math.Max(2, NativeMethods.GetSystemMetrics(SM_CXDOUBLECLK) / 2);
+                    int maxH = Math.Max(2, NativeMethods.GetSystemMetrics(SM_CYDOUBLECLK) / 2);
                     if (nowMs - _lastClickTickMs <= NativeMethods.GetDoubleClickTime()
                         && Math.Abs(x - _lastClickScreenX) <= maxW
                         && Math.Abs(y - _lastClickScreenY) <= maxH)

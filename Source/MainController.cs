@@ -135,11 +135,18 @@ namespace TrueReplayer.Controllers
             // Handled by bridge — React auto-scrolls on actions:updated
         }
 
+        // Window (ms) during which a matching KeyUp is swallowed after a hotkey KeyDown,
+        // so the hotkey press doesn't also leak through as a key-up to the target app.
+        private const long HotkeyKeyUpSuppressMs = 300;
+        // Debounce window (ms) collapsing rapid duplicate Record/Replay hotkey fires
+        // (key auto-repeat / double registration) into a single toggle.
+        private const long DuplicateHotkeyDebounceMs = 500;
+
         private string? hotkeyJustPressed;
         // Monotonic tick timestamps (Environment.TickCount64) — DateTime.Now is non-monotonic
         // (NTP/manual/DST shifts could make the delta negative or huge and break suppression).
         // Default 0 is correct: TickCount64 is ms-since-boot, so `now - 0` is always >= the
-        // 500/300ms windows in any real session (and the key-match guard covers the hotkey case).
+        // suppression windows in any real session (and the key-match guard covers the hotkey case).
         private long hotkeyPressTicks;
 
         private long lastRecordingToggleTicks;
@@ -153,13 +160,13 @@ namespace TrueReplayer.Controllers
 
         public bool IsHotkeyKeyUpSuppressed(string key)
         {
-            return hotkeyJustPressed == key && Environment.TickCount64 - hotkeyPressTicks < 300;
+            return hotkeyJustPressed == key && Environment.TickCount64 - hotkeyPressTicks < HotkeyKeyUpSuppressMs;
         }
 
         public bool ShouldSuppressDuplicateRecordingHotkey()
         {
             var now = Environment.TickCount64;
-            if (now - lastRecordingToggleTicks < 500)
+            if (now - lastRecordingToggleTicks < DuplicateHotkeyDebounceMs)
                 return true;
 
             lastRecordingToggleTicks = now;
@@ -169,7 +176,7 @@ namespace TrueReplayer.Controllers
         public bool ShouldSuppressDuplicateReplayHotkey()
         {
             var now = Environment.TickCount64;
-            if (now - lastReplayToggleTicks < 500)
+            if (now - lastReplayToggleTicks < DuplicateHotkeyDebounceMs)
                 return true;
 
             lastReplayToggleTicks = now;

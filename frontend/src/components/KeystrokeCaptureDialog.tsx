@@ -377,8 +377,8 @@ export function KeystrokeCaptureDialog({
             <div className="flex flex-col gap-2.5">
               <div className="flex items-center justify-between gap-3">
                 <label className="text-[12px] font-medium text-text-secondary">Hold duration (ms)</label>
-                {/* Step is dynamic (stepFor returns 100 normally, 1 below 100ms for fine
-                    control). NumberInput's step is constant per render, so we recompute
+                {/* Step is dynamic (stepFor returns 1000 once we're at/above 1s, 100
+                    below it). NumberInput's step is constant per render, so we recompute
                     via the parent's clamp on each change. */}
                 <NumberInput
                   value={holdMs}

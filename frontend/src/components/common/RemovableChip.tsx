@@ -14,10 +14,12 @@ interface RemovableChipProps {
   className?: string;                   // outer wrapper class
 }
 
-// Hover-reveal ✕ button overlay used across ProfilePanel for assignable bits (hotkey,
-// hotstring, window target, folder target). One source of truth so styling stays
-// consistent and a single tweak propagates everywhere. The ✕ is positioned absolute
-// so it overlays the chip without consuming layout width when hidden.
+// Hover/focus-reveal ✕ button overlay used across ProfilePanel for assignable bits
+// (hotkey, hotstring, window target, folder target). One source of truth so styling
+// stays consistent and a single tweak propagates everywhere. The ✕ is positioned
+// absolute so it overlays the chip without consuming layout width, and is revealed
+// via opacity (not display:none) so it stays Tab-reachable and AT-accessible even
+// while visually hidden.
 //
 // Each wrapper is its own `group` — chips aren't nested in other groups in ProfilePanel,
 // so the unnamed variant is enough and survives Tailwind's static class extraction.
@@ -58,7 +60,15 @@ export function RemovableChip({
           onRemove(e);
         }}
         aria-label={removeTitle}
-        className={`hidden group-hover/removable:inline-flex ${btnClass}`}
+        // Reveal on hover OR keyboard focus, and keep it reachable by Tab / AT:
+        // `opacity-0` (not `hidden`/display:none) leaves the button in the tab
+        // order and the accessibility tree, so keyboard and screen-reader users
+        // can reach it — display:none removed it entirely. `pointer-events-none`
+        // in the resting state preserves the old mouse behaviour exactly: the
+        // invisible overlay never intercepts clicks on the chip content beneath
+        // it until revealed. focus-visible (not focus) avoids any flash on mouse
+        // interaction. Reveal is instant (no transition) to match the original.
+        className={`opacity-0 pointer-events-none group-hover/removable:opacity-100 group-hover/removable:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto ${btnClass}`}
       >
         ✕
       </button>

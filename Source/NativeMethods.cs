@@ -293,6 +293,11 @@ namespace TrueReplayer.Interop
         /// </summary>
         public static class VirtualScreen
         {
+            // Guards the cache fields below. Bounds is read from the replay/clicker thread
+            // while Invalidate() runs on the UI thread's WndProc (WM_DISPLAYCHANGE), so the
+            // lock prevents a torn-tuple read (mixed old/new bounds) and double-initialization.
+            // It does not change the values returned for a given display configuration.
+            private static readonly object _gate = new object();
             private static int _x, _y, _w, _h;
             private static bool _cached;
 
@@ -300,24 +305,33 @@ namespace TrueReplayer.Interop
             {
                 get
                 {
-                    if (!_cached)
+                    lock (_gate)
                     {
-                        _x = GetSystemMetrics(76); // SM_XVIRTUALSCREEN
-                        _y = GetSystemMetrics(77); // SM_YVIRTUALSCREEN
-                        _w = GetSystemMetrics(78); // SM_CXVIRTUALSCREEN
-                        _h = GetSystemMetrics(79); // SM_CYVIRTUALSCREEN
-                        _cached = true;
+                        if (!_cached)
+                        {
+                            _x = GetSystemMetrics(76); // SM_XVIRTUALSCREEN
+                            _y = GetSystemMetrics(77); // SM_YVIRTUALSCREEN
+                            _w = GetSystemMetrics(78); // SM_CXVIRTUALSCREEN
+                            _h = GetSystemMetrics(79); // SM_CYVIRTUALSCREEN
+                            _cached = true;
+                        }
+                        return (_x, _y, _w, _h);
                     }
-                    return (_x, _y, _w, _h);
                 }
             }
 
             /// <summary>
-            /// Drops the cache so the next read re-queries Windows. Call after a
-            /// monitor reconfiguration or DPI change. Not wired to any system event
-            /// yet — invoke manually if needed.
+            /// Drops the cache so the next read re-queries Windows. Wired to the
+            /// WM_DISPLAYCHANGE message in WindowShellServices' WndProc, so it fires
+            /// automatically on a monitor reconfiguration or DPI change.
             /// </summary>
-            public static void Invalidate() => _cached = false;
+            public static void Invalidate()
+            {
+                lock (_gate)
+                {
+                    _cached = false;
+                }
+            }
         }
     }
 }

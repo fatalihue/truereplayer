@@ -195,7 +195,7 @@ function ClipboardTransformPopover({ onInsert, onClose }: ClipboardTransformPopo
       className="absolute inset-1 z-30 rounded-lg overflow-hidden shadow-2xl flex flex-col"
       style={{
         background: 'var(--color-bg-elevated, #2d2d2d)',
-        border: '1px solid rgba(96, 205, 255, 0.35)',
+        border: '1px solid color-mix(in srgb, var(--color-accent) 35%, transparent)',
         boxShadow: '0 16px 40px rgba(0, 0, 0, 0.55)',
         animation: 'transform-pop-in 0.16s ease',
       }}
@@ -244,8 +244,8 @@ function ClipboardTransformPopover({ onInsert, onClose }: ClipboardTransformPopo
           onClick={handleInsert}
           className="h-7 px-3 text-[11px] font-semibold rounded text-white shadow-sm transition-colors"
           style={{
-            background: 'linear-gradient(180deg, #0078D4, #0065B3)',
-            boxShadow: '0 2px 6px rgba(0, 120, 212, 0.3)',
+            background: 'linear-gradient(180deg, var(--color-accent-solid), color-mix(in srgb, var(--color-accent-solid) 82%, #000))',
+            boxShadow: '0 2px 6px color-mix(in srgb, var(--color-accent-solid) 30%, transparent)',
           }}
         >
           Insert

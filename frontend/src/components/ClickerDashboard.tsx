@@ -21,6 +21,17 @@ export function ClickerDashboard() {
   const loopActive = loopProgress.active;
   // A finished run (status !== 'replaying') has no time-to-finish — gate ETA on
   // isReplaying so a completed loop renders "—" instead of "~0s" (remaining hits 0).
+  //
+  // Unit coupling (why mixing loopProgress + clickerStats here is sound): formatEta does
+  // remaining = total - current, then etaSec = remaining / rate, so total/current/rate must
+  // share a unit. `rate` is clicks/sec. In Clicker mode the backend runs exactly ONE click
+  // per loop iteration (ToggleCursorClickReplay in ActionExecution.cs increments clickCount
+  // and iteration in lockstep), so loopProgress.total (= loopCount, the iteration cap) is
+  // measured in CLICKS — same unit as clickerStats.count and rate. The two args come from
+  // different state slices fed by separate bridge messages (macro:loopProgress vs
+  // clicker:stats), but they coincide because of that 1-click-per-iteration invariant. If
+  // the clicker ever runs N clicks per iteration, total would become iterations and this
+  // comparison would silently break — keep it 1:1 (or convert total to clicks before passing).
   const etaText = formatEta(isReplaying && loopActive, loopProgress.total, clickerStats.count, rate);
   const progressPct = loopActive && loopProgress.total > 0
     ? Math.min(100, (loopProgress.current / loopProgress.total) * 100)

@@ -19,6 +19,10 @@ export function Toggle({ isOn, onChange, disabled = false, size = 'default' }: T
   return (
     <button
       type="button"
+      role="switch"
+      aria-checked={isOn}
+      aria-disabled={disabled}
+      disabled={disabled}
       onClick={() => !disabled && onChange(!isOn)}
       className={`relative ${track} rounded-full transition-colors border ${
         disabled

@@ -55,6 +55,17 @@ namespace TrueReplayer
         private static readonly NativeMethods.LowLevelMouseProc _mouseProc = MouseHookCallback;
         private static readonly NativeMethods.LowLevelKeyboardProc _keyboardProc = KeyboardHookCallback;
 
+        // WM_SYSKEYDOWN: keyboard message Windows sends instead of WM_KEYDOWN when Alt is held
+        // (or for Alt itself / F10). The low-level hook must treat it as a key-down too, else
+        // Alt-combo hotkeys would never register. NativeMethods only declares WM_KEYDOWN/UP, so
+        // it's named here (kept private to this hook). Value matches the Win32 WM_SYSKEYDOWN.
+        private const int WM_SYSKEYDOWN = 0x0104;
+
+        // LLKHF_INJECTED: bit 4 of KBDLLHOOKSTRUCT.flags (offset 8). Set by Windows when the
+        // event came from SendInput rather than physical hardware — used to drop our own
+        // replay/F15-menu-cancel injections so they don't feed back into hotkey/hotstring logic.
+        private const uint LLKHF_INJECTED = 0x10;
+
         // Monotonic tick timestamp (Environment.TickCount64) for the AltGr (right-Alt → right-Ctrl)
         // debounce — DateTime.Now is non-monotonic (NTP/manual/DST shifts could make the delta
         // negative or huge and wrongly suppress/leak the synthetic Ctrl). 0 means "never seen a
@@ -840,9 +851,9 @@ namespace TrueReplayer
                 if (CaptureHotkeyMode)
                 {
                     int captureVk = Marshal.ReadInt32(lParam);
-                    bool captureDown = wParam == (IntPtr)NativeMethods.WM_KEYDOWN || wParam == (IntPtr)0x0104;
+                    bool captureDown = wParam == (IntPtr)NativeMethods.WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN;
                     uint captureFlags = (uint)Marshal.ReadInt32(lParam, 8);
-                    bool captureInjected = (captureFlags & 0x10) != 0;
+                    bool captureInjected = (captureFlags & LLKHF_INJECTED) != 0;
 
                     // Always let our own SendInput events through unchanged — they're our F15
                     // menu-cancel pulses and we'd otherwise echo them back to the UI.
@@ -882,7 +893,7 @@ namespace TrueReplayer
                 }
 
                 int vkCode = Marshal.ReadInt32(lParam);
-                bool isDown = wParam == (IntPtr)NativeMethods.WM_KEYDOWN || wParam == (IntPtr)0x0104;
+                bool isDown = wParam == (IntPtr)NativeMethods.WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN;
 
                 // Skip any trigger-mode / hotkey / hotstring logic for events we injected
                 // via SendInput — replay-simulated keystrokes and the F15 menu-cancel phantom.
@@ -890,7 +901,7 @@ namespace TrueReplayer
                 // triggering PROFILE_STOP, feeding the hotstring buffer, etc.).
                 // LLKHF_INJECTED is flag bit 4 (0x10) in KBDLLHOOKSTRUCT.flags (offset 8).
                 uint hookFlags = (uint)Marshal.ReadInt32(lParam, 8);
-                bool isInjected = (hookFlags & 0x10) != 0;
+                bool isInjected = (hookFlags & LLKHF_INJECTED) != 0;
                 if (isInjected)
                 {
                     return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);

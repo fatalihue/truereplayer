@@ -27,6 +27,12 @@ export const defaultColumnVisibility: ColumnVisibility = {
   notes: true,
 };
 
+// Default keystroke repeat-delay in ms. Mirrors KeystrokeCaptureDialog's
+// DEFAULT_REPEAT_DELAY_MS (which matches the C# clamp). Used as the sentinel
+// below: when the captured delay equals this default we omit repeatDelayMs from
+// the insert payload so the C# side leaves RepeatDelayMs null (clean profile JSON).
+const DEFAULT_REPEAT_DELAY_MS = 30;
+
 // Toggle Columns button is currently DISABLED — the code below is preserved in
 // comments for when the user decides on a final home for it. The grid header's
 // trailing 24 px column was already removed (no row-spacer waste either way), so
@@ -798,7 +804,7 @@ export function Toolbar(_props: ToolbarProps) {
                 { keystroke: result.key, insertIndex };
               if (result.repeat > 1) {
                 payload.repeat = result.repeat;
-                if (result.repeatDelayMs !== 30) payload.repeatDelayMs = result.repeatDelayMs;
+                if (result.repeatDelayMs !== DEFAULT_REPEAT_DELAY_MS) payload.repeatDelayMs = result.repeatDelayMs;
               }
               send({ type: 'actions:insertKeystroke', payload });
             }

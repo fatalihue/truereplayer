@@ -41,6 +41,12 @@ namespace TrueReplayer.Services
         private static readonly HashSet<string> Modifiers =
             new(StringComparer.OrdinalIgnoreCase) { "Ctrl", "Shift", "Alt", "Win" };
 
+        // Canonical modifier ORDER for building / expanding a keystroke combo (the exact
+        // "Win+Ctrl+Shift+Alt+Key" sequence SimulateKeystroke parses). Distinct from the
+        // Modifiers set above, which is an unordered membership test. Shared by ExpandKeystroke
+        // (KeyDown order) and BuildCombo (string order) so the two never drift apart.
+        private static readonly string[] ModifierOrder = { "Win", "Ctrl", "Shift", "Alt" };
+
         // ActionItem.Key is non-nullable by declaration, but System.Text.Json can deserialize an
         // explicit JSON null into it from a hand-edited / imported .trprofile. HashSet.Contains(null)
         // under OrdinalIgnoreCase throws, so guard here and treat a null Key as a non-modifier
@@ -167,7 +173,7 @@ namespace TrueReplayer.Services
             var parts = ks.Key.Split('+');
             string target = parts[^1].Trim();
             var prefix = parts.Take(parts.Length - 1).Select(p => p.Trim()).ToList();
-            var mods = new[] { "Win", "Ctrl", "Shift", "Alt" }
+            var mods = ModifierOrder
                 .Where(m => prefix.Any(p => KeyEq(p, m)))
                 .ToList();
 
@@ -281,7 +287,7 @@ namespace TrueReplayer.Services
         private static string BuildCombo(IReadOnlyCollection<string> mods, string? target)
         {
             var parts = new List<string>();
-            foreach (var m in new[] { "Win", "Ctrl", "Shift", "Alt" })
+            foreach (var m in ModifierOrder)
                 if (mods.Any(x => KeyEq(x, m))) parts.Add(m);
             if (!string.IsNullOrEmpty(target)) parts.Add(target);
             return string.Join("+", parts);

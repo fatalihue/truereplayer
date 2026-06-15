@@ -1270,7 +1270,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       onClick={(e) => {
         // Don't fire click if we were dragging
         if (dragActive.current) { e.preventDefault(); return; }
-        send({ type: 'profile:click', payload: { name: p.name } }); (e.target as HTMLElement).blur();
+        send({ type: 'profile:click', payload: { name: p.name } });
+        // Blur the row after dispatching so it doesn't retain keyboard focus.
+        (e.target as HTMLElement).blur();
       }}
       onContextMenu={(e) => handleContextMenu(e, p.name)}
       className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-left transition-colors outline-none select-none cursor-grab active:cursor-grabbing ${
@@ -1728,7 +1730,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 ref={ungroupedRef}
                 className={`rounded transition-colors ${dropTarget === '__ungrouped__' && dragProfile ? 'bg-accent-solid/20 ring-2 ring-accent-solid/50' : ''}`}
               >
-                {ungroupedProfiles.length > 0 && (profileOrder?.pinned?.length > 0 || profileOrder?.folders?.length > 0) && (
+                {ungroupedProfiles.length > 0 && ((profileOrder?.pinned?.length ?? 0) > 0 || (profileOrder?.folders?.length ?? 0) > 0) && (
                   renderSectionLabel('Ungrouped')
                 )}
                 {ungroupedProfiles.map(renderProfileRow)}

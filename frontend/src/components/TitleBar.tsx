@@ -1,6 +1,12 @@
 import { Search } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 
+// Right margin reserved for the Windows native caption-button strip
+// (minimize / maximize / close), which is overlaid on the right edge of the
+// custom title bar. Without this gap the status badge would sit underneath the
+// caption buttons. Matches the previous `mr-[140px]` (140px = margin-right: 140px).
+const CAPTION_BUTTONS_WIDTH_PX = 140;
+
 const statusConfig = {
   ready:     { dot: 'bg-replay',    text: 'Ready',     bg: 'bg-replay-bg',    border: 'border-replay/20' },
   recording: { dot: 'bg-recording', text: 'Recording', bg: 'bg-recording-bg', border: 'border-recording/20' },
@@ -49,7 +55,10 @@ export function TitleBar({ onOpenCommandPalette }: TitleBarProps) {
       {/* Status badge — while recording it emits an expanding red ring (see
           .rec-badge-pulse in index.css) so the REC state is unmistakable without
           a full-viewport frame. */}
-      <div className={`no-drag flex items-center gap-1.5 px-2.5 py-1 rounded-full ${cfg.bg} border ${cfg.border} mr-[140px] ${status === 'recording' ? 'rec-badge-pulse' : ''}`}>
+      <div
+        className={`no-drag flex items-center gap-1.5 px-2.5 py-1 rounded-full ${cfg.bg} border ${cfg.border} ${status === 'recording' ? 'rec-badge-pulse' : ''}`}
+        style={{ marginRight: CAPTION_BUTTONS_WIDTH_PX }}
+      >
         <div className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} style={{ animation: 'pulse-dot 2s ease-in-out infinite' }} />
         <span className="text-[11px] font-medium text-text-primary">{cfg.text}</span>
       </div>

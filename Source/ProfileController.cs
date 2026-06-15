@@ -71,7 +71,6 @@ namespace TrueReplayer.Controllers
         // Theme colors for native dialogs (sent from React frontend)
         private SolidColorBrush? _dialogBackground;
         private SolidColorBrush? _dialogForeground;
-        private SolidColorBrush? _dialogTextSecondary;
 
         public ProfileController(MainWindow window)
         {
@@ -79,11 +78,15 @@ namespace TrueReplayer.Controllers
             SetupProfileWatcher();
         }
 
+        // Native ContentDialogs only theme their background + primary foreground today, so only
+        // bgCard/bgSurface and textPrimary are read here. textSecondary, accentSolid and borderSubtle
+        // are accepted but intentionally unused: the signature mirrors the full theme payload sent by
+        // WebViewBridge.HandleThemeColors (which forwards all six fields) so the call site stays a
+        // straight pass-through and a future dialog can start consuming them without a contract change.
         public void SetDialogThemeColors(string bgSurface, string bgCard, string textPrimary, string textSecondary, string? accentSolid, string? borderSubtle)
         {
             _dialogBackground = ParseHexBrush(bgCard) ?? ParseHexBrush(bgSurface);
             _dialogForeground = ParseHexBrush(textPrimary);
-            _dialogTextSecondary = ParseHexBrush(textSecondary);
         }
 
         private static SolidColorBrush? ParseHexBrush(string? hex)
@@ -254,7 +257,7 @@ namespace TrueReplayer.Controllers
             if (profile == null)
             {
                 System.Diagnostics.Debug.WriteLine($"Falha ao carregar o perfil '{profileName}' do arquivo '{entry.FilePath}'.");
-                return profile;
+                return null;
             }
 
             // Same validator hook as LoadProfileAsync — also covers sub-profile calls via
