@@ -2186,72 +2186,75 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               use X/Y but happen to live in showCoords). Lets the user click somewhere on
               screen to fill both coords without manual typing or re-recording. */}
           {showCoords && (
-            <div className="flex gap-2.5">
-              <Field label="X" className="flex-1">
-                {/* x === '' means "no override" — the action keeps its recorded coord.
-                    Pass null so the "—" placeholder shows instead of "0" which would be
-                    a legitimate top-left coordinate but is here ambiguous with unset. */}
-                <NumberInput
-                  value={x === '' ? null : (Number.isFinite(parseInt(x, 10)) ? parseInt(x, 10) : null)}
-                  onChange={(n) => setX(String(n))}
-                  onClear={() => setX('')}
-                  placeholder="—"
-                  inputWidth="w-full"
-                  inputHeight="h-8"
-                  ariaLabel="X coordinate"
-                />
-              </Field>
-              <Field label="Y" className="flex-1">
-                <NumberInput
-                  value={y === '' ? null : (Number.isFinite(parseInt(y, 10)) ? parseInt(y, 10) : null)}
-                  onChange={(n) => setY(String(n))}
-                  onClear={() => setY('')}
-                  placeholder="—"
-                  inputWidth="w-full"
-                  inputHeight="h-8"
-                  ariaLabel="Y coordinate"
-                />
-              </Field>
+            <div className="space-y-2.5">
+              {/* Row 1: X / Y at full width — no longer squeezed by the action buttons. */}
+              <div className="flex gap-2.5">
+                <Field label="X" className="flex-1">
+                  {/* x === '' means "no override" — the action keeps its recorded coord.
+                      Pass null so the "—" placeholder shows instead of "0" which would be
+                      a legitimate top-left coordinate but is here ambiguous with unset. */}
+                  <NumberInput
+                    value={x === '' ? null : (Number.isFinite(parseInt(x, 10)) ? parseInt(x, 10) : null)}
+                    onChange={(n) => setX(String(n))}
+                    onClear={() => setX('')}
+                    placeholder="—"
+                    inputWidth="w-full"
+                    inputHeight="h-8"
+                    ariaLabel="X coordinate"
+                  />
+                </Field>
+                <Field label="Y" className="flex-1">
+                  <NumberInput
+                    value={y === '' ? null : (Number.isFinite(parseInt(y, 10)) ? parseInt(y, 10) : null)}
+                    onChange={(n) => setY(String(n))}
+                    onClear={() => setY('')}
+                    placeholder="—"
+                    inputWidth="w-full"
+                    inputHeight="h-8"
+                    ariaLabel="Y coordinate"
+                  />
+                </Field>
+              </div>
+              {/* Row 2: coordinate tools — "Pick from screen" gets the room to read clearly;
+                  Copy / Paste stay as compact icon buttons on the right. */}
               {isClickHalf && (
-                <div className="flex flex-col justify-end gap-1">
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={handlePickPosition}
-                      disabled={pickPositionRequestId != null}
-                      className="h-8 flex items-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      title="Click anywhere on screen to set X/Y"
-                    >
-                      <Crosshair size={12} />
-                      {pickPositionRequestId != null ? 'Picking…' : 'Pick'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCopyCoords}
-                      style={coordCopyFlash ? { borderColor: 'var(--color-replay)', color: 'var(--color-replay)', backgroundColor: 'var(--color-replay-bg)' } : undefined}
-                      className={`h-8 w-8 flex items-center justify-center border rounded transition-colors ${
-                        coordCopyFlash
-                          ? ''
-                          : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
-                      }`}
-                      title={coordCopyFlash ? 'Copied!' : 'Copy X,Y to clipboard'}
-                    >
-                      {coordCopyFlash ? <Check size={12} /> : <Copy size={12} />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handlePasteCoords}
-                      style={coordPasteError ? { borderColor: 'var(--color-recording)', color: 'var(--color-recording)', backgroundColor: 'var(--color-recording-bg)' } : undefined}
-                      className={`h-8 w-8 flex items-center justify-center border rounded transition-colors ${
-                        coordPasteError
-                          ? ''
-                          : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
-                      }`}
-                      title={coordPasteError ? 'Clipboard does not contain valid coords' : 'Paste X,Y from clipboard'}
-                    >
-                      {coordPasteError ? <X size={12} /> : <ClipboardPaste size={12} />}
-                    </button>
-                  </div>
+                <div className="flex items-stretch gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handlePickPosition}
+                    disabled={pickPositionRequestId != null}
+                    className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Click anywhere on screen to set X/Y"
+                  >
+                    <Crosshair size={13} />
+                    {pickPositionRequestId != null ? 'Picking…' : 'Pick from screen'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyCoords}
+                    style={coordCopyFlash ? { borderColor: 'var(--color-replay)', color: 'var(--color-replay)', backgroundColor: 'var(--color-replay-bg)' } : undefined}
+                    className={`h-8 w-8 shrink-0 flex items-center justify-center border rounded transition-colors ${
+                      coordCopyFlash
+                        ? ''
+                        : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
+                    }`}
+                    title={coordCopyFlash ? 'Copied!' : 'Copy X,Y to clipboard'}
+                  >
+                    {coordCopyFlash ? <Check size={12} /> : <Copy size={12} />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handlePasteCoords}
+                    style={coordPasteError ? { borderColor: 'var(--color-recording)', color: 'var(--color-recording)', backgroundColor: 'var(--color-recording-bg)' } : undefined}
+                    className={`h-8 w-8 shrink-0 flex items-center justify-center border rounded transition-colors ${
+                      coordPasteError
+                        ? ''
+                        : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
+                    }`}
+                    title={coordPasteError ? 'Clipboard does not contain valid coords' : 'Paste X,Y from clipboard'}
+                  >
+                    {coordPasteError ? <X size={12} /> : <ClipboardPaste size={12} />}
+                  </button>
                 </div>
               )}
             </div>
