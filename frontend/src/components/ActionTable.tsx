@@ -826,27 +826,29 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     let indices = selectedIndices.has(idx)
       ? Array.from(selectedIndices).sort((a, b) => a - b)
       : [idx];
-    // Drag an IF row solo → auto-expand the drag set to include the whole block
-    // (body + optional ELSE + matching ENDIF). Without this, dragging the IF alone
-    // would leave its body rows in place and the engine would treat them as
-    // unconditional. When the user already has a multi-select that includes the IF,
-    // respect their explicit selection — they may want to extract the IF + only
-    // some of its body rows (the reorder backend will renumber correctly and the
-    // load-time validator catches any imbalance the reorder leaves behind).
-    const t = actions[idx]?.actionType;
-    if (t === 'If' && !selectedIndices.has(idx)) {
-      const endIfIdx = blockInfo.endIfOf.get(idx);
-      if (endIfIdx !== undefined && endIfIdx > idx) {
-        indices = [];
-        for (let i = idx; i <= endIfIdx; i++) indices.push(i);
+    // Snap the drag set to whole conditional blocks. Any selected row that sits
+    // inside an IF…ENDIF span (solo IF drag, or a multi-select that straddles a
+    // block boundary) pulls in that block's full span — for nested blocks, every
+    // enclosing IF span. Without this, a partial-block move leaves orphaned IF/
+    // ELSE/ENDIF rows behind: the reorder backend (HandleActionsReorder) renumbers
+    // but does NOT run ConditionalBlockValidator, so the imbalance corrupts the
+    // live list and only surfaces on the next profile load.
+    const set = new Set(indices);
+    for (const sel of indices) {
+      // A row r is enclosed by IF j iff j…endIfOf(j) covers r. Walk all IFs (small
+      // count even on large lists) and union every enclosing span.
+      for (const [ifIdx, endIfIdx] of blockInfo.endIfOf) {
+        if (ifIdx <= sel && sel <= endIfIdx)
+          for (let i = ifIdx; i <= endIfIdx; i++) set.add(i);
       }
     }
+    if (set.size !== indices.length) indices = Array.from(set).sort((a, b) => a - b);
     // Suppress the click that fires after the drop — handleRowClick consumes and
     // resets the flag (same contract as the old mouse-event implementation).
     dragOccurred.current = true;
     setActiveDragId(String(ev.active.id));
     setDragIndices(indices);
-  }, [sortableIds, selectedIndices, actions, blockInfo]);
+  }, [sortableIds, selectedIndices, blockInfo]);
 
   const handleDragEnd = useCallback((ev: DragEndEvent) => {
     const indices = dragIndices ?? [];
@@ -2037,13 +2039,20 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             setSelectedIndices(new Set());
           }}
           onMoveUp={() => {
-            // Mirror the Alt+↑ hotkey logic: shift the contiguous indices one slot up
-            // and re-emit selection:set so the highlighted rows follow their new
-            // positions. Guarded by canMoveUp so first-row selections no-op silently.
+            // Mirror the Alt+↑ hotkey logic: shift the indices one slot up and re-emit
+            // selection:set so the highlighted rows follow their new positions. Guarded
+            // by canMoveUp so first-row selections no-op silently.
             if (!canMoveUp) return;
             const minIdx = selSorted[0];
             send({ type: 'actions:reorder', payload: { indices: selSorted, targetIndex: minIdx - 1 } });
-            window.dispatchEvent(new CustomEvent('selection:set', { detail: selSorted.map(i => i - 1) }));
+            // HandleActionsReorder reinserts the removed rows CONTIGUOUSLY at the
+            // adjusted target — landing at [minIdx-1 .. minIdx-1+count-1] regardless of
+            // whether the original selection was contiguous. A per-index i-1 highlight
+            // would point at the wrong rows for non-contiguous selections, so emit the
+            // contiguous landing range instead.
+            window.dispatchEvent(new CustomEvent('selection:set', {
+              detail: selSorted.map((_, i) => minIdx - 1 + i),
+            }));
           }}
           onMoveDown={() => {
             if (!canMoveDown) return;
@@ -2051,7 +2060,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             // targetIndex = maxIdx + 2 because the reorder API treats the target as the
             // pre-shift insertion point (mirrors the Alt+↓ hotkey behaviour exactly).
             send({ type: 'actions:reorder', payload: { indices: selSorted, targetIndex: maxIdx + 2 } });
-            window.dispatchEvent(new CustomEvent('selection:set', { detail: selSorted.map(i => i + 1) }));
+            // As in onMoveUp: rows land contiguously. All selected indices are < the
+            // target so the backend's adjustedTarget = maxIdx + 2 - count, landing at
+            // [maxIdx+2-count .. maxIdx+1]. Emit that range, not a per-index i+1 map.
+            const count = selSorted.length;
+            window.dispatchEvent(new CustomEvent('selection:set', {
+              detail: selSorted.map((_, i) => maxIdx + 2 - count + i),
+            }));
           }}
           onSetDelay={(delay) => {
             send({ type: 'actions:bulkUpdateDelay', payload: { indices: selSorted, delay } });

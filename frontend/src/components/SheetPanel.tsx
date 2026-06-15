@@ -738,14 +738,24 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   // panel, then reopening leaves the field stuck in capture mode because the input was
   // unmounted before its blur could fire. Also tear down any pending idle-cancel timer
   // so it doesn't fire against a stale input ref after the panel reopens. Finally drop
-  // any in-flight pickPosition request: if the user opens action A, clicks Pick, closes
-  // the panel, then opens action B, the overlay's reply would otherwise land on B.
+  // every in-flight overlay/extension request: the panel doesn't remount on action
+  // change, so if the user opens action A, fires Pick / eyedropper / Test action / Test
+  // pixel, then switches to action B, the pending reply would otherwise land on B (and
+  // a stuck requestId leaves B's button frozen at "Picking… / Running…"). Also kill the
+  // Test-action safety timeout so it can't fire against B, and clear the transient test
+  // results so B doesn't briefly show A's outcome.
   useEffect(() => {
     setKeyFieldFocused(false);
     setPauseHotkeyFocused(false);
     disarmKeyCaptureTimer();
     setPickPositionRequestId(null);
-  }, [actionIndex, disarmKeyCaptureTimer]);
+    clearTestTimeout();
+    setTestRequestId(null);
+    setTestResult(null);
+    setPickColorRequestId(null);
+    setTestPixelRequestId(null);
+    setTestPixelResult(null);
+  }, [actionIndex, disarmKeyCaptureTimer, clearTestTimeout]);
 
   // Unmount cleanup — any pending timers must be torn down so they don't fire against
   // refs to gone DOM nodes (would warn in React strict-mode dev, harmless in prod but

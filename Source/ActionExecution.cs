@@ -927,13 +927,26 @@ namespace TrueReplayer.Services
                         {
                             recX = x - rect.Left;
                             recY = y - rect.Top;
-                            // Capture window geometry on first click for Restore Position / Restore Size
+                            // Capture window geometry on first click for Restore Position / Restore Size.
+                            // WindowFromPoint can resolve to the wrong window (a tooltip, the desktop, or
+                            // TrueReplayer itself if the click lands on our own UI) — capturing that would
+                            // permanently poison the profile's restore geometry. Skip our own process and
+                            // implausibly small rects to rule out the common poison cases. This is a
+                            // heuristic, not a strict Window Target match (the recorder has no target
+                            // reference), so an unrelated large window could still seed geometry.
                             if (Models.UserProfile.Current.WindowWidth == 0)
                             {
-                                Models.UserProfile.Current.WindowWidth = rect.Right - rect.Left;
-                                Models.UserProfile.Current.WindowHeight = rect.Bottom - rect.Top;
-                                Models.UserProfile.Current.WindowX = rect.Left;
-                                Models.UserProfile.Current.WindowY = rect.Top;
+                                int w = rect.Right - rect.Left;
+                                int h = rect.Bottom - rect.Top;
+                                NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+                                bool isOwnWindow = pid == (uint)Environment.ProcessId;
+                                if (!isOwnWindow && w >= 100 && h >= 100)
+                                {
+                                    Models.UserProfile.Current.WindowWidth = w;
+                                    Models.UserProfile.Current.WindowHeight = h;
+                                    Models.UserProfile.Current.WindowX = rect.Left;
+                                    Models.UserProfile.Current.WindowY = rect.Top;
+                                }
                             }
                         }
                     }
@@ -1297,7 +1310,12 @@ namespace TrueReplayer.Services
                     }
                 }, token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
             }
-            catch (TaskCanceledException) { }
+            // OperationCanceledException is the BASE type (TaskCanceledException derives from it),
+            // so this catches both. A plain Stop during a Pause or an instant probe surfaces a bare
+            // OperationCanceledException (ExecutePause's ThrowIfCancellationRequested, InstantProbe's
+            // rethrow) — catching only TaskCanceledException let it escape and fault the run, making
+            // StartReplay's continuation show a spurious "error:" toast on a normal cancel.
+            catch (OperationCanceledException) { }
             finally
             {
                 // Final push so the StatusBar lands on the actual completion count regardless
@@ -2275,7 +2293,7 @@ namespace TrueReplayer.Services
             else
             {
                 var tcsClip = new TaskCompletionSource<string?>();
-                dispatcherQueue.TryEnqueue(async () =>
+                if (!dispatcherQueue.TryEnqueue(async () =>
                 {
                     try
                     {
@@ -2288,7 +2306,11 @@ namespace TrueReplayer.Services
                         else tcsClip.SetResult(null);
                     }
                     catch { tcsClip.SetResult(null); }
-                });
+                }))
+                {
+                    // Queue shut down (app closing) — unblock the awaiter with "no clipboard".
+                    tcsClip.TrySetResult(null);
+                }
                 clipContent = await tcsClip.Task;
             }
 
@@ -2333,7 +2355,7 @@ namespace TrueReplayer.Services
 
             // Save original clipboard content so we can restore it after pasting
             var tcsBackup = new TaskCompletionSource<string?>();
-            dispatcherQueue.TryEnqueue(async () =>
+            if (!dispatcherQueue.TryEnqueue(async () =>
             {
                 try
                 {
@@ -2352,7 +2374,11 @@ namespace TrueReplayer.Services
                 {
                     tcsBackup.SetResult(null);
                 }
-            });
+            }))
+            {
+                // Queue shut down (app closing) — unblock the awaiter with "no backup".
+                tcsBackup.TrySetResult(null);
+            }
             var originalClipboard = await tcsBackup.Task;
 
             // Resolve {clipboard[:mods]} placeholders using the saved clipboard content
@@ -3001,7 +3027,7 @@ namespace TrueReplayer.Services
         private async Task PasteTextViaClipboard(string text, CancellationToken token)
         {
             var tcs = new TaskCompletionSource<bool>();
-            dispatcherQueue.TryEnqueue(() =>
+            if (!dispatcherQueue.TryEnqueue(() =>
             {
                 try
                 {
@@ -3014,7 +3040,11 @@ namespace TrueReplayer.Services
                 {
                     tcs.SetResult(false);
                 }
-            });
+            }))
+            {
+                // Queue shut down (app closing) — unblock the awaiter; the false result bails below.
+                tcs.TrySetResult(false);
+            }
 
             if (!await tcs.Task || token.IsCancellationRequested) return;
 

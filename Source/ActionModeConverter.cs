@@ -41,6 +41,12 @@ namespace TrueReplayer.Services
         private static readonly HashSet<string> Modifiers =
             new(StringComparer.OrdinalIgnoreCase) { "Ctrl", "Shift", "Alt", "Win" };
 
+        // ActionItem.Key is non-nullable by declaration, but System.Text.Json can deserialize an
+        // explicit JSON null into it from a hand-edited / imported .trprofile. HashSet.Contains(null)
+        // under OrdinalIgnoreCase throws, so guard here and treat a null Key as a non-modifier
+        // (consistent with KeyEq, which already tolerates null).
+        private static bool IsModifier(string? key) => key != null && Modifiers.Contains(key);
+
         // ── Paired → Combined ─────────────────────────────────────────────
         public static List<ActionItem> ToCombined(IReadOnlyList<ActionItem> input)
         {
@@ -68,7 +74,7 @@ namespace TrueReplayer.Services
                 // Held key: adjacent non-modifier KeyDown+KeyUp whose Up carries a real hold
                 // → HoldKey, preserving the exact press duration. Checked before the keystroke
                 // matcher (which would otherwise flatten it into an instant tap).
-                if (a.ActionType == "KeyDown" && !Modifiers.Contains(a.Key)
+                if (a.ActionType == "KeyDown" && !IsModifier(a.Key)
                     && i + 1 < input.Count
                     && input[i + 1].ActionType == "KeyUp" && KeyEq(input[i + 1].Key, a.Key)
                     && input[i + 1].Delay >= HoldThresholdMs)
@@ -197,13 +203,13 @@ namespace TrueReplayer.Services
 
             int j = start;
             var mods = new List<string>();
-            while (j < input.Count && input[j].ActionType == "KeyDown" && Modifiers.Contains(input[j].Key))
+            while (j < input.Count && input[j].ActionType == "KeyDown" && IsModifier(input[j].Key))
             {
                 mods.Add(input[j].Key);
                 j++;
             }
 
-            bool haveKey = j < input.Count && input[j].ActionType == "KeyDown" && !Modifiers.Contains(input[j].Key);
+            bool haveKey = j < input.Count && input[j].ActionType == "KeyDown" && !IsModifier(input[j].Key);
             if (!haveKey)
             {
                 // Lone modifier(s): expect a KeyUp for each held modifier, in reverse order.

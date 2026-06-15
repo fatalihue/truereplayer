@@ -326,6 +326,11 @@ export function Toolbar(_props: ToolbarProps) {
           send({ type: 'actions:copyInternal', payload: { indices: Array.from(sel) } });
         }
       }
+      // Mutating shortcuts (paste, reorder) are blocked during record/replay so a
+      // stray keystroke can't reshape the actions list while data is being captured
+      // or executed — mirrors the disabled state of the Move/Paste toolbar buttons.
+      // Ctrl+C above is read-only, so it stays allowed (it returns before reaching here).
+      if (buttonStates.recordingActive || buttonStates.replayActive) return;
       if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
         e.preventDefault();
         const sel = selectionRef.current;
@@ -345,12 +350,17 @@ export function Toolbar(_props: ToolbarProps) {
           const minIdx = indices[0];
           if (minIdx <= 0) return;
           send({ type: 'actions:reorder', payload: { indices, targetIndex: minIdx - 1 } });
-          window.dispatchEvent(new CustomEvent('selection:set', { detail: indices.map(i => i - 1) }));
+          // Backend reinserts the rows CONTIGUOUSLY at the adjusted target, so they land at
+          // [minIdx-1 .. minIdx-1+count-1]. A per-index i-1 map mis-highlights non-contiguous
+          // selections — emit the contiguous range (mirrors the bulk Move Up button fix).
+          window.dispatchEvent(new CustomEvent('selection:set', { detail: indices.map((_, i) => minIdx - 1 + i) }));
         } else {
           const maxIdx = indices[indices.length - 1];
           if (maxIdx >= actions.length - 1) return;
           send({ type: 'actions:reorder', payload: { indices, targetIndex: maxIdx + 2 } });
-          window.dispatchEvent(new CustomEvent('selection:set', { detail: indices.map(i => i + 1) }));
+          // adjustedTarget = maxIdx + 2 - count → rows land at [maxIdx+2-count .. maxIdx+1].
+          const count = indices.length;
+          window.dispatchEvent(new CustomEvent('selection:set', { detail: indices.map((_, i) => maxIdx + 2 - count + i) }));
         }
       }
     };
@@ -359,7 +369,7 @@ export function Toolbar(_props: ToolbarProps) {
     // selectionRef is a useRef result — stable identity across renders, so listing it
     // doesn't cause extra subscribes. Adding it just silences exhaustive-deps without
     // changing behaviour (handler always reads .current at the time it fires).
-  }, [send, actions.length, selectionRef]);
+  }, [send, actions.length, selectionRef, buttonStates.recordingActive, buttonStates.replayActive]);
 
   return (
     <>

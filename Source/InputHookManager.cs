@@ -142,7 +142,11 @@ namespace TrueReplayer
         private static int _hotstringBufferLen = 0;
         private static readonly HashSet<int> _terminatorVkCodes = new() { 0x0D, 0x20, 0x09 }; // Enter, Space, Tab
 
-        public static bool IsReplayingAction { get; set; } = false;
+        // Backed by a volatile field (matching the cross-thread fields above): written from the
+        // replay worker thread (ActionExecution.cs) and read on every keystroke/scroll in the hook
+        // callbacks. A plain auto-property gives no cross-thread visibility guarantee; volatile does.
+        private static volatile bool _isReplayingAction = false;
+        public static bool IsReplayingAction { get => _isReplayingAction; set => _isReplayingAction = value; }
 
         // Single-use hotkey listener for Pause action: when ExecutePause is awaiting, the registered
         // hotkey resumes replay. Volatile so the hook thread sees writes from the replay thread
@@ -233,10 +237,25 @@ namespace TrueReplayer
 
         public static void Start()
         {
+            // SetWindowsHookEx returns IntPtr.Zero on failure (e.g. another LL hook hogging the
+            // chain, or a desktop-isolation restriction). Without these checks a failed install is
+            // totally silent — every hotkey and all recording would be dead with no diagnostic.
+            // GetLastWin32Error() is meaningful because the SetWindowsHookEx DllImports declare
+            // SetLastError=true (NativeMethods.cs).
             if (_mouseHookId == IntPtr.Zero)
+            {
                 _mouseHookId = NativeMethods.SetMouseHook(_mouseProc);
+                if (_mouseHookId == IntPtr.Zero)
+                    TrueReplayer.Services.DiagnosticLog.Error(
+                        $"SetMouseHook failed — mouse hook not installed (recording/clicker hotkeys disabled). Win32 error {Marshal.GetLastWin32Error()}.");
+            }
             if (_keyboardHookId == IntPtr.Zero)
+            {
                 _keyboardHookId = NativeMethods.SetKeyboardHook(_keyboardProc);
+                if (_keyboardHookId == IntPtr.Zero)
+                    TrueReplayer.Services.DiagnosticLog.Error(
+                        $"SetKeyboardHook failed — keyboard hook not installed (all hotkeys/hotstrings/recording disabled). Win32 error {Marshal.GetLastWin32Error()}.");
+            }
         }
 
         public static void Stop()
@@ -522,30 +541,27 @@ namespace TrueReplayer
         {
             if (count <= 0) return;
 
-            bool wasReplaying = IsReplayingAction;
-            IsReplayingAction = true;
+            // No need to flip IsReplayingAction here: the backspaces we inject below go out via
+            // SendInput and are already dropped by the keyboard hook's LLKHF_INJECTED gate (see
+            // KeyboardHookCallbackCore), so they never feed the hotstring buffer or re-trigger a
+            // hotkey. The previous snapshot/restore of that shared cross-thread flag was both
+            // redundant and racy — it runs on the hook thread, and if the replay worker thread set
+            // the flag true between the snapshot and the finally, the restore would clobber it back
+            // to false and silently disable the replay-injection guard.
+            int inputSize = Marshal.SizeOf(typeof(NativeMethods.INPUT));
+            ushort vkBack = 0x08;
+            ushort scanBack = (ushort)NativeMethods.MapVirtualKey(vkBack, 0);
 
-            try
+            for (int i = 0; i < count; i++)
             {
-                int inputSize = Marshal.SizeOf(typeof(NativeMethods.INPUT));
-                ushort vkBack = 0x08;
-                ushort scanBack = (ushort)NativeMethods.MapVirtualKey(vkBack, 0);
-
-                for (int i = 0; i < count; i++)
+                var inputs = new NativeMethods.INPUT[]
                 {
-                    var inputs = new NativeMethods.INPUT[]
-                    {
-                        new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion {
-                            ki = new NativeMethods.KEYBDINPUT { wVk = vkBack, wScan = scanBack, dwFlags = NativeMethods.KEYEVENTF_SCANCODE } } },
-                        new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion {
-                            ki = new NativeMethods.KEYBDINPUT { wVk = vkBack, wScan = scanBack, dwFlags = NativeMethods.KEYEVENTF_KEYUP | NativeMethods.KEYEVENTF_SCANCODE } } },
-                    };
-                    NativeMethods.SendInput((uint)inputs.Length, inputs, inputSize);
-                }
-            }
-            finally
-            {
-                IsReplayingAction = wasReplaying;
+                    new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion {
+                        ki = new NativeMethods.KEYBDINPUT { wVk = vkBack, wScan = scanBack, dwFlags = NativeMethods.KEYEVENTF_SCANCODE } } },
+                    new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion {
+                        ki = new NativeMethods.KEYBDINPUT { wVk = vkBack, wScan = scanBack, dwFlags = NativeMethods.KEYEVENTF_KEYUP | NativeMethods.KEYEVENTF_SCANCODE } } },
+                };
+                NativeMethods.SendInput((uint)inputs.Length, inputs, inputSize);
             }
         }
 

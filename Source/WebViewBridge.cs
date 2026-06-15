@@ -40,6 +40,17 @@ namespace TrueReplayer
         private readonly Stack<string> _redoStack = new();
         private const int MaxHistory = 50;
 
+        // Base64 cache for WaitImage / IF-Image reference PNGs, keyed by "profileName\0imagePath".
+        // PushActionsUpdate and the cold-start state:init projection were re-reading + re-encoding
+        // EVERY image row from disk on the UI thread on EVERY actions mutation (edit, reorder,
+        // toggle, undo/redo, bulk), even when no image changed — O(N PNGs) sync File.ReadAllBytes +
+        // Convert.ToBase64String per keystroke-level push. Every image mutation (capture/crop/paste/
+        // import/duplicate) assigns a brand-new GUID filename to ImagePath, so a stale entry is
+        // naturally superseded by the new key — no per-path invalidation is needed. The only
+        // wholesale clear is in the CurrentProfileName setter (rename/delete/switch can reuse the
+        // same filename under a different profile dir), which also bounds the cache's growth.
+        private readonly Dictionary<string, string> _imageBase64Cache = new();
+
         // Internal action clipboard for copy/paste between profiles
         private List<ActionItem>? _copiedActions = null;
         // Profile name from which _copiedActions was copied — used to locate WaitImage PNGs
@@ -119,6 +130,12 @@ namespace TrueReplayer
             get => _currentProfileName;
             set
             {
+                // Switching profiles (or landing on "No Profile") invalidates the base64
+                // image cache: a different profile's actions reference a different image dir,
+                // and rename/delete can reuse the same filename under a new dir. Clearing on
+                // any change keeps the cache from serving a stale PNG and bounds its growth.
+                if (_currentProfileName != value)
+                    _imageBase64Cache.Clear();
                 _currentProfileName = value;
                 // Propagate to the hook so the global Replay hotkey gate can look up the
                 // active profile's target in _windowTargets — same registry that powers the
@@ -760,6 +777,19 @@ namespace TrueReplayer
             browserBridge?.SetRecordingMode(status == "recording" && BrowserSelectorEnabled);
         }
 
+        // Reads (and caches) a reference image as base64. See _imageBase64Cache for the
+        // caching rationale — the read is the only sync File.ReadAllBytes + base64 on the
+        // actions-push hot path, so memoizing it removes the per-mutation re-encode cost.
+        private string GetImageBase64Cached(string profileName, string imagePath)
+        {
+            string cacheKey = profileName + "\0" + imagePath;
+            if (_imageBase64Cache.TryGetValue(cacheKey, out var cached))
+                return cached;
+            string b64 = ImageStorageService.ReadAsBase64(profileName, imagePath) ?? "";
+            _imageBase64Cache[cacheKey] = b64;
+            return b64;
+        }
+
         public void PushActionsUpdate()
         {
             string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
@@ -788,7 +818,7 @@ namespace TrueReplayer
                 imageBase64 = !string.IsNullOrEmpty(a.ImagePath) && (
                         a.ActionType == "WaitImage"
                         || (a.ActionType == "If" && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)))
-                    ? ImageStorageService.ReadAsBase64(profileName, a.ImagePath) ?? ""
+                    ? GetImageBase64Cached(profileName, a.ImagePath)
                     : "",
                 // WaitImage extras (forwarded so the editor restores their state)
                 waitImageOnTimeout = a.WaitImageOnTimeout,
@@ -1312,7 +1342,7 @@ namespace TrueReplayer
                     imageBase64 = !string.IsNullOrEmpty(a.ImagePath) && (
                             a.ActionType == "WaitImage"
                             || (a.ActionType == "If" && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)))
-                        ? ImageStorageService.ReadAsBase64(stateInitProfileName, a.ImagePath) ?? ""
+                        ? GetImageBase64Cached(stateInitProfileName, a.ImagePath)
                         : "",
                     // WaitImage extras — must match PushActionsUpdate so the editor restores
                     // the right state on cold start. Without these, the editor saw undefined
@@ -1504,6 +1534,13 @@ namespace TrueReplayer
         // flipping this to false alone would leave updates undetectable to the user.
         private const bool AutoApplyUpdates = true;
 
+        // Re-entrancy guard for HandleUpdateApply. It's reachable from three places that can
+        // overlap: the auto-apply branch of CheckForUpdateAsync (fired on startup AND on every
+        // ApplyProfile/PushFullState), the "update:check" message, and the "update:apply"
+        // message. Without the guard a second invocation kicks off a parallel download +
+        // ApplyAndRestart, racing the Velopack apply against itself.
+        private bool _updateInProgress;
+
         private async Task CheckForUpdateAsync()
         {
             // Announce we're starting so the overlay can show its indeterminate "Checking…"
@@ -1556,31 +1593,44 @@ namespace TrueReplayer
 
         private async Task HandleUpdateApply()
         {
-            SendMessage("update:progress", new { percent = 0 });
-
-            var success = await UpdateService.DownloadUpdateAsync(progress =>
+            // Short-circuit re-entrant calls (auto-apply + manual update:check/update:apply can
+            // overlap). The flag stays set through the success path so the 1.8 s pre-restart
+            // delay can't be interrupted by a second apply; ApplyAndRestart exits the process,
+            // so the finally only runs (clearing the flag) on the download-failure path.
+            if (_updateInProgress) return;
+            _updateInProgress = true;
+            try
             {
-                dispatcherQueue.TryEnqueue(() =>
+                SendMessage("update:progress", new { percent = 0 });
+
+                var success = await UpdateService.DownloadUpdateAsync(progress =>
                 {
-                    SendMessage("update:progress", new { percent = progress });
+                    dispatcherQueue.TryEnqueue(() =>
+                    {
+                        SendMessage("update:progress", new { percent = progress });
+                    });
                 });
-            });
 
-            if (success)
-            {
-                SendMessage("update:ready", new { });
-                // Give the React overlay a beat to render the 'installing' phase before
-                // we tear down the process. Without the pause, Environment.Exit(0) inside
-                // ApplyAndRestart kills the WebView2 in the same tick as the message
-                // dispatch — the user never sees "Atualizando para vX.Y.Z" / "Aplicando
-                // atualização" / pulsing progress. 1.8 s matches the user's eye on the
-                // checkmark animation cycle without dragging the restart noticeably.
-                await Task.Delay(1800);
-                UpdateService.ApplyAndRestart();
+                if (success)
+                {
+                    SendMessage("update:ready", new { });
+                    // Give the React overlay a beat to render the 'installing' phase before
+                    // we tear down the process. Without the pause, Environment.Exit(0) inside
+                    // ApplyAndRestart kills the WebView2 in the same tick as the message
+                    // dispatch — the user never sees "Atualizando para vX.Y.Z" / "Aplicando
+                    // atualização" / pulsing progress. 1.8 s matches the user's eye on the
+                    // checkmark animation cycle without dragging the restart noticeably.
+                    await Task.Delay(1800);
+                    UpdateService.ApplyAndRestart();
+                }
+                else
+                {
+                    SendMessage("update:error", new { message = "Download failed" });
+                }
             }
-            else
+            finally
             {
-                SendMessage("update:error", new { message = "Download failed" });
+                _updateInProgress = false;
             }
         }
 
@@ -1855,12 +1905,15 @@ namespace TrueReplayer
             if (!payload.TryGetProperty("field", out var fieldEl)) return;
             if (!payload.TryGetProperty("value", out var valueEl)) return;
 
-            PushUndoState();
             int index = indexEl.GetInt32();
             string field = fieldEl.GetString() ?? "";
             string value = valueEl.GetString() ?? "";
 
             if (index < 0 || index >= actions.Count) return;
+
+            // Snapshot only once the edit is guaranteed to land — pushing before the bounds
+            // guard would leave a duplicate undo state (and clear the redo stack) on a no-op.
+            PushUndoState();
 
             var action = actions[index];
             switch (field)
@@ -2043,7 +2096,6 @@ namespace TrueReplayer
         /// </summary>
         private void HandleActionsReplaceRange(JsonElement payload)
         {
-            PushUndoState();
             int start = payload.GetProperty("startIndex").GetInt32();
             int count = payload.GetProperty("count").GetInt32();
             var replacementEl = payload.GetProperty("replacement");
@@ -2052,6 +2104,10 @@ namespace TrueReplayer
             // either no-op (clamp to zero) or throw on RemoveAt; we no-op silently
             // since the frontend has already validated the selection by this point.
             if (start < 0 || count <= 0 || start + count > actions.Count) return;
+
+            // Snapshot after the bounds guard so a rejected range doesn't push a
+            // duplicate undo state (and wipe the redo stack) for nothing.
+            PushUndoState();
 
             var newItems = JsonSerializer.Deserialize<List<ActionItem>>(
                 replacementEl.GetRawText(), JsonOptions) ?? new List<ActionItem>();
@@ -2141,12 +2197,15 @@ namespace TrueReplayer
 
         private void HandleActionsToggleSkip(JsonElement payload)
         {
-            PushUndoState();
             var indices = payload.GetProperty("indices").EnumerateArray()
                 .Select(e => e.GetInt32())
                 .Where(i => i >= 0 && i < actions.Count)
                 .ToList();
             if (indices.Count == 0) return;
+
+            // Snapshot only once we know at least one row will flip — pushing before the
+            // empty-selection guard would leak a duplicate undo state on a no-op.
+            PushUndoState();
 
             // Smart toggle: if every selected action is already skipped, un-skip all;
             // otherwise skip all. Consistent with how most UIs handle batch toggles.
@@ -2169,13 +2228,16 @@ namespace TrueReplayer
         // mixed selection never flips a flag the replay would ignore.
         private void HandleActionsToggleFocusClick(JsonElement payload)
         {
-            PushUndoState();
             var indices = payload.GetProperty("indices").EnumerateArray()
                 .Select(e => e.GetInt32())
                 .Where(i => i >= 0 && i < actions.Count)
                 .Where(i => actions[i].ActionType is "LeftClick" or "RightClick" or "MiddleClick")
                 .ToList();
             if (indices.Count == 0) return;
+
+            // Snapshot only after confirming at least one eligible click is selected, so a
+            // selection with no combined-click rows doesn't leave a stale undo state.
+            PushUndoState();
 
             bool allOn = indices.All(i => actions[i].IsFocusClick);
             bool newState = !allOn;
@@ -2189,7 +2251,6 @@ namespace TrueReplayer
 
         private void HandleActionsReorder(JsonElement payload)
         {
-            PushUndoState();
             var indices = payload.GetProperty("indices").EnumerateArray()
                 .Select(e => e.GetInt32())
                 .OrderBy(i => i)
@@ -2201,6 +2262,10 @@ namespace TrueReplayer
             // Validate all indices
             var validIndices = indices.Where(i => i >= 0 && i < actions.Count).ToList();
             if (validIndices.Count == 0) return;
+
+            // Snapshot after both index guards — an empty or fully-invalid selection is a
+            // no-op and must not push a duplicate undo state / clear the redo stack.
+            PushUndoState();
 
             // Suppress CollectionChanged during batch reorder
             actions.CollectionChanged -= OnActionsChanged;
@@ -2236,9 +2301,11 @@ namespace TrueReplayer
 
         private void HandleAddSendText(JsonElement payload)
         {
-            PushUndoState();
             string text = payload.GetProperty("text").GetString() ?? "";
             if (string.IsNullOrEmpty(text)) return;
+
+            // Snapshot after the empty-text guard so an empty payload doesn't leak undo state.
+            PushUndoState();
 
             int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
             var action = new ActionItem { ActionType = "SendText", Key = text, Delay = delay };
@@ -2262,12 +2329,14 @@ namespace TrueReplayer
 
         private void HandleEditSendText(JsonElement payload)
         {
-            PushUndoState();
             int index = payload.GetProperty("index").GetInt32();
             string text = payload.GetProperty("text").GetString() ?? "";
 
             if (index < 0 || index >= actions.Count) return;
             if (actions[index].ActionType != "SendText") return;
+
+            // Snapshot after the bounds + type guards so a stale/mismatched edit is a clean no-op.
+            PushUndoState();
 
             actions[index].Key = text;
             HasUnsavedChanges = true;
@@ -2278,9 +2347,11 @@ namespace TrueReplayer
 
         private void HandleAddRunProfile(JsonElement payload)
         {
-            PushUndoState();
             string targetName = payload.GetProperty("profileName").GetString() ?? "";
             if (string.IsNullOrEmpty(targetName)) return;
+
+            // Snapshot after the empty-name guard so a blank target doesn't leak undo state.
+            PushUndoState();
 
             int repeat = 1;
             if (payload.TryGetProperty("repeatCount", out var rEl) && rEl.ValueKind == JsonValueKind.Number)
@@ -2318,10 +2389,12 @@ namespace TrueReplayer
 
         private void HandleEditRunProfile(JsonElement payload)
         {
-            PushUndoState();
             int index = payload.GetProperty("index").GetInt32();
             if (index < 0 || index >= actions.Count) return;
             if (actions[index].ActionType != "RunProfile") return;
+
+            // Snapshot after the bounds + type guards so a stale/mismatched edit is a clean no-op.
+            PushUndoState();
 
             if (payload.TryGetProperty("profileName", out var nameEl) && nameEl.ValueKind == JsonValueKind.String)
             {
@@ -2381,10 +2454,16 @@ namespace TrueReplayer
 
         private void HandleInsertAction(JsonElement payload)
         {
-            PushUndoState();
             string actionType = payload.GetProperty("actionType").GetString() ?? "";
             int insertIndex = payload.GetProperty("insertIndex").GetInt32();
             if (string.IsNullOrEmpty(actionType)) return;
+
+            // Snapshot after the empty-actionType guard. The unrecognized-type tail below
+            // (the final `else`) pops this back off, mirroring HandleBulkUpdateCoord, so an
+            // unhandled type also leaves the undo/redo stacks untouched. The WaitImage and
+            // capture (LeftClick/KeyPress) branches keep this push — it's their only undo
+            // step since their async insert paths don't push one of their own.
+            PushUndoState();
 
             insertIndex = Math.Max(0, Math.Min(insertIndex, actions.Count));
 
@@ -2479,6 +2558,9 @@ namespace TrueReplayer
             }
             else
             {
+                // Unrecognized type — nothing was inserted, so drop the snapshot pushed above
+                // (which also restores the redo stack it cleared). Mirrors HandleBulkUpdateCoord.
+                _undoStack.TryPop(out _);
                 return;
             }
 
@@ -3645,7 +3727,6 @@ namespace TrueReplayer
 
         private void HandleDuplicateActions(JsonElement payload)
         {
-            PushUndoState();
             var indices = payload.GetProperty("indices").EnumerateArray()
                 .Select(e => e.GetInt32())
                 .OrderBy(i => i)
@@ -3655,6 +3736,9 @@ namespace TrueReplayer
 
             var validIndices = indices.Where(i => i >= 0 && i < actions.Count).ToList();
             if (validIndices.Count == 0) return;
+
+            // Snapshot after both index guards — nothing to duplicate means no undo state.
+            PushUndoState();
 
             string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
 
@@ -3946,68 +4030,82 @@ namespace TrueReplayer
             string profileDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
                 "TrueReplayer", "Profiles");
-            Directory.CreateDirectory(profileDir);
 
             if (!name.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
                 name += ".json";
 
             string fullPath = Path.Combine(profileDir, name);
-            if (File.Exists(fullPath))
+
+            // async void: an unhandled IO exception (CreateDirectory / SaveProfileAsync /
+            // load on a read-only or full disk) would post to the dispatcher and crash the
+            // app. Guard the whole disk-touching body and surface a toast, mirroring
+            // HandleProfileDuplicate/HandleProfileRename/HandleProfileDelete.
+            try
             {
-                // Silent no-op before — now surfaces a toast so the user knows why nothing
-                // happened. The frontend dialog also blocks this inline, but a hotkey / race
-                // could still reach here, so it stays defended on the backend too.
-                SendMessage("alert:show", new { message = $"A profile named \"{Path.GetFileNameWithoutExtension(name)}\" already exists" });
-                return;
-            }
+                Directory.CreateDirectory(profileDir);
 
-            var profile = UserProfile.Default;
-            await SettingsManager.SaveProfileAsync(fullPath, profile);
-            await profileController.RefreshProfileListAsync(true);
-
-            string profileName = Path.GetFileNameWithoutExtension(fullPath);
-
-            if (!string.IsNullOrEmpty(folderName))
-            {
-                var order = profileController.GetProfileOrder();
-                var folder = order.Folders.FirstOrDefault(f => f.Name == folderName);
-                if (folder != null)
+                if (File.Exists(fullPath))
                 {
-                    order.UngroupedOrder.Remove(profileName);
-                    if (!folder.Items.Contains(profileName))
-                        folder.Items.Add(profileName);
-                    await profileController.SaveProfileOrderAsync();
+                    // Silent no-op before — now surfaces a toast so the user knows why nothing
+                    // happened. The frontend dialog also blocks this inline, but a hotkey / race
+                    // could still reach here, so it stays defended on the backend too.
+                    SendMessage("alert:show", new { message = $"A profile named \"{Path.GetFileNameWithoutExtension(name)}\" already exists" });
+                    return;
                 }
-            }
 
-            // Auto-select the freshly created profile so the user can start adding
-            // actions without clicking it first. Mirrors what HandleProfileClick does
-            // on the activate path, minus the unsaved-changes guard (this row didn't
-            // exist a moment ago, nothing to lose) and the deselect branch (it's not
-            // a re-click). Works identically inside or outside a folder — folder
-            // placement happened above, activation just needs the canonical name.
-            var loaded = await profileController.LoadProfileByNameAsync(profileName);
-            if (loaded != null)
-            {
-                var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == profileName);
-                UserProfile.Current = loaded;
-                AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
-                CurrentProfileName = profileName;
-                CurrentProfilePath = entry?.FilePath;
-                HasUnsavedChanges = false;
-                if (entry != null)
+                var profile = UserProfile.Default;
+                await SettingsManager.SaveProfileAsync(fullPath, profile);
+                await profileController.RefreshProfileListAsync(true);
+
+                string profileName = Path.GetFileNameWithoutExtension(fullPath);
+
+                if (!string.IsNullOrEmpty(folderName))
                 {
-                    entry.UseRelativeCoordinates = loaded.UseRelativeCoordinates;
-                    entry.BringToFocus = loaded.BringToFocus;
+                    var order = profileController.GetProfileOrder();
+                    var folder = order.Folders.FirstOrDefault(f => f.Name == folderName);
+                    if (folder != null)
+                    {
+                        order.UngroupedOrder.Remove(profileName);
+                        if (!folder.Items.Contains(profileName))
+                            folder.Items.Add(profileName);
+                        await profileController.SaveProfileOrderAsync();
+                    }
                 }
-                UserProfile.Current.UseRelativeCoordinates = profileController.GetEffectiveRelativeCoordinates(profileName);
-                UserProfile.Current.BringToFocus = profileController.GetEffectiveBringToFocus(profileName);
-                ApplyProfile(loaded);
-                profileController.UpdateProfileColors(profileName);
-                TrayIconService.UpdateTrayIcon();
-            }
 
-            PushProfilesUpdate();
+                // Auto-select the freshly created profile so the user can start adding
+                // actions without clicking it first. Mirrors what HandleProfileClick does
+                // on the activate path, minus the unsaved-changes guard (this row didn't
+                // exist a moment ago, nothing to lose) and the deselect branch (it's not
+                // a re-click). Works identically inside or outside a folder — folder
+                // placement happened above, activation just needs the canonical name.
+                var loaded = await profileController.LoadProfileByNameAsync(profileName);
+                if (loaded != null)
+                {
+                    var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == profileName);
+                    UserProfile.Current = loaded;
+                    AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
+                    CurrentProfileName = profileName;
+                    CurrentProfilePath = entry?.FilePath;
+                    HasUnsavedChanges = false;
+                    if (entry != null)
+                    {
+                        entry.UseRelativeCoordinates = loaded.UseRelativeCoordinates;
+                        entry.BringToFocus = loaded.BringToFocus;
+                    }
+                    UserProfile.Current.UseRelativeCoordinates = profileController.GetEffectiveRelativeCoordinates(profileName);
+                    UserProfile.Current.BringToFocus = profileController.GetEffectiveBringToFocus(profileName);
+                    ApplyProfile(loaded);
+                    profileController.UpdateProfileColors(profileName);
+                    TrayIconService.UpdateTrayIcon();
+                }
+
+                PushProfilesUpdate();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Bridge] Create error: {ex.Message}");
+                SendMessage("alert:show", new { message = $"Could not create profile: {ex.Message}" });
+            }
         }
 
         private async void HandleProfileToggleDisable(JsonElement payload)
@@ -4018,23 +4116,33 @@ namespace TrueReplayer
             var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
             if (entry == null || !File.Exists(entry.FilePath)) return;
 
-            var profile = await SettingsManager.LoadProfileAsync(entry.FilePath);
-            if (profile == null) return;
+            // async void: a load/save IO failure would crash the app on the dispatcher.
+            // Guard the disk I/O and surface a toast, matching the other profile handlers.
+            try
+            {
+                var profile = await SettingsManager.LoadProfileAsync(entry.FilePath);
+                if (profile == null) return;
 
-            profile.IsDisabled = !profile.IsDisabled;
-            await SettingsManager.SaveProfileAsync(entry.FilePath, profile);
+                profile.IsDisabled = !profile.IsDisabled;
+                await SettingsManager.SaveProfileAsync(entry.FilePath, profile);
 
-            entry.IsDisabled = profile.IsDisabled;
-            if (CurrentProfileName == name)
-                UserProfile.Current.IsDisabled = profile.IsDisabled;
-            PushProfilesUpdate();
+                entry.IsDisabled = profile.IsDisabled;
+                if (CurrentProfileName == name)
+                    UserProfile.Current.IsDisabled = profile.IsDisabled;
+                PushProfilesUpdate();
 
-            // Re-register hotkeys so disabled profiles are excluded
-            var hotkeys = profileController.GetProfileHotkeys();
-            InputHookManager.RegisterProfileHotkeys(hotkeys);
-            InputHookManager.RegisterProfileTriggerModes(profileController.GetProfileTriggerModes());
-            var hotstrings = profileController.GetProfileHotstrings();
-            InputHookManager.RegisterProfileHotstrings(hotstrings);
+                // Re-register hotkeys so disabled profiles are excluded
+                var hotkeys = profileController.GetProfileHotkeys();
+                InputHookManager.RegisterProfileHotkeys(hotkeys);
+                InputHookManager.RegisterProfileTriggerModes(profileController.GetProfileTriggerModes());
+                var hotstrings = profileController.GetProfileHotstrings();
+                InputHookManager.RegisterProfileHotstrings(hotstrings);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Bridge] Toggle-disable error: {ex.Message}");
+                SendMessage("alert:show", new { message = $"Could not update \"{name}\": {ex.Message}" });
+            }
         }
 
         private async void HandleProfileDuplicate(JsonElement payload)

@@ -30,6 +30,10 @@ namespace TrueReplayer.Controllers
         private readonly MainWindow window;
         private FileSystemWatcher? profileWatcher;
         private CancellationTokenSource? debounceCts;
+        // Watcher events fire on threadpool threads and can overlap; this guards the
+        // cancel/dispose/reassign of debounceCts so two callbacks can't race into
+        // cancelling or disposing the same (already-disposed) CTS.
+        private readonly object _debounceLock = new();
         private bool _disposed;
         private DateTime suppressWatcherUntil = DateTime.MinValue;
 
@@ -568,11 +572,17 @@ namespace TrueReplayer.Controllers
             if (string.Equals(Path.GetFileName(e.FullPath), "profile-order.json", StringComparison.OrdinalIgnoreCase))
                 return;
 
-            debounceCts?.Cancel();
-            debounceCts?.Dispose();
-
-            debounceCts = new CancellationTokenSource();
-            var token = debounceCts.Token;
+            // Atomically retire the in-flight debounce and start a fresh one. Without the lock,
+            // two overlapping watcher callbacks could Cancel/Dispose the same CTS twice (or await
+            // a disposed token) and both reach RefreshProfileList.
+            CancellationToken token;
+            lock (_debounceLock)
+            {
+                debounceCts?.Cancel();
+                debounceCts?.Dispose();
+                debounceCts = new CancellationTokenSource();
+                token = debounceCts.Token;
+            }
 
             try
             {
@@ -587,7 +597,11 @@ namespace TrueReplayer.Controllers
                     });
                 }
             }
+            // TaskCanceledException: this debounce was superseded by a newer event.
+            // ObjectDisposedException: the CTS this token belongs to was disposed by a
+            // concurrent supersede/Dispose() between the snapshot and the await. Both are benign.
             catch (TaskCanceledException) { }
+            catch (ObjectDisposedException) { }
         }
 
         #endregion // Profile List Management
@@ -1336,21 +1350,35 @@ namespace TrueReplayer.Controllers
 
         private async Task MergeImportedOrganizationAsync(ProfileExportOrganization org)
         {
+            // Only honour pins/folder-membership for profiles that actually landed on disk.
+            // ConfirmImportAsync may have skipped (conflict=Skip / incompatible / unsafe name)
+            // or renamed entries ("name (2)"), and it doesn't expose the original->finalName map,
+            // so we gate on the post-import profile list. RefreshProfileListAsync(true) ran in the
+            // caller before this, so ProfileEntries reflects what's on disk now.
+            // LIMITATION: renamed imports won't be re-pinned/re-foldered under their new name —
+            // acceptable trade-off vs. threading the rename map through ConfirmImportAsync, and it
+            // never produces dangling references to names that don't exist.
+            var onDisk = ProfileEntries.Select(p => p.Name).ToHashSet();
+
             // Merge pinned: add new pinned items that aren't already pinned
             foreach (var name in org.Pinned)
             {
-                if (!_profileOrder.Pinned.Contains(name))
+                if (onDisk.Contains(name) && !_profileOrder.Pinned.Contains(name))
                     _profileOrder.Pinned.Add(name);
             }
 
             // Merge folders: add new folders, merge items into existing folders
             foreach (var importedFolder in org.Folders)
             {
+                // Copy into a fresh list (don't alias the deserialized, untrusted collection into
+                // the long-lived _profileOrder) and keep only items that actually exist on disk.
+                var folderItems = importedFolder.Items.Where(onDisk.Contains).ToList();
+
                 var existingFolder = _profileOrder.Folders.FirstOrDefault(f => f.Name == importedFolder.Name);
                 if (existingFolder != null)
                 {
                     // Merge items into existing folder
-                    foreach (var item in importedFolder.Items)
+                    foreach (var item in folderItems)
                     {
                         if (!existingFolder.Items.Contains(item))
                             existingFolder.Items.Add(item);
@@ -1364,7 +1392,7 @@ namespace TrueReplayer.Controllers
                         Name = importedFolder.Name,
                         Color = importedFolder.Color,
                         Collapsed = false,
-                        Items = importedFolder.Items,
+                        Items = folderItems,
                         TargetWindow = importedFolder.TargetWindow,
                         UseRelativeCoordinates = importedFolder.UseRelativeCoordinates,
                         BringToFocus = importedFolder.BringToFocus,
@@ -1378,7 +1406,7 @@ namespace TrueReplayer.Controllers
                 }
 
                 // Remove imported folder items from ungrouped
-                foreach (var item in importedFolder.Items)
+                foreach (var item in folderItems)
                     _profileOrder.UngroupedOrder.Remove(item);
             }
 
@@ -1410,8 +1438,26 @@ namespace TrueReplayer.Controllers
                     _profileOrder = new ProfileOrderData();
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                // The order file exists but won't parse. Resetting to an empty order and letting a
+                // later save run would PERMANENTLY wipe the user's folders/pins/colours — UNLESS the
+                // original bytes are preserved first. So: copy the unreadable file to .bak (the
+                // recovery point) and alert the user, THEN reset to an empty order. A subsequent save
+                // may overwrite the corrupt original, but the .bak keeps a faithful copy to restore
+                // from, and not blocking saves means the user's first layout edit still persists.
+                System.Diagnostics.Debug.WriteLine($"[ProfileController] LoadProfileOrder parse failed: {ex.Message}");
+                try
+                {
+                    string backupPath = ProfileOrderPath + ".bak";
+                    File.Copy(ProfileOrderPath, backupPath, overwrite: true);
+                    OnAlert?.Invoke($"Couldn't read your profile organisation (folders/pins). The unreadable file was backed up to {Path.GetFileName(backupPath)}; your layout was reset.");
+                }
+                catch (Exception backupEx)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[ProfileController] LoadProfileOrder backup failed: {backupEx.Message}");
+                    OnAlert?.Invoke("Couldn't read your profile organisation (folders/pins); your layout was reset.");
+                }
                 _profileOrder = new ProfileOrderData();
             }
 
@@ -1703,9 +1749,12 @@ namespace TrueReplayer.Controllers
                 profileWatcher = null;
             }
 
-            debounceCts?.Cancel();
-            debounceCts?.Dispose();
-            debounceCts = null;
+            lock (_debounceLock)
+            {
+                debounceCts?.Cancel();
+                debounceCts?.Dispose();
+                debounceCts = null;
+            }
 
             _profileOrderLock?.Dispose();
         }

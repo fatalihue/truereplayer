@@ -136,39 +136,43 @@ namespace TrueReplayer.Controllers
         }
 
         private string? hotkeyJustPressed;
-        private DateTime hotkeyPressTime;
+        // Monotonic tick timestamps (Environment.TickCount64) — DateTime.Now is non-monotonic
+        // (NTP/manual/DST shifts could make the delta negative or huge and break suppression).
+        // Default 0 is correct: TickCount64 is ms-since-boot, so `now - 0` is always >= the
+        // 500/300ms windows in any real session (and the key-match guard covers the hotkey case).
+        private long hotkeyPressTicks;
 
-        private DateTime lastRecordingToggleTime = DateTime.MinValue;
-        private DateTime lastReplayToggleTime = DateTime.MinValue;
+        private long lastRecordingToggleTicks;
+        private long lastReplayToggleTicks;
 
         public void SetLastHotkeyPressed(string key)
         {
             hotkeyJustPressed = key;
-            hotkeyPressTime = DateTime.Now;
+            hotkeyPressTicks = Environment.TickCount64;
         }
 
         public bool IsHotkeyKeyUpSuppressed(string key)
         {
-            return hotkeyJustPressed == key && (DateTime.Now - hotkeyPressTime).TotalMilliseconds < 300;
+            return hotkeyJustPressed == key && Environment.TickCount64 - hotkeyPressTicks < 300;
         }
 
         public bool ShouldSuppressDuplicateRecordingHotkey()
         {
-            var now = DateTime.Now;
-            if ((now - lastRecordingToggleTime).TotalMilliseconds < 500)
+            var now = Environment.TickCount64;
+            if (now - lastRecordingToggleTicks < 500)
                 return true;
 
-            lastRecordingToggleTime = now;
+            lastRecordingToggleTicks = now;
             return false;
         }
 
         public bool ShouldSuppressDuplicateReplayHotkey()
         {
-            var now = DateTime.Now;
-            if ((now - lastReplayToggleTime).TotalMilliseconds < 500)
+            var now = Environment.TickCount64;
+            if (now - lastReplayToggleTicks < 500)
                 return true;
 
-            lastReplayToggleTime = now;
+            lastReplayToggleTicks = now;
             return false;
         }
     }

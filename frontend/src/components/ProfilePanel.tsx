@@ -398,13 +398,22 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setShowInfoDialog(name);
   };
 
-  const allExportSelected = profiles.length > 0 && profiles.every(p => exportSelection[p.name]);
+  // Profiles currently visible in the export dialog (after the search filter). Select-All,
+  // the count, and confirmExport all scope to these so a filter never touches hidden profiles.
+  const visibleExportNames = profiles
+    .filter(p => !exportSearch || p.name.toLowerCase().includes(exportSearch.toLowerCase()))
+    .map(p => p.name);
+
+  const allExportSelected = visibleExportNames.length > 0 && visibleExportNames.every(n => exportSelection[n]);
 
   const toggleExportSelectAll = () => {
     const newVal = !allExportSelected;
-    const updated: Record<string, boolean> = {};
-    profiles.forEach(p => { updated[p.name] = newVal; });
-    setExportSelection(updated);
+    // Flip only the visible profiles; preserve any selection made on filtered-out ones.
+    setExportSelection(prev => {
+      const updated = { ...prev };
+      visibleExportNames.forEach(n => { updated[n] = newVal; });
+      return updated;
+    });
   };
 
   const toggleExportProfile = (name: string) => {
@@ -419,9 +428,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   };
 
   const confirmExport = () => {
-    const selectedNames = Object.entries(exportSelection)
-      .filter(([, checked]) => checked)
-      .map(([name]) => name);
+    // Scope to the visible profiles so a filtered-out (but still-checked) profile is not shipped.
+    const selectedNames = visibleExportNames.filter(name => exportSelection[name]);
     if (selectedNames.length > 0) {
       send({ type: 'profile:export', payload: { names: selectedNames, includeOrganization: true } });
     }
@@ -1093,7 +1101,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       }
       document.body.style.cursor = '';
       dragStartPos.current = null;
-      dragActive.current = false;
+      // Defer clearing dragActive until after the browser dispatches the synthesized click:
+      // mouseup → click fire back-to-back, so resetting here would let the row's onClick guard
+      // (`if (dragActive.current)`) miss a just-finished drag and spuriously activate the profile.
+      setTimeout(() => { dragActive.current = false; }, 0);
       setDragProfile(null);
       setDropTarget(null);
       setDragCursorPos(null);
@@ -2359,7 +2370,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           const inFolder = (profileOrder?.folders ?? []).some(f => f.items.includes(n));
           return !inFolder && matchesExport(n);
         });
-        const selectedCount = Object.values(exportSelection).filter(v => v).length;
+        // Count only visible + selected so the filter never inflates the total with hidden picks.
+        const visibleNames = profiles.filter(p => matchesExport(p.name)).map(p => p.name);
+        const selectedCount = visibleNames.filter(n => exportSelection[n]).length;
 
         return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -2391,7 +2404,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             >
               <CheckboxBox checked={allExportSelected} />
               <span className="text-xs font-medium text-text-secondary">Select All</span>
-              <span className="ml-auto text-[10px] text-text-disabled">{selectedCount}/{profiles.length}</span>
+              <span className="ml-auto text-[10px] text-text-disabled">{selectedCount}/{visibleNames.length}</span>
             </button>
 
             {/* Scrollable list organized by folders */}

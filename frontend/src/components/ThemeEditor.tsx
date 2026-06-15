@@ -476,12 +476,19 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => doImport(reader.result as string);
+    reader.onerror = () => setImportError('Could not read the selected file.');
     reader.readAsText(file);
     e.target.value = '';
   }, [doImport]);
 
   const handlePasteClipboard = useCallback(async () => {
-    const text = await navigator.clipboard.readText();
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      setImportError('Could not read from clipboard. Check clipboard permissions or paste the JSON manually.');
+      return;
+    }
     setImportText(text);
     doImport(text);
   }, [doImport]);

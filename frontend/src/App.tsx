@@ -87,6 +87,15 @@ function AppShell() {
 
       if (inEditable) return;
 
+      // Don't swallow keys aimed at a focused interactive control — Space/Enter
+      // are how the browser activates buttons/checkboxes/links (it synthesizes a
+      // click), and arrows drive selects. closest() catches nested targets too
+      // (e.g. an icon inside a <button>).
+      const interactive = (e.target as HTMLElement)?.closest?.(
+        'button, a[href], select, summary, [role="button"], [role="checkbox"], [tabindex]'
+      );
+      if (interactive) return;
+
       // Block Tab, Space, Enter, arrows from interacting with UI elements
       if (['Tab', ' ', 'Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();

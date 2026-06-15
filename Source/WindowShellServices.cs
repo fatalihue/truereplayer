@@ -459,6 +459,11 @@ namespace TrueReplayer.Services
         private const int WM_GETMINMAXINFO = 0x0024;
         private const int WM_DISPLAYCHANGE = 0x007E;
         private const int SW_RESTORE = 9;
+        // Layout minimum in DIPs — matches the size WindowAppearanceService.Configure
+        // passes to appWindow.Resize. WM_GETMINMAXINFO works in physical pixels, so this
+        // is scaled by the window's DPI before being written to ptMinTrackSize.
+        private const int BaseMinWidthDip = 1180;
+        private const int BaseMinHeightDip = 780;
         private const uint SWP_NOMOVE = 0x0002;
         private const uint SWP_NOSIZE = 0x0001;
         private const uint SWP_NOACTIVATE = 0x0010;
@@ -523,8 +528,13 @@ namespace TrueReplayer.Services
             if (msg == WM_GETMINMAXINFO)
             {
                 MINMAXINFO mmi = Marshal.PtrToStructure<MINMAXINFO>(lParam)!;
-                mmi.ptMinTrackSize.x = 1180;
-                mmi.ptMinTrackSize.y = 780;
+                // ptMinTrackSize is in physical pixels — scale the DIP minimum by the
+                // window's current DPI so the floor matches the layout minimum at any scale
+                // (GetDpiForWindow returns 96 at 100%; falls back to 96 if it ever returns 0).
+                uint dpi = GetDpiForWindow(hwnd);
+                if (dpi == 0) dpi = 96;
+                mmi.ptMinTrackSize.x = (int)(BaseMinWidthDip * dpi / 96.0);
+                mmi.ptMinTrackSize.y = (int)(BaseMinHeightDip * dpi / 96.0);
                 Marshal.StructureToPtr(mmi, lParam, true);
                 return IntPtr.Zero;
             }
@@ -600,5 +610,6 @@ namespace TrueReplayer.Services
         [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+        [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hWnd);
     }
 }

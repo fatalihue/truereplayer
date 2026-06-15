@@ -111,7 +111,7 @@ namespace TrueReplayer.Services
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[UpdateService] Release notes fetch failed: {ex.Message}");
+                DiagnosticLog.Warn($"[UpdateService] Release notes fetch failed: {ex.Message}");
             }
             return new List<string>();
         }
@@ -171,7 +171,7 @@ namespace TrueReplayer.Services
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[UpdateService] Download failed: {ex.Message}");
+                DiagnosticLog.Error($"[UpdateService] Download failed: {ex.Message}");
                 return false;
             }
         }

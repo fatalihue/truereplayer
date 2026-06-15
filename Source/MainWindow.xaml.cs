@@ -211,6 +211,13 @@ namespace TrueReplayer
                 return;
             }
 
+            // Everything past the env-creation await wires up the bridge, tray callbacks,
+            // ProcessFailed/NavigationCompleted recovery and navigation. In an async void method
+            // any throw here escapes only to the global handler, which keeps the process alive but
+            // leaves the UI half-wired with no recovery affordance. Guard the whole block so a
+            // failure surfaces the same actionable message as the env-creation failure above.
+            try
+            {
             // Create bridge and register message handler BEFORE navigation
             // to ensure no messages from React are missed
             bridge = new WebViewBridge(
@@ -362,14 +369,21 @@ namespace TrueReplayer
                     _uiReadyWatchdog?.Dispose();
                     _uiReadyWatchdog = new System.Threading.Timer(_ =>
                     {
-                        if (_uiReloadAttempts >= MaxReloadAttempts)
+                        // Timer callback runs on a thread-pool thread. Marshal the counter
+                        // read/increment onto the UI thread so all access to _uiReloadAttempts
+                        // (also reset by CancelUIWatchdog and read by RecoverWebView) stays
+                        // single-threaded — no data race on the non-volatile int.
+                        DispatcherQueue.TryEnqueue(() =>
                         {
-                            // Exhausted watchdog attempts without a ui:ready — go nuclear.
-                            DispatcherQueue.TryEnqueue(() => RecoverWebView("watchdog max attempts — forcing restart"));
-                            return;
-                        }
-                        _uiReloadAttempts++;
-                        DispatcherQueue.TryEnqueue(() => RecoverWebView($"watchdog ({_uiReloadAttempts}/{MaxReloadAttempts})"));
+                            if (_uiReloadAttempts >= MaxReloadAttempts)
+                            {
+                                // Exhausted watchdog attempts without a ui:ready — go nuclear.
+                                RecoverWebView("watchdog max attempts — forcing restart");
+                                return;
+                            }
+                            _uiReloadAttempts++;
+                            RecoverWebView($"watchdog ({_uiReloadAttempts}/{MaxReloadAttempts})");
+                        });
                     }, null, 5000, System.Threading.Timeout.Infinite);
                 }
             };
@@ -394,9 +408,22 @@ namespace TrueReplayer
             WebView.CoreWebView2.Navigate(_targetUrl);
 #endif
 
-            // Load initial data
+            // Load initial data. This lambda runs on a LATER dispatcher tick (after
+            // InitializeWebView has already returned), so the outer try/catch can't cover it —
+            // it needs its own guard. An unobserved throw here silently skips hotkey
+            // registration and the collision/failure toasts, so wrap the body and best-effort
+            // surface the failure. bridge is also null-checked: it's assigned above, but a
+            // failed wiring path could leave it null by the time this runs.
             DispatcherQueue.TryEnqueue(async () =>
             {
+                if (bridge == null)
+                {
+                    Services.DiagnosticLog.Warn("Initial-data load skipped: bridge is null");
+                    return;
+                }
+
+                try
+                {
                 await profileController.RefreshProfileListAsync(true);
 
                 // Sweep WaitImage PNGs that aren't referenced by any action across all profiles.
@@ -441,7 +468,23 @@ namespace TrueReplayer
                 {
                     bridge.SendMessage("alert:show", new { message = msg });
                 }
+                }
+                catch (Exception ex)
+                {
+                    Services.DiagnosticLog.Error("Initial-data load failed", ex);
+                    try { bridge.SendMessage("alert:show", new { message = "Startup data couldn't load fully. Some profiles or hotkeys may be unavailable." }); }
+                    catch { /* toast is best-effort — never let the failure handler throw */ }
+                }
             });
+            }
+            catch (Exception ex)
+            {
+                Services.DiagnosticLog.Error("InitializeWebView: post-environment wiring failed", ex);
+                NativeMethods.MessageBoxW(hwnd,
+                    "TrueReplayer couldn't finish starting its UI.\n\nPlease restart TrueReplayer. " +
+                    "If the problem persists, repair the Microsoft Edge WebView2 Runtime.",
+                    "TrueReplayer", NativeMethods.MB_ICONERROR);
+            }
         }
 
         /// <summary>

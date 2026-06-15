@@ -139,7 +139,9 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
     case 'profiles:updated':
       return { ...state, profiles: message.payload.profiles, activeProfile: message.payload.activeProfile, profileOrder: message.payload.profileOrder ?? state.profileOrder };
     case 'settings:loaded':
-      return { ...state, settings: message.payload.settings };
+      // Deep-merge over defaults (mirrors state:init) so a partial/version-skewed payload
+      // that drops a field can't make settings.* undefined and crash downstream reads.
+      return { ...state, settings: { ...initialState.settings, ...(message.payload.settings ?? {}) } };
     case 'button:states':
       return { ...state, buttonStates: message.payload };
     case 'toolbar:updated':

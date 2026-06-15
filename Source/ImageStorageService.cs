@@ -130,14 +130,22 @@ namespace TrueReplayer.Services
         /// <summary>
         /// Saves a base64-encoded image to the profile directory (for import).
         /// </summary>
-        public static string SaveFromBase64(string base64Data, string profileName)
+        public static string? SaveFromBase64(string base64Data, string profileName)
         {
             string dir = GetImageDirectory(profileName);
             Directory.CreateDirectory(dir);
 
             string filename = $"wait-{Guid.NewGuid():N}.png";
             string fullPath = Path.Combine(dir, filename);
-            File.WriteAllBytes(fullPath, Convert.FromBase64String(base64Data));
+            // base64Data is untrusted import data: a malformed string throws FormatException
+            // out of Convert.FromBase64String. Swallow it (returning null) so a single bad
+            // payload can't crash the caller.
+            try { File.WriteAllBytes(fullPath, Convert.FromBase64String(base64Data)); }
+            catch (Exception ex)
+            {
+                try { DiagnosticLog.Info($"[Images] Skipped image with invalid base64 data: {ex.Message}"); } catch { }
+                return null;
+            }
             return filename;
         }
 
@@ -154,7 +162,14 @@ namespace TrueReplayer.Services
             if (!TryResolveImageFile(profileName, filename, out string fullPath)) return;
 
             Directory.CreateDirectory(GetImageDirectory(profileName));
-            File.WriteAllBytes(fullPath, Convert.FromBase64String(base64Data));
+            // base64Data is untrusted import data and this runs once per image inside
+            // ConfirmImportAsync's unguarded loop. Swallow a malformed payload (log + skip
+            // this one image) so one bad entry doesn't abort the rest of the import.
+            try { File.WriteAllBytes(fullPath, Convert.FromBase64String(base64Data)); }
+            catch (Exception ex)
+            {
+                try { DiagnosticLog.Info($"[Images] Skipped '{filename}' with invalid base64 data: {ex.Message}"); } catch { }
+            }
         }
 
         /// <summary>

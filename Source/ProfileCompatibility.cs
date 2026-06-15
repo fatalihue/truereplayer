@@ -129,7 +129,10 @@ namespace TrueReplayer.Services
         public static bool IsCompatible(string? requiredVersion, string runningVersion)
         {
             if (string.IsNullOrWhiteSpace(requiredVersion)) return true;
-            if (!TryParseVersion(requiredVersion, out var required)) return true;
+            // Present-but-unparseable required version (e.g. a hand-crafted "99.banana"): fail
+            // CLOSED. The pin was clearly intended to gate, so a value we can't compare must be
+            // treated as incompatible rather than waved through.
+            if (!TryParseVersion(requiredVersion, out var required)) return false;
             if (!TryParseVersion(runningVersion, out var running)) return true;
             return running >= required;
         }
