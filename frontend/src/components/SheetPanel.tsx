@@ -179,6 +179,12 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   // Pick position — when active, the next 'mouse:positionPicked' message updates X/Y.
   const [pickPositionRequestId, setPickPositionRequestId] = useState<string | null>(null);
 
+  // Browser element pick — gates 'browser:pickResult' so a reply arriving after the user
+  // switched/closed actions (the panel doesn't remount) can't write the selector into the
+  // wrong action. Mirrors pickPositionRequestId / pickColorRequestId. `isPicking` stays the
+  // button's visual flag; this id is the correctness gate.
+  const [pickElementRequestId, setPickElementRequestId] = useState<string | null>(null);
+
   // Pause action's Resume Hotkey capture state — same UX as KeyDown/KeyUp's keyFieldFocused
   // and the Settings / Profile / grid inputs: focus → empty + "New key..." + accent pulse.
   const [pauseHotkeyFocused, setPauseHotkeyFocused] = useState(false);
@@ -217,6 +223,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const pickPositionRequestIdRef = useRef(pickPositionRequestId);
   const pickColorRequestIdRef = useRef(pickColorRequestId);
   const testPixelRequestIdRef = useRef(testPixelRequestId);
+  const pickElementRequestIdRef = useRef(pickElementRequestId);
   // Configure-region is fire-and-forget (no UI state), so a plain ref tracks the in-flight
   // request and guards waitimage:searchRegionSet against a stale reply landing on a different
   // action after the user switched (the panel doesn't remount on action change).
@@ -227,6 +234,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     pickPositionRequestIdRef.current = pickPositionRequestId;
     pickColorRequestIdRef.current = pickColorRequestId;
     testPixelRequestIdRef.current = testPixelRequestId;
+    pickElementRequestIdRef.current = pickElementRequestId;
   });
 
   // Listen for pick element result + test result from extension. Subscribed once (stable deps);
@@ -234,8 +242,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   useEffect(() => {
     return subscribe((msg) => {
       if (msg.type === 'browser:pickResult') {
+        const payload = msg.payload as { requestId?: string; selector?: string | null; alternatives?: SelectorAlternative[] };
+        // Gate on the request id we started with. A reply whose id doesn't match (the user
+        // switched/closed the action, or cancelled via Esc) is stale — drop it so it can't
+        // overwrite the now-current action's selector. Matches the pickPosition/pickColor guards.
+        if (!pickElementRequestIdRef.current || payload.requestId !== pickElementRequestIdRef.current) return;
         setIsPicking(false);
-        const payload = msg.payload as { selector?: string | null; alternatives?: SelectorAlternative[] };
+        setPickElementRequestId(null);
         if (payload.selector) {
           setKey(payload.selector);
           // #2 — Show alternatives popover when there are 2+ candidates
@@ -734,11 +747,22 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     if (actionIndex == null) return;
     const onDocKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
+      // An active element pick takes priority: Esc cancels the pick (tear down the extension
+      // overlay + drop our in-flight state) instead of closing the panel. The extension's own
+      // page-level Esc only fires when the browser page is focused — this covers Esc while the
+      // TrueReplayer editor has focus. Consume the press so the panel doesn't also close.
+      if (pickElementRequestIdRef.current) {
+        e.preventDefault();
+        send({ type: 'browser:cancelPick', payload: {} });
+        setPickElementRequestId(null);
+        setIsPicking(false);
+        return;
+      }
       onClose();
     };
     document.addEventListener('keydown', onDocKeyDown);
     return () => document.removeEventListener('keydown', onDocKeyDown);
-  }, [actionIndex, onClose]);
+  }, [actionIndex, onClose, send]);
 
   // Reset the capture state whenever the panel switches to a different action (including
   // closing — actionIndex going null). Without this, focusing the field, closing the
@@ -762,7 +786,14 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     setPickColorRequestId(null);
     setTestPixelRequestId(null);
     setTestPixelResult(null);
-  }, [actionIndex, disarmKeyCaptureTimer, clearTestTimeout]);
+    // Browser element pick — drop the in-flight pick when the action changes (mirrors the
+    // pickPosition / pickColor resets above). Clearing the id makes any late browser:pickResult
+    // stale (the handler's id guard drops it), and we ask the extension to tear down its overlay
+    // so a leftover pick can't land on the newly-opened action. send is stable from useBridge.
+    if (pickElementRequestIdRef.current) send({ type: 'browser:cancelPick', payload: {} });
+    setPickElementRequestId(null);
+    setIsPicking(false);
+  }, [actionIndex, disarmKeyCaptureTimer, clearTestTimeout, send]);
 
   // Unmount cleanup — any pending timers must be torn down so they don't fire against
   // refs to gone DOM nodes (would warn in React strict-mode dev, harmless in prod but
@@ -1720,9 +1751,11 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 {!isBrowserNavigate && (
                   <button
                     onClick={() => {
+                      const requestId = Math.random().toString(36).slice(2, 10);
+                      setPickElementRequestId(requestId);
                       setIsPicking(true);
                       setShowAlternatives(false);
-                      send({ type: 'browser:pickElement', payload: {} });
+                      send({ type: 'browser:pickElement', payload: { requestId } });
                     }}
                     disabled={isPicking}
                     className={`h-8 w-8 flex items-center justify-center rounded border transition-colors ${

@@ -315,6 +315,24 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     return { depth, blockIfOf, endIfOf, hasElse };
   }, [actions]);
 
+  // Expand a selection to whole conditional blocks: any selected row that sits
+  // inside an IF…ENDIF span pulls in that block's full span — for nested blocks,
+  // every enclosing IF span. Returns a sorted-ascending index array. Shared by
+  // the drag block-snap (handleDragStart) and the bulk-bar Delete so a partial-
+  // block operation can never orphan IF/ELSE/ENDIF rows.
+  const expandToBlocks = useCallback((indices: number[]): number[] => {
+    const set = new Set(indices);
+    for (const sel of indices) {
+      // A row r is enclosed by IF j iff j…endIfOf(j) covers r. Walk all IFs (small
+      // count even on large lists) and union every enclosing span.
+      for (const [ifIdx, endIfIdx] of blockInfo.endIfOf) {
+        if (ifIdx <= sel && sel <= endIfIdx)
+          for (let i = ifIdx; i <= endIfIdx; i++) set.add(i);
+      }
+    }
+    return set.size === indices.length ? indices : Array.from(set).sort((a, b) => a - b);
+  }, [blockInfo]);
+
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number } | null>(null);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
@@ -611,13 +629,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
     if (e.key === 'Delete' && selectedIndices.size > 0) {
       e.preventDefault();
-      // Same single-IF safety as handleContextDelete: a lone-IF selection routes
-      // through actions:deleteConditional so the whole block goes with it.
+      // Lone-IF selection routes through actions:deleteConditional so the whole block goes
+      // with it. Any other selection is expanded to whole IF…EndIf blocks first
+      // (expandToBlocks) so a straddling multi-select can't orphan block rows — the same
+      // block-snap the bulk-bar Delete and the drag use.
       const sel = Array.from(selectedIndices);
       if (sel.length === 1 && actions[sel[0]]?.actionType === 'If') {
         send({ type: 'actions:deleteConditional', payload: { ifRowIndex: sel[0] } });
       } else {
-        send({ type: 'actions:delete', payload: { indices: sel } });
+        send({ type: 'actions:delete', payload: { indices: expandToBlocks(sel) } });
       }
       setSelectedIndices(new Set());
     }
@@ -631,7 +651,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       e.preventDefault();
       setSelectedIndices(new Set());
     }
-  }, [editingCell, sendTextEdit, selectedIndices, send, actions]);
+  }, [editingCell, sendTextEdit, selectedIndices, send, actions, expandToBlocks]);
 
   // Handle edit input key events
   const handleEditKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -833,22 +853,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     // ELSE/ENDIF rows behind: the reorder backend (HandleActionsReorder) renumbers
     // but does NOT run ConditionalBlockValidator, so the imbalance corrupts the
     // live list and only surfaces on the next profile load.
-    const set = new Set(indices);
-    for (const sel of indices) {
-      // A row r is enclosed by IF j iff j…endIfOf(j) covers r. Walk all IFs (small
-      // count even on large lists) and union every enclosing span.
-      for (const [ifIdx, endIfIdx] of blockInfo.endIfOf) {
-        if (ifIdx <= sel && sel <= endIfIdx)
-          for (let i = ifIdx; i <= endIfIdx; i++) set.add(i);
-      }
-    }
-    if (set.size !== indices.length) indices = Array.from(set).sort((a, b) => a - b);
+    indices = expandToBlocks(indices);
     // Suppress the click that fires after the drop — handleRowClick consumes and
     // resets the flag (same contract as the old mouse-event implementation).
     dragOccurred.current = true;
     setActiveDragId(String(ev.active.id));
     setDragIndices(indices);
-  }, [sortableIds, selectedIndices, blockInfo]);
+  }, [sortableIds, selectedIndices, expandToBlocks]);
 
   const handleDragEnd = useCallback((ev: DragEndEvent) => {
     const indices = dragIndices ?? [];
@@ -1045,10 +1056,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       : [contextMenu.rowIndex];
     // Special case: deleting an IF row alone removes the whole block (body +
     // optional Else + matching EndIf) via the dedicated bridge message. Without
-    // this, the orphaned body rows would silently execute unconditionally —
-    // worse than the visible "block was here" tracking. The single-row check
-    // matters: a multi-select delete with an IF mixed in still routes through
-    // the regular actions:delete (user explicitly selected the rows; respect that).
+    // this, the orphaned body rows would silently execute unconditionally.
     if (indices.length === 1) {
       const idx = indices[0];
       if (actions[idx]?.actionType === 'If') {
@@ -1058,10 +1066,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         return;
       }
     }
-    send({ type: 'actions:delete', payload: { indices } });
+    // Any other selection: expand to whole IF…EndIf blocks first so a straddling
+    // multi-select can't orphan block rows (same block-snap as the bulk bar / drag).
+    send({ type: 'actions:delete', payload: { indices: expandToBlocks(indices) } });
     setSelectedIndices(new Set());
     closeContextMenu();
-  }, [contextMenu, selectedIndices, send, closeContextMenu, actions]);
+  }, [contextMenu, selectedIndices, send, closeContextMenu, actions, expandToBlocks]);
 
   // Resolve the "effective selection" for context-menu operations the same way
   // Duplicate/Delete do: if the right-clicked row is part of the multi-select,
@@ -2038,8 +2048,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           canMoveDown={canMoveDown}
           onClearSelection={() => setSelectedIndices(new Set())}
           onDelete={() => {
-            send({ type: 'actions:delete', payload: { indices: selSorted } });
-            showToast(`Deleted ${selectedIndices.size} action(s)`, 'success');
+            // Expand any selected IF (or block body / straddling multi-select) to its
+            // whole IF…ELSE…ENDIF span before deleting — same block-snap the drag and
+            // context/Delete-key paths use — so the bulk bar can't orphan block rows.
+            const indices = expandToBlocks(selSorted);
+            send({ type: 'actions:delete', payload: { indices } });
+            showToast(`Deleted ${indices.length} action(s)`, 'success');
             setSelectedIndices(new Set());
           }}
           onMoveUp={() => {

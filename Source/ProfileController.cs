@@ -1237,6 +1237,14 @@ namespace TrueReplayer.Controllers
             // silently resolving to the same path. Seeded as collisions are resolved below.
             var allocatedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            // Maps each successfully-imported entry's ORIGINAL envelope name -> the finalName it was
+            // written under (== original unless a Rename/Overwrite collision bumped it to "name (N)").
+            // This is both the rename map AND the authoritative "names actually imported this batch"
+            // set, threaded into MergeImportedOrganizationAsync so renamed imports get re-foldered /
+            // re-pinned under their new name (BUG3 fix). Ordinal-ignore-case so org name lookups match
+            // regardless of casing, mirroring allocatedNames / onDisk.
+            var importedRenames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
             foreach (var entry in toImport)
             {
                 // Hard compatibility gate — refuse to write a profile the running app can't run.
@@ -1357,6 +1365,12 @@ namespace TrueReplayer.Controllers
                 }
 
                 imported++;
+                // Record original -> final so the org merge can remap folder/pin references. Keyed by
+                // the original envelope name (what org.Folders / org.Pinned reference); value is the
+                // name actually written on disk ("name (N)" when renamed). Only reached on a real
+                // write, so Skipped/incompatible/unsafe entries are never added — exactly the gate the
+                // merge needs (no dangling refs, never touches the pre-existing same-named profile).
+                importedRenames[entry.Name] = finalName;
             }
 
             if (imported > 0)
@@ -1364,7 +1378,7 @@ namespace TrueReplayer.Controllers
 
             // Merge organization if present
             if (hasOrganization && imported > 0)
-                await MergeImportedOrganizationAsync(envelope.Organization!);
+                await MergeImportedOrganizationAsync(envelope.Organization!, importedRenames);
 
             return (imported, skipped, hasOrganization);
         }
@@ -1383,31 +1397,37 @@ namespace TrueReplayer.Controllers
             return true;
         }
 
-        private async Task MergeImportedOrganizationAsync(ProfileExportOrganization org)
+        private async Task MergeImportedOrganizationAsync(
+            ProfileExportOrganization org,
+            IReadOnlyDictionary<string, string> importedRenames)
         {
-            // Only honour pins/folder-membership for profiles that actually landed on disk.
-            // ConfirmImportAsync may have skipped (conflict=Skip / incompatible / unsafe name)
-            // or renamed entries ("name (2)"), and it doesn't expose the original->finalName map,
-            // so we gate on the post-import profile list. RefreshProfileListAsync(true) ran in the
-            // caller before this, so ProfileEntries reflects what's on disk now.
-            // LIMITATION: renamed imports won't be re-pinned/re-foldered under their new name —
-            // acceptable trade-off vs. threading the rename map through ConfirmImportAsync, and it
-            // never produces dangling references to names that don't exist.
-            var onDisk = ProfileEntries.Select(p => p.Name).ToHashSet();
+            // Only honour pins/folder-membership for profiles that THIS import actually wrote.
+            // importedRenames maps each imported entry's original envelope name (what org.Folders /
+            // org.Pinned reference) -> the name it landed under on disk ("name (2)" when a collision
+            // forced a rename). Gating on the map replaces the old onDisk gate while fixing BUG3:
+            //   * Skipped / incompatible / unsafe entries are absent from the map -> excluded.
+            //   * A renamed import is remapped to its new name -> re-foldered / re-pinned correctly.
+            //   * The pre-existing same-named profile was NOT imported, so it's never in the map and
+            //     is never re-pinned / moved (no dangling refs, no clobbering local layout).
+            // RefreshProfileListAsync(true) ran in the caller, so the remapped names exist on disk.
 
-            // Merge pinned: add new pinned items that aren't already pinned
+            // Merge pinned: add new pinned items that aren't already pinned, remapped to final names.
             foreach (var name in org.Pinned)
             {
-                if (onDisk.Contains(name) && !_profileOrder.Pinned.Contains(name))
-                    _profileOrder.Pinned.Add(name);
+                if (importedRenames.TryGetValue(name, out var finalName) && !_profileOrder.Pinned.Contains(finalName))
+                    _profileOrder.Pinned.Add(finalName);
             }
 
             // Merge folders: add new folders, merge items into existing folders
             foreach (var importedFolder in org.Folders)
             {
                 // Copy into a fresh list (don't alias the deserialized, untrusted collection into
-                // the long-lived _profileOrder) and keep only items that actually exist on disk.
-                var folderItems = importedFolder.Items.Where(onDisk.Contains).ToList();
+                // the long-lived _profileOrder) and remap each item through importedRenames — keeping
+                // only items this import wrote, under their final ("name (N)") name.
+                var folderItems = importedFolder.Items
+                    .Where(importedRenames.ContainsKey)
+                    .Select(n => importedRenames[n])
+                    .ToList();
 
                 var existingFolder = _profileOrder.Folders.FirstOrDefault(f => f.Name == importedFolder.Name);
                 if (existingFolder != null)

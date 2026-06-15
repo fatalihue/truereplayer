@@ -410,7 +410,7 @@ export type IncomingMessage =
   | { type: 'update:error'; payload: { message: string } }
   | { type: 'update:none'; payload: { currentVersion: string } }
   | { type: 'browser:status'; payload: { connected: boolean } }
-  | { type: 'browser:pickResult'; payload: { selector: string | null; alternatives?: SelectorAlternative[]; error?: string } }
+  | { type: 'browser:pickResult'; payload: { requestId?: string; selector: string | null; alternatives?: SelectorAlternative[]; error?: string } }
   | { type: 'browser:testResult'; payload: BrowserTestResult }
   | { type: 'browser:extensionOutdated'; payload: { currentVersion: string; expectedVersion: string } }
   | { type: 'image:testMatchResult'; payload: { requestId: string; found: boolean; score: number; x: number; y: number; w: number; h: number; error?: string } }
@@ -593,7 +593,8 @@ export type OutgoingMessage =
   | { type: 'logs:openFolder'; payload: Record<string, never> }
   | { type: 'actions:addBrowserAction'; payload: { actionType: string; selector: string; browserText?: string; newTab?: boolean; insertIndex?: number } }
   | { type: 'browser:toggleRecording'; payload: { enabled: boolean } }
-  | { type: 'browser:pickElement'; payload: Record<string, never> }
+  | { type: 'browser:pickElement'; payload: { requestId: string } }
+  | { type: 'browser:cancelPick'; payload: Record<string, never> }
   | { type: 'browser:testAction'; payload: { requestId: string; actionType: string; key: string; browserText?: string; newTab?: boolean; timeout: number; waitMode?: string | null; urlWaitPattern?: string | null; postNavigateSelector?: string | null; typeAppend?: boolean; typePaste?: boolean; typeDelay?: number | null; selectMatchMode?: string | null } }
   | { type: 'theme:colors'; payload: { bgSurface: string; bgCard: string; textPrimary: string; textSecondary: string; accentSolid: string; borderSubtle: string } }
   | { type: 'hotkey:suppress'; payload: { enabled: boolean } }

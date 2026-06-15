@@ -667,7 +667,8 @@ namespace TrueReplayer
                     case "pixel:testMatch": HandlePixelColorTestMatch(payload); break;
                     case "actions:addBrowserAction": HandleAddBrowserAction(payload); break;
                     case "browser:toggleRecording": HandleBrowserToggleRecording(payload); break;
-                    case "browser:pickElement": HandlePickElement(); break;
+                    case "browser:pickElement": HandlePickElement(payload); break;
+                    case "browser:cancelPick": browserBridge?.CancelPickElement(); break;
                     case "browser:testAction": _ = HandleBrowserTestAction(payload); break;
                     case "profile:click": HandleProfileClick(payload); break;
                     case "profile:create": HandleProfileCreate(payload); break;
@@ -3815,11 +3816,16 @@ namespace TrueReplayer
             browserBridge?.SetRecordingMode(enabled);
         }
 
-        private async void HandlePickElement()
+        private async void HandlePickElement(JsonElement payload)
         {
+            // Echo the frontend's requestId back on every reply branch so the editor can match the
+            // result to its pending pick and drop a stale one (user switched/closed the action, or
+            // cancelled via Esc). Mirrors HandleMousePickPositionAsync / HandlePixelColorPickAsync.
+            string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
+
             if (browserBridge == null || !browserBridge.IsConnected)
             {
-                SendMessage("browser:pickResult", new { selector = (string?)null, alternatives = new object[0], error = "Browser extension is not connected." });
+                SendMessage("browser:pickResult", new { requestId, selector = (string?)null, alternatives = new object[0], error = "Browser extension is not connected." });
                 return;
             }
 
@@ -3828,13 +3834,14 @@ namespace TrueReplayer
                 var pick = await browserBridge.PickElementAsync(CancellationToken.None);
                 SendMessage("browser:pickResult", new
                 {
+                    requestId,
                     selector = pick.Selector,
                     alternatives = pick.Alternatives.Select(a => new { selector = a.Selector, tier = a.Tier, description = a.Description }).ToArray()
                 });
             }
             catch (Exception ex)
             {
-                SendMessage("browser:pickResult", new { selector = (string?)null, alternatives = new object[0], error = ex.Message });
+                SendMessage("browser:pickResult", new { requestId, selector = (string?)null, alternatives = new object[0], error = ex.Message });
             }
         }
 
