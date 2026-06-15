@@ -144,19 +144,27 @@ namespace TrueReplayer.Services
         /// </summary>
         public static List<string> ListContributingFeatures(UserProfile profile)
         {
-            var contributors = new List<string>();
+            // Single pass: evaluate each detect predicate exactly once, recording the
+            // (version, name) of every feature the profile actually uses.
+            var matches = new List<(Version Version, string Name)>();
             Version highest = BaselineVersion;
-            // First pass: find the highest min-version.
-            foreach (var (detect, version, _) in FeatureMatrix)
-            {
-                try { if (detect(profile) && version > highest) highest = version; }
-                catch { }
-            }
-            // Second pass: collect every feature pinned at that highest version.
             foreach (var (detect, version, name) in FeatureMatrix)
             {
-                try { if (detect(profile) && version == highest) contributors.Add(name); }
+                try
+                {
+                    if (detect(profile))
+                    {
+                        matches.Add((version, name));
+                        if (version > highest) highest = version;
+                    }
+                }
                 catch { }
+            }
+            // Collect (in matrix order) every matched feature pinned at the highest version.
+            var contributors = new List<string>();
+            foreach (var (version, name) in matches)
+            {
+                if (version == highest) contributors.Add(name);
             }
             return contributors;
         }

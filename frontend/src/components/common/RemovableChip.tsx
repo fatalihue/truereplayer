@@ -51,7 +51,12 @@ export function RemovableChip({
       {children}
       <button
         type="button"
-        onClick={onRemove}
+        // Stop the click here so removing a chip never bubbles up to the chip's
+        // own (or an ancestor's) click handler — callers no longer need to.
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove(e);
+        }}
         aria-label={removeTitle}
         className={`hidden group-hover/removable:inline-flex ${btnClass}`}
       >

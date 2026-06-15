@@ -60,7 +60,10 @@ export function UpdateOverlay() {
         case 'update:progress':
           setPhase((prev) => {
             if (prev.step === 'downloading') {
-              return { ...prev, percent: msg.payload.percent };
+              // Clamp to [0,100]: a malformed/out-of-range backend percent would otherwise
+              // overflow the progress-bar width and could spuriously trip the >=100 install gate.
+              const percent = Math.max(0, Math.min(100, msg.payload.percent));
+              return { ...prev, percent };
             }
             return prev;
           });
@@ -291,10 +294,6 @@ const keyframes = `
 @keyframes update-install-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.65; }
-}
-@keyframes update-indeterminate {
-  0% { transform: translateX(-120%); }
-  100% { transform: translateX(350%); }
 }
 @keyframes update-checkmark {
   from { stroke-dashoffset: 24; }

@@ -1005,7 +1005,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   }, [computeInsertIndexFromY, showToast]);
 
   const isMouseAction = (actionType: string) =>
-    actionType.includes('Click') || actionType.includes('Middle');
+    actionType.includes('Click');
 
   // Context menu: right-click on a row
   const handleRowContextMenu = useCallback((idx: number, e: React.MouseEvent) => {
@@ -1132,6 +1132,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   // The bulk bar floats over the grid (see the overlay render below). Drives the
   // scroll-area padding so a selection never hides the bottom rows behind it.
   const bulkBarVisible = selectedIndices.size > 0 && !buttonStates.recordingActive && !buttonStates.replayActive;
+  // Guard on actions.length > 0 so an EMPTY grid is never treated as "all
+  // selected" (0 === 0 would otherwise be true, giving a no-op deselect + a
+  // wrong "Deselect all" tooltip on a fresh grid).
+  const allSelected = actions.length > 0 && selectedIndices.size === actions.length;
 
   return (
     <div
@@ -1166,17 +1170,17 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           <button
             type="button"
             onClick={() => {
-              if (selectedIndices.size === actions.length) {
+              if (allSelected) {
                 setSelectedIndices(new Set());
               } else {
                 setSelectedIndices(new Set(actions.map((_, i) => i)));
               }
             }}
             className="flex items-center justify-center cursor-pointer"
-            title={selectedIndices.size === actions.length ? 'Deselect all' : 'Select all'}
+            title={allSelected ? 'Deselect all' : 'Select all'}
           >
             <CheckboxBox
-              checked={actions.length > 0 && selectedIndices.size === actions.length}
+              checked={allSelected}
             />
           </button>
         </span>
@@ -1864,7 +1868,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           const primary = actions[sortableIds.indexOf(activeDragId)];
           if (!primary) return null;
           const ghostColors = getActionTypeColors(primary.actionType);
-          const ghostDetail = isMouseAction(primary.actionType)
+          const ghostDetail = (isMouseAction(primary.actionType) && !primary.actionType.startsWith('Browser'))
             ? `${primary.x}, ${primary.y}`
             : getDisplayKey(primary.key);
           return (

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Velopack;
 using Velopack.Sources;
@@ -55,12 +56,22 @@ namespace TrueReplayer.Services
 
             try
             {
+                using var timeoutCts = new CancellationTokenSource();
                 var checkTask = _manager.CheckForUpdatesAsync();
-                if (await Task.WhenAny(checkTask, Task.Delay(CheckTimeout)) != checkTask)
+                var timeoutTask = Task.Delay(CheckTimeout, timeoutCts.Token);
+                if (await Task.WhenAny(checkTask, timeoutTask) != checkTask)
                 {
+                    // Velopack's CheckForUpdatesAsync exposes no CancellationToken overload, so the
+                    // GitHub round-trip can't be aborted — but observe its eventual outcome so a late
+                    // fault doesn't bubble up as a noisy UnobservedTaskException.
+                    _ = checkTask.ContinueWith(
+                        t => DiagnosticLog.Warn(
+                            $"[UpdateService] Update check finished after timeout: {t.Exception?.GetBaseException().Message ?? "completed"}"),
+                        TaskScheduler.Default);
                     DiagnosticLog.Warn("[UpdateService] Update check timed out — release server slow/unreachable; treating as up-to-date this run");
                     return null;
                 }
+                timeoutCts.Cancel(); // check won the race — stop the pending Task.Delay timer
                 _pendingUpdate = await checkTask; // already completed
                 return _pendingUpdate?.TargetFullRelease?.Version?.ToString();
             }
@@ -131,16 +142,22 @@ namespace TrueReplayer.Services
                 var line = rawLine.Trim();
                 if (line.Length == 0) continue;
                 if (line.StartsWith('#')) continue;          // heading
-                if (line.StartsWith("---") || line.StartsWith("===")) continue; // hr
+                // Horizontal rule / setext underline only — a line made up entirely of '-' or '='.
+                // (StartsWith would also drop real content like "--- note" or "===> arrow".)
+                if ((line[0] == '-' || line[0] == '=') && IsRuleLine(line)) continue;
 
                 // Strip bullet prefix
                 if (line.StartsWith("- ") || line.StartsWith("* ") || line.StartsWith("+ "))
                     line = line.Substring(2).Trim();
                 else if (line.Length > 2 && char.IsDigit(line[0]))
                 {
-                    // Numbered list like "1. foo"
+                    // Numbered list like "1. foo": require real ordered-list syntax —
+                    // digits, then a dot, then whitespace. This avoids mangling content such as a
+                    // version "1.5x faster" (digit + dot but no space after the dot).
                     var dot = line.IndexOf('.');
-                    if (dot > 0 && dot < 4)
+                    if (dot > 0 && dot < 4
+                        && dot + 1 < line.Length && char.IsWhiteSpace(line[dot + 1])
+                        && AllDigits(line, dot))
                         line = line.Substring(dot + 1).Trim();
                 }
 
@@ -151,6 +168,26 @@ namespace TrueReplayer.Services
                     result.Add(line);
             }
             return result;
+        }
+
+        // True when the line is a markdown horizontal rule / setext underline: 3+ identical
+        // '-' or '=' characters and nothing else.
+        private static bool IsRuleLine(string line)
+        {
+            if (line.Length < 3) return false;
+            var c = line[0];
+            if (c != '-' && c != '=') return false;
+            foreach (var ch in line)
+                if (ch != c) return false;
+            return true;
+        }
+
+        // True when every character in line[0..dot) is a digit (the marker of an ordered-list item).
+        private static bool AllDigits(string line, int dot)
+        {
+            for (var i = 0; i < dot; i++)
+                if (!char.IsDigit(line[i])) return false;
+            return true;
         }
 
         /// <summary>

@@ -55,7 +55,12 @@ namespace TrueReplayer
         private static readonly NativeMethods.LowLevelMouseProc _mouseProc = MouseHookCallback;
         private static readonly NativeMethods.LowLevelKeyboardProc _keyboardProc = KeyboardHookCallback;
 
-        private static DateTime? lastAltRightPressTime = null;
+        // Monotonic tick timestamp (Environment.TickCount64) for the AltGr (right-Alt → right-Ctrl)
+        // debounce — DateTime.Now is non-monotonic (NTP/manual/DST shifts could make the delta
+        // negative or huge and wrongly suppress/leak the synthetic Ctrl). 0 means "never seen a
+        // right-Alt" (TickCount64 is ms-since-boot, so a real timestamp is effectively never 0,
+        // and the <100ms window bounds it regardless). Matches the MainController tick fix.
+        private static long lastAltRightPressTicks = 0;
 
         public static volatile Dictionary<string, string> ProfileHotkeys = new();
         public static volatile Dictionary<string, HotstringConfig> ProfileHotstrings = new();
@@ -262,14 +267,33 @@ namespace TrueReplayer
         {
             if (_mouseHookId != IntPtr.Zero)
             {
-                NativeMethods.UnhookWindowsHookEx(_mouseHookId);
+                // UnhookWindowsHookEx returns false if the handle was already invalid or the
+                // unhook failed. NativeMethods declares it WITHOUT SetLastError, so there's no
+                // meaningful Win32 errno to report — just record the failure. We still null the
+                // id either way so a later Start() re-installs rather than wedging on a stale id.
+                if (!NativeMethods.UnhookWindowsHookEx(_mouseHookId))
+                    TrueReplayer.Services.DiagnosticLog.Warn("UnhookWindowsHookEx failed for the mouse hook on Stop() — handle may have been already invalid.");
                 _mouseHookId = IntPtr.Zero;
             }
             if (_keyboardHookId != IntPtr.Zero)
             {
-                NativeMethods.UnhookWindowsHookEx(_keyboardHookId);
+                if (!NativeMethods.UnhookWindowsHookEx(_keyboardHookId))
+                    TrueReplayer.Services.DiagnosticLog.Warn("UnhookWindowsHookEx failed for the keyboard hook on Stop() — handle may have been already invalid.");
                 _keyboardHookId = IntPtr.Zero;
             }
+
+            // Reset transient hook state so a subsequent Start() begins clean. Without this, a
+            // key physically held across a Stop()/Start() leaves a stale _vkCodesCurrentlyDown
+            // entry (next press looks like an auto-repeat and is swallowed), a half-typed
+            // hotstring buffer leaks into the next session's matching, and an in-flight
+            // WhilePressed/OnRelease hold could fire PROFILE_STOP/PROFILE for a key that was
+            // never released. ClearActiveHold also disposes the debounce timer under _holdLock.
+            ClearActiveHold();
+            _vkCodesCurrentlyDown.Clear();
+            _hotstringBufferLen = 0;
+            _pendingReleaseProfile = null;
+            _pendingReleaseVkCode = 0;
+            lock (_captureOwnersLock) _captureOwners.Clear();
         }
 
 
@@ -368,6 +392,11 @@ namespace TrueReplayer
         private static readonly StringBuilder _windowTextBuffer = new(512);
         private static readonly StringBuilder _processNameBuffer = new(512);
 
+        // Reused to compose the scroll-wheel hotkey combo string on the mouse-hook hot path
+        // (avoids a per-wheel-event List<string> allocation). Touched only on the hook thread,
+        // like _windowTextBuffer / _processNameBuffer above — no synchronization required.
+        private static readonly StringBuilder _scrollComboBuilder = new(32);
+
         private static bool IsForegroundWindowMatch(string profileName)
         {
             // Read snapshot once for consistent access
@@ -452,8 +481,21 @@ namespace TrueReplayer
                         var pb = new StringBuilder(512);
                         if (NativeMethods.GetProcessImageFileName(h, pb, (uint)pb.Capacity) > 0)
                             proc = System.IO.Path.GetFileName(pb.ToString());
+                        else
+                            // Handle opened but the image name couldn't be read — distinguish
+                            // this from "couldn't open" so the gate-reject diagnostic isn't
+                            // misleading (e.g. a protected/anti-cheat process).
+                            proc = $"?(name-unavailable, pid {pid})";
                     }
                     finally { NativeMethods.CloseHandle(h); }
+                }
+                else
+                {
+                    // OpenProcess failed — usually the foreground app is elevated and we're not
+                    // (errno 5 = ACCESS_DENIED), which is the #2 silent "hotkey does nothing"
+                    // cause. Surface the errno so support can tell elevation apart from a
+                    // ProcessName mismatch. OpenProcess has SetLastError=true (NativeMethods.cs).
+                    proc = $"?(open-failed err {Marshal.GetLastWin32Error()}, pid {pid})";
                 }
                 return $"{proc} \"{title}\"";
             }
@@ -661,13 +703,17 @@ namespace TrueReplayer
                     bool winHeld = _vkCodesCurrentlyDown.Contains(0x5B)
                                 || _vkCodesCurrentlyDown.Contains(0x5C);
 
-                    var parts = new List<string>();
-                    if (winHeld) parts.Add("Win");
-                    if (ctrlHeld) parts.Add("Ctrl");
-                    if (altHeld) parts.Add("Alt");
-                    if (shiftHeld) parts.Add("Shift");
-                    parts.Add(scrollKey);
-                    string combo = string.Join("+", parts);
+                    // Hot path: every wheel event with profile hotkeys configured lands here, so
+                    // compose the combo into a reusable StringBuilder instead of allocating a
+                    // List<string> + string.Join on each scroll. _scrollComboBuilder is only ever
+                    // touched on the (single) hook thread, so no synchronization is needed.
+                    _scrollComboBuilder.Clear();
+                    if (winHeld) _scrollComboBuilder.Append("Win+");
+                    if (ctrlHeld) _scrollComboBuilder.Append("Ctrl+");
+                    if (altHeld) _scrollComboBuilder.Append("Alt+");
+                    if (shiftHeld) _scrollComboBuilder.Append("Shift+");
+                    _scrollComboBuilder.Append(scrollKey);
+                    string combo = _scrollComboBuilder.ToString();
 
                     string? matchedProfile = null;
                     foreach (var p in ProfileHotkeys)
@@ -852,13 +898,12 @@ namespace TrueReplayer
 
                 if (vkCode == 165 && isDown)
                 {
-                    lastAltRightPressTime = DateTime.Now;
+                    lastAltRightPressTicks = Environment.TickCount64;
                 }
 
-                if (vkCode == 162 && isDown && lastAltRightPressTime != null)
+                if (vkCode == 162 && isDown && lastAltRightPressTicks != 0)
                 {
-                    var elapsed = DateTime.Now - lastAltRightPressTime.Value;
-                    if (elapsed.TotalMilliseconds < 100)
+                    if (Environment.TickCount64 - lastAltRightPressTicks < 100)
                     {
                         return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
                     }

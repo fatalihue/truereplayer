@@ -542,7 +542,13 @@ namespace TrueReplayer.Controllers
 
         public void RefreshProfileList(bool suppressWatcher = false)
         {
-            _ = RefreshProfileListAsync(suppressWatcher);
+            // Fire-and-forget, but observe the task so a load/UI failure is logged instead of
+            // vanishing into an unobserved-task exception (which would otherwise be silent).
+            _ = RefreshProfileListAsync(suppressWatcher).ContinueWith(
+                t => DiagnosticLog.Error("RefreshProfileList background refresh failed", t.Exception!.GetBaseException()),
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted,
+                TaskScheduler.Default);
         }
 
         private void SetupProfileWatcher()
@@ -1220,6 +1226,14 @@ namespace TrueReplayer.Controllers
             // multi-profile imports feel deterministic.
             var toImport = envelope.Profiles.Where(p => selectedNames.Contains(p.Name)).ToList();
 
+            // Names already claimed by earlier entries in THIS batch. The rename loop below only
+            // consulted File.Exists, which misses collisions against an earlier selected entry that
+            // either (a) shares the same source name with no pre-existing file on disk, or (b) was
+            // assigned a "name (N)" that a later entry then independently computes to the same value.
+            // Tracking allocations here keeps the numbering consistent and prevents two imports
+            // silently resolving to the same path. Seeded as collisions are resolved below.
+            var allocatedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             foreach (var entry in toImport)
             {
                 // Hard compatibility gate — refuse to write a profile the running app can't run.
@@ -1242,7 +1256,9 @@ namespace TrueReplayer.Controllers
                 string targetPath = Path.Combine(profileDir, entry.Name + ".json");
                 string finalName = entry.Name;
 
-                if (File.Exists(targetPath))
+                // Treat a name claimed by an earlier batch entry the same as a name already on disk —
+                // both must trigger conflict resolution so we never assign two imports the same path.
+                if (File.Exists(targetPath) || allocatedNames.Contains(finalName))
                 {
                     // Look up the user's decision from the preview dialog. Default Rename when
                     // the entry is missing — matches the safest default the dialog already uses.
@@ -1264,10 +1280,22 @@ namespace TrueReplayer.Controllers
                             finalName = $"{entry.Name} ({counter})";
                             targetPath = Path.Combine(profileDir, finalName + ".json");
                             counter++;
-                        } while (File.Exists(targetPath));
+                        } while (File.Exists(targetPath) || allocatedNames.Contains(finalName));
                     }
                     // Overwrite: leave targetPath / finalName as-is — File.WriteAllTextAsync below
-                    // replaces the existing file atomically.
+                    // replaces the existing file atomically. Guard against a second selected entry
+                    // also overwriting the SAME target: if an earlier batch entry already claimed
+                    // this name, fall back to a fresh "name (N)" so the later import isn't lost.
+                    else if (resolution == ImportConflictResult.Overwrite && allocatedNames.Contains(finalName))
+                    {
+                        int counter = 2;
+                        do
+                        {
+                            finalName = $"{entry.Name} ({counter})";
+                            targetPath = Path.Combine(profileDir, finalName + ".json");
+                            counter++;
+                        } while (File.Exists(targetPath) || allocatedNames.Contains(finalName));
+                    }
                 }
 
                 var profile = new UserProfile
@@ -1309,6 +1337,10 @@ namespace TrueReplayer.Controllers
                     skipped++;
                     continue;
                 }
+
+                // Claim this name for the batch BEFORE writing so subsequent entries see it even
+                // though the write below is what makes it visible to File.Exists.
+                allocatedNames.Add(finalName);
 
                 await SettingsManager.SaveProfileAsync(targetPath, profile);
 
@@ -1517,7 +1549,9 @@ namespace TrueReplayer.Controllers
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[ProfileController] SaveProfileOrder error: {ex.Message}");
+                // Non-fatal: a failed order write loses only pin/folder layout, not profile data.
+                // Log to DiagnosticLog (not Debug-only) so the silent failure is diagnosable.
+                DiagnosticLog.Error("SaveProfileOrder write failed", ex);
             }
             finally
             {
@@ -1710,7 +1744,25 @@ namespace TrueReplayer.Controllers
 
         public async Task ReorderProfilesAsync(List<string>? pinned, List<ProfileFolder>? folders, List<string>? ungrouped)
         {
-            if (pinned != null) _profileOrder.Pinned = pinned;
+            // The incoming lists come from the (untrusted) frontend drag/drop payload. Validate every
+            // name against the profiles that actually exist on disk before persisting, mirroring the
+            // onDisk gate in MergeImportedOrganizationAsync — otherwise a stale or malformed payload
+            // could inject names for profiles that don't exist or silently drop real ones into a
+            // garbage order file. Unknown names are filtered; duplicates are collapsed (first wins).
+            var onDisk = ProfileEntries.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+            List<string> Sanitize(List<string> names)
+            {
+                var result = new List<string>(names.Count);
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var n in names)
+                {
+                    if (onDisk.Contains(n) && seen.Add(n))
+                        result.Add(n);
+                }
+                return result;
+            }
+
+            if (pinned != null) _profileOrder.Pinned = Sanitize(pinned);
             if (folders != null)
             {
                 // Preserve existing folder data (TargetWindow, UseRelativeCoordinates, BringToFocus)
@@ -1718,20 +1770,22 @@ namespace TrueReplayer.Controllers
                 var reordered = new List<ProfileFolder>();
                 foreach (var incoming in folders)
                 {
+                    var validItems = Sanitize(incoming.Items);
                     var existing = _profileOrder.Folders.FirstOrDefault(f => f.Name == incoming.Name);
                     if (existing != null)
                     {
-                        existing.Items = incoming.Items;
+                        existing.Items = validItems;
                         reordered.Add(existing);
                     }
                     else
                     {
+                        incoming.Items = validItems;
                         reordered.Add(incoming);
                     }
                 }
                 _profileOrder.Folders = reordered;
             }
-            if (ungrouped != null) _profileOrder.UngroupedOrder = ungrouped;
+            if (ungrouped != null) _profileOrder.UngroupedOrder = Sanitize(ungrouped);
             await SaveProfileOrderAsync();
         }
 
@@ -1756,7 +1810,12 @@ namespace TrueReplayer.Controllers
                 debounceCts = null;
             }
 
-            _profileOrderLock?.Dispose();
+            // Intentionally NOT disposing _profileOrderLock: an in-flight SaveProfileOrderAsync may
+            // still be awaiting WaitAsync or sitting between WaitAsync and Release(), and disposing
+            // the semaphore underneath it throws ObjectDisposedException (and could leak the slot).
+            // SemaphoreSlim holds no unmanaged handle here (AvailableWaitHandle is never queried), so
+            // letting the GC reclaim it after the last save completes is safe. The _disposed guard
+            // above plus _debounceLock already make any in-flight watcher callback benign.
         }
     }
 }

@@ -508,7 +508,12 @@ function HotkeyInput({ value, settingKey, onChange, width = 'w-[110px]' }: {
     if (!isFocused) return;
     return subscribe((msg) => {
       if (msg.type !== 'hotkey:captured') return;
-      const combo = msg.payload.combo;
+      const combo = msg.payload?.combo;
+      // Compile-time narrowing types combo as string, but a malformed backend
+      // message could deliver a non-string/empty payload at runtime — without
+      // this guard it would be set as the field value and committed, and the
+      // only backstop is BridgeContext's per-handler try/catch (which just logs).
+      if (typeof combo !== 'string' || combo.length === 0) return;
       setLocalValue(combo);
       armCaptureTimer();
       // A pure modifier press ("Win", "Ctrl") shouldn't commit — wait for the real key.
@@ -766,15 +771,16 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   value={settings.customDelay}
                   onCommit={(v) => changeSetting('customDelay', v)}
                   onEnter={(v) => {
+                    const delay = parseInt(v, 10);
+                    // Non-numeric input shouldn't have any side-effect: neither flip
+                    // the toggle on nor push a bulk delay update. Guard both together.
+                    if (isNaN(delay)) return;
                     if (!settings.useCustomDelay) {
                       changeSetting('useCustomDelay', true);
                     }
                     const indices = selectionRef.current;
                     if (indices.size > 0) {
-                      const delay = parseInt(v, 10);
-                      if (!isNaN(delay)) {
-                        send({ type: 'actions:bulkUpdateDelay', payload: { indices: [...indices], delay } });
-                      }
+                      send({ type: 'actions:bulkUpdateDelay', payload: { indices: [...indices], delay } });
                     }
                   }}
                   width="w-[80px]"

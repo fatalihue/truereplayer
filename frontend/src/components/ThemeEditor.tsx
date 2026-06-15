@@ -238,6 +238,10 @@ function SliderSetting({ label, value, min, max, unit, defaultValue, onChange }:
   const hovering = useRef(false);
   const latestValue = useRef(value);
   latestValue.current = value;
+  // Keep the latest onChange in a ref so the wheel effect doesn't re-subscribe on
+  // every render (onChange is an inline arrow recreated by the parent each render).
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -248,11 +252,11 @@ function SliderSetting({ label, value, min, max, unit, defaultValue, onChange }:
       e.stopPropagation();
       const delta = e.deltaY < 0 ? 1 : -1;
       const next = Math.min(max, Math.max(min, latestValue.current + delta));
-      if (next !== latestValue.current) onChange(next);
+      if (next !== latestValue.current) onChangeRef.current(next);
     };
     el.addEventListener('wheel', handler, { passive: false });
     return () => el.removeEventListener('wheel', handler);
-  }, [min, max, onChange]);
+  }, [min, max]);
 
   // Position of the default-value tick along the range (0..100%). Only rendered when
   // defaultValue is supplied and strictly inside the [min, max] interval (so edge
@@ -363,6 +367,9 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
   const [importText, setImportText] = useState('');
   const [importError, setImportError] = useState('');
   const [copySuccess, setCopySuccess] = useState(false);
+  const [copyError, setCopyError] = useState(false);
+  // Transient index of the recent-color swatch just copied, for a per-swatch tick.
+  const [copiedRecent, setCopiedRecent] = useState<number | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   // Preset tab — search + filter chip state. Persists across tab switches as long
   // as the editor stays open.
@@ -448,9 +455,16 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
 
   const handleCopyClipboard = useCallback(async () => {
     const theme = exportTheme(exportName.trim() || 'My Theme');
-    await navigator.clipboard.writeText(JSON.stringify(theme, null, 2));
-    setCopySuccess(true);
-    setTimeout(() => setCopySuccess(false), 2000);
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(theme, null, 2));
+      setCopyError(false);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch {
+      setCopySuccess(false);
+      setCopyError(true);
+      setTimeout(() => setCopyError(false), 2000);
+    }
   }, [exportTheme, exportName]);
 
   // ── Import handlers ──
@@ -463,7 +477,10 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
         setImportError('Invalid theme format. Check all required color keys and UI settings.');
         return;
       }
-      importTheme(parsed as ExportedTheme);
+      if (!importTheme(parsed as ExportedTheme)) {
+        setImportError('Invalid theme format. Check all required color keys and UI settings.');
+        return;
+      }
       setImportText('');
       setActiveTab('presets');
     } catch {
@@ -855,15 +872,23 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                     {recentColors.map((c, i) => (
                       <button
                         key={i}
-                        onClick={() => {
+                        onClick={async () => {
                           // Copy the hex to clipboard so the user can paste into any field.
                           // Better than auto-applying because we don't know which slot to set.
-                          navigator.clipboard?.writeText(c).catch(() => { /* noop */ });
+                          try {
+                            await navigator.clipboard?.writeText(c);
+                            setCopiedRecent(i);
+                            setTimeout(() => setCopiedRecent(prev => (prev === i ? null : prev)), 1200);
+                          } catch {
+                            /* clipboard unavailable — swatch stays unchanged */
+                          }
                         }}
-                        className="w-4 h-4 rounded border border-border-default hover:scale-110 transition-transform"
+                        className="w-4 h-4 rounded border border-border-default hover:scale-110 transition-transform flex items-center justify-center"
                         style={{ backgroundColor: c }}
-                        title={`${c} — click to copy`}
-                      />
+                        title={copiedRecent === i ? `${c} — copied!` : `${c} — click to copy`}
+                      >
+                        {copiedRecent === i && <Check size={9} className="text-white drop-shadow-[0_0_1px_rgba(0,0,0,0.8)]" />}
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -1181,7 +1206,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                     className="flex items-center gap-1.5 px-3 py-2 rounded text-xs text-text-primary bg-bg-elevated hover:bg-bg-card border border-border-subtle transition-colors"
                   >
                     <Clipboard size={13} />
-                    {copySuccess ? 'Copied!' : 'Copy to Clipboard'}
+                    {copyError ? 'Copy failed' : copySuccess ? 'Copied!' : 'Copy to Clipboard'}
                   </button>
                 </div>
                 <p className="mt-2 text-[10px] text-text-tertiary">

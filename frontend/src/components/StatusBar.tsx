@@ -19,25 +19,71 @@ export function StatusBar() {
   // While running A alone, replayChain is ['A'] and we leave the chain hidden.
   const chainLabel = replayChain.length >= 2 ? replayChain.join(' → ') : null;
 
-  // Elapsed timer
+  // Elapsed timer. Anchored to Date.now() rather than an accumulating per-tick
+  // counter (setInterval is throttled in background tabs / under load, which made
+  // the old `prev + 1` drift below wall-clock). Paused intervals are subtracted so a
+  // pause no longer inflates the count. Limitation: no backend macro elapsed exists,
+  // so this measures from when the UI observes the start/pause edges; a sub-second
+  // offset vs the engine's true start is possible, but it no longer drifts.
   const [elapsed, setElapsed] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startRef = useRef(0);          // Date.now() at the replay-start edge.
+  const pausedAccumRef = useRef(0);    // total resolved paused ms.
+  const pauseStartRef = useRef(0);     // Date.now() captured when the current pause began.
+  const wasPausedRef = useRef(false);  // previous isPaused, to detect edges.
 
   useEffect(() => {
-    if (isReplaying) {
-      setElapsed(0);
-      intervalRef.current = setInterval(() => setElapsed(prev => prev + 1), 1000);
-    } else {
+    if (!isReplaying) {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
+      startRef.current = 0;
+      pausedAccumRef.current = 0;
+      pauseStartRef.current = 0;
+      wasPausedRef.current = false;
       setElapsed(0);
+      return;
     }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+
+    if (startRef.current === 0) {
+      startRef.current = Date.now();
+      pausedAccumRef.current = 0;
+      pauseStartRef.current = 0;
+      wasPausedRef.current = false;
+    }
+
+    // Pause-begin edge: capture the pause start while pauseState.startedAt is still set.
+    if (!wasPausedRef.current && pauseState.isPaused) {
+      pauseStartRef.current = pauseState.startedAt > 0 ? pauseState.startedAt : Date.now();
+    }
+    // Resume edge: fold the just-ended pause in using the CAPTURED start (pauseState.startedAt
+    // is already 0 here because replay:resumed zeroes it in the same dispatch).
+    if (wasPausedRef.current && !pauseState.isPaused && pauseStartRef.current > 0) {
+      pausedAccumRef.current += Math.max(0, Date.now() - pauseStartRef.current);
+      pauseStartRef.current = 0;
+    }
+    wasPausedRef.current = pauseState.isPaused;
+
+    const compute = () => {
+      // While paused, freeze: subtract the in-progress pause using the captured start.
+      const livePause = pauseState.isPaused && pauseStartRef.current > 0
+        ? Math.max(0, Date.now() - pauseStartRef.current)
+        : 0;
+      const ms = Date.now() - startRef.current - pausedAccumRef.current - livePause;
+      setElapsed(Math.max(0, Math.floor(ms / 1000)));
     };
-  }, [isReplaying]);
+    compute();
+
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(compute, 1000);
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [isReplaying, pauseState.isPaused, pauseState.startedAt]);
 
   const total = statusBar.actionCount;
   const current = highlightedActionIndex != null ? highlightedActionIndex + 1 : 0;

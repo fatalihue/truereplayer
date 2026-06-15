@@ -174,6 +174,12 @@ namespace TrueReplayer.Services
             int repeats = Math.Max(1, Math.Min(999, ks.RepeatCount));
             int gap = Math.Max(0, Math.Min(5000, ks.RepeatDelayMs ?? ActionItem.DefaultRepeatDelayMs));
 
+            // Capture the very first KeyDown of the whole expansion so we can stamp the
+            // Keystroke's persisted metadata (Comment, RepeatCount, RepeatDelayMs) onto it.
+            // TryMatchKeystroke clones THIS leading row when folding the run back to a
+            // Keystroke, so stamping here is what makes the Keystroke->paired->combined
+            // round-trip preserve those fields instead of silently dropping them.
+            ActionItem? leadRow = null;
             for (int r = 0; r < repeats; r++)
             {
                 // First action of the whole expansion carries the Keystroke's own delay; each
@@ -182,13 +188,26 @@ namespace TrueReplayer.Services
                 bool first = true;
                 foreach (var m in mods)
                 {
-                    result.Add(new ActionItem { ActionType = "KeyDown", Key = m, Delay = first ? leadDelay : 0 });
+                    var row = new ActionItem { ActionType = "KeyDown", Key = m, Delay = first ? leadDelay : 0 };
+                    leadRow ??= row;
+                    result.Add(row);
                     first = false;
                 }
-                result.Add(new ActionItem { ActionType = "KeyDown", Key = target, Delay = first ? leadDelay : 0 });
+                var targetRow = new ActionItem { ActionType = "KeyDown", Key = target, Delay = first ? leadDelay : 0 };
+                leadRow ??= targetRow;
+                result.Add(targetRow);
                 result.Add(new ActionItem { ActionType = "KeyUp", Key = target, Delay = 0 });
                 for (int m = mods.Count - 1; m >= 0; m--)
                     result.Add(new ActionItem { ActionType = "KeyUp", Key = mods[m], Delay = 0 });
+            }
+
+            // Stamp the Keystroke's carried-through fields onto the leading row so a later
+            // ToCombined re-fold (TryMatchKeystroke clones this row) restores them.
+            if (leadRow != null)
+            {
+                leadRow.Comment = ks.Comment;
+                leadRow.RepeatCount = ks.RepeatCount;
+                leadRow.RepeatDelayMs = ks.RepeatDelayMs;
             }
         }
 

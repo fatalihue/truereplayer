@@ -19,7 +19,9 @@ export function ClickerDashboard() {
 
   const { elapsed, rate, rateLabel } = formatClickerStats(clickerStats.count, clickerStats.elapsedMs);
   const loopActive = loopProgress.active;
-  const etaText = formatEta(loopActive, loopProgress.total, clickerStats.count, rate);
+  // A finished run (status !== 'replaying') has no time-to-finish — gate ETA on
+  // isReplaying so a completed loop renders "—" instead of "~0s" (remaining hits 0).
+  const etaText = formatEta(isReplaying && loopActive, loopProgress.total, clickerStats.count, rate);
   const progressPct = loopActive && loopProgress.total > 0
     ? Math.min(100, (loopProgress.current / loopProgress.total) * 100)
     : null;

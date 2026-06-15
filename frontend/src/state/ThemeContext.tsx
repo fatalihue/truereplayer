@@ -48,8 +48,8 @@ interface ThemeContextValue {
 
   /** Export current resolved theme as JSON object */
   exportTheme: (name: string) => ExportedTheme;
-  /** Import a theme — sets closest preset + overrides */
-  importTheme: (theme: ExportedTheme) => void;
+  /** Import a theme — sets closest preset + overrides. Returns false if the theme is invalid (caller should surface an error). */
+  importTheme: (theme: ExportedTheme) => boolean;
 
   /** Save current resolved colors as a named custom preset and switch to it */
   saveAsPreset: (name: string) => void;
@@ -227,8 +227,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       : prev);
   }, []);
 
-  const importTheme = useCallback((theme: ExportedTheme) => {
-    if (!validateExportedTheme(theme)) return;
+  const importTheme = useCallback((theme: ExportedTheme): boolean => {
+    if (!validateExportedTheme(theme)) return false;
 
     const baseId = findClosestPreset(theme.colors);
     const base = getThemeById(baseId) ?? themes[0];
@@ -247,6 +247,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       colorOverrides: overrides,
       uiSettings: { ...DEFAULT_UI_SETTINGS, ...theme.uiSettings },
     });
+    return true;
   }, []);
 
   const value = useMemo<ThemeContextValue>(() => ({

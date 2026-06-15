@@ -121,12 +121,18 @@ export function KeystrokeCaptureDialog({
   // Re-sync when reopening the dialog on a different row (parent toggles mount
   // via `{editState && <Dialog />}` but React may reuse the instance at the same
   // JSX position). Without this, a second Edit click could open with stale values.
+  // Re-seed every state field, not just the hold duration — otherwise mode /
+  // captured / repeat / gap keep the previous row's values when the instance is
+  // reused.
   useEffect(() => {
-    if (initialHoldDurationMs != null) {
-      setHoldMsState(initialHoldDurationMs);
-      holdMsRef.current = initialHoldDurationMs;
-    }
-  }, [initialHoldDurationMs]);
+    setMode(initialActionType === 'HoldKey' ? 'hold' : 'press');
+    setCaptured(initialKey ?? null);
+    setRepeat(initialRepeat ?? 1);
+    setRepeatDelay(initialRepeatDelayMs ?? DEFAULT_REPEAT_DELAY_MS);
+    const ms = initialHoldDurationMs ?? DEFAULT_HOLD_MS;
+    setHoldMsState(ms);
+    holdMsRef.current = ms;
+  }, [initialActionType, initialKey, initialRepeat, initialRepeatDelayMs, initialHoldDurationMs]);
 
   const containerRef = useRef<HTMLDivElement>(null);
   // Stable refcount slot — see InputHookManager.RegisterCapture. Per-mount ID so

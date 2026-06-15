@@ -38,6 +38,14 @@ namespace TrueReplayer
 
         private IntPtr hwnd;
 
+        // Hotkey-routing prefixes emitted by InputHookManager and matched at every dispatch
+        // site below. Named consts replace repeated magic strings so a rename can't silently
+        // desync one branch from the rest of the routing.
+        private const string ProfilePrefix = "PROFILE::";
+        private const string ProfileHoldPrefix = "PROFILE_HOLD::";
+        private const string ProfileTogglePrefix = "PROFILE_TOGGLE::";
+        private const string ProfileStopPrefix = "PROFILE_STOP::";
+
         public MainWindow()
         {
             this.InitializeComponent();
@@ -53,10 +61,21 @@ namespace TrueReplayer
             TrayIconService.Initialize(this, hwnd);
 
             string iconPath = Path.Combine(AppContext.BaseDirectory, "TrueReplayer.ico");
-            IntPtr hIcon = LoadImage(IntPtr.Zero, iconPath, 1, 0, 0, 0x00000010);
-            const int WM_SETICON = 0x80;
-            SendMessage(hwnd, WM_SETICON, (IntPtr)1, hIcon);
-            SendMessage(hwnd, WM_SETICON, (IntPtr)0, hIcon);
+            // LR_LOADFROMFILE returns an HICON the window holds for its lifetime via WM_SETICON.
+            // Not DestroyIcon'd: the OS reclaims per-process GDI handles on exit (each launch is a
+            // fresh process), and a Closed-handler free would be preempted by WindowEventManager's
+            // Environment.Exit anyway. Just guard a null handle and log a load failure.
+            IntPtr hWindowIcon = LoadImage(IntPtr.Zero, iconPath, 1, 0, 0, 0x00000010);
+            if (hWindowIcon != IntPtr.Zero)
+            {
+                const int WM_SETICON = 0x80;
+                SendMessage(hwnd, WM_SETICON, (IntPtr)1, hWindowIcon);
+                SendMessage(hwnd, WM_SETICON, (IntPtr)0, hWindowIcon);
+            }
+            else
+            {
+                Services.DiagnosticLog.Warn($"Window icon failed to load from '{iconPath}' — using default icon");
+            }
 
             mainController = null!;
 
@@ -697,7 +716,7 @@ namespace TrueReplayer
                     // We intentionally do NOT call ClearActiveHold here — the hook thread already
                     // cleared its own state before dispatching PROFILE_STOP. Touching those fields
                     // from the UI thread would race with any later hook-thread keydown writes.
-                    if (key.StartsWith("PROFILE_STOP::"))
+                    if (key.StartsWith(ProfileStopPrefix))
                     {
                         if (mainController.IsReplayInProgress())
                             mainController.StopReplayIfRunning();
@@ -720,7 +739,7 @@ namespace TrueReplayer
                         return;
                     }
 
-                    bool isProfileTrigger = key.StartsWith("PROFILE::") || key.StartsWith("PROFILE_HOLD::") || key.StartsWith("PROFILE_TOGGLE::");
+                    bool isProfileTrigger = key.StartsWith(ProfilePrefix) || key.StartsWith(ProfileHoldPrefix) || key.StartsWith(ProfileTogglePrefix);
                     if (isProfileTrigger && (!UserProfile.Current.ProfileKeyEnabled || mainController.IsRecording()))
                     {
                         return;
@@ -740,7 +759,7 @@ namespace TrueReplayer
                     // Re-triggering OnPress / OnRelease during an active replay stops it —
                     // otherwise a user running an infinite-loop profile in OnRelease mode has
                     // no way to stop without using the global replay hotkey.
-                    if (key.StartsWith("PROFILE::") && mainController.IsReplayInProgress())
+                    if (key.StartsWith(ProfilePrefix) && mainController.IsReplayInProgress())
                     {
                         mainController.StopReplayIfRunning();
                         return;
@@ -748,7 +767,7 @@ namespace TrueReplayer
 
                     // PROFILE_HOLD:: during active replay: ignored (WhilePressed shouldn't re-enter).
                     // PROFILE_TOGGLE:: passes through — ToggleReplay handles the "press again = stop".
-                    if (key.StartsWith("PROFILE_HOLD::") && mainController.IsReplayInProgress())
+                    if (key.StartsWith(ProfileHoldPrefix) && mainController.IsReplayInProgress())
                     {
                         return;
                     }
@@ -833,11 +852,11 @@ namespace TrueReplayer
                                 effRestoreSz);
                         }
                     }
-                    else if (key.StartsWith("PROFILE::") || key.StartsWith("PROFILE_HOLD::") || key.StartsWith("PROFILE_TOGGLE::"))
+                    else if (key.StartsWith(ProfilePrefix) || key.StartsWith(ProfileHoldPrefix) || key.StartsWith(ProfileTogglePrefix))
                     {
-                        string prefix = key.StartsWith("PROFILE_HOLD::") ? "PROFILE_HOLD::"
-                            : key.StartsWith("PROFILE_TOGGLE::") ? "PROFILE_TOGGLE::"
-                            : "PROFILE::";
+                        string prefix = key.StartsWith(ProfileHoldPrefix) ? ProfileHoldPrefix
+                            : key.StartsWith(ProfileTogglePrefix) ? ProfileTogglePrefix
+                            : ProfilePrefix;
                         string profileName = key.Substring(prefix.Length);
                         // Toggle and WhilePressed both force infinite-loop replay regardless of
                         // the profile's own LoopCount: WhilePressed because the key stays held

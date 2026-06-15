@@ -74,6 +74,15 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
   const ownerIdRef = useRef(`pause-dialog-${crypto.randomUUID()}`);
   const { send, subscribe } = useBridge();
 
+  // Re-sync when reopening the dialog on a different row (parent toggles mount
+  // via `{editState && <Dialog />}` but React may reuse the instance at the same
+  // JSX position). Without this, a second Edit click could open with stale values.
+  // Mirrors the exact seed→state mapping the useState initializers use above.
+  useEffect(() => {
+    setCaptured(initialKey ? initialKey : null);
+    setTimeoutMs(initialTimeoutMs ?? 1000);
+  }, [initialKey, initialTimeoutMs]);
+
   // Focus the container so its keydown (Esc to close) works without a click first.
   useEffect(() => {
     containerRef.current?.focus();

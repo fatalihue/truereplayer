@@ -57,7 +57,7 @@ function AppShell() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const ctrlOrMeta = e.ctrlKey || e.metaKey;
-      if (ctrlOrMeta && e.key === 'k') {
+      if (ctrlOrMeta && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
         setCmdPaletteOpen(prev => !prev);
         return;

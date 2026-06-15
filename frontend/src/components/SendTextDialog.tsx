@@ -29,7 +29,11 @@ const SNIPPETS_KEY = 'trueplayer_snippets';
 function loadSnippets(): Snippet[] {
   try {
     const raw = localStorage.getItem(SNIPPETS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    // Guard against a non-array (corrupt/hand-edited localStorage) — otherwise every
+    // .map/.filter over snippets downstream would throw and break the dialog.
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
@@ -292,7 +296,11 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
     if (!trimmedName || !trimmedText) return;
 
     const newSnippet: Snippet = {
-      id: Date.now().toString(),
+      // crypto.randomUUID (secure-context, available in WebView2) avoids the
+      // same-millisecond collision a bare timestamp had; fall back to timestamp+random.
+      id: (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name: trimmedName,
       text: trimmedText,
     };

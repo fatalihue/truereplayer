@@ -75,6 +75,8 @@ namespace TrueReplayer.Services
 
             ReleaseCurrentIcon();
             currentIconHandle = LoadImage(IntPtr.Zero, iconPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
+            if (currentIconHandle == IntPtr.Zero)
+                DiagnosticLog.Warn($"Tray icon LoadImage failed (Win32 error {Marshal.GetLastWin32Error()}) for '{iconPath}' — tray icon will appear blank");
 
             notifyIcon = new NotifyIconData
             {
@@ -87,7 +89,8 @@ namespace TrueReplayer.Services
                 szTip = ResolveTooltip(settings)
             };
 
-            Shell_NotifyIcon(NIM_ADD, ref notifyIcon);
+            if (!Shell_NotifyIcon(NIM_ADD, ref notifyIcon))
+                DiagnosticLog.Error($"Shell_NotifyIcon(NIM_ADD) failed (Win32 error {Marshal.GetLastWin32Error()}) — tray icon was not registered");
 
             if (showNotification)
             {
@@ -110,12 +113,18 @@ namespace TrueReplayer.Services
 
         public static void ShowMinimizeBalloon()
         {
-            NotifyIconData data = notifyIcon;
-            data.uFlags |= NIF_INFO;
-            data.szInfoTitle = "TrueReplayer is running in the background";
-            data.szInfo = "Click the tray icon to restore the window.";
-            data.dwInfoFlags = NIIF_INFO;
-            Shell_NotifyIcon(NIM_MODIFY, ref data);
+            // Mutate the actual field, not a by-value copy — otherwise NIF_INFO / the balloon
+            // text never persist on the static struct.
+            notifyIcon.uFlags |= NIF_INFO;
+            notifyIcon.szInfoTitle = "TrueReplayer is running in the background";
+            notifyIcon.szInfo = "Click the tray icon to restore the window.";
+            notifyIcon.dwInfoFlags = NIIF_INFO;
+            if (!Shell_NotifyIcon(NIM_MODIFY, ref notifyIcon))
+                DiagnosticLog.Warn($"Shell_NotifyIcon(NIM_MODIFY) for minimize balloon failed (Win32 error {Marshal.GetLastWin32Error()})");
+            // Clear NIF_INFO so subsequent UpdateTrayIcon/RemoveTrayIcon NIM_MODIFY calls — which
+            // reuse this field and do NOT rewrite uFlags — don't re-pop the balloon on an
+            // unrelated tray refresh (mode toggle, profile-key toggle, settings change, etc.).
+            notifyIcon.uFlags &= ~NIF_INFO;
         }
 
         public static void RemoveTrayIcon()
@@ -287,8 +296,16 @@ namespace TrueReplayer.Services
 
             GetCursorPos(out NativeMethods.POINT pt);
             SetForegroundWindow(hwnd);
-            int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD, pt.x, pt.y, 0, hwnd, IntPtr.Zero);
-            DestroyMenu(hMenu);
+            int cmd;
+            try
+            {
+                cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD, pt.x, pt.y, 0, hwnd, IntPtr.Zero);
+            }
+            finally
+            {
+                // Always free the popup menu, even if TrackPopupMenu throws — otherwise the HMENU leaks.
+                DestroyMenu(hMenu);
+            }
 
             if (cmd == 1) ShowWindow(hwnd, 9);
             // Mode switch: only fire when it actually changes, so re-picking the
@@ -388,8 +405,8 @@ namespace TrueReplayer.Services
         private static extern int
 
  TrackPopupMenu(IntPtr hMenu, uint uFlags, int x, int y, int nReserved, IntPtr hWnd, IntPtr prcRect);
-        [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern bool Shell_NotifyIcon(uint dwMessage, ref NotifyIconData lpdata);
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr LoadImage(IntPtr hInst, string lpszName, uint uType, int cxDesired, int cyDesired, uint fuLoad);
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool Shell_NotifyIcon(uint dwMessage, ref NotifyIconData lpdata);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern IntPtr LoadImage(IntPtr hInst, string lpszName, uint uType, int cxDesired, int cyDesired, uint fuLoad);
         [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
         [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr hIcon);
         [DllImport("user32.dll")] private static extern bool DestroyMenu(IntPtr hMenu);

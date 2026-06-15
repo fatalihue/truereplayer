@@ -341,8 +341,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
         setTextMatch('');
         setTextMode('exact');
       }
-      setX(String(action.x || ''));
-      setY(String(action.y || ''));
+      // `?? ''` (not `|| ''`) so an explicit coordinate of 0 seeds as "0" rather than
+      // collapsing to empty — empty means "no override" (skipped on save), 0 is a real value.
+      setX(String(action.x ?? ''));
+      setY(String(action.y ?? ''));
       setDelay(String(action.delay));
       setComment(action.comment || '');
       // Timeout edited in milliseconds (matches the grid + dialogs). Pause defaults
@@ -453,7 +455,12 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
         }
       }
       const newConfidence = Math.min(100, Math.max(10, parseInt(confidence, 10) || 80)) / 100;
-      if (newConfidence !== (action.confidence || 0.8)) {
+      // Compare with a tolerance below the 1% input granularity (0.01): the editor only exposes
+      // integer-percent values, so any real edit differs by >= 0.01, while float-precision noise
+      // from the seed round-trip (action.confidence * 100 -> round -> / 100) stays under 0.005.
+      // Strict !== here re-saved an unchanged value whenever the stored fraction wasn't exactly
+      // representable at 2 decimals (e.g. 0.8500001), bumping the undo stack for a no-op.
+      if (Math.abs(newConfidence - (action.confidence || 0.8)) > 0.005) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'confidence', value: String(newConfidence) } });
       }
       if (actionType === 'WaitImage') {
@@ -775,6 +782,17 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     catch (e) { return (e as Error).message; }
   }, [textMode, textMatch]);
 
+  // #2 — Tier shield for current selector (priority: textMatch > key). Memoised because
+  // estimateTier runs a regex suite and buildTextSelector rebuilds the selector — recomputing
+  // both on every render (the panel re-renders on each keystroke / test result) is wasteful.
+  // MUST live here, above the `if (actionIndex == null) return null` early return below, so the
+  // hook is called unconditionally on every render (Rules of Hooks).
+  const { selectorForTier, tier, tierMeta } = useMemo(() => {
+    const sel = textMatch.trim() ? buildTextSelector(textMode, textMatch.trim()) : key;
+    const t = estimateTier(sel);
+    return { selectorForTier: sel, tier: t, tierMeta: TIER_META[t] };
+  }, [textMatch, textMode, key]);
+
   // #3 — Run the current action against the live page
   const handleTestAction = useCallback(() => {
     if (actionIndex == null || !action) return;
@@ -909,6 +927,15 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       setTestPixelResult({ matches: false, error: 'Set X, Y, and the target colour first.' });
       return;
     }
+    // The empty check above doesn't catch non-numeric input (e.g. "abc"): parseInt would
+    // return NaN, which JSON-serialises to null and makes the backend probe a bogus pixel.
+    // Parse up front and bail with an inline error so we never send NaN.
+    const testX = parseInt(pixelX, 10);
+    const testY = parseInt(pixelY, 10);
+    if (isNaN(testX) || isNaN(testY)) {
+      setTestPixelResult({ matches: false, error: 'X and Y must be numbers.' });
+      return;
+    }
     const requestId = Math.random().toString(36).slice(2, 10);
     setTestPixelRequestId(requestId);
     setTestPixelResult(null);
@@ -917,8 +944,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       type: 'pixel:testMatch',
       payload: {
         requestId,
-        x: parseInt(pixelX, 10),
-        y: parseInt(pixelY, 10),
+        x: testX,
+        y: testY,
         hex,
         tolerance: parseInt(pixelTolerance, 10) || 0,
       },
@@ -1025,11 +1052,6 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   // Skip rendering the picker when there's nothing useful to switch to (single-option family).
   const familyOptions = currentFamily ? familyTypes[currentFamily] : [];
   const showTypePicker = familyOptions.length > 1;
-
-  // #2 — Tier shield for current selector (priority: textMatch > key)
-  const selectorForTier = textMatch.trim() ? buildTextSelector(textMode, textMatch.trim()) : key;
-  const tier = estimateTier(selectorForTier);
-  const tierMeta = TIER_META[tier];
 
   return createPortal(
     <>
@@ -1472,7 +1494,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               <div className="flex items-center gap-2.5">
                 <span
                   className="w-7 h-7 rounded border border-border-default shrink-0"
-                  style={{ background: /^#?[0-9A-Fa-f]{6}$/.test(pixelColor.trim()) ? (pixelColor.trim().startsWith('#') ? pixelColor.trim() : '#' + pixelColor.trim()) : 'transparent' }}
+                  style={{ background: /^#?(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(pixelColor.trim()) ? (pixelColor.trim().startsWith('#') ? pixelColor.trim() : '#' + pixelColor.trim()) : 'transparent' }}
                   title={pixelColor || 'No colour set'}
                 />
                 <input

@@ -38,9 +38,21 @@ export function BulkActionBar({
 
   if (selectedCount === 0) return null;
 
+  // True only while the delay field holds a non-empty, unparseable/negative value.
+  // Drives the invalid-styled border below and blocks confirm so the bad value
+  // isn't silently dropped (RELIABILITY: previously handleConfirm just closed the
+  // field on invalid input with no feedback). Empty stays valid = an OK/Enter on a
+  // blank field is a clean cancel, matching the X/Y branch's no-op-on-blank.
+  const delayInvalid =
+    activeInput === 'delay' &&
+    inputValue.trim() !== '' &&
+    !(parseInt(inputValue, 10) >= 0);
+
   const handleConfirm = () => {
     if (!activeInput) return;
     if (activeInput === 'delay') {
+      // Keep the field open + invalid-styled instead of discarding silently.
+      if (delayInvalid) return;
       const delay = parseInt(inputValue, 10);
       if (!isNaN(delay) && delay >= 0) onSetDelay(delay);
     } else if (activeInput === 'x' || activeInput === 'y') {
@@ -96,7 +108,9 @@ export function BulkActionBar({
               onKeyDown={(e) => { if (e.key === 'Enter') handleConfirm(); if (e.key === 'Escape') setActiveInput(null); }}
               autoFocus
               placeholder={inputPlaceholder}
-              className={`${inputWidth} h-6 px-2 text-[11px] font-mono bg-bg-input border border-border-default rounded text-center text-text-primary outline-none focus:border-accent-solid`}
+              className={`${inputWidth} h-6 px-2 text-[11px] font-mono bg-bg-input border rounded text-center text-text-primary outline-none ${
+                delayInvalid ? 'border-recording/60 focus:border-recording' : 'border-border-default focus:border-accent-solid'
+              }`}
             />
             <button
               onClick={handleConfirm}

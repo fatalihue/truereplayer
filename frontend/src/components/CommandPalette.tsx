@@ -302,7 +302,14 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
       // palette. The palette now focuses on actions, insertion, transforms, profile management,
       // and view/diagnostic utilities that aren't one-click in the standard UI.
     ];
-  }, [profiles, activeProfile, settings, buttonStates, send, onClose, computeInsertIndex]);
+    // Narrow deps to the exact settings fields read above (hotkeys, loop config, mode flags)
+    // so unrelated settings changes (e.g. movement knobs) don't rebuild every command group.
+  }, [
+    profiles, activeProfile, buttonStates, send, onClose, computeInsertIndex,
+    settings.recordingHotkey, settings.replayHotkey, settings.modeToggleHotkey,
+    settings.useCursorClick, settings.enableLoop, settings.loopCount,
+    settings.loopIntervalEnabled, settings.loopInterval,
+  ]);
 
   // Filter
   const filteredGroups = useMemo(() => {
@@ -329,7 +336,9 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         onClose();
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setFocusedIndex(prev => Math.min(prev + 1, flatItems.length - 1));
+        // Math.max(0, ...) guards the empty-list case: when flatItems is empty,
+        // length - 1 is -1, which would otherwise leave focusedIndex at an invalid -1.
+        setFocusedIndex(prev => Math.max(0, Math.min(prev + 1, flatItems.length - 1)));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         setFocusedIndex(prev => Math.max(prev - 1, 0));

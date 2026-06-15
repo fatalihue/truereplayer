@@ -1814,7 +1814,10 @@ namespace TrueReplayer.Services
                     await ApplyWindowContextAsync(token);
                 }
 
-                int repeats = Math.Max(1, action.RepeatCount);
+                // Clamp 1..999 to match Keystroke (the canonical RepeatCount range) — without
+                // an upper bound a hand-edited/corrupt RepeatCount could spin a sub-profile an
+                // unbounded number of times before the Stop hotkey gets a turn between iterations.
+                int repeats = Math.Max(1, Math.Min(999, action.RepeatCount));
                 var subActions = subProfile.Actions.ToList();
                 for (int r = 0; r < repeats && !token.IsCancellationRequested; r++)
                 {
@@ -2124,6 +2127,11 @@ namespace TrueReplayer.Services
                 NativeMethods.SendInput(1, new[] { mv }, inputSize); // for apps reading Raw Input
             }
 
+            // A click is split across separate SimulateMouse calls (DOWN then UP at the same
+            // point); on the UP half the cursor is already on target, so re-issuing the move is a
+            // redundant SetCursorPos/SendInput. Skip that no-op move — but the gap sleep below is
+            // KEPT on both halves so press→release retains a small, realistic dwell (some games /
+            // anti-cheat reject a zero-dwell synthetic click).
             int stepPx = MoveStepPx;
             if (SmoothMovement && stepPx > 0 && NativeMethods.GetCursorPos(out var start) && (start.x != x || start.y != y))
             {
@@ -2138,9 +2146,13 @@ namespace TrueReplayer.Services
                     if (i < steps && MoveStepDelayMs > 0) Thread.Sleep(MoveStepDelayMs);
                 }
             }
+            else if (SmoothMovement && stepPx > 0 && NativeMethods.GetCursorPos(out var atTarget) && atTarget.x == x && atTarget.y == y)
+            {
+                // Already exactly on target (typical UP half of a click) — skip the redundant move.
+            }
             else
             {
-                MoveAbs(x, y); // single jump (SmoothMovement off, MoveStepPx == 0, GetCursorPos failed, or at target)
+                MoveAbs(x, y); // single jump (SmoothMovement off, MoveStepPx == 0, or GetCursorPos failed)
             }
 
             var clickInput = new NativeMethods.INPUT
@@ -2152,7 +2164,9 @@ namespace TrueReplayer.Services
                 }
             };
 
-            // Small gap so the app registers the final position before the button fires.
+            // Small gap before the button fires: after a move it lets the app register the final
+            // position; on the same-spot UP half it provides the press→release dwell. Kept on both
+            // halves so synthetic clicks keep a realistic, non-zero dwell.
             Thread.Sleep(Math.Max(0, MoveClickDelayMs));
             lock (_simInputLock)
             {
@@ -2454,7 +2468,14 @@ namespace TrueReplayer.Services
                         Windows.ApplicationModel.DataTransfer.Clipboard.Clear();
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    // Clipboard.SetContent/Clear can throw transiently (another app holding the
+                    // clipboard, COM 0x800401D0 CLIPBRD_E_CANT_OPEN). Non-fatal — the replay is
+                    // already over — but log so a user who notices their clipboard wasn't restored
+                    // has a breadcrumb instead of silence.
+                    DiagnosticLog.Error("Failed to restore original clipboard", ex);
+                }
             });
         }
 

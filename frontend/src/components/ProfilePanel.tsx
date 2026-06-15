@@ -125,9 +125,14 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const folderMenuRef = useRef<HTMLDivElement>(null);
 
-  // Build profile map for quick lookup
-  const profileMap = new Map<string, ProfileEntry>();
-  profiles.forEach(p => profileMap.set(p.name, p));
+  // Build profile map for quick lookup. Memoized on `profiles` so the map (and every
+  // derived section list below, which all key off it) isn't rebuilt on unrelated re-renders
+  // (drag state, dialog toggles, hover submenus). Only changes when the profile set changes.
+  const profileMap = useMemo(() => {
+    const m = new Map<string, ProfileEntry>();
+    profiles.forEach(p => m.set(p.name, p));
+    return m;
+  }, [profiles]);
 
   // Search supports two modes detected from the query prefix:
   //   - "#fps"  → tag mode: matches profiles with a tag containing "fps" (substring,
@@ -151,44 +156,50 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   // Build sectioned lists (alphabetically sorted)
   const sortByName = (a: ProfileEntry, b: ProfileEntry) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
 
-  const pinnedProfiles = (profileOrder?.pinned ?? [])
+  // The three section lists all derive from profileMap + profileOrder + the search query.
+  // Memoize so they only recompute when one of those changes — not on drag/dialog/hover
+  // re-renders. matchesSearch/sortByName/isTagSearch/tagSearchTerm are pure derivations of
+  // searchQuery, so searchQuery in the dep array covers them.
+  const pinnedProfiles = useMemo(() => (profileOrder?.pinned ?? [])
     .filter(n => profileMap.has(n) && matchesSearch(profileMap.get(n)!))
     .map(n => profileMap.get(n)!)
-    .sort(sortByName);
+    .sort(sortByName), [profileMap, profileOrder, searchQuery]);
 
-  const folderSections = (profileOrder?.folders ?? []).map(f => ({
+  const folderSections = useMemo(() => (profileOrder?.folders ?? []).map(f => ({
     ...f,
     profiles: f.items
       .filter(n => profileMap.has(n) && matchesSearch(profileMap.get(n)!))
       .map(n => profileMap.get(n)!)
       .sort(sortByName)
-  }));
+  })), [profileMap, profileOrder, searchQuery]);
 
-  // Collect all profiles referenced in profileOrder sections
-  const allReferenced = new Set<string>([
-    ...(profileOrder?.pinned ?? []),
-    ...(profileOrder?.folders ?? []).flatMap(f => f.items),
-    ...(profileOrder?.ungroupedOrder ?? [])
-  ]);
+  const ungroupedProfiles = useMemo(() => {
+    // Collect all profiles referenced in profileOrder sections
+    const allReferenced = new Set<string>([
+      ...(profileOrder?.pinned ?? []),
+      ...(profileOrder?.folders ?? []).flatMap(f => f.items),
+      ...(profileOrder?.ungroupedOrder ?? [])
+    ]);
 
-  // Include any profiles not in any section (handles race condition on startup)
-  const ungroupedNames = [
-    ...(profileOrder?.ungroupedOrder ?? []),
-    ...profiles.filter(p => !allReferenced.has(p.name)).map(p => p.name)
-  ];
+    // Include any profiles not in any section (handles race condition on startup)
+    const ungroupedNames = [
+      ...(profileOrder?.ungroupedOrder ?? []),
+      ...profiles.filter(p => !allReferenced.has(p.name)).map(p => p.name)
+    ];
 
-  const ungroupedProfiles = ungroupedNames
-    .filter(n => profileMap.has(n) && matchesSearch(profileMap.get(n)!))
-    .map(n => profileMap.get(n)!)
-    .sort(sortByName);
+    return ungroupedNames
+      .filter(n => profileMap.has(n) && matchesSearch(profileMap.get(n)!))
+      .map(n => profileMap.get(n)!)
+      .sort(sortByName);
+  }, [profileMap, profileOrder, profiles, searchQuery]);
 
   // If searching, show flat filtered list instead of sections. Reuses matchesSearch so
   // #tag mode works here too — was previously a separate name-only filter, which silently
   // broke tag-search by returning the unfiltered list when the prefix didn't match a name.
   const isSearching = searchQuery.length > 0;
-  const filtered = isSearching
+  const filtered = useMemo(() => isSearching
     ? profiles.filter(matchesSearch)
-    : profiles;
+    : profiles, [profiles, searchQuery, isSearching]);
 
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   // Same role as menuPos, but for the folder context menu. Kept separate so the two
@@ -703,7 +714,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const confirmHotkey = () => {
     if (showHotkeyDialog && hotkeyCapture && hotkeyCapture !== '...') {
       send({ type: 'profile:assignHotkey', payload: { name: showHotkeyDialog, hotkey: hotkeyCapture, mode: hotkeyTriggerMode } });
-      // Don't close dialog here — wait for profiles:updated (success) or alert:show (conflict)
+      // Close optimistically rather than waiting solely on profiles:updated. The backend
+      // doesn't push that message on every path (e.g. a profile that fails to load), which
+      // previously left the dialog stuck open with no feedback. On a hotkey conflict the
+      // backend emits alert:show, which ToastContext already surfaces as a toast, so the
+      // user still sees why the bind didn't take even though the dialog has closed.
+      setShowHotkeyDialog(null);
     }
   };
 
@@ -724,16 +740,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     return subscribe((msg) => {
       if (msg.type === 'hotkey:captured') {
         setHotkeyCapture(msg.payload.combo);
-      }
-    });
-  }, [showHotkeyDialog, subscribe]);
-
-  // Auto-close hotkey dialog when profile list updates (means hotkey was saved successfully)
-  useEffect(() => {
-    if (!showHotkeyDialog) return;
-    return subscribe((msg) => {
-      if (msg.type === 'profiles:updated') {
-        setShowHotkeyDialog(null);
       }
     });
   }, [showHotkeyDialog, subscribe]);

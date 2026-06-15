@@ -206,6 +206,30 @@ namespace TrueReplayer
         private static readonly HashSet<string> PreservedTypingKeys =
             new(StringComparer.OrdinalIgnoreCase) { "Return", "Enter", "Tab", "Escape", "Esc" };
 
+        // Allowlist for the actions:edit "actionType" field — the exact canonical strings the
+        // executor understands (ActionReplayer's combined- and paired-mode switches +
+        // ActionModeConverter + the conditional-block types). An edit message could otherwise
+        // stamp an arbitrary string onto a row, producing an action no execution branch handles
+        // (silent no-op at replay) and a type the grid/converters don't recognize. Ordinal
+        // (case-sensitive) on purpose: the mouse switch in ActionReplayer is case-sensitive, so
+        // only the exact canonical spelling is a valid stored value. The frontend dropdown only
+        // ever emits these spellings.
+        private static readonly HashSet<string> KnownActionTypes =
+            new(StringComparer.Ordinal)
+            {
+                "LeftClick", "RightClick", "MiddleClick", "DoubleClick",
+                "LeftClickDown", "LeftClickUp",
+                "RightClickDown", "RightClickUp",
+                "MiddleClickDown", "MiddleClickUp",
+                "ScrollUp", "ScrollDown",
+                "KeyDown", "KeyUp", "HoldKey", "Keystroke",
+                "SendText",
+                "WaitImage", "WaitPixelColor", "Pause", "RunProfile",
+                "If", "Else", "EndIf",
+                "BrowserClick", "BrowserRightClick", "BrowserType",
+                "BrowserWaitElement", "BrowserNavigate", "BrowserSelectOption",
+            };
+
         private void EndSelectInteraction()
         {
             InputHookManager.SuppressMouseRecording = false;
@@ -700,7 +724,7 @@ namespace TrueReplayer
                     case "window:minimizeToTray": HandleMinimizeToTray(payload); break;
                     case "window:runOnStartup": HandleRunOnStartup(payload); break;
                     case "window:startMinimized": HandleStartMinimized(payload); break;
-                    case "window:reloadUI": try { var url = webView.Source; webView.Navigate(url); } catch { } break;
+                    case "window:reloadUI": try { var url = webView.Source; webView.Navigate(url); } catch (Exception rex) { DiagnosticLog.Error("window:reloadUI navigation failed", rex); } break;
                     case "update:check": _ = CheckForUpdateAsync(); break;
                     case "update:apply": _ = HandleUpdateApply(); break;
                     case "logs:openFolder":
@@ -1654,12 +1678,19 @@ namespace TrueReplayer
 
         private void HandleThemeColors(JsonElement payload)
         {
-            var bgSurface = payload.GetProperty("bgSurface").GetString();
-            var bgCard = payload.GetProperty("bgCard").GetString();
-            var textPrimary = payload.GetProperty("textPrimary").GetString();
-            var textSecondary = payload.GetProperty("textSecondary").GetString();
-            var accentSolid = payload.GetProperty("accentSolid").GetString();
-            var borderSubtle = payload.GetProperty("borderSubtle").GetString();
+            // Defensive reads — GetProperty throws on a missing field and the outer HandleMessage
+            // catch would only Debug.WriteLine it, silently skipping the theme update. TryGet a
+            // string for each field (null when absent/non-string); the guard below still requires
+            // the two load-bearing colors before applying.
+            static string? Str(JsonElement p, string name) =>
+                p.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String ? el.GetString() : null;
+
+            var bgSurface = Str(payload, "bgSurface");
+            var bgCard = Str(payload, "bgCard");
+            var textPrimary = Str(payload, "textPrimary");
+            var textSecondary = Str(payload, "textSecondary");
+            var accentSolid = Str(payload, "accentSolid");
+            var borderSubtle = Str(payload, "borderSubtle");
 
             if (bgSurface != null && textPrimary != null)
             {
@@ -1735,10 +1766,16 @@ namespace TrueReplayer
                 return;
             }
 
-            bool loopEnabled = payload.GetProperty("loopEnabled").GetBoolean();
-            string loopCount = payload.GetProperty("loopCount").GetString() ?? "1";
-            bool intervalEnabled = payload.GetProperty("intervalEnabled").GetBoolean();
-            string intervalText = payload.GetProperty("intervalText").GetString() ?? "0";
+            // Defensive reads — a hotkey-forwarded or older-frontend payload may omit these.
+            // GetProperty/GetBoolean would throw and the outer catch would only Debug.WriteLine,
+            // silently dropping the replay start. Fall back to the same defaults the *.GetString()
+            // calls already used (loop off, count "1", interval off, text "0").
+            bool loopEnabled = payload.TryGetProperty("loopEnabled", out var loopEnEl) && loopEnEl.ValueKind == JsonValueKind.True;
+            string loopCount = payload.TryGetProperty("loopCount", out var loopCntEl) && loopCntEl.ValueKind == JsonValueKind.String
+                ? loopCntEl.GetString() ?? "1" : "1";
+            bool intervalEnabled = payload.TryGetProperty("intervalEnabled", out var ivEnEl) && ivEnEl.ValueKind == JsonValueKind.True;
+            string intervalText = payload.TryGetProperty("intervalText", out var ivTxtEl) && ivTxtEl.ValueKind == JsonValueKind.String
+                ? ivTxtEl.GetString() ?? "0" : "0";
 
             bool useVariation = UseDelayVariation;
             int variationPercent = int.TryParse(DelayVariation, out var vp) ? vp : 20;
@@ -1910,6 +1947,16 @@ namespace TrueReplayer
             string value = valueEl.GetString() ?? "";
 
             if (index < 0 || index >= actions.Count) return;
+
+            // Reject an unknown actionType before snapshotting — an arbitrary string would set a
+            // row no execution branch handles (silent no-op at replay) and is rejected here for
+            // the same reason the bounds guard runs before PushUndoState: a no-op must not leave
+            // a stale undo state behind (and clear the redo stack).
+            if (field == "actionType" && !KnownActionTypes.Contains(value))
+            {
+                DiagnosticLog.Warn($"actions:edit rejected unknown actionType '{value}' at index {index}");
+                return;
+            }
 
             // Snapshot only once the edit is guaranteed to land — pushing before the bounds
             // guard would leave a duplicate undo state (and clear the redo stack) on a no-op.
@@ -5437,7 +5484,11 @@ namespace TrueReplayer
                     {
                         System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{entry.FilePath}\"");
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Error($"profile:openFolder failed to reveal '{entry.FilePath}'", ex);
+                        SendMessage("alert:show", new { message = "Could not open the profile folder" });
+                    }
                 }
                 return;
             }
@@ -5452,7 +5503,11 @@ namespace TrueReplayer
                 Directory.CreateDirectory(profileDir);
                 System.Diagnostics.Process.Start("explorer.exe", $"\"{profileDir}\"");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Error("profile:openFolder failed to open the Profiles directory", ex);
+                SendMessage("alert:show", new { message = "Could not open the Profiles folder" });
+            }
         }
 
         // ── Profile Organization Handlers ──

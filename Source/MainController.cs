@@ -16,8 +16,6 @@ namespace TrueReplayer.Controllers
         private readonly Func<int> getDelayFunc;
         private readonly Action? onButtonStatesChanged;
 
-        private DateTime lastActionTime;
-
         public MainController(
             ObservableCollection<ActionItem> actions,
             ActionRecorder recorder,
@@ -123,9 +121,11 @@ namespace TrueReplayer.Controllers
             onButtonStatesChanged?.Invoke();
         }
 
+        // No-op: the captured timestamp had no consumer (the removed `lastActionTime`
+        // field was write-only). Kept as a no-op so the RecordingService callback wired
+        // from MainWindow stays valid without a cross-file signature change.
         public void SetLastActionTime(DateTime time)
         {
-            lastActionTime = time;
         }
 
         public int GetDelay() => getDelayFunc();
