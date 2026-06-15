@@ -1,9 +1,12 @@
+<sub>**English** · [Português (BR)](README.pt-BR.md)</sub>
+
 # TrueReplayer
 
 A fast, lightweight **macro recorder for Windows**. Record your mouse clicks, key presses, and scrolls — then replay them any time, on demand or with a hotkey.
 
-[![Download](https://img.shields.io/github/v/release/fatalihue/TrueReplayer-releases?style=flat-square&color=60CDFF&label=download)](https://github.com/fatalihue/TrueReplayer-releases/releases/latest)
+[![Release](https://img.shields.io/github/v/release/fatalihue/TrueReplayer-releases?style=flat-square&color=60CDFF&label=release)](https://github.com/fatalihue/TrueReplayer-releases/releases/latest)
 ![Windows 10/11](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D4?style=flat-square)
+![Version](https://img.shields.io/badge/version-2.6.0-6bcb77?style=flat-square)
 
 ## What it does
 
@@ -24,7 +27,7 @@ That's all you need to get going.
 
 ## Download
 
-Grab the latest **`TrueReplayer-win-Setup.exe`** from the [**Releases page**](https://github.com/fatalihue/TrueReplayer-releases/releases/latest). It installs in seconds and updates itself automatically. Windows 10 / 11 (64-bit).
+Grab the latest **`TrueReplayer-win-Setup.exe`** (**v2.6.0**) from the [**Releases page**](https://github.com/fatalihue/TrueReplayer-releases/releases/latest). It installs in seconds and updates itself automatically. Windows 10 / 11 (64-bit).
 
 ## License
 
