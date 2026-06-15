@@ -140,8 +140,32 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
     onClose();
   };
 
+  // The emoji picker (emoji-picker-react) swallows Escape internally to clear its own search box,
+  // so the key never reaches handleKeyDown below. Catch it at the document level in CAPTURE phase
+  // while the picker is open and close it ourselves before the picker's handler runs.
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowEmojiPicker(false);
+      }
+    };
+    document.addEventListener('keydown', onEsc, true);
+    return () => document.removeEventListener('keydown', onEsc, true);
+  }, [showEmojiPicker]);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape' && !showEmojiPicker && !showTagSuggestions) {
+    if (e.key !== 'Escape') return;
+    // Escape closes the emoji picker first when it's open — previously this was a dead no-op
+    // (neither the dialog nor the picker closed). Only close the dialog when no popover is open.
+    if (showEmojiPicker) {
+      e.preventDefault();
+      setShowEmojiPicker(false);
+      return;
+    }
+    if (!showTagSuggestions) {
       e.preventDefault();
       onClose();
     }

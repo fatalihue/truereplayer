@@ -112,6 +112,15 @@ namespace TrueReplayer.Services
                     // else: region too small for the template, fall through to full-screen match
                 }
 
+                // Cv2.MatchTemplate throws if the template is larger than the image being searched
+                // in either dimension. This happens when a reference image captured on a larger /
+                // multi-monitor desktop is replayed on a smaller screen (or after a monitor is
+                // unplugged) and the region path fell through to the full screen. Treat it as
+                // "not found" (Score 0) so the action runs its normal timeout / OnTimeout handling
+                // instead of throwing an unobserved exception that aborts the whole replay run.
+                if (workingMat.Width < templateMat.Width || workingMat.Height < templateMat.Height)
+                    return new MatchResult(0, 0, 0, templateMat.Width, templateMat.Height);
+
                 using var matchResult = new Mat();
                 Cv2.MatchTemplate(workingMat, templateMat, matchResult, TemplateMatchModes.CCoeffNormed);
                 Cv2.MinMaxLoc(matchResult, out _, out double maxVal, out _, out var maxLoc);

@@ -109,7 +109,13 @@ export function TokenChipPopover({
     };
     place();
     window.addEventListener('resize', place);
-    return () => window.removeEventListener('resize', place);
+    // Also reposition on scroll (capture phase so a scroll in ANY ancestor container counts) —
+    // otherwise scrolling the editor leaves the popover detached from its chip.
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
   }, [anchor, kind, token]);
 
   // Dismiss on outside click or Escape — both delegate to onClose, which the
@@ -257,14 +263,16 @@ function DelayEditor({ token, onChange }: { token: string; onChange: (t: string)
   const initial = parseDelay(token);
   const [ms, setMs] = useState(initial.ms);
 
-  useEffect(() => {
-    onChange(`{delay:${ms}}`);
-  }, [ms, onChange]);
+  // Report changes only on real user input — NOT from a mount-time effect, which would emit a
+  // canonicalized token (e.g. {delay} → {delay:500}) and make merely opening then closing the
+  // chip silently rewrite it.
+  // Clamp to the backend's 60000ms cap here since the local NumInput has no max prop.
+  const update = (v: number) => { const c = Math.min(60000, v); setMs(c); onChange(`{delay:${c}}`); };
 
   return (
     <Section label="Delay">
       <div className="flex items-center gap-2 py-1">
-        <NumInput value={ms} onChange={setMs} min={0} width={80} />
+        <NumInput value={ms} onChange={update} min={0} width={80} />
         <span className="text-[11px] text-text-tertiary">milliseconds</span>
       </div>
       <div className="text-[10px] text-text-tertiary mt-1">
@@ -283,16 +291,15 @@ function RepeatableEditor({
 }) {
   const initial = parseRepeatable(token);
   const [n, setN] = useState(initial.n);
-  const next = n > 1 ? `{${initial.name}:${n}}` : `{${initial.name}}`;
 
-  useEffect(() => {
-    onChange(next);
-  }, [next, onChange]);
+  // Report changes only on real user input — NOT from a mount-time effect, which would emit a
+  // canonicalized token (e.g. {enter:1} → {enter}) and make opening then closing the chip rewrite it.
+  const update = (v: number) => { setN(v); onChange(v > 1 ? `{${initial.name}:${v}}` : `{${initial.name}}`); };
 
   return (
     <Section label="Repeat">
       <div className="flex items-center gap-2 py-1">
-        <NumInput value={n} onChange={setN} min={1} width={70} />
+        <NumInput value={n} onChange={update} min={1} width={70} />
         <span className="text-[11px] text-text-tertiary">
           time{n === 1 ? '' : 's'}
         </span>

@@ -30,10 +30,13 @@ namespace TrueReplayer
                 var existing = Process.GetProcessesByName("TrueReplayer");
                 foreach (var proc in existing)
                 {
-                    if (proc.Id != Environment.ProcessId && proc.MainWindowHandle != IntPtr.Zero)
+                    using (proc) // Process objects from GetProcessesByName own a native handle — dispose them
                     {
-                        ShowWindow(proc.MainWindowHandle, 9); // SW_RESTORE
-                        SetForegroundWindow(proc.MainWindowHandle);
+                        if (proc.Id != Environment.ProcessId && proc.MainWindowHandle != IntPtr.Zero)
+                        {
+                            ShowWindow(proc.MainWindowHandle, 9); // SW_RESTORE
+                            SetForegroundWindow(proc.MainWindowHandle);
+                        }
                     }
                 }
                 return;
@@ -58,9 +61,21 @@ namespace TrueReplayer
                             Verb = "runas"
                         });
                     }
+                    return; // elevated instance launched — this one exits
                 }
-                catch { /* User declined UAC — continue without admin */ }
-                return;
+                catch (System.ComponentModel.Win32Exception wex) when (wex.NativeErrorCode == 1223)
+                {
+                    // User explicitly declined the UAC prompt. Honour that by exiting rather than
+                    // silently running un-elevated when admin was requested.
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    // Elevation failed for a real reason (bad exe path, AppLocker/SRP policy, blocked
+                    // binary) — don't vanish with no window and no message. Log it and fall through
+                    // to run un-elevated so the user still gets a working app.
+                    TrueReplayer.Services.DiagnosticLog.Error("[Elevation] self-elevate failed", ex);
+                }
             }
 
             // Check WebView2 Runtime before initializing UI
@@ -185,7 +200,9 @@ namespace TrueReplayer
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[NativeHost] Registry registration failed: {ex.Message}");
+                // Visible in release via the session log — a silent failure here means the browser
+                // extension can't reach the app and the user has no clue why.
+                TrueReplayer.Services.DiagnosticLog.Warn($"[NativeHost] Registry registration failed: {ex.Message}");
             }
         }
     }

@@ -113,7 +113,7 @@ function connect() {
                     commandId: msg.commandId + ':wu',
                     command: 'waitUrl',
                     urlPattern,
-                    timeout: Math.min(navTimeout, msg.timeout || 30000),
+                    timeout: msg.timeout || 30000, // navTimeout is always >= this, so the old Math.min was a no-op
                   }).then((response) => {
                     if (response?.success) cb();
                     else finishErr(
@@ -135,7 +135,7 @@ function connect() {
                     commandId: msg.commandId + ':ws',
                     command: 'waitElement',
                     selector: postSel,
-                    timeout: Math.min(navTimeout, msg.timeout || 30000),
+                    timeout: msg.timeout || 30000, // navTimeout is always >= this, so the old Math.min was a no-op
                   }).then((response) => {
                     if (response?.success) finishOk();
                     else finishErr(
@@ -163,8 +163,15 @@ function connect() {
                   setTimeout(() => runPostChecks(targetTabId), 300);
                 };
 
+                // Require a real load to START ('loading') before accepting 'complete'. Without
+                // this, a tab already at 'complete' (same-URL re-navigation or a fast cache hit)
+                // can fire an early 'complete' and run post-checks against the OLD document. If no
+                // fresh load starts, the fallback timeout below reports the failure.
+                let sawLoading = false;
                 onUpdated = (updatedTabId, changeInfo) => {
-                  if (updatedTabId === targetTabId && changeInfo.status === 'complete') {
+                  if (updatedTabId !== targetTabId) return;
+                  if (changeInfo.status === 'loading') { sawLoading = true; return; }
+                  if (changeInfo.status === 'complete' && sawLoading) {
                     finalize();
                   }
                 };
@@ -183,6 +190,12 @@ function connect() {
 
               if (msg.newTab) {
                 chrome.tabs.create({ url, active: true }, (tab) => {
+                  if (chrome.runtime.lastError || !tab) {
+                    finishErr('NAVIGATION_FAILED',
+                      `Couldn't open a new tab: ${chrome.runtime.lastError?.message || 'unknown error'}`,
+                      'Check the URL and the extension\'s tab permissions.');
+                    return;
+                  }
                   waitForLoad(tab.id);
                 });
               } else {
@@ -255,11 +268,17 @@ function connect() {
             });
           });
           break;
+
+        case 'browser:cancelPick':
+          // App asked to abort an in-progress element pick (editor switched/closed).
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { type: 'cancelPick' }).catch(() => {});
+          });
+          break;
       }
     });
 
     port.onDisconnect.addListener(() => {
-      const wasBridgeReady = isBridgeReady;
       port = null;
       isRecording = false;
       isBridgeReady = false;
@@ -307,6 +326,10 @@ function sendToNative(msg) {
     } catch (e) {
       console.error('[TrueReplayer] Send error:', e);
     }
+  } else {
+    // Don't drop silently — a message arriving before the bridge is ready (or after it
+    // disconnected) is worth a breadcrumb when debugging "recording captured nothing".
+    console.warn('[TrueReplayer] Dropped message (bridge not ready):', msg && msg.type);
   }
 }
 
@@ -326,6 +349,13 @@ function updateBadge() {
 
 // Listen for messages from content scripts
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Trust only this extension's own messages (defence-in-depth — onMessage already filters to
+  // same-extension senders), and require a tab context for the recording message types so they
+  // can't be spoofed from a non-content-script sender. getStatus (from the popup) has no tab.
+  if (!msg || sender.id !== chrome.runtime.id) return;
+  const RECORDING_TYPES = ['elementClicked', 'typingCaptured', 'selectInteractionStart',
+    'selectInteractionEnd', 'selectChanged', 'commandResult'];
+  if (RECORDING_TYPES.includes(msg.type) && !sender.tab) return;
   if (msg.type === 'elementClicked' && isRecording) {
     sendToNative({
       type: 'browser:elementClicked',

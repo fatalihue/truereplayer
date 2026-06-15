@@ -81,6 +81,9 @@ namespace TrueReplayer.Services
         /// </summary>
         public static void WriteAllTextAtomic(string filePath, string content)
         {
+            // Resolve to a full path so a bare filename doesn't put the temp in the process CWD
+            // (which may differ from the target dir and break the atomic same-directory move).
+            filePath = Path.GetFullPath(filePath);
             var dir = Path.GetDirectoryName(filePath)!;
             var tempPath = Path.Combine(dir, Path.GetRandomFileName());
             File.WriteAllText(tempPath, content);
@@ -153,6 +156,9 @@ namespace TrueReplayer.Services
         /// </summary>
         public static async Task WriteAllTextAtomicAsync(string filePath, string content)
         {
+            // Resolve to a full path so a bare filename doesn't put the temp in the process CWD
+            // (which may differ from the target dir and break the atomic same-directory move).
+            filePath = Path.GetFullPath(filePath);
             var dir = Path.GetDirectoryName(filePath)!;
             var tempPath = Path.Combine(dir, Path.GetRandomFileName());
             await File.WriteAllTextAsync(tempPath, content);

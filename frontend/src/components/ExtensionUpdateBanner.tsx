@@ -10,9 +10,13 @@ export function ExtensionUpdateBanner() {
   useEffect(() => {
     return subscribe((msg) => {
       if (msg.type === 'browser:extensionOutdated') {
-        const payload = msg.payload as { currentVersion: string; expectedVersion: string };
-        setOutdated({ current: payload.currentVersion, expected: payload.expectedVersion });
-        setDismissed(false);
+        const payload = msg.payload as { currentVersion?: string; expectedVersion?: string };
+        // Validate before trusting the bridge payload — a malformed message would otherwise
+        // render a banner with blank version numbers.
+        if (typeof payload?.currentVersion === 'string' && typeof payload?.expectedVersion === 'string') {
+          setOutdated({ current: payload.currentVersion, expected: payload.expectedVersion });
+          setDismissed(false);
+        }
       }
     });
   }, [subscribe]);

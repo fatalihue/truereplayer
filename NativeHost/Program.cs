@@ -62,7 +62,13 @@ class Program
                         }
                     }
                     int msgLen = BitConverter.ToInt32(buf, 0);
-                    if (msgLen <= 0 || msgLen > 1024 * 1024) break;
+                    if (msgLen <= 0 || msgLen > 1024 * 1024)
+                    {
+                        // A corrupt/malicious extension can send a negative or huge length. Don't
+                        // treat it as a clean EOF — log the rejected value so the abort is diagnosable.
+                        Log($"stdin: invalid msgLen {msgLen} (expected 1..1048576) — aborting read loop");
+                        break;
+                    }
                     var msgBuf = new byte[msgLen];
                     int totalRead = 0;
                     while (totalRead < msgLen)
@@ -71,10 +77,22 @@ class Program
                         if (r == 0) { stdinDead.TrySetResult(); return; }
                         totalRead += r;
                     }
-                    // Forward to pipe if connected
+                    // Forward to pipe if connected, otherwise buffer until the handler is wired up.
+                    // Chrome can send messages during the up-to-3s pipe-connect window; invoking a
+                    // null delegate here would silently drop the first commands of a session.
                     var msg = Encoding.UTF8.GetString(msgBuf);
                     Log($"stdin→pipe: {msg[..Math.Min(msg.Length, 120)]}");
-                    StdinMessageReceived?.Invoke(msg);
+                    Action<string> handler;
+                    lock (StdinHandlerLock)
+                    {
+                        if (StdinMessageReceived == null)
+                        {
+                            if (_preConnectBuffer.Count < 1000) _preConnectBuffer.Enqueue(msg);
+                            continue;
+                        }
+                        handler = StdinMessageReceived;
+                    }
+                    handler(msg);
                 }
             }
             catch (Exception ex) { Log($"stdin: exception: {ex.Message}"); }
@@ -86,9 +104,9 @@ class Program
         // When stdin dies, cancel everything
         _ = stdinDead.Task.ContinueWith(_ => cts.Cancel());
 
-        // Failsafe: kill this process after 10 seconds if pipe never connects,
-        // or after 60 seconds of idle (no pipe data). This prevents orphan
-        // processes when Chrome dies without properly closing stdin.
+        // Failsafe: kill this process after 10 seconds if the pipe never connects — prevents an
+        // orphan process when Chrome dies without properly closing stdin. (Idle AFTER connect is
+        // caught by the 6s pipe-relay watchdog further down, not here.)
         _ = Task.Run(async () =>
         {
             // Wait 10s for pipe to connect
@@ -125,23 +143,29 @@ class Program
             var writer = new StreamWriter(pipe, Utf8NoBom) { AutoFlush = true };
             var reader = new StreamReader(pipe, Utf8NoBom);
 
-            // Forward stdin messages to pipe
-            StdinMessageReceived = (msg) =>
+            // Forward stdin messages to pipe. Assign + drain the pre-connect buffer under the same
+            // lock the stdin thread uses, so no message slips through between wiring up and draining.
+            lock (StdinHandlerLock)
             {
-                try
+                StdinMessageReceived = (msg) =>
                 {
-                    lock (PipeLock)
+                    try
                     {
-                        writer.WriteLine(msg);
+                        lock (PipeLock)
+                        {
+                            writer.WriteLine(msg);
+                        }
+                        Log($"stdin→pipe: write OK");
                     }
-                    Log($"stdin→pipe: write OK");
-                }
-                catch (Exception ex)
-                {
-                    Log($"stdin→pipe: WRITE FAILED: {ex.Message}");
-                    cts.Cancel();
-                }
-            };
+                    catch (Exception ex)
+                    {
+                        Log($"stdin→pipe: WRITE FAILED: {ex.Message}");
+                        cts.Cancel();
+                    }
+                };
+                while (_preConnectBuffer.Count > 0)
+                    StdinMessageReceived(_preConnectBuffer.Dequeue());
+            }
 
             // Pipe→stdout relay with watchdog
             // Heartbeat arrives every 2s. If nothing for 6s, pipe is dead.
@@ -155,7 +179,7 @@ class Program
 
                     var line = await readTask.ConfigureAwait(false);
                     if (line == null) { Log("pipe→stdout: EOF (null)"); break; }
-                    if (line.Contains("\"heartbeat\"")) continue;
+                    if (line.Contains("\"type\":\"heartbeat\"")) continue; // match the heartbeat TYPE, not any payload containing the word
                     Log($"pipe→stdout: {line[..Math.Min(line.Length, 120)]}");
                     SendToStdout(line);
                 }
@@ -178,18 +202,23 @@ class Program
     }
 
     private static Action<string>? StdinMessageReceived;
+    private static readonly object StdinHandlerLock = new();
+    private static readonly System.Collections.Generic.Queue<string> _preConnectBuffer = new();
     private static volatile bool PipeConnected;
+    private static Stream? _stdoutStream;
 
     private static void SendToStdout(string json)
     {
         lock (StdoutLock)
         {
-            var stdout = Console.OpenStandardOutput();
+            // Open the standard output stream once and reuse it — re-opening per message is
+            // wasteful and risks interleaving on a shared handle.
+            _stdoutStream ??= Console.OpenStandardOutput();
             var msgBytes = Encoding.UTF8.GetBytes(json);
             var lengthBytes = BitConverter.GetBytes(msgBytes.Length);
-            stdout.Write(lengthBytes, 0, 4);
-            stdout.Write(msgBytes, 0, msgBytes.Length);
-            stdout.Flush();
+            _stdoutStream.Write(lengthBytes, 0, 4);
+            _stdoutStream.Write(msgBytes, 0, msgBytes.Length);
+            _stdoutStream.Flush();
         }
     }
 }

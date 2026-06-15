@@ -352,6 +352,8 @@ namespace TrueReplayer.Models
                 }
 
 
+                // Legacy capture stored top-row digit keys as their WinForms Keys-enum name
+                // ("D0".."D9"). Display them as the bare digit ("0".."9") for readability.
                 if (Key.StartsWith("D") && Key.Length == 2 && char.IsDigit(Key[1]))
                     return Key[1].ToString();
 

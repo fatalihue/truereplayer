@@ -53,6 +53,10 @@ export function BridgeProvider({ children }: { children: ReactNode }) {
         console.error('[Bridge] Failed to parse message:', err);
         return;
       }
+      if (!message || typeof message !== 'object' || typeof (message as { type?: unknown }).type !== 'string') {
+        console.error('[Bridge] Ignoring malformed message:', message);
+        return;
+      }
       console.log('[Bridge] ← C#:', message.type);
       // Isolate handlers: a thrown exception in one must not block others
       handlersRef.current.forEach(handler => {

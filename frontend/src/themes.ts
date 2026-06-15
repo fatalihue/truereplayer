@@ -1743,8 +1743,12 @@ export function validateExportedTheme(data: unknown): data is ExportedTheme {
   }
   if (!d.uiSettings || typeof d.uiSettings !== 'object') return false;
   const ui = d.uiSettings as Record<string, unknown>;
-  if (typeof ui.fontSize !== 'number' || typeof ui.borderRadius !== 'number' || typeof ui.rowHeight !== 'number') return false;
-  if (ui.zoom !== undefined && typeof ui.zoom !== 'number') return false;
+  // Bounds-check (not just type-check) — these feed CSS sizing, so reject NaN/Infinity/negative/
+  // absurd values. Ranges are intentionally wide so any reasonable hand-made theme still imports.
+  if (typeof ui.fontSize !== 'number' || !(ui.fontSize >= 6 && ui.fontSize <= 48)) return false;
+  if (typeof ui.borderRadius !== 'number' || !(ui.borderRadius >= 0 && ui.borderRadius <= 64)) return false;
+  if (typeof ui.rowHeight !== 'number' || !(ui.rowHeight >= 12 && ui.rowHeight <= 120)) return false;
+  if (ui.zoom !== undefined && !(typeof ui.zoom === 'number' && ui.zoom >= 0.25 && ui.zoom <= 5)) return false;
   // uiSettings color fields are interpolated into cssText (incl. color-mix) — when present they
   // must be safe colors. Missing fields are tolerated (merged over DEFAULT_UI_SETTINGS on import).
   const UI_COLOR_FIELDS = [

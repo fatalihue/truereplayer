@@ -389,7 +389,7 @@
     return true;
   }
 
-  // #4 — Element covered: returns the covering element if alvo isn't on top, else null
+  // #4 — Element covered: returns the covering element if the target isn't on top, else null
   function getCoveringElement(el) {
     const rect = el.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
@@ -737,7 +737,13 @@
     }
 
     let clipboardOk = false;
+    // Snapshot the user's clipboard so it can be restored — typeViaPaste otherwise permanently
+    // clobbers whatever they had copied. readText may be blocked (no permission/gesture); if so we
+    // skip the restore rather than failing the paste.
+    let priorClipboard = null;
+    let priorClipboardRead = false;
     try {
+      try { priorClipboard = await navigator.clipboard.readText(); priorClipboardRead = true; } catch { priorClipboardRead = false; }
       await navigator.clipboard.writeText(text);
       clipboardOk = true;
     } catch {
@@ -764,6 +770,11 @@
       el.dispatchEvent(new Event('input', { bubbles: true }));
     }
     el.dispatchEvent(new Event('change', { bubbles: true }));
+
+    // Restore the user's original clipboard now that the paste has consumed it (best effort).
+    if (priorClipboardRead) {
+      try { await navigator.clipboard.writeText(priorClipboard); } catch { /* best effort */ }
+    }
   }
 
   // ── Key chip parsing for BrowserType ──
@@ -888,7 +899,7 @@
 
   async function executeCommand(msg) {
     const {
-      command, commandId, selector, text, url, timeout = 30000,
+      command, selector, text, url, timeout = 30000,
       waitMode, urlWaitPattern, postNavigateSelector,
       typeAppend, typePaste, typeDelay,
       selectMatchMode,
@@ -1056,7 +1067,7 @@
           // Parse text for key chips: {enter}, {tab}, {esc}, {backspace}, {delete}, {up}/{down}/{left}/{right}.
           // Mixed sequences like "user{tab}pass{enter}" type each text segment, then
           // dispatch the key, then continue typing on the new active element.
-          const segments = parseTypeSegments(text);
+          const segments = parseTypeSegments(text ?? ''); // tolerate a missing text payload
           let currentEl = el;
           // Each text segment that follows a focus transition (start, or after a key)
           // re-applies the typeAppend rule — so non-append clears each new field too.
@@ -1128,8 +1139,14 @@
 
         case 'navigate': {
           // background.js handles tab-level navigation; this same-tab fallback only fires
-          // if invoked directly on a content script (legacy path).
-          window.location.href = url;
+          // if invoked directly on a content script (legacy path). Validate the scheme — refuse
+          // javascript:/data: which would otherwise execute in the page context (XSS sink).
+          let parsedNav;
+          try { parsedNav = new URL(url, location.href); } catch { parsedNav = null; }
+          if (!parsedNav || (parsedNav.protocol !== 'http:' && parsedNav.protocol !== 'https:')) {
+            throw mkError('INVALID_URL', 'Refusing to navigate to a non-http(s) URL.', 'Use an http:// or https:// URL.');
+          }
+          window.location.href = parsedNav.href;
           return { success: true };
         }
 
@@ -1263,6 +1280,9 @@
       case 'executeCommand':
         executeCommand(msg).then((result) => {
           sendResponse(result);
+        }).catch((err) => {
+          // Without this, a thrown command leaves the caller awaiting a response forever.
+          sendResponse({ success: false, error: (err && (err.message || err.error)) || String(err) });
         });
         return true; // async response
 
@@ -1273,6 +1293,13 @@
         };
         startPick();
         return true; // async response
+
+      case 'cancelPick':
+        // App aborted the pick (editor switched/closed) — stop highlighting. stopPick resolves the
+        // pending pickElement response with null, so the in-flight request completes cleanly.
+        if (picking) stopPick(null, []);
+        sendResponse({ ok: true });
+        break;
 
       default:
         sendResponse({ ok: true });

@@ -234,7 +234,8 @@ namespace TrueReplayer.Services
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"[BrowserBridge] Parse error: {ex.Message}");
+                    // Surface malformed pipe messages to the session log instead of only Debug.
+                    TrueReplayer.Services.DiagnosticLog.Warn($"[BrowserBridge] Parse error: {ex.Message}");
                 }
             }
         }
@@ -278,6 +279,17 @@ namespace TrueReplayer.Services
             {
                 System.Diagnostics.Debug.WriteLine($"[BrowserBridge] Send error: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Tells the extension to abort an in-progress element pick (user switched/closed the
+        /// editor). The extension's stopPick resolves the pending pick with null, which flows back
+        /// through the normal pickResult path; the frontend ignores it via its requestId guard.
+        /// </summary>
+        public void CancelPickElement()
+        {
+            if (!IsConnected) return;
+            SendMessage(new { type = "browser:cancelPick" });
         }
 
         public async Task<PickResult> PickElementAsync(CancellationToken token, int timeoutMs = 30000)

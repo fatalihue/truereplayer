@@ -57,6 +57,10 @@ namespace TrueReplayer.Helpers
         {
             if (hwnd == IntPtr.Zero) return false;
             if (target == null) return false;
+            // A target with neither criterion set would otherwise fall through both checks and
+            // match EVERY window. Treat "no criteria" the same as "no target" — match nothing.
+            if (string.IsNullOrEmpty(target.ProcessName) && string.IsNullOrEmpty(target.WindowTitle))
+                return false;
 
             // Title check
             if (!string.IsNullOrEmpty(target.WindowTitle))

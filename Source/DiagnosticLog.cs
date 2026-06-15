@@ -66,7 +66,8 @@ namespace TrueReplayer.Services
             if (ex.StackTrace != null)
             {
                 // Stack on its own lines, indented to be visually grouped with the ERROR line
-                var indented = string.Join(Environment.NewLine + "    ", ex.StackTrace.Split('\n'));
+                // Normalize CRLF first so Windows stack traces don't leave a trailing '\r' on each line.
+                var indented = string.Join(Environment.NewLine + "    ", ex.StackTrace.Replace("\r\n", "\n").Split('\n'));
                 WriteRaw("    " + indented);
             }
             if (ex.InnerException != null)

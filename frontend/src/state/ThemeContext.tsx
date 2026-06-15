@@ -104,7 +104,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           },
         });
       }
-    } catch { /* WebView not available (dev mode) */ }
+    } catch (err) {
+      // Usually just "WebView not available" in dev mode, but log so a real push failure to C#
+      // isn't completely invisible.
+      console.debug('[Theme] push colors to C# failed:', err);
+    }
   }, [config, resolvedColors]);
 
   const selectPreset = useCallback((id: string) => {
@@ -171,7 +175,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const exportTheme = useCallback((name: string): ExportedTheme => {
     return {
       name,
-      version: 1,
+      version: 1, // ExportedTheme FILE-FORMAT version (validateExportedTheme checks === 1) — not the ThemeConfig schema version
       colors: resolvedColors,
       uiSettings: { ...config.uiSettings },
     };
@@ -238,7 +242,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
 
     setConfig({
-      version: 1,
+      version: 3, // current ThemeConfig schema version — writing 1 forced a needless re-migration on next load
       baseThemeId: baseId,
       colorOverrides: overrides,
       uiSettings: { ...DEFAULT_UI_SETTINGS, ...theme.uiSettings },

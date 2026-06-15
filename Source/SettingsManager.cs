@@ -97,17 +97,27 @@ namespace TrueReplayer.Services
             bool changed = false;
             if (obj.ContainsKey("LockPosition") && !obj.ContainsKey("RestorePosition"))
             {
-                obj["RestorePosition"] = obj["LockPosition"]?.GetValue<bool>() ?? false;
+                obj["RestorePosition"] = ReadBoolLoose(obj["LockPosition"]);
                 obj.Remove("LockPosition");
                 changed = true;
             }
             if (obj.ContainsKey("lockPosition") && !obj.ContainsKey("restorePosition"))
             {
-                obj["restorePosition"] = obj["lockPosition"]?.GetValue<bool>() ?? false;
+                obj["restorePosition"] = ReadBoolLoose(obj["lockPosition"]);
                 obj.Remove("lockPosition");
                 changed = true;
             }
             return changed;
+        }
+
+        // Legacy LockPosition was a JSON bool, but tolerate a stray string/number so a malformed
+        // value doesn't throw out of GetValue<bool>() and abort the whole settings migration.
+        private static bool ReadBoolLoose(JsonNode? node)
+        {
+            if (node == null) return false;
+            try { return node.GetValue<bool>(); } catch { }
+            var s = node.ToString().Trim();
+            return s.Equals("true", StringComparison.OrdinalIgnoreCase) || s == "1";
         }
 
         /// <summary>

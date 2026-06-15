@@ -48,6 +48,8 @@ const KNOWN_TOKEN_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 const TOKEN_REGEX = /\{[a-zA-Z]+(?::[a-zA-Z0-9]+)*\}/g;
+// Non-global form for single-match .exec() — stateless, so safe to share across calls.
+const TOKEN_REGEX_SINGLE = new RegExp(TOKEN_REGEX.source);
 
 export interface LexicalEditorHandle {
   /** Insert text at the current cursor; known `{...}` substrings become chips. */
@@ -240,7 +242,7 @@ function TokenAutoTransformPlugin() {
     return editor.registerNodeTransform(TextNode, (textNode: TextNode) => {
       const text = textNode.getTextContent();
       if (!text.includes('{')) return;
-      const match = /\{[a-zA-Z]+(?::[a-zA-Z0-9]+)*\}/.exec(text);
+      const match = TOKEN_REGEX_SINGLE.exec(text);
       if (!match) return;
       const name = match[0].slice(1, -1).split(':')[0].toLowerCase();
       if (!KNOWN_TOKEN_NAMES.has(name)) return;

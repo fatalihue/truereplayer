@@ -90,6 +90,9 @@ namespace TrueReplayer.Services
             string s = hex.Trim();
             if (s.StartsWith("#")) s = s.Substring(1);
             if (s.Length != 6) return null;
+            // Reject anything that isn't a pure hex triple — Convert.ToInt32(..,16) otherwise
+            // silently accepts a leading sign/whitespace in a channel (e.g. "+f0000").
+            foreach (char c in s) if (!Uri.IsHexDigit(c)) return null;
 
             try
             {

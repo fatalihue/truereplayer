@@ -31,6 +31,9 @@ namespace TrueReplayer.Services
         private readonly string _hintText;
         private readonly TaskCompletionSource<RegionSelectionResult?> _tcs = new();
 
+        // GetSystemMetrics indices for the virtual desktop (all monitors) — Win32 SM_* constants.
+        private const int SM_XVIRTUALSCREEN = 76, SM_YVIRTUALSCREEN = 77, SM_CXVIRTUALSCREEN = 78, SM_CYVIRTUALSCREEN = 79;
+
         private Point _startPoint;
         private Point _currentPoint;
         private bool _isDragging;
@@ -72,10 +75,10 @@ namespace TrueReplayer.Services
             _pointPick = pointPick;
 
             // Virtual screen bounds (all monitors)
-            int vx = NativeMethods.GetSystemMetrics(76);
-            int vy = NativeMethods.GetSystemMetrics(77);
-            int vw = NativeMethods.GetSystemMetrics(78);
-            int vh = NativeMethods.GetSystemMetrics(79);
+            int vx = NativeMethods.GetSystemMetrics(SM_XVIRTUALSCREEN);
+            int vy = NativeMethods.GetSystemMetrics(SM_YVIRTUALSCREEN);
+            int vw = NativeMethods.GetSystemMetrics(SM_CXVIRTUALSCREEN);
+            int vh = NativeMethods.GetSystemMetrics(SM_CYVIRTUALSCREEN);
             _virtualOriginX = vx;
             _virtualOriginY = vy;
 
@@ -120,6 +123,16 @@ namespace TrueReplayer.Services
         }
 
         public Task<RegionSelectionResult?> GetSelectionAsync() => _tcs.Task;
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            // Guarantee the awaiting caller is always released, even when the form is closed by a
+            // route that doesn't hit the ESC / click / drag handlers (Alt+F4, taskkill, the system
+            // menu, or teardown after a paint exception). Without this the caller would block forever
+            // on .Result. TrySetResult is idempotent, so a normal completion already set is unaffected.
+            _tcs.TrySetResult(null);
+            base.OnFormClosed(e);
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -510,9 +523,10 @@ namespace TrueReplayer.Services
                     return;
                 }
 
-                // Account for virtual screen offset
-                int vx = NativeMethods.GetSystemMetrics(76);
-                int vy = NativeMethods.GetSystemMetrics(77);
+                // Account for virtual screen offset — reuse the origin cached in the ctor instead
+                // of re-querying GetSystemMetrics.
+                int vx = _virtualOriginX;
+                int vy = _virtualOriginY;
 
                 Bitmap? cropped = null;
                 if (!_regionOnly)

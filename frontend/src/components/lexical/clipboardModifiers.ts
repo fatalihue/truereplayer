@@ -48,7 +48,9 @@ export function applyTransformPreview(raw: string, s: TransformState): string {
     const lines = r.replace(/\r\n/g, '\n').split('\n');
     r = lines[s.extractN - 1] ?? '';
   } else if (s.extract === 'word') {
-    const words = r.split(/\s+/).filter(Boolean);
+    // Split on the SAME whitespace set the backend uses (space, tab, CR, LF) so the preview can't
+    // diverge from runtime — /\s+/ would also match Unicode spaces the backend doesn't.
+    const words = r.split(/[ \t\n\r]+/).filter(Boolean);
     r = words[s.extractN - 1] ?? '';
   }
   if (s.limit === 'first') r = r.slice(0, Math.max(0, s.limitN));
