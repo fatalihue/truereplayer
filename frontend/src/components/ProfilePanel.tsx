@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { Search, SearchX, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink, Info, MoreHorizontal, Hash } from 'lucide-react';
 import type { ProfileEntry, ImportPreviewPayload, ImportConflictResolution } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -996,6 +996,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const tickAutoScroll = useCallback(() => {
     const container = scrollRef.current;
     if (!container || (!dragActive.current && !folderDragActiveRef.current)) {
+      if (container) delete container.dataset.autoscrolling;
       autoScrollRaf.current = null;
       return;
     }
@@ -1010,9 +1011,14 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       delta = AUTOSCROLL_MAX_SPEED * Math.min(1, Math.max(0, intensity));
     }
     if (delta !== 0) {
+      // Freeze the drop-gap grow animation while auto-scrolling: the gap re-mounts at a
+      // new index every frame, and replaying the 120ms grow that fast reads as flicker.
+      // Mirrors ActionTable's guard — see [data-autoscrolling] in index.css.
+      container.dataset.autoscrolling = 'true';
       container.scrollTop += delta;
       autoScrollRaf.current = requestAnimationFrame(tickAutoScroll);
     } else {
+      delete container.dataset.autoscrolling;
       autoScrollRaf.current = null;
     }
   }, []);
@@ -1031,22 +1037,60 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     }
   }, [tickAutoScroll]);
 
-  // Wraps a state-mutating bridge call in a View Transition when the browser supports
-  // it (Chromium 111+, WebView2 recent). Falls back to a plain call otherwise.
-  const sendWithTransition = useCallback((msg: Parameters<typeof send>[0]) => {
-    const vt = (document as unknown as { startViewTransition?: (cb: () => void | Promise<void>) => unknown }).startViewTransition;
-    if (typeof vt === 'function') {
-      vt.call(document, () => {
-        send(msg);
-        return new Promise<void>(resolve => setTimeout(resolve, 50));
-      });
-    } else {
-      send(msg);
-    }
-  }, [send]);
+  // FLIP-on-drop — mirrors ActionTable's grid drag so folder/profile reorders slide
+  // into place instead of teleporting. The reorder round-trips through the backend, so
+  // the new order lands a frame or two AFTER the drop; the old View-Transition cross-fade
+  // tried to bridge that gap by fading the whole panel, which read as an ugly blink. Now:
+  // at drop we snapshot every drag item's viewport top, then once the reordered data
+  // arrives we slide each one from its old slot to its new slot (translateY delta → 0),
+  // exactly like the grid's row reorder (same 180ms / cubic-bezier, same offscreen/maxFly
+  // culls, same data-animations gate). Per-kind selector ('folder:' vs 'profile:') because
+  // the list is NESTED: a folder reorder animates only the folder wrappers (their child
+  // profile rows ride the wrapper's transform), a profile move animates only profile rows —
+  // animating both at once would double-transform the nested rows. Timestamped so a stale
+  // snapshot (reorder rejected / unrelated update arriving later) is discarded.
+  const pendingFlipRects = useRef<{ map: Map<string, number>; at: number; selector: string } | null>(null);
+
+  const snapshotDragItems = useCallback((selector: string) => {
+    if (document.documentElement.getAttribute('data-animations') !== 'true') return;
+    const container = scrollRef.current;
+    if (!container) return;
+    const map = new Map<string, number>();
+    container.querySelectorAll<HTMLElement>(selector).forEach(el => {
+      const id = el.getAttribute('data-drag-item');
+      if (id) map.set(id, el.getBoundingClientRect().top);
+    });
+    pendingFlipRects.current = { map, at: performance.now(), selector };
+  }, []);
+
+  useLayoutEffect(() => {
+    const pending = pendingFlipRects.current;
+    if (!pending) return;
+    pendingFlipRects.current = null;
+    const container = scrollRef.current;
+    if (!container) return;
+    if (performance.now() - pending.at > 800) return;
+    const view = container.getBoundingClientRect();
+    const maxFly = view.height || 600;
+    container.querySelectorAll<HTMLElement>(pending.selector).forEach(el => {
+      const id = el.getAttribute('data-drag-item');
+      if (!id) return;
+      const oldTop = pending.map.get(id);
+      if (oldTop === undefined) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.bottom < view.top || rect.top > view.bottom) return; // offscreen → no animation
+      const delta = oldTop - rect.top;
+      if (Math.abs(delta) < 2 || Math.abs(delta) > maxFly) return; // unchanged or too far → snap
+      el.animate(
+        [{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' }],
+        { duration: 180, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
+      );
+    });
+  }, [profileOrder, profiles]);
 
   const handleProfileMouseDown = (e: React.MouseEvent, profileName: string) => {
     if (e.button !== 0) return; // left click only
+    if (scrollRef.current) delete scrollRef.current.dataset.autoscrolling; // reset any stale flag from a prior drag
     dragStartPos.current = { x: e.clientX, y: e.clientY };
     dragActive.current = false;
     setDragProfile(profileName);
@@ -1094,7 +1138,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         const targetFolder = dropTarget === '__ungrouped__' ? null : dropTarget;
         const currentFolder = getProfileFolder(dragProfile);
         if (currentFolder !== targetFolder) {
-          sendWithTransition({ type: 'profile:moveToFolder', payload: { profileName: dragProfile, folderName: targetFolder } });
+          snapshotDragItems('[data-drag-item^="profile:"]');
+          send({ type: 'profile:moveToFolder', payload: { profileName: dragProfile, folderName: targetFolder } });
         }
       } else if (wasActive && dragProfile) {
         // Not over a folder/ungrouped zone — did we drop on the actions grid? If so, hand off
@@ -1150,7 +1195,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         autoScrollRaf.current = null;
       }
     };
-  }, [dragProfile, dropTarget, sendWithTransition, maybeKickAutoScroll, getProfileFolder]);
+  }, [dragProfile, dropTarget, send, snapshotDragItems, maybeKickAutoScroll, getProfileFolder]);
 
   // ── Folder Drag & Drop (reorder folders) ──
   const folderDragStartPos = useRef<{ x: number; y: number } | null>(null);
@@ -1160,6 +1205,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
   const handleFolderMouseDown = (e: React.MouseEvent, folderName: string) => {
     if (e.button !== 0) return;
+    if (scrollRef.current) delete scrollRef.current.dataset.autoscrolling; // reset any stale flag from a prior drag
     folderDragStartPos.current = { x: e.clientX, y: e.clientY };
     folderDragActive.current = false;
     setDragFolder(folderName);
@@ -1202,7 +1248,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           const [moved] = folders.splice(fromIdx, 1);
           const toIdx = dropFolderIndex > fromIdx ? dropFolderIndex - 1 : dropFolderIndex;
           folders.splice(toIdx, 0, moved);
-          sendWithTransition({ type: 'profile:reorder', payload: { folders } });
+          snapshotDragItems('[data-drag-item^="folder:"]');
+          send({ type: 'profile:reorder', payload: { folders } });
         }
       }
       document.body.style.cursor = '';
@@ -1245,7 +1292,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         autoScrollRaf.current = null;
       }
     };
-  }, [dragFolder, dropFolderIndex, profileOrder, sendWithTransition, maybeKickAutoScroll, folderDragActive]);
+  }, [dragFolder, dropFolderIndex, profileOrder, send, snapshotDragItems, maybeKickAutoScroll, folderDragActive]);
 
   const handleDialogKeyDown = (e: React.KeyboardEvent, onConfirm: () => void) => {
     if (e.key === 'Enter') {
@@ -1266,6 +1313,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const renderProfileRow = (p: ProfileEntry) => (
     <div
       key={p.name}
+      data-drag-item={`profile:${p.name}`}
       onMouseDown={(e) => handleProfileMouseDown(e, p.name)}
       onClick={(e) => {
         // Don't fire click if we were dragging
@@ -1653,6 +1701,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                     )}
                     <div
                       ref={(el) => { if (el) folderRefs.current.set(folder.name, el); else folderRefs.current.delete(folder.name); }}
+                      data-drag-item={`folder:${folder.name}`}
                       className={`rounded transition-colors ${isDragOver ? 'bg-accent-solid/20 ring-2 ring-accent-solid/50' : ''} ${isFolderDragging ? 'opacity-50' : ''}`}
                     >
                       <div
