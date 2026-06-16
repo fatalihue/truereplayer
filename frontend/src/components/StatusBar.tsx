@@ -233,7 +233,7 @@ export function StatusBar() {
       {/* Spacer only when the replay progress row isn't already using flex-1 — otherwise
           two flex-1 elements would split the space and squeeze the chain label. */}
       {!(isReplaying && !isClicker) && <div className="flex-1" />}
-      <span className="text-[11px] text-text-disabled shrink-0 ml-3">{APP_VERSION}</span>
+      <span className="text-[11px] font-mono text-text-secondary shrink-0 ml-3">{APP_VERSION}</span>
     </div>
   );
 }

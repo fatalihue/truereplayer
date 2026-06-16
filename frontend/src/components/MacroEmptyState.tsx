@@ -1,6 +1,5 @@
 import { ListOrdered } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
-import { APP_VERSION } from '../appVersion';
 
 // Shown inside the ActionTable when the grid has zero actions (Macro mode only —
 // Clicker mode swaps the whole table for ClickerDashboard / ClickerEmptyState).
@@ -30,9 +29,6 @@ export function MacroEmptyState() {
             {' '}to start recording.
           </>
         )}
-      </div>
-      <div className="mt-1.5 px-2 py-0.5 rounded border border-border-default bg-bg-card text-[11px] font-mono text-text-secondary">
-        {APP_VERSION}
       </div>
     </div>
   );
