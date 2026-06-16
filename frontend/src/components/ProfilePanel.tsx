@@ -1706,7 +1706,13 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 // matching the dimmed look of disabled profiles. Empty folders stay normal.
                 const folderAllDisabled = folder.items.length > 0
                   && folder.items.every(n => profileMap.get(n)?.isDisabled);
-                const showDropBefore = dragFolder && dropFolderIndex === folderIdx && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder);
+                // Suppress the gap at BOTH no-op slots: dropping at the dragged folder's
+                // own index OR index+1 leaves it exactly where it is (mirrors handleMouseUp's
+                // `fromIdx !== dropFolderIndex && fromIdx !== dropFolderIndex - 1` guard).
+                // showDropAfter already excluded both; showDropBefore was missing the +1, so
+                // a misleading gap popped in just past the dragged folder even though releasing
+                // there did nothing — the residual boundary glitch.
+                const showDropBefore = dragFolder && dropFolderIndex === folderIdx && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder) && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder) + 1;
                 // showDropAfter is ONLY for the end-of-list slot (after the last
                 // folder) — for any middle insertion the gap is rendered by the
                 // next folder's showDropBefore. Without the last-folder guard BOTH
