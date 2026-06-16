@@ -1241,18 +1241,25 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       cursorY.current = e.clientY;
       setDragCursorPos({ x: e.clientX, y: e.clientY });
 
-      // Hit-test folder positions to find drop index
+      // Map the cursor Y to an insertion slot (0..N) CONTINUOUSLY: the first folder
+      // whose vertical midpoint is below the cursor wins; past all of them → the end.
+      // Mirrors the grid's computeInsertIndexFromY. The old test only set an index
+      // while the cursor was literally inside a folder HEADER's rect, so the margins
+      // between headers — and the entire body of an expanded folder — were dead zones
+      // where dropFolderIndex fell back to null and the indicator flickered as the
+      // cursor crossed a folder boundary. The dragged folder stays in the scan; a drop
+      // at or adjacent to its own slot is a no-op (handled in handleMouseUp) and its
+      // gap is suppressed by the showDropBefore/showDropAfter source-index guards. The
+      // gap is inserted BEFORE the chosen folder, pushing that midpoint away from the
+      // cursor, so the choice is self-stabilising rather than oscillating.
       const folders = profileOrder?.folders ?? [];
-      let bestIndex: number | null = null;
-      folderRefs.current.forEach((el, name) => {
-        const idx = folders.findIndex(f => f.name === name);
-        if (idx < 0 || name === dragFolder) return;
+      let bestIndex = folders.length;
+      for (let idx = 0; idx < folders.length; idx++) {
+        const el = folderRefs.current.get(folders[idx].name);
+        if (!el) continue;
         const rect = el.getBoundingClientRect();
-        const midY = rect.top + rect.height / 2;
-        if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
-          bestIndex = e.clientY < midY ? idx : idx + 1;
-        }
-      });
+        if (e.clientY < rect.top + rect.height / 2) { bestIndex = idx; break; }
+      }
       setDropFolderIndex(bestIndex);
       maybeKickAutoScroll(e.clientY);
     };
