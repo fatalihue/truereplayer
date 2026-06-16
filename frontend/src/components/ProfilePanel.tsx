@@ -1055,11 +1055,28 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     if (document.documentElement.getAttribute('data-animations') !== 'true') return;
     const container = scrollRef.current;
     if (!container) return;
+    // The drop indicator is a REAL layout slot (.drop-gap-slot) that physically
+    // pushes every item below it down. If we snapshot with it present, unmoved
+    // folders below the gap record a displaced "old" top and then spuriously
+    // slide ~one gap-height on drop — the ugly "flicker". The grid never hits
+    // this: dnd-kit shifts rows via transforms, so only the rows BETWEEN source
+    // and target ever move. To get the same clean baseline, collapse the gap(s)
+    // before measuring and restore immediately — all synchronous within this
+    // handler, so nothing paints in between (verified: removing the gap yields
+    // exactly the post-reorder resting position). scrollTop is pinned because
+    // collapsing the gaps can clamp the scroll when dropping near the list end.
+    const gaps = Array.from(container.querySelectorAll<HTMLElement>('.drop-gap-slot'));
+    const prevDisplay = gaps.map(g => g.style.display);
+    const scrollTop = container.scrollTop;
+    gaps.forEach(g => { g.style.display = 'none'; });
+    container.scrollTop = scrollTop;
     const map = new Map<string, number>();
     container.querySelectorAll<HTMLElement>(selector).forEach(el => {
       const id = el.getAttribute('data-drag-item');
       if (id) map.set(id, el.getBoundingClientRect().top);
     });
+    gaps.forEach((g, i) => { g.style.display = prevDisplay[i]; });
+    container.scrollTop = scrollTop;
     pendingFlipRects.current = { map, at: performance.now(), selector };
   }, []);
 
@@ -1683,7 +1700,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 const folderAllDisabled = folder.items.length > 0
                   && folder.items.every(n => profileMap.get(n)?.isDisabled);
                 const showDropBefore = dragFolder && dropFolderIndex === folderIdx && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder);
-                const showDropAfter = dragFolder && dropFolderIndex === folderIdx + 1 && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder) && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder) + 1;
+                // showDropAfter is ONLY for the end-of-list slot (after the last
+                // folder) — for any middle insertion the gap is rendered by the
+                // next folder's showDropBefore. Without the last-folder guard BOTH
+                // fired at every interior boundary, stacking two gaps (~64px) and
+                // doubling the layout displacement the FLIP snapshot had to undo.
+                const showDropAfter = dragFolder && folderIdx === (profileOrder?.folders ?? []).length - 1 && dropFolderIndex === folderIdx + 1 && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder) && dropFolderIndex !== (profileOrder?.folders ?? []).findIndex(f => f.name === dragFolder) + 1;
                 return (
                   <div key={folder.name}>
                     {/* Insertion gap — a real (layout-affecting) slot so neighbouring
