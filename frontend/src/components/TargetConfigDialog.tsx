@@ -322,7 +322,7 @@ export function TargetConfigDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-[380px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
+      <div className="relative w-[380px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
         <h3 className="text-sm font-semibold text-text-primary mb-3">{header}</h3>
         <p className="text-xs text-text-secondary mb-4">{description}</p>
 
@@ -557,7 +557,11 @@ export function TargetConfigDialog({
               this nudge, the toggle silently reinterprets every stored X/Y, breaking clicks,
               WaitImage regions, and WaitPixel coords against the wrong reference frame. */}
           {convertHint && (
-            <div className="flex items-start gap-2 px-2 py-1.5 text-[11px] text-amber-400 bg-amber-950/15 border border-amber-900/40 rounded">
+            // Floating toast anchored just below the dialog box (absolute → does NOT grow
+            // the dialog; the inline hint used to push every row down and resize the box).
+            // Opaque card + shadow so it reads as a layer over the backdrop. No timeout —
+            // it stays until the user converts or skips, same as the old hint.
+            <div className="absolute top-full left-0 right-0 mt-2 flex items-start gap-2 px-3 py-2 text-[11px] text-amber-300 bg-bg-card border border-amber-700/60 rounded-lg shadow-xl z-10">
               <span className="flex-1 leading-snug">
                 {convertibleActionCount} action{convertibleActionCount === 1 ? '' : 's'} captured in {convertHint === 'toRelative' ? 'absolute' : 'relative'} coords.{' '}
                 {convertHint === 'toRelative'
@@ -634,32 +638,10 @@ export function TargetConfigDialog({
           )}
         </div>
 
-        {/* Coordinate conversion — rewrites the X/Y of every action in the active profile
-            to the chosen coord space. Profile-only (folder actions live on each profile,
-            not on the folder itself). Surfaced directly here instead of buried in an
-            overflow menu so both destinations are visible side-by-side and don't require
-            an extra click to discover. */}
-        {onConvertCoordinates && (
-          <div className="mt-3 pt-3 border-t border-border-subtle">
-            <div className="text-[10px] text-text-tertiary uppercase tracking-wider mb-1.5">Convert Action Coordinates</div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => onConvertCoordinates('toRelative')}
-                className="flex-1 h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors"
-                title="Rewrite every action's X/Y so they're relative to the target window (anchored to it when it moves)"
-              >
-                To Relative
-              </button>
-              <button
-                onClick={() => onConvertCoordinates('toAbsolute')}
-                className="flex-1 h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors"
-                title="Rewrite every action's X/Y to absolute screen coordinates (frozen to the screen, no target window dependency)"
-              >
-                To Absolute
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Coordinate conversion (To Relative / To Absolute) moved to the profile's
+            right-click menu → More ("Convert coords → Relative/Absolute") — it's rarely
+            used, so it lives in a less prominent place now. The relative-toggle migration
+            toast above still offers a one-click convert at the moment it's most relevant. */}
 
         <div className="flex items-center mt-4">
           {hasOwnTarget && onRemove && (

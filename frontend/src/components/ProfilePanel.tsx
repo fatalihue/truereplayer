@@ -2012,6 +2012,34 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                     <ExternalLink size={13} className="text-text-tertiary" />
                     Open in Explorer
                   </button>
+                  {/* Convert action coordinates — relocated from Target Configuration (rarely
+                      used). profile:click activates the right-clicked profile first so the
+                      backend's active-profile convert rewrites THIS profile's X/Y, then convert. */}
+                  <div className="my-1 border-t border-border-subtle" />
+                  <button
+                    onClick={() => {
+                      send({ type: 'profile:click', payload: { name: contextMenu.profileName } });
+                      send({ type: 'profile:convertCoordinates', payload: { direction: 'toRelative' } });
+                      setContextMenu(null);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                    title="Rewrite this profile's action X/Y to be relative to its target window"
+                  >
+                    <ArrowLeftRight size={13} className="text-text-tertiary" />
+                    Convert coords → Relative
+                  </button>
+                  <button
+                    onClick={() => {
+                      send({ type: 'profile:click', payload: { name: contextMenu.profileName } });
+                      send({ type: 'profile:convertCoordinates', payload: { direction: 'toAbsolute' } });
+                      setContextMenu(null);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                    title="Rewrite this profile's action X/Y to absolute screen coordinates"
+                  >
+                    <ArrowLeftRight size={13} className="text-text-tertiary" />
+                    Convert coords → Absolute
+                  </button>
                 </div>
               </div>
             )}
