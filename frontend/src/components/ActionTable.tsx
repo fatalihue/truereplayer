@@ -1267,9 +1267,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         const hasHotkey = !!action.key;
                         const ms = action.timeout ?? 0;
                         const hasTimeout = ms > 0;
-                        if (hasHotkey && hasTimeout) return `${action.key} / ${ms}ms`;
+                        if (hasHotkey && hasTimeout) return `${action.key} / ${ms} ms`;
                         if (hasHotkey) return action.key;
-                        if (hasTimeout) return `${ms}ms`;
+                        if (hasTimeout) return `${ms} ms`;
                         return '—';
                       })()
                     : action.actionType === 'If'
@@ -1741,7 +1741,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           const ms = action.holdDurationMs && action.holdDurationMs > 0 ? action.holdDurationMs : 1000;
                           // Always milliseconds (was "1s"/"1.5s" for clean seconds) so every
                           // action duration reads in the same unit across the grid.
-                          const label = `${ms}ms`;
+                          const label = `${ms} ms`;
                           return (
                             <span
                               className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold tabular-nums bg-[color-mix(in_srgb,var(--color-accent)_18%,transparent)] text-accent-light hover:bg-[color-mix(in_srgb,var(--color-accent)_28%,transparent)] cursor-pointer transition-colors"
@@ -2088,7 +2088,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           }}
           onSetDelay={(delay) => {
             send({ type: 'actions:bulkUpdateDelay', payload: { indices: selSorted, delay } });
-            showToast(`Set delay to ${delay}ms for ${selectedIndices.size} action(s)`, 'success');
+            showToast(`Set delay to ${delay} ms for ${selectedIndices.size} action(s)`, 'success');
           }}
           onSetCoord={(axis, value) => {
             send({ type: 'actions:bulkUpdateCoord', payload: { indices: selSorted, axis, value } });

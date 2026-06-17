@@ -228,7 +228,7 @@ function ComboInput({ value, onCommit, options, width = 'w-[80px]', editable = t
 // identity: purple header + subtle purple border so the user immediately sees "I'm
 // configuring Clicker, not the macro profile".
 function ClickerSection({
-  button, rate, rateJitter, useRateJitter, hold, positionJitter, usePositionJitter,
+  button, rate, rateJitter, useRateJitter, positionJitter, usePositionJitter,
   useArea, area,
   loops, useLoops, interval, useInterval, onChange,
 }: {
@@ -352,6 +352,24 @@ function ClickerSection({
               <option value="ms">ms</option>
             </select>
           </SettingRow>
+          <SettingRow label="Loops" tooltip="Number of clicks per run. 0 = infinite">
+            <SettingInput
+              value={loops}
+              onCommit={(v) => onChange('cursorClickLoops', v)}
+              onEnter={() => activateIfOff(useLoops, 'cursorClickUseLoops')}
+              width="w-[80px]"
+            />
+            <CompactToggle isOn={useLoops} onChange={(v) => onChange('cursorClickUseLoops', v)} />
+          </SettingRow>
+          <SettingRow label="Interval" tooltip="Pause between loop (ms)">
+            <SettingInput
+              value={interval}
+              onCommit={(v) => onChange('cursorClickInterval', v)}
+              onEnter={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
+              width="w-[80px]"
+            />
+            <CompactToggle isOn={useInterval} onChange={(v) => onChange('cursorClickUseInterval', v)} />
+          </SettingRow>
           <SettingRow label="Jitter" tooltip="Random ±% applied to each delay (anti-cheat detection)">
             <SettingInput
               value={rateJitter}
@@ -360,12 +378,6 @@ function ClickerSection({
               width="w-[80px]"
             />
             <CompactToggle isOn={useRateJitter} onChange={(v) => onChange('cursorClickUseJitter', v)} />
-          </SettingRow>
-          <SettingRow label="Hold" tooltip="How long button stays pressed (ms). 10 = normal click; 50-200 = slow click">
-            <SettingInput value={hold} onCommit={(v) => onChange('cursorClickHold', v)} width="w-[80px]" />
-            {/* Hold has no on/off — 0 ms is a valid value. Spacer keeps the input column
-                aligned with the rows that do have a toggle (matches Toggle's w-10 footprint). */}
-            <div className="w-7" />
           </SettingRow>
           <SettingRow label="Position" tooltip="Random ±px offset around the cursor (anti-cheat detection). Mutually exclusive with Area.">
             <SettingInput
@@ -428,24 +440,14 @@ function ClickerSection({
               )}
             />
           </SettingRow>
-          <SettingRow label="Loops" tooltip="Number of clicks per run. 0 = infinite">
-            <SettingInput
-              value={loops}
-              onCommit={(v) => onChange('cursorClickLoops', v)}
-              onEnter={() => activateIfOff(useLoops, 'cursorClickUseLoops')}
-              width="w-[80px]"
-            />
-            <CompactToggle isOn={useLoops} onChange={(v) => onChange('cursorClickUseLoops', v)} />
+          {/* Hold — removed from the panel per request; the default of 10 ms
+              (defaultSettings.cursorClickHold) still applies at replay. To show it again,
+              re-add `hold` to the ClickerSection destructuring and uncomment this row:
+          <SettingRow label="Hold" tooltip="How long button stays pressed (ms). 10 = normal click; 50-200 = slow click">
+            <SettingInput value={hold} onCommit={(v) => onChange('cursorClickHold', v)} width="w-[80px]" />
+            <div className="w-7" />
           </SettingRow>
-          <SettingRow label="Interval" tooltip="Pause between loop (ms)">
-            <SettingInput
-              value={interval}
-              onCommit={(v) => onChange('cursorClickInterval', v)}
-              onEnter={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
-              width="w-[80px]"
-            />
-            <CompactToggle isOn={useInterval} onChange={(v) => onChange('cursorClickUseInterval', v)} />
-          </SettingRow>
+          */}
     </Section>
   );
 }
