@@ -557,11 +557,12 @@ export function TargetConfigDialog({
               this nudge, the toggle silently reinterprets every stored X/Y, breaking clicks,
               WaitImage regions, and WaitPixel coords against the wrong reference frame. */}
           {convertHint && (
-            // Floating toast anchored just below the dialog box (absolute → does NOT grow
-            // the dialog; the inline hint used to push every row down and resize the box).
-            // Opaque card + shadow so it reads as a layer over the backdrop. No timeout —
-            // it stays until the user converts or skips, same as the old hint.
-            <div className="absolute top-full left-0 right-0 mt-2 flex items-start gap-2 px-3 py-2 text-[11px] text-amber-300 bg-bg-card border border-amber-700/60 rounded-lg shadow-xl z-10">
+            // Floating toast OVERLAID on the dialog box (absolute, pinned to the bottom →
+            // does NOT grow the dialog; the inline hint used to push every row down and
+            // resize the box). Sits over the action-button area; opaque card + shadow so it
+            // reads as a layer on top. No timeout — stays until the user converts or skips
+            // (Skip clears it and reveals the buttons), same actions as the old hint.
+            <div className="absolute bottom-3 left-4 right-4 flex items-start gap-2 px-3 py-2 text-[11px] text-amber-300 bg-bg-card border border-amber-700/60 rounded-lg shadow-xl z-20">
               <span className="flex-1 leading-snug">
                 {convertibleActionCount} action{convertibleActionCount === 1 ? '' : 's'} captured in {convertHint === 'toRelative' ? 'absolute' : 'relative'} coords.{' '}
                 {convertHint === 'toRelative'
