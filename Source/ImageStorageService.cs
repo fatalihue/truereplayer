@@ -152,23 +152,29 @@ namespace TrueReplayer.Services
         /// <summary>
         /// Saves a base64-encoded image with a specific filename (for import with original name).
         /// </summary>
-        public static void SaveFromBase64(string base64Data, string profileName, string filename)
+        /// Returns true if the image was written; false if the filename was rejected
+        /// (traversal/invalid) or the base64 payload was malformed. The import counts the
+        /// false returns to warn the user about reference images that didn't restore,
+        /// instead of the action silently pointing at a missing PNG.
+        public static bool SaveFromBase64(string base64Data, string profileName, string filename)
         {
             // filename originates from an imported .trprofile (untrusted). Resolve it to a
             // sanitized path inside the profile's image dir, rejecting traversal/invalid names.
             // The same Path.GetFileName reduction runs on the read side (LoadReferenceImage et
             // al.), so a name like "..\\x.png" maps to "x.png" consistently and the action's
             // ImagePath still resolves after import.
-            if (!TryResolveImageFile(profileName, filename, out string fullPath)) return;
+            if (!TryResolveImageFile(profileName, filename, out string fullPath)) return false;
 
             Directory.CreateDirectory(GetImageDirectory(profileName));
             // base64Data is untrusted import data and this runs once per image inside
-            // ConfirmImportAsync's unguarded loop. Swallow a malformed payload (log + skip
-            // this one image) so one bad entry doesn't abort the rest of the import.
-            try { File.WriteAllBytes(fullPath, Convert.FromBase64String(base64Data)); }
+            // ConfirmImportAsync's loop. Swallow a malformed payload (log + skip this one
+            // image) so one bad entry doesn't abort the rest of the import — but report it
+            // via the return value so the import can surface a warning.
+            try { File.WriteAllBytes(fullPath, Convert.FromBase64String(base64Data)); return true; }
             catch (Exception ex)
             {
                 try { DiagnosticLog.Info($"[Images] Skipped '{filename}' with invalid base64 data: {ex.Message}"); } catch { }
+                return false;
             }
         }
 

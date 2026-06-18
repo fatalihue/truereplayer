@@ -5731,46 +5731,7 @@ namespace TrueReplayer
                     _pendingImportFileName = null;
                     return;
                 }
-
-                _pendingImportEnvelope = envelope;
-                _pendingImportFileName = Path.GetFileName(filePath);
-
-                // Build the preview payload — one entry per profile in the envelope with
-                // everything the Import Preview dialog needs to render. Compatibility is
-                // computed server-side so the frontend doesn't need to know the version table.
-                string runningVersion = typeof(WebViewBridge).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
-                var previewProfiles = envelope.Profiles.Select(p => new
-                {
-                    name = p.Name,
-                    description = p.Description,
-                    tags = p.Tags,
-                    iconEmoji = p.IconEmoji,
-                    profileVersion = p.ProfileVersion,
-                    createdAt = p.CreatedAt?.ToString("o"),
-                    updatedAt = p.UpdatedAt?.ToString("o"),
-                    appMinVersion = p.AppMinVersion,
-                    compatible = ProfileCompatibility.IsCompatible(p.AppMinVersion, runningVersion),
-                    actionCount = p.Actions?.Count ?? 0,
-                    hotkey = p.CustomHotkey,
-                    hotstring = p.CustomHotstring?.Sequence,
-                    targetProcessName = p.TargetWindow?.ProcessName,
-                    targetWindowTitle = p.TargetWindow?.WindowTitle,
-                    // Conflict detection — the receiver may already have a profile with the
-                    // same name. Surface that here so the dialog can show a "will be renamed"
-                    // / "will overwrite" hint up-front instead of only learning at confirm time.
-                    nameConflict = profileController.ProfileEntries.Any(e => e.Name == p.Name)
-                }).ToArray();
-
-                SendMessage("profile:importPreview", new
-                {
-                    fileName = _pendingImportFileName,
-                    envelopeVersion = envelope.Version,
-                    exportedAt = envelope.ExportedAt,
-                    runningVersion,
-                    hasOrganization = envelope.Organization != null,
-                    requiresAcknowledgement = !AppSettingsManager.Load().HasAcknowledgedImportWarning,
-                    profiles = previewProfiles
-                });
+                SendImportPreview(envelope, Path.GetFileName(filePath));
             }
             catch (Exception ex)
             {
@@ -5778,6 +5739,57 @@ namespace TrueReplayer
                 _pendingImportEnvelope = null;
                 _pendingImportFileName = null;
             }
+        }
+
+        /// <summary>
+        /// Drag-and-drop import: the page read the dropped .trprofile's text (WebView2 hands
+        /// the page the file CONTENT, not its path) and posted it here. Parse it through the
+        /// SAME envelope parser as the file-picker path, then render the identical preview.
+        /// </summary>
+        /// <summary>
+        /// Stores the parsed envelope as the pending import and pushes the preview payload the
+        /// React Import Preview dialog renders. Shared by the file-picker and drag-and-drop
+        /// import paths so both produce an identical preview. Compatibility is computed
+        /// server-side so the frontend doesn't need the version table.
+        /// </summary>
+        private void SendImportPreview(ProfileExportEnvelope envelope, string fileName)
+        {
+            _pendingImportEnvelope = envelope;
+            _pendingImportFileName = fileName;
+
+            string runningVersion = typeof(WebViewBridge).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+            var previewProfiles = envelope.Profiles.Select(p => new
+            {
+                name = p.Name,
+                description = p.Description,
+                tags = p.Tags,
+                iconEmoji = p.IconEmoji,
+                profileVersion = p.ProfileVersion,
+                createdAt = p.CreatedAt?.ToString("o"),
+                updatedAt = p.UpdatedAt?.ToString("o"),
+                appMinVersion = p.AppMinVersion,
+                compatible = ProfileCompatibility.IsCompatible(p.AppMinVersion, runningVersion),
+                actionCount = p.Actions?.Count ?? 0,
+                hotkey = p.CustomHotkey,
+                hotstring = p.CustomHotstring?.Sequence,
+                targetProcessName = p.TargetWindow?.ProcessName,
+                targetWindowTitle = p.TargetWindow?.WindowTitle,
+                // Conflict detection — the receiver may already have a profile with the same
+                // name. Surface that here so the dialog can show a "will be renamed" / "will
+                // overwrite" hint up-front instead of only learning at confirm time.
+                nameConflict = profileController.ProfileEntries.Any(e => e.Name == p.Name)
+            }).ToArray();
+
+            SendMessage("profile:importPreview", new
+            {
+                fileName = _pendingImportFileName,
+                envelopeVersion = envelope.Version,
+                exportedAt = envelope.ExportedAt,
+                runningVersion,
+                hasOrganization = envelope.Organization != null,
+                requiresAcknowledgement = !AppSettingsManager.Load().HasAcknowledgedImportWarning,
+                profiles = previewProfiles
+            });
         }
 
         /// <summary>
@@ -5841,7 +5853,7 @@ namespace TrueReplayer
 
             try
             {
-                var (imported, skipped, hasOrganization) = await profileController.ConfirmImportAsync(
+                var (imported, skipped, hasOrganization, imageFailures) = await profileController.ConfirmImportAsync(
                     _pendingImportEnvelope, selectedNames, conflictResolutions);
 
                 if (imported > 0)
@@ -5849,8 +5861,12 @@ namespace TrueReplayer
                     PushProfilesUpdate();
                     string msg = $"Imported {imported} profile(s).";
                     if (skipped > 0) msg += $" {skipped} skipped.";
+                    if (imageFailures > 0) msg += $" {imageFailures} reference image(s) couldn't be restored.";
                     if (hasOrganization) msg += " Folder organization imported.";
-                    SendMessage("alert:show", new { message = msg });
+                    // Explicit toast type: a partial success (some images didn't restore) must NOT
+                    // render red — the frontend infers an error from words like "couldn't". 'info'
+                    // (neutral) for the warning case, 'success' (green) for a clean import.
+                    SendMessage("alert:show", new { message = msg, type = imageFailures > 0 ? "info" : "success" });
                 }
                 else if (skipped > 0)
                 {

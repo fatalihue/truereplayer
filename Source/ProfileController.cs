@@ -1175,6 +1175,27 @@ namespace TrueReplayer.Controllers
             try
             {
                 var json = await File.ReadAllTextAsync(fileName);
+                var envelope = ParseImportEnvelope(json);
+                return envelope == null ? (null, null) : (envelope, fileName);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ProfileController] PrepareImportPreview read error: {ex.Message}");
+                return (null, null);
+            }
+        }
+
+        /// <summary>
+        /// Migrate + deserialize + validate a .trprofile JSON string into an envelope, or
+        /// null if it's malformed or carries no profiles. Shared by the file-picker import
+        /// (PrepareImportPreviewAsync) and the drag-and-drop import — which hands the dropped
+        /// file's CONTENT straight here, because WebView2 exposes the bytes to the page but
+        /// not the path — so both paths run the identical parse + validation.
+        /// </summary>
+        public static ProfileExportEnvelope? ParseImportEnvelope(string json)
+        {
+            try
+            {
                 json = SettingsManager.MigrateProfileJson(json);
                 var options = new JsonSerializerOptions
                 {
@@ -1182,13 +1203,13 @@ namespace TrueReplayer.Controllers
                     TypeInfoResolver = new DefaultJsonTypeInfoResolver()
                 };
                 var envelope = JsonSerializer.Deserialize<ProfileExportEnvelope>(json, options);
-                if (envelope?.Profiles == null || envelope.Profiles.Count == 0) return (null, null);
-                return (envelope, fileName);
+                if (envelope?.Profiles == null || envelope.Profiles.Count == 0) return null;
+                return envelope;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[ProfileController] PrepareImportPreview error: {ex.Message}");
-                return (null, null);
+                System.Diagnostics.Debug.WriteLine($"[ProfileController] ParseImportEnvelope error: {ex.Message}");
+                return null;
             }
         }
 
@@ -1204,7 +1225,7 @@ namespace TrueReplayer.Controllers
         /// The old `ShowImportConflictDialogAsync` is no longer called; the React dialog
         /// surfaces all decisions up-front so the import runs without further prompts.
         /// </summary>
-        public async Task<(int imported, int skipped, bool hasOrganization)> ConfirmImportAsync(
+        public async Task<(int imported, int skipped, bool hasOrganization, int imageFailures)> ConfirmImportAsync(
             ProfileExportEnvelope envelope,
             HashSet<string> selectedNames,
             Dictionary<string, ImportConflictResult> conflictResolutions)
@@ -1219,6 +1240,7 @@ namespace TrueReplayer.Controllers
 
             int imported = 0;
             int skipped = 0;
+            int imageFailures = 0;
 
             // Canonical Profiles dir (with trailing separator) for the containment check below.
             string canonicalProfileDir = Path.GetFullPath(profileDir);
@@ -1355,12 +1377,15 @@ namespace TrueReplayer.Controllers
 
                 await SettingsManager.SaveProfileAsync(targetPath, profile);
 
-                // Restore embedded WaitImage reference images
+                // Restore embedded WaitImage reference images. Count any that fail to restore
+                // (rejected name / malformed base64) so the bridge can warn the user — a
+                // silently-missing PNG turns WaitImage / If-ImageFound into a no-op.
                 if (entry.Images != null && entry.Images.Count > 0)
                 {
                     foreach (var kvp in entry.Images)
                     {
-                        ImageStorageService.SaveFromBase64(kvp.Value, finalName, kvp.Key);
+                        if (!ImageStorageService.SaveFromBase64(kvp.Value, finalName, kvp.Key))
+                            imageFailures++;
                     }
                 }
 
@@ -1380,7 +1405,7 @@ namespace TrueReplayer.Controllers
             if (hasOrganization && imported > 0)
                 await MergeImportedOrganizationAsync(envelope.Organization!, importedRenames);
 
-            return (imported, skipped, hasOrganization);
+            return (imported, skipped, hasOrganization, imageFailures);
         }
 
         // Guards against a malicious/buggy .trprofile envelope smuggling path separators or

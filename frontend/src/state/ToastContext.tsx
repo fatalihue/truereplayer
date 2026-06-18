@@ -83,7 +83,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     return subscribe((msg) => {
       if (msg.type === 'alert:show') {
-        showToast(msg.payload.message);
+        // Honour an explicit type from the backend (e.g. a partial-success import warning
+        // sent as 'info' so it isn't mis-inferred as a red error); fall back to inference.
+        showToast(msg.payload.message, msg.payload.type);
       }
     });
   }, [subscribe, showToast]);

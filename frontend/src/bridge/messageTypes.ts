@@ -380,7 +380,7 @@ export type IncomingMessage =
   | { type: 'button:states'; payload: ButtonStates }
   | { type: 'toolbar:updated'; payload: { profileName: string; actionCount: number } }
   | { type: 'statusbar:updated'; payload: { directory: string; profileName: string | null; actionCount: number } }
-  | { type: 'alert:show'; payload: { message: string } }
+  | { type: 'alert:show'; payload: { message: string; type?: 'success' | 'error' | 'info' } }
   | { type: 'windowTarget:detected'; payload: { processName: string; windowTitle: string } }
   | { type: 'windowTarget:detectState'; payload: { detecting: boolean } }
   | { type: 'windowTarget:testResult'; payload: { matches: boolean; foregroundProcess: string; foregroundTitle: string; error?: string } }
