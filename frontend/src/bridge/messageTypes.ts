@@ -247,6 +247,10 @@ export interface SettingsState {
   moveStepPx: string;
   moveStepDelay: string;
   moveClickDelay: string;
+  // Fast approach (jump-and-settle) — teleport far moves, smooth only the final
+  // settleDistance px. settleDistance is a numeric string (same convention as moveStepPx).
+  fastApproach: boolean;
+  settleDistance: string;
   useCursorClick: boolean;
   cursorClickButton: string;
   // Clicker-exclusive hotkeys (decoupled from the global macro hotkeys). Default

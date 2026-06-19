@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Move, AlertTriangle } from 'lucide-react';
+import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -629,7 +629,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
         ]
       : [
           { tab: 'profile', title: 'Execution', icon: Timer, color: '#ffd93d' },
-          { tab: 'profile', title: 'Movement', icon: Move, color: '#51cf66' },
+          { tab: 'profile', title: 'Game Mode', icon: Gamepad2, color: '#51cf66' },
           { tab: 'profile', title: 'Recording', icon: Mic, color: '#ff6b6b' },
         ];
   const railGlobal: RailEntry[] = [
@@ -830,27 +830,37 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               </SettingRow>
             </Section>
 
-            {/* Movement — interpolated cursor path. Required for games (Roblox) that ignore a
-                single large jump; off = legacy instant move. */}
-            <Section icon={Move} iconColor="#51cf66" title="Movement">
-              <SettingRow label="Smooth movement" tooltip="Move the cursor along a path to the target instead of jumping straight there. Required for games like Roblox that ignore a single large jump. Off = legacy instant move.">
+            {/* Game Mode — interpolated cursor path so games (e.g. Roblox) that ignore a single
+                large jump follow the cursor. A workaround some games need; off = instant jumps,
+                perfect for normal apps. Fast approach speeds up far moves on top of that. */}
+            <Section icon={Gamepad2} iconColor="#51cf66" title="Game Mode">
+              <SettingRow label="Smooth movement" tooltip="Moves the cursor along a path instead of jumping. A workaround for games like Roblox that ignore a single large jump. Turn off for normal apps — they don't need it and jumps are instant.">
                 <CompactToggle isOn={settings.smoothMovement} onChange={(v) => changeSetting('smoothMovement', v)} />
               </SettingRow>
               {settings.smoothMovement && (
                 <>
-                  <SettingRow label="Path step" tooltip="Max pixels per step along the path. Lower = smoother / more reliable, slightly slower. ~20 works well for Roblox.">
+                  <SettingRow label="Path step" tooltip="Max pixels per step along the path. Lower = smoother and more reliable, slightly slower. ~20 works well for Roblox.">
                     <SettingInput value={settings.moveStepPx} onCommit={(v) => changeSetting('moveStepPx', v)} width="w-[80px]" />
                     {/* spacer = toggle column, so these inputs line up with Execution's. */}
                     <span className="w-7 shrink-0" aria-hidden />
                   </SettingRow>
-                  <SettingRow label="Step delay" tooltip="Pause between path steps (ms).">
+                  <SettingRow label="Step delay" tooltip="Pause between path steps, in ms.">
                     <SettingInput value={settings.moveStepDelay} onCommit={(v) => changeSetting('moveStepDelay', v)} width="w-[80px]" />
                     <span className="w-7 shrink-0" aria-hidden />
                   </SettingRow>
-                  <SettingRow label="Click delay" tooltip="Gap after reaching the target before the click fires (ms).">
+                  <SettingRow label="Click delay" tooltip="Pause after reaching the target before the click fires, in ms.">
                     <SettingInput value={settings.moveClickDelay} onCommit={(v) => changeSetting('moveClickDelay', v)} width="w-[80px]" />
                     <span className="w-7 shrink-0" aria-hidden />
                   </SettingRow>
+                  <SettingRow label="Fast approach" tooltip="When the cursor starts far from the target (e.g. another monitor), teleport most of the way and smooth only the final stretch — makes a far first click near-instant instead of crawling the whole distance. If a game misclicks with this on, turn it off.">
+                    <CompactToggle isOn={settings.fastApproach} onChange={(v) => changeSetting('fastApproach', v)} />
+                  </SettingRow>
+                  {settings.fastApproach && (
+                    <SettingRow label="Settle distance" tooltip="Pixels of smooth movement before the target after a teleport. Higher = more reliable in strict games, slightly slower. ~80 works well.">
+                      <SettingInput value={settings.settleDistance} onCommit={(v) => changeSetting('settleDistance', v)} width="w-[80px]" />
+                      <span className="w-7 shrink-0" aria-hidden />
+                    </SettingRow>
+                  )}
                 </>
               )}
             </Section>

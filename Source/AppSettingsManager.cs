@@ -31,6 +31,10 @@ namespace TrueReplayer.Services
             public int MoveStepPx { get; set; } = 20;
             public int MoveStepDelayMs { get; set; } = 2;
             public int MoveClickDelayMs { get; set; } = 10;
+            // Fast approach (jump-and-settle): teleport far moves, smooth only the final
+            // SettleDistancePx. See ActionReplayer.FastApproach.
+            public bool FastApproach { get; set; } = false;
+            public int SettleDistancePx { get; set; } = 80;
             public bool UseCursorClick { get; set; } = false;
             public string CursorClickButton { get; set; } = "Left";
             // Clicker v2 — dedicated Clicker settings, independent of the active profile.
@@ -141,6 +145,8 @@ namespace TrueReplayer.Services
             ActionReplayer.MoveStepPx = s.MoveStepPx;
             ActionReplayer.MoveStepDelayMs = s.MoveStepDelayMs;
             ActionReplayer.MoveClickDelayMs = s.MoveClickDelayMs;
+            ActionReplayer.FastApproach = s.FastApproach;
+            ActionReplayer.SettleDistancePx = s.SettleDistancePx;
             profile.RecordingHotkey = s.RecordingHotkey;
             profile.ReplayHotkey = s.ReplayHotkey;
             profile.ProfileKeyToggleHotkey = s.ProfileKeyToggleHotkey;

@@ -1178,6 +1178,8 @@ namespace TrueReplayer
                     moveStepPx = ActionReplayer.MoveStepPx.ToString(),
                     moveStepDelay = ActionReplayer.MoveStepDelayMs.ToString(),
                     moveClickDelay = ActionReplayer.MoveClickDelayMs.ToString(),
+                    fastApproach = ActionReplayer.FastApproach,
+                    settleDistance = ActionReplayer.SettleDistancePx.ToString(),
                     useCursorClick = UseCursorClick,
                     cursorClickButton = CursorClickButton,
                     cursorClickStartHotkey = CursorClickStartHotkey,
@@ -1432,6 +1434,8 @@ namespace TrueReplayer
                     moveStepPx = ActionReplayer.MoveStepPx.ToString(),
                     moveStepDelay = ActionReplayer.MoveStepDelayMs.ToString(),
                     moveClickDelay = ActionReplayer.MoveClickDelayMs.ToString(),
+                    fastApproach = ActionReplayer.FastApproach,
+                    settleDistance = ActionReplayer.SettleDistancePx.ToString(),
                     useCursorClick = UseCursorClick,
                     cursorClickButton = CursorClickButton,
                     cursorClickStartHotkey = CursorClickStartHotkey,
@@ -6189,6 +6193,8 @@ namespace TrueReplayer
             ActionReplayer.MoveStepPx = defaults.MoveStepPx;
             ActionReplayer.MoveStepDelayMs = defaults.MoveStepDelayMs;
             ActionReplayer.MoveClickDelayMs = defaults.MoveClickDelayMs;
+            ActionReplayer.FastApproach = defaults.FastApproach;
+            ActionReplayer.SettleDistancePx = defaults.SettleDistancePx;
             UseCursorClick = defaults.UseCursorClick;       // preserved above
             CursorClickButton = defaults.CursorClickButton; // preserved above
             CursorClickStartHotkey = defaults.CursorClickStartHotkey;
@@ -6255,6 +6261,8 @@ namespace TrueReplayer
                 MoveStepPx = ActionReplayer.MoveStepPx,
                 MoveStepDelayMs = ActionReplayer.MoveStepDelayMs,
                 MoveClickDelayMs = ActionReplayer.MoveClickDelayMs,
+                FastApproach = ActionReplayer.FastApproach,
+                SettleDistancePx = ActionReplayer.SettleDistancePx,
                 UseCursorClick = UseCursorClick,
                 CursorClickButton = CursorClickButton,
                 CursorClickStartHotkey = CursorClickStartHotkey,
@@ -6438,6 +6446,14 @@ namespace TrueReplayer
                 case "moveClickDelay":
                     if (int.TryParse(valueElement.GetString(), out int mcDelay))
                         ActionReplayer.MoveClickDelayMs = Math.Clamp(mcDelay, 0, 1000);
+                    break;
+                // Fast approach (jump-and-settle). See ActionReplayer.FastApproach.
+                case "fastApproach":
+                    ActionReplayer.FastApproach = valueElement.GetBoolean();
+                    break;
+                case "settleDistance":
+                    if (int.TryParse(valueElement.GetString(), out int settleDist))
+                        ActionReplayer.SettleDistancePx = Math.Clamp(settleDist, 0, 4000);
                     break;
                 case "useCursorClick":
                     SetCursorClickMode(valueElement.GetBoolean());

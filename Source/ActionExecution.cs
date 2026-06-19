@@ -262,7 +262,8 @@ namespace TrueReplayer.Services
                 $"relativeCoords={useRelativeCoords}, " +
                 $"target=[{(windowTarget == null ? "none" : $"{windowTarget.ProcessName} {windowTarget.WindowTitle}".Trim())}], " +
                 $"bringToFocus={bringToFocus}, forceInfinite={forceInfiniteLoop}, " +
-                $"smoothMovement={ActionReplayer.SmoothMovement} (step {ActionReplayer.MoveStepPx}px/{ActionReplayer.MoveStepDelayMs}ms, clickGap {ActionReplayer.MoveClickDelayMs}ms)");
+                $"smoothMovement={ActionReplayer.SmoothMovement} (step {ActionReplayer.MoveStepPx}px/{ActionReplayer.MoveStepDelayMs}ms, clickGap {ActionReplayer.MoveClickDelayMs}ms), " +
+                $"fastApproach={ActionReplayer.FastApproach} (settle {ActionReplayer.SettleDistancePx}px)");
 
             onStatusChanged?.Invoke("replaying");
 
@@ -1017,6 +1018,20 @@ namespace TrueReplayer.Services
         public static int MoveStepDelayMs = 2;
         public static int MoveClickDelayMs = 10;
 
+        // ── Fast approach (jump-and-settle) ─────────────────────────────────────────────
+        // Walking the WHOLE smooth path is slow when the cursor starts far from the target
+        // (e.g. the first click is on the opposite monitor — hundreds of MoveStepPx steps).
+        // When FastApproach is on and the move is longer than SettleDistancePx, we teleport
+        // most of the way with a bare SetCursorPos (no SendInput, so no large Raw-Input delta
+        // for anti-cheat to flag) to a point SettleDistancePx short of the target, then walk
+        // only that final stretch smoothly — the small "settle" moves are what games look for
+        // to accept the cursor as having arrived. Far moves become ~constant-time instead of
+        // scaling with distance. Off by default (opt-in): plain SetCursorPos teleports work
+        // for some games but not all, so users validate it on their games. UI keys:
+        // fastApproach / settleDistance.
+        public static bool FastApproach = false;
+        public static int SettleDistancePx = 80;
+
         // ── Focus click ───────────────────────────────────────────────────────────────
         // Opt-in per-action flag (ActionItem.IsFocusClick) honoured by combined clicks. A
         // single click on a very small target — e.g. a Roblox text field while the window is at
@@ -1043,9 +1058,11 @@ namespace TrueReplayer.Services
             if (FocusClickGapMs > 0) Thread.Sleep(FocusClickGapMs);
             if (token.IsCancellationRequested) return;
             int fx = x + FocusClickOffsetPx, fy = y + FocusClickOffsetPx;
-            SimulateMouse(fx, fy, down);
+            // The focus tap is a deliberate few-px settle off the primary click, never a jump — opt it
+            // out of fast approach so a tiny SettleDistancePx can't turn this nudge into a teleport.
+            SimulateMouse(fx, fy, down, allowFastApproach: false);
             if (!token.IsCancellationRequested)
-                SimulateMouse(fx, fy, up);
+                SimulateMouse(fx, fy, up, allowFastApproach: false);
         }
 
         private readonly ObservableCollection<ActionItem> _actions;
@@ -2084,7 +2101,7 @@ namespace TrueReplayer.Services
         /// click — the screenshot pipeline returns absolute hits regardless of
         /// profile rel-coord state) so we don't double-translate.
         /// </summary>
-        private void SimulateMouse(int x, int y, uint mouseEvent, int mouseData = 0, bool coordsAreProfileSpace = true)
+        private void SimulateMouse(int x, int y, uint mouseEvent, int mouseData = 0, bool coordsAreProfileSpace = true, bool allowFastApproach = true)
         {
             // Translate profile-space coords (window-relative when UseRelativeCoordinates is on)
             // to absolute virtual-desktop pixels. Callers that already hold absolute coords
@@ -2143,14 +2160,36 @@ namespace TrueReplayer.Services
             int stepPx = MoveStepPx;
             if (SmoothMovement && stepPx > 0 && NativeMethods.GetCursorPos(out var start) && (start.x != x || start.y != y))
             {
-                int pathDx = x - start.x;
-                int pathDy = y - start.y;
+                int originX = start.x, originY = start.y;
+
+                // Fast approach: teleport the long part of the move (SetCursorPos only — no
+                // SendInput, so the game never sees a giant Raw-Input delta) to SettleDistancePx
+                // short of the target, then smooth-walk just that final stretch below. Skipped
+                // for moves already shorter than the settle distance (they're walked in full) and
+                // for callers that opt out (the focus tap — see FocusTap). The settle point lands on
+                // the nearest integer pixel, so it can sit ~1px off the exact SettleDistancePx ring;
+                // that's harmless — the walk below still ends exactly on the target.
+                if (allowFastApproach && FastApproach && SettleDistancePx > 0)
+                {
+                    double fullDx = x - originX;
+                    double fullDy = y - originY;
+                    double fullDist = Math.Sqrt(fullDx * fullDx + fullDy * fullDy);
+                    if (fullDist > SettleDistancePx)
+                    {
+                        originX = x - (int)Math.Round(fullDx / fullDist * SettleDistancePx);
+                        originY = y - (int)Math.Round(fullDy / fullDist * SettleDistancePx);
+                        NativeMethods.SetCursorPos(originX, originY); // raw-input-silent teleport
+                    }
+                }
+
+                int pathDx = x - originX;
+                int pathDy = y - originY;
                 double dist = Math.Sqrt((double)pathDx * pathDx + (double)pathDy * pathDy);
                 int steps = Math.Max(1, (int)Math.Ceiling(dist / stepPx));
                 for (int i = 1; i <= steps; i++)
                 {
                     double t = (double)i / steps;
-                    MoveAbs(start.x + (int)Math.Round(pathDx * t), start.y + (int)Math.Round(pathDy * t));
+                    MoveAbs(originX + (int)Math.Round(pathDx * t), originY + (int)Math.Round(pathDy * t));
                     if (i < steps && MoveStepDelayMs > 0) Thread.Sleep(MoveStepDelayMs);
                 }
             }
