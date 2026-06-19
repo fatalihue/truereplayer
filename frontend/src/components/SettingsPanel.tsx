@@ -842,11 +842,9 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               <Section color="#60cdff" title="Hotkeys">
                 <SettingRow label="Start" tooltip="Run / stop the clicker.">
                   <HotkeyInput value={settings.cursorClickStartHotkey} settingKey="cursorClickStartHotkey" onChange={changeHotkey} width="w-[80px]" />
-                  <span className="w-7 shrink-0" aria-hidden />
                 </SettingRow>
                 <SettingRow label="Pause" tooltip="Pause / resume the clicker.">
                   <HotkeyInput value={settings.cursorClickPauseHotkey} settingKey="cursorClickPauseHotkey" onChange={changeHotkey} width="w-[80px]" />
-                  <span className="w-7 shrink-0" aria-hidden />
                 </SettingRow>
               </Section>
               <ClickerSection
