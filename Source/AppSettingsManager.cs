@@ -33,7 +33,7 @@ namespace TrueReplayer.Services
             public int MoveClickDelayMs { get; set; } = 10;
             // Fast approach (jump-and-settle): teleport far moves, smooth only the final
             // SettleDistancePx. See ActionReplayer.FastApproach.
-            public bool FastApproach { get; set; } = false;
+            public bool FastApproach { get; set; } = true;
             public int SettleDistancePx { get; set; } = 80;
             public bool UseCursorClick { get; set; } = false;
             public string CursorClickButton { get; set; } = "Left";

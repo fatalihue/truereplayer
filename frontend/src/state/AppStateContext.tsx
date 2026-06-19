@@ -16,7 +16,7 @@ const defaultSettings = {
   moveStepPx: '20',
   moveStepDelay: '2',
   moveClickDelay: '10',
-  fastApproach: false,
+  fastApproach: true,
   settleDistance: '80',
   useCursorClick: false,
   cursorClickButton: 'Left',

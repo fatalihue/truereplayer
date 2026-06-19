@@ -177,6 +177,35 @@ html, body, #root {
   transform: none;
 }
 
+/* Settings-panel row tooltip — a body portal (see SettingRow), so the panel's scroll-overflow
+   can't clip it. Same look as the data-tip pills, but wraps at a max width and appears instantly
+   (the native title attribute lagged ~1s). Positioned by JS; anchored to the row's left edge. */
+.settings-tip {
+  position: fixed;
+  transform: translateY(-50%);
+  max-width: 240px;
+  padding: 6px 9px;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: normal;
+  color: var(--color-text-primary);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+  pointer-events: none;
+  z-index: 99999;
+}
+@keyframes settings-tip-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* Respect the global animations toggle (matches .rec-badge-pulse etc.). */
+html[data-animations="true"] .settings-tip {
+  animation: settings-tip-in 0.1s ease;
+}
+
 .drag-region {
   -webkit-app-region: drag;
   app-region: drag;

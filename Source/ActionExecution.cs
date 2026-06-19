@@ -1026,10 +1026,10 @@ namespace TrueReplayer.Services
         // for anti-cheat to flag) to a point SettleDistancePx short of the target, then walk
         // only that final stretch smoothly — the small "settle" moves are what games look for
         // to accept the cursor as having arrived. Far moves become ~constant-time instead of
-        // scaling with distance. Off by default (opt-in): plain SetCursorPos teleports work
-        // for some games but not all, so users validate it on their games. UI keys:
-        // fastApproach / settleDistance.
-        public static bool FastApproach = false;
+        // scaling with distance. On by default (validated on real games): the bare SetCursorPos
+        // teleport works for the user's games — turn off only if a particular game misclicks.
+        // UI keys: fastApproach / settleDistance.
+        public static bool FastApproach = true;
         public static int SettleDistancePx = 80;
 
         // ── Focus click ───────────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useContext, createContext } from 'react';
+import { createPortal } from 'react-dom';
 import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle } from 'lucide-react';
 // `Search` import removed with the disabled Settings filter — re-add it to revive the filter.
 import { useAppState } from '../state/AppStateContext';
@@ -163,11 +164,30 @@ function SettingRow({ label, tooltip, children, danger }: { label: string; toolt
   // (e.g. Profile Keys OFF) is impossible to miss when glancing at the panel.
   // Hide when the "Filter settings" query doesn't match this row's label.
   const filter = useContext(FilterContext);
+  const rowRef = useRef<HTMLDivElement>(null);
+  // Tooltip is a body portal — NOT native `title` (lags ~1s) and NOT a CSS ::after (the panel's
+  // scroll-overflow would clip it). Right-anchored 8px left of the row (the panel hugs the right
+  // window edge) so it overlays the work area; its width is capped to the space on the left so it
+  // never clips on a narrow window; hidden on scroll since the position is captured at hover time.
+  const [tip, setTip] = useState<{ right: number; top: number; maxW: number } | null>(null);
+  useEffect(() => {
+    if (!tip) return;
+    const hide = () => setTip(null);
+    window.addEventListener('scroll', hide, true);
+    return () => window.removeEventListener('scroll', hide, true);
+  }, [tip]);
   if (filter && !label.toLowerCase().includes(filter)) return null;
+  const showTip = () => {
+    if (!tooltip || !rowRef.current) return;
+    const r = rowRef.current.getBoundingClientRect();
+    setTip({ right: window.innerWidth - r.left + 8, top: r.top + r.height / 2, maxW: Math.min(240, Math.max(0, r.left - 16)) });
+  };
   return (
     <div
+      ref={rowRef}
       className="relative flex items-center justify-between min-h-8 px-2.5 gap-2"
-      title={tooltip}
+      onMouseEnter={showTip}
+      onMouseLeave={() => setTip(null)}
     >
       {/* Danger = thin red left accent + red icon/label (replaces the old full-row red wash). */}
       {danger && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-sm bg-recording" />}
@@ -178,6 +198,10 @@ function SettingRow({ label, tooltip, children, danger }: { label: string; toolt
       <div className="flex items-center gap-2.5 shrink-0">
         {children}
       </div>
+      {tip && tooltip && createPortal(
+        <div className="settings-tip" style={{ right: tip.right, top: tip.top, maxWidth: tip.maxW }}>{tooltip}</div>,
+        document.body,
+      )}
     </div>
   );
 }
@@ -377,7 +401,7 @@ function ClickerSection({
               ]}
             />
           </SettingRow>
-          <SettingRow label="Rate" tooltip="Click rate — clicks per second (/s) or delay (ms). Type a value, or use the arrow to pick a preset.">
+          <SettingRow label="Rate" tooltip="Click rate: /s or delay (ms). Type or pick a preset.">
             {/* Combo + /s↔ms unit toggle share one CTRL_W slot so the row aligns with the chips. */}
             <div className="w-[80px] flex items-center gap-1">
               <ComboInput
@@ -403,7 +427,7 @@ function ClickerSection({
               </select>
             </div>
           </SettingRow>
-          <SettingRow label="Loops" tooltip="Number of clicks per run. 0 = infinite">
+          <SettingRow label="Loops" tooltip="Clicks per run. 0 = forever.">
             <EnableChip
               value={loops}
               isOn={useLoops}
@@ -412,7 +436,7 @@ function ClickerSection({
               onEnterActivate={() => activateIfOff(useLoops, 'cursorClickUseLoops')}
             />
           </SettingRow>
-          <SettingRow label="Interval" tooltip="Pause between loop (ms)">
+          <SettingRow label="Interval" tooltip="Pause between loops (ms).">
             <EnableChip
               value={interval}
               isOn={useInterval}
@@ -421,7 +445,7 @@ function ClickerSection({
               onEnterActivate={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
             />
           </SettingRow>
-          <SettingRow label="Jitter" tooltip="Random ±% applied to each delay (anti-cheat detection)">
+          <SettingRow label="Jitter" tooltip="Random ±% on each delay — less robotic.">
             <EnableChip
               value={rateJitter}
               isOn={useRateJitter}
@@ -430,7 +454,7 @@ function ClickerSection({
               onEnterActivate={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
             />
           </SettingRow>
-          <SettingRow label="Position" tooltip="Random ±px offset around the cursor (anti-cheat detection). Mutually exclusive with Area.">
+          <SettingRow label="Position" tooltip="Random ±px around the cursor. Exclusive with Area.">
             <EnableChip
               value={positionJitter}
               isOn={usePositionJitter}
@@ -450,7 +474,7 @@ function ClickerSection({
           {/* Click area — chip-shaped: the dot toggles useArea (mutually exclusive with
               Position); the body opens the region picker; ✕ (hover) clears. Backend also
               auto-enables useArea + disables Position jitter on a successful draw. */}
-          <SettingRow label="Area" tooltip="Click at a random point inside a screen rectangle. Mutually exclusive with Position.">
+          <SettingRow label="Area" tooltip="Clicks a random point in a screen box. Exclusive with Position.">
             <div
               className="w-[80px] h-7 flex items-center rounded border overflow-hidden relative group"
               style={useArea
@@ -848,7 +872,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             ) : (
               <>
             <Section color="#ffd93d" title="Execution">
-              <SettingRow label="Delay" tooltip="Fixed delay between actions (ms)">
+              <SettingRow label="Delay" tooltip="Fixed delay between actions (ms).">
                 <EnableChip
                   value={settings.customDelay}
                   isOn={settings.useCustomDelay}
@@ -866,7 +890,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   }}
                 />
               </SettingRow>
-              <SettingRow label="Loops" tooltip="Number of times to repeat. 0 = infinite">
+              <SettingRow label="Loops" tooltip="Times to repeat. 0 = forever.">
                 <EnableChip
                   value={settings.loopCount}
                   isOn={settings.enableLoop}
@@ -875,7 +899,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   onEnterActivate={() => { if (!settings.enableLoop) changeSetting('enableLoop', true); }}
                 />
               </SettingRow>
-              <SettingRow label="Interval" tooltip="Pause between loop (ms)">
+              <SettingRow label="Interval" tooltip="Pause between loops (ms).">
                 <EnableChip
                   value={settings.loopInterval}
                   isOn={settings.loopIntervalEnabled}
@@ -884,7 +908,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   onEnterActivate={() => { if (!settings.loopIntervalEnabled) changeSetting('loopIntervalEnabled', true); }}
                 />
               </SettingRow>
-              <SettingRow label="Jitter" tooltip="Random ±% applied to each delay (anti-cheat detection)">
+              <SettingRow label="Jitter" tooltip="Random ±% on each delay — less robotic.">
                 <EnableChip
                   value={settings.delayVariation}
                   isOn={settings.useDelayVariation}
@@ -899,26 +923,26 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 large jump follow the cursor. Off = instant jumps, perfect for normal apps. Fast
                 approach speeds far moves on top of that; the numeric knobs live under Tuning. */}
             <Section color="#51cf66" title="Game Mode">
-              <SettingRow label="Smooth movement" tooltip="Moves the cursor along a path instead of jumping. A workaround for games like Roblox that ignore a single large jump. Turn off for normal apps — they don't need it and jumps are instant.">
+              <SettingRow label="Smooth movement" tooltip="Cursor follows a path so games (e.g. Roblox) accept it. Off = instant jumps, fine for normal apps.">
                 <CompactToggle isOn={settings.smoothMovement} onChange={(v) => changeSetting('smoothMovement', v)} />
               </SettingRow>
               {settings.smoothMovement && (
                 <>
-                  <SettingRow label="Fast approach" tooltip="When the cursor starts far from the target (e.g. another monitor), teleport most of the way and smooth only the final stretch — makes a far first click near-instant instead of crawling the whole distance. If a game misclicks with this on, turn it off.">
+                  <SettingRow label="Fast approach" tooltip="Teleports long moves (e.g. across monitors), smoothing only the final stretch — far clicks become near-instant. Turn off if a game misclicks.">
                     <CompactToggle isOn={settings.fastApproach} onChange={(v) => changeSetting('fastApproach', v)} />
                   </SettingRow>
                   <Disclosure label="Tuning">
-                    <SettingRow label="Path step" tooltip="Max pixels per step along the path. Lower = smoother and more reliable, slightly slower. ~20 works well for Roblox.">
+                    <SettingRow label="Path step" tooltip="Max px per step. Lower = smoother, slower. ~20 for Roblox.">
                       <ValueField value={settings.moveStepPx} unit="px" onCommitValue={(v) => changeSetting('moveStepPx', v)} />
                     </SettingRow>
-                    <SettingRow label="Step delay" tooltip="Pause between path steps, in ms.">
+                    <SettingRow label="Step delay" tooltip="Pause between path steps (ms).">
                       <ValueField value={settings.moveStepDelay} unit="ms" onCommitValue={(v) => changeSetting('moveStepDelay', v)} />
                     </SettingRow>
-                    <SettingRow label="Click delay" tooltip="Pause after reaching the target before the click fires, in ms.">
+                    <SettingRow label="Click delay" tooltip="Pause before the click after moving (ms).">
                       <ValueField value={settings.moveClickDelay} unit="ms" onCommitValue={(v) => changeSetting('moveClickDelay', v)} />
                     </SettingRow>
                     {settings.fastApproach && (
-                      <SettingRow label="Settle distance" tooltip="Pixels of smooth movement before the target after a teleport. Higher = more reliable in strict games, slightly slower. ~80 works well.">
+                      <SettingRow label="Settle distance" tooltip="Px smoothed before the target after a teleport. Higher = safer, slower. ~80.">
                         <ValueField value={settings.settleDistance} unit="px" onCommitValue={(v) => changeSetting('settleDistance', v)} />
                       </SettingRow>
                     )}
@@ -940,13 +964,13 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               <SettingRow label="Keyboard">
                 <CompactToggle isOn={settings.recordKeyboard} onChange={(v) => changeSetting('recordKeyboard', v)} />
               </SettingRow>
-              <SettingRow label="Combined Actions" tooltip="Record each key press and mouse click as a single action (Keystroke / Click) instead of separate Down + Up rows. Two quick left clicks merge into a Double Click automatically. Modifiers fold into the key (Ctrl+C, Shift+A). Holds and drags aren't captured in this mode — leave it off, or add a HoldKey row, for those.">
+              <SettingRow label="Combined Actions" tooltip="Records each click/keypress as one action (not Down+Up). Merges double-clicks, folds modifiers (Ctrl+C). Holds & drags need this off.">
                 <CompactToggle isOn={settings.recordCombinedInput} onChange={(v) => changeSetting('recordCombinedInput', v)} />
               </SettingRow>
-              <SettingRow label="Profile Keys" danger={!settings.profileKeyEnabled} tooltip="Profile shortcuts and hotstrings won't fire while this is off">
+              <SettingRow label="Profile Keys" danger={!settings.profileKeyEnabled} tooltip="Profile shortcuts & hotstrings won't fire while off.">
                 <CompactToggle isOn={settings.profileKeyEnabled} onChange={(v) => changeSetting('profileKeyEnabled', v)} />
               </SettingRow>
-              <SettingRow label="Browser Actions" tooltip="Record CSS selectors from Chrome instead of mouse coordinates">
+              <SettingRow label="Browser Actions" tooltip="Record Chrome CSS selectors instead of coordinates.">
                 <CompactToggle isOn={settings.browserSelectorEnabled ?? true} onChange={(v) => changeSetting('browserSelectorEnabled', v)} />
               </SettingRow>
             </Section>
@@ -986,7 +1010,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   onChange={changeHotkey}
                 />
               </SettingRow>
-              <SettingRow label="Mode" tooltip="Switch between Macro and Clicker modes">
+              <SettingRow label="Mode" tooltip="Switch Macro ↔ Clicker.">
                 <HotkeyInput
                   value={settings.modeToggleHotkey}
                   settingKey="modeToggleHotkey"
@@ -1027,7 +1051,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   disabled={!settings.runOnStartup}
                 />
               </SettingRow>
-              <SettingRow label="Run as Administrator" tooltip="Relaunch with admin privileges on startup. Required to record clicks on elevated apps.">
+              <SettingRow label="Run as Administrator" tooltip="Relaunch as admin on startup — needed for elevated apps.">
                 <CompactToggle
                   isOn={settings.runAsAdmin ?? false}
                   onChange={(v) => changeSetting('runAsAdmin', v)}
@@ -1038,7 +1062,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             {/* Appearance — flat Section (matches the rest) with one action row that opens
                 the Theme Editor. Section preserves data-section for the collapsed rail. */}
             <Section color="#c084fc" title="Appearance">
-              <SettingRow label="Theme & layout" tooltip="Customise colours, font, row height, and per-action accents.">
+              <SettingRow label="Theme & layout" tooltip="Colours, font, row height, per-action accents.">
                 <button
                   onClick={() => window.dispatchEvent(new CustomEvent('cmd:themeeditor'))}
                   className="flex items-center gap-1 text-ui text-accent-solid hover:underline"
@@ -1048,17 +1072,9 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               </SettingRow>
             </Section>
 
-            {/* Updates */}
+            {/* Updates — the app auto-checks on launch; this is just a manual re-check.
+                (The old always-on "Auto Check" switch was a no-op placeholder — removed.) */}
             <Section color="#6bcb77" title="Updates" collapsible defaultOpen={false}>
-              {/* Auto Check is intentionally inert for now: it always reads ON and its onChange
-                  is a deliberate no-op. The app auto-checks for updates on launch regardless, so
-                  there is no backend toggle to bind to yet. Kept visible as a UX placeholder so
-                  the control doesn't disappear when wiring lands. TODO: wire to a real
-                  settings:change key + backend flag (and drop the hardcoded isOn={true}) once an
-                  opt-out is supported. Until then, do NOT remove or rewire — it is user-visible. */}
-              <SettingRow label="Auto Check">
-                <CompactToggle isOn={true} onChange={() => {}} />
-              </SettingRow>
               <button
                 onClick={() => {
                   setUpdateStatus('checking');
