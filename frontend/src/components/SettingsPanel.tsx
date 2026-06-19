@@ -182,58 +182,6 @@ function SettingRow({ label, tooltip, children, danger }: { label: string; toolt
   );
 }
 
-function SettingInput({ value: propValue, onCommit, onEnter, width = 'w-14', suffix, mono = true }: {
-  value: string;
-  onCommit: (v: string) => void;
-  onEnter?: (v: string) => void;
-  width?: string;
-  suffix?: string;
-  mono?: boolean;
-}) {
-  const [localValue, setLocalValue] = useState(propValue);
-  const isFocused = useRef(false);
-  const committedByEnter = useRef(false);
-
-  useEffect(() => {
-    if (!isFocused.current) {
-      setLocalValue(propValue);
-    }
-  }, [propValue]);
-
-  const commit = () => {
-    onCommit(localValue);
-  };
-
-  return (
-    <>
-      <input
-        type="text"
-        value={localValue}
-        onChange={(e) => setLocalValue(e.target.value)}
-        onFocus={() => { isFocused.current = true; committedByEnter.current = false; }}
-        onBlur={() => {
-          isFocused.current = false;
-          if (!committedByEnter.current) {
-            commit();
-          }
-          committedByEnter.current = false;
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            committedByEnter.current = true;
-            commit();
-            onEnter?.(localValue);
-            (e.target as HTMLInputElement).blur();
-          }
-        }}
-        className={`${width} h-7 px-2 text-ui text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid ${mono ? 'font-mono' : ''}`}
-      />
-      {suffix && <span className="text-[11px] text-text-disabled w-4">{suffix}</span>}
-    </>
-  );
-}
-
 // Field + a dropdown of options (a combobox). Two modes share one visual identity so the
 // Clicker rows look uniform:
 //   • editable (Rate): type freely, or click the chevron to pick a preset.
@@ -411,15 +359,12 @@ function ClickerSection({
     // Uses the shared Section so it matches macro mode exactly (header above a single
     // inset group, same row layout). Purple icon/title keep the "you're in Clicker" cue.
     <Section color="var(--color-clicker)" title="Clicker">
-          {/* Layout mirrors the Execution panel exactly: label | input | toggle. The Rate
-              row puts the /s ↔ ms <select> in the toggle column so the column always lines
-              up across rows. Hold has no toggle (0 ms is a valid value, no on/off needed)
-              so we render a w-10 spacer to keep the input vertically aligned with the others. */}
+          {/* Flat/chip layout: every right-column control is one CTRL_W (80px) box, flush right,
+              so chips, combos and the area control all line up. Value+enable rows are a single
+              EnableChip; Button/Rate are pickers; Area is chip-shaped (dot + picker). */}
           {/* Mouse button picker — moved here from the ActionBar so the panel is the single
-              source of truth for "every Clicker setting". Left/Right/Middle, no on/off
-              switch (always applied). Spacer matches the toggle column on the other rows. */}
+              source of truth for "every Clicker setting". Left/Right/Middle, always applied. */}
           <SettingRow label="Button" tooltip="Mouse button to click">
-            {/* Same combobox visual as Rate (read-only picker mode) so the two top rows match. */}
             <ComboInput
               editable={false}
               value={button}
@@ -431,103 +376,125 @@ function ClickerSection({
                 { value: 'Middle', label: 'Middle' },
               ]}
             />
-            <div className="w-7" />
           </SettingRow>
           <SettingRow label="Rate" tooltip="Click rate — clicks per second (/s) or delay (ms). Type a value, or use the arrow to pick a preset.">
-            <ComboInput
-              /* Key on (unit, localDelayMs) so it remounts with the right displayValue when
-                 either changes — toggling the unit, or picking a preset (commitRate updates
-                 localDelayMs optimistically). */
-              key={`rate-${unit}-${localDelayMs}`}
-              value={displayValue}
-              onCommit={commitRate}
-              width="w-[80px]"
-              options={unit === 'cps'
-                ? [10, 25, 50, 100, 200].map((c) => ({ value: String(c), label: `${c}/s` }))
-                : [100, 40, 20, 10, 5].map((m) => ({ value: String(m), label: `${m} ms` }))}
-            />
-            <select
-              value={unit}
-              onChange={(e) => setUnit(e.target.value as 'ms' | 'cps')}
-              className="w-7 h-5 text-center text-[11px] text-text-secondary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid font-mono cursor-pointer appearance-none"
-              title="Unit"
-            >
-              <option value="cps">/s</option>
-              <option value="ms">ms</option>
-            </select>
+            {/* Combo + /s↔ms unit toggle share one CTRL_W slot so the row aligns with the chips. */}
+            <div className="w-[80px] flex items-center gap-1">
+              <ComboInput
+                /* Key on (unit, localDelayMs) so it remounts with the right displayValue when
+                   either changes — toggling the unit, or picking a preset (commitRate updates
+                   localDelayMs optimistically). */
+                key={`rate-${unit}-${localDelayMs}`}
+                value={displayValue}
+                onCommit={commitRate}
+                width="flex-1 min-w-0"
+                options={unit === 'cps'
+                  ? [10, 25, 50, 100, 200].map((c) => ({ value: String(c), label: `${c}/s` }))
+                  : [100, 40, 20, 10, 5].map((m) => ({ value: String(m), label: `${m} ms` }))}
+              />
+              <select
+                value={unit}
+                onChange={(e) => setUnit(e.target.value as 'ms' | 'cps')}
+                className="w-6 h-7 text-center text-[10px] text-text-secondary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid font-mono cursor-pointer appearance-none shrink-0"
+                title="Unit"
+              >
+                <option value="cps">/s</option>
+                <option value="ms">ms</option>
+              </select>
+            </div>
           </SettingRow>
           <SettingRow label="Loops" tooltip="Number of clicks per run. 0 = infinite">
-            <SettingInput
+            <EnableChip
               value={loops}
-              onCommit={(v) => onChange('cursorClickLoops', v)}
-              onEnter={() => activateIfOff(useLoops, 'cursorClickUseLoops')}
-              width="w-[80px]"
+              isOn={useLoops}
+              onCommitValue={(v) => onChange('cursorClickLoops', v)}
+              onToggle={(v) => onChange('cursorClickUseLoops', v)}
+              onEnterActivate={() => activateIfOff(useLoops, 'cursorClickUseLoops')}
             />
-            <CompactToggle isOn={useLoops} onChange={(v) => onChange('cursorClickUseLoops', v)} />
           </SettingRow>
           <SettingRow label="Interval" tooltip="Pause between loop (ms)">
-            <SettingInput
+            <EnableChip
               value={interval}
-              onCommit={(v) => onChange('cursorClickInterval', v)}
-              onEnter={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
-              width="w-[80px]"
+              isOn={useInterval}
+              onCommitValue={(v) => onChange('cursorClickInterval', v)}
+              onToggle={(v) => onChange('cursorClickUseInterval', v)}
+              onEnterActivate={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
             />
-            <CompactToggle isOn={useInterval} onChange={(v) => onChange('cursorClickUseInterval', v)} />
           </SettingRow>
           <SettingRow label="Jitter" tooltip="Random ±% applied to each delay (anti-cheat detection)">
-            <SettingInput
+            <EnableChip
               value={rateJitter}
-              onCommit={(v) => onChange('cursorClickDelayJitter', v)}
-              onEnter={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
-              width="w-[80px]"
+              isOn={useRateJitter}
+              onCommitValue={(v) => onChange('cursorClickDelayJitter', v)}
+              onToggle={(v) => onChange('cursorClickUseJitter', v)}
+              onEnterActivate={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
             />
-            <CompactToggle isOn={useRateJitter} onChange={(v) => onChange('cursorClickUseJitter', v)} />
           </SettingRow>
           <SettingRow label="Position" tooltip="Random ±px offset around the cursor (anti-cheat detection). Mutually exclusive with Area.">
-            <SettingInput
+            <EnableChip
               value={positionJitter}
-              onCommit={(v) => onChange('cursorClickPositionJitter', v)}
-              onEnter={() => setExclusive(
-                { key: 'cursorClickUsePositionJitter', on: usePositionJitter },
-                { key: 'cursorClickUseArea', on: useArea },
-                true,
-              )}
-              width="w-[80px]"
-            />
-            <CompactToggle
               isOn={usePositionJitter}
-              onChange={(v) => setExclusive(
+              onCommitValue={(v) => onChange('cursorClickPositionJitter', v)}
+              onToggle={(v) => setExclusive(
                 { key: 'cursorClickUsePositionJitter', on: usePositionJitter },
                 { key: 'cursorClickUseArea', on: useArea },
                 v,
               )}
+              onEnterActivate={() => setExclusive(
+                { key: 'cursorClickUsePositionJitter', on: usePositionJitter },
+                { key: 'cursorClickUseArea', on: useArea },
+                true,
+              )}
             />
           </SettingRow>
-          {/* Click area row. "Set…" opens the region picker; backend persists + auto-enables
-              useArea + disables Position jitter on a successful draw. ✕ lives INSIDE the
-              field (absolute, hover-revealed) so the right column stays Toggle-only. */}
+          {/* Click area — chip-shaped: the dot toggles useArea (mutually exclusive with
+              Position); the body opens the region picker; ✕ (hover) clears. Backend also
+              auto-enables useArea + disables Position jitter on a successful draw. */}
           <SettingRow label="Area" tooltip="Click at a random point inside a screen rectangle. Mutually exclusive with Position.">
-            <div className="relative group w-[80px]">
+            <div
+              className="w-[80px] h-7 flex items-center rounded border overflow-hidden relative group"
+              style={useArea
+                ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
+                : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
+            >
+              <button
+                type="button"
+                onClick={() => setExclusive(
+                  { key: 'cursorClickUseArea', on: useArea },
+                  { key: 'cursorClickUsePositionJitter', on: usePositionJitter },
+                  !useArea,
+                )}
+                aria-label={useArea ? 'Disable area' : 'Enable area'}
+                title={useArea ? 'On — click to turn off' : 'Off — click to turn on'}
+                className="h-full pl-2 pr-1.5 flex items-center shrink-0 cursor-pointer transition-colors hover:bg-[rgba(127,127,127,0.18)]"
+              >
+                <span
+                  className="w-2 h-2 rounded-full block shrink-0"
+                  style={useArea
+                    ? { background: 'var(--color-accent-solid)' }
+                    : { background: 'transparent', border: '1.5px solid var(--color-text-tertiary)' }}
+                />
+              </button>
               <button
                 onClick={() => send({ type: 'clicker:configureArea', payload: { requestId: `clicker-area-${Date.now()}` } })}
-                className="h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none hover:border-accent-solid focus:border-accent-solid cursor-pointer flex items-center justify-center gap-1.5 w-full"
+                className="flex-1 min-w-0 h-full flex items-center justify-end pr-2 font-mono cursor-pointer hover:underline"
                 title={area
                   ? `Current: ${area.w}×${area.h} at (${area.x}, ${area.y}). Click to redraw.`
                   : 'Drag a rectangle on screen'}
               >
                 {area
-                  ? <span className="text-[10px] truncate">{area.w}×{area.h}</span>
-                  : <span className="text-[11px]">Set…</span>}
+                  ? <span className={`text-[10px] truncate ${useArea ? 'text-text-primary' : 'text-text-tertiary'}`}>{area.w}×{area.h}</span>
+                  : <span className={`text-[11px] ${useArea ? 'text-text-secondary' : 'text-text-tertiary'}`}>Set…</span>}
               </button>
               {area && (
                 <button
                   onClick={(e) => {
-                    // stopPropagation so the click doesn't bubble to the field button below.
+                    // stopPropagation so the click doesn't bubble to the picker button.
                     e.stopPropagation();
                     onChange('cursorClickUseArea', false);
                     onChange('cursorClickArea', null);
                   }}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus:opacity-100 text-text-tertiary hover:text-text-primary text-[12px] leading-none px-1 transition-opacity bg-bg-input rounded"
+                  className="absolute right-0.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus:opacity-100 text-text-tertiary hover:text-text-primary text-[12px] leading-none px-0.5 transition-opacity"
                   title="Clear area"
                   tabIndex={-1}
                 >
@@ -535,21 +502,12 @@ function ClickerSection({
                 </button>
               )}
             </div>
-            <CompactToggle
-              isOn={useArea}
-              onChange={(v) => setExclusive(
-                { key: 'cursorClickUseArea', on: useArea },
-                { key: 'cursorClickUsePositionJitter', on: usePositionJitter },
-                v,
-              )}
-            />
           </SettingRow>
           {/* Hold — removed from the panel per request; the default of 10 ms
               (defaultSettings.cursorClickHold) still applies at replay. To show it again,
               re-add `hold` to the ClickerSection destructuring and uncomment this row:
           <SettingRow label="Hold" tooltip="How long button stays pressed (ms). 10 = normal click; 50-200 = slow click">
-            <SettingInput value={hold} onCommit={(v) => onChange('cursorClickHold', v)} width="w-[80px]" />
-            <div className="w-7" />
+            <ValueField value={hold} unit="ms" onCommitValue={(v) => onChange('cursorClickHold', v)} />
           </SettingRow>
           */}
     </Section>
