@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useContext, createContext } from 'react';
 import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle } from 'lucide-react';
+// `Search` import removed with the disabled Settings filter — re-add it to revive the filter.
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -11,17 +12,28 @@ function CompactToggle(props: { isOn: boolean; onChange: (v: boolean) => void; d
   return <Toggle {...props} size="sm" />;
 }
 
-function Section({ icon: Icon, iconColor, title, children, defaultOpen = true }: {
-  icon: React.ElementType;
-  iconColor: string;
+// One shared width for every right-column control (chips, value fields, comboboxes) so
+// they line up on a single edge and read as the same size. The panel is narrow (~224px),
+// so keep it compact.
+const CTRL_W = 'w-[80px]';
+
+// Live "Filter settings" query (lowercased). SettingRow reads it and hides itself when its
+// label doesn't match, so the search needs no prop-drilling through every row.
+const FilterContext = createContext('');
+
+// Flat section: a small colored dot + label, no bordered card and (by default) no collapse
+// chevron — the per-group cards + always-present expanders were the "boxy noise" users
+// flagged. Pass collapsible for a long/secondary group (e.g. Updates), which keeps the
+// chevron + persisted open state. data-section still drives the collapsed rail's scroll.
+function Section({ color, title, children, collapsible = false, defaultOpen = true }: {
+  color: string;
   title: string;
   children: React.ReactNode;
+  collapsible?: boolean;
   defaultOpen?: boolean;
 }) {
-  // Open/closed state survives restarts, keyed by title (titles are stable
-  // identifiers — 'Execution', 'Recording', …). Falls back to defaultOpen the
-  // first time a section is ever seen.
   const [isOpen, setIsOpen] = useState(() => {
+    if (!collapsible) return true;
     const saved = localStorage.getItem(`ui:settings-section:${title}`);
     return saved === null ? defaultOpen : saved === '1';
   });
@@ -31,35 +43,127 @@ function Section({ icon: Icon, iconColor, title, children, defaultOpen = true }:
       return !prev;
     });
   };
-
+  const dot = <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: color }} />;
   return (
-    // Grouped-insets layout: the header floats ABOVE a single rounded inset group
-    // instead of every section being a bordered card (that was the "boxy noise").
-    // data-section lets the collapsed-rail icons scroll their target into view.
     <div data-section={title}>
-      <button
-        onClick={toggleOpen}
-        className="group w-full flex items-center gap-2 px-1 py-1.5"
-      >
-        <Icon size={13} style={{ color: iconColor }} />
-        <span className="text-xs font-semibold text-text-secondary flex-1 text-left group-hover:text-text-primary transition-colors">{title}</span>
-        {isOpen ? <ChevronDown size={13} className="text-text-tertiary" /> : <ChevronRight size={13} className="text-text-tertiary" />}
-      </button>
-      {isOpen && (
-        // Inset group: same bg as the panel, just a border around it. Rows are spaced
-        // (space-y) like the old cards — NO per-row divider lines (those read as an ugly
-        // grid). The group border + the gap between groups do all the separating.
-        <div className="bg-bg-surface border border-border-subtle rounded-ui overflow-hidden py-1 space-y-1">
-          {children}
+      {collapsible ? (
+        <button onClick={toggleOpen} className="group w-full flex items-center gap-2 px-1.5 pt-2.5 pb-1">
+          {dot}
+          <span className="text-[11px] font-medium tracking-wide text-text-tertiary flex-1 text-left group-hover:text-text-secondary transition-colors">{title}</span>
+          {isOpen ? <ChevronDown size={12} className="text-text-tertiary" /> : <ChevronRight size={12} className="text-text-tertiary" />}
+        </button>
+      ) : (
+        <div className="flex items-center gap-2 px-1.5 pt-2.5 pb-1">
+          {dot}
+          <span className="text-[11px] font-medium tracking-wide text-text-tertiary">{title}</span>
         </div>
       )}
+      {isOpen && <div>{children}</div>}
     </div>
+  );
+}
+
+// Merged value+enable control: one chip carrying the number, its unit and an enable dot —
+// replaces the old "field + separate switch" pair so a setting reads as a single unit. Same
+// CTRL_W as the plain value fields so the column stays aligned. The dot toggles enable;
+// editing the number commits on blur/Enter (Enter also runs onEnterActivate — e.g. flip the
+// setting on when the user types a value into a disabled chip).
+function EnableChip({ value, isOn, onCommitValue, onToggle, onEnterActivate }: {
+  value: string;
+  isOn: boolean;
+  onCommitValue: (v: string) => void;
+  onToggle: (v: boolean) => void;
+  onEnterActivate?: (v: string) => void;
+}) {
+  const [local, setLocal] = useState(value);
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setLocal(value); }, [value]);
+  return (
+    <div
+      className={`${CTRL_W} h-7 flex items-center rounded border overflow-hidden`}
+      style={isOn
+        ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
+        : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
+    >
+      {/* The whole left zone (not just the dot) is the on/off target — full height + ~20px wide
+          with a hover highlight, so it's easy to hit. The number stays editable on its own. */}
+      <button
+        type="button"
+        onClick={() => onToggle(!isOn)}
+        aria-label={isOn ? 'Disable' : 'Enable'}
+        title={isOn ? 'On — click to turn off' : 'Off — click to turn on'}
+        className="h-full pl-2 pr-1.5 flex items-center shrink-0 cursor-pointer transition-colors hover:bg-[rgba(127,127,127,0.18)]"
+      >
+        <span
+          className="w-2 h-2 rounded-full block shrink-0"
+          style={isOn
+            ? { background: 'var(--color-accent-solid)' }
+            : { background: 'transparent', border: '1.5px solid var(--color-text-tertiary)' }}
+        />
+      </button>
+      <input
+        type="text"
+        value={local}
+        onChange={(e) => setLocal(e.target.value)}
+        onFocus={() => { focused.current = true; }}
+        onBlur={() => { focused.current = false; onCommitValue(local); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { onCommitValue(local); onEnterActivate?.(local); (e.target as HTMLInputElement).blur(); }
+        }}
+        className={`flex-1 min-w-0 bg-transparent outline-none text-ui font-mono text-right pr-2 ${isOn ? 'text-text-primary' : 'text-text-tertiary'}`}
+      />
+    </div>
+  );
+}
+
+// Plain value field — same box/size as EnableChip but with no enable dot (always applies),
+// for numbers that have no on/off (the Game-mode tuning knobs). Unit sits inside so it lines
+// up with the chips above it.
+function ValueField({ value, unit, onCommitValue }: {
+  value: string;
+  unit?: string;
+  onCommitValue: (v: string) => void;
+}) {
+  const [local, setLocal] = useState(value);
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setLocal(value); }, [value]);
+  return (
+    <div className={`${CTRL_W} h-7 flex items-center gap-1.5 px-2 rounded border border-border-default bg-bg-input`}>
+      <input
+        type="text"
+        value={local}
+        onChange={(e) => setLocal(e.target.value)}
+        onFocus={() => { focused.current = true; }}
+        onBlur={() => { focused.current = false; onCommitValue(local); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') { onCommitValue(local); (e.target as HTMLInputElement).blur(); } }}
+        className="flex-1 min-w-0 bg-transparent outline-none text-ui font-mono text-right text-text-primary"
+      />
+      {unit && <span className="text-[10px] shrink-0 text-text-disabled">{unit}</span>}
+    </div>
+  );
+}
+
+// Inline disclosure for a handful of secondary rows (e.g. the Game-mode tuning knobs) so the
+// numbers users rarely touch don't clutter the group. One small caret toggle, no card.
+function Disclosure({ label, children }: { label: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(o => !o)} className="group w-full flex items-center gap-1 px-2.5 py-1 text-[11px] text-accent-solid hover:underline transition-colors">
+        <ChevronRight size={12} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
+        {label}
+      </button>
+      {open && <div>{children}</div>}
+    </>
   );
 }
 
 function SettingRow({ label, tooltip, children, danger }: { label: string; tooltip?: string; children: React.ReactNode; danger?: boolean }) {
   // `danger` paints the row in a loud red so a disabled-but-critical toggle
   // (e.g. Profile Keys OFF) is impossible to miss when glancing at the panel.
+  // Hide when the "Filter settings" query doesn't match this row's label.
+  const filter = useContext(FilterContext);
+  if (filter && !label.toLowerCase().includes(filter)) return null;
   return (
     <div
       className="relative flex items-center justify-between min-h-8 px-2.5 gap-2"
@@ -306,7 +410,7 @@ function ClickerSection({
   return (
     // Uses the shared Section so it matches macro mode exactly (header above a single
     // inset group, same row layout). Purple icon/title keep the "you're in Clicker" cue.
-    <Section icon={MousePointerClick} iconColor="var(--color-clicker)" title="Clicker">
+    <Section color="var(--color-clicker)" title="Clicker">
           {/* Layout mirrors the Execution panel exactly: label | input | toggle. The Rate
               row puts the /s ↔ ms <select> in the toggle column so the column always lines
               up across rows. Hold has no toggle (0 ms is a valid value, no on/off needed)
@@ -563,6 +667,9 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
   const selectionRef = useSelectionRef();
   const [activeTab, setActiveTab] = useState<'profile' | 'global'>('profile');
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'up-to-date' | 'error'>('idle');
+  // SETTINGS FILTER (disabled). To revive: uncomment the line below, the filter input + its
+  // FilterContext.Provider wrapper in the tab content, and re-add `Search` to the lucide import.
+  // const [query, setQuery] = useState('');
 
   useEffect(() => {
     return subscribe((msg) => {
@@ -726,7 +833,22 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
 
       {/* Tab Content — more vertical gap between groups now that each section is a
           floating header + inset (not a tight stack of bordered cards). */}
-      <div className="flex-1 overflow-y-auto space-y-3 px-1 py-2">
+      <div className="flex-1 overflow-y-auto px-1.5 py-2">
+        {/* SETTINGS FILTER (disabled — uncomment this block, the Provider close tag below, the
+            query state above, and re-add `Search` to the lucide import to revive):
+        <div className="flex items-center gap-2 h-7 px-2 mb-1 rounded border border-border-default bg-bg-input">
+          <Search size={12} className="text-text-tertiary shrink-0" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') setQuery(''); }}
+            placeholder="Filter settings"
+            className="flex-1 min-w-0 bg-transparent outline-none text-ui text-text-primary placeholder:text-text-tertiary"
+          />
+        </div>
+        <FilterContext.Provider value={query.trim().toLowerCase()}>
+        */}
         {activeTab === 'profile' ? (
           <>
             {/* Clicker mode swaps the Execution + Recording stack for a dedicated panel.
@@ -735,7 +857,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               <>
               {/* Clicker hotkeys — their own group, pinned above the Clicker settings.
                   Decoupled from the global macro hotkeys; active only in Clicker mode. */}
-              <Section icon={Zap} iconColor="#60cdff" title="Hotkeys">
+              <Section color="#60cdff" title="Hotkeys">
                 <SettingRow label="Start" tooltip="Run / stop the clicker.">
                   <HotkeyInput value={settings.cursorClickStartHotkey} settingKey="cursorClickStartHotkey" onChange={changeHotkey} width="w-[80px]" />
                   <span className="w-7 shrink-0" aria-hidden />
@@ -767,100 +889,82 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               </>
             ) : (
               <>
-            <Section icon={Timer} iconColor="#ffd93d" title="Execution">
+            <Section color="#ffd93d" title="Execution">
               <SettingRow label="Delay" tooltip="Fixed delay between actions (ms)">
-                <SettingInput
+                <EnableChip
                   value={settings.customDelay}
-                  onCommit={(v) => changeSetting('customDelay', v)}
-                  onEnter={(v) => {
+                  isOn={settings.useCustomDelay}
+                  onCommitValue={(v) => changeSetting('customDelay', v)}
+                  onToggle={(v) => changeSetting('useCustomDelay', v)}
+                  onEnterActivate={(v) => {
                     const delay = parseInt(v, 10);
-                    // Non-numeric input shouldn't have any side-effect: neither flip
-                    // the toggle on nor push a bulk delay update. Guard both together.
+                    // Non-numeric input shouldn't flip the toggle on or push a bulk update.
                     if (isNaN(delay)) return;
-                    if (!settings.useCustomDelay) {
-                      changeSetting('useCustomDelay', true);
-                    }
+                    if (!settings.useCustomDelay) changeSetting('useCustomDelay', true);
                     const indices = selectionRef.current;
                     if (indices.size > 0) {
                       send({ type: 'actions:bulkUpdateDelay', payload: { indices: [...indices], delay } });
                     }
                   }}
-                  width="w-[80px]"
                 />
-                <CompactToggle isOn={settings.useCustomDelay} onChange={(v) => changeSetting('useCustomDelay', v)} />
-              </SettingRow>
-              <SettingRow label="Jitter" tooltip="Random ±% applied to each delay (anti-cheat detection)">
-                <SettingInput
-                  value={settings.delayVariation}
-                  onCommit={(v) => changeSetting('delayVariation', v)}
-                  onEnter={() => {
-                    if (!settings.useDelayVariation) {
-                      changeSetting('useDelayVariation', true);
-                    }
-                  }}
-                  width="w-[80px]"
-                />
-                <CompactToggle isOn={settings.useDelayVariation} onChange={(v) => changeSetting('useDelayVariation', v)} />
               </SettingRow>
               <SettingRow label="Loops" tooltip="Number of times to repeat. 0 = infinite">
-                <SettingInput
+                <EnableChip
                   value={settings.loopCount}
-                  onCommit={(v) => changeSetting('loopCount', v)}
-                  onEnter={() => {
-                    if (!settings.enableLoop) {
-                      changeSetting('enableLoop', true);
-                    }
-                  }}
-                  width="w-[80px]"
+                  isOn={settings.enableLoop}
+                  onCommitValue={(v) => changeSetting('loopCount', v)}
+                  onToggle={(v) => changeSetting('enableLoop', v)}
+                  onEnterActivate={() => { if (!settings.enableLoop) changeSetting('enableLoop', true); }}
                 />
-                <CompactToggle isOn={settings.enableLoop} onChange={(v) => changeSetting('enableLoop', v)} />
               </SettingRow>
               <SettingRow label="Interval" tooltip="Pause between loop (ms)">
-                <SettingInput
+                <EnableChip
                   value={settings.loopInterval}
-                  onCommit={(v) => changeSetting('loopInterval', v)}
-                  onEnter={() => {
-                    if (!settings.loopIntervalEnabled) {
-                      changeSetting('loopIntervalEnabled', true);
-                    }
-                  }}
-                  width="w-[80px]"
+                  isOn={settings.loopIntervalEnabled}
+                  onCommitValue={(v) => changeSetting('loopInterval', v)}
+                  onToggle={(v) => changeSetting('loopIntervalEnabled', v)}
+                  onEnterActivate={() => { if (!settings.loopIntervalEnabled) changeSetting('loopIntervalEnabled', true); }}
                 />
-                <CompactToggle isOn={settings.loopIntervalEnabled} onChange={(v) => changeSetting('loopIntervalEnabled', v)} />
+              </SettingRow>
+              <SettingRow label="Jitter" tooltip="Random ±% applied to each delay (anti-cheat detection)">
+                <EnableChip
+                  value={settings.delayVariation}
+                  isOn={settings.useDelayVariation}
+                  onCommitValue={(v) => changeSetting('delayVariation', v)}
+                  onToggle={(v) => changeSetting('useDelayVariation', v)}
+                  onEnterActivate={() => { if (!settings.useDelayVariation) changeSetting('useDelayVariation', true); }}
+                />
               </SettingRow>
             </Section>
 
             {/* Game Mode — interpolated cursor path so games (e.g. Roblox) that ignore a single
-                large jump follow the cursor. A workaround some games need; off = instant jumps,
-                perfect for normal apps. Fast approach speeds up far moves on top of that. */}
-            <Section icon={Gamepad2} iconColor="#51cf66" title="Game Mode">
+                large jump follow the cursor. Off = instant jumps, perfect for normal apps. Fast
+                approach speeds far moves on top of that; the numeric knobs live under Tuning. */}
+            <Section color="#51cf66" title="Game Mode">
               <SettingRow label="Smooth movement" tooltip="Moves the cursor along a path instead of jumping. A workaround for games like Roblox that ignore a single large jump. Turn off for normal apps — they don't need it and jumps are instant.">
                 <CompactToggle isOn={settings.smoothMovement} onChange={(v) => changeSetting('smoothMovement', v)} />
               </SettingRow>
               {settings.smoothMovement && (
                 <>
-                  <SettingRow label="Path step" tooltip="Max pixels per step along the path. Lower = smoother and more reliable, slightly slower. ~20 works well for Roblox.">
-                    <SettingInput value={settings.moveStepPx} onCommit={(v) => changeSetting('moveStepPx', v)} width="w-[80px]" />
-                    {/* spacer = toggle column, so these inputs line up with Execution's. */}
-                    <span className="w-7 shrink-0" aria-hidden />
-                  </SettingRow>
-                  <SettingRow label="Step delay" tooltip="Pause between path steps, in ms.">
-                    <SettingInput value={settings.moveStepDelay} onCommit={(v) => changeSetting('moveStepDelay', v)} width="w-[80px]" />
-                    <span className="w-7 shrink-0" aria-hidden />
-                  </SettingRow>
-                  <SettingRow label="Click delay" tooltip="Pause after reaching the target before the click fires, in ms.">
-                    <SettingInput value={settings.moveClickDelay} onCommit={(v) => changeSetting('moveClickDelay', v)} width="w-[80px]" />
-                    <span className="w-7 shrink-0" aria-hidden />
-                  </SettingRow>
                   <SettingRow label="Fast approach" tooltip="When the cursor starts far from the target (e.g. another monitor), teleport most of the way and smooth only the final stretch — makes a far first click near-instant instead of crawling the whole distance. If a game misclicks with this on, turn it off.">
                     <CompactToggle isOn={settings.fastApproach} onChange={(v) => changeSetting('fastApproach', v)} />
                   </SettingRow>
-                  {settings.fastApproach && (
-                    <SettingRow label="Settle distance" tooltip="Pixels of smooth movement before the target after a teleport. Higher = more reliable in strict games, slightly slower. ~80 works well.">
-                      <SettingInput value={settings.settleDistance} onCommit={(v) => changeSetting('settleDistance', v)} width="w-[80px]" />
-                      <span className="w-7 shrink-0" aria-hidden />
+                  <Disclosure label="Tuning">
+                    <SettingRow label="Path step" tooltip="Max pixels per step along the path. Lower = smoother and more reliable, slightly slower. ~20 works well for Roblox.">
+                      <ValueField value={settings.moveStepPx} unit="px" onCommitValue={(v) => changeSetting('moveStepPx', v)} />
                     </SettingRow>
-                  )}
+                    <SettingRow label="Step delay" tooltip="Pause between path steps, in ms.">
+                      <ValueField value={settings.moveStepDelay} unit="ms" onCommitValue={(v) => changeSetting('moveStepDelay', v)} />
+                    </SettingRow>
+                    <SettingRow label="Click delay" tooltip="Pause after reaching the target before the click fires, in ms.">
+                      <ValueField value={settings.moveClickDelay} unit="ms" onCommitValue={(v) => changeSetting('moveClickDelay', v)} />
+                    </SettingRow>
+                    {settings.fastApproach && (
+                      <SettingRow label="Settle distance" tooltip="Pixels of smooth movement before the target after a teleport. Higher = more reliable in strict games, slightly slower. ~80 works well.">
+                        <ValueField value={settings.settleDistance} unit="px" onCommitValue={(v) => changeSetting('settleDistance', v)} />
+                      </SettingRow>
+                    )}
+                  </Disclosure>
                 </>
               )}
             </Section>
@@ -868,7 +972,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             {/* Recording — switches, same as every other on/off row. Profile Keys keeps
                 the danger accent (left bar + red icon/label) when off, since its shortcuts
                 and hotstrings stop firing. */}
-            <Section icon={Mic} iconColor="#ff6b6b" title="Recording">
+            <Section color="#ff6b6b" title="Recording">
               <SettingRow label="Mouse Clicks">
                 <CompactToggle isOn={settings.recordMouse} onChange={(v) => changeSetting('recordMouse', v)} />
               </SettingRow>
@@ -895,7 +999,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
         ) : (
           <>
             {/* Hotkeys */}
-            <Section icon={Zap} iconColor="#60cdff" title="Hotkeys">
+            <Section color="#60cdff" title="Hotkeys">
               <SettingRow label="Recording">
                 <HotkeyInput
                   value={settings.recordingHotkey}
@@ -934,7 +1038,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             </Section>
 
             {/* Window */}
-            <Section icon={Monitor} iconColor="#7a8599" title="Window">
+            <Section color="#7a8599" title="Window">
               <SettingRow label="Always On Top">
                 <CompactToggle
                   isOn={settings.alwaysOnTop}
@@ -973,26 +1077,21 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               </SettingRow>
             </Section>
 
-            {/* Appearance — direct action, not a collapsible Section. The category
-                only houses a single entry (Theme Editor) right now, so making the user
-                expand a submenu before clicking is pure friction. Render as a button
-                styled like a collapsed Section header so it slots into the panel's
-                visual rhythm. If we ever add more appearance settings (per-action
-                accents, font-only toggles, etc.) swap back to <Section> with the
-                children inside. */}
-            <button
-              data-section="Appearance"
-              onClick={() => window.dispatchEvent(new CustomEvent('cmd:themeeditor'))}
-              title="Customise colours, font, row height, and per-action accents."
-              className="w-full flex items-center gap-2 px-3 h-9 bg-bg-surface border border-border-subtle rounded-ui hover:bg-bg-elevated transition-colors"
-            >
-              <Palette size={13} style={{ color: '#c084fc' }} />
-              <span className="text-xs font-semibold text-text-secondary flex-1 text-left">Appearance</span>
-              <ChevronRight size={13} className="text-text-tertiary" />
-            </button>
+            {/* Appearance — flat Section (matches the rest) with one action row that opens
+                the Theme Editor. Section preserves data-section for the collapsed rail. */}
+            <Section color="#c084fc" title="Appearance">
+              <SettingRow label="Theme & layout" tooltip="Customise colours, font, row height, and per-action accents.">
+                <button
+                  onClick={() => window.dispatchEvent(new CustomEvent('cmd:themeeditor'))}
+                  className="flex items-center gap-1 text-ui text-accent-solid hover:underline"
+                >
+                  Customise <ChevronRight size={12} />
+                </button>
+              </SettingRow>
+            </Section>
 
             {/* Updates */}
-            <Section icon={Download} iconColor="#6bcb77" title="Updates" defaultOpen={false}>
+            <Section color="#6bcb77" title="Updates" collapsible defaultOpen={false}>
               {/* Auto Check is intentionally inert for now: it always reads ON and its onChange
                   is a deliberate no-op. The app auto-checks for updates on launch regardless, so
                   there is no backend toggle to bind to yet. Kept visible as a UX placeholder so
@@ -1018,6 +1117,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             </Section>
           </>
         )}
+        {/* </FilterContext.Provider>  ← re-enable together with the disabled filter block above */}
       </div>
     </div>
   );
