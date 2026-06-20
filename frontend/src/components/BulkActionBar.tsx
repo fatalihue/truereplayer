@@ -102,6 +102,14 @@ export function BulkActionBar({
         {/* Inline Input (shared for all bulk edit types) */}
         {activeInput ? (
           <div className="flex items-center gap-1">
+            {/* X/Y accept a signed offset (+10 / -5) applied to each selection or a plain number
+                that sets them all. Shown inline to the LEFT of the field (it grows into the
+                spacer) so the input + OK keep the exact position the other edit types use. */}
+            {(activeInput === 'x' || activeInput === 'y') && (
+              <span className="text-[10px] text-text-tertiary whitespace-nowrap">
+                {tt('+/- offsets each · number sets all', '+/- desloca cada · número define todos')}
+              </span>
+            )}
             <span className="text-[10px] text-text-disabled uppercase">{activeInput === 'notes' ? 'Notes' : activeInput}</span>
             <input
               type="text"
@@ -114,14 +122,6 @@ export function BulkActionBar({
                 delayInvalid ? 'border-recording/60 focus:border-recording' : 'border-border-default focus:border-accent-solid'
               }`}
             />
-            {/* X/Y accept a signed offset (+10 / -5) applied to each selection or a plain number
-                that sets them all — the rule that used to live in the button tooltip, now shown
-                inline while the field is open. */}
-            {(activeInput === 'x' || activeInput === 'y') && (
-              <span className="text-[10px] text-text-tertiary whitespace-nowrap">
-                {tt('+/- offsets each · number sets all', '+/- desloca cada · número define todos')}
-              </span>
-            )}
             <button
               onClick={handleConfirm}
               className="h-6 px-2 rounded text-[11px] font-medium bg-accent-solid text-white hover:bg-accent-solid/80 transition-colors"
