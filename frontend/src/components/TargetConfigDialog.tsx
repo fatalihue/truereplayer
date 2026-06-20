@@ -436,6 +436,7 @@ export function TargetConfigDialog({
             <div className="flex items-center gap-1.5 mt-1.5">
               <button
                 onClick={() => { setTitleMatchMode('contains'); markEdited(); }}
+                data-tip={tt('Match windows whose title contains this text (partial, case-insensitive)', 'Corresponde a janelas cujo título contém este texto (parcial, sem diferenciar maiúsculas)')}
                 className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
                   titleMatchMode === 'contains'
                     ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
@@ -444,6 +445,7 @@ export function TargetConfigDialog({
               >Contains</button>
               <button
                 onClick={() => { setTitleMatchMode('regex'); markEdited(); }}
+                data-tip={tt('Match the window title against a regular expression pattern', 'Corresponde o título da janela a um padrão de expressão regular (regex)')}
                 className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
                   titleMatchMode === 'regex'
                     ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
@@ -456,6 +458,7 @@ export function TargetConfigDialog({
 
         <button
           onClick={handleDetect}
+          data-tip={tt('Click any window to auto-fill its process name and title', 'Clique em qualquer janela para preencher automaticamente seu nome de processo e título')}
           className={`mt-3 w-full h-8 text-xs border rounded transition-colors ${
             isDetecting
               ? 'text-recording border-recording/40 bg-recording/10 hover:bg-recording/20'
@@ -610,7 +613,7 @@ export function TargetConfigDialog({
             </div>
           )}
           <div className="flex items-center justify-between">
-            <span className="text-xs text-text-secondary">Bring to Focus</span>
+            <span className="text-xs text-text-secondary" data-tip={tt('Bring the target window to the foreground (and un-minimize it) before replay starts', 'Traz a janela-alvo para o primeiro plano (e a desminimiza) antes de iniciar a reprodução')}>Bring to Focus</span>
             <Toggle isOn={bringToFocus} onChange={setBringToFocus} />
           </div>
           {/* Restore Position/Size + Update Geometry apply to both profile and folder scopes —
@@ -650,6 +653,9 @@ export function TargetConfigDialog({
           {hasOwnTarget && onRemove && (
             <button
               onClick={handleRemove}
+              data-tip={isProfile
+                ? tt('Clear this target so the profile runs unscoped (or inherits its folder target)', 'Remove este alvo para que o perfil rode sem escopo (ou herde o alvo da pasta)')
+                : tt('Clear this folder target — profiles inside fall back to their own or none', 'Remove o alvo desta pasta — os perfis dentro voltam ao próprio alvo ou a nenhum')}
               className="px-4 py-1.5 text-xs text-recording hover:text-recording/80 bg-bg-elevated rounded transition-colors"
             >Remove</button>
           )}

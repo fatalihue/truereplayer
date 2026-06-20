@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Keyboard, AlertCircle } from 'lucide-react';
 import { NumberInput } from './common/NumberInput';
 import { useBridge } from '../bridge/BridgeContext';
+import { useTt } from '../state/LanguageContext';
 
 /**
  * Unified "Send Keystroke" dialog. One capture pad + a Press/Hold mode toggle covers
@@ -86,6 +87,8 @@ export function KeystrokeCaptureDialog({
   onConfirm,
   onClose,
 }: KeystrokeCaptureDialogProps) {
+  const tt = useTt();
+
   // `isEditing` flips Esc behaviour and the button label. Decoupled from mode so
   // we can edit a Keystroke row, switch to Hold, and save — converting the row's
   // ActionType without leaving the dialog.
@@ -273,7 +276,10 @@ export function KeystrokeCaptureDialog({
           {/* Capture pad — universal for both modes. Single press detects whatever
               modifiers the user is holding; Hold mode silently uses only the last
               key, with a warning chip when modifiers got dropped. */}
-          <div className="bg-bg-input border border-dashed border-[#FFC107]/40 rounded-md py-5 px-4 text-center min-h-[156px] flex flex-col justify-center">
+          <div
+            className="bg-bg-input border border-dashed border-[#FFC107]/40 rounded-md py-5 px-4 text-center min-h-[156px] flex flex-col justify-center"
+            data-tip={tt('Press a key or combo to capture it (incl. Win+ combos the browser cannot see). Press again to replace.', 'Pressione uma tecla ou combo para capturar (incl. combos Win+ que o browser nao ve). Pressione de novo para substituir.')}
+          >
             {captured === null ? (
               <>
                 <div className="text-[12px] text-text-tertiary mb-1">Press any key or combo</div>
@@ -327,6 +333,9 @@ export function KeystrokeCaptureDialog({
                   key={m}
                   type="button"
                   onClick={() => setMode(m)}
+                  data-tip={m === 'press'
+                    ? tt('Tap the key once, or N times with a gap between presses.', 'Pressiona a tecla uma vez, ou N vezes com intervalo entre os toques.')
+                    : tt('Keep a single key held down for the set duration (modifiers are dropped).', 'Mantem uma unica tecla pressionada pela duracao definida (modificadores sao descartados).')}
                   className={`px-3 py-1.5 rounded text-[12px] font-medium transition-colors ${
                     mode === m
                       ? 'bg-accent-solid text-white'
@@ -343,7 +352,10 @@ export function KeystrokeCaptureDialog({
           {mode === 'press' && (
             <div className="flex flex-col gap-2.5">
               <div className="flex items-center justify-between gap-3">
-                <label className="text-[12px] font-medium text-text-secondary">Times to repeat</label>
+                <label
+                  className="text-[12px] font-medium text-text-secondary"
+                  data-tip={tt('How many times to press the key. 1 = single press; up to 999.', 'Quantas vezes pressionar a tecla. 1 = um toque; ate 999.')}
+                >Times to repeat</label>
                 <NumberInput
                   value={repeat}
                   onChange={(n) => setRepeat(clampRepeat(n))}
@@ -357,7 +369,10 @@ export function KeystrokeCaptureDialog({
                   exists for repeat-flavoured presses without making the dialog
                   jump in height when the user increments Times. */}
               <div className="flex items-center justify-between gap-3">
-                <label className={`text-[12px] font-medium transition-colors ${repeat > 1 ? 'text-text-secondary' : 'text-text-tertiary'}`}>
+                <label
+                  className={`text-[12px] font-medium transition-colors ${repeat > 1 ? 'text-text-secondary' : 'text-text-tertiary'}`}
+                  data-tip={tt('Pause between each press, in ms (0–5000). Only used when Times > 1.', 'Pausa entre cada toque, em ms (0–5000). So vale quando Times > 1.')}
+                >
                   Gap between presses (ms)
                 </label>
                 <NumberInput
@@ -376,7 +391,10 @@ export function KeystrokeCaptureDialog({
           {mode === 'hold' && (
             <div className="flex flex-col gap-2.5">
               <div className="flex items-center justify-between gap-3">
-                <label className="text-[12px] font-medium text-text-secondary">Hold duration (ms)</label>
+                <label
+                  className="text-[12px] font-medium text-text-secondary"
+                  data-tip={tt('How long the key stays pressed, in ms (10–60000). Use the presets for common values.', 'Por quanto tempo a tecla fica pressionada, em ms (10–60000). Use os presets para valores comuns.')}
+                >Hold duration (ms)</label>
                 {/* Step is dynamic (stepFor returns 1000 once we're at/above 1s, 100
                     below it). NumberInput's step is constant per render, so we recompute
                     via the parent's clamp on each change. */}
@@ -454,6 +472,9 @@ export function KeystrokeCaptureDialog({
               type="button"
               onClick={handleConfirm}
               disabled={captured === null}
+              data-tip={isEditing
+                ? tt('Apply the captured key and settings to this row. Disabled until a key is captured.', 'Aplica a tecla capturada e os ajustes nesta linha. Desabilitado ate capturar uma tecla.')
+                : tt('Insert a row with the captured key and settings. Disabled until a key is captured.', 'Insere uma linha com a tecla capturada e os ajustes. Desabilitado ate capturar uma tecla.')}
               className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isEditing ? 'Save' : 'Add'}

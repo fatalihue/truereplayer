@@ -28,6 +28,7 @@ interface ImportPreviewDialogProps {
  * during confirm; this dialog only shows whether a name conflict EXISTS via a chip.
  */
 export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPreviewDialogProps) {
+  const tt = useTt();
   // Default selection: every compatible profile checked. The user opts out per item
   // rather than opting in — matches the "I'm importing this file because I want it all"
   // mental model and matches Stream Deck / VS Code profile import UX.
@@ -138,7 +139,17 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
             <span>Exported: {formatDate(preview.exportedAt)}</span>
             <span>Format: v{preview.envelopeVersion}</span>
             <span>Your app: v{preview.runningVersion}</span>
-            {preview.hasOrganization && <span className="text-[#60cdff]">+ folder organization</span>}
+            {preview.hasOrganization && (
+              <span
+                className="text-[#60cdff]"
+                data-tip={tt(
+                  'This file also carries the folder/grouping layout — imported profiles keep their original folders',
+                  'Este arquivo também traz a organização de pastas — os perfis importados mantêm suas pastas originais'
+                )}
+              >
+                + folder organization
+              </span>
+            )}
           </div>
         </div>
 
@@ -147,7 +158,13 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
           <span>
             {preview.profiles.length} profile{preview.profiles.length === 1 ? '' : 's'} in this file
             {incompatibleCount > 0 && (
-              <span className="text-amber-400 ml-2">
+              <span
+                className="text-amber-400 ml-2"
+                data-tip={tt(
+                  'Built for a newer TrueReplayer than yours — greyed out and cannot be selected. Update the app to import them',
+                  'Feitos para uma versão do TrueReplayer mais nova que a sua — desativados e não podem ser selecionados. Atualize o app para importá-los'
+                )}
+              >
                 ({incompatibleCount} incompatible)
               </span>
             )}
@@ -156,12 +173,17 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
             <button
               onClick={() => toggleAll(true)}
               disabled={compatibleCount === 0}
+              data-tip={tt(
+                'Check every compatible profile (incompatible ones stay off)',
+                'Marca todos os perfis compatíveis (os incompatíveis ficam desmarcados)'
+              )}
               className="hover:text-text-primary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Select all
             </button>
             <button
               onClick={() => toggleAll(false)}
+              data-tip={tt('Uncheck every profile — nothing will be imported', 'Desmarca todos os perfis — nada será importado')}
               className="hover:text-text-primary transition-colors"
             >
               Clear
@@ -175,7 +197,13 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
             "override" overrides. Lets the user resolve everything in one click. */}
         {conflictCount > 0 && (
           <div className="px-4 py-3 border-b border-border-subtle bg-amber-900/25 flex items-center gap-4 flex-wrap">
-            <span className="text-xs font-medium text-amber-400 flex items-center gap-2">
+            <span
+              className="text-xs font-medium text-amber-400 flex items-center gap-2"
+              data-tip={tt(
+                'Some profiles share a name with one you already have. Pick how to handle all of them at once; you can still override individual rows below',
+                'Alguns perfis têm o mesmo nome de um que você já possui. Escolha como tratar todos de uma vez; você ainda pode ajustar linhas individuais abaixo'
+              )}
+            >
               <AlertTriangle size={14} />
               {conflictCount} name conflict{conflictCount === 1 ? '' : 's'} — apply to all:
             </span>
@@ -306,6 +334,10 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
             <button
               onClick={handleConfirm}
               disabled={selectedCount === 0}
+              data-tip={tt(
+                'Import the checked profiles into your library, applying the conflict choices above. Reference images travel with the file and are restored too',
+                'Importa os perfis marcados para sua biblioteca, aplicando as escolhas de conflito acima. As imagens de referência vêm no arquivo e também são restauradas'
+              )}
               className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Import Selected ({selectedCount})

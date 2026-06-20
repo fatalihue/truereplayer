@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Checkbox } from './Checkbox';
+import { useTt } from '../state/LanguageContext';
 
 interface SecurityWarningModalProps {
   /** Called when the user clicks "I understand". `dontShowAgain` true means persist the ack. */
@@ -22,6 +23,7 @@ interface SecurityWarningModalProps {
  * next import — that's intentional, the user hasn't acknowledged anything yet.
  */
 export function SecurityWarningModal({ onContinue, onCancel }: SecurityWarningModalProps) {
+  const tt = useTt();
   const [dontShowAgain, setDontShowAgain] = useState(false);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -69,6 +71,10 @@ export function SecurityWarningModal({ onContinue, onCancel }: SecurityWarningMo
               checked={dontShowAgain}
               onChange={setDontShowAgain}
               label="Don't show this again"
+              title={tt(
+                'Skip this warning on future imports (only saved if you click continue)',
+                'Pular este aviso em importações futuras (só é salvo se você clicar em continuar)'
+              )}
             />
           </div>
         </div>
@@ -77,12 +83,20 @@ export function SecurityWarningModal({ onContinue, onCancel }: SecurityWarningMo
         <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border-subtle">
           <button
             onClick={onCancel}
+            data-tip={tt(
+              'Abort the import — nothing is imported and the profile does not run',
+              'Cancelar a importação — nada é importado e o profile não roda'
+            )}
             className="px-4 py-1.5 text-xs font-medium text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle rounded transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={() => onContinue(dontShowAgain)}
+            data-tip={tt(
+              'Proceed and import the profile — it can click, type, and trigger automatically',
+              'Prosseguir e importar o profile — ele pode clicar, digitar e disparar automaticamente'
+            )}
             className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors"
           >
             I understand, continue

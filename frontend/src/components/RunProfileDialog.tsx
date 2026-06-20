@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Repeat2 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
+import { useTt } from '../state/LanguageContext';
 import { NumberInput } from './common/NumberInput';
 
 export interface RunProfileDialogProps {
@@ -21,6 +22,7 @@ export interface RunProfileDialogProps {
  */
 export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClose }: RunProfileDialogProps) {
   const { profiles } = useAppState();
+  const tt = useTt();
   const [profileName, setProfileName] = useState(initial?.profileName ?? '');
   const [repeatCount, setRepeatCount] = useState(initial?.repeatCount ?? 1);
   const selectRef = useRef<HTMLSelectElement>(null);
@@ -107,6 +109,10 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
                   ref={selectRef}
                   value={profileName}
                   onChange={(e) => setProfileName(e.target.value)}
+                  data-tip={tt(
+                    "Profile whose actions run inline here. Self-references and disabled profiles are hidden.",
+                    "Profile cujas ações rodam inline aqui. Auto-referências e profiles desativados ficam ocultos."
+                  )}
                   className="h-9 px-2 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
                 >
                   {eligibleProfiles.map((p) => (
@@ -122,15 +128,23 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
                   Repeat
                 </label>
                 <div className="flex items-center gap-2">
-                  <NumberInput
-                    value={repeatCount}
-                    onChange={setRepeatCount}
-                    min={1}
-                    max={999}
-                    inputWidth="w-16"
-                    inputHeight="h-9"
-                    ariaLabel="Repeat count"
-                  />
+                  <span
+                    className="inline-flex"
+                    data-tip={tt(
+                      "How many times the selected profile runs each time this action is reached (1–999). The target's own Loops/Interval are ignored.",
+                      "Quantas vezes o profile selecionado roda cada vez que esta ação é alcançada (1–999). Os Loops/Interval do próprio alvo são ignorados."
+                    )}
+                  >
+                    <NumberInput
+                      value={repeatCount}
+                      onChange={setRepeatCount}
+                      min={1}
+                      max={999}
+                      inputWidth="w-16"
+                      inputHeight="h-9"
+                      ariaLabel="Repeat count"
+                    />
+                  </span>
                   <span className="text-xs text-text-tertiary">
                     {repeatCount === 1 ? 'time' : 'times'} per call
                   </span>
@@ -160,6 +174,14 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
             <button
               onClick={handleConfirm}
               disabled={!canConfirm}
+              data-tip={tt(
+                initial
+                  ? "Save changes to this Run Profile action. Disabled until a profile is selected."
+                  : "Add the Run Profile action with these settings. Disabled until a profile is selected.",
+                initial
+                  ? "Salvar alterações desta ação Run Profile. Desativado até um profile ser selecionado."
+                  : "Adicionar a ação Run Profile com estas configurações. Desativado até um profile ser selecionado."
+              )}
               className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {initial ? 'Save' : 'Add'}

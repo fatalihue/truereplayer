@@ -213,6 +213,7 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
                       type="button"
                       onClick={() => setIconEmoji(null)}
                       className="text-[10px] text-text-tertiary hover:text-text-primary transition-colors"
+                      data-tip={tt('Remove the profile icon', 'Remover o ícone do perfil')}
                     >
                       Clear
                     </button>
@@ -257,6 +258,7 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
                   onChange={(e) => setDescription(e.target.value.slice(0, MAX_DESCRIPTION))}
                   placeholder="What does this profile do?"
                   rows={3}
+                  data-tip={tt(`Notes about this profile (up to ${MAX_DESCRIPTION} chars)`, `Notas sobre este perfil (até ${MAX_DESCRIPTION} caracteres)`)}
                   className="w-full px-3 py-2 text-xs text-text-primary bg-bg-input border border-border-subtle rounded outline-none focus:border-accent-solid placeholder:text-text-disabled transition-colors resize-none"
                 />
                 <div className="text-[10px] text-text-tertiary text-right">
@@ -295,6 +297,7 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
                     onBlur={() => setTimeout(() => setShowTagSuggestions(false), 150)}
                     placeholder={tags.length === 0 ? 'Add a tag…' : ''}
                     disabled={tags.length >= MAX_TAGS}
+                    data-tip={tt('Lowercase letters, digits, - _ + . only; Enter or comma to add', 'Apenas letras minúsculas, dígitos, - _ + . ; Enter ou vírgula para adicionar')}
                     className="flex-1 min-w-[100px] bg-transparent text-xs text-text-primary outline-none placeholder:text-text-disabled disabled:opacity-50"
                   />
                 </div>
@@ -357,6 +360,7 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
           <button
             onClick={onClose}
             className="px-4 py-1.5 text-xs font-medium text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle rounded transition-colors"
+            data-tip={tt('Discard changes and close', 'Descartar alterações e fechar')}
           >
             Cancel
           </button>
@@ -364,6 +368,7 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
             onClick={handleSave}
             disabled={!loaded}
             className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50"
+            data-tip={tt('Save icon, description and tags to this profile', 'Salvar ícone, descrição e tags neste perfil')}
           >
             Save
           </button>

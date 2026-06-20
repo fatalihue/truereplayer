@@ -210,6 +210,7 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
                     type="button"
                     onClick={() => setCaptured(null)}
                     className="text-text-tertiary hover:text-text-secondary underline underline-offset-2"
+                    data-tip={tt('Remove the resume hotkey — leaves a timeout-only Pause', 'Remove a tecla de retomada — deixa um Pause apenas por tempo limite')}
                   >
                     Clear
                   </button>
@@ -222,7 +223,10 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
               then resumes only via the captured hotkey above. */}
           <div className="flex flex-col gap-2">
             <label className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wider">Timeout</label>
-            <div className="flex items-center gap-2">
+            <div
+              className="flex items-center gap-2"
+              data-tip={tt('How long to wait before continuing, in ms. 0 = no timeout (resume by hotkey only)', 'Quanto aguardar antes de continuar, em ms. 0 = sem tempo limite (retoma apenas pela tecla de atalho)')}
+            >
               <NumberInput
                 value={timeoutMs}
                 onChange={setTimeoutMs}
@@ -286,6 +290,9 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
               onClick={handleConfirm}
               disabled={!canConfirm}
               className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              data-tip={isEditing
+                ? tt('Save the Pause — needs a resume hotkey or a timeout', 'Salvar o Pause — requer uma tecla de retomada ou um tempo limite')
+                : tt('Add the Pause — needs a resume hotkey or a timeout', 'Adicionar o Pause — requer uma tecla de retomada ou um tempo limite')}
             >
               {isEditing ? 'Save' : 'Add'}
             </button>

@@ -2353,6 +2353,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               type="text"
               readOnly
               value={hotkeyCapture}
+              data-tip={tt('Press the key combination to capture it here (Ctrl, Alt, Win, F-keys all work).', 'Pressione a combinação de teclas para capturá-la aqui (Ctrl, Alt, Win, F-keys funcionam).')}
               className="w-full h-9 px-3 text-sm font-mono text-accent bg-bg-input border border-accent-solid rounded text-center outline-none"
             />
 
@@ -2392,6 +2393,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               {profiles.find(p => p.name === showHotkeyDialog)?.hotkey && (
                 <button
                   onClick={() => { handleRemoveHotkey(showHotkeyDialog!); setShowHotkeyDialog(null); }}
+                  data-tip={tt('Unbind this hotkey from the profile. Undo available for 10s.', 'Remove esta hotkey do perfil. Desfazer disponível por 10s.')}
                   className="px-4 py-1.5 text-xs text-recording hover:text-recording/80 bg-bg-elevated rounded transition-colors"
                 >
                   Remove
@@ -2408,6 +2410,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 <button
                   onClick={confirmHotkey}
                   disabled={hotkeyCapture === '...'}
+                  data-tip={tt('Bind the captured combo so it triggers this profile globally.', 'Vincula a combinação capturada para acionar este perfil globalmente.')}
                   className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
                 >
                   Assign
@@ -2437,6 +2440,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               }}
               placeholder="e.g. /id"
               maxLength={32}
+              data-tip={tt('Text you type that auto-triggers this profile. Letters, digits and - . / , ; = only.', 'Texto que você digita e que aciona este perfil automaticamente. Só letras, dígitos e - . / , ; = .')}
               className="w-full h-9 px-3 text-sm font-mono text-accent bg-bg-input border border-accent-solid rounded outline-none"
             />
             <p className="text-[11px] text-text-tertiary mt-1.5">
@@ -2446,6 +2450,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             <button
               type="button"
               onClick={() => setHotstringInstant(!hotstringInstant)}
+              data-tip={tt('On: fires the moment the last character is typed. Off: waits for Enter, Space or Tab first.', 'Ligado: dispara assim que o último caractere é digitado. Desligado: espera por Enter, Space ou Tab antes.')}
               className="flex items-center gap-2 mt-3 cursor-pointer text-left"
             >
               <CheckboxBox checked={hotstringInstant} />
@@ -2457,6 +2462,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               {profiles.find(p => p.name === showHotstringDialog)?.hotstring && (
                 <button
                   onClick={() => { handleRemoveHotstring(showHotstringDialog!); setShowHotstringDialog(null); }}
+                  data-tip={tt('Unbind this hotstring from the profile. Undo available for 10s.', 'Remove este hotstring do perfil. Desfazer disponível por 10s.')}
                   className="px-4 py-1.5 text-xs text-recording hover:text-recording/80 bg-bg-elevated rounded transition-colors"
                 >
                   Remove
@@ -2473,6 +2479,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 <button
                   onClick={confirmHotstring}
                   disabled={hotstringValue.trim().length < 2}
+                  data-tip={tt('Bind this typed sequence so it triggers the profile (min 2 characters).', 'Vincula esta sequência digitada para acionar o perfil (mín 2 caracteres).')}
                   className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
                 >
                   Assign
@@ -2649,6 +2656,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               onChange={(e) => setFolderDialogName(e.target.value)}
               onKeyDown={(e) => handleDialogKeyDown(e, confirmCreateFolder)}
               placeholder="Folder name..."
+              data-tip={tt('Name for the new folder. Must be unique (case-insensitive).', 'Nome da nova pasta. Deve ser único (sem diferenciar maiúsculas).')}
               className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
             />
             <div className="flex items-center gap-1.5 mt-3">
@@ -2701,6 +2709,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 else if (e.key === 'Escape') { e.preventDefault(); setShowRenameFolderDialog(null); }
               }}
               placeholder="New folder name..."
+              data-tip={tt('New name for this folder. Must be unique (case-insensitive).', 'Novo nome para esta pasta. Deve ser único (sem diferenciar maiúsculas).')}
               className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
             />
             {renameFolderNameTaken && (

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Globe } from 'lucide-react';
 import { Checkbox } from './Checkbox';
+import { useTt } from '../state/LanguageContext';
 
 interface NavigateDialogProps {
   onConfirm: (url: string, newTab: boolean) => void;
@@ -8,6 +9,7 @@ interface NavigateDialogProps {
 }
 
 export function NavigateDialog({ onConfirm, onClose }: NavigateDialogProps) {
+  const tt = useTt();
   const [url, setUrl] = useState('');
   const [newTab, setNewTab] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -62,6 +64,7 @@ export function NavigateDialog({ onConfirm, onClose }: NavigateDialogProps) {
             spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"
+            data-tip={tt('The address to open in the browser. https:// is added if you omit it.', 'O endereço a abrir no browser. https:// é adicionado se você omitir.')}
             className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-subtle rounded outline-none focus:border-accent-solid placeholder:text-text-disabled transition-colors"
           />
 
@@ -69,6 +72,7 @@ export function NavigateDialog({ onConfirm, onClose }: NavigateDialogProps) {
             checked={newTab}
             onChange={setNewTab}
             label="Open in new tab"
+            title={tt('Open the URL in a new browser tab instead of the current one.', 'Abre a URL em uma nova aba do browser em vez da aba atual.')}
           />
 
           <p className="text-[11px] text-text-tertiary">
