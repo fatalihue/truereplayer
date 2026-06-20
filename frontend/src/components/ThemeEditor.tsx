@@ -15,7 +15,7 @@ import {
 } from '../themes';
 import type { ThemeColors, ExportedTheme, ThemeTag, CustomThemePreset } from '../themes';
 import { useTheme } from '../state/ThemeContext';
-import { useTt } from '../state/LanguageContext';
+import { useTt, useLanguage, DEFAULT_LANGUAGE } from '../state/LanguageContext';
 
 interface ThemeEditorProps {
   onClose: () => void;
@@ -366,6 +366,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
     exportTheme, importTheme,
     saveAsPreset, deleteCustomPreset,
   } = useTheme();
+  const { setLanguage } = useLanguage();
 
   const panelRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<TabId>('presets');
@@ -1275,7 +1276,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
             Live Preview pane spans the full body+footer height. */}
         <div className="border-t border-r border-border-subtle bg-bg-card px-4 py-2 flex items-center gap-2">
           <button
-            onClick={() => { clearAllOverrides(); resetUISettings(); }}
+            onClick={() => { clearAllOverrides(); resetUISettings(); setLanguage(DEFAULT_LANGUAGE); }}
             disabled={!hasOverrides && JSON.stringify(config.uiSettings) === JSON.stringify(DEFAULT_UI_SETTINGS)}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-surface border border-border-subtle transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             data-tip={tt('Clear color overrides and reset all UI settings to defaults', 'Limpar substituições de cor e restaurar todas as configurações da UI para os padrões')}

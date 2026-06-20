@@ -546,7 +546,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     const prevMode = prev?.triggerMode ?? 'onPress';
     send({ type: 'profile:removeHotkey', payload: { name } });
     if (prevHotkey) {
-      showToast(`Removed hotkey ${prevHotkey} from "${name}"`, {
+      showToast(tt(`Removed hotkey ${prevHotkey} from "${name}"`, `Hotkey ${prevHotkey} removido de "${name}"`), {
         type: 'success',
         duration: 10000, // longer undo window for destructive metadata removals (user request)
         action: {
@@ -573,7 +573,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     const prevInstant = prev?.hotstringInstant ?? true;
     send({ type: 'profile:removeHotstring', payload: { name } });
     if (prevSeq) {
-      showToast(`Removed hotstring "${prevSeq}" from "${name}"`, {
+      showToast(tt(`Removed hotstring "${prevSeq}" from "${name}"`, `Hotstring "${prevSeq}" removido de "${name}"`), {
         type: 'success',
         duration: 10000,
         action: {
@@ -611,7 +611,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     send({ type: 'profile:removeFolderWindowTarget', payload: { folderName } });
     if (hadTarget) {
       const label = prevProcess || prevTitle || 'target';
-      showToast(`Removed folder target (${label}) from "${folderName}"`, {
+      showToast(tt(`Removed folder target (${label}) from "${folderName}"`, `Alvo da pasta (${label}) removido de "${folderName}"`), {
         type: 'success',
         duration: 10000,
         action: {
@@ -648,7 +648,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       const prev = pendingRemovalsRef.current.get(name);
       if (!prev) return;  // Not ours, or already handled (defensive)
       pendingRemovalsRef.current.delete(name);
-      showToast(`Removed window target (${prev.label}) from "${name}"`, {
+      showToast(tt(`Removed window target (${prev.label}) from "${name}"`, `Janela-alvo (${prev.label}) removida de "${name}"`), {
         type: 'success',
         duration: 10000,
         action: {

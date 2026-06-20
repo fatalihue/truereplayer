@@ -548,7 +548,7 @@ export function TargetConfigDialog({
             className="flex items-center justify-between"
             data-tip={relativeToggleDisabled
               ? tt('Set a process name or window title first — relative coordinates need a target window to anchor to.', 'Defina primeiro um nome de processo ou título de janela — coordenadas relativas precisam de uma janela-alvo para se ancorar.')
-              : undefined}
+              : tt('Store click coordinates relative to the target window, so the macro keeps hitting the right spot when the window moves or resizes.', 'Armazena as coordenadas de clique relativas à janela-alvo, então a macro continua acertando o ponto certo mesmo se a janela mover ou redimensionar.')}
           >
             <span className={`text-xs ${relativeToggleDisabled ? 'text-text-disabled' : 'text-text-secondary'}`}>Relative Coordinates</span>
             <Toggle

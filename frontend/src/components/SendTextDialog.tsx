@@ -507,7 +507,6 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                 type="button"
                                 onClick={() => handleVarInsert(item.var)}
                                 className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
-                                data-tip={item.var}
                               >
                                 {item.label}
                               </button>

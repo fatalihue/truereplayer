@@ -189,7 +189,7 @@ function Header({ token, onClose }: { token: string; onClose: () => void }) {
   return (
     <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-border-subtle bg-bg-card shrink-0">
       <Wand2 size={14} className="text-accent-light shrink-0" />
-      <div className="text-xs font-mono text-[#f0abfc] flex-1 truncate" data-tip={token}>
+      <div className="text-xs font-mono text-[#f0abfc] flex-1 truncate">
         {token}
       </div>
       <button

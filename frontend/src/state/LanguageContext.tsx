@@ -3,15 +3,17 @@ import { createContext, useContext, useState, useCallback, type ReactNode } from
 // Optional PT-BR tooltip mode. Names/labels across the app stay in English (universal); only the
 // TOOLTIP text is localized. The language lives in localStorage (frontend-only — tooltips never
 // touch the backend), survives updates via the pinned WebView2 UserDataFolder, and switches live.
+// Default is PT-BR (the audience is Brazilian); only an explicit stored 'en' opts out.
 export type Language = 'en' | 'pt-BR';
 const STORAGE_KEY = 'tr-language';
+export const DEFAULT_LANGUAGE: Language = 'pt-BR';
 
 function loadLanguage(): Language {
-  try { return localStorage.getItem(STORAGE_KEY) === 'pt-BR' ? 'pt-BR' : 'en'; } catch { return 'en'; }
+  try { return localStorage.getItem(STORAGE_KEY) === 'en' ? 'en' : DEFAULT_LANGUAGE; } catch { return DEFAULT_LANGUAGE; }
 }
 
 type LanguageContextValue = { language: Language; setLanguage: (l: Language) => void };
-const LanguageContext = createContext<LanguageContextValue>({ language: 'en', setLanguage: () => {} });
+const LanguageContext = createContext<LanguageContextValue>({ language: DEFAULT_LANGUAGE, setLanguage: () => {} });
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLang] = useState<Language>(loadLanguage);

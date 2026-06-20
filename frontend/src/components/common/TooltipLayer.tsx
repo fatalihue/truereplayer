@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-type Pending = { text: string; rect: DOMRect; pos: string };
+type Pending = { text: string; rect: DOMRect; pos: string; mx: number; my: number };
 
 // Single global tooltip renderer for the whole app. Any element with a `data-tip="..."` attribute
 // shows a tooltip on hover, rendered as a body portal — so it's instant (no native-title ~1s lag),
@@ -17,16 +17,16 @@ export function TooltipLayer() {
 
   useEffect(() => {
     const hide = () => { currentTarget.current = null; setPending(null); setCoords(null); };
-    const show = (el: HTMLElement) => {
+    const show = (el: HTMLElement, mx: number, my: number) => {
       const text = el.getAttribute('data-tip');
       if (!text) return;
       currentTarget.current = el;
       setCoords(null); // re-measure before showing
-      setPending({ text, rect: el.getBoundingClientRect(), pos: el.getAttribute('data-tip-pos') || 'auto' });
+      setPending({ text, rect: el.getBoundingClientRect(), pos: el.getAttribute('data-tip-pos') || 'auto', mx, my });
     };
     const onOver = (e: Event) => {
       const el = (e.target as HTMLElement)?.closest?.('[data-tip]') as HTMLElement | null;
-      if (el && el !== currentTarget.current) show(el);
+      if (el && el !== currentTarget.current) show(el, (e as MouseEvent).clientX, (e as MouseEvent).clientY);
     };
     const onOut = (e: MouseEvent) => {
       const el = (e.target as HTMLElement)?.closest?.('[data-tip]');
@@ -55,9 +55,10 @@ export function TooltipLayer() {
     if (!pending || !tipRef.current) return;
     const a = pending.rect;
     const t = tipRef.current.getBoundingClientRect();
-    const gap = 6, m = 8;
+    const gap = 10, m = 8, CURSOR = 24; // CURSOR: keep below/above tooltips clear of the pointer
     const vw = window.innerWidth, vh = window.innerHeight;
     let left: number, top: number;
+    let flippedAbove = false; // default placement had to flip above the anchor
     switch (pending.pos) {
       case 'left':
         left = a.left - gap - t.width; top = a.top + a.height / 2 - t.height / 2; break;
@@ -70,7 +71,14 @@ export function TooltipLayer() {
       default: // below, centred; flip above if no room below
         left = a.left + a.width / 2 - t.width / 2;
         top = a.bottom + gap;
-        if (top + t.height > vh - m) top = a.top - gap - t.height;
+        if (top + t.height > vh - m) { top = a.top - gap - t.height; flippedAbove = true; }
+    }
+    // Cursor clearance for the below/above placements: push the tooltip past the pointer so it
+    // never covers the cursor (the anchor is under the cursor, and a tight below-gap would land the
+    // tooltip right on the pointer tip). Side placements (left/right) already sit clear of it.
+    if (Number.isFinite(pending.my) && (pending.pos === 'auto' || pending.pos === 'below-start' || pending.pos === 'end')) {
+      if (flippedAbove) top = Math.min(top, pending.my - CURSOR - t.height);
+      else top = Math.max(top, pending.my + CURSOR);
     }
     // Clamp so the top-left corner is never < m, even when space is tight (max wins outermost).
     left = Math.max(m, Math.min(left, vw - t.width - m));

@@ -1000,7 +1000,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       const c = profileDragCtx.current;
       if (c.recording || c.replaying) return;
       if (detail.profileName === c.activeProfile) {
-        showToast("A profile can't run itself", 'error');
+        showToast(tt("A profile can't run itself", 'Um perfil não pode executar a si mesmo'), 'error');
         return;
       }
       const insertIndex = computeInsertIndexFromY(detail.clientY) ?? c.actionCount;
@@ -1016,7 +1016,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       window.removeEventListener('mousemove', onMove);
       stopScroll();
     };
-  }, [computeInsertIndexFromY, showToast]);
+  }, [computeInsertIndexFromY, showToast, tt]);
 
   const isMouseAction = (actionType: string) =>
     actionType.includes('Click');
@@ -2057,7 +2057,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             // context/Delete-key paths use — so the bulk bar can't orphan block rows.
             const indices = expandToBlocks(selSorted);
             send({ type: 'actions:delete', payload: { indices } });
-            showToast(`Deleted ${indices.length} action(s)`, 'success');
+            showToast(tt(`Deleted ${indices.length} action(s)`, `${indices.length} ação(ões) excluída(s)`), 'success');
             setSelectedIndices(new Set());
           }}
           onMoveUp={() => {
@@ -2092,22 +2092,22 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           }}
           onSetDelay={(delay) => {
             send({ type: 'actions:bulkUpdateDelay', payload: { indices: selSorted, delay } });
-            showToast(`Set delay to ${delay} ms for ${selectedIndices.size} action(s)`, 'success');
+            showToast(tt(`Set delay to ${delay} ms for ${selectedIndices.size} action(s)`, `Atraso definido para ${delay} ms em ${selectedIndices.size} ação(ões)`), 'success');
           }}
           onSetCoord={(axis, value) => {
             send({ type: 'actions:bulkUpdateCoord', payload: { indices: selSorted, axis, value } });
           }}
           onSetComment={(comment) => {
             send({ type: 'actions:bulkUpdateComment', payload: { indices: selSorted, comment } });
-            showToast(`Set notes for ${selectedIndices.size} action(s)`, 'success');
+            showToast(tt(`Set notes for ${selectedIndices.size} action(s)`, `Notas definidas para ${selectedIndices.size} ação(ões)`), 'success');
           }}
           onToggleSkip={() => {
             const allSkipped = selSorted.every(i => actions[i]?.isSkipped);
             send({ type: 'actions:toggleSkip', payload: { indices: selSorted } });
             showToast(
               allSkipped
-                ? `Enabled ${selectedIndices.size} action(s)`
-                : `Skipped ${selectedIndices.size} action(s)`,
+                ? tt(`Enabled ${selectedIndices.size} action(s)`, `${selectedIndices.size} ação(ões) ativada(s)`)
+                : tt(`Skipped ${selectedIndices.size} action(s)`, `${selectedIndices.size} ação(ões) ignorada(s)`),
               'success'
             );
           }}
@@ -2185,8 +2185,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   onMouseEnter={onMouse}
                   onClick={() => {
                     navigator.clipboard.writeText(row.key ?? '')
-                      .then(() => showToast('URL copied', 'success'))
-                      .catch(() => showToast('Copy failed', 'error'));
+                      .then(() => showToast(tt('URL copied', 'URL copiada'), 'success'))
+                      .catch(() => showToast(tt('Copy failed', 'Falha ao copiar'), 'error'));
                     closeContextMenu();
                   }}
                   className={cls}
@@ -2205,8 +2205,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   onMouseEnter={onMouse}
                   onClick={() => {
                     navigator.clipboard.writeText(row.key ?? '')
-                      .then(() => showToast('Selector copied', 'success'))
-                      .catch(() => showToast('Copy failed', 'error'));
+                      .then(() => showToast(tt('Selector copied', 'Seletor copiado'), 'success'))
+                      .catch(() => showToast(tt('Copy failed', 'Falha ao copiar'), 'error'));
                     closeContextMenu();
                   }}
                   className={cls}
@@ -2224,8 +2224,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   onMouseEnter={onMouse}
                   onClick={() => {
                     navigator.clipboard.writeText(row.key ?? '')
-                      .then(() => showToast('Text copied', 'success'))
-                      .catch(() => showToast('Copy failed', 'error'));
+                      .then(() => showToast(tt('Text copied', 'Texto copiado'), 'success'))
+                      .catch(() => showToast(tt('Copy failed', 'Falha ao copiar'), 'error'));
                     closeContextMenu();
                   }}
                   className={cls}
@@ -2248,8 +2248,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   onMouseEnter={onMouse}
                   onClick={() => {
                     navigator.clipboard.writeText(`${row.x ?? 0}, ${row.y ?? 0}`)
-                      .then(() => showToast(`Copied ${row.x ?? 0}, ${row.y ?? 0}`, 'success'))
-                      .catch(() => showToast('Copy failed', 'error'));
+                      .then(() => showToast(tt(`Copied ${row.x ?? 0}, ${row.y ?? 0}`, `Copiado ${row.x ?? 0}, ${row.y ?? 0}`), 'success'))
+                      .catch(() => showToast(tt('Copy failed', 'Falha ao copiar'), 'error'));
                     closeContextMenu();
                   }}
                   className={cls}
@@ -2397,7 +2397,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           similar.add(i);
                       });
                       setSelectedIndices(similar);
-                      showToast(`Selected ${similar.size} similar action(s)`, 'success');
+                      showToast(tt(`Selected ${similar.size} similar action(s)`, `${similar.size} ação(ões) semelhante(s) selecionada(s)`), 'success');
                       closeContextMenu();
                     }}
                     className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
