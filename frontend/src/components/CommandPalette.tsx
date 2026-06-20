@@ -10,6 +10,7 @@ import {
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
+import { useTt } from '../state/LanguageContext';
 import { KbdTag } from './common/KbdTag';
 
 interface CommandPaletteProps {
@@ -42,6 +43,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   const { profiles, activeProfile, settings, buttonStates, actions } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
+  const tt = useTt();
   const [query, setQuery] = useState('');
 
   // Insert position helper: matches the toolbar's behavior — before the first selected
@@ -239,7 +241,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             id: 'duplicateprofile', label: 'Duplicate Profile',
             icon: <Files size={14} className="text-text-secondary" />,
             disabled: !activeProfile,
-            disabledHint: 'Select a profile first',
+            disabledHint: tt('Select a profile first', 'Selecione um perfil primeiro'),
             onAction: () => { if (activeProfile) { send({ type: 'profile:duplicate', payload: { name: activeProfile } }); onClose(); } },
           },
           {
@@ -305,7 +307,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
     // Narrow deps to the exact settings fields read above (hotkeys, loop config, mode flags)
     // so unrelated settings changes (e.g. movement knobs) don't rebuild every command group.
   }, [
-    profiles, activeProfile, buttonStates, send, onClose, computeInsertIndex,
+    profiles, activeProfile, buttonStates, send, onClose, computeInsertIndex, tt,
     settings.recordingHotkey, settings.replayHotkey, settings.modeToggleHotkey,
     settings.useCursorClick, settings.enableLoop, settings.loopCount,
     settings.loopIntervalEnabled, settings.loopInterval,

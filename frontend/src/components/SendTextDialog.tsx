@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Smile, Clock, BookmarkPlus, Trash2, ChevronRight, Wand2, Pencil, Search, Check, X } from 'lucide-react';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import type { EmojiClickData } from 'emoji-picker-react';
+import { useTt } from '../state/LanguageContext';
 import { LexicalTokenEditor, type LexicalEditorHandle } from './lexical/LexicalTokenEditor';
 import { ClipboardModifierBody } from './lexical/ClipboardModifierBody';
 import { useClipboardContent } from './lexical/useClipboardContent';
@@ -170,6 +171,7 @@ interface ClipboardTransformPopoverProps {
 // Limit + token / preview) is shared with the chip click-to-edit popover via
 // ClipboardModifierBody — only the shell (header / footer / positioning) differs.
 function ClipboardTransformPopover({ onInsert, onClose }: ClipboardTransformPopoverProps) {
+  const tt = useTt();
   const [state, setState] = useState<TransformState>(DEFAULT_TRANSFORM);
   const { clipRaw, clipReady } = useClipboardContent();
   const popRef = useRef<HTMLDivElement>(null);
@@ -216,7 +218,7 @@ function ClipboardTransformPopover({ onInsert, onClose }: ClipboardTransformPopo
           type="button"
           onClick={onClose}
           className="text-text-tertiary hover:text-text-primary text-sm leading-none px-1"
-          data-tip="Close"
+          data-tip={tt('Close', 'Fechar')}
         >
           ✕
         </button>
@@ -258,6 +260,7 @@ function ClipboardTransformPopover({ onInsert, onClose }: ClipboardTransformPopo
 type PanelType = 'emoji' | 'variables' | 'snippets';
 
 export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: SendTextDialogProps) {
+  const tt = useTt();
   const [text, setText] = useState(initialText);
   // The side panel is always visible (user request — no collapse), with one of
   // the three tools active; Variables is the default.
@@ -399,13 +402,13 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
             {mode === 'add' ? 'Insert Text' : 'Edit Text'}
           </h3>
           <div className="flex items-center gap-1">
-            <button type="button" onClick={() => selectPanel('emoji')} className={tabBtnClass(activePanel === 'emoji')} data-tip="Emoji">
+            <button type="button" onClick={() => selectPanel('emoji')} className={tabBtnClass(activePanel === 'emoji')} data-tip={tt('Emoji', 'Emoji')}>
               <Smile size={14} /> Emoji
             </button>
-            <button type="button" onClick={() => selectPanel('variables')} className={tabBtnClass(activePanel === 'variables')} data-tip="Variables">
+            <button type="button" onClick={() => selectPanel('variables')} className={tabBtnClass(activePanel === 'variables')} data-tip={tt('Variables', 'Variáveis')}>
               <Clock size={14} /> Variables
             </button>
-            <button type="button" onClick={() => selectPanel('snippets')} className={tabBtnClass(activePanel === 'snippets')} data-tip="Snippets">
+            <button type="button" onClick={() => selectPanel('snippets')} className={tabBtnClass(activePanel === 'snippets')} data-tip={tt('Snippets', 'Trechos')}>
               <BookmarkPlus size={14} /> Snippets
             </button>
           </div>
@@ -492,7 +495,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                     ? 'text-accent-light bg-accent-solid/15 border-accent-solid/50'
                                     : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40'
                                 }`}
-                                data-tip="Build a {clipboard:...} transform"
+                                data-tip={tt('Build a {clipboard:...} transform', 'Crie uma transformação {clipboard:...}')}
                               >
                                 <Wand2 size={11} className="shrink-0" />
                                 {item.label}
@@ -627,7 +630,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                               onClick={() => handleInsertSnippet(s.text)}
                               disabled={deletingSnippetId === s.id}
                               className="flex-1 text-left min-w-0 disabled:cursor-default"
-                              data-tip={deletingSnippetId === s.id ? '' : 'Insert at cursor'}
+                              data-tip={deletingSnippetId === s.id ? '' : tt('Insert at cursor', 'Inserir no cursor')}
                             >
                               <div className="text-xs font-medium text-text-primary truncate">{s.name}</div>
                               <div className="text-[11px] text-text-tertiary truncate mt-0.5">{s.text}</div>
@@ -639,7 +642,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                   type="button"
                                   onClick={() => handleDeleteSnippet(s.id)}
                                   className="shrink-0 p-1 rounded text-red-300 bg-red-500/20 hover:bg-red-500/35 border border-red-500/40 transition-colors"
-                                  data-tip="Confirm delete"
+                                  data-tip={tt('Confirm delete', 'Confirmar exclusão')}
                                   autoFocus
                                 >
                                   <Check size={12} />
@@ -648,7 +651,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                   type="button"
                                   onClick={() => setDeletingSnippetId(null)}
                                   className="shrink-0 p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-surface transition-colors"
-                                  data-tip="Cancel"
+                                  data-tip={tt('Cancel', 'Cancelar')}
                                 >
                                   <X size={12} />
                                 </button>
@@ -659,7 +662,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                   type="button"
                                   onClick={() => setEditingSnippetId(s.id)}
                                   className="shrink-0 p-1 text-text-disabled hover:text-accent-light transition-colors opacity-0 group-hover:opacity-100"
-                                  data-tip="Edit snippet"
+                                  data-tip={tt('Edit snippet', 'Editar trecho')}
                                 >
                                   <Pencil size={12} />
                                 </button>
@@ -667,7 +670,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                   type="button"
                                   onClick={() => setDeletingSnippetId(s.id)}
                                   className="shrink-0 p-1 text-text-disabled hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
-                                  data-tip="Delete snippet"
+                                  data-tip={tt('Delete snippet', 'Excluir trecho')}
                                 >
                                   <Trash2 size={12} />
                                 </button>

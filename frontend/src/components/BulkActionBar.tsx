@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Clock, Trash2, X, Crosshair, MessageSquare, Eye, EyeOff, ArrowUpToLine, ArrowDownToLine } from 'lucide-react';
+import { useTt } from '../state/LanguageContext';
 
 interface BulkActionBarProps {
   selectedCount: number;
@@ -33,6 +34,7 @@ export function BulkActionBar({
   onSetComment,
   onToggleSkip,
 }: BulkActionBarProps) {
+  const tt = useTt();
   const [activeInput, setActiveInput] = useState<'delay' | 'x' | 'y' | 'notes' | null>(null);
   const [inputValue, setInputValue] = useState('');
 
@@ -86,7 +88,7 @@ export function BulkActionBar({
         <button
           onClick={onClearSelection}
           className="p-0.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-          data-tip="Clear selection (Esc)"
+          data-tip={tt('Clear selection (Esc)', 'Limpar seleção (Esc)')}
         >
           <X size={11} />
         </button>
@@ -134,7 +136,7 @@ export function BulkActionBar({
               onClick={onMoveUp}
               disabled={!canMoveUp}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-tertiary"
-              data-tip="Move selection up (Alt+↑)"
+              data-tip={tt('Move selection up (Alt+↑)', 'Mover seleção para cima (Alt+↑)')}
             >
               <ArrowUpToLine size={11} />
             </button>
@@ -142,7 +144,7 @@ export function BulkActionBar({
               onClick={onMoveDown}
               disabled={!canMoveDown}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-tertiary"
-              data-tip="Move selection down (Alt+↓)"
+              data-tip={tt('Move selection down (Alt+↓)', 'Mover seleção para baixo (Alt+↓)')}
             >
               <ArrowDownToLine size={11} />
             </button>
@@ -153,7 +155,7 @@ export function BulkActionBar({
             <button
               onClick={() => openInput('delay')}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
-              data-tip="Set delay for selected"
+              data-tip={tt('Set delay for selected', 'Definir atraso para selecionados')}
             >
               <Clock size={11} />
               Delay
@@ -164,7 +166,7 @@ export function BulkActionBar({
             <button
               onClick={() => openInput('x')}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
-              data-tip="Set X for selected (use +/- for offset)"
+              data-tip={tt('Set X for selected (use +/- for offset)', 'Definir X para selecionados (use +/- para deslocamento)')}
             >
               <Crosshair size={11} />
               X
@@ -173,7 +175,7 @@ export function BulkActionBar({
             <button
               onClick={() => openInput('y')}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
-              data-tip="Set Y for selected (use +/- for offset)"
+              data-tip={tt('Set Y for selected (use +/- for offset)', 'Definir Y para selecionados (use +/- para deslocamento)')}
             >
               <Crosshair size={11} />
               Y
@@ -183,7 +185,7 @@ export function BulkActionBar({
             <button
               onClick={() => openInput('notes')}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
-              data-tip="Set notes for selected"
+              data-tip={tt('Set notes for selected', 'Definir notas para selecionados')}
             >
               <MessageSquare size={11} />
               Notes
@@ -202,7 +204,7 @@ export function BulkActionBar({
                   ? 'text-accent-light hover:text-accent-light hover:bg-accent-solid/10'
                   : 'text-text-tertiary hover:text-text-primary hover:bg-bg-elevated'
               }`}
-              data-tip={allSelectedSkipped ? 'Enable selected (include in replay)' : 'Skip selected (exclude from replay)'}
+              data-tip={allSelectedSkipped ? tt('Enable selected (include in replay)', 'Ativar selecionados (incluir na reprodução)') : tt('Skip selected (exclude from replay)', 'Pular selecionados (excluir da reprodução)')}
             >
               {allSelectedSkipped ? <Eye size={11} /> : <EyeOff size={11} />}
               {allSelectedSkipped ? 'Enable' : 'Skip'}
@@ -213,7 +215,7 @@ export function BulkActionBar({
             <button
               onClick={onDelete}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-recording hover:text-recording/80 hover:bg-recording-bg transition-colors"
-              data-tip="Delete selected (Del)"
+              data-tip={tt('Delete selected (Del)', 'Excluir selecionados (Del)')}
             >
               <Trash2 size={11} />
               Delete

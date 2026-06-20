@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Hourglass } from 'lucide-react';
 import { NumberInput } from './common/NumberInput';
 import { useBridge } from '../bridge/BridgeContext';
+import { useTt } from '../state/LanguageContext';
 
 interface PauseDialogProps {
   /**
@@ -58,6 +59,7 @@ const TIMEOUT_PRESETS = [
 const stepFor = (ms: number) => (ms >= 1000 ? 1000 : 100);
 
 export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }: PauseDialogProps) {
+  const tt = useTt();
   const isEditing = initialKey !== undefined;
 
   // Captured resume hotkey. null = none configured (empty pad). Seed from the
@@ -245,7 +247,7 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
                         ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
                         : 'text-text-tertiary border-border-default bg-bg-elevated hover:text-text-secondary hover:bg-bg-card'
                     }`}
-                    data-tip={p.ms === 0 ? 'No timeout — resume by hotkey only' : `Wait ${p.label}`}
+                    data-tip={p.ms === 0 ? tt('No timeout — resume by hotkey only', 'Sem tempo limite — retoma apenas pela tecla de atalho') : tt(`Wait ${p.label}`, `Aguardar ${p.label}`)}
                   >
                     {p.label}
                   </button>

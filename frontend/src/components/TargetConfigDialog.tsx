@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, ChevronDown } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
+import { useTt } from '../state/LanguageContext';
 import { Toggle } from './common/Toggle';
 
 type Scope = 'profile' | 'folder';
@@ -73,6 +74,7 @@ export function TargetConfigDialog({
   convertibleActionCount = 0,
 }: TargetConfigDialogProps) {
   const { send, subscribe } = useBridge();
+  const tt = useTt();
 
   const [processName, setProcessName] = useState(initial.processName);
   const [windowTitle, setWindowTitle] = useState(initial.windowTitle);
@@ -356,7 +358,7 @@ export function TargetConfigDialog({
                       send({ type: 'process:list', payload: {} });
                     }
                   }}
-                  data-tip="Pick from running processes"
+                  data-tip={tt('Pick from running processes', 'Escolher de processos em execução')}
                   className={`p-1 transition-colors ${showProcessPicker ? 'text-accent' : 'text-text-tertiary hover:text-text-secondary'}`}
                 >
                   <ChevronDown size={14} />
@@ -499,12 +501,12 @@ export function TargetConfigDialog({
                 : 'text-text-secondary border-border-default hover:bg-bg-elevated'
           }`}
           data-tip={testInFlight
-            ? 'Sending test request…'
+            ? tt('Sending test request…', 'Enviando requisição de teste…')
             : testResult
               ? (testResult.error
                   ? testResult.error
-                  : `${testResult.matches ? 'Matches' : 'No match'} — ${testResult.foregroundProcess || '?'}${testResult.foregroundTitle ? ' / ' + testResult.foregroundTitle : ''}`)
-              : 'Check whether the current config matches the window in front (excluding TrueReplayer)'
+                  : `${testResult.matches ? tt('Matches', 'Corresponde') : tt('No match', 'Sem correspondência')} — ${testResult.foregroundProcess || '?'}${testResult.foregroundTitle ? ' / ' + testResult.foregroundTitle : ''}`)
+              : tt('Check whether the current config matches the window in front (excluding TrueReplayer)', 'Verifica se a configuração atual corresponde à janela em primeiro plano (excluindo o TrueReplayer)')
           }
         >
           <div className="truncate">
@@ -542,7 +544,7 @@ export function TargetConfigDialog({
           <div
             className="flex items-center justify-between"
             data-tip={relativeToggleDisabled
-              ? 'Set a process name or window title first — relative coordinates need a target window to anchor to.'
+              ? tt('Set a process name or window title first — relative coordinates need a target window to anchor to.', 'Defina primeiro um nome de processo ou título de janela — coordenadas relativas precisam de uma janela-alvo para se ancorar.')
               : undefined}
           >
             <span className={`text-xs ${relativeToggleDisabled ? 'text-text-disabled' : 'text-text-secondary'}`}>Relative Coordinates</span>
@@ -592,15 +594,15 @@ export function TargetConfigDialog({
                   }}
                   className="px-2 py-0.5 text-[10px] font-medium text-text-primary bg-accent-solid/30 hover:bg-accent-solid/50 rounded transition-colors"
                   data-tip={convertAlsoApplies
-                    ? 'Save the target above AND migrate stored action coords in one shot'
-                    : 'Migrate stored action coords using the saved target'}
+                    ? tt('Save the target above AND migrate stored action coords in one shot', 'Salva o alvo acima E migra as coordenadas das ações de uma vez')
+                    : tt('Migrate stored action coords using the saved target', 'Migra as coordenadas das ações usando o alvo salvo')}
                 >
                   {convertAlsoApplies ? 'Apply target & convert' : 'Convert'}
                 </button>
                 <button
                   onClick={() => { setConvertHint(null); setConvertHintDismissed(true); }}
                   className="px-1.5 py-0.5 text-[10px] text-text-tertiary hover:text-text-primary transition-colors"
-                  data-tip="Skip — actions stay in their original coord space"
+                  data-tip={tt('Skip — actions stay in their original coord space', 'Pular — as ações permanecem no seu espaço de coordenadas original')}
                 >
                   Skip
                 </button>
@@ -616,11 +618,11 @@ export function TargetConfigDialog({
               them with its own target). Convert Coordinates is profile-only because it rewrites
               the actions of the active profile, not a property of the target itself. */}
           <div className="flex items-center justify-between">
-            <span className="text-xs text-text-secondary" data-tip="Restore the target window to its saved position before replay">Restore Position</span>
+            <span className="text-xs text-text-secondary" data-tip={tt('Restore the target window to its saved position before replay', 'Restaura a janela-alvo para a posição salva antes da reprodução')}>Restore Position</span>
             <Toggle isOn={restorePosition} onChange={setRestorePosition} />
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-text-secondary" data-tip="Restore the target window to its saved size before replay (un-maximizes if needed)">Restore Size</span>
+            <span className="text-xs text-text-secondary" data-tip={tt('Restore the target window to its saved size before replay (un-maximizes if needed)', 'Restaura a janela-alvo para o tamanho salvo antes da reprodução (desmaximiza se necessário)')}>Restore Size</span>
             <Toggle isOn={restoreSize} onChange={setRestoreSize} />
           </div>
           {onUpdateGeometry && (
@@ -632,7 +634,7 @@ export function TargetConfigDialog({
               })}
               disabled={submitDisabled}
               className="w-full h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              data-tip="Capture the current size and position of the target window matching the fields above"
+              data-tip={tt('Capture the current size and position of the target window matching the fields above', 'Captura o tamanho e a posição atuais da janela-alvo que corresponde aos campos acima')}
             >
               Update Window Size &amp; Position
             </button>

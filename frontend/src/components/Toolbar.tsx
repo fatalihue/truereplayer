@@ -3,6 +3,7 @@ import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repea
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
+import { useTt } from '../state/LanguageContext';
 import { SendTextDialog } from './SendTextDialog';
 import { RunProfileDialog } from './RunProfileDialog';
 import { NavigateDialog } from './NavigateDialog';
@@ -59,6 +60,7 @@ type ToolbarProps = Record<string, never>;
  * size detection accounts for it.
  */
 function ResponsiveProfileName({ name, actionCount }: { name: string; actionCount?: number }) {
+  const tt = useTt();
   const containerRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   const [size, setSize] = useState<'base' | 'sm'>('base');
@@ -87,7 +89,7 @@ function ResponsiveProfileName({ name, actionCount }: { name: string; actionCoun
     <div ref={containerRef} className="flex-1 min-w-0 relative">
       <span
         className={`block font-semibold text-text-primary truncate ${size === 'sm' ? 'text-sm' : 'text-base'}`}
-        data-tip={showCount ? `${name} · ${countLabel}` : name}
+        data-tip={showCount ? tt(`${name} · ${countLabel}`, `${name} · ${countLabel}`) : name}
       >
         {name}
         {showCount && (
@@ -111,6 +113,7 @@ function ResponsiveProfileName({ name, actionCount }: { name: string; actionCoun
 export function Toolbar(_props: ToolbarProps) {
   const { toolbar, buttonStates, actions, activeProfile } = useAppState();
   const { send } = useBridge();
+  const tt = useTt();
   /* DISABLED — Toggle Columns dropdown.
    * Re-enable by:
    *   1. Changing ToolbarProps back to { columnVisibility, onColumnVisibilityChange }
@@ -403,7 +406,7 @@ export function Toolbar(_props: ToolbarProps) {
               tabIndex={-1}
               onClick={() => send({ type: 'profile:click', payload: { name: activeProfile } })}
               disabled={buttonStates.recordingActive || buttonStates.replayActive}
-              data-tip="Deselect profile"
+              data-tip={tt('Deselect profile', 'Desmarcar perfil')}
               // -ml-[13px] pulls the icon LEFT into the toolbar's own px-4 padding so the
               // X's vertical line matches the checkbox column center in the table below
               // (measured 12.7px gap before this fix). Purely cosmetic — the hover/click
@@ -431,7 +434,7 @@ export function Toolbar(_props: ToolbarProps) {
             disabled={!buttonStates.canUndo}
             onClick={() => send({ type: 'actions:undo', payload: {} })}
             className={`p-1.5 rounded transition-colors ${buttonStates.canUndo ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled'}`}
-            data-tip="Undo (Ctrl+Z)"
+            data-tip={tt('Undo (Ctrl+Z)', 'Desfazer (Ctrl+Z)')}
           >
             <Undo2 size={14} />
           </button>
@@ -440,7 +443,7 @@ export function Toolbar(_props: ToolbarProps) {
             disabled={!buttonStates.canRedo}
             onClick={() => send({ type: 'actions:redo', payload: {} })}
             className={`p-1.5 rounded transition-colors ${buttonStates.canRedo ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled'}`}
-            data-tip="Redo (Ctrl+Y)"
+            data-tip={tt('Redo (Ctrl+Y)', 'Refazer (Ctrl+Y)')}
           >
             <Redo2 size={14} />
           </button>
@@ -517,7 +520,7 @@ export function Toolbar(_props: ToolbarProps) {
             }}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Insert Send Keystroke action"
+            data-tip={tt('Insert Send Keystroke action', 'Inserir ação Send Keystroke')}
           >
             <Keyboard size={14} />
           </button>
@@ -528,7 +531,7 @@ export function Toolbar(_props: ToolbarProps) {
             onClick={() => setShowSendTextDialog(true)}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Insert Send Text action"
+            data-tip={tt('Insert Send Text action', 'Inserir ação Send Text')}
           >
             <Type size={14} />
           </button>
@@ -545,7 +548,7 @@ export function Toolbar(_props: ToolbarProps) {
             }}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Insert Pause action"
+            data-tip={tt('Insert Pause action', 'Inserir ação Pause')}
           >
             <Hourglass size={14} />
           </button>
@@ -564,7 +567,7 @@ export function Toolbar(_props: ToolbarProps) {
               onClick={() => setShowWaitMenu(!showWaitMenu)}
               disabled={buttonStates.recordingActive || buttonStates.replayActive}
               className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-              data-tip="Insert Wait (Image / Pixel Color)"
+              data-tip={tt('Insert Wait (Image / Pixel Color)', 'Inserir Wait (Image / Pixel Color)')}
             >
               <ScanEye size={14} />
             </button>
@@ -610,7 +613,7 @@ export function Toolbar(_props: ToolbarProps) {
               onClick={() => setShowConditionalMenu(!showConditionalMenu)}
               disabled={buttonStates.recordingActive || buttonStates.replayActive}
               className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-              data-tip="Insert Conditional (If / Else / EndIf)"
+              data-tip={tt('Insert Conditional (If / Else / EndIf)', 'Inserir Condicional (If / Else / EndIf)')}
             >
               <GitBranch size={14} />
             </button>
@@ -655,7 +658,7 @@ export function Toolbar(_props: ToolbarProps) {
               onClick={() => setShowBrowserMenu(!showBrowserMenu)}
               disabled={buttonStates.recordingActive || buttonStates.replayActive}
               className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-              data-tip="Browser Actions"
+              data-tip={tt('Browser Actions', 'Ações de Navegador')}
             >
               <Globe size={14} />
             </button>
@@ -707,7 +710,7 @@ export function Toolbar(_props: ToolbarProps) {
             onClick={() => setShowRunProfileDialog(true)}
             disabled={buttonStates.recordingActive || buttonStates.replayActive}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip="Insert Run Profile action"
+            data-tip={tt('Insert Run Profile action', 'Inserir ação Run Profile')}
           >
             <Repeat2 size={14} />
           </button>
@@ -724,7 +727,7 @@ export function Toolbar(_props: ToolbarProps) {
             tabIndex={-1}
             onClick={() => send({ type: 'actions:clear', payload: {} })}
             className="p-1.5 rounded text-text-tertiary hover:bg-recording-bg hover:text-recording transition-colors"
-            data-tip="Clear all actions in this profile"
+            data-tip={tt('Clear all actions in this profile', 'Limpar todas as ações deste perfil')}
           >
             <Trash2 size={14} />
           </button>

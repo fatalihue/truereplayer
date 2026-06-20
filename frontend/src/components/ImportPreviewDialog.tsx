@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Download, AlertTriangle, FolderOpen, Keyboard, Hash, Pencil, Replace, Ban } from 'lucide-react';
 import type { ImportPreviewPayload, ImportConflictResolution } from '../bridge/messageTypes';
 import { Checkbox } from './Checkbox';
+import { useTt } from '../state/LanguageContext';
 
 interface ImportPreviewDialogProps {
   preview: ImportPreviewPayload;
@@ -333,15 +334,16 @@ interface ResolutionChipsProps {
 }
 
 function ResolutionChips({ value, onChange, size = 'sm' }: ResolutionChipsProps) {
+  const tt = useTt();
   const options: {
     key: ImportConflictResolution;
     label: string;
     tooltip: string;
     Icon: React.ComponentType<{ size?: number; className?: string }>;
   }[] = [
-    { key: 'rename', label: 'Rename', tooltip: 'Import with a new name (appends " (2)", " (3)"…)', Icon: Pencil },
-    { key: 'overwrite', label: 'Overwrite', tooltip: 'Replace the existing local profile', Icon: Replace },
-    { key: 'skip', label: 'Skip', tooltip: 'Leave the existing profile alone — don\'t import this one', Icon: Ban },
+    { key: 'rename', label: 'Rename', tooltip: tt('Import with a new name (appends " (2)", " (3)"…)', 'Importa com um novo nome (anexa " (2)", " (3)"…)'), Icon: Pencil },
+    { key: 'overwrite', label: 'Overwrite', tooltip: tt('Replace the existing local profile', 'Substitui o perfil local existente'), Icon: Replace },
+    { key: 'skip', label: 'Skip', tooltip: tt('Leave the existing profile alone — don\'t import this one', 'Mantém o perfil existente — não importa este'), Icon: Ban },
   ];
 
   // Size variants. lg pumps padding + adds an icon; sm stays as the tight overlay

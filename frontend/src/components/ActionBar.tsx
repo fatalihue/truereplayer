@@ -2,6 +2,7 @@ import { Circle, Play, Square, Save, FolderOpen, MousePointerClick, ListOrdered 
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
+import { useTt } from '../state/LanguageContext';
 
 // Shared min-width for the primary action buttons so the layout doesn't shift when
 // labels swap (Recording↔Pause, Replay↔Stop, Click↔Stop). Comfortably fits the longest
@@ -12,6 +13,7 @@ export function ActionBar() {
   const { buttonStates, settings, actions } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
+  const tt = useTt();
   const isClicker = settings.useCursorClick;
   const isReplaying = buttonStates.replayActive;
   const isRecording = buttonStates.recordingActive;
@@ -70,7 +72,7 @@ export function ActionBar() {
                 ? 'bg-replay/15 text-replay shadow-[inset_0_0_0_1px_rgba(107,203,119,0.35)]'
                 : 'text-text-tertiary hover:text-text-secondary'
             }`}
-            data-tip="Run the recorded actions in order"
+            data-tip={tt('Run the recorded actions in order', 'Executa as ações gravadas em ordem')}
           >
             {/* ListOrdered (not Play) so the mode pill doesn't visually duplicate the Replay
                 action button. Both pills now use a "type" icon (Macro = ordered list, Clicker
@@ -87,7 +89,7 @@ export function ActionBar() {
                 ? 'bg-[var(--color-clicker-bg)] text-[var(--color-clicker)] shadow-[inset_0_0_0_1px_var(--color-clicker-border)]'
                 : 'text-text-tertiary hover:text-text-secondary'
             }`}
-            data-tip="Click repeatedly at cursor position. Ignores recorded actions and profile hotkeys."
+            data-tip={tt('Click repeatedly at cursor position. Ignores recorded actions and profile hotkeys.', 'Clica repetidamente na posição do cursor. Ignora ações gravadas e hotkeys de perfil.')}
           >
             <MousePointerClick size={11} />
             Clicker
@@ -145,7 +147,7 @@ export function ActionBar() {
         <button
           onClick={() => send({ type: 'profile:save', payload: {} })}
           disabled={isClicker}
-          data-tip={isClicker ? 'Profiles are unavailable in Clicker mode' : undefined}
+          data-tip={isClicker ? tt('Profiles are unavailable in Clicker mode', 'Perfis não estão disponíveis no modo Clicker') : undefined}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[13px] bg-bg-elevated/40 border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-bg-elevated/40 disabled:hover:text-text-secondary"
         >
           <Save size={14} />
@@ -154,7 +156,7 @@ export function ActionBar() {
         <button
           onClick={() => send({ type: 'profile:load', payload: {} })}
           disabled={isClicker}
-          data-tip={isClicker ? 'Profiles are unavailable in Clicker mode' : undefined}
+          data-tip={isClicker ? tt('Profiles are unavailable in Clicker mode', 'Perfis não estão disponíveis no modo Clicker') : undefined}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[13px] bg-bg-elevated/40 border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-bg-elevated/40 disabled:hover:text-text-secondary"
         >
           <FolderOpen size={14} />

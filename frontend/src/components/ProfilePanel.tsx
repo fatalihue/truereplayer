@@ -11,6 +11,7 @@ import { SecurityWarningModal } from './SecurityWarningModal';
 import { ImportPreviewDialog } from './ImportPreviewDialog';
 import { ProfileInfoDialog } from './ProfileInfoDialog';
 import { useToast } from '../state/ToastContext';
+import { useTt } from '../state/LanguageContext';
 import { useFlyoutFlip } from '../hooks/useFlyoutFlip';
 
 interface ContextMenuState {
@@ -46,6 +47,7 @@ const CONVERTIBLE_CLICK_TYPES = new Set([
 ]);
 
 export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePanelProps) {
+  const tt = useTt();
   const { profiles, profileOrder, actions } = useAppState();
 
   // Pre-compute the count of actions whose stored coordinates would benefit from a
@@ -930,7 +932,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const targetLabel = (procName?: string | null, windowTitle?: string | null): string => {
     if (procName) return /\.exe$/i.test(procName) ? procName : `${procName}.exe`;
     if (windowTitle) return windowTitle;
-    return 'Window target';
+    return tt('Window target', 'Janela-alvo');
   };
 
   // Folder colour for the collapsed rail's avatar dot — tells which folder a
@@ -1374,7 +1376,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         {p.appIconBase64 && p.hasWindowTarget && (
           <RemovableChip
             variant="circle"
-            removeTitle={`Remove window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`}
+            removeTitle={tt(`Remove window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`, `Remover janela-alvo (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`)}
             tip={targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)}
             onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'profileTarget', name: p.name, label: `window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})` }); }}
             className="w-3.5 h-3.5"
@@ -1419,7 +1421,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           // Crosshair stays as a "this row IS gated" cue. Removal via hover ✕ overlay.
           <RemovableChip
             variant="circle"
-            removeTitle={`Remove window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`}
+            removeTitle={tt(`Remove window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`, `Remover janela-alvo (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`)}
             tip={targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)}
             onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'profileTarget', name: p.name, label: `window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})` }); }}
           >
@@ -1441,24 +1443,24 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             Tooltip shows only the mode name; the full description lives in the
             hotkey configuration dialog. */}
         {p.hotkey && p.triggerMode === 'onRelease' && (
-          <span data-tip="On Release" data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
+          <span data-tip={tt('On Release', 'Ao soltar')} data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
             <ArrowUpFromDot size={10} />
           </span>
         )}
         {p.hotkey && p.triggerMode === 'whilePressed' && (
-          <span data-tip="While Pressed" data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
+          <span data-tip={tt('While Pressed', 'Enquanto pressionado')} data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
             <Zap size={10} />
           </span>
         )}
         {p.hotkey && p.triggerMode === 'toggle' && (
-          <span data-tip="Toggle" data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
+          <span data-tip={tt('Toggle', 'Alternar')} data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
             <Repeat size={10} />
           </span>
         )}
 
         {p.hotkey && (
           <RemovableChip
-            removeTitle={`Remove hotkey ${p.hotkey}`}
+            removeTitle={tt(`Remove hotkey ${p.hotkey}`, `Remover hotkey ${p.hotkey}`)}
             onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'hotkey', name: p.name, label: `hotkey ${p.hotkey}` }); }}
           >
             <KbdTag combo={p.hotkey} />
@@ -1471,7 +1473,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           // siblings \u2014 the old accent-hover text made hotstrings look like a
           // different kind of thing.
           <RemovableChip
-            removeTitle={`Remove hotstring "${p.hotstring}"`}
+            removeTitle={tt(`Remove hotstring "${p.hotstring}"`, `Remover hotstring "${p.hotstring}"`)}
             onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'hotstring', name: p.name, label: `hotstring "${p.hotstring}"` }); }}
             className="px-1.5 py-0.5 rounded text-[11px] font-mono bg-bg-elevated border border-border-default text-text-secondary"
           ><span>
@@ -1507,21 +1509,21 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               <button
                 onClick={onToggleCollapse}
                 className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-                data-tip="Expand" data-tip-pos="right"
+                data-tip={tt('Expand', 'Expandir')} data-tip-pos="right"
               >
                 <ChevronsRight size={14} />
               </button>
               <button
                 onClick={handleCreate}
                 className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-                data-tip="New profile" data-tip-pos="right"
+                data-tip={tt('New profile', 'Novo perfil')} data-tip-pos="right"
               >
                 <FilePlus size={14} />
               </button>
               <button
                 onClick={() => { pendingFocusSearch.current = true; onToggleCollapse?.(); }}
                 className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-                data-tip="Search profiles" data-tip-pos="right"
+                data-tip={tt('Search profiles', 'Buscar perfis')} data-tip-pos="right"
               >
                 <Search size={14} />
               </button>
@@ -1566,7 +1568,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       <button
                         onClick={onToggleCollapse}
                         className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-semibold bg-bg-elevated text-text-tertiary hover:bg-bg-card hover:text-text-primary transition-colors shrink-0"
-                        data-tip={`${overflow} more — expand`} data-tip-pos="right"
+                        data-tip={tt(`${overflow} more — expand`, `${overflow} mais — expandir`)} data-tip-pos="right"
                       >
                         +{overflow}
                       </button>
@@ -1589,35 +1591,35 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             <button
               onClick={onToggleCollapse}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              data-tip="Collapse profiles panel"
+              data-tip={tt('Collapse profiles panel', 'Recolher painel de perfis')}
             >
               <ChevronsLeft size={14} />
             </button>
             <button
               onClick={handleOpenProfilesFolder}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              data-tip="Open profiles folder"
+              data-tip={tt('Open profiles folder', 'Abrir pasta de perfis')}
             >
               <ExternalLink size={14} />
             </button>
             <button
               onClick={handleExportClick}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              data-tip="Import or export profiles"
+              data-tip={tt('Import or export profiles', 'Importar ou exportar perfis')}
             >
               <ArrowLeftRight size={14} />
             </button>
             <button
               onClick={handleCreateFolder}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              data-tip="New folder"
+              data-tip={tt('New folder', 'Nova pasta')}
             >
               <FolderPlus size={14} />
             </button>
             <button
               onClick={handleCreate}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              data-tip="New profile" data-tip-pos="end"
+              data-tip={tt('New profile', 'Novo perfil')} data-tip-pos="end"
             >
               <FilePlus size={14} />
             </button>
@@ -1761,7 +1763,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         {folder.appIconBase64 && (
                           <RemovableChip
                             variant="circle"
-                            removeTitle={`Remove folder target (${targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)})`}
+                            removeTitle={tt(`Remove folder target (${targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)})`, `Remover alvo da pasta (${targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)})`)}
                             tip={targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)}
                             onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'folderTarget', name: folder.name, label: `folder target (${targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)})` }); }}
                             className={`w-3.5 h-3.5 ${folderAllDisabled ? 'opacity-40' : ''}`}
@@ -1779,7 +1781,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         {folder.hasWindowTarget && !folder.appIconBase64 && (
                           <RemovableChip
                             variant="circle"
-                            removeTitle={`Remove folder target (${targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)})`}
+                            removeTitle={tt(`Remove folder target (${targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)})`, `Remover alvo da pasta (${targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)})`)}
                             tip={targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)}
                             onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'folderTarget', name: folder.name, label: `folder target (${targetLabel(folder.windowTargetProcessName, folder.windowTargetWindowTitle)})` }); }}
                           >
@@ -2027,7 +2029,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       setContextMenu(null);
                     }}
                     className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                    data-tip={profile?.isActive ? "Rewrite this profile's action X/Y to be relative to its target window" : 'Open this profile first — convert applies to the loaded profile'}
+                    data-tip={profile?.isActive ? tt("Rewrite this profile's action X/Y to be relative to its target window", 'Reescreve o X/Y das ações deste perfil para ser relativo à janela-alvo') : tt('Open this profile first — convert applies to the loaded profile', 'Abra este perfil primeiro — a conversão se aplica ao perfil carregado')}
                   >
                     <ArrowLeftRight size={13} className="text-text-tertiary" />
                     Convert coords → Relative
@@ -2039,7 +2041,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       setContextMenu(null);
                     }}
                     className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                    data-tip={profile?.isActive ? "Rewrite this profile's action X/Y to absolute screen coordinates" : 'Open this profile first — convert applies to the loaded profile'}
+                    data-tip={profile?.isActive ? tt("Rewrite this profile's action X/Y to absolute screen coordinates", 'Reescreve o X/Y das ações deste perfil para coordenadas absolutas de tela') : tt('Open this profile first — convert applies to the loaded profile', 'Abra este perfil primeiro — a conversão se aplica ao perfil carregado')}
                   >
                     <ArrowLeftRight size={13} className="text-text-tertiary" />
                     Convert coords → Absolute
@@ -2359,10 +2361,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               <div className="text-[10px] font-semibold uppercase tracking-wider text-text-disabled mb-1.5">Trigger Mode</div>
               <div className="grid grid-cols-2 gap-1.5">
                 {([
-                  { id: 'onPress', label: 'On Press', help: 'Fires once when the key is pressed down.' },
-                  { id: 'onRelease', label: 'On Release', help: 'Fires once when the key is released.' },
-                  { id: 'whilePressed', label: 'While Pressed', help: 'Runs in infinite loop while held. Stops on release.' },
-                  { id: 'toggle', label: 'Toggle', help: 'Press to start an infinite loop, press again to stop.' },
+                  { id: 'onPress', label: 'On Press', help: tt('Fires once when the key is pressed down.', 'Dispara uma vez quando a tecla é pressionada.') },
+                  { id: 'onRelease', label: 'On Release', help: tt('Fires once when the key is released.', 'Dispara uma vez quando a tecla é solta.') },
+                  { id: 'whilePressed', label: 'While Pressed', help: tt('Runs in infinite loop while held. Stops on release.', 'Executa em loop infinito enquanto pressionada. Para ao soltar.') },
+                  { id: 'toggle', label: 'Toggle', help: tt('Press to start an infinite loop, press again to stop.', 'Pressione para iniciar um loop infinito, pressione de novo para parar.') },
                 ] as const).map((opt) => (
                   <button
                     key={opt.id}

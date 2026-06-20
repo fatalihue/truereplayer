@@ -10,6 +10,7 @@ import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
+import { useTt } from '../state/LanguageContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { useToast } from '../state/ToastContext';
 import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors } from '../utils/displayUtils';
@@ -144,6 +145,7 @@ function isProbeAction(action: ActionItem): boolean {
 // modifier and the image confidence % live elsewhere — the Action pill and the
 // Sheet panel respectively — to keep this cell to just "what is matched".)
 function ProbeDetails({ action }: { action: ActionItem }) {
+  const tt = useTt();
   const isIf = action.actionType === 'If';
   const isImage = action.actionType === 'WaitImage'
     || (isIf && action.conditionType === 'ImageFound');
@@ -177,7 +179,7 @@ function ProbeDetails({ action }: { action: ActionItem }) {
             <span
               className="inline-block w-2.5 h-2.5 rounded-sm border border-white/20 shrink-0"
               style={{ background: action.pixelColor }}
-              data-tip={`Target colour: ${action.pixelColor}`}
+              data-tip={tt(`Target colour: ${action.pixelColor}`, `Cor-alvo: ${action.pixelColor}`)}
             />
           )}
           <span className="font-mono text-text-secondary truncate">
@@ -202,6 +204,7 @@ interface ActionTableProps {
 export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps) {
   const { actions, highlightedActionIndex, buttonStates, activeProfile, pauseState } = useAppState();
   const { send } = useBridge();
+  const tt = useTt();
   const selectionRef = useSelectionRef();
   const scrollRef = useRef<HTMLDivElement>(null);
   const highlightedRowRef = useRef<HTMLTableRowElement>(null);
@@ -816,7 +819,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     // index below the gap by one and make the target oscillate as the gap moves).
     const rows = Array.from(tbodyRef.current.querySelectorAll('tr')).filter(
       tr => !tr.hasAttribute('data-drop-gap')
-        && !tr.querySelector('button[data-tip="Insert an Else branch in this conditional block"]')
+        && !tr.querySelector('button[data-add-else]')
     );
     let target: number | null = null;
     for (let i = 0; i < rows.length; i++) {
@@ -1187,7 +1190,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               }
             }}
             className="flex items-center justify-center cursor-pointer"
-            data-tip={allSelected ? 'Deselect all' : 'Select all'}
+            data-tip={allSelected ? tt('Deselect all', 'Desmarcar todas') : tt('Select all', 'Selecionar todas')}
           >
             <CheckboxBox
               checked={allSelected}
@@ -1397,7 +1400,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         }}
                         onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-action-if-bg)'; }}
                         onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                        data-tip="Insert an Else branch in this conditional block"
+                        data-add-else
+                        data-tip={tt('Insert an Else branch in this conditional block', 'Insere uma ramificação Else neste bloco condicional')}
                       >
                         <Plus size={11} />
                         Add Else branch
@@ -1553,7 +1557,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         <span
                           className="ml-0.5 px-1 rounded text-[9px] font-bold tracking-wider"
                           style={{ background: 'var(--color-action-if-fg)', color: 'var(--color-bg-surface)' }}
-                          data-tip="Negated condition — the TRUE branch fires when the probe FAILS (IFNOT)"
+                          data-tip={tt('Negated condition — the TRUE branch fires when the probe FAILS (IFNOT)', 'Condição negada — a ramificação TRUE dispara quando a verificação FALHA (IFNOT)')}
                         >
                           NOT
                         </span>
@@ -1702,7 +1706,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         }`}
                         data-tip={
                           action.actionType === 'SendText' ? action.key
-                          : action.actionType === 'RunProfile' ? `Run profile "${action.key}"`
+                          : action.actionType === 'RunProfile' ? tt(`Run profile "${action.key}"`, `Executar perfil "${action.key}"`)
                           // Browser actions can have long CSS selectors / URLs that
                           // get truncated at 92 px. Exposing the full string on hover
                           // saves the user from opening the editor just to read it.
@@ -1745,7 +1749,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           return (
                             <span
                               className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold tabular-nums bg-[color-mix(in_srgb,var(--color-accent)_18%,transparent)] text-accent-light hover:bg-[color-mix(in_srgb,var(--color-accent)_28%,transparent)] cursor-pointer transition-colors"
-                              data-tip={`Hold duration: ${ms} ms`}
+                              data-tip={tt(`Hold duration: ${ms} ms`, `Duração da retenção: ${ms} ms`)}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setKeystrokeEdit({ index: idx });

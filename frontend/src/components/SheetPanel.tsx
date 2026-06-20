@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { ArrowLeft, RefreshCw, Crosshair, Copy, ClipboardPaste, ShieldCheck, ShieldAlert, ShieldQuestion, PlayCircle, Pipette, Check, X } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
+import { useTt } from '../state/LanguageContext';
 import type { SelectorAlternative, BrowserTestResult } from '../bridge/messageTypes';
 import { Checkbox } from './Checkbox';
 import { NumberInput } from './common/NumberInput';
@@ -98,6 +99,7 @@ const TIER_META: Record<'S' | 'A' | 'B' | 'C', { color: string; label: string; I
 export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const { actions } = useAppState();
   const { send, subscribe } = useBridge();
+  const tt = useTt();
 
   const action = actionIndex != null ? actions[actionIndex] : null;
 
@@ -1099,7 +1101,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       >
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-4 border-b border-border-subtle shrink-0">
-          <button onClick={onClose} className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip="Close panel">
+          <button onClick={onClose} className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('Close panel', 'Fechar painel')}>
             <ArrowLeft size={16} />
           </button>
           <div>
@@ -1127,7 +1129,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               {clickHalfSuffix && (
                 <span
                   className="px-1.5 py-[1px] rounded text-[10px] font-medium border bg-bg-card text-text-secondary border-border-default"
-                  data-tip={clickHalfSuffix === 'Down' ? 'Button pressed down' : 'Button released'}
+                  data-tip={clickHalfSuffix === 'Down' ? tt('Button pressed down', 'Botão pressionado') : tt('Button released', 'Botão solto')}
                 >
                   {clickHalfSuffix === 'Down' ? '↓ press' : '↑ release'}
                 </span>
@@ -1202,7 +1204,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                       ? 'bg-bg-elevated text-text-primary'
                       : 'text-text-tertiary hover:text-text-secondary'
                   }`}
-                  data-tip="TRUE branch fires when the probe succeeds (image / pixel found)"
+                  data-tip={tt('TRUE branch fires when the probe succeeds (image / pixel found)', 'Ramo TRUE dispara quando o teste tem sucesso (image / pixel encontrado)')}
                 >
                   Found
                 </button>
@@ -1214,7 +1216,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                       ? 'bg-bg-elevated text-text-primary'
                       : 'text-text-tertiary hover:text-text-secondary'
                   }`}
-                  data-tip="TRUE branch fires when the probe FAILS (image / pixel NOT found) — IFNOT"
+                  data-tip={tt('TRUE branch fires when the probe FAILS (image / pixel NOT found) — IFNOT', 'Ramo TRUE dispara quando o teste FALHA (image / pixel NÃO encontrado) — IFNOT')}
                 >
                   NOT Found
                 </button>
@@ -1251,7 +1253,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 type="button"
                 onClick={() => action?.imageBase64 && setCropperOpen(true)}
                 disabled={!action?.imageBase64}
-                data-tip={action?.imageBase64 ? 'Click to crop the reference image' : ''}
+                data-tip={action?.imageBase64 ? tt('Click to crop the reference image', 'Clique para recortar a imagem de referência') : ''}
                 className="w-full rounded border border-border-default bg-bg-elevated overflow-hidden block hover:border-accent-solid/60 transition-colors disabled:cursor-default disabled:hover:border-border-default"
               >
                 {action?.imageBase64 ? (
@@ -1282,7 +1284,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     send({ type: 'waitimage:recapture', payload: { index: actionIndex } });
                   }}
                   className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
-                  data-tip="Recapture reference image"
+                  data-tip={tt('Recapture reference image', 'Recapturar imagem de referência')}
                 >
                   <RefreshCw size={12} />
                   Recapture
@@ -1291,7 +1293,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   onClick={handleTestMatch}
                   disabled={!action?.imagePath || testMatchRequestId != null}
                   className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  data-tip="Capture the screen now and report the match score"
+                  data-tip={tt('Capture the screen now and report the match score', 'Captura a tela agora e informa a pontuação de correspondência')}
                 >
                   <PlayCircle size={12} />
                   {testMatchRequestId != null ? 'Testing…' : 'Test match'}
@@ -1345,7 +1347,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 <button
                   onClick={handleConfigureSearchRegion}
                   className="px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
-                  data-tip="Draw a sub-rectangle of the screen to limit where the match runs. Reduces CPU and false positives."
+                  data-tip={tt('Draw a sub-rectangle of the screen to limit where the match runs. Reduces CPU and false positives.', 'Desenhe um sub-retângulo da tela para limitar onde a correspondência roda. Reduz CPU e falsos positivos.')}
                 >
                   Configure…
                 </button>
@@ -1353,7 +1355,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   <button
                     onClick={() => setWaitImageSearchRegion(null)}
                     className="px-2 py-1.5 rounded text-xs text-text-tertiary hover:text-[#C42B1C] hover:bg-bg-card transition-colors"
-                    data-tip="Clear search region (revert to full screen)"
+                    data-tip={tt('Clear search region (revert to full screen)', 'Limpar região de busca (voltar para tela cheia)')}
                   >
                     <X size={12} />
                   </button>
@@ -1437,7 +1439,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   checked={waitImageClickOnMatch}
                   onChange={setWaitImageClickOnMatch}
                   label="Click on found location"
-                  title="Left-clicks the centre of the matched region as soon as it's found."
+                  title={tt("Left-clicks the centre of the matched region as soon as it's found.", 'Dá um clique esquerdo no centro da região correspondente assim que for encontrada.')}
                 />
               </Field>
             )}
@@ -1478,7 +1480,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   type="button"
                   onClick={handlePickPixelColor}
                   className="flex items-center gap-1.5 h-7 px-2.5 text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default rounded hover:bg-bg-card hover:text-text-primary transition-colors"
-                  data-tip="Click anywhere on screen — captures X, Y, and the pixel colour in one shot"
+                  data-tip={tt('Click anywhere on screen — captures X, Y, and the pixel colour in one shot', 'Clique em qualquer lugar da tela — captura X, Y e a cor do pixel de uma vez')}
                 >
                   <Pipette size={12} />
                   Pick from screen
@@ -1490,7 +1492,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   type="button"
                   onClick={handleTestPixelMatch}
                   className="flex items-center gap-1.5 h-7 px-2.5 text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default rounded hover:bg-bg-card hover:text-text-primary transition-colors"
-                  data-tip="Read the live pixel and compare against the target colour"
+                  data-tip={tt('Read the live pixel and compare against the target colour', 'Lê o pixel ao vivo e compara com a cor-alvo')}
                 >
                   <PlayCircle size={12} />
                   Test match
@@ -1526,7 +1528,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 <span
                   className="w-7 h-7 rounded border border-border-default shrink-0"
                   style={{ background: /^#?(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(pixelColor.trim()) ? (pixelColor.trim().startsWith('#') ? pixelColor.trim() : '#' + pixelColor.trim()) : 'transparent' }}
-                  data-tip={pixelColor || 'No colour set'}
+                  data-tip={pixelColor || tt('No colour set', 'Nenhuma cor definida')}
                 />
                 <input
                   type="text"
@@ -1611,7 +1613,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   checked={pixelClickOnMatch}
                   onChange={setPixelClickOnMatch}
                   label="Click on found location"
-                  title="Left-clicks the watched pixel (X, Y) as soon as it matches the target colour."
+                  title={tt('Left-clicks the watched pixel (X, Y) as soon as it matches the target colour.', 'Dá um clique esquerdo no pixel monitorado (X, Y) assim que ele corresponder à cor-alvo.')}
                 />
               </Field>
             )}
@@ -1688,7 +1690,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                           ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
                           : 'text-text-tertiary border-border-default bg-bg-elevated hover:text-text-secondary hover:bg-bg-card'
                       }`}
-                      data-tip={p.ms === 0 ? 'Wait forever (resume hotkey only)' : `Wait ${p.label}`}
+                      data-tip={p.ms === 0 ? tt('Wait forever (resume hotkey only)', 'Esperar para sempre (apenas tecla de retomada)') : tt(`Wait ${p.label}`, `Esperar ${p.label}`)}
                     >
                       {p.label}
                     </button>
@@ -1734,7 +1736,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 {isBrowserNavigate ? 'URL' : 'CSS Selector'}
                 {/* #2 — Tier shield indicator (only for non-Navigate selectors) */}
                 {!isBrowserNavigate && selectorForTier && (
-                  <span data-tip={`${tierMeta.label} selector`} style={{ color: tierMeta.color, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                  <span data-tip={tt(`${tierMeta.label} selector`, `Seletor ${tierMeta.label}`)} style={{ color: tierMeta.color, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                     <tierMeta.Icon size={12} />
                     <span style={{ fontSize: 9, fontWeight: 600 }}>{tier}</span>
                   </span>
@@ -1763,7 +1765,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                         ? 'bg-accent-solid/20 border-accent-solid text-accent-light'
                         : 'bg-bg-input border-border-default text-text-tertiary hover:text-text-primary hover:border-text-tertiary'
                     }`}
-                    data-tip="Pick element from page"
+                    data-tip={tt('Pick element from page', 'Selecionar elemento da página')}
                   >
                     <Crosshair size={14} />
                   </button>
@@ -1778,7 +1780,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     <button
                       onClick={() => setShowAlternatives(false)}
                       className="text-[10px] text-text-tertiary hover:text-text-primary"
-                      data-tip="Dismiss alternatives"
+                      data-tip={tt('Dismiss alternatives', 'Dispensar alternativas')}
                     >
                       ×
                     </button>
@@ -1811,7 +1813,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             <div>
               <label
                 className="block text-[11px] font-semibold text-text-tertiary uppercase tracking-wide mb-1.5"
-                data-tip="Takes priority over CSS selector when filled"
+                data-tip={tt('Takes priority over CSS selector when filled', 'Tem prioridade sobre o seletor CSS quando preenchido')}
               >
                 TEXT MATCH
               </label>
@@ -1820,7 +1822,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   value={textMode}
                   onChange={(e) => setTextMode(e.target.value as TextMode)}
                   className="h-8 px-1.5 text-[11px] bg-bg-input border border-border-default rounded text-text-secondary outline-none focus:border-accent-solid"
-                  data-tip="Match mode"
+                  data-tip={tt('Match mode', 'Modo de correspondência')}
                 >
                   {TEXT_MODES.map(m => (
                     <option key={m.value} value={m.value}>{m.label}</option>
@@ -1855,7 +1857,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               <div>
                 <label
                   className="block text-[11px] font-semibold text-text-tertiary uppercase tracking-wide mb-1.5"
-                  data-tip="Optional. Wait until URL matches glob (*) or /regex/. Useful for redirects."
+                  data-tip={tt('Optional. Wait until URL matches glob (*) or /regex/. Useful for redirects.', 'Opcional. Espera até a URL corresponder a glob (*) ou /regex/. Útil para redirecionamentos.')}
                 >
                   URL PATTERN
                 </label>
@@ -1870,7 +1872,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               <div>
                 <label
                   className="block text-[11px] font-semibold text-text-tertiary uppercase tracking-wide mb-1.5"
-                  data-tip="Optional. Wait for element to appear after page load."
+                  data-tip={tt('Optional. Wait for element to appear after page load.', 'Opcional. Espera o elemento aparecer após o carregamento da página.')}
                 >
                   WAIT ELEMENT
                 </label>
@@ -1912,9 +1914,9 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   cohesive control. */}
               <div className="flex flex-wrap gap-1 mt-2">
                 {[
-                  { var: '{Clipboard}', label: 'Clipboard', title: 'Inserts the clipboard value at this position' },
-                  { var: '{Enter}', label: 'Enter', title: 'Press Enter key at this position' },
-                  { var: '{Tab}', label: 'Tab', title: 'Press Tab key at this position' },
+                  { var: '{Clipboard}', label: 'Clipboard', title: tt('Inserts the clipboard value at this position', 'Insere o valor da área de transferência nesta posição') },
+                  { var: '{Enter}', label: 'Enter', title: tt('Press Enter key at this position', 'Pressiona a tecla Enter nesta posição') },
+                  { var: '{Tab}', label: 'Tab', title: tt('Press Tab key at this position', 'Pressiona a tecla Tab nesta posição') },
                 ].map(item => (
                   <button
                     key={item.var}
@@ -1938,7 +1940,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     type="button"
                     onClick={() => browserTextEditorRef.current?.insertText(item.var)}
                     className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
-                    data-tip={`Inserts the ${item.label.toLowerCase()} value at this position`}
+                    data-tip={tt(`Inserts the ${item.label.toLowerCase()} value at this position`, `Insere o valor de ${item.label.toLowerCase()} nesta posição`)}
                   >
                     {item.label}
                   </button>
@@ -1953,7 +1955,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                       ? 'text-accent-light bg-accent-solid/15 border-accent-solid/50'
                       : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40'
                   }`}
-                  data-tip={showMoreTypeChips ? 'Hide extra keys' : 'More keys (Escape, Backspace, Delete, arrows)'}
+                  data-tip={showMoreTypeChips ? tt('Hide extra keys', 'Ocultar teclas extras') : tt('More keys (Escape, Backspace, Delete, arrows)', 'Mais teclas (Escape, Backspace, Delete, setas)')}
                 >
                   ⋯
                 </button>
@@ -1976,7 +1978,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                       type="button"
                       onClick={() => browserTextEditorRef.current?.insertText(item.var)}
                       className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
-                      data-tip={`Press ${item.label} key at this position`}
+                      data-tip={tt(`Press ${item.label} key at this position`, `Pressiona a tecla ${item.label} nesta posição`)}
                     >
                       {item.label}
                     </button>
@@ -1993,16 +1995,16 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 checked={typeAppend}
                 onChange={setTypeAppend}
                 label="Keep existing text"
-                title="Add the new text to the end of whatever is already in the field. When unchecked (default), the field is cleared before typing."
+                title={tt('Add the new text to the end of whatever is already in the field. When unchecked (default), the field is cleared before typing.', 'Adiciona o novo texto ao final do que já estiver no campo. Quando desmarcado (padrão), o campo é limpo antes de digitar.')}
               />
               <Checkbox
                 checked={typePaste}
                 onChange={setTypePaste}
                 label="Paste"
-                title="Use clipboard paste (instant) instead of typing char-by-char"
+                title={tt('Use clipboard paste (instant) instead of typing char-by-char', 'Usa colagem da área de transferência (instantâneo) em vez de digitar caractere por caractere')}
               />
               <div className="flex items-center gap-2">
-                <label className="text-[11px] text-text-tertiary" data-tip="Delay between characters in ms (typing only). 0 = instant, blank = auto.">Char delay (ms)</label>
+                <label className="text-[11px] text-text-tertiary" data-tip={tt('Delay between characters in ms (typing only). 0 = instant, blank = auto.', 'Atraso entre caracteres em ms (apenas digitação). 0 = instantâneo, vazio = automático.')}>Char delay (ms)</label>
                 <NumberInput
                   // typeDelay '' = "auto" (engine picks a default per text length). Pass
                   // null so the placeholder shows; user clearing the field via onClear
@@ -2111,7 +2113,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 onClick={handleTestAction}
                 disabled={testRequestId !== null}
                 className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-accent-solid/40 bg-accent-solid/10 hover:bg-accent-solid/20 text-accent-light transition-colors disabled:opacity-60"
-                data-tip="Run this action live to verify the selector / settings"
+                data-tip={tt('Run this action live to verify the selector / settings', 'Executa esta ação ao vivo para verificar o seletor / configurações')}
               >
                 <PlayCircle size={13} />
                 {testRequestId ? 'Running…' : 'Test action'}
@@ -2224,7 +2226,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     onClick={handlePickPosition}
                     disabled={pickPositionRequestId != null}
                     className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    data-tip="Click anywhere on screen to set X/Y"
+                    data-tip={tt('Click anywhere on screen to set X/Y', 'Clique em qualquer lugar da tela para definir X/Y')}
                   >
                     <Crosshair size={13} />
                     {pickPositionRequestId != null ? 'Picking…' : 'Pick from screen'}
@@ -2238,7 +2240,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                         ? ''
                         : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
                     }`}
-                    data-tip={coordCopyFlash ? 'Copied!' : 'Copy X,Y to clipboard'}
+                    data-tip={coordCopyFlash ? tt('Copied!', 'Copiado!') : tt('Copy X,Y to clipboard', 'Copiar X,Y para a área de transferência')}
                   >
                     {coordCopyFlash ? <Check size={12} /> : <Copy size={12} />}
                   </button>
@@ -2251,7 +2253,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                         ? ''
                         : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
                     }`}
-                    data-tip={coordPasteError ? 'Clipboard does not contain valid coords' : 'Paste X,Y from clipboard'}
+                    data-tip={coordPasteError ? tt('Clipboard does not contain valid coords', 'A área de transferência não contém coordenadas válidas') : tt('Paste X,Y from clipboard', 'Colar X,Y da área de transferência')}
                   >
                     {coordPasteError ? <X size={12} /> : <ClipboardPaste size={12} />}
                   </button>

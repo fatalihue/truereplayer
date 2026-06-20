@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTt } from '../state/LanguageContext';
 
 interface CropRect {
   x: number;
@@ -33,6 +34,7 @@ const HANDLE_BORDER_RGBA = 'rgba(255, 255, 255, 0.7)';
 // coordinates (the parent persists those via the bridge); display scaling is calculated
 // on the fly so the UI works for any reference size from a tiny 30px icon up to a 600px panel.
 export function ImageCropper({ imageBase64, onSave, onCancel }: ImageCropperProps) {
+  const tt = useTt();
   const imgRef = useRef<HTMLImageElement>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [crop, setCrop] = useState<CropRect>({ x: 0, y: 0, w: 0, h: 0 });
@@ -286,7 +288,7 @@ export function ImageCropper({ imageBase64, onSave, onCancel }: ImageCropperProp
               onClick={() => onSave(crop)}
               disabled={!canSave}
               className="px-3 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              data-tip={canSave ? 'Apply crop' : 'Pick a smaller region first'}
+              data-tip={canSave ? tt('Apply crop', 'Aplicar recorte') : tt('Pick a smaller region first', 'Selecione uma região menor primeiro')}
             >
               Save crop
             </button>

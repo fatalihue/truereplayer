@@ -4,6 +4,7 @@ import { AppStateProvider, useAppState } from './state/AppStateContext';
 import { SelectionProvider } from './state/SelectionContext';
 import { ThemeProvider } from './state/ThemeContext';
 import { ToastProvider } from './state/ToastContext';
+import { LanguageProvider } from './state/LanguageContext';
 import { TitleBar } from './components/TitleBar';
 import { ProfilePanel } from './components/ProfilePanel';
 import { Toolbar, defaultColumnVisibility } from './components/Toolbar';
@@ -214,7 +215,9 @@ export default function App() {
         <AppStateProvider>
           <SelectionProvider>
             <ToastProvider>
-              <AppShell />
+              <LanguageProvider>
+                <AppShell />
+              </LanguageProvider>
             </ToastProvider>
           </SelectionProvider>
         </AppStateProvider>

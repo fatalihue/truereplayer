@@ -15,6 +15,7 @@ import {
 } from '../themes';
 import type { ThemeColors, ExportedTheme, ThemeTag, CustomThemePreset } from '../themes';
 import { useTheme } from '../state/ThemeContext';
+import { useTt } from '../state/LanguageContext';
 
 interface ThemeEditorProps {
   onClose: () => void;
@@ -95,6 +96,7 @@ function ColorRow({ label, colorKey, value, baseValue, mode, contrastBg, onChang
   onChange: (key: keyof ThemeColors, value: string) => void;
   onReset: (key: keyof ThemeColors) => void;
 }) {
+  const tt = useTt();
   const isOverridden = value !== baseValue;
   const hexValue = toHex(value);
   const hasEyedropper = typeof (window as unknown as { EyeDropper?: unknown }).EyeDropper !== 'undefined';
@@ -143,7 +145,7 @@ function ColorRow({ label, colorKey, value, baseValue, mode, contrastBg, onChang
               if (picked) onChange(colorKey, withOriginalAlpha(picked, value));
             }}
             className="p-0.5 rounded text-text-disabled hover:text-accent hover:bg-bg-elevated transition-colors"
-            data-tip="Pick color from screen"
+            data-tip={tt('Pick color from screen', 'Capturar cor da tela')}
           >
             <Pipette size={12} />
           </button>
@@ -159,7 +161,7 @@ function ColorRow({ label, colorKey, value, baseValue, mode, contrastBg, onChang
           return (
             <span
               className={`px-1.5 py-px text-[9px] font-mono rounded border ${tone.bg} ${tone.fg} ${tone.border}`}
-              data-tip={`Contrast ratio ${ratio.toFixed(1)}:1 — WCAG AA wants 4.5+ for body text`}
+              data-tip={tt(`Contrast ratio ${ratio.toFixed(1)}:1 — WCAG AA wants 4.5+ for body text`, `Taxa de contraste ${ratio.toFixed(1)}:1 — WCAG AA exige 4.5+ para texto de corpo`)}
             >
               {tone.icon} {ratio.toFixed(1)}
             </span>
@@ -169,7 +171,7 @@ function ColorRow({ label, colorKey, value, baseValue, mode, contrastBg, onChang
         <button
           onClick={() => onReset(colorKey)}
           className={`p-0.5 rounded text-text-disabled hover:text-text-primary hover:bg-bg-elevated transition-colors ${isOverridden ? 'visible' : 'invisible'}`}
-          data-tip="Reset to base"
+          data-tip={tt('Reset to base', 'Restaurar para a base')}
         >
           <RotateCcw size={12} />
         </button>
@@ -234,6 +236,7 @@ function SliderSetting({ label, value, min, max, unit, defaultValue, onChange }:
   defaultValue?: number;
   onChange: (v: number) => void;
 }) {
+  const tt = useTt();
   const containerRef = useRef<HTMLDivElement>(null);
   const hovering = useRef(false);
   const latestValue = useRef(value);
@@ -281,7 +284,7 @@ function SliderSetting({ label, value, min, max, unit, defaultValue, onChange }:
           <div
             className="absolute pointer-events-none"
             style={{ left: `${defaultPct}%`, top: '50%', transform: 'translate(-50%, -50%)' }}
-            data-tip={`Default: ${defaultValue}${unit}`}
+            data-tip={tt(`Default: ${defaultValue}${unit}`, `Padrão: ${defaultValue}${unit}`)}
           >
             <div className="w-0.5 h-2.5 bg-text-tertiary/60" />
           </div>
@@ -316,6 +319,7 @@ function AppearanceColorRow({ label, value, defaultValue, onChange }: {
   defaultValue: string;
   onChange: (v: string) => void;
 }) {
+  const tt = useTt();
   const isCustom = value !== defaultValue;
   return (
     <div className="flex items-center gap-2 py-0.5 group">
@@ -343,7 +347,7 @@ function AppearanceColorRow({ label, value, defaultValue, onChange }: {
       <button
         onClick={() => onChange(defaultValue)}
         className={`p-0.5 rounded text-text-disabled hover:text-text-primary hover:bg-bg-elevated transition-colors ${isCustom ? 'visible' : 'invisible'}`}
-        data-tip="Reset to default"
+        data-tip={tt('Reset to default', 'Restaurar para o padrão')}
       >
         <RotateCcw size={12} />
       </button>
@@ -354,6 +358,7 @@ function AppearanceColorRow({ label, value, defaultValue, onChange }: {
 // ── Main ThemeEditor ──
 
 export function ThemeEditor({ onClose }: ThemeEditorProps) {
+  const tt = useTt();
   const {
     config, resolvedColors, customPresets, selectPreset,
     setColorOverride, clearColorOverride, clearAllOverrides,
@@ -630,7 +635,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                     <button
                       onClick={(e) => { e.stopPropagation(); deleteCustomPreset(theme.id); }}
                       className="absolute top-1 right-1 w-5 h-5 rounded bg-bg-base/80 text-text-tertiary hover:text-recording opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center justify-center"
-                      data-tip="Delete this custom preset"
+                      data-tip={tt('Delete this custom preset', 'Excluir este preset personalizado')}
                     >
                       <X size={11} />
                     </button>
@@ -690,7 +695,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                         }}
                         disabled={noPick}
                         className="ml-auto flex items-center gap-1 px-2.5 py-0.5 text-[10px] rounded-full border border-border-default text-text-tertiary hover:text-text-primary hover:border-accent-solid/40 hover:bg-bg-elevated disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        data-tip={noPick ? 'No other presets in this filter' : 'Pick a random preset from the current filter'}
+                        data-tip={noPick ? tt('No other presets in this filter', 'Nenhum outro preset neste filtro') : tt('Pick a random preset from the current filter', 'Escolher um preset aleatório do filtro atual')}
                       >
                         <Dices size={11} />
                         Surprise me
@@ -888,7 +893,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                         }}
                         className="w-4 h-4 rounded border border-border-default hover:scale-110 transition-transform flex items-center justify-center"
                         style={{ backgroundColor: c }}
-                        data-tip={copiedRecent === i ? `${c} — copied!` : `${c} — click to copy`}
+                        data-tip={copiedRecent === i ? tt(`${c} — copied!`, `${c} — copiado!`) : tt(`${c} — click to copy`, `${c} — clique para copiar`)}
                       >
                         {copiedRecent === i && <Check size={9} className="text-white drop-shadow-[0_0_1px_rgba(0,0,0,0.8)]" />}
                       </button>
@@ -1273,7 +1278,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
             onClick={() => { clearAllOverrides(); resetUISettings(); }}
             disabled={!hasOverrides && JSON.stringify(config.uiSettings) === JSON.stringify(DEFAULT_UI_SETTINGS)}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-surface border border-border-subtle transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            data-tip="Clear color overrides and reset all UI settings to defaults"
+            data-tip={tt('Clear color overrides and reset all UI settings to defaults', 'Limpar substituições de cor e restaurar todas as configurações da UI para os padrões')}
           >
             <RotateCcw size={11} />
             Reset all
@@ -1281,7 +1286,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
           <button
             onClick={handleExportFile}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-surface border border-border-subtle transition-colors"
-            data-tip="Save the current theme as a JSON file"
+            data-tip={tt('Save the current theme as a JSON file', 'Salvar o tema atual como um arquivo JSON')}
           >
             <Download size={11} />
             Export

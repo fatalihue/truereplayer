@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { Info, Smile, Hash, X } from 'lucide-react';
 import EmojiPicker, { Theme as EmojiTheme, EmojiStyle } from 'emoji-picker-react';
 import { useBridge } from '../bridge/BridgeContext';
+import { useTt } from '../state/LanguageContext';
 import type { ProfileMetadataPayload, TagListEntry } from '../bridge/messageTypes';
 
 interface ProfileInfoDialogProps {
@@ -31,6 +32,7 @@ const TAG_REGEX = /^[a-z0-9\-_+.]+$/;
  */
 export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogProps) {
   const { send, subscribe } = useBridge();
+  const tt = useTt();
 
   const [loaded, setLoaded] = useState(false);
   const [original, setOriginal] = useState<ProfileMetadataPayload | null>(null);
@@ -202,7 +204,7 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
                     type="button"
                     onClick={() => setShowEmojiPicker(v => !v)}
                     className="w-12 h-12 flex items-center justify-center text-2xl bg-bg-input border border-border-subtle rounded hover:border-accent-solid transition-colors"
-                    data-tip="Pick an emoji"
+                    data-tip={tt('Pick an emoji', 'Escolher um emoji')}
                   >
                     {iconEmoji || <Smile size={18} className="text-text-tertiary" />}
                   </button>
@@ -277,7 +279,7 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
                         type="button"
                         onClick={() => removeTag(t)}
                         className="hover:text-amber-400 transition-colors"
-                        data-tip="Remove"
+                        data-tip={tt('Remove', 'Remover')}
                       >
                         <X size={10} />
                       </button>
