@@ -25,6 +25,11 @@ import { Checkbox, CheckboxBox } from './Checkbox';
 import type { ColumnVisibility } from './Toolbar';
 import { useFlyoutFlip } from '../hooks/useFlyoutFlip';
 
+// IF / ELSE / ENDIF are structural block markers, not input actions — the replay engine ignores
+// their Delay. So the grid hides their Delay cell, bulk "set delay" skips them, and the load/save
+// validator keeps it 0. (A block's pause belongs on the action INSIDE it, not on the marker.)
+const STRUCTURAL_TYPES = new Set(['If', 'Else', 'EndIf']);
+
 function ActionIcon({ actionType }: { actionType: string }) {
   const size = 12;
   if (actionType.startsWith('Browser')) return <Globe size={size} />;
@@ -865,7 +870,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     // both the replay engine (BuildBlockMap: empty body just runs to the EndIf) and the
     // frontend blockInfo. Structural rows and any multi-row drag still snap to whole blocks.
     const draggedType = actions[idx]?.actionType;
-    const isStructuralRow = draggedType === 'If' || draggedType === 'Else' || draggedType === 'EndIf';
+    const isStructuralRow = STRUCTURAL_TYPES.has(draggedType ?? '');
     const isLoneBodyRow = indices.length === 1 && !isStructuralRow;
     if (!isLoneBodyRow) indices = expandToBlocks(indices);
     // Suppress the click that fires after the drop — handleRowClick consumes and
@@ -1775,8 +1780,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       (same guard chain as the Details cell). */}
                   {columnVisibility.delay && (
                   <td
-                    className="pl-2 cursor-text"
-                    onClick={(e) => {
+                    // Structural rows (If/Else/EndIf) have no delay — blank cell, not editable.
+                    className={`pl-2 ${STRUCTURAL_TYPES.has(action.actionType) ? '' : 'cursor-text'}`}
+                    onClick={STRUCTURAL_TYPES.has(action.actionType) ? undefined : (e) => {
                       if (editingCell) return;
                       if (dragOccurred.current) return;
                       if (e.ctrlKey || e.metaKey || e.shiftKey) return;
@@ -1784,7 +1790,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       startEdit(idx, 'delay', String(action.delay >= 0 ? action.delay : 0));
                     }}
                   >
-                    {editingCell?.index === idx && editingCell.field === 'delay' ? (
+                    {STRUCTURAL_TYPES.has(action.actionType) ? null
+                      : editingCell?.index === idx && editingCell.field === 'delay' ? (
                       <input
                         ref={editInputRef}
                         type="text"
@@ -2084,8 +2091,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             }));
           }}
           onSetDelay={(delay) => {
-            send({ type: 'actions:bulkUpdateDelay', payload: { indices: selSorted, delay } });
-            showToast(tt(`Set delay to ${delay} ms for ${selectedIndices.size} action(s)`, `Atraso definido para ${delay} ms em ${selectedIndices.size} ação(ões)`), 'success');
+            // IF/ELSE/ENDIF carry no delay — exclude them from the bulk set (their cell is blank too).
+            const targets = selSorted.filter(i => !STRUCTURAL_TYPES.has(actions[i]?.actionType ?? ''));
+            if (targets.length === 0) return;
+            send({ type: 'actions:bulkUpdateDelay', payload: { indices: targets, delay } });
+            showToast(tt(`Set delay to ${delay} ms for ${targets.length} action(s)`, `Atraso definido para ${delay} ms em ${targets.length} ação(ões)`), 'success');
           }}
           onSetCoord={(axis, value) => {
             send({ type: 'actions:bulkUpdateCoord', payload: { indices: selSorted, axis, value } });

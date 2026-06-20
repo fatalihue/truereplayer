@@ -2128,8 +2128,14 @@ namespace TrueReplayer
 
             foreach (var idx in indices)
             {
-                if (idx >= 0 && idx < actions.Count)
-                    actions[idx].Delay = delay;
+                if (idx < 0 || idx >= actions.Count) continue;
+                // IF/ELSE/ENDIF are structural markers with no replay delay — never bulk-set theirs.
+                var t = actions[idx].ActionType;
+                if (string.Equals(t, "If", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(t, "Else", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(t, "EndIf", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                actions[idx].Delay = delay;
             }
 
             HasUnsavedChanges = true;

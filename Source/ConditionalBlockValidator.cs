@@ -39,6 +39,20 @@ namespace TrueReplayer.Services
             if (actions == null || actions.Count == 0)
                 return new BlockValidationResult(0, 0);
 
+            // Structural markers (IF/ELSE/ENDIF) carry no replay delay — normalise any stray value to
+            // 0 so a bulk "set delay for all" (or a hand-edited profile) can't leave a meaningless
+            // delay on a block marker. Silent (not counted as a fixup → no toast) and idempotent.
+            foreach (var a in actions)
+            {
+                if (a.Delay != 0
+                    && (string.Equals(a.ActionType, "If", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(a.ActionType, "Else", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(a.ActionType, "EndIf", StringComparison.OrdinalIgnoreCase)))
+                {
+                    a.Delay = 0;
+                }
+            }
+
             // First pass — collect indices of orphan ELSE/ENDIF rows + open IFs.
             // We don't mutate the list while scanning so the indices in the stack stay
             // valid; mutations happen in a second pass after we know what to drop.
