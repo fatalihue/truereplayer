@@ -41,11 +41,20 @@ export function TooltipLayer() {
     // The anchor rect is captured at hover time, so a scroll would strand the tooltip — hide it.
     window.addEventListener('scroll', hide, true);
     window.addEventListener('blur', hide);
+    // An anchor removed from the DOM while hovered (e.g. a toolbar / bulk bar that unmounts
+    // right after a click/confirm) never fires mouseout, which would strand its tooltip on
+    // screen until the next hover. Watch for it disconnecting and hide. The callback is a
+    // cheap ref check; it no-ops whenever no tooltip is showing.
+    const observer = new MutationObserver(() => {
+      if (currentTarget.current && !currentTarget.current.isConnected) hide();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
     return () => {
       document.removeEventListener('mouseover', onOver, true);
       document.removeEventListener('mouseout', onOut, true);
       window.removeEventListener('scroll', hide, true);
       window.removeEventListener('blur', hide);
+      observer.disconnect();
     };
   }, []);
 

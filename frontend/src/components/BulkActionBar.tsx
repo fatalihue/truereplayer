@@ -114,6 +114,14 @@ export function BulkActionBar({
                 delayInvalid ? 'border-recording/60 focus:border-recording' : 'border-border-default focus:border-accent-solid'
               }`}
             />
+            {/* X/Y accept a signed offset (+10 / -5) applied to each selection or a plain number
+                that sets them all — the rule that used to live in the button tooltip, now shown
+                inline while the field is open. */}
+            {(activeInput === 'x' || activeInput === 'y') && (
+              <span className="text-[10px] text-text-tertiary whitespace-nowrap">
+                {tt('+/- offsets each · number sets all', '+/- desloca cada · número define todos')}
+              </span>
+            )}
             <button
               onClick={handleConfirm}
               className="h-6 px-2 rounded text-[11px] font-medium bg-accent-solid text-white hover:bg-accent-solid/80 transition-colors"
@@ -165,7 +173,6 @@ export function BulkActionBar({
             <button
               onClick={() => openInput('x')}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
-              data-tip={tt('Set X for selected (use +/- for offset)', 'Definir X para selecionados (use +/- para deslocamento)')}
             >
               <Crosshair size={11} />
               X
@@ -174,7 +181,6 @@ export function BulkActionBar({
             <button
               onClick={() => openInput('y')}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
-              data-tip={tt('Set Y for selected (use +/- for offset)', 'Definir Y para selecionados (use +/- para deslocamento)')}
             >
               <Crosshair size={11} />
               Y
