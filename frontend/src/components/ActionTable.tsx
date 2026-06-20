@@ -856,13 +856,24 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     // ELSE/ENDIF rows behind: the reorder backend (HandleActionsReorder) renumbers
     // but does NOT run ConditionalBlockValidator, so the imbalance corrupts the
     // live list and only surfaces on the next profile load.
-    indices = expandToBlocks(indices);
+    //
+    // EXCEPTION — a lone NON-structural body row drags freely, in OR out of a block,
+    // making drag-out symmetric with drag-in. This is safe: moving a single body row
+    // never reorders the IF/ELSE/ENDIF rows relative to each other, so the list stays
+    // balanced (no orphans → the load validator is a no-op), block membership is purely
+    // positional and recomputed after the move, and an emptied IF…ENDIF is handled by
+    // both the replay engine (BuildBlockMap: empty body just runs to the EndIf) and the
+    // frontend blockInfo. Structural rows and any multi-row drag still snap to whole blocks.
+    const draggedType = actions[idx]?.actionType;
+    const isStructuralRow = draggedType === 'If' || draggedType === 'Else' || draggedType === 'EndIf';
+    const isLoneBodyRow = indices.length === 1 && !isStructuralRow;
+    if (!isLoneBodyRow) indices = expandToBlocks(indices);
     // Suppress the click that fires after the drop — handleRowClick consumes and
     // resets the flag (same contract as the old mouse-event implementation).
     dragOccurred.current = true;
     setActiveDragId(String(ev.active.id));
     setDragIndices(indices);
-  }, [sortableIds, selectedIndices, expandToBlocks]);
+  }, [sortableIds, selectedIndices, expandToBlocks, actions]);
 
   const handleDragEnd = useCallback((ev: DragEndEvent) => {
     const indices = dragIndices ?? [];
