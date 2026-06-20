@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Clock, Trash2, X, Crosshair, MessageSquare, Eye, EyeOff, ArrowUpToLine, ArrowDownToLine } from 'lucide-react';
-import { useTt } from '../state/LanguageContext';
 
 interface BulkActionBarProps {
   selectedCount: number;
@@ -34,7 +33,6 @@ export function BulkActionBar({
   onSetComment,
   onToggleSkip,
 }: BulkActionBarProps) {
-  const tt = useTt();
   const [activeInput, setActiveInput] = useState<'delay' | 'x' | 'y' | 'notes' | null>(null);
   const [inputValue, setInputValue] = useState('');
 
@@ -88,7 +86,6 @@ export function BulkActionBar({
         <button
           onClick={onClearSelection}
           className="p-0.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-          data-tip={tt('Clear selection (Esc)', 'Limpar seleção (Esc)')}
         >
           <X size={11} />
         </button>
@@ -102,14 +99,6 @@ export function BulkActionBar({
         {/* Inline Input (shared for all bulk edit types) */}
         {activeInput ? (
           <div className="flex items-center gap-1">
-            {/* X/Y accept a signed offset (+10 / -5) applied to each selection or a plain number
-                that sets them all. Shown inline to the LEFT of the field (it grows into the
-                spacer) so the input + OK keep the exact position the other edit types use. */}
-            {(activeInput === 'x' || activeInput === 'y') && (
-              <span className="text-[10px] text-text-tertiary whitespace-nowrap">
-                {tt('+/- offsets each · number sets all', '+/- desloca cada · número define todos')}
-              </span>
-            )}
             <span className="text-[10px] text-text-disabled uppercase">{activeInput === 'notes' ? 'Notes' : activeInput}</span>
             <input
               type="text"
@@ -144,7 +133,6 @@ export function BulkActionBar({
               onClick={onMoveUp}
               disabled={!canMoveUp}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-tertiary"
-              data-tip={tt('Move selection up (Alt+↑)', 'Mover seleção para cima (Alt+↑)')}
             >
               <ArrowUpToLine size={11} />
             </button>
@@ -152,7 +140,6 @@ export function BulkActionBar({
               onClick={onMoveDown}
               disabled={!canMoveDown}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-tertiary"
-              data-tip={tt('Move selection down (Alt+↓)', 'Mover seleção para baixo (Alt+↓)')}
             >
               <ArrowDownToLine size={11} />
             </button>
@@ -208,18 +195,15 @@ export function BulkActionBar({
                   ? 'text-accent-light hover:text-accent-light hover:bg-accent-solid/10'
                   : 'text-text-tertiary hover:text-text-primary hover:bg-bg-elevated'
               }`}
-              data-tip={allSelectedSkipped ? tt('Enable selected (include in replay)', 'Ativar selecionados (incluir na reprodução)') : tt('Skip selected (exclude from replay)', 'Pular selecionados (excluir da reprodução)')}
             >
               {allSelectedSkipped ? <Eye size={11} /> : <EyeOff size={11} />}
               {allSelectedSkipped ? 'Enable' : 'Skip'}
             </button>
 
-            {/* Delete — destructive group of one. Tooltip carries the Del hotkey
-                hint; inline "Del" badge would bump the bar over at narrow widths. */}
+            {/* Delete — destructive group of one (the Del hotkey also deletes the selection). */}
             <button
               onClick={onDelete}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-recording hover:text-recording/80 hover:bg-recording-bg transition-colors"
-              data-tip={tt('Delete selected (Del)', 'Excluir selecionados (Del)')}
             >
               <Trash2 size={11} />
               Delete
