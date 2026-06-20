@@ -360,7 +360,6 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
           <button
             onClick={onClose}
             className="px-4 py-1.5 text-xs font-medium text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle rounded transition-colors"
-            data-tip={tt('Discard changes and close', 'Descartar alterações e fechar')}
           >
             Cancel
           </button>
@@ -368,7 +367,6 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
             onClick={handleSave}
             disabled={!loaded}
             className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50"
-            data-tip={tt('Save icon, description and tags to this profile', 'Salvar ícone, descrição e tags neste perfil')}
           >
             Save
           </button>

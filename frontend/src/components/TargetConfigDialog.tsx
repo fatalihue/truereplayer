@@ -458,7 +458,6 @@ export function TargetConfigDialog({
 
         <button
           onClick={handleDetect}
-          data-tip={tt('Click any window to auto-fill its process name and title', 'Clique em qualquer janela para preencher automaticamente seu nome de processo e título')}
           className={`mt-3 w-full h-8 text-xs border rounded transition-colors ${
             isDetecting
               ? 'text-recording border-recording/40 bg-recording/10 hover:bg-recording/20'
@@ -503,14 +502,6 @@ export function TargetConfigDialog({
                   : 'bg-replay/10 text-replay border-replay/30 hover:bg-replay/15'
                 : 'text-text-secondary border-border-default hover:bg-bg-elevated'
           }`}
-          data-tip={testInFlight
-            ? tt('Sending test request…', 'Enviando requisição de teste…')
-            : testResult
-              ? (testResult.error
-                  ? testResult.error
-                  : `${testResult.matches ? tt('Matches', 'Corresponde') : tt('No match', 'Sem correspondência')} — ${testResult.foregroundProcess || '?'}${testResult.foregroundTitle ? ' / ' + testResult.foregroundTitle : ''}`)
-              : tt('Check whether the current config matches the window in front (excluding TrueReplayer)', 'Verifica se a configuração atual corresponde à janela em primeiro plano (excluindo o TrueReplayer)')
-          }
         >
           <div className="truncate">
             {testInFlight ? (
@@ -596,16 +587,12 @@ export function TargetConfigDialog({
                     }
                   }}
                   className="px-2 py-0.5 text-[10px] font-medium text-text-primary bg-accent-solid/30 hover:bg-accent-solid/50 rounded transition-colors"
-                  data-tip={convertAlsoApplies
-                    ? tt('Save the target above AND migrate stored action coords in one shot', 'Salva o alvo acima E migra as coordenadas das ações de uma vez')
-                    : tt('Migrate stored action coords using the saved target', 'Migra as coordenadas das ações usando o alvo salvo')}
                 >
                   {convertAlsoApplies ? 'Apply target & convert' : 'Convert'}
                 </button>
                 <button
                   onClick={() => { setConvertHint(null); setConvertHintDismissed(true); }}
                   className="px-1.5 py-0.5 text-[10px] text-text-tertiary hover:text-text-primary transition-colors"
-                  data-tip={tt('Skip — actions stay in their original coord space', 'Pular — as ações permanecem no seu espaço de coordenadas original')}
                 >
                   Skip
                 </button>
@@ -637,7 +624,6 @@ export function TargetConfigDialog({
               })}
               disabled={submitDisabled}
               className="w-full h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              data-tip={tt('Capture the current size and position of the target window matching the fields above', 'Captura o tamanho e a posição atuais da janela-alvo que corresponde aos campos acima')}
             >
               Update Window Size &amp; Position
             </button>
@@ -653,9 +639,6 @@ export function TargetConfigDialog({
           {hasOwnTarget && onRemove && (
             <button
               onClick={handleRemove}
-              data-tip={isProfile
-                ? tt('Clear this target so the profile runs unscoped (or inherits its folder target)', 'Remove este alvo para que o perfil rode sem escopo (ou herde o alvo da pasta)')
-                : tt('Clear this folder target — profiles inside fall back to their own or none', 'Remove o alvo desta pasta — os perfis dentro voltam ao próprio alvo ou a nenhum')}
               className="px-4 py-1.5 text-xs text-recording hover:text-recording/80 bg-bg-elevated rounded transition-colors"
             >Remove</button>
           )}

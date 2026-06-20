@@ -472,9 +472,6 @@ export function KeystrokeCaptureDialog({
               type="button"
               onClick={handleConfirm}
               disabled={captured === null}
-              data-tip={isEditing
-                ? tt('Apply the captured key and settings to this row. Disabled until a key is captured.', 'Aplica a tecla capturada e os ajustes nesta linha. Desabilitado ate capturar uma tecla.')
-                : tt('Insert a row with the captured key and settings. Disabled until a key is captured.', 'Insere uma linha com a tecla capturada e os ajustes. Desabilitado ate capturar uma tecla.')}
               className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isEditing ? 'Save' : 'Add'}

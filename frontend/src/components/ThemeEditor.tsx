@@ -1279,7 +1279,6 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
             onClick={() => { clearAllOverrides(); resetUISettings(); setLanguage(DEFAULT_LANGUAGE); }}
             disabled={!hasOverrides && JSON.stringify(config.uiSettings) === JSON.stringify(DEFAULT_UI_SETTINGS)}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-surface border border-border-subtle transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            data-tip={tt('Clear color overrides and reset all UI settings to defaults', 'Limpar substituições de cor e restaurar todas as configurações da UI para os padrões')}
           >
             <RotateCcw size={11} />
             Reset all
@@ -1287,7 +1286,6 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
           <button
             onClick={handleExportFile}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-surface border border-border-subtle transition-colors"
-            data-tip={tt('Save the current theme as a JSON file', 'Salvar o tema atual como um arquivo JSON')}
           >
             <Download size={11} />
             Export

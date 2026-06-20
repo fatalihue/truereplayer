@@ -1401,7 +1401,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-action-if-bg)'; }}
                         onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                         data-add-else
-                        data-tip={tt('Insert an Else branch in this conditional block', 'Insere uma ramificação Else neste bloco condicional')}
                       >
                         <Plus size={11} />
                         Add Else branch

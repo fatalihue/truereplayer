@@ -5,7 +5,6 @@ import { useBridge } from '../bridge/BridgeContext';
 import { usePauseTick } from '../hooks/usePauseTick';
 import { formatClickerStats } from '../utils/clickerFormat';
 import { APP_VERSION } from '../appVersion';
-import { useTt } from '../state/LanguageContext';
 
 // Thin vertical divider between status segments.
 const Sep = () => <div className="w-px h-3 bg-border-subtle mx-3 shrink-0" />;
@@ -13,7 +12,6 @@ const Sep = () => <div className="w-px h-3 bg-border-subtle mx-3 shrink-0" />;
 export function StatusBar() {
   const { statusBar, status, highlightedActionIndex, replayChain, pauseState, settings, clickerStats, loopProgress } = useAppState();
   const { send } = useBridge();
-  const tt = useTt();
   const isReplaying = status === 'replaying';
   const isClicker = settings.useCursorClick;
   // The engine's stack already includes the root profile at index 0, so we only
@@ -206,7 +204,6 @@ export function StatusBar() {
                   <button
                     onClick={() => send({ type: 'replay:resume', payload: {} })}
                     className="px-2 py-0.5 text-[10px] font-medium rounded border border-border-default text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors shrink-0"
-                    data-tip={tt('Resume replay', 'Retomar replay')}
                   >
                     Resume
                   </button>

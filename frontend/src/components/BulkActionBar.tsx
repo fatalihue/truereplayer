@@ -155,7 +155,6 @@ export function BulkActionBar({
             <button
               onClick={() => openInput('delay')}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
-              data-tip={tt('Set delay for selected', 'Definir atraso para selecionados')}
             >
               <Clock size={11} />
               Delay
@@ -185,7 +184,6 @@ export function BulkActionBar({
             <button
               onClick={() => openInput('notes')}
               className="flex items-center gap-1 h-6 px-2 rounded text-[11px] text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
-              data-tip={tt('Set notes for selected', 'Definir notas para selecionados')}
             >
               <MessageSquare size={11} />
               Notes

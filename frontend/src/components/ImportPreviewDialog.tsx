@@ -183,7 +183,6 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
             </button>
             <button
               onClick={() => toggleAll(false)}
-              data-tip={tt('Uncheck every profile — nothing will be imported', 'Desmarca todos os perfis — nada será importado')}
               className="hover:text-text-primary transition-colors"
             >
               Clear

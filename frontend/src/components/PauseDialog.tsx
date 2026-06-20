@@ -290,9 +290,6 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
               onClick={handleConfirm}
               disabled={!canConfirm}
               className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              data-tip={isEditing
-                ? tt('Save the Pause — needs a resume hotkey or a timeout', 'Salvar o Pause — requer uma tecla de retomada ou um tempo limite')
-                : tt('Add the Pause — needs a resume hotkey or a timeout', 'Adicionar o Pause — requer uma tecla de retomada ou um tempo limite')}
             >
               {isEditing ? 'Save' : 'Add'}
             </button>

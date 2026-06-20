@@ -1284,7 +1284,6 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     send({ type: 'waitimage:recapture', payload: { index: actionIndex } });
                   }}
                   className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
-                  data-tip={tt('Recapture reference image', 'Recapturar imagem de referência')}
                 >
                   <RefreshCw size={12} />
                   Recapture
@@ -1914,16 +1913,15 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   cohesive control. */}
               <div className="flex flex-wrap gap-1 mt-2">
                 {[
-                  { var: '{Clipboard}', label: 'Clipboard', title: tt('Inserts the clipboard value at this position', 'Insere o valor da área de transferência nesta posição') },
-                  { var: '{Enter}', label: 'Enter', title: tt('Press Enter key at this position', 'Pressiona a tecla Enter nesta posição') },
-                  { var: '{Tab}', label: 'Tab', title: tt('Press Tab key at this position', 'Pressiona a tecla Tab nesta posição') },
+                  { var: '{Clipboard}', label: 'Clipboard' },
+                  { var: '{Enter}', label: 'Enter' },
+                  { var: '{Tab}', label: 'Tab' },
                 ].map(item => (
                   <button
                     key={item.var}
                     type="button"
                     onClick={() => browserTextEditorRef.current?.insertText(item.var)}
                     className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
-                    data-tip={item.title}
                   >
                     {item.label}
                   </button>
@@ -1940,7 +1938,6 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     type="button"
                     onClick={() => browserTextEditorRef.current?.insertText(item.var)}
                     className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
-                    data-tip={tt(`Inserts the ${item.label.toLowerCase()} value at this position`, `Insere o valor de ${item.label.toLowerCase()} nesta posição`)}
                   >
                     {item.label}
                   </button>
@@ -1978,7 +1975,6 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                       type="button"
                       onClick={() => browserTextEditorRef.current?.insertText(item.var)}
                       className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
-                      data-tip={tt(`Press ${item.label} key at this position`, `Pressiona a tecla ${item.label} nesta posição`)}
                     >
                       {item.label}
                     </button>

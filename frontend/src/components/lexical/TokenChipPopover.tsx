@@ -211,14 +211,12 @@ function Footer({
   kind: TokenKind;
   onDelete: () => void;
 }) {
-  const tt = useTt();
   return (
     <div className="flex items-center justify-between px-3.5 py-2 bg-bg-card border-t border-border-subtle shrink-0">
       <button
         type="button"
         onClick={onDelete}
         className="flex items-center gap-1 h-7 px-2 text-[11px] rounded text-red-300 hover:bg-red-500/15 border border-transparent hover:border-red-500/30 transition-colors"
-        data-tip={tt('Remove this token', 'Remover este token')}
       >
         <Trash2 size={12} />
         Delete

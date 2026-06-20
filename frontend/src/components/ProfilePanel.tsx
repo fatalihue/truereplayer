@@ -2393,7 +2393,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               {profiles.find(p => p.name === showHotkeyDialog)?.hotkey && (
                 <button
                   onClick={() => { handleRemoveHotkey(showHotkeyDialog!); setShowHotkeyDialog(null); }}
-                  data-tip={tt('Unbind this hotkey from the profile. Undo available for 10s.', 'Remove esta hotkey do perfil. Desfazer disponível por 10s.')}
                   className="px-4 py-1.5 text-xs text-recording hover:text-recording/80 bg-bg-elevated rounded transition-colors"
                 >
                   Remove
@@ -2410,7 +2409,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 <button
                   onClick={confirmHotkey}
                   disabled={hotkeyCapture === '...'}
-                  data-tip={tt('Bind the captured combo so it triggers this profile globally.', 'Vincula a combinação capturada para acionar este perfil globalmente.')}
                   className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
                 >
                   Assign
@@ -2462,7 +2460,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               {profiles.find(p => p.name === showHotstringDialog)?.hotstring && (
                 <button
                   onClick={() => { handleRemoveHotstring(showHotstringDialog!); setShowHotstringDialog(null); }}
-                  data-tip={tt('Unbind this hotstring from the profile. Undo available for 10s.', 'Remove este hotstring do perfil. Desfazer disponível por 10s.')}
                   className="px-4 py-1.5 text-xs text-recording hover:text-recording/80 bg-bg-elevated rounded transition-colors"
                 >
                   Remove
@@ -2479,7 +2476,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 <button
                   onClick={confirmHotstring}
                   disabled={hotstringValue.trim().length < 2}
-                  data-tip={tt('Bind this typed sequence so it triggers the profile (min 2 characters).', 'Vincula esta sequência digitada para acionar o perfil (mín 2 caracteres).')}
                   className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
                 >
                   Assign

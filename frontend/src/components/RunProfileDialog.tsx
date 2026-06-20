@@ -174,14 +174,6 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
             <button
               onClick={handleConfirm}
               disabled={!canConfirm}
-              data-tip={tt(
-                initial
-                  ? "Save changes to this Run Profile action. Disabled until a profile is selected."
-                  : "Add the Run Profile action with these settings. Disabled until a profile is selected.",
-                initial
-                  ? "Salvar alterações desta ação Run Profile. Desativado até um profile ser selecionado."
-                  : "Adicionar a ação Run Profile com estas configurações. Desativado até um profile ser selecionado."
-              )}
               className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {initial ? 'Save' : 'Add'}
