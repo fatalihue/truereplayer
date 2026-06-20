@@ -366,7 +366,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
     exportTheme, importTheme,
     saveAsPreset, deleteCustomPreset,
   } = useTheme();
-  const { setLanguage } = useLanguage();
+  const { language, setLanguage } = useLanguage();
 
   const panelRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<TabId>('presets');
@@ -1277,7 +1277,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
         <div className="border-t border-r border-border-subtle bg-bg-card px-4 py-2 flex items-center gap-2">
           <button
             onClick={() => { clearAllOverrides(); resetUISettings(); setLanguage(DEFAULT_LANGUAGE); }}
-            disabled={!hasOverrides && JSON.stringify(config.uiSettings) === JSON.stringify(DEFAULT_UI_SETTINGS)}
+            disabled={!hasOverrides && JSON.stringify(config.uiSettings) === JSON.stringify(DEFAULT_UI_SETTINGS) && language === DEFAULT_LANGUAGE}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-surface border border-border-subtle transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <RotateCcw size={11} />

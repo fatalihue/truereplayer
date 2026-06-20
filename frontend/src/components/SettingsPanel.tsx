@@ -163,7 +163,6 @@ function Disclosure({ label, children }: { label: string; children: React.ReactN
 function SettingRow({ label, tooltip, children, danger }: { label: string; tooltip?: string; children: React.ReactNode; danger?: boolean }) {
   // `danger` paints the row in a loud red so a disabled-but-critical toggle
   // (e.g. Profile Keys OFF) is impossible to miss when glancing at the panel.
-  // Hide when the "Filter settings" query doesn't match this row's label.
   const filter = useContext(FilterContext);
   // Hide when the "Filter settings" query doesn't match this row's label.
   if (filter && !label.toLowerCase().includes(filter)) return null;

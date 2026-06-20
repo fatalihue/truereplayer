@@ -669,7 +669,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         },
       });
     });
-  }, [subscribe, send, showToast]);
+    // `tt` is a dep: it's memoised on [language], and this effect closes over it for the toast.
+    // Without it the subscription would freeze tt at the mount-time language and a later language
+    // switch would render the "Removed window target" Undo toast in the previous language.
+  }, [subscribe, send, showToast, tt]);
 
   const handleRemoveWindowTarget = (name: string) => {
     setContextMenu(null);

@@ -502,6 +502,15 @@ export function TargetConfigDialog({
                   : 'bg-replay/10 text-replay border-replay/30 hover:bg-replay/15'
                 : 'text-text-secondary border-border-default hover:bg-bg-elevated'
           }`}
+          // The button doubles as the result chip (truncated in this 380px dialog); the data-tip
+          // reveals the full result/error on hover so a long window title or error isn't lost.
+          data-tip={testInFlight
+            ? tt('Sending test request…', 'Enviando requisição de teste…')
+            : testResult
+              ? (testResult.error
+                  ? testResult.error
+                  : `${testResult.matches ? 'Matches' : 'No match'} — ${testResult.foregroundProcess || '?'}${testResult.foregroundTitle ? ' / ' + testResult.foregroundTitle : ''}`)
+              : tt('Check whether the current config matches the window in front (excluding TrueReplayer)', 'Verifica se a configuração atual corresponde à janela em frente (excluindo o TrueReplayer)')}
         >
           <div className="truncate">
             {testInFlight ? (
@@ -534,7 +543,8 @@ export function TargetConfigDialog({
           {/* Relative Coordinates — disabled when the dialog has no target in its fields
               and the flag is currently OFF (hard block on OFF→ON to prevent the user from
               saving a profile in a coord space that can't be anchored to anything). The
-              title attr on the row surfaces the reason via tooltip on hover. */}
+              data-tip on the row surfaces the reason (or, when enabled, what it does) via the
+              body-portal tooltip on hover. */}
           <div
             className="flex items-center justify-between"
             data-tip={relativeToggleDisabled
