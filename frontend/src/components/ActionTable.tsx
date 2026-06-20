@@ -1293,6 +1293,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           }
                           return '';
                         })()
+                      : action.actionType === 'HoldKey'
+                        // Hold Key reads like Pause: "<key> / <ms> ms" as plain text in the
+                        // cell (no separate duration chip) so the two duration-bearing actions
+                        // share one format. Click-to-edit is handled by the <td> onClick below.
+                        ? `${getDisplayKey(action.key)} / ${action.holdDurationMs && action.holdDurationMs > 0 ? action.holdDurationMs : 1000} ms`
                       : getDisplayKey(action.key);
               const displayX = getDisplayX(action);
               const displayY = getDisplayY(action);
@@ -1733,31 +1738,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             covered by double-clicking the Key chip (line above),
                             which already routes to setKeystrokeEdit for Keystroke /
                             HoldKey rows. */}
-                        {/* Hold-duration badge for HoldKey rows. Same visual treatment as
-                            the × N badge so the two repeat-flavoured key actions look like
-                            siblings. Click reopens the unified Keystroke dialog (in Hold
-                            mode) with key + duration pre-filled. Format: "1s" for clean
-                            second multiples, "1.5s" for fractional, "500ms" for sub-second.
-                            No "hold" text — the row's pill + Timer icon already convey
-                            the action; the badge just communicates the duration. */}
-                        {action.actionType === 'HoldKey' && (() => {
-                          const ms = action.holdDurationMs && action.holdDurationMs > 0 ? action.holdDurationMs : 1000;
-                          // Always milliseconds (was "1s"/"1.5s" for clean seconds) so every
-                          // action duration reads in the same unit across the grid.
-                          const label = `${ms} ms`;
-                          return (
-                            <span
-                              className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold tabular-nums bg-[color-mix(in_srgb,var(--color-accent)_18%,transparent)] text-accent-light hover:bg-[color-mix(in_srgb,var(--color-accent)_28%,transparent)] cursor-pointer transition-colors"
-                              data-tip={tt(`Hold duration: ${ms} ms`, `Duração da retenção: ${ms} ms`)}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setKeystrokeEdit({ index: idx });
-                              }}
-                            >
-                              {label}
-                            </span>
-                          );
-                        })()}
+                        {/* Hold-duration now renders inline in displayKey ("<key> / <ms> ms",
+                            Pause-style) instead of a separate chip; click-to-edit is the
+                            <td> onClick (HoldKey → setKeystrokeEdit). */}
                       </span>
                     ) : null}
                     {/* Coordinate pair — mouse actions show (and inline-edit) their
