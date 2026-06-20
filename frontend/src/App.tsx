@@ -13,6 +13,7 @@ import { ActionBar } from './components/ActionBar';
 import { SettingsPanel } from './components/SettingsPanel';
 import { StatusBar } from './components/StatusBar';
 import { Toast } from './components/Toast';
+import { TooltipLayer } from './components/common/TooltipLayer';
 import { UpdateOverlay } from './components/UpdateOverlay';
 import { ExtensionUpdateBanner } from './components/ExtensionUpdateBanner';
 import { ClickerDashboard } from './components/ClickerDashboard';
@@ -199,6 +200,9 @@ function AppShell() {
       />
       {showThemeEditor && <ThemeEditor onClose={() => setShowThemeEditor(false)} />}
       <UpdateOverlay />
+
+      {/* One global tooltip renderer driving every [data-tip] in the app */}
+      <TooltipLayer />
     </div>
   );
 }

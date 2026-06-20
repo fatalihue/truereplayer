@@ -109,81 +109,23 @@ html, body, #root {
   outline: none !important;
 }
 
-/* Allow tooltips on disabled buttons */
+/* Allow tooltips on disabled buttons (so they still fire mouseover for the portal). */
 [data-tip][disabled] {
   pointer-events: auto !important;
   cursor: default !important;
 }
+/* Kept so any element that relied on data-tip for relative-positioning of its own
+   absolute children doesn't shift. The tooltip itself is a body portal (see below). */
+[data-tip] { position: relative; }
 
-/* Custom tooltips — faster and more consistent than native title attribute */
-[data-tip] {
-  position: relative;
-}
-[data-tip]::after {
-  content: attr(data-tip);
-  position: absolute;
-  bottom: auto;
-  top: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 4px 8px;
-  font-size: 11px;
-  font-weight: 400;
-  white-space: nowrap;
-  color: var(--color-text-primary);
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border-default);
-  border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-  z-index: 9999;
-}
-[data-tip]:hover::after {
-  opacity: 1;
-}
-/* Right-aligned (for buttons near right edge) */
-[data-tip-pos="end"]::after {
-  left: auto;
-  right: 0;
-  transform: none;
-}
-/* Right position variant */
-[data-tip-pos="right"]::after {
-  bottom: auto;
-  left: calc(100% + 6px);
-  top: 50%;
-  transform: translateY(-50%);
-}
-/* Left position variant (buttons hugging the right window edge — e.g. the
-   settings panel rail; the default below-centred tip would overflow the
-   window and get clipped) */
-[data-tip-pos="left"]::after {
-  bottom: auto;
-  left: auto;
-  right: calc(100% + 6px);
-  top: 50%;
-  transform: translateY(-50%);
-}
-/* Below, anchored to the element's LEFT edge, extending right. For icons near
-   the left window edge (e.g. the profile/folder target icons in the left
-   sidebar) the default centred tip extends left and clips a long name; this
-   variant grows into the content area instead, so the full name always shows. */
-[data-tip-pos="below-start"]::after {
-  top: calc(100% + 6px);
-  left: 0;
-  right: auto;
-  transform: none;
-}
-
-/* Settings-panel row tooltip — a body portal (see SettingRow), so the panel's scroll-overflow
-   can't clip it. Same look as the data-tip pills, but wraps at a max width and appears instantly
-   (the native title attribute lagged ~1s). Positioned by JS; anchored to the row's left edge. */
-.settings-tip {
+/* Unified tooltip — ONE body-portal renderer (TooltipLayer) drives every tooltip via the
+   data-tip attribute: instant, never clipped (escapes panel/modal overflow), wraps at a max
+   width, and auto-positions/flips to stay on-screen. Replaces the old [data-tip]::after CSS,
+   the per-row .settings-tip portal, and the native title= tooltips. data-tip-pos (left/right/
+   end/below-start) is read by the renderer as a placement hint. */
+.app-tip {
   position: fixed;
-  transform: translateY(-50%);
-  max-width: 240px;
+  max-width: 260px;
   padding: 6px 9px;
   font-size: 11px;
   font-weight: 400;
@@ -197,13 +139,12 @@ html, body, #root {
   pointer-events: none;
   z-index: 99999;
 }
-@keyframes settings-tip-in {
+@keyframes app-tip-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-/* Respect the global animations toggle (matches .rec-badge-pulse etc.). */
-html[data-animations="true"] .settings-tip {
-  animation: settings-tip-in 0.1s ease;
+html[data-animations="true"] .app-tip {
+  animation: app-tip-in 0.1s ease;
 }
 
 .drag-region {

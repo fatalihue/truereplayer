@@ -361,7 +361,7 @@ function ResolutionChips({ value, onChange, size = 'sm' }: ResolutionChipsProps)
             key={opt.key}
             type="button"
             onClick={() => onChange(opt.key)}
-            title={opt.tooltip}
+            data-tip={opt.tooltip}
             className={`${btnPad} ${textSize} flex items-center gap-1.5 transition-colors ${
               active
                 ? 'bg-accent-solid/30 text-text-primary'

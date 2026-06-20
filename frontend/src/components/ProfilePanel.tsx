@@ -2027,7 +2027,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       setContextMenu(null);
                     }}
                     className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                    title={profile?.isActive ? "Rewrite this profile's action X/Y to be relative to its target window" : 'Open this profile first — convert applies to the loaded profile'}
+                    data-tip={profile?.isActive ? "Rewrite this profile's action X/Y to be relative to its target window" : 'Open this profile first — convert applies to the loaded profile'}
                   >
                     <ArrowLeftRight size={13} className="text-text-tertiary" />
                     Convert coords → Relative
@@ -2039,7 +2039,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       setContextMenu(null);
                     }}
                     className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                    title={profile?.isActive ? "Rewrite this profile's action X/Y to absolute screen coordinates" : 'Open this profile first — convert applies to the loaded profile'}
+                    data-tip={profile?.isActive ? "Rewrite this profile's action X/Y to absolute screen coordinates" : 'Open this profile first — convert applies to the loaded profile'}
                   >
                     <ArrowLeftRight size={13} className="text-text-tertiary" />
                     Convert coords → Absolute

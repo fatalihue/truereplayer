@@ -177,7 +177,7 @@ function ProbeDetails({ action }: { action: ActionItem }) {
             <span
               className="inline-block w-2.5 h-2.5 rounded-sm border border-white/20 shrink-0"
               style={{ background: action.pixelColor }}
-              title={`Target colour: ${action.pixelColor}`}
+              data-tip={`Target colour: ${action.pixelColor}`}
             />
           )}
           <span className="font-mono text-text-secondary truncate">
@@ -816,7 +816,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     // index below the gap by one and make the target oscillate as the gap moves).
     const rows = Array.from(tbodyRef.current.querySelectorAll('tr')).filter(
       tr => !tr.hasAttribute('data-drop-gap')
-        && !tr.querySelector('button[title="Insert an Else branch in this conditional block"]')
+        && !tr.querySelector('button[data-tip="Insert an Else branch in this conditional block"]')
     );
     let target: number | null = null;
     for (let i = 0; i < rows.length; i++) {
@@ -1187,7 +1187,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               }
             }}
             className="flex items-center justify-center cursor-pointer"
-            title={allSelected ? 'Deselect all' : 'Select all'}
+            data-tip={allSelected ? 'Deselect all' : 'Select all'}
           >
             <CheckboxBox
               checked={allSelected}
@@ -1397,7 +1397,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         }}
                         onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-action-if-bg)'; }}
                         onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                        title="Insert an Else branch in this conditional block"
+                        data-tip="Insert an Else branch in this conditional block"
                       >
                         <Plus size={11} />
                         Add Else branch
@@ -1553,7 +1553,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         <span
                           className="ml-0.5 px-1 rounded text-[9px] font-bold tracking-wider"
                           style={{ background: 'var(--color-action-if-fg)', color: 'var(--color-bg-surface)' }}
-                          title="Negated condition — the TRUE branch fires when the probe FAILS (IFNOT)"
+                          data-tip="Negated condition — the TRUE branch fires when the probe FAILS (IFNOT)"
                         >
                           NOT
                         </span>
@@ -1700,7 +1700,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                               ? 'cursor-pointer hover:text-accent-light'
                               : ''
                         }`}
-                        title={
+                        data-tip={
                           action.actionType === 'SendText' ? action.key
                           : action.actionType === 'RunProfile' ? `Run profile "${action.key}"`
                           // Browser actions can have long CSS selectors / URLs that
@@ -1745,7 +1745,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           return (
                             <span
                               className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold tabular-nums bg-[color-mix(in_srgb,var(--color-accent)_18%,transparent)] text-accent-light hover:bg-[color-mix(in_srgb,var(--color-accent)_28%,transparent)] cursor-pointer transition-colors"
-                              title={`Hold duration: ${ms} ms`}
+                              data-tip={`Hold duration: ${ms} ms`}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setKeystrokeEdit({ index: idx });

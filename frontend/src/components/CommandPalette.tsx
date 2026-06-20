@@ -406,7 +406,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
                     onClick={isDisabled ? undefined : item.onAction}
                     onMouseEnter={() => setFocusedIndex(idx)}
                     disabled={isDisabled}
-                    title={isDisabled ? item.disabledHint : undefined}
+                    data-tip={isDisabled ? item.disabledHint : undefined}
                     className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
                       isDisabled
                         ? 'opacity-40 cursor-not-allowed'

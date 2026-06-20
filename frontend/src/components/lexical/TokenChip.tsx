@@ -70,7 +70,7 @@ export function TokenChip({ nodeKey, token }: { nodeKey: NodeKey; token: string 
         className={`inline-flex items-center px-1.5 py-[1px] mx-[1px] text-[12px] font-mono rounded text-[var(--color-action-sendtext-fg)] bg-[var(--color-action-sendtext-fg)]/15 border border-[var(--color-action-sendtext-fg)]/40 select-none cursor-pointer hover:bg-[var(--color-action-sendtext-fg)]/25 transition-colors ${
           open ? 'ring-1 ring-[var(--color-action-sendtext-fg)]/60' : ''
         }`}
-        title={token}
+        data-tip={token}
       >
         {token.slice(1, -1)}
       </span>

@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback, useContext, createContext } from 'react';
-import { createPortal } from 'react-dom';
 import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle } from 'lucide-react';
 // `Search` import removed with the disabled Settings filter — re-add it to revive the filter.
 import { useAppState } from '../state/AppStateContext';
@@ -92,7 +91,7 @@ function EnableChip({ value, isOn, onCommitValue, onToggle, onEnterActivate }: {
         type="button"
         onClick={() => onToggle(!isOn)}
         aria-label={isOn ? 'Disable' : 'Enable'}
-        title={isOn ? 'On — click to turn off' : 'Off — click to turn on'}
+        data-tip={isOn ? 'On — click to turn off' : 'Off — click to turn on'}
         className="h-full pl-2 pr-1.5 flex items-center shrink-0 cursor-pointer transition-colors hover:bg-[rgba(127,127,127,0.18)]"
       >
         <span
@@ -164,30 +163,15 @@ function SettingRow({ label, tooltip, children, danger }: { label: string; toolt
   // (e.g. Profile Keys OFF) is impossible to miss when glancing at the panel.
   // Hide when the "Filter settings" query doesn't match this row's label.
   const filter = useContext(FilterContext);
-  const rowRef = useRef<HTMLDivElement>(null);
-  // Tooltip is a body portal — NOT native `title` (lags ~1s) and NOT a CSS ::after (the panel's
-  // scroll-overflow would clip it). Right-anchored 8px left of the row (the panel hugs the right
-  // window edge) so it overlays the work area; its width is capped to the space on the left so it
-  // never clips on a narrow window; hidden on scroll since the position is captured at hover time.
-  const [tip, setTip] = useState<{ right: number; top: number; maxW: number } | null>(null);
-  useEffect(() => {
-    if (!tip) return;
-    const hide = () => setTip(null);
-    window.addEventListener('scroll', hide, true);
-    return () => window.removeEventListener('scroll', hide, true);
-  }, [tip]);
+  // Hide when the "Filter settings" query doesn't match this row's label.
   if (filter && !label.toLowerCase().includes(filter)) return null;
-  const showTip = () => {
-    if (!tooltip || !rowRef.current) return;
-    const r = rowRef.current.getBoundingClientRect();
-    setTip({ right: window.innerWidth - r.left + 8, top: r.top + r.height / 2, maxW: Math.min(240, Math.max(0, r.left - 16)) });
-  };
+  // Tooltip via the global TooltipLayer (data-tip) — pos="left" so it opens into the work area
+  // (the panel hugs the right window edge) instead of clipping off-screen.
   return (
     <div
-      ref={rowRef}
       className="relative flex items-center justify-between min-h-8 px-2.5 gap-2"
-      onMouseEnter={showTip}
-      onMouseLeave={() => setTip(null)}
+      data-tip={tooltip || undefined}
+      data-tip-pos="left"
     >
       {/* Danger = thin red left accent + red icon/label (replaces the old full-row red wash). */}
       {danger && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-sm bg-recording" />}
@@ -198,10 +182,6 @@ function SettingRow({ label, tooltip, children, danger }: { label: string; toolt
       <div className="flex items-center gap-2.5 shrink-0">
         {children}
       </div>
-      {tip && tooltip && createPortal(
-        <div className="settings-tip" style={{ right: tip.right, top: tip.top, maxWidth: tip.maxW }}>{tooltip}</div>,
-        document.body,
-      )}
     </div>
   );
 }
@@ -420,7 +400,7 @@ function ClickerSection({
                 value={unit}
                 onChange={(e) => setUnit(e.target.value as 'ms' | 'cps')}
                 className="w-6 h-7 text-center text-[10px] text-text-secondary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid font-mono cursor-pointer appearance-none shrink-0"
-                title="Unit"
+                data-tip="Unit"
               >
                 <option value="cps">/s</option>
                 <option value="ms">ms</option>
@@ -489,7 +469,7 @@ function ClickerSection({
                   !useArea,
                 )}
                 aria-label={useArea ? 'Disable area' : 'Enable area'}
-                title={useArea ? 'On — click to turn off' : 'Off — click to turn on'}
+                data-tip={useArea ? 'On — click to turn off' : 'Off — click to turn on'}
                 className="h-full pl-2 pr-1.5 flex items-center shrink-0 cursor-pointer transition-colors hover:bg-[rgba(127,127,127,0.18)]"
               >
                 <span
@@ -502,7 +482,7 @@ function ClickerSection({
               <button
                 onClick={() => send({ type: 'clicker:configureArea', payload: { requestId: `clicker-area-${Date.now()}` } })}
                 className="flex-1 min-w-0 h-full flex items-center justify-end pr-2 font-mono cursor-pointer hover:underline"
-                title={area
+                data-tip={area
                   ? `Current: ${area.w}×${area.h} at (${area.x}, ${area.y}). Click to redraw.`
                   : 'Drag a rectangle on screen'}
               >
@@ -519,7 +499,7 @@ function ClickerSection({
                     onChange('cursorClickArea', null);
                   }}
                   className="absolute right-0.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus:opacity-100 text-text-tertiary hover:text-text-primary text-[12px] leading-none px-0.5 transition-opacity"
-                  title="Clear area"
+                  data-tip="Clear area"
                   tabIndex={-1}
                 >
                   ✕

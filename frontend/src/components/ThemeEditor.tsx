@@ -143,7 +143,7 @@ function ColorRow({ label, colorKey, value, baseValue, mode, contrastBg, onChang
               if (picked) onChange(colorKey, withOriginalAlpha(picked, value));
             }}
             className="p-0.5 rounded text-text-disabled hover:text-accent hover:bg-bg-elevated transition-colors"
-            title="Pick color from screen"
+            data-tip="Pick color from screen"
           >
             <Pipette size={12} />
           </button>
@@ -159,7 +159,7 @@ function ColorRow({ label, colorKey, value, baseValue, mode, contrastBg, onChang
           return (
             <span
               className={`px-1.5 py-px text-[9px] font-mono rounded border ${tone.bg} ${tone.fg} ${tone.border}`}
-              title={`Contrast ratio ${ratio.toFixed(1)}:1 — WCAG AA wants 4.5+ for body text`}
+              data-tip={`Contrast ratio ${ratio.toFixed(1)}:1 — WCAG AA wants 4.5+ for body text`}
             >
               {tone.icon} {ratio.toFixed(1)}
             </span>
@@ -169,7 +169,7 @@ function ColorRow({ label, colorKey, value, baseValue, mode, contrastBg, onChang
         <button
           onClick={() => onReset(colorKey)}
           className={`p-0.5 rounded text-text-disabled hover:text-text-primary hover:bg-bg-elevated transition-colors ${isOverridden ? 'visible' : 'invisible'}`}
-          title="Reset to base"
+          data-tip="Reset to base"
         >
           <RotateCcw size={12} />
         </button>
@@ -281,7 +281,7 @@ function SliderSetting({ label, value, min, max, unit, defaultValue, onChange }:
           <div
             className="absolute pointer-events-none"
             style={{ left: `${defaultPct}%`, top: '50%', transform: 'translate(-50%, -50%)' }}
-            title={`Default: ${defaultValue}${unit}`}
+            data-tip={`Default: ${defaultValue}${unit}`}
           >
             <div className="w-0.5 h-2.5 bg-text-tertiary/60" />
           </div>
@@ -343,7 +343,7 @@ function AppearanceColorRow({ label, value, defaultValue, onChange }: {
       <button
         onClick={() => onChange(defaultValue)}
         className={`p-0.5 rounded text-text-disabled hover:text-text-primary hover:bg-bg-elevated transition-colors ${isCustom ? 'visible' : 'invisible'}`}
-        title="Reset to default"
+        data-tip="Reset to default"
       >
         <RotateCcw size={12} />
       </button>
@@ -630,7 +630,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                     <button
                       onClick={(e) => { e.stopPropagation(); deleteCustomPreset(theme.id); }}
                       className="absolute top-1 right-1 w-5 h-5 rounded bg-bg-base/80 text-text-tertiary hover:text-recording opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center justify-center"
-                      title="Delete this custom preset"
+                      data-tip="Delete this custom preset"
                     >
                       <X size={11} />
                     </button>
@@ -690,7 +690,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                         }}
                         disabled={noPick}
                         className="ml-auto flex items-center gap-1 px-2.5 py-0.5 text-[10px] rounded-full border border-border-default text-text-tertiary hover:text-text-primary hover:border-accent-solid/40 hover:bg-bg-elevated disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        title={noPick ? 'No other presets in this filter' : 'Pick a random preset from the current filter'}
+                        data-tip={noPick ? 'No other presets in this filter' : 'Pick a random preset from the current filter'}
                       >
                         <Dices size={11} />
                         Surprise me
@@ -888,7 +888,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                         }}
                         className="w-4 h-4 rounded border border-border-default hover:scale-110 transition-transform flex items-center justify-center"
                         style={{ backgroundColor: c }}
-                        title={copiedRecent === i ? `${c} — copied!` : `${c} — click to copy`}
+                        data-tip={copiedRecent === i ? `${c} — copied!` : `${c} — click to copy`}
                       >
                         {copiedRecent === i && <Check size={9} className="text-white drop-shadow-[0_0_1px_rgba(0,0,0,0.8)]" />}
                       </button>
@@ -1273,7 +1273,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
             onClick={() => { clearAllOverrides(); resetUISettings(); }}
             disabled={!hasOverrides && JSON.stringify(config.uiSettings) === JSON.stringify(DEFAULT_UI_SETTINGS)}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-surface border border-border-subtle transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Clear color overrides and reset all UI settings to defaults"
+            data-tip="Clear color overrides and reset all UI settings to defaults"
           >
             <RotateCcw size={11} />
             Reset all
@@ -1281,7 +1281,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
           <button
             onClick={handleExportFile}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] text-text-secondary hover:text-text-primary bg-bg-elevated hover:bg-bg-surface border border-border-subtle transition-colors"
-            title="Save the current theme as a JSON file"
+            data-tip="Save the current theme as a JSON file"
           >
             <Download size={11} />
             Export

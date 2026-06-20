@@ -87,7 +87,7 @@ function ResponsiveProfileName({ name, actionCount }: { name: string; actionCoun
     <div ref={containerRef} className="flex-1 min-w-0 relative">
       <span
         className={`block font-semibold text-text-primary truncate ${size === 'sm' ? 'text-sm' : 'text-base'}`}
-        title={showCount ? `${name} · ${countLabel}` : name}
+        data-tip={showCount ? `${name} · ${countLabel}` : name}
       >
         {name}
         {showCount && (

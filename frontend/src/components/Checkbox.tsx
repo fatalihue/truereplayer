@@ -46,7 +46,7 @@ export function Checkbox({
       role="checkbox"
       aria-checked={indeterminate ? 'mixed' : checked}
       onClick={handleClick}
-      title={title}
+      data-tip={title}
       className={`flex items-center gap-2 cursor-pointer select-none group ${className}`}
     >
       <span

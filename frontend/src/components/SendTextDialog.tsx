@@ -216,7 +216,7 @@ function ClipboardTransformPopover({ onInsert, onClose }: ClipboardTransformPopo
           type="button"
           onClick={onClose}
           className="text-text-tertiary hover:text-text-primary text-sm leading-none px-1"
-          title="Close"
+          data-tip="Close"
         >
           ✕
         </button>
@@ -399,13 +399,13 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
             {mode === 'add' ? 'Insert Text' : 'Edit Text'}
           </h3>
           <div className="flex items-center gap-1">
-            <button type="button" onClick={() => selectPanel('emoji')} className={tabBtnClass(activePanel === 'emoji')} title="Emoji">
+            <button type="button" onClick={() => selectPanel('emoji')} className={tabBtnClass(activePanel === 'emoji')} data-tip="Emoji">
               <Smile size={14} /> Emoji
             </button>
-            <button type="button" onClick={() => selectPanel('variables')} className={tabBtnClass(activePanel === 'variables')} title="Variables">
+            <button type="button" onClick={() => selectPanel('variables')} className={tabBtnClass(activePanel === 'variables')} data-tip="Variables">
               <Clock size={14} /> Variables
             </button>
-            <button type="button" onClick={() => selectPanel('snippets')} className={tabBtnClass(activePanel === 'snippets')} title="Snippets">
+            <button type="button" onClick={() => selectPanel('snippets')} className={tabBtnClass(activePanel === 'snippets')} data-tip="Snippets">
               <BookmarkPlus size={14} /> Snippets
             </button>
           </div>
@@ -492,7 +492,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                     ? 'text-accent-light bg-accent-solid/15 border-accent-solid/50'
                                     : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40'
                                 }`}
-                                title="Build a {clipboard:...} transform"
+                                data-tip="Build a {clipboard:...} transform"
                               >
                                 <Wand2 size={11} className="shrink-0" />
                                 {item.label}
@@ -504,7 +504,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                 type="button"
                                 onClick={() => handleVarInsert(item.var)}
                                 className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
-                                title={item.var}
+                                data-tip={item.var}
                               >
                                 {item.label}
                               </button>
@@ -627,7 +627,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                               onClick={() => handleInsertSnippet(s.text)}
                               disabled={deletingSnippetId === s.id}
                               className="flex-1 text-left min-w-0 disabled:cursor-default"
-                              title={deletingSnippetId === s.id ? '' : 'Insert at cursor'}
+                              data-tip={deletingSnippetId === s.id ? '' : 'Insert at cursor'}
                             >
                               <div className="text-xs font-medium text-text-primary truncate">{s.name}</div>
                               <div className="text-[11px] text-text-tertiary truncate mt-0.5">{s.text}</div>
@@ -639,7 +639,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                   type="button"
                                   onClick={() => handleDeleteSnippet(s.id)}
                                   className="shrink-0 p-1 rounded text-red-300 bg-red-500/20 hover:bg-red-500/35 border border-red-500/40 transition-colors"
-                                  title="Confirm delete"
+                                  data-tip="Confirm delete"
                                   autoFocus
                                 >
                                   <Check size={12} />
@@ -648,7 +648,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                   type="button"
                                   onClick={() => setDeletingSnippetId(null)}
                                   className="shrink-0 p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-surface transition-colors"
-                                  title="Cancel"
+                                  data-tip="Cancel"
                                 >
                                   <X size={12} />
                                 </button>
@@ -659,7 +659,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                   type="button"
                                   onClick={() => setEditingSnippetId(s.id)}
                                   className="shrink-0 p-1 text-text-disabled hover:text-accent-light transition-colors opacity-0 group-hover:opacity-100"
-                                  title="Edit snippet"
+                                  data-tip="Edit snippet"
                                 >
                                   <Pencil size={12} />
                                 </button>
@@ -667,7 +667,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                   type="button"
                                   onClick={() => setDeletingSnippetId(s.id)}
                                   className="shrink-0 p-1 text-text-disabled hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
-                                  title="Delete snippet"
+                                  data-tip="Delete snippet"
                                 >
                                   <Trash2 size={12} />
                                 </button>

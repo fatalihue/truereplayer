@@ -286,7 +286,7 @@ export function ImageCropper({ imageBase64, onSave, onCancel }: ImageCropperProp
               onClick={() => onSave(crop)}
               disabled={!canSave}
               className="px-3 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title={canSave ? 'Apply crop' : 'Pick a smaller region first'}
+              data-tip={canSave ? 'Apply crop' : 'Pick a smaller region first'}
             >
               Save crop
             </button>

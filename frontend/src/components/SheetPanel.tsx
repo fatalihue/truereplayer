@@ -1099,7 +1099,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       >
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-4 border-b border-border-subtle shrink-0">
-          <button onClick={onClose} className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" title="Close panel">
+          <button onClick={onClose} className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip="Close panel">
             <ArrowLeft size={16} />
           </button>
           <div>
@@ -1127,7 +1127,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               {clickHalfSuffix && (
                 <span
                   className="px-1.5 py-[1px] rounded text-[10px] font-medium border bg-bg-card text-text-secondary border-border-default"
-                  title={clickHalfSuffix === 'Down' ? 'Button pressed down' : 'Button released'}
+                  data-tip={clickHalfSuffix === 'Down' ? 'Button pressed down' : 'Button released'}
                 >
                   {clickHalfSuffix === 'Down' ? '↓ press' : '↑ release'}
                 </span>
@@ -1202,7 +1202,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                       ? 'bg-bg-elevated text-text-primary'
                       : 'text-text-tertiary hover:text-text-secondary'
                   }`}
-                  title="TRUE branch fires when the probe succeeds (image / pixel found)"
+                  data-tip="TRUE branch fires when the probe succeeds (image / pixel found)"
                 >
                   Found
                 </button>
@@ -1214,7 +1214,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                       ? 'bg-bg-elevated text-text-primary'
                       : 'text-text-tertiary hover:text-text-secondary'
                   }`}
-                  title="TRUE branch fires when the probe FAILS (image / pixel NOT found) — IFNOT"
+                  data-tip="TRUE branch fires when the probe FAILS (image / pixel NOT found) — IFNOT"
                 >
                   NOT Found
                 </button>
@@ -1251,7 +1251,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 type="button"
                 onClick={() => action?.imageBase64 && setCropperOpen(true)}
                 disabled={!action?.imageBase64}
-                title={action?.imageBase64 ? 'Click to crop the reference image' : ''}
+                data-tip={action?.imageBase64 ? 'Click to crop the reference image' : ''}
                 className="w-full rounded border border-border-default bg-bg-elevated overflow-hidden block hover:border-accent-solid/60 transition-colors disabled:cursor-default disabled:hover:border-border-default"
               >
                 {action?.imageBase64 ? (
@@ -1282,7 +1282,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     send({ type: 'waitimage:recapture', payload: { index: actionIndex } });
                   }}
                   className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
-                  title="Recapture reference image"
+                  data-tip="Recapture reference image"
                 >
                   <RefreshCw size={12} />
                   Recapture
@@ -1291,7 +1291,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   onClick={handleTestMatch}
                   disabled={!action?.imagePath || testMatchRequestId != null}
                   className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Capture the screen now and report the match score"
+                  data-tip="Capture the screen now and report the match score"
                 >
                   <PlayCircle size={12} />
                   {testMatchRequestId != null ? 'Testing…' : 'Test match'}
@@ -1345,7 +1345,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 <button
                   onClick={handleConfigureSearchRegion}
                   className="px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
-                  title="Draw a sub-rectangle of the screen to limit where the match runs. Reduces CPU and false positives."
+                  data-tip="Draw a sub-rectangle of the screen to limit where the match runs. Reduces CPU and false positives."
                 >
                   Configure…
                 </button>
@@ -1353,7 +1353,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   <button
                     onClick={() => setWaitImageSearchRegion(null)}
                     className="px-2 py-1.5 rounded text-xs text-text-tertiary hover:text-[#C42B1C] hover:bg-bg-card transition-colors"
-                    title="Clear search region (revert to full screen)"
+                    data-tip="Clear search region (revert to full screen)"
                   >
                     <X size={12} />
                   </button>
@@ -1478,7 +1478,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   type="button"
                   onClick={handlePickPixelColor}
                   className="flex items-center gap-1.5 h-7 px-2.5 text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default rounded hover:bg-bg-card hover:text-text-primary transition-colors"
-                  title="Click anywhere on screen — captures X, Y, and the pixel colour in one shot"
+                  data-tip="Click anywhere on screen — captures X, Y, and the pixel colour in one shot"
                 >
                   <Pipette size={12} />
                   Pick from screen
@@ -1490,7 +1490,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   type="button"
                   onClick={handleTestPixelMatch}
                   className="flex items-center gap-1.5 h-7 px-2.5 text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default rounded hover:bg-bg-card hover:text-text-primary transition-colors"
-                  title="Read the live pixel and compare against the target colour"
+                  data-tip="Read the live pixel and compare against the target colour"
                 >
                   <PlayCircle size={12} />
                   Test match
@@ -1526,7 +1526,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 <span
                   className="w-7 h-7 rounded border border-border-default shrink-0"
                   style={{ background: /^#?(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(pixelColor.trim()) ? (pixelColor.trim().startsWith('#') ? pixelColor.trim() : '#' + pixelColor.trim()) : 'transparent' }}
-                  title={pixelColor || 'No colour set'}
+                  data-tip={pixelColor || 'No colour set'}
                 />
                 <input
                   type="text"
@@ -1688,7 +1688,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                           ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
                           : 'text-text-tertiary border-border-default bg-bg-elevated hover:text-text-secondary hover:bg-bg-card'
                       }`}
-                      title={p.ms === 0 ? 'Wait forever (resume hotkey only)' : `Wait ${p.label}`}
+                      data-tip={p.ms === 0 ? 'Wait forever (resume hotkey only)' : `Wait ${p.label}`}
                     >
                       {p.label}
                     </button>
@@ -1734,7 +1734,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 {isBrowserNavigate ? 'URL' : 'CSS Selector'}
                 {/* #2 — Tier shield indicator (only for non-Navigate selectors) */}
                 {!isBrowserNavigate && selectorForTier && (
-                  <span title={`${tierMeta.label} selector`} style={{ color: tierMeta.color, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                  <span data-tip={`${tierMeta.label} selector`} style={{ color: tierMeta.color, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                     <tierMeta.Icon size={12} />
                     <span style={{ fontSize: 9, fontWeight: 600 }}>{tier}</span>
                   </span>
@@ -1763,7 +1763,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                         ? 'bg-accent-solid/20 border-accent-solid text-accent-light'
                         : 'bg-bg-input border-border-default text-text-tertiary hover:text-text-primary hover:border-text-tertiary'
                     }`}
-                    title="Pick element from page"
+                    data-tip="Pick element from page"
                   >
                     <Crosshair size={14} />
                   </button>
@@ -1778,7 +1778,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     <button
                       onClick={() => setShowAlternatives(false)}
                       className="text-[10px] text-text-tertiary hover:text-text-primary"
-                      title="Dismiss alternatives"
+                      data-tip="Dismiss alternatives"
                     >
                       ×
                     </button>
@@ -1790,7 +1790,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                         key={i}
                         onClick={() => { setKey(alt.selector); setShowAlternatives(false); }}
                         className="w-full text-left px-2 py-1 rounded text-[11px] hover:bg-bg-card transition-colors flex items-center gap-1.5"
-                        title={alt.description}
+                        data-tip={alt.description}
                       >
                         <span style={{ color: m.color, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
                           <m.Icon size={10} />
@@ -1811,7 +1811,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             <div>
               <label
                 className="block text-[11px] font-semibold text-text-tertiary uppercase tracking-wide mb-1.5"
-                title="Takes priority over CSS selector when filled"
+                data-tip="Takes priority over CSS selector when filled"
               >
                 TEXT MATCH
               </label>
@@ -1820,7 +1820,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   value={textMode}
                   onChange={(e) => setTextMode(e.target.value as TextMode)}
                   className="h-8 px-1.5 text-[11px] bg-bg-input border border-border-default rounded text-text-secondary outline-none focus:border-accent-solid"
-                  title="Match mode"
+                  data-tip="Match mode"
                 >
                   {TEXT_MODES.map(m => (
                     <option key={m.value} value={m.value}>{m.label}</option>
@@ -1855,7 +1855,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               <div>
                 <label
                   className="block text-[11px] font-semibold text-text-tertiary uppercase tracking-wide mb-1.5"
-                  title="Optional. Wait until URL matches glob (*) or /regex/. Useful for redirects."
+                  data-tip="Optional. Wait until URL matches glob (*) or /regex/. Useful for redirects."
                 >
                   URL PATTERN
                 </label>
@@ -1870,7 +1870,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               <div>
                 <label
                   className="block text-[11px] font-semibold text-text-tertiary uppercase tracking-wide mb-1.5"
-                  title="Optional. Wait for element to appear after page load."
+                  data-tip="Optional. Wait for element to appear after page load."
                 >
                   WAIT ELEMENT
                 </label>
@@ -1921,7 +1921,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     type="button"
                     onClick={() => browserTextEditorRef.current?.insertText(item.var)}
                     className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
-                    title={item.title}
+                    data-tip={item.title}
                   >
                     {item.label}
                   </button>
@@ -1938,7 +1938,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     type="button"
                     onClick={() => browserTextEditorRef.current?.insertText(item.var)}
                     className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
-                    title={`Inserts the ${item.label.toLowerCase()} value at this position`}
+                    data-tip={`Inserts the ${item.label.toLowerCase()} value at this position`}
                   >
                     {item.label}
                   </button>
@@ -1953,7 +1953,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                       ? 'text-accent-light bg-accent-solid/15 border-accent-solid/50'
                       : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40'
                   }`}
-                  title={showMoreTypeChips ? 'Hide extra keys' : 'More keys (Escape, Backspace, Delete, arrows)'}
+                  data-tip={showMoreTypeChips ? 'Hide extra keys' : 'More keys (Escape, Backspace, Delete, arrows)'}
                 >
                   ⋯
                 </button>
@@ -1976,7 +1976,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                       type="button"
                       onClick={() => browserTextEditorRef.current?.insertText(item.var)}
                       className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
-                      title={`Press ${item.label} key at this position`}
+                      data-tip={`Press ${item.label} key at this position`}
                     >
                       {item.label}
                     </button>
@@ -2002,7 +2002,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 title="Use clipboard paste (instant) instead of typing char-by-char"
               />
               <div className="flex items-center gap-2">
-                <label className="text-[11px] text-text-tertiary" title="Delay between characters in ms (typing only). 0 = instant, blank = auto.">Char delay (ms)</label>
+                <label className="text-[11px] text-text-tertiary" data-tip="Delay between characters in ms (typing only). 0 = instant, blank = auto.">Char delay (ms)</label>
                 <NumberInput
                   // typeDelay '' = "auto" (engine picks a default per text length). Pass
                   // null so the placeholder shows; user clearing the field via onClear
@@ -2111,7 +2111,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 onClick={handleTestAction}
                 disabled={testRequestId !== null}
                 className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-accent-solid/40 bg-accent-solid/10 hover:bg-accent-solid/20 text-accent-light transition-colors disabled:opacity-60"
-                title="Run this action live to verify the selector / settings"
+                data-tip="Run this action live to verify the selector / settings"
               >
                 <PlayCircle size={13} />
                 {testRequestId ? 'Running…' : 'Test action'}
@@ -2224,7 +2224,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     onClick={handlePickPosition}
                     disabled={pickPositionRequestId != null}
                     className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Click anywhere on screen to set X/Y"
+                    data-tip="Click anywhere on screen to set X/Y"
                   >
                     <Crosshair size={13} />
                     {pickPositionRequestId != null ? 'Picking…' : 'Pick from screen'}
@@ -2238,7 +2238,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                         ? ''
                         : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
                     }`}
-                    title={coordCopyFlash ? 'Copied!' : 'Copy X,Y to clipboard'}
+                    data-tip={coordCopyFlash ? 'Copied!' : 'Copy X,Y to clipboard'}
                   >
                     {coordCopyFlash ? <Check size={12} /> : <Copy size={12} />}
                   </button>
@@ -2251,7 +2251,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                         ? ''
                         : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
                     }`}
-                    title={coordPasteError ? 'Clipboard does not contain valid coords' : 'Paste X,Y from clipboard'}
+                    data-tip={coordPasteError ? 'Clipboard does not contain valid coords' : 'Paste X,Y from clipboard'}
                   >
                     {coordPasteError ? <X size={12} /> : <ClipboardPaste size={12} />}
                   </button>

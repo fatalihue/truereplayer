@@ -202,7 +202,7 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
                     type="button"
                     onClick={() => setShowEmojiPicker(v => !v)}
                     className="w-12 h-12 flex items-center justify-center text-2xl bg-bg-input border border-border-subtle rounded hover:border-accent-solid transition-colors"
-                    title="Pick an emoji"
+                    data-tip="Pick an emoji"
                   >
                     {iconEmoji || <Smile size={18} className="text-text-tertiary" />}
                   </button>
@@ -277,7 +277,7 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
                         type="button"
                         onClick={() => removeTag(t)}
                         className="hover:text-amber-400 transition-colors"
-                        title="Remove"
+                        data-tip="Remove"
                       >
                         <X size={10} />
                       </button>

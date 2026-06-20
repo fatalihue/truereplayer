@@ -356,7 +356,7 @@ export function TargetConfigDialog({
                       send({ type: 'process:list', payload: {} });
                     }
                   }}
-                  title="Pick from running processes"
+                  data-tip="Pick from running processes"
                   className={`p-1 transition-colors ${showProcessPicker ? 'text-accent' : 'text-text-tertiary hover:text-text-secondary'}`}
                 >
                   <ChevronDown size={14} />
@@ -498,7 +498,7 @@ export function TargetConfigDialog({
                   : 'bg-replay/10 text-replay border-replay/30 hover:bg-replay/15'
                 : 'text-text-secondary border-border-default hover:bg-bg-elevated'
           }`}
-          title={testInFlight
+          data-tip={testInFlight
             ? 'Sending test request…'
             : testResult
               ? (testResult.error
@@ -541,7 +541,7 @@ export function TargetConfigDialog({
               title attr on the row surfaces the reason via tooltip on hover. */}
           <div
             className="flex items-center justify-between"
-            title={relativeToggleDisabled
+            data-tip={relativeToggleDisabled
               ? 'Set a process name or window title first — relative coordinates need a target window to anchor to.'
               : undefined}
           >
@@ -591,7 +591,7 @@ export function TargetConfigDialog({
                     }
                   }}
                   className="px-2 py-0.5 text-[10px] font-medium text-text-primary bg-accent-solid/30 hover:bg-accent-solid/50 rounded transition-colors"
-                  title={convertAlsoApplies
+                  data-tip={convertAlsoApplies
                     ? 'Save the target above AND migrate stored action coords in one shot'
                     : 'Migrate stored action coords using the saved target'}
                 >
@@ -600,7 +600,7 @@ export function TargetConfigDialog({
                 <button
                   onClick={() => { setConvertHint(null); setConvertHintDismissed(true); }}
                   className="px-1.5 py-0.5 text-[10px] text-text-tertiary hover:text-text-primary transition-colors"
-                  title="Skip — actions stay in their original coord space"
+                  data-tip="Skip — actions stay in their original coord space"
                 >
                   Skip
                 </button>
@@ -616,11 +616,11 @@ export function TargetConfigDialog({
               them with its own target). Convert Coordinates is profile-only because it rewrites
               the actions of the active profile, not a property of the target itself. */}
           <div className="flex items-center justify-between">
-            <span className="text-xs text-text-secondary" title="Restore the target window to its saved position before replay">Restore Position</span>
+            <span className="text-xs text-text-secondary" data-tip="Restore the target window to its saved position before replay">Restore Position</span>
             <Toggle isOn={restorePosition} onChange={setRestorePosition} />
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-text-secondary" title="Restore the target window to its saved size before replay (un-maximizes if needed)">Restore Size</span>
+            <span className="text-xs text-text-secondary" data-tip="Restore the target window to its saved size before replay (un-maximizes if needed)">Restore Size</span>
             <Toggle isOn={restoreSize} onChange={setRestoreSize} />
           </div>
           {onUpdateGeometry && (
@@ -632,7 +632,7 @@ export function TargetConfigDialog({
               })}
               disabled={submitDisabled}
               className="w-full h-7 text-[11px] text-text-secondary border border-border-default rounded hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Capture the current size and position of the target window matching the fields above"
+              data-tip="Capture the current size and position of the target window matching the fields above"
             >
               Update Window Size &amp; Position
             </button>

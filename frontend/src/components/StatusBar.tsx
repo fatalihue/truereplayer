@@ -184,7 +184,7 @@ export function StatusBar() {
                   <span
                     className="flex items-center gap-1.5 text-[11px] font-mono whitespace-nowrap"
                     style={{ color: 'var(--color-action-runprofile-fg)' }}
-                    title={chainLabel}
+                    data-tip={chainLabel}
                   >
                     <Repeat size={10} />
                     {chainLabel}
@@ -204,7 +204,7 @@ export function StatusBar() {
                   <button
                     onClick={() => send({ type: 'replay:resume', payload: {} })}
                     className="px-2 py-0.5 text-[10px] font-medium rounded border border-border-default text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors shrink-0"
-                    title="Resume replay"
+                    data-tip="Resume replay"
                   >
                     Resume
                   </button>

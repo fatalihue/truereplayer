@@ -245,7 +245,7 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
                         ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
                         : 'text-text-tertiary border-border-default bg-bg-elevated hover:text-text-secondary hover:bg-bg-card'
                     }`}
-                    title={p.ms === 0 ? 'No timeout — resume by hotkey only' : `Wait ${p.label}`}
+                    data-tip={p.ms === 0 ? 'No timeout — resume by hotkey only' : `Wait ${p.label}`}
                   >
                     {p.label}
                   </button>

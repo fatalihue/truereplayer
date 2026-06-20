@@ -187,14 +187,14 @@ function Header({ token, onClose }: { token: string; onClose: () => void }) {
   return (
     <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-border-subtle bg-bg-card shrink-0">
       <Wand2 size={14} className="text-accent-light shrink-0" />
-      <div className="text-xs font-mono text-[#f0abfc] flex-1 truncate" title={token}>
+      <div className="text-xs font-mono text-[#f0abfc] flex-1 truncate" data-tip={token}>
         {token}
       </div>
       <button
         type="button"
         onClick={onClose}
         className="text-text-tertiary hover:text-text-primary text-sm leading-none px-1"
-        title="Close"
+        data-tip="Close"
       >
         ✕
       </button>
@@ -215,7 +215,7 @@ function Footer({
         type="button"
         onClick={onDelete}
         className="flex items-center gap-1 h-7 px-2 text-[11px] rounded text-red-300 hover:bg-red-500/15 border border-transparent hover:border-red-500/30 transition-colors"
-        title="Remove this token"
+        data-tip="Remove this token"
       >
         <Trash2 size={12} />
         Delete

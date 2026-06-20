@@ -50,7 +50,7 @@ export function SendTextPreview({ text }: SendTextPreviewProps) {
           <span
             key={idx}
             className="inline-flex items-center px-1.5 py-[1px] mx-[1px] text-[12px] font-mono rounded text-[var(--color-action-sendtext-fg)] bg-[var(--color-action-sendtext-fg)]/15 border border-[var(--color-action-sendtext-fg)]/40 select-none align-middle"
-            title={segment.value}
+            data-tip={segment.value}
           >
             {segment.value.slice(1, -1)}
           </span>
