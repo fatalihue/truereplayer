@@ -254,6 +254,23 @@ html[data-animations="true"] .record-btn-glow {
   animation: record-btn-glow 1.6s ease-in-out infinite;
 }
 
+/* REPLAY-mode alert — mirrors the REC badge ring + button glow (so an active replay is just as
+   unmistakable) but in the replay accent (blue) to match the "Replaying" badge. */
+@keyframes replay-badge-pulse {
+  from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 60%, transparent); }
+  to   { box-shadow: 0 0 0 8px transparent; }
+}
+html[data-animations="true"] .replay-badge-pulse {
+  animation: replay-badge-pulse 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes replay-btn-glow {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50%      { box-shadow: 0 0 14px 2px color-mix(in srgb, var(--color-accent) 60%, transparent); }
+}
+html[data-animations="true"] .replay-btn-glow {
+  animation: replay-btn-glow 1.6s ease-in-out infinite;
+}
+
 /* Sheet panel slider — themed range input used by the Slider primitive
    (components/sheet/Slider.tsx). WebView2 is Chromium-only, so the -webkit
    pseudo-elements cover every runtime this app has. */

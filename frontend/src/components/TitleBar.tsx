@@ -52,11 +52,11 @@ export function TitleBar({ onOpenCommandPalette }: TitleBarProps) {
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Status badge — while recording it emits an expanding red ring (see
-          .rec-badge-pulse in index.css) so the REC state is unmistakable without
-          a full-viewport frame. */}
+      {/* Status badge — while recording (red) OR replaying (accent) it emits an expanding ring
+          (.rec-badge-pulse / .replay-badge-pulse in index.css) so the live state is unmistakable
+          without a full-viewport frame. */}
       <div
-        className={`no-drag flex items-center gap-1.5 px-2.5 py-1 rounded-full ${cfg.bg} border ${cfg.border} ${status === 'recording' ? 'rec-badge-pulse' : ''}`}
+        className={`no-drag flex items-center gap-1.5 px-2.5 py-1 rounded-full ${cfg.bg} border ${cfg.border} ${status === 'recording' ? 'rec-badge-pulse' : status === 'replaying' ? 'replay-badge-pulse' : ''}`}
         style={{ marginRight: CAPTION_BUTTONS_WIDTH_PX }}
       >
         <div className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} style={{ animation: 'pulse-dot 2s ease-in-out infinite' }} />

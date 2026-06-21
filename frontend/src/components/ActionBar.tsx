@@ -127,7 +127,7 @@ export function ActionBar() {
         <button
           onClick={handleReplay}
           disabled={!buttonStates.replayEnabled}
-          className={`flex items-center gap-2 px-5 py-2 rounded text-[13px] font-semibold text-white transition-colors ${replayBtnClass} ${PRIMARY_BTN} disabled:opacity-50 disabled:cursor-not-allowed`}
+          className={`flex items-center gap-2 px-5 py-2 rounded text-[13px] font-semibold text-white transition-colors ${replayBtnClass} ${PRIMARY_BTN} ${isReplaying ? 'replay-btn-glow' : ''} disabled:opacity-50 disabled:cursor-not-allowed`}
         >
           {isReplaying
             ? <Square size={11} fill="white" className="shrink-0" />
