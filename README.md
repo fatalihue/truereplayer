@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/Square150x150Logo.png" width="104" alt="TrueReplayer logo" />
+<img src="Assets/Square150x150Logo.png" width="104" alt="TrueReplayer logo" />
 
 # TrueReplayer
 
