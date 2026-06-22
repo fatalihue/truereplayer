@@ -80,6 +80,11 @@ As configurações de **Execution** (aba Settings → Profile) controlam o tempo
 
 A tabela central lista todas as ações do perfil. Colunas: **caixa de seleção · Action (pílula colorida) · Details · Delay · Notes**.
 
+<p align="center">
+  <img src="img/main.png" width="820" alt="A janela principal e a grade de ações do TrueReplayer" /><br>
+  <sub><i>Perfis &amp; pastas à esquerda, a grade de ações no centro, configurações à direita.</i></sub>
+</p>
+
 - **Selecionar** — clique numa linha (única), `Ctrl+Click` (alternar), `Shift+Click` (intervalo), ou use as caixas de seleção.
 - **Editar na própria linha** — clique numa célula para editar **Delay**, **Notes**, **coordenadas** (`x, y` para linhas de mouse — os separadores podem ser vírgula/ponto e vírgula/espaço) ou a **Key** (linhas de teclado capturam a próxima tecla que você pressionar). Confirme com **Enter/Tab**, cancele com **Esc**.
 - **Reordenar** — arraste uma linha, ou selecione e pressione **`Alt+↑` / `Alt+↓`**.
@@ -118,6 +123,11 @@ Insira ações pela **barra de ferramentas** (Send Keystroke, Send Text, Pause, 
 
 Faça uma macro reagir ao que está na tela.
 
+<p align="center">
+  <img src="img/conditionals.png" width="820" alt="Dois blocos If/Else/EndIf na grade de ações" /><br>
+  <sub><i>Uma verificação de pixel negada (<code>if NOT</code>) e uma verificação de imagem com ramo <code>else</code>.</i></sub>
+</p>
+
 - Um **If** executa uma **sondagem**: *Image Found* (esta imagem está visível?) ou *Pixel Color Match* (este pixel corresponde a esta cor?).
 - Se a sondagem for **verdadeira**, as ações entre **If** e **Else/EndIf** rodam; se **falsa**, a execução salta para a ramificação **Else** (se houver) ou para depois do **EndIf**.
 - **Negate (IFNOT)** inverte o teste — a ramificação *verdadeira* roda quando a sondagem **falha**.
@@ -145,6 +155,11 @@ Faça uma macro reagir ao que está na tela.
 
 Vincule um perfil a um gatilho para que ele rode sem abrir o aplicativo.
 
+<p align="center">
+  <img src="img/hotkey.png" width="320" alt="O diálogo Assign Hotkey com os modos de gatilho" /><br>
+  <sub><i>Capture uma combinação de teclas e escolha um modo de gatilho.</i></sub>
+</p>
+
 - **Hotkey** — clique com o botão direito num perfil → **Assign hotkey**, pressione a combinação (ex.: `Ctrl+Alt+F1`), escolha um modo de gatilho. Dispara globalmente.
 - **Hotstring** — atribua uma sequência digitada (ex.: `qqsig`); ao terminar de digitá-la, o perfil roda.
 - **Chave-mestra** — `Pause` (ou Settings → Recording → **Profile Keys**) ativa/desativa **todas** as hotkeys e hotstrings de uma vez.
@@ -165,6 +180,11 @@ Vincule um perfil a um gatilho para que ele rode sem abrir o aplicativo.
 ## Alvo de janela e coordenadas relativas
 
 Vincule um perfil (ou uma pasta inteira) a uma janela de aplicativo específica.
+
+<p align="center">
+  <img src="img/target.png" width="360" alt="O diálogo Target Configuration" /><br>
+  <sub><i>Corresponda a uma janela por processo / título, com coordenadas relativas e opções de restauração.</i></sub>
+</p>
 
 - **Alvo de janela (window target)** — defina um nome de processo e/ou título de janela (correspondência por *contains* ou *regex*). A **hotkey do perfil só dispara quando aquela janela está em primeiro plano**. Use **Detect window** para clicar numa janela e preencher os campos automaticamente, e **Test** para verificar a correspondência.
 - **Coordenadas relativas** — armazene os cliques relativos ao canto superior esquerdo da janela em vez da tela, para que a macro continue acertando o ponto certo quando a janela se mover ou for redimensionada. Use **Convert to Relative / Absolute** para migrar as coordenadas de uma macro existente.
@@ -191,6 +211,11 @@ Mude para **Clicker** com **`ScrollLock`** (ou o botão Macro/Clicker). O painel
 
 Inicie/pare com **`PageDown`**, pause/retome com **`PageUp`**. Enquanto roda, o **painel ao vivo** mostra a contagem de cliques, a taxa, o tempo decorrido, o progresso dos loops e o ETA.
 
+<p align="center">
+  <img src="img/clicker.png" width="820" alt="O painel do Clicker enquanto roda" /><br>
+  <sub><i>Contagem ao vivo, taxa, tempo decorrido, progresso do loop, ETA e uma barra de progresso.</i></sub>
+</p>
+
 ---
 
 ## Game mode
@@ -206,6 +231,11 @@ Para jogos (ex.: Roblox) que ignoram um "teleporte" instantâneo do cursor, o *G
 ## Send Text
 
 O editor **Insert Text** compõe o texto que é injetado via colagem do clipboard (para que layouts e caracteres especiais sobrevivam).
+
+<p align="center">
+  <img src="img/sendtext.png" width="820" alt="O editor Send Text com chips de token e uma paleta de teclas/clipboard" /><br>
+  <sub><i>Chips de token editáveis inline, com uma paleta de teclas &amp; clipboard ao lado.</i></sub>
+</p>
 
 - **Tokens** — incorpore teclas e valores especiais: `{enter}`, `{tab}`, `{space}`, setas e outras teclas; `{date}` / `{time}` / `{datetime}`; `{delay:500}` para pausar no meio do texto. Teclas repetíveis aceitam uma contagem: `{enter:3}`.
 - **Clipboard** — `{clipboard}` insere o clipboard atual; `{clipboard:upper}`, `{clipboard:trim}`, `{clipboard:line:1}` etc. o transformam (trim → extrair → limitar → ordem de caixa). Seu clipboard real é restaurado depois.
@@ -234,6 +264,11 @@ Um selo de **qualidade do seletor** (S → C) indica quão estável cada seletor
 ## Temas e aparência
 
 Abra o **Theme Editor** em Settings → Global → Appearance → *Customise* (ou `Ctrl+K` → Theme editor).
+
+<p align="center">
+  <img src="img/theme.png" width="820" alt="A aba de presets do Theme Editor com um preview ao vivo" /><br>
+  <sub><i>Mais de 40 presets, com um preview ao vivo que se atualiza enquanto você edita.</i></sub>
+</p>
 
 - **Presets** — mais de 40 temas selecionados agrupados por matiz; clique para aplicar. O padrão é *Lavender Coal* (escuro).
 - **Cores** — ajuste finamente todas as 15 cores do tema via seletor, hex ou HSL; um verificador de contraste sinaliza texto com baixo contraste.

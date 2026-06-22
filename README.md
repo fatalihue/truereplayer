@@ -17,6 +17,10 @@ A fast, lightweight **macro recorder & automation tool for Windows**. Capture yo
 
 </div>
 
+<p align="center">
+  <img src="docs/img/main.png" width="860" alt="TrueReplayer main window — a profile's action list with the profiles panel on the left and settings on the right" />
+</p>
+
 ---
 
 ## Contents
@@ -62,8 +66,18 @@ It sends input the way real apps and **games** expect (tested in Roblox and othe
 - **Conditionals (If / Else / EndIf)** — branch on whether an image is found or a pixel matches; supports *IFNOT* and nesting.
 - **Browser actions** — drive Chrome by CSS selector (Click, Type, Navigate, Wait for element, Select option) via the companion extension.
 
+<p align="center">
+  <img src="docs/img/conditionals.png" width="760" alt="An If/Else/EndIf conditional block in the action grid" /><br>
+  <sub><i>If / Else / EndIf blocks branch on what's on screen — an image being found, or a pixel color matching.</i></sub>
+</p>
+
 ### 🖱️ Built-in auto-clicker
 A dedicated **Clicker mode** (switch with **`ScrollLock`**) for fast, steady clicking: pick the button, set a rate (clicks/sec or delay), add random jitter, restrict it to a screen region, and watch **live stats** (count, rate, elapsed, ETA, loop progress).
+
+<p align="center">
+  <img src="docs/img/clicker.png" width="760" alt="The Clicker mode live dashboard with click count, rate and progress" /><br>
+  <sub><i>The Clicker dashboard — live count, rate, elapsed time, loop progress and ETA.</i></sub>
+</p>
 
 ### 🎮 Game mode
 - **Smooth movement** — moves the cursor along a path instead of teleporting, so games (e.g. Roblox) that reject single jumps accept the clicks.
@@ -80,6 +94,11 @@ A dedicated **Clicker mode** (switch with **`ScrollLock`**) for fast, steady cli
 - **Profiles & folders** with icons, descriptions, tags and colors.
 - **Bilingual tooltips** — English or **Português (BR)** (Settings → Global → Language).
 - **Import / export** profiles as portable `.trprofile` files (includes reference images and organization).
+
+<p align="center">
+  <img src="docs/img/theme.png" width="820" alt="The Theme Editor with 40+ presets and a live preview" /><br>
+  <sub><i>The Theme Editor — 40+ presets with a live preview, plus full color &amp; layout control.</i></sub>
+</p>
 
 ---
 

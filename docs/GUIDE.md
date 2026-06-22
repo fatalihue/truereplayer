@@ -80,6 +80,11 @@ Press **`Ctrl+PageDown`** (or click **Replay**) to run the active profile; press
 
 The central table lists every action in the profile. Columns: **selection checkbox · Action (colored pill) · Details · Delay · Notes**.
 
+<p align="center">
+  <img src="img/main.png" width="820" alt="The TrueReplayer main window and action grid" /><br>
+  <sub><i>Profiles &amp; folders on the left, the action grid in the center, settings on the right.</i></sub>
+</p>
+
 - **Select** — click a row (single), `Ctrl+Click` (toggle), `Shift+Click` (range), or use the checkboxes.
 - **Edit inline** — click a cell to edit **Delay**, **Notes**, **coordinates** (`x, y` for mouse rows — separators can be comma/semicolon/space) or the **Key** (keyboard rows capture the next key you press). Commit with **Enter/Tab**, cancel with **Esc**.
 - **Reorder** — drag a row, or select and press **`Alt+↑` / `Alt+↓`**.
@@ -118,6 +123,11 @@ Insert actions from the **toolbar** (Send Keystroke, Send Text, Pause, Wait, Con
 
 Make a macro react to what's on screen.
 
+<p align="center">
+  <img src="img/conditionals.png" width="820" alt="Two If/Else/EndIf blocks in the action grid" /><br>
+  <sub><i>A negated pixel check (<code>if NOT</code>) and an image check with an <code>else</code> branch.</i></sub>
+</p>
+
 - An **If** runs a **probe**: *Image Found* (is this image visible?) or *Pixel Color Match* (does this pixel match this color?).
 - If the probe is **true**, the actions between **If** and **Else/EndIf** run; if **false**, execution jumps to the **Else** branch (if present) or past the **EndIf**.
 - **Negate (IFNOT)** flips the test — the *true* branch runs when the probe **fails**.
@@ -145,6 +155,11 @@ Make a macro react to what's on screen.
 
 Bind a profile to a trigger so it runs without opening the app.
 
+<p align="center">
+  <img src="img/hotkey.png" width="320" alt="The Assign Hotkey dialog with trigger modes" /><br>
+  <sub><i>Capture a key combo and pick a trigger mode.</i></sub>
+</p>
+
 - **Hotkey** — right-click a profile → **Assign hotkey**, press the combo (e.g. `Ctrl+Alt+F1`), pick a trigger mode. Fires globally.
 - **Hotstring** — assign a typed sequence (e.g. `qqsig`); finishing it runs the profile.
 - **Master switch** — `Pause` (or Settings → Recording → **Profile Keys**) enables/disables **all** hotkeys and hotstrings at once.
@@ -165,6 +180,11 @@ Bind a profile to a trigger so it runs without opening the app.
 ## Window targeting & relative coordinates
 
 Tie a profile (or a whole folder) to a specific application window.
+
+<p align="center">
+  <img src="img/target.png" width="360" alt="The Target Configuration dialog" /><br>
+  <sub><i>Match a window by process / title, with relative coordinates and restore options.</i></sub>
+</p>
 
 - **Window target** — set a process name and/or window title (match *contains* or *regex*). The profile's **hotkey only fires when that window is in front**. Use **Detect window** to click a window and auto-fill the fields, and **Test** to check the match.
 - **Relative coordinates** — store clicks relative to the window's top-left corner instead of the screen, so the macro keeps hitting the right spot when the window moves or resizes. Use **Convert to Relative / Absolute** to migrate an existing macro's coordinates.
@@ -191,6 +211,11 @@ Switch to **Clicker** with **`ScrollLock`** (or the Macro/Clicker toggle). The P
 
 Start/stop with **`PageDown`**, pause/resume with **`PageUp`**. While running, the **live dashboard** shows the click count, rate, elapsed time, loop progress and ETA.
 
+<p align="center">
+  <img src="img/clicker.png" width="820" alt="The Clicker dashboard while running" /><br>
+  <sub><i>Live count, rate, elapsed time, loop progress, ETA and a progress bar.</i></sub>
+</p>
+
 ---
 
 ## Game mode
@@ -206,6 +231,11 @@ For games (e.g. Roblox) that ignore an instant cursor "teleport", *Game mode* ma
 ## Send Text
 
 The **Insert Text** editor composes text that's injected via clipboard paste (so layouts and special characters survive).
+
+<p align="center">
+  <img src="img/sendtext.png" width="820" alt="The Send Text editor with token chips and a key/clipboard palette" /><br>
+  <sub><i>Editable token chips inline, with a key &amp; clipboard palette on the side.</i></sub>
+</p>
 
 - **Tokens** — embed special keys and values: `{enter}`, `{tab}`, `{space}`, arrows and other keys; `{date}` / `{time}` / `{datetime}`; `{delay:500}` to pause mid-text. Repeatable keys take a count: `{enter:3}`.
 - **Clipboard** — `{clipboard}` inserts the current clipboard; `{clipboard:upper}`, `{clipboard:trim}`, `{clipboard:line:1}` etc. transform it (trim → extract → limit → case order). Your real clipboard is restored afterward.
@@ -234,6 +264,11 @@ A **selector quality** badge (S → C) hints how stable each captured selector i
 ## Themes & appearance
 
 Open the **Theme Editor** from Settings → Global → Appearance → *Customise* (or `Ctrl+K` → Theme editor).
+
+<p align="center">
+  <img src="img/theme.png" width="820" alt="The Theme Editor presets tab with a live preview" /><br>
+  <sub><i>40+ presets, with a live preview that updates as you edit.</i></sub>
+</p>
 
 - **Presets** — 40+ curated themes grouped by hue; click to apply. The default is *Lavender Coal* (dark).
 - **Colors** — fine-tune all 15 theme colors via picker, hex or HSL; a contrast checker flags low-contrast text.

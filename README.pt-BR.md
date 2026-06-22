@@ -17,6 +17,10 @@ Um gravador de macros e ferramenta de automação rápido e leve **para Windows*
 
 </div>
 
+<p align="center">
+  <img src="docs/img/main.png" width="860" alt="Janela principal do TrueReplayer — a lista de ações de um perfil, com o painel de perfis à esquerda e as configurações à direita" />
+</p>
+
 ---
 
 ## Conteúdo
@@ -62,8 +66,18 @@ Ele envia a entrada da forma que aplicativos e **jogos** reais esperam (testado 
 - **Condicionais (If / Else / EndIf)** — ramifique conforme uma imagem é encontrada ou um pixel corresponde; suporta *IFNOT* e aninhamento.
 - **Ações de navegador** — controle o Chrome por seletor CSS (Click, Type, Navigate, Wait for element, Select option) por meio da extensão complementar.
 
+<p align="center">
+  <img src="docs/img/conditionals.png" width="760" alt="Um bloco condicional If/Else/EndIf na grade de ações" /><br>
+  <sub><i>Blocos If / Else / EndIf ramificam conforme o que está na tela — uma imagem encontrada ou uma cor de pixel correspondente.</i></sub>
+</p>
+
 ### 🖱️ Auto-clicker embutido
 Um **Clicker mode** dedicado (alterne com **`ScrollLock`**) para cliques rápidos e constantes: escolha o botão, defina uma taxa (cliques/seg ou delay), adicione jitter aleatório, restrinja a uma região da tela e acompanhe as **estatísticas ao vivo** (contagem, taxa, tempo decorrido, ETA, progresso do loop).
+
+<p align="center">
+  <img src="docs/img/clicker.png" width="760" alt="O dashboard ao vivo do Clicker mode com contagem de cliques, taxa e progresso" /><br>
+  <sub><i>O dashboard do Clicker — contagem ao vivo, taxa, tempo decorrido, progresso do loop e ETA.</i></sub>
+</p>
 
 ### 🎮 Game mode
 - **Smooth movement** — move o cursor ao longo de um caminho em vez de teletransportá-lo, para que jogos (ex.: Roblox) que rejeitam saltos únicos aceitem os cliques.
@@ -80,6 +94,11 @@ Um **Clicker mode** dedicado (alterne com **`ScrollLock`**) para cliques rápido
 - **Perfis e pastas** com ícones, descrições, tags e cores.
 - **Tooltips bilíngues** — English ou **Português (BR)** (Settings → Global → Language).
 - **Importe / exporte** perfis como arquivos `.trprofile` portáteis (inclui imagens de referência e organização).
+
+<p align="center">
+  <img src="docs/img/theme.png" width="820" alt="O Theme Editor com mais de 40 presets e um preview ao vivo" /><br>
+  <sub><i>O Theme Editor — mais de 40 presets com preview ao vivo, além de controle total de cores &amp; layout.</i></sub>
+</p>
 
 ---
 
