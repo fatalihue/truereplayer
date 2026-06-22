@@ -64,7 +64,7 @@ Ele envia a entrada da forma que aplicativos e **jogos** reais esperam (testado 
 - **Send Text** — cole texto formatado com tokens como `{enter}`, `{tab}`, `{clipboard}`, datas, snippets salvos e transformações da área de transferência.
 - **Run Profile** — chame outra macro como um sub-passo e construa automações modulares e reutilizáveis.
 - **Condicionais (If / Else / EndIf)** — ramifique conforme uma imagem é encontrada ou um pixel corresponde; suporta *IFNOT* e aninhamento.
-- **Ações de navegador** — controle o Chrome por seletor CSS (Click, Type, Navigate, Wait for element, Select option) por meio da extensão complementar.
+- **Ações de navegador** — controle o Chrome por seletor CSS (Click, Type, Navigate, Wait for element, Select option) por meio da [extensão Chrome complementar](https://github.com/fatalihue/TrueReplayer-releases/blob/main/docs/extension-setup/README.md).
 
 <p align="center">
   <img src="docs/img/conditionals.png" width="760" alt="Um bloco condicional If/Else/EndIf na grade de ações" /><br>
