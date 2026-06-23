@@ -4179,6 +4179,29 @@ namespace TrueReplayer
                 File.Copy(entry.FilePath, copyPath);
                 await profileController.RefreshProfileListAsync(true);
 
+                // File.Copy only duplicated the JSON, which still pointed at the SOURCE profile's
+                // per-profile PNGs — so the copy's WaitImage / IF-Image rows rendered an empty
+                // thumbnail. Clone each referenced image into the copy's own image dir under a fresh
+                // GUID filename (matching the paste / duplicate-action convention so the base64 cache
+                // key is naturally unique) and repoint the copy's rows. A null clone (source PNG
+                // missing) clears ImagePath → empty thumbnail + "recapture" hint, never a broken ref.
+                var copyProfile = await profileController.LoadProfileByNameAsync(copyName);
+                if (copyProfile != null)
+                {
+                    bool clonedAny = false;
+                    foreach (var action in copyProfile.Actions)
+                    {
+                        if (string.IsNullOrEmpty(action.ImagePath)) continue;
+                        bool refsImage = action.ActionType == "WaitImage"
+                            || (action.ActionType == "If" && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
+                        if (!refsImage) continue;
+                        action.ImagePath = ImageStorageService.CloneReferenceImage(name, action.ImagePath!, copyName);
+                        clonedAny = true;
+                    }
+                    if (clonedAny)
+                        await profileController.SaveProfileByNameAsync(copyName, copyProfile);
+                }
+
                 // Place the copy in the same folder as the original
                 var order = profileController.GetProfileOrder();
                 var folder = order.Folders.FirstOrDefault(f => f.Items.Contains(name));
