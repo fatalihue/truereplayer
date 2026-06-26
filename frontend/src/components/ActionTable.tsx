@@ -1065,12 +1065,28 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
   const handleDuplicate = useCallback(() => {
     if (!contextMenu) return;
-    const indices = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
+    const sel = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
       ? Array.from(selectedIndices)
       : [contextMenu.rowIndex];
+    // Block-aware duplicate (mirrors the delete/drag/bulk "never orphan a marker" rule):
+    //   • a lone IF → clone exactly ITS OWN block, [if..endIfOf(if)]. endIfOf is the
+    //     stack-built map, so a nested inner IF stays inner and never pulls the outer block.
+    //   • a selection that touches any IF/ELSE/ENDIF marker → snap to whole blocks via
+    //     expandToBlocks so we can't clone an unbalanced half-block into an orphan.
+    //   • a pure body-row selection → clone as-is, so duplicating a single action (a click,
+    //     a keystroke) still copies just that row.
+    // The backend inserts the clones right after the last source row — i.e. immediately after
+    // the block's EndIf — yielding a valid SIBLING block (still inside any enclosing block).
+    let indices = sel;
+    if (sel.length === 1 && actions[sel[0]]?.actionType === 'If') {
+      const end = blockInfo.endIfOf.get(sel[0]);
+      if (end != null) indices = Array.from({ length: end - sel[0] + 1 }, (_, k) => sel[0] + k);
+    } else if (sel.some((i) => STRUCTURAL_TYPES.has(actions[i]?.actionType ?? ''))) {
+      indices = expandToBlocks(sel);
+    }
     send({ type: 'actions:duplicate', payload: { indices } });
     closeContextMenu();
-  }, [contextMenu, selectedIndices, send, closeContextMenu]);
+  }, [contextMenu, selectedIndices, send, closeContextMenu, actions, blockInfo, expandToBlocks]);
 
   const handleContextDelete = useCallback(() => {
     if (!contextMenu) return;
