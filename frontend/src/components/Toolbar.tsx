@@ -10,6 +10,7 @@ import { NavigateDialog } from './NavigateDialog';
 import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
 import { PauseDialog } from './PauseDialog';
 import { useFlyoutFlip } from '../hooks/useFlyoutFlip';
+import { snapIndicesToBlocks } from '../utils/conditionalBlocks';
 
 export interface ColumnVisibility {
   action: boolean;
@@ -354,7 +355,11 @@ export function Toolbar(_props: ToolbarProps) {
         const sel = selectionRef.current;
         if (sel.size === 0) return;
         e.preventDefault();
-        const indices = Array.from(sel).sort((a, b) => a - b);
+        // Block-snap so moving a selection that touches an If/Else/EndIf marker carries the whole
+        // block (never orphaning it); a pure body-row selection moves as-is. Shared with the grid's
+        // delete/drag/bulk-Move paths via the same pure helper. minIdx/maxIdx come from the snapped
+        // set, since snapping can pull in rows beyond the original selection's edges.
+        const indices = snapIndicesToBlocks(Array.from(sel).sort((a, b) => a - b), actions);
         if (e.key === 'ArrowUp') {
           const minIdx = indices[0];
           if (minIdx <= 0) return;
@@ -378,7 +383,7 @@ export function Toolbar(_props: ToolbarProps) {
     // selectionRef is a useRef result — stable identity across renders, so listing it
     // doesn't cause extra subscribes. Adding it just silences exhaustive-deps without
     // changing behaviour (handler always reads .current at the time it fires).
-  }, [send, actions.length, selectionRef, buttonStates.recordingActive, buttonStates.replayActive]);
+  }, [send, actions, selectionRef, buttonStates.recordingActive, buttonStates.replayActive]);
 
   return (
     <>

@@ -14,6 +14,7 @@ import { useTt } from '../state/LanguageContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { useToast } from '../state/ToastContext';
 import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors } from '../utils/displayUtils';
+import { snapIndicesToBlocks } from '../utils/conditionalBlocks';
 import { SendTextDialog } from './SendTextDialog';
 import { SendTextPreview } from './SendTextPreview';
 import { RunProfileDialog } from './RunProfileDialog';
@@ -24,9 +25,6 @@ import { MacroEmptyState } from './MacroEmptyState';
 import { Checkbox, CheckboxBox } from './Checkbox';
 import type { ColumnVisibility } from './Toolbar';
 import { useFlyoutFlip } from '../hooks/useFlyoutFlip';
-
-// IF / ELSE / ENDIF move together as one block when dragged (so markers can't be orphaned).
-const STRUCTURAL_TYPES = new Set(['If', 'Else', 'EndIf']);
 
 // ELSE / ENDIF are pure jump markers with NO delay — the grid hides their Delay cell, the validator
 // keeps it 0, and bulk "set delay" skips them. The opening IF is deliberately NOT here: it runs a
@@ -342,33 +340,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     return { depth, blockIfOf, endIfOf, hasElse };
   }, [actions]);
 
-  // Expand a selection to whole conditional blocks: any selected row that sits
-  // inside an IF…ENDIF span pulls in that block's full span — for nested blocks,
-  // every enclosing IF span. Returns a sorted-ascending index array. Shared by
-  // the drag block-snap (handleDragStart) and the bulk-bar Delete so a partial-
-  // block operation can never orphan IF/ELSE/ENDIF rows.
-  const expandToBlocks = useCallback((indices: number[]): number[] => {
-    const set = new Set(indices);
-    for (const sel of indices) {
-      // A row r is enclosed by IF j iff j…endIfOf(j) covers r. Walk all IFs (small
-      // count even on large lists) and union every enclosing span.
-      for (const [ifIdx, endIfIdx] of blockInfo.endIfOf) {
-        if (ifIdx <= sel && sel <= endIfIdx)
-          for (let i = ifIdx; i <= endIfIdx; i++) set.add(i);
-      }
-    }
-    return set.size === indices.length ? indices : Array.from(set).sort((a, b) => a - b);
-  }, [blockInfo]);
-
-  // Block-snap a selection ONLY when it includes a structural marker (If/Else/EndIf).
-  // A selection that touches a marker is expanded to whole IF…EndIf blocks so the marker
-  // can't be orphaned; a PURE body-row selection is returned untouched, so deleting (or
-  // operating on) plain actions inside a block stays granular instead of nuking the whole
-  // block — removing body rows never unbalances the If/Else/EndIf markers. Same "only snap
-  // when a marker is involved" rule the duplicate path uses and the lone-body-row drag relies on.
-  const snapSelectionToBlocks = useCallback((sel: number[]): number[] =>
-    sel.some((i) => STRUCTURAL_TYPES.has(actions[i]?.actionType ?? '')) ? expandToBlocks(sel) : sel,
-  [actions, expandToBlocks]);
+  // Block-snap a selection ONLY when it includes a structural marker (If/Else/EndIf): a selection
+  // touching a marker expands to whole IF…EndIf blocks so the marker can't be orphaned; a PURE
+  // body-row selection is returned untouched, so deleting/moving plain actions inside a block stays
+  // granular (removing body rows never unbalances the markers). Delegates to the shared pure
+  // snapIndicesToBlocks so the grid and the Toolbar Alt+↑/↓ reorder handler use one source of truth.
+  const snapSelectionToBlocks = useCallback(
+    (sel: number[]): number[] => snapIndicesToBlocks(sel, actions),
+    [actions],
+  );
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number } | null>(null);
@@ -896,8 +876,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     // positional and recomputed after the move; an emptied IF…ENDIF is handled by both the replay
     // engine (BuildBlockMap: empty body runs to the EndIf) and the frontend blockInfo. The backend
     // (HandleActionsReorder) reinserts a non-contiguous selection contiguously at the target, so the
-    // dragged body rows land together regardless of gaps — that's purely a reinsert mechanic and does
-    // NOT itself snap markers (the bulk Move Up/Down buttons share that backend path but skip the snap).
+    // dragged body rows land together regardless of gaps. The bulk Move Up/Down buttons + Alt+↑/↓ now
+    // apply the same marker snap (snapSelectionToBlocks / snapIndicesToBlocks), so every mutating op is consistent.
     indices = snapSelectionToBlocks(indices);
     // Suppress the click that fires after the drop — handleRowClick consumes and
     // resets the flag (same contract as the old mouse-event implementation).
@@ -1093,22 +1073,21 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     // Block-aware duplicate (mirrors the delete/drag/bulk "never orphan a marker" rule):
     //   • a lone IF → clone exactly ITS OWN block, [if..endIfOf(if)]. endIfOf is the
     //     stack-built map, so a nested inner IF stays inner and never pulls the outer block.
-    //   • a selection that touches any IF/ELSE/ENDIF marker → snap to whole blocks via
-    //     expandToBlocks so we can't clone an unbalanced half-block into an orphan.
-    //   • a pure body-row selection → clone as-is, so duplicating a single action (a click,
-    //     a keystroke) still copies just that row.
+    //   • any other selection → snapSelectionToBlocks: a marker-touch snaps to whole blocks so we
+    //     can't clone an unbalanced half-block into an orphan; a pure body-row selection clones
+    //     as-is, so duplicating a single action (a click, a keystroke) still copies just that row.
     // The backend inserts the clones right after the last source row — i.e. immediately after
     // the block's EndIf — yielding a valid SIBLING block (still inside any enclosing block).
     let indices = sel;
     if (sel.length === 1 && actions[sel[0]]?.actionType === 'If') {
       const end = blockInfo.endIfOf.get(sel[0]);
       if (end != null) indices = Array.from({ length: end - sel[0] + 1 }, (_, k) => sel[0] + k);
-    } else if (sel.some((i) => STRUCTURAL_TYPES.has(actions[i]?.actionType ?? ''))) {
-      indices = expandToBlocks(sel);
+    } else {
+      indices = snapSelectionToBlocks(sel);
     }
     send({ type: 'actions:duplicate', payload: { indices } });
     closeContextMenu();
-  }, [contextMenu, selectedIndices, send, closeContextMenu, actions, blockInfo, expandToBlocks]);
+  }, [contextMenu, selectedIndices, send, closeContextMenu, actions, blockInfo, snapSelectionToBlocks]);
 
   const handleContextDelete = useCallback(() => {
     if (!contextMenu) return;
@@ -2105,8 +2084,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           buttons at the list edges, mirroring the Alt+↑/↓ hotkey's no-op-at-edges. */}
       {bulkBarVisible && (() => {
         const selSorted = Array.from(selectedIndices).sort((a, b) => a - b);
-        const canMoveUp = selSorted.length > 0 && selSorted[0] > 0;
-        const canMoveDown = selSorted.length > 0 && selSorted[selSorted.length - 1] < actions.length - 1;
+        // Reorder (Move Up/Down) operates on the block-snapped set so moving a selection that
+        // touches an If/Else/EndIf marker carries the whole block — never orphaning it — while a
+        // pure body-row selection moves as-is. Delete snaps inside its own handler; the other bulk
+        // ops (delay/coord/comment/skip) act on the raw selection, so keep selSorted for those.
+        const moveSet = snapSelectionToBlocks(selSorted);
+        const canMoveUp = moveSet.length > 0 && moveSet[0] > 0;
+        const canMoveDown = moveSet.length > 0 && moveSet[moveSet.length - 1] < actions.length - 1;
         return (
         <div className="absolute inset-x-0 bottom-0 z-20">
         <BulkActionBar
@@ -2125,33 +2109,31 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             setSelectedIndices(new Set());
           }}
           onMoveUp={() => {
-            // Mirror the Alt+↑ hotkey logic: shift the indices one slot up and re-emit
-            // selection:set so the highlighted rows follow their new positions. Guarded
-            // by canMoveUp so first-row selections no-op silently.
+            // Mirror the Alt+↑ hotkey: shift the block-snapped set one slot up and re-emit
+            // selection:set so the highlighted rows follow their new positions. Guarded by
+            // canMoveUp (derived from the snapped set) so a block already at the top no-ops.
             if (!canMoveUp) return;
-            const minIdx = selSorted[0];
-            send({ type: 'actions:reorder', payload: { indices: selSorted, targetIndex: minIdx - 1 } });
-            // HandleActionsReorder reinserts the removed rows CONTIGUOUSLY at the
-            // adjusted target — landing at [minIdx-1 .. minIdx-1+count-1] regardless of
-            // whether the original selection was contiguous. A per-index i-1 highlight
-            // would point at the wrong rows for non-contiguous selections, so emit the
-            // contiguous landing range instead.
+            const minIdx = moveSet[0];
+            send({ type: 'actions:reorder', payload: { indices: moveSet, targetIndex: minIdx - 1 } });
+            // HandleActionsReorder reinserts the removed rows CONTIGUOUSLY at the adjusted
+            // target — landing at [minIdx-1 .. minIdx-1+count-1] regardless of whether the
+            // (snapped) selection was contiguous. Emit that contiguous landing range so the
+            // highlight follows, rather than a per-index i-1 map.
             window.dispatchEvent(new CustomEvent('selection:set', {
-              detail: selSorted.map((_, i) => minIdx - 1 + i),
+              detail: moveSet.map((_, i) => minIdx - 1 + i),
             }));
           }}
           onMoveDown={() => {
             if (!canMoveDown) return;
-            const maxIdx = selSorted[selSorted.length - 1];
+            const maxIdx = moveSet[moveSet.length - 1];
             // targetIndex = maxIdx + 2 because the reorder API treats the target as the
             // pre-shift insertion point (mirrors the Alt+↓ hotkey behaviour exactly).
-            send({ type: 'actions:reorder', payload: { indices: selSorted, targetIndex: maxIdx + 2 } });
-            // As in onMoveUp: rows land contiguously. All selected indices are < the
-            // target so the backend's adjustedTarget = maxIdx + 2 - count, landing at
-            // [maxIdx+2-count .. maxIdx+1]. Emit that range, not a per-index i+1 map.
-            const count = selSorted.length;
+            send({ type: 'actions:reorder', payload: { indices: moveSet, targetIndex: maxIdx + 2 } });
+            // As in onMoveUp: rows land contiguously. All moved indices are < the target so the
+            // backend's adjustedTarget = maxIdx + 2 - count, landing at [maxIdx+2-count .. maxIdx+1].
+            const count = moveSet.length;
             window.dispatchEvent(new CustomEvent('selection:set', {
-              detail: selSorted.map((_, i) => maxIdx + 2 - count + i),
+              detail: moveSet.map((_, i) => maxIdx + 2 - count + i),
             }));
           }}
           onSetDelay={(delay) => {
