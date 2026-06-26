@@ -360,6 +360,16 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     return set.size === indices.length ? indices : Array.from(set).sort((a, b) => a - b);
   }, [blockInfo]);
 
+  // Block-snap a selection ONLY when it includes a structural marker (If/Else/EndIf).
+  // A selection that touches a marker is expanded to whole IF…EndIf blocks so the marker
+  // can't be orphaned; a PURE body-row selection is returned untouched, so deleting (or
+  // operating on) plain actions inside a block stays granular instead of nuking the whole
+  // block — removing body rows never unbalances the If/Else/EndIf markers. Same "only snap
+  // when a marker is involved" rule the duplicate path uses and the lone-body-row drag relies on.
+  const snapSelectionToBlocks = useCallback((sel: number[]): number[] =>
+    sel.some((i) => STRUCTURAL_TYPES.has(actions[i]?.actionType ?? '')) ? expandToBlocks(sel) : sel,
+  [actions, expandToBlocks]);
+
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number } | null>(null);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
@@ -657,14 +667,14 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     if (e.key === 'Delete' && selectedIndices.size > 0) {
       e.preventDefault();
       // Lone-IF selection routes through actions:deleteConditional so the whole block goes
-      // with it. Any other selection is expanded to whole IF…EndIf blocks first
-      // (expandToBlocks) so a straddling multi-select can't orphan block rows — the same
-      // block-snap the bulk-bar Delete and the drag use.
+      // with it. A selection that TOUCHES a marker snaps to whole IF…EndIf blocks so a
+      // straddling multi-select can't orphan block rows; a PURE body-row selection deletes
+      // just those rows (snapSelectionToBlocks) — removing body rows can't unbalance the markers.
       const sel = Array.from(selectedIndices);
       if (sel.length === 1 && actions[sel[0]]?.actionType === 'If') {
         send({ type: 'actions:deleteConditional', payload: { ifRowIndex: sel[0] } });
       } else {
-        send({ type: 'actions:delete', payload: { indices: expandToBlocks(sel) } });
+        send({ type: 'actions:delete', payload: { indices: snapSelectionToBlocks(sel) } });
       }
       setSelectedIndices(new Set());
     }
@@ -678,7 +688,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       e.preventDefault();
       setSelectedIndices(new Set());
     }
-  }, [editingCell, sendTextEdit, selectedIndices, send, actions, expandToBlocks]);
+  }, [editingCell, sendTextEdit, selectedIndices, send, actions, snapSelectionToBlocks]);
 
   // Handle edit input key events
   const handleEditKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -873,31 +883,28 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     let indices = selectedIndices.has(idx)
       ? Array.from(selectedIndices).sort((a, b) => a - b)
       : [idx];
-    // Snap the drag set to whole conditional blocks. Any selected row that sits
-    // inside an IF…ENDIF span (solo IF drag, or a multi-select that straddles a
-    // block boundary) pulls in that block's full span — for nested blocks, every
-    // enclosing IF span. Without this, a partial-block move leaves orphaned IF/
-    // ELSE/ENDIF rows behind: the reorder backend (HandleActionsReorder) renumbers
-    // but does NOT run ConditionalBlockValidator, so the imbalance corrupts the
-    // live list and only surfaces on the next profile load.
+    // Snap the drag set to whole conditional blocks ONLY when it touches a marker: any selected
+    // IF/ELSE/ENDIF (a solo IF drag, or a multi-select that straddles a block boundary) pulls in
+    // its block's full span — for nested blocks, every enclosing IF span. Without this a partial-
+    // block move orphans markers: the reorder backend (HandleActionsReorder) renumbers but does
+    // NOT run ConditionalBlockValidator, so the imbalance only surfaces on the next profile load.
     //
-    // EXCEPTION — a lone NON-structural body row drags freely, in OR out of a block,
-    // making drag-out symmetric with drag-in. This is safe: moving a single body row
-    // never reorders the IF/ELSE/ENDIF rows relative to each other, so the list stays
-    // balanced (no orphans → the load validator is a no-op), block membership is purely
-    // positional and recomputed after the move, and an emptied IF…ENDIF is handled by
-    // both the replay engine (BuildBlockMap: empty body just runs to the EndIf) and the
-    // frontend blockInfo. Structural rows and any multi-row drag still snap to whole blocks.
-    const draggedType = actions[idx]?.actionType;
-    const isStructuralRow = STRUCTURAL_TYPES.has(draggedType ?? '');
-    const isLoneBodyRow = indices.length === 1 && !isStructuralRow;
-    if (!isLoneBodyRow) indices = expandToBlocks(indices);
+    // A PURE body-row selection (no markers, ANY count) drags freely, in OR out of a block —
+    // symmetric with drag-in and consistent with the granular delete/duplicate paths. Safe because
+    // moving body rows never reorders the IF/ELSE/ENDIF rows relative to each other, so the list
+    // stays balanced (no orphans → the load validator is a no-op); block membership is purely
+    // positional and recomputed after the move; an emptied IF…ENDIF is handled by both the replay
+    // engine (BuildBlockMap: empty body runs to the EndIf) and the frontend blockInfo. The backend
+    // (HandleActionsReorder) reinserts a non-contiguous selection contiguously at the target, so the
+    // dragged body rows land together regardless of gaps — that's purely a reinsert mechanic and does
+    // NOT itself snap markers (the bulk Move Up/Down buttons share that backend path but skip the snap).
+    indices = snapSelectionToBlocks(indices);
     // Suppress the click that fires after the drop — handleRowClick consumes and
     // resets the flag (same contract as the old mouse-event implementation).
     dragOccurred.current = true;
     setActiveDragId(String(ev.active.id));
     setDragIndices(indices);
-  }, [sortableIds, selectedIndices, expandToBlocks, actions]);
+  }, [sortableIds, selectedIndices, snapSelectionToBlocks]);
 
   const handleDragEnd = useCallback((ev: DragEndEvent) => {
     const indices = dragIndices ?? [];
@@ -1120,12 +1127,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         return;
       }
     }
-    // Any other selection: expand to whole IF…EndIf blocks first so a straddling
-    // multi-select can't orphan block rows (same block-snap as the bulk bar / drag).
-    send({ type: 'actions:delete', payload: { indices: expandToBlocks(indices) } });
+    // A selection touching a marker snaps to whole IF…EndIf blocks so a straddling multi-select
+    // can't orphan block rows; a pure body-row selection deletes just those rows
+    // (snapSelectionToBlocks) — same granular rule the Delete-key / bulk-bar paths use.
+    send({ type: 'actions:delete', payload: { indices: snapSelectionToBlocks(indices) } });
     setSelectedIndices(new Set());
     closeContextMenu();
-  }, [contextMenu, selectedIndices, send, closeContextMenu, actions, expandToBlocks]);
+  }, [contextMenu, selectedIndices, send, closeContextMenu, actions, snapSelectionToBlocks]);
 
   // Resolve the "effective selection" for context-menu operations the same way
   // Duplicate/Delete do: if the right-clicked row is part of the multi-select,
@@ -2108,10 +2116,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           canMoveDown={canMoveDown}
           onClearSelection={() => setSelectedIndices(new Set())}
           onDelete={() => {
-            // Expand any selected IF (or block body / straddling multi-select) to its
-            // whole IF…ELSE…ENDIF span before deleting — same block-snap the drag and
-            // context/Delete-key paths use — so the bulk bar can't orphan block rows.
-            const indices = expandToBlocks(selSorted);
+            // A selection touching a marker snaps to whole IF…ELSE…ENDIF blocks so the bulk
+            // bar can't orphan block rows; a pure body-row selection deletes just those rows
+            // (snapSelectionToBlocks) — same granular rule the drag / context / Delete-key paths use.
+            const indices = snapSelectionToBlocks(selSorted);
             send({ type: 'actions:delete', payload: { indices } });
             showToast(tt(`Deleted ${indices.length} action(s)`, `${indices.length} ação(ões) excluída(s)`), 'success');
             setSelectedIndices(new Set());
