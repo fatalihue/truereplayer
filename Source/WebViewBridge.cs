@@ -2710,11 +2710,12 @@ namespace TrueReplayer
                         ConditionType = "ImageFound",
                         ImagePath = imagePath,
                         Confidence = 0.8,
-                        // No custom delay: an IF is control flow (a branch point), not an
-                        // input step — a pre-delay before evaluating the condition has no
-                        // useful meaning, and the probe's own wait/timeout already handles
-                        // timing. Both IF and EndIf stay 0. (Add a Pause before the IF if
-                        // you genuinely want to wait before the check.)
+                        // Inserted with Delay = 0 by default. The IF accepts an optional
+                        // pre-probe delay — a "wait for the condition to load before checking"
+                        // knob applied before the probe at replay (see the conditional handling
+                        // in ActionExecution) — so the user can set it on the IF row afterward
+                        // when a slow-loading condition needs the screen to settle first. EndIf
+                        // stays 0 (pure jump marker).
                         Delay = 0,
                         Key = "",
                         Comment = "",
@@ -2803,8 +2804,8 @@ namespace TrueReplayer
                         PixelX = storedX,
                         PixelY = storedY,
                         PixelColor = PixelColorService.ToHex(selection.PickedColor.Value),
-                        // No custom delay — an IF is control flow, not an input step
-                        // (see the If-Image insert above). Both IF and EndIf stay 0.
+                        // Inserted with Delay = 0 by default; the IF accepts an optional
+                        // pre-probe delay (see the If-Image insert above). EndIf stays 0.
                         Delay = 0,
                         Key = "",
                         Comment = "",
