@@ -34,6 +34,21 @@ const STRUCTURAL_TYPES = new Set(['If', 'Else', 'EndIf']);
 // (applied before the probe in the engine) and is editable like any other action's delay.
 const NO_DELAY_TYPES = new Set(['Else', 'EndIf']);
 
+// Per-nesting-level colour ("rainbow brackets") so a nested block reads apart from its parent.
+// Level 0 keeps the user's configurable IF colour, so a single-level block looks exactly as before;
+// deeper levels cycle a fixed, distinct palette (defaults in index.css :root → always resolve, no
+// hard-coded hex here). Used for the scope rails (full strength) and the row wash (low opacity).
+const BLOCK_LEVEL_COLORS = [
+  'var(--color-action-if-fg)',
+  'var(--color-block-1)',
+  'var(--color-block-2)',
+  'var(--color-block-3)',
+  'var(--color-block-4)',
+];
+// Cycle by level; the double-mod keeps it safe for any (even negative) input.
+const blockColor = (level: number): string =>
+  BLOCK_LEVEL_COLORS[((level % BLOCK_LEVEL_COLORS.length) + BLOCK_LEVEL_COLORS.length) % BLOCK_LEVEL_COLORS.length];
+
 function ActionIcon({ actionType }: { actionType: string }) {
   const size = 12;
   if (actionType.startsWith('Browser')) return <Globe size={size} />;
@@ -1382,6 +1397,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               //    the pill would overlap the rail visually).
               const indentPx = isStructural ? depth * 14 : Math.max(0, depth - 1) * 14;
 
+              // Colour for THIS row's own block level (rainbow-bracket scheme): a structural
+              // If/Else/EndIf belongs to its own level (= depth); a body row belongs to the
+              // block that encloses it (= depth − 1). Exposed via the --row-block-color custom
+              // prop so the row's bg AND its hover variant can both reference it. Level 0 resolves
+              // to the user's IF colour, so a single-level block looks exactly as it did before.
+              const rowBlockColor = blockColor(isStructural ? depth : depth - 1);
+
               // Ghost "+ Add Else branch" row — rendered just BEFORE an EndIf row whose
               // matching IF has no ELSE. Placing it before the EndIf keeps it visually
               // tucked between the end of the body (or right after the IF for an empty
@@ -1418,10 +1440,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     // Shifts with its neighbours during a profile-drag insert preview —
                     // it isn't a sortable item, so it needs the transform applied by hand.
                     style={{
+                      // Tint the ghost slot with the colour of the block it belongs to so it
+                      // sits inside that block's coloured band, not a generic IF-hued strip.
+                      ['--row-block-color' as string]: blockColor(addElseDepth),
                       transform: profileShift ? 'translateY(var(--ui-row-height))' : undefined,
                       transition: profileDragTransition,
-                    }}
-                    className="h-row border-b border-border-subtle relative pointer-events-none bg-[color-mix(in_srgb,var(--color-action-if-fg)_6%,transparent)]"
+                    } as React.CSSProperties}
+                    className="h-row border-b border-border-subtle relative pointer-events-none bg-[color-mix(in_srgb,var(--row-block-color)_6%,transparent)]"
                   >
                     <td colSpan={99} className="p-0 relative">
                       <button
@@ -1435,11 +1460,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           // body rows use. 78 (col-2 boundary) + addElseDepth*14 (depth indent)
                           // + 4 (default pl-1) lands the button just past the IF's rail.
                           marginLeft: `${78 + addElseDepth * 14 + 4}px`,
-                          color: 'var(--color-action-if-fg)',
-                          borderColor: 'var(--color-action-if-border)',
+                          color: 'var(--row-block-color)',
+                          borderColor: 'color-mix(in srgb, var(--row-block-color) 35%, transparent)',
                           background: 'transparent',
                         }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-action-if-bg)'; }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'color-mix(in srgb, var(--row-block-color) 10%, transparent)'; }}
                         onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                         data-add-else
                       >
@@ -1480,12 +1505,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   // language for profiles dragged over the grid (rows at/below the
                   // insert point slide down one slot to open space).
                   style={{
+                    // Per-level block colour, consumed by the bg + hover classes below and
+                    // inherited by the scope rails' container. Level 0 === the IF colour.
+                    ['--row-block-color' as string]: rowBlockColor,
                     ...(isPausedHere ? { backgroundColor: 'color-mix(in srgb, var(--color-action-pause-fg) 18%, transparent)' } : null),
                     transform: sortable.transform
                       ? CSS.Translate.toString(sortable.transform)
                       : (profileShift ? 'translateY(var(--ui-row-height))' : undefined),
                     transition: sortable.transition ?? profileDragTransition,
-                  }}
+                  } as React.CSSProperties}
                   className={`group h-row border-b border-border-subtle transition-colors relative ${
                     // Cursor signals draggability: grabbing during an active drag, grab on
                     // hover when THIS row can be dragged (per-row — Else/EndIf are pinned
@@ -1509,12 +1537,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           : isStructural
                             // Structural row tint replaces the odd/even striping so the
                             // whole IF / ELSE / ENDIF row group reads as a cohesive scope
-                            // marker, distinct from the body rows it brackets. Hovering
-                            // mixes the IF hue into the elevated colour instead of using
-                            // plain bg-elevated, so the block tint survives the hover.
-                            ? 'bg-[color-mix(in_srgb,var(--color-action-if-fg)_6%,transparent)] hover:bg-[color-mix(in_srgb,var(--color-action-if-fg)_10%,var(--color-bg-elevated))]'
+                            // marker, distinct from the body rows it brackets. The hue comes
+                            // from --row-block-color (per nesting level), so a nested block
+                            // reads in a different colour from its parent. Hovering mixes that
+                            // hue into the elevated colour so the block tint survives the hover.
+                            ? 'bg-[color-mix(in_srgb,var(--row-block-color)_6%,transparent)] hover:bg-[color-mix(in_srgb,var(--row-block-color)_10%,var(--color-bg-elevated))]'
                             : isInBlock
-                              ? 'bg-[color-mix(in_srgb,var(--color-action-if-fg)_3%,transparent)] hover:bg-[color-mix(in_srgb,var(--color-action-if-fg)_7%,var(--color-bg-elevated))]'
+                              ? 'bg-[color-mix(in_srgb,var(--row-block-color)_3%,transparent)] hover:bg-[color-mix(in_srgb,var(--row-block-color)_7%,var(--color-bg-elevated))]'
                               : idx % 2 === 0
                                 ? 'bg-bg-surface hover:bg-bg-elevated'
                                 // Odd-row stripe: a whisper of text-primary instead of a
@@ -1548,7 +1577,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           style={{
                             left: `${78 + i * 14}px`,
                             width: strong ? '3px' : '2px',
-                            background: strong ? 'var(--color-action-if-fg)' : 'var(--color-action-if-border)',
+                            // Rail i sits at nesting level i, so it takes that level's colour —
+                            // each enclosing block contributes its own coloured rail (rainbow
+                            // brackets). The innermost rail of a structural row is full strength;
+                            // outer/body rails use the 35% wash the old --if-border used.
+                            background: strong
+                              ? blockColor(i)
+                              : `color-mix(in srgb, ${blockColor(i)} 35%, transparent)`,
                           }}
                         />
                       );

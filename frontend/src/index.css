@@ -47,6 +47,20 @@
   --color-action-browser-fg: #fb923c;
   --color-action-browser-bg: rgba(251, 146, 60, 0.1);
 
+  /* Conditional-block nesting palette ("rainbow brackets"). Level 0 is the user's
+     configurable IF colour (--color-action-if-fg) so single-level blocks look
+     unchanged; deeper levels cycle this fixed set so nested IF/Else/EndIf blocks
+     read apart at a glance. Hues are picked to stay CLEAR of every action colour
+     (recording/browser/sendtext/pixelcolor/replay/scroll/if/key/accent/runprofile/
+     mouse/clicker/waitimage/pause) — the action palette fills most of the wheel, so
+     the only perceptually-free zones are pink/rose and the muted earth tones; these
+     two pairs (rose + indigo, bronze + olive) read distinctly "not an action".
+     Consumed by the scope rails (full strength) + row wash (low opacity). */
+  --color-block-1: #ef5da8; /* rose */
+  --color-block-2: #5d5fd1; /* indigo */
+  --color-block-3: #b3814e; /* bronze */
+  --color-block-4: #9a9a3e; /* olive */
+
   /* Hotkey badge — follows accent color */
   --color-hotkey-fg: var(--color-accent);
   --color-hotkey-bg: color-mix(in srgb, var(--color-accent) 8%, transparent);
