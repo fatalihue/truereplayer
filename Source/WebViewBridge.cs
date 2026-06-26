@@ -2129,10 +2129,11 @@ namespace TrueReplayer
             foreach (var idx in indices)
             {
                 if (idx < 0 || idx >= actions.Count) continue;
-                // IF/ELSE/ENDIF are structural markers with no replay delay — never bulk-set theirs.
+                // ELSE/ENDIF are pure jump markers with no replay delay — never bulk-set theirs. The
+                // opening IF DOES carry a delay (a pre-probe "wait for the condition to settle" knob),
+                // so it's bulk-set like any normal action.
                 var t = actions[idx].ActionType;
-                if (string.Equals(t, "If", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(t, "Else", StringComparison.OrdinalIgnoreCase)
+                if (string.Equals(t, "Else", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(t, "EndIf", StringComparison.OrdinalIgnoreCase))
                     continue;
                 actions[idx].Delay = delay;

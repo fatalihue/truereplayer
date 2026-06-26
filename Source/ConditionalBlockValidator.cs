@@ -39,14 +39,15 @@ namespace TrueReplayer.Services
             if (actions == null || actions.Count == 0)
                 return new BlockValidationResult(0, 0);
 
-            // Structural markers (IF/ELSE/ENDIF) carry no replay delay — normalise any stray value to
-            // 0 so a bulk "set delay for all" (or a hand-edited profile) can't leave a meaningless
-            // delay on a block marker. Silent (not counted as a fixup → no toast) and idempotent.
+            // ELSE/ENDIF are pure jump markers and carry no replay delay — normalise any stray value
+            // to 0 so a hand-edited profile can't leave a meaningless delay on them. The opening IF is
+            // deliberately exempt: it runs a probe, so its delay is a real "wait for the condition to
+            // settle before checking" knob (applied before the probe at replay). Silent (not counted
+            // as a fixup → no toast) and idempotent.
             foreach (var a in actions)
             {
                 if (a.Delay != 0
-                    && (string.Equals(a.ActionType, "If", StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(a.ActionType, "Else", StringComparison.OrdinalIgnoreCase)
+                    && (string.Equals(a.ActionType, "Else", StringComparison.OrdinalIgnoreCase)
                         || string.Equals(a.ActionType, "EndIf", StringComparison.OrdinalIgnoreCase)))
                 {
                     a.Delay = 0;

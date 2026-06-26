@@ -1446,6 +1446,24 @@ namespace TrueReplayer.Services
                             i = actions.Count;
                         continue;
                     }
+                    // The IF carries an optional delay applied BEFORE the probe — a "wait for the
+                    // condition to settle" knob. Some conditions (an image/pixel that only appears
+                    // after a page or animation loads) aren't ready the instant the loop reaches the
+                    // IF, so an immediate probe reads FALSE and the block is wrongly skipped. The
+                    // delay lets the screen catch up first. (ELSE/ENDIF are pure jumps — no delay.)
+                    // Honours the same jitter setting as a regular action's delay.
+                    int ifDelay = Math.Max(0, action.Delay);
+                    if (_useDelayVariation && _delayVariationPercent > 0 && ifDelay > 0)
+                    {
+                        int variation = ifDelay * _delayVariationPercent / 100;
+                        ifDelay += Random.Shared.Next(-variation, variation + 1);
+                        ifDelay = Math.Max(0, ifDelay);
+                    }
+                    if (ifDelay > 0)
+                    {
+                        try { await Task.Delay(ifDelay, token); }
+                        catch (OperationCanceledException) { break; }
+                    }
                     // Highlight while the probe runs — user feedback "we're checking the condition".
                     dispatcherQueue.TryEnqueue(() => OnActionExecuting?.Invoke(action));
                     bool branchTrue;
