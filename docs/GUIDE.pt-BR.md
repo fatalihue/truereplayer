@@ -93,7 +93,7 @@ A tabela central lista todas as ações do perfil. Colunas: **caixa de seleção
 - **Barra em massa** — quando várias linhas estão selecionadas, aparece uma barra com **Set delay**, **Set X / Set Y** (um deslocamento `+10` / `-5` ajusta cada uma; um número simples define todas), **Set notes**, **Move ↑/↓**, **Skip**, **Delete**.
 - **Painel Sheet** — clique com o botão direito → Edit (ou abra o Sheet) para um formulário completo com todos os campos da linha selecionada.
 
-> **Observação:** linhas estruturais (*If / Else / EndIf*) não têm delay — a célula Delay delas fica em branco e não é editável, e um "set delay" em massa as ignora. A pausa de um bloco pertence à ação *dentro* dele.
+> **Observação:** *Else / EndIf* são marcadores de salto puros — a célula Delay delas fica em branco e não é editável, e um "set delay" em massa as ignora. O **If** de abertura *aceita* delay: é uma **espera pré-sondagem** aplicada antes de checar a condição, para que uma imagem/pixel que demora a aparecer não seja lida como "falsa" e o bloco pulado por engano.
 
 ---
 
@@ -131,12 +131,14 @@ Faça uma macro reagir ao que está na tela.
 - Um **If** executa uma **sondagem**: *Image Found* (esta imagem está visível?) ou *Pixel Color Match* (este pixel corresponde a esta cor?).
 - Se a sondagem for **verdadeira**, as ações entre **If** e **Else/EndIf** rodam; se **falsa**, a execução salta para a ramificação **Else** (se houver) ou para depois do **EndIf**.
 - **Negate (IFNOT)** inverte o teste — a ramificação *verdadeira* roda quando a sondagem **falha**.
-- Blocos podem ser **aninhados**. Adicione um **Else** pelo *Insert Else* da linha. A estrutura é validada e reparada automaticamente ao carregar (marcadores órfãos removidos, `EndIf` ausente adicionado).
+- Blocos podem ser **aninhados** — cada nível de aninhamento aparece na sua própria cor (com trilhos de escopo correspondentes) para manter condicionais profundas legíveis. Para criar um bloco aninhado, selecione uma linha **dentro** de um bloco existente e use **Insert Conditional**. Adicione um **Else** pelo *Insert Else* da linha. A estrutura é validada e reparada automaticamente ao carregar (marcadores órfãos removidos, `EndIf` ausente adicionado).
 
-**Mover ações para dentro e para fora de um bloco:**
-- Arraste uma **única** ação do corpo livremente **para dentro ou para fora** de um bloco.
-- Um arrasto de **múltiplas linhas**, ou arrastar o próprio **If**, move o **bloco inteiro** junto (para que os marcadores não fiquem órfãos).
-- Você também pode tirar uma linha passo a passo com **`Alt+↑` / `Alt+↓`**.
+**Editando o conteúdo de um bloco** — ações *dentro* de um bloco são editadas de forma granular; uma operação só engloba o **bloco inteiro** quando a seleção inclui um marcador (*If / Else / EndIf*), para que marcadores nunca fiquem órfãos:
+- **Arraste** uma ou mais ações do corpo livremente **para dentro ou para fora** de um bloco (uma, várias, até não-contíguas).
+- **Delete** linhas do corpo e o bloco permanece — selecione a linha **If** para deletar o bloco inteiro.
+- **Reordene** com **Move ↑/↓** ou **`Alt+↑` / `Alt+↓`**: uma seleção só de corpo move sozinha; uma seleção que toca um marcador leva o bloco inteiro.
+- **Duplique** um **If** para copiar o bloco inteiro como irmão.
+- Arrastar o próprio **If** (ou qualquer seleção que inclua um marcador) sempre move o bloco inteiro junto.
 
 ---
 

@@ -93,7 +93,7 @@ The central table lists every action in the profile. Columns: **selection checkb
 - **Bulk bar** — when multiple rows are selected, a bar appears with **Set delay**, **Set X / Set Y** (a `+10` / `-5` offset adjusts each; a plain number sets all), **Set notes**, **Move ↑/↓**, **Skip**, **Delete**.
 - **Sheet panel** — right-click → Edit (or open the Sheet) for a full form with every field of the selected row.
 
-> **Note:** structural rows (*If / Else / EndIf*) have no delay — their Delay cell is blank and not editable, and a bulk "set delay" skips them. A block's pause belongs on the action *inside* it.
+> **Note:** *Else / EndIf* are pure jump markers — their Delay cell is blank and not editable, and a bulk "set delay" skips them. The opening **If** *does* take a delay: it's a **pre-probe wait** applied before the condition is checked, so a slow-to-appear image/pixel isn't read as "false" and the block wrongly skipped.
 
 ---
 
@@ -131,12 +131,14 @@ Make a macro react to what's on screen.
 - An **If** runs a **probe**: *Image Found* (is this image visible?) or *Pixel Color Match* (does this pixel match this color?).
 - If the probe is **true**, the actions between **If** and **Else/EndIf** run; if **false**, execution jumps to the **Else** branch (if present) or past the **EndIf**.
 - **Negate (IFNOT)** flips the test — the *true* branch runs when the probe **fails**.
-- Blocks can be **nested**. Add an **Else** via the row's *Insert Else*. The structure is validated and auto-repaired on load (orphan markers removed, missing `EndIf` added).
+- Blocks can be **nested** — each nesting level shows in its own colour (with matching scope rails) so deep conditionals stay readable. To create a nested block, select a row **inside** an existing block, then **Insert Conditional**. Add an **Else** via the row's *Insert Else*. The structure is validated and auto-repaired on load (orphan markers removed, missing `EndIf` added).
 
-**Moving actions in and out of a block:**
-- Drag a **single** body action freely **in or out** of a block.
-- A **multi-row** drag, or dragging the **If** itself, moves the **whole block** together (so markers can't be orphaned).
-- You can also step a row out with **`Alt+↑` / `Alt+↓`**.
+**Editing a block's contents** — actions *inside* a block edit granularly; an operation only snaps to the **whole block** when your selection includes a marker (*If / Else / EndIf*), so markers can never be orphaned:
+- **Drag** one or more body actions freely **in or out** of a block (single, multiple, even non-contiguous).
+- **Delete** body rows and the block stays — select the **If** row to delete the whole block.
+- **Reorder** with **Move ↑/↓** or **`Alt+↑` / `Alt+↓`**: a body-only selection moves on its own; a selection touching a marker carries the whole block.
+- **Duplicate** an **If** to copy the whole block as a sibling.
+- Dragging the **If** itself (or any selection that includes a marker) always moves the whole block together.
 
 ---
 
