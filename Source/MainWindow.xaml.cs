@@ -896,8 +896,14 @@ namespace TrueReplayer
                             UserProfile.Current.UseRelativeCoordinates = profileController.GetEffectiveRelativeCoordinates(profileName);
                             UserProfile.Current.BringToFocus = profileController.GetEffectiveBringToFocus(profileName);
                             if (bridge == null) return;
-                            bridge.ApplyProfile(profile);
+                            // Set CurrentProfileName BEFORE ApplyProfile: ApplyProfile pushes the action
+                            // grid, which reads each WaitImage/IF-Image thumbnail's base64 keyed by
+                            // CurrentProfileName. With the old order the push ran under the STALE name
+                            // (e.g. a previous profile, or "No Profile" → "default"), so the reference
+                            // PNG resolved to the wrong dir, missed, and showed a placeholder. Setting
+                            // the name first also clears the base64 cache so the push re-reads cleanly.
                             bridge.CurrentProfileName = profileName;
+                            bridge.ApplyProfile(profile);
                             bridge.CurrentProfilePath = entry?.FilePath;
                             bridge.HasUnsavedChanges = false;
 

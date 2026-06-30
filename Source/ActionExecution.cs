@@ -2553,7 +2553,16 @@ namespace TrueReplayer.Services
             // no-op when run via RunProfile (image lives in the sub-profile's folder).
             string profileName = CurrentExecutingProfileName;
             var referenceImage = ImageStorageService.LoadReferenceImage(profileName, action.ImagePath);
-            if (referenceImage == null) return;
+            if (referenceImage == null)
+            {
+                // Reference PNG missing/unreadable (e.g. deleted by orphan cleanup, or a wrong
+                // profile-name context). Don't silently skip the wait — that lets the macro fall
+                // through as if the screen were ready and silently desync. Log it and honour the
+                // OnTimeout policy (StopReplay by default), the same as a real match timeout.
+                DiagnosticLog.Info($"[WaitImage] Reference image not found (profile '{profileName}', {action.ImagePath}) — applying OnTimeout policy.");
+                HandleWaitImageTimeout(action);
+                return;
+            }
 
             // Compose the optional ROI from the four nullable ints stored on the action.
             // When the profile uses relative coordinates, the stored X/Y are window-relative
@@ -2579,7 +2588,12 @@ namespace TrueReplayer.Services
             try
             {
                 int timeoutMs = action.Timeout > 0 ? action.Timeout : 30000;
-                double confidence = action.Confidence > 0 ? action.Confidence : 0.8;
+                // Clamp below 1.0: a normalized template correlation (CCoeffNormed) essentially never
+                // reaches an exact 1.0 on a live screen (anti-aliasing, sub-pixel text, animation,
+                // capture noise), so a user-set 100% confidence makes the match unreachable and the
+                // WaitImage just times out forever (→ StopReplay). Cap at 0.99 so "max confidence"
+                // stays strict but achievable.
+                double confidence = action.Confidence > 0 ? Math.Min(action.Confidence, 0.99) : 0.8;
 
                 var matchResult = await ImageMatchingService.WaitForImageAsync(
                     referenceImage,
@@ -2830,7 +2844,9 @@ namespace TrueReplayer.Services
                     searchRegion = new System.Drawing.Rectangle(sx + dx, sy + dy, sw, sh);
                 }
 
-                double confidence = action.Confidence > 0 ? action.Confidence : 0.8;
+                // Same 1.0-is-unreachable clamp as ExecuteWaitImage — a 100%-confidence IF/ImageFound
+                // condition would otherwise always read FALSE on a live screen.
+                double confidence = action.Confidence > 0 ? Math.Min(action.Confidence, 0.99) : 0.8;
                 var matchResult = ImageMatchingService.MatchOnce(referenceImage, searchRegion);
                 return matchResult.Score >= confidence;
             }

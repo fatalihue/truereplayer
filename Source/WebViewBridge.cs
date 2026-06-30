@@ -811,7 +811,12 @@ namespace TrueReplayer
             if (_imageBase64Cache.TryGetValue(cacheKey, out var cached))
                 return cached;
             string b64 = ImageStorageService.ReadAsBase64(profileName, imagePath) ?? "";
-            _imageBase64Cache[cacheKey] = b64;
+            // Only memoize a SUCCESSFUL read. Caching an empty result (missing file / transient IO /
+            // a wrong-profile key) would pin the grid placeholder for the WHOLE session — this cache
+            // is otherwise cleared only on a profile-name change. Skipping the cache on "" lets a
+            // one-off miss self-heal on the next actions push once the file is resolvable again.
+            if (b64.Length > 0)
+                _imageBase64Cache[cacheKey] = b64;
             return b64;
         }
 
