@@ -77,6 +77,9 @@ export interface ActionItem {
   // IFNOT semantic — inverts the probe outcome so the TRUE branch fires when the
   // probe FAILS. Default false (clean JSON when unused).
   conditionNegate?: boolean;
+  // Optional poll timeout (ms) for the IF condition. 0/undefined = instant single check (branch
+  // immediately). > 0 = poll up to N ms for the (negate-applied) condition to become true, then branch.
+  conditionTimeout?: number;
   // null/undefined = "TreatAsFalse" (probe exception → walk FALSE branch). "Halt"
   // rethrows and stops replay. Mirrors waitImageOnTimeout's vocabulary.
   ifOnProbeError?: string | null;

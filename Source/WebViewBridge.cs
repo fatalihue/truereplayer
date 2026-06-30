@@ -888,6 +888,7 @@ namespace TrueReplayer
                 conditionType = a.ConditionType,
                 conditionNegate = a.ConditionNegate,
                 ifOnProbeError = a.IfOnProbeError,
+                conditionTimeout = a.ConditionTimeout,
                 browserText = a.BrowserText ?? "",
                 newTab = a.NewTab,
                 isSkipped = a.IsSkipped,
@@ -2046,6 +2047,9 @@ namespace TrueReplayer
                     break;
                 case "conditionNegate":
                     action.ConditionNegate = value == "true";
+                    break;
+                case "conditionTimeout":
+                    if (int.TryParse(value, out int condTimeout)) action.ConditionTimeout = Math.Max(0, condTimeout);
                     break;
                 case "ifOnProbeError":
                     // Same convention as waitImageOnTimeout / pixelOnTimeout — only the

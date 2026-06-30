@@ -117,6 +117,15 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? IfOnProbeError { get; set; }
 
+        // Optional poll timeout (ms) for an IF condition. 0 (default) = instant single check:
+        // evaluate the probe once and branch immediately (legacy behaviour). > 0 = poll the probe
+        // until the negate-applied condition becomes true or this many ms elapse, then branch —
+        // "wait up to N ms for the condition, else take the Else/false branch". Kept SEPARATE from
+        // Timeout (existing IF rows default that to 5000) so enabling this is an explicit opt-in and
+        // never changes legacy IF timing.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public int ConditionTimeout { get; set; }
+
         // Browser action properties
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? BrowserText { get; set; }
@@ -395,6 +404,7 @@ namespace TrueReplayer.Models
             ConditionType = ConditionType,
             ConditionNegate = ConditionNegate,
             IfOnProbeError = IfOnProbeError,
+            ConditionTimeout = ConditionTimeout,
             BrowserText = BrowserText,
             NewTab = NewTab,
             WaitMode = WaitMode,

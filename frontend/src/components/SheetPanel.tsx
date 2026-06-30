@@ -161,6 +161,9 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   // and lets the FALSE branch fire on error; "Halt" rethrows and stops replay.
   const [conditionNegate, setConditionNegate] = useState(false);
   const [ifOnProbeError, setIfOnProbeError] = useState<'TreatAsFalse' | 'Halt'>('TreatAsFalse');
+  // Optional "wait up to N ms for the condition" poll timeout (0 = instant single check). Stored as
+  // a string so the input can be cleared; coerced to a non-negative int on persist.
+  const [conditionTimeout, setConditionTimeout] = useState('0');
 
   // Eyedropper / live-test request tracking — mirrors the WaitImage testMatch /
   // mouse:pickPosition pattern. Single in-flight request at a time; the requestId
@@ -418,6 +421,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       // so a freshly-inserted IF row reads as the most permissive shape.
       setConditionNegate(action.conditionNegate || false);
       setIfOnProbeError(action.ifOnProbeError === 'Halt' ? 'Halt' : 'TreatAsFalse');
+      setConditionTimeout(String(action.conditionTimeout ?? 0));
     }
   }, [action]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -565,6 +569,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       if (!!conditionNegate !== !!(action.conditionNegate)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'conditionNegate', value: String(conditionNegate) } });
       }
+      const ctVal = Math.max(0, parseInt(conditionTimeout, 10) || 0);
+      if (ctVal !== (action.conditionTimeout ?? 0)) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'conditionTimeout', value: String(ctVal) } });
+      }
       const persistedErr = ifOnProbeError === 'Halt' ? 'Halt' : '';
       const currentErr = action.ifOnProbeError === 'Halt' ? 'Halt' : '';
       if (persistedErr !== currentErr) {
@@ -653,7 +661,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     // from actionType + action.conditionType which are already in the array, so the
     // callback rebinds whenever those change. Listing the derived flags would also
     // be a forward-reference error (they're declared further down the component body).
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, send, onClose]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
@@ -1235,6 +1243,23 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 <option value="TreatAsFalse">Treat as false (default)</option>
                 <option value="Halt">Halt replay</option>
               </select>
+            </Field>
+
+            <Field
+              label={tt('Wait for condition', 'Esperar pela condição')}
+              hint={tt('0 = check once and branch instantly (default). Above 0 = poll up to this many ms for the condition to become true before deciding: if it does, the TRUE branch fires; if the time runs out, the FALSE / Else branch fires.', '0 = checa uma vez e ramifica na hora (padrão). Acima de 0 = faz polling por até tantos ms pela condição ficar verdadeira antes de decidir: se ficar, dispara o ramo TRUE; se o tempo acabar, dispara o ramo FALSE / Else.')}
+            >
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={conditionTimeout}
+                  onChange={(e) => setConditionTimeout(e.target.value.replace(/[^0-9]/g, ''))}
+                  className="w-24 h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                  placeholder="0"
+                />
+                <span className="text-[11px] text-text-tertiary">{tt('ms (0 = instant)', 'ms (0 = instantâneo)')}</span>
+              </div>
             </Field>
           </>
           )}

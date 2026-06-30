@@ -1467,7 +1467,7 @@ namespace TrueReplayer.Services
                     // Highlight while the probe runs — user feedback "we're checking the condition".
                     dispatcherQueue.TryEnqueue(() => OnActionExecuting?.Invoke(action));
                     bool branchTrue;
-                    try { branchTrue = InstantProbe(action, token); }
+                    try { branchTrue = await EvaluateConditionWithTimeout(action, token); }
                     catch (OperationCanceledException) { break; }
                     if (!branchTrue)
                     {
@@ -2755,9 +2755,34 @@ namespace TrueReplayer.Services
         }
 
         // ── Conditional logic: instant probe ─────────────────────────────────
-        // Used by IF rows to decide which branch to take. Unlike ExecuteWaitImage /
-        // ExecuteWaitPixelColor, there's NO polling — one screen capture + match (image)
-        // or one pixel read (pixel), completes in ~tens of milliseconds. Cancellation is
+        // Evaluates an IF condition, optionally POLLING for up to action.ConditionTimeout ms for the
+        // (negate-applied) outcome to become true before deciding. ConditionTimeout 0 = the classic
+        // instant single check (unchanged). > 0 turns the IF into "wait up to N ms for the condition,
+        // then branch": returns TRUE the instant the probe is satisfied, otherwise FALSE once the window
+        // elapses (→ Else / false branch). Like a Wait Image/Pixel poll, but it BRANCHES on the result
+        // instead of stopping the run. Poll cadence matches the probe's cost (pixel ~0.1 ms → 50 ms; an
+        // image match captures + correlates the screen → a gentler 200 ms).
+        private async Task<bool> EvaluateConditionWithTimeout(ActionItem action, CancellationToken token)
+        {
+            int timeoutMs = action.ConditionTimeout;
+            if (timeoutMs <= 0)
+                return InstantProbe(action, token); // instant single check — unchanged legacy behaviour
+
+            int pollMs = string.Equals(action.ConditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase) ? 50 : 200;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (true)
+            {
+                token.ThrowIfCancellationRequested();
+                if (InstantProbe(action, token)) return true;         // condition satisfied within the window
+                if (sw.ElapsedMilliseconds >= timeoutMs) return false; // window elapsed → take the Else/false branch
+                await Task.Delay(pollMs, token);
+            }
+        }
+
+        // Used by IF rows to decide which branch to take — a SINGLE-SHOT probe (the optional
+        // "wait up to N ms for the condition" polling lives in EvaluateConditionWithTimeout above).
+        // One screen capture + match (image) or one pixel read (pixel), completes in ~tens of
+        // milliseconds. Cancellation is
         // checked up-front; the probe itself is fast enough that we don't interleave
         // checks during the work (MatchOnce is ~30-80 ms on 1080p, GetPixelAt is sub-ms).
         //
