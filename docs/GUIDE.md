@@ -117,6 +117,8 @@ The central table lists every action in the profile. Columns: **selection checkb
 
 Insert actions from the **toolbar** (Send Keystroke, Send Text, Pause, Wait, Conditional, Browser, Run Profile) or the **command palette** (`Ctrl+K`). Most actions open a small dialog to configure them; click an action's Details cell later to edit it.
 
+> **Tip — match by colour, not confidence.** Image matching compares the whole reference, so it's great for shape/text but a blunt tool for telling apart two states that differ only in **colour** (e.g. an enabled *green* vs a disabled *grey* button). For that, use **Wait Pixel Color** (or an **If** on *Pixel Color Match*): sample a point in the solid fill and match the colour within a tolerance. Also don't set **confidence to 100%** — a live screen never reproduces a reference pixel-for-pixel, so a 100% match times out (it's capped just under 100% internally).
+
 ---
 
 ## Conditional blocks (If / Else / EndIf)
@@ -131,6 +133,7 @@ Make a macro react to what's on screen.
 - An **If** runs a **probe**: *Image Found* (is this image visible?) or *Pixel Color Match* (does this pixel match this color?).
 - If the probe is **true**, the actions between **If** and **Else/EndIf** run; if **false**, execution jumps to the **Else** branch (if present) or past the **EndIf**.
 - **Negate (IFNOT)** flips the test — the *true* branch runs when the probe **fails**.
+- **Wait for condition (optional)** — by default an **If** checks once and branches instantly. Set a *Wait for condition* value (ms) and it polls that long for the condition to become true before deciding: satisfied in time → **true** branch; time runs out → **Else / false**. Great for *"wait up to 3 s for the button to enable, else take a fallback path."* `0` = instant (the default).
 - Blocks can be **nested** — each nesting level shows in its own colour (with matching scope rails) so deep conditionals stay readable. To create a nested block, select a row **inside** an existing block, then **Insert Conditional**. Add an **Else** via the row's *Insert Else*. The structure is validated and auto-repaired on load (orphan markers removed, missing `EndIf` added).
 
 **Editing a block's contents** — actions *inside* a block edit granularly; an operation only snaps to the **whole block** when your selection includes a marker (*If / Else / EndIf*), so markers can never be orphaned:

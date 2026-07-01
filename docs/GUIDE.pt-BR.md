@@ -117,6 +117,8 @@ A tabela central lista todas as ações do perfil. Colunas: **caixa de seleção
 
 Insira ações pela **barra de ferramentas** (Send Keystroke, Send Text, Pause, Wait, Conditional, Browser, Run Profile) ou pela **paleta de comandos** (`Ctrl+K`). A maioria das ações abre um pequeno diálogo para configurá-las; clique na célula Details de uma ação depois para editá-la.
 
+> **Dica — diferencie por cor, não por confiança.** O match de imagem compara a referência inteira, ótimo para forma/texto, mas é grosseiro para distinguir dois estados que diferem só na **cor** (ex.: um botão habilitado *verde* vs desabilitado *cinza*). Para isso use **Wait Pixel Color** (ou um **If** em *Pixel Color Match*): amostre um ponto no preenchimento sólido e case a cor dentro de uma tolerância. E não use **confiança em 100%** — uma tela viva nunca reproduz a referência pixel a pixel, então um match de 100% dá timeout (internamente é limitado logo abaixo de 100%).
+
 ---
 
 ## Blocos condicionais (If / Else / EndIf)
@@ -131,6 +133,7 @@ Faça uma macro reagir ao que está na tela.
 - Um **If** executa uma **sondagem**: *Image Found* (esta imagem está visível?) ou *Pixel Color Match* (este pixel corresponde a esta cor?).
 - Se a sondagem for **verdadeira**, as ações entre **If** e **Else/EndIf** rodam; se **falsa**, a execução salta para a ramificação **Else** (se houver) ou para depois do **EndIf**.
 - **Negate (IFNOT)** inverte o teste — a ramificação *verdadeira* roda quando a sondagem **falha**.
+- **Esperar pela condição (opcional)** — por padrão um **If** checa uma vez e ramifica na hora. Defina um valor de *Wait for condition* (ms) e ele faz polling por esse tempo pela condição ficar verdadeira antes de decidir: satisfez a tempo → ramo **verdadeiro**; o tempo acabou → **Else / falso**. Ótimo para *"espere até 3 s o botão habilitar, senão siga um plano B."* `0` = instantâneo (o padrão).
 - Blocos podem ser **aninhados** — cada nível de aninhamento aparece na sua própria cor (com trilhos de escopo correspondentes) para manter condicionais profundas legíveis. Para criar um bloco aninhado, selecione uma linha **dentro** de um bloco existente e use **Insert Conditional**. Adicione um **Else** pelo *Insert Else* da linha. A estrutura é validada e reparada automaticamente ao carregar (marcadores órfãos removidos, `EndIf` ausente adicionado).
 
 **Editando o conteúdo de um bloco** — ações *dentro* de um bloco são editadas de forma granular; uma operação só engloba o **bloco inteiro** quando a seleção inclui um marcador (*If / Else / EndIf*), para que marcadores nunca fiquem órfãos:

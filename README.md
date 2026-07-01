@@ -63,7 +63,7 @@ It sends input the way real apps and **games** expect (tested in Roblox and othe
 - **Wait for Image / Pixel Color** — block until something appears on screen (great for syncing with slower apps).
 - **Send Text** — paste rich text with tokens like `{enter}`, `{tab}`, `{clipboard}`, dates, saved snippets and clipboard transforms.
 - **Run Profile** — call another macro as a sub-step and build modular, reusable automations.
-- **Conditionals (If / Else / EndIf)** — branch on whether an image is found or a pixel matches; supports *IFNOT* and nesting.
+- **Conditionals (If / Else / EndIf)** — branch on whether an image is found or a pixel matches; supports *IFNOT*, nesting, and an optional per-condition timeout (wait for the condition, then branch).
 - **Browser actions** — drive Chrome by CSS selector (Click, Type, Navigate, Wait for element, Select option) via the [companion Chrome extension](https://github.com/fatalihue/TrueReplayer-releases/blob/main/docs/extension-setup/README.md).
 
 <p align="center">
