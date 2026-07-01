@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, RefreshCw, Crosshair, Copy, ClipboardPaste, ShieldCheck, ShieldAlert, ShieldQuestion, PlayCircle, Pipette, Check, X } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Crosshair, Copy, ClipboardPaste, ShieldCheck, ShieldAlert, ShieldQuestion, PlayCircle, Pipette, Check, X, Frame } from 'lucide-react';
+import { ActionIcon } from './ActionTable';
 import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
 import { useTt } from '../state/LanguageContext';
@@ -45,6 +46,18 @@ const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
 };
 
 const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'Pause', 'If', 'Else', 'EndIf']);
+
+// Semantic result-card colouring via theme tokens — success = replay green, failure/error =
+// recording red. Matches the inline-style pattern the foot-gun cards already use, so no
+// hardcoded hex (the app has 40+ themes). Pure, so it lives at module scope.
+function resultCardStyle(ok: boolean) {
+  const c = ok ? 'var(--color-replay)' : 'var(--color-recording)';
+  return {
+    color: c,
+    borderColor: `color-mix(in srgb, ${c} 40%, transparent)`,
+    backgroundColor: `color-mix(in srgb, ${c} 10%, transparent)`,
+  };
+}
 
 // #1 — Text matching modes mapped to selector prefixes
 type TextMode = 'exact' | 'contains' | 'icontains' | 'regex';
@@ -1094,6 +1107,25 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const familyOptions = currentFamily ? familyTypes[currentFamily] : [];
   const showTypePicker = familyOptions.length > 1;
 
+  // Human-readable action name — defined once, used as the header headline (and reusable
+  // for tooltips). Replaces the inline 17-branch ternary that used to live in the header.
+  const actionLabel = isWaitImage ? 'Wait Image'
+    : isWaitPixelColor ? 'Wait Pixel Color'
+    : isIfImage ? 'If Image Found'
+    : isIfPixel ? 'If Pixel Color Match'
+    : isIf ? 'If'
+    : isElse ? 'Else'
+    : isEndIf ? 'End If'
+    : actionType === 'BrowserClick' ? 'Click Element'
+    : actionType === 'BrowserRightClick' ? 'Right Click Element'
+    : actionType === 'BrowserType' ? 'Type Text'
+    : actionType === 'BrowserWaitElement' ? 'Wait Element'
+    : actionType === 'BrowserNavigate' ? 'Open URL'
+    : actionType === 'BrowserSelectOption' ? 'Select Option'
+    : actionType === 'DoubleClick' ? 'Double Click'
+    : isClickHalf ? `${(clickHalfBase ?? '').replace('Click', '')} Click`
+    : actionType;
+
   return createPortal(
     <>
       {/* Backdrop — no click-to-close, user must Save/Cancel/arrow */}
@@ -1109,31 +1141,20 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       >
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-4 border-b border-border-subtle shrink-0">
-          <button onClick={onClose} className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('Close panel', 'Fechar painel')}>
+          <button onClick={onClose} className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors shrink-0" data-tip={tt('Close panel', 'Fechar painel')}>
             <ArrowLeft size={16} />
           </button>
-          <div>
-            <div className="text-sm font-semibold text-text-primary">Edit Action</div>
+          {/* Action icon — reuses the grid's canonical ActionIcon so the drawer reads the
+              same as the row the user clicked (covers even the icon-less Else/EndIf). */}
+          <div className="flex items-center justify-center w-8 h-8 rounded-md bg-bg-elevated text-text-secondary shrink-0">
+            <ActionIcon actionType={actionType} size={15} />
+          </div>
+          <div className="min-w-0">
+            {/* Headline = the action name; the redundant "Edit Action" is dropped (the
+                drawer context already makes it obvious). */}
+            <div className="text-sm font-semibold text-text-primary truncate">{actionLabel}</div>
             <div className="text-[11px] text-text-tertiary mt-0.5 flex items-center gap-1.5 flex-wrap">
-              <span>
-                Action #{(actionIndex ?? 0) + 1} — {isWaitImage ? 'Wait Image'
-                  : isWaitPixelColor ? 'Wait Pixel Color'
-                  : isIfImage ? 'If Image Found'
-                  : isIfPixel ? 'If Pixel Color Match'
-                  : isIf ? 'If'
-                  : isElse ? 'Else'
-                  : isEndIf ? 'End If'
-                  : actionType === 'BrowserClick' ? 'Click Element'
-                  : actionType === 'BrowserRightClick' ? 'Right Click Element'
-                  : actionType === 'BrowserType' ? 'Type Text'
-                  : actionType === 'BrowserWaitElement' ? 'Wait Element'
-                  : actionType === 'BrowserNavigate' ? 'Open URL'
-                  : actionType === 'BrowserSelectOption' ? 'Select Option'
-                  : actionType === 'DoubleClick' ? 'Double Click'
-                  : isClickHalf
-                    ? `${(clickHalfBase ?? '').replace('Click', '')} Click`
-                    : actionType}
-              </span>
+              <span>Action #{(actionIndex ?? 0) + 1}</span>
               {clickHalfSuffix && (
                 <span
                   className="px-1.5 py-[1px] rounded text-[10px] font-medium border bg-bg-card text-text-secondary border-border-default"
@@ -1147,7 +1168,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
         </div>
 
         {/* Body */}
-        <div className="p-4 space-y-4 flex-1 min-h-0 overflow-y-auto">
+        <div className="p-4 space-y-3 flex-1 min-h-0 overflow-y-auto">
           {/* Action Type — only shown when the family has >1 meaningful option. Hidden for
               SendText (single option), WaitImage / Browser / Pause (each has its own editor
               shape). Cross-family conversions aren't offered: users who want to swap families
@@ -1231,9 +1252,28 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               </div>
             </Field>
 
+            {/* Wait for condition sits next to the Condition toggle — the core branch
+                decision and its timing modifier read as one pair; the flaky-probe fallback
+                (On Probe Error) reads last as the edge case. */}
+            <Field
+              label="Wait for condition"
+              hint={tt('0 = check once and branch instantly (default). Above 0 = poll up to this many ms for the condition to become true before deciding: if it does, the TRUE branch fires; if the time runs out, the FALSE / Else branch fires.', '0 = checa uma vez e ramifica na hora (padrão). Acima de 0 = faz polling por até tantos ms pela condição ficar verdadeira antes de decidir: se ficar, dispara o ramo TRUE; se o tempo acabar, dispara o ramo FALSE / Else.')}
+            >
+              <NumberInput
+                value={parseInt(conditionTimeout, 10) || 0}
+                onChange={(n) => setConditionTimeout(String(n))}
+                min={0}
+                step={500}
+                suffix="ms"
+                inputWidth="w-24"
+                inputHeight="h-8"
+                ariaLabel="Wait for condition in milliseconds"
+              />
+            </Field>
+
             <Field
               label="On Probe Error"
-              hint="Default: probe exception falls through to the FALSE branch so the replay continues. Halt rethrows so flaky probes don't silently mask bugs."
+              hint={tt("Default: probe exception falls through to the FALSE branch so the replay continues. Halt rethrows so flaky probes don't silently mask bugs.", 'Padrão: uma exceção no teste cai para o ramo FALSE e a reprodução continua. Interromper relança o erro para que testes instáveis não mascarem bugs silenciosamente.')}
             >
               <select
                 value={ifOnProbeError}
@@ -1244,24 +1284,17 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 <option value="Halt">Halt replay</option>
               </select>
             </Field>
-
-            <Field
-              label={tt('Wait for condition', 'Esperar pela condição')}
-              hint={tt('0 = check once and branch instantly (default). Above 0 = poll up to this many ms for the condition to become true before deciding: if it does, the TRUE branch fires; if the time runs out, the FALSE / Else branch fires.', '0 = checa uma vez e ramifica na hora (padrão). Acima de 0 = faz polling por até tantos ms pela condição ficar verdadeira antes de decidir: se ficar, dispara o ramo TRUE; se o tempo acabar, dispara o ramo FALSE / Else.')}
-            >
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={conditionTimeout}
-                  onChange={(e) => setConditionTimeout(e.target.value.replace(/[^0-9]/g, ''))}
-                  className="w-24 h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-                  placeholder="0"
-                />
-                <span className="text-[11px] text-text-tertiary">{tt('ms (0 = instant)', 'ms (0 = instantâneo)')}</span>
-              </div>
-            </Field>
           </>
+          )}
+
+          {/* Else / EndIf are pure block markers with nothing to configure — a short
+              orientation note keeps the otherwise-empty panel from reading as broken. */}
+          {(isElse || isEndIf) && (
+            <div className="text-[11px] text-text-tertiary leading-snug px-1">
+              {isElse
+                ? tt('Else marks the FALSE branch of its If block. Configure the condition on the opening If row — nothing to set here.', 'Else marca o ramo FALSE do bloco If. Configure a condição na linha If de abertura — nada a definir aqui.')
+                : tt('End If closes the conditional block. Configure the condition on the opening If row — nothing to set here.', 'End If fecha o bloco condicional. Configure a condição na linha If de abertura — nada a definir aqui.')}
+            </div>
           )}
 
           {/* WaitImage Settings — also rendered for IF rows whose ConditionType is
@@ -1308,7 +1341,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     // behaviour where the editor stays open through the capture.
                     send({ type: 'waitimage:recapture', payload: { index: actionIndex } });
                   }}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1.5 h-8 px-2.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
                 >
                   <RefreshCw size={12} />
                   Recapture
@@ -1316,7 +1349,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 <button
                   onClick={handleTestMatch}
                   disabled={!action?.imagePath || testMatchRequestId != null}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 flex items-center justify-center gap-1.5 h-8 px-2.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   data-tip={tt('Capture the screen now and report the match score', 'Captura a tela agora e informa a pontuação de correspondência')}
                 >
                   <PlayCircle size={12} />
@@ -1329,13 +1362,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   the user knows where to fine-tune it (Configure button below). */}
               {testMatchResult && !testMatchRequestId && (
                 <div
-                  className={`mt-2 px-2 py-1.5 rounded text-[11px] font-mono border ${
-                    testMatchResult.error
-                      ? 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#C42B1C]'
-                      : testMatchResult.found
-                      ? 'border-[#0E7A0D]/40 bg-[#0E7A0D]/10 text-[#6bcb77]'
-                      : 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#ff6b6b]'
-                  }`}
+                  className="mt-2 px-2 py-1.5 rounded text-[11px] font-mono border"
+                  style={resultCardStyle(!!testMatchResult.found && !testMatchResult.error)}
                 >
                   {testMatchResult.error ? (
                     testMatchResult.error
@@ -1370,15 +1398,16 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 </div>
                 <button
                   onClick={handleConfigureSearchRegion}
-                  className="px-2.5 py-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
+                  className="h-8 px-2.5 flex items-center gap-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
                   data-tip={tt('Draw a sub-rectangle of the screen to limit where the match runs. Reduces CPU and false positives.', 'Desenhe um sub-retângulo da tela para limitar onde a correspondência roda. Reduz CPU e falsos positivos.')}
                 >
-                  Configure…
+                  <Frame size={12} />
+                  Configure
                 </button>
                 {waitImageSearchRegion && (
                   <button
                     onClick={() => setWaitImageSearchRegion(null)}
-                    className="px-2 py-1.5 rounded text-xs text-text-tertiary hover:text-[#C42B1C] hover:bg-bg-card transition-colors"
+                    className="h-8 px-2 flex items-center rounded text-xs text-text-tertiary hover:text-[var(--color-recording)] hover:bg-bg-card transition-colors"
                     data-tip={tt('Clear search region (revert to full screen)', 'Limpar região de busca (voltar para tela cheia)')}
                   >
                     <X size={12} />
@@ -1393,7 +1422,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 wait behavior → test it". */}
             <Field
               label="Tolerance (%)"
-              hint="80% is a reasonable default. Raise toward 95 for stricter matches; drop below 70 for compressed / scaled UI elements."
+              hint={tt('80% is a reasonable default. Raise toward 95 for stricter matches; drop below 70 for compressed / scaled UI elements.', 'Padrão razoável é 80%. Aumente para ~95 para correspondências mais estritas; abaixe abaixo de 70 para elementos de UI comprimidos / redimensionados.')}
             >
               <Slider
                 value={parseInt(confidence, 10) || 80}
@@ -1485,62 +1514,69 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 the X/Y inputs, Test match on the row below — clusters the
                 "configure the probe" and "validate the probe" actions visually. */}
             <Field label="Pixel to Watch">
-              <div className="flex items-center gap-2.5">
-                <input
-                  type="text"
-                  value={pixelX}
-                  onChange={(e) => setPixelX(e.target.value)}
-                  placeholder="X"
-                  className="w-20 h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
-                />
-                <input
-                  type="text"
-                  value={pixelY}
-                  onChange={(e) => setPixelY(e.target.value)}
-                  placeholder="Y"
-                  className="w-20 h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid"
-                />
-                <button
-                  type="button"
-                  onClick={handlePickPixelColor}
-                  className="flex items-center gap-1.5 h-7 px-2.5 text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default rounded hover:bg-bg-card hover:text-text-primary transition-colors"
-                  data-tip={tt('Click anywhere on screen — captures X, Y, and the pixel colour in one shot', 'Clique em qualquer lugar da tela — captura X, Y e a cor do pixel de uma vez')}
-                >
-                  <Pipette size={12} />
-                  Pick from screen
-                </button>
+              {/* X / Y as NumberInput (steppers + clamp + h-8), parallel to the Click editor's
+                  coordinate row. */}
+              <div className="flex gap-2.5">
+                <Field label="X" className="flex-1">
+                  <NumberInput
+                    value={pixelX === '' ? null : (Number.isFinite(parseInt(pixelX, 10)) ? parseInt(pixelX, 10) : null)}
+                    onChange={(n) => setPixelX(String(n))}
+                    onClear={() => setPixelX('')}
+                    placeholder="—"
+                    inputWidth="w-full"
+                    inputHeight="h-8"
+                    ariaLabel="Pixel X"
+                  />
+                </Field>
+                <Field label="Y" className="flex-1">
+                  <NumberInput
+                    value={pixelY === '' ? null : (Number.isFinite(parseInt(pixelY, 10)) ? parseInt(pixelY, 10) : null)}
+                    onChange={(n) => setPixelY(String(n))}
+                    onClear={() => setPixelY('')}
+                    placeholder="—"
+                    inputWidth="w-full"
+                    inputHeight="h-8"
+                    ariaLabel="Pixel Y"
+                  />
+                </Field>
               </div>
-              {/* Test match — separate row so the X/Y/Pick row stays uncluttered. */}
-              <div className="mt-2">
+              {/* Test match + Pick share one row — Test validates the current pixel, Pick
+                  (re)captures X/Y + colour. Both h-8, flex-1, so neither clips or wraps. */}
+              <div className="mt-2 flex gap-2">
                 <button
                   type="button"
                   onClick={handleTestPixelMatch}
-                  className="flex items-center gap-1.5 h-7 px-2.5 text-xs font-medium text-text-secondary bg-bg-elevated border border-border-default rounded hover:bg-bg-card hover:text-text-primary transition-colors"
+                  className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded whitespace-nowrap transition-colors"
                   data-tip={tt('Read the live pixel and compare against the target colour', 'Lê o pixel ao vivo e compara com a cor-alvo')}
                 >
-                  <PlayCircle size={12} />
+                  <PlayCircle size={13} />
                   Test match
                 </button>
-                {testPixelResult && (
-                  <div
-                    className={`mt-2 px-2 py-1.5 rounded text-[11px] font-mono border ${
-                      testPixelResult.error
-                        ? 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#C42B1C]'
-                        : testPixelResult.matches
-                        ? 'border-[#0E7A0D]/40 bg-[#0E7A0D]/10 text-[#6bcb77]'
-                        : 'border-[#C42B1C]/40 bg-[#C42B1C]/10 text-[#ff6b6b]'
-                    }`}
-                  >
-                    {testPixelResult.error ? (
-                      testPixelResult.error
-                    ) : testPixelResult.matches ? (
-                      <>Sampled {testPixelResult.sampledHex}  ·  Target {pixelColor} ± {pixelTolerance} ✓</>
-                    ) : (
-                      <>Sampled {testPixelResult.sampledHex ?? 'no read'}  ·  Target {pixelColor} ± {pixelTolerance} — out of tolerance</>
-                    )}
-                  </div>
-                )}
+                <button
+                  type="button"
+                  onClick={handlePickPixelColor}
+                  disabled={pickColorRequestId != null}
+                  className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  data-tip={tt('Click anywhere on screen — captures X, Y, and the pixel colour in one shot', 'Clique em qualquer lugar da tela — captura X, Y e a cor do pixel de uma vez')}
+                >
+                  <Pipette size={13} />
+                  {pickColorRequestId != null ? 'Picking…' : 'Pick'}
+                </button>
               </div>
+              {testPixelResult && (
+                <div
+                  className="mt-2 px-2 py-1.5 rounded text-[11px] font-mono border"
+                  style={resultCardStyle(!!testPixelResult.matches && !testPixelResult.error)}
+                >
+                  {testPixelResult.error ? (
+                    testPixelResult.error
+                  ) : testPixelResult.matches ? (
+                    <>Sampled {testPixelResult.sampledHex}  ·  Target {pixelColor} ± {pixelTolerance} ✓</>
+                  ) : (
+                    <>Sampled {testPixelResult.sampledHex ?? 'no read'}  ·  Target {pixelColor} ± {pixelTolerance} — out of tolerance</>
+                  )}
+                </div>
+              )}
             </Field>
 
             {/* TARGET COLOUR — swatch + hex input. The eyedropper above writes both, but
@@ -1550,7 +1586,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             <Field label="Target Colour">
               <div className="flex items-center gap-2.5">
                 <span
-                  className="w-7 h-7 rounded border border-border-default shrink-0"
+                  className="w-8 h-8 rounded border border-border-default shrink-0"
                   style={{ background: /^#?(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(pixelColor.trim()) ? (pixelColor.trim().startsWith('#') ? pixelColor.trim() : '#' + pixelColor.trim()) : 'transparent' }}
                   data-tip={pixelColor || tt('No colour set', 'Nenhuma cor definida')}
                 />
@@ -1559,7 +1595,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   value={pixelColor}
                   onChange={(e) => setPixelColor(e.target.value)}
                   placeholder="#RRGGBB"
-                  className="flex-1 h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
+                  className="flex-1 h-8 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
                 />
               </div>
             </Field>
@@ -1570,7 +1606,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 who really want > 50 can still type it. */}
             <Field
               label="Tolerance (Per Channel)"
-              hint="0 = exact match. Try 5–15 for game UI colours that compress slightly."
+              hint={tt('0 = exact match. Try 5–15 for game UI colours that compress slightly.', '0 = correspondência exata. Tente 5–15 para cores de UI de jogos que comprimem levemente.')}
             >
               <Slider
                 value={parseInt(pixelTolerance, 10) || 0}
@@ -1678,12 +1714,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 }`}
               />
             </Field>
-            <Field label="Timeout (ms) — 0 = infinite">
+            <Field label="Timeout">
               <NumberInput
                 value={parseInt(timeout, 10) || 0}
                 onChange={(n) => setTimeout_(String(n))}
                 min={0}
                 step={1000}
+                suffix="ms"
                 inputWidth="w-full"
                 inputHeight="h-8"
                 ariaLabel="Timeout in milliseconds"
@@ -1743,7 +1780,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 >
                   <ShieldAlert size={13} className="shrink-0 mt-px" />
                   <span>
-                    No resume hotkey and no timeout — this Pause will be skipped at replay time.
+                    {tt('No resume hotkey and no timeout — this Pause will be skipped at replay time.', 'Sem tecla de retomada e sem tempo limite — esta Pause será ignorada na reprodução.')}
                   </span>
                 </div>
               );
@@ -1803,10 +1840,10 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     <span className="text-[10px] font-semibold text-text-tertiary">ALTERNATIVES</span>
                     <button
                       onClick={() => setShowAlternatives(false)}
-                      className="text-[10px] text-text-tertiary hover:text-text-primary"
+                      className="flex items-center text-text-tertiary hover:text-text-primary"
                       data-tip={tt('Dismiss alternatives', 'Dispensar alternativas')}
                     >
-                      ×
+                      <X size={12} />
                     </button>
                   </div>
                   {alternatives.map((alt, i) => {
@@ -1878,13 +1915,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
             {/* #7 — Navigate post-checks */}
             {isBrowserNavigate && (
             <>
-              <div>
-                <label
-                  className="block text-[11px] font-semibold text-text-tertiary uppercase tracking-wide mb-1.5"
-                  data-tip={tt('Optional. Wait until URL matches glob (*) or /regex/. Useful for redirects.', 'Opcional. Espera até a URL corresponder a glob (*) ou /regex/. Útil para redirecionamentos.')}
-                >
-                  URL PATTERN
-                </label>
+              <Field label="URL Pattern" hint={tt('Optional. Wait until URL matches glob (*) or /regex/. Useful for redirects.', 'Opcional. Espera até a URL corresponder a glob (*) ou /regex/. Útil para redirecionamentos.')}>
                 <input
                   type="text"
                   value={urlWaitPattern}
@@ -1892,14 +1923,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
                   placeholder="*/dashboard*"
                 />
-              </div>
-              <div>
-                <label
-                  className="block text-[11px] font-semibold text-text-tertiary uppercase tracking-wide mb-1.5"
-                  data-tip={tt('Optional. Wait for element to appear after page load.', 'Opcional. Espera o elemento aparecer após o carregamento da página.')}
-                >
-                  WAIT ELEMENT
-                </label>
+              </Field>
+              <Field label="Wait Element" hint={tt('Optional. Wait for element to appear after page load.', 'Opcional. Espera o elemento aparecer após o carregamento da página.')}>
                 <input
                   type="text"
                   value={postNavigateSelector}
@@ -1907,7 +1932,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
                   placeholder="#app-ready"
                 />
-              </div>
+              </Field>
             </>
             )}
 
@@ -1929,40 +1954,21 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   apiRef={browserTextEditorRef}
                 />
               </div>
-              {/* Chip palette — two visible rows of the tokens users actually reach for,
-                  rare keys behind the "⋯" expander. Names match the SendText dialog's
-                  vocabulary so users don't have to learn two. insertText() drops the
-                  token at the cursor inside the Lexical editor; the
-                  TokenAutoTransformPlugin immediately converts it into a chip. Gold
-                  hover is shared across every chip button so the palette reads as one
-                  cohesive control. */}
+              {/* Chip palette — the 3 most-reached tokens on one row; everything else (Tab,
+                  Date, Time, and the rare keys) collapses behind the "⋯" expander. Names match
+                  the SendText dialog's vocabulary; insertText() drops the token at the cursor
+                  inside the Lexical editor and TokenAutoTransformPlugin turns it into a chip. */}
               <div className="flex flex-wrap gap-1 mt-2">
                 {[
                   { var: '{Clipboard}', label: 'Clipboard' },
                   { var: '{Enter}', label: 'Enter' },
-                  { var: '{Tab}', label: 'Tab' },
-                ].map(item => (
-                  <button
-                    key={item.var}
-                    type="button"
-                    onClick={() => browserTextEditorRef.current?.insertText(item.var)}
-                    className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-              <div className="flex flex-wrap gap-1 mt-1">
-                {[
-                  { var: '{Date}', label: 'Date' },
-                  { var: '{Time}', label: 'Time' },
                   { var: '{DateTime}', label: 'DateTime' },
                 ].map(item => (
                   <button
                     key={item.var}
                     type="button"
                     onClick={() => browserTextEditorRef.current?.insertText(item.var)}
-                    className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
+                    className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-accent hover:border-accent-solid/40 transition-colors"
                   >
                     {item.label}
                   </button>
@@ -1975,18 +1981,20 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   className={`px-2 py-0.5 text-[11px] font-mono border rounded transition-colors ${
                     showMoreTypeChips
                       ? 'text-accent-light bg-accent-solid/15 border-accent-solid/50'
-                      : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40'
+                      : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-accent hover:border-accent-solid/40'
                   }`}
-                  data-tip={showMoreTypeChips ? tt('Hide extra keys', 'Ocultar teclas extras') : tt('More keys (Escape, Backspace, Delete, arrows)', 'Mais teclas (Escape, Backspace, Delete, setas)')}
+                  data-tip={showMoreTypeChips ? tt('Hide extra tokens', 'Ocultar tokens extras') : tt('More tokens (Tab, Date, Time, Escape, Backspace, Delete, arrows)', 'Mais tokens (Tab, Date, Time, Escape, Backspace, Delete, setas)')}
                 >
                   ⋯
                 </button>
               </div>
-              {/* Rare keys — everything the extension's BrowserType parser supports
-                  beyond the common set (escape / backspace / delete / arrows). */}
+              {/* Everything beyond the top 3 — collapsed by default. */}
               {showMoreTypeChips && (
                 <div className="flex flex-wrap gap-1 mt-1">
                   {[
+                    { var: '{Tab}', label: 'Tab' },
+                    { var: '{Date}', label: 'Date' },
+                    { var: '{Time}', label: 'Time' },
                     { var: '{Escape}', label: 'Escape' },
                     { var: '{Backspace}', label: 'Backspace' },
                     { var: '{Delete}', label: 'Delete' },
@@ -1999,7 +2007,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                       key={item.var}
                       type="button"
                       onClick={() => browserTextEditorRef.current?.insertText(item.var)}
-                      className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
+                      className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-accent hover:border-accent-solid/40 transition-colors"
                     >
                       {item.label}
                     </button>
@@ -2025,7 +2033,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 title={tt('Use clipboard paste (instant) instead of typing char-by-char', 'Usa colagem da área de transferência (instantâneo) em vez de digitar caractere por caractere')}
               />
               <div className="flex items-center gap-2">
-                <label className="text-[11px] text-text-tertiary" data-tip={tt('Delay between characters in ms (typing only). 0 = instant, blank = auto.', 'Atraso entre caracteres em ms (apenas digitação). 0 = instantâneo, vazio = automático.')}>Char delay (ms)</label>
+                <label className="text-[11px] text-text-tertiary" data-tip={tt('Delay between characters in ms (typing only). 0 = instant, blank = auto.', 'Atraso entre caracteres em ms (apenas digitação). 0 = instantâneo, vazio = automático.')}>Char delay</label>
                 <NumberInput
                   // typeDelay '' = "auto" (engine picks a default per text length). Pass
                   // null so the placeholder shows; user clearing the field via onClear
@@ -2036,8 +2044,9 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   min={0}
                   disabled={typePaste}
                   placeholder="auto"
+                  suffix="ms"
                   inputWidth="w-14"
-                  inputHeight="h-7"
+                  inputHeight="h-8"
                   ariaLabel="Char delay (ms)"
                 />
               </div>
@@ -2061,7 +2070,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               </Field>
               <Field
                 label="Match By"
-                hint="Only works on native <select> elements. For React-Select / Select2 use Click Element."
+                hint={tt('Only works on native <select> elements. For React-Select / Select2 use Click Element.', 'Só funciona em elementos <select> nativos. Para React-Select / Select2 use Click Element.')}
               >
                 <select
                   value={selectMatchMode}
@@ -2104,7 +2113,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                   }}
                 >
                   <ShieldAlert size={13} className="shrink-0 mt-px" />
-                  <span>Text-match mode needs a value in the Text Match field. Otherwise this Wait will time out.</span>
+                  <span>{tt('Text-match mode needs a value in the Text Match field. Otherwise this Wait will time out.', 'O modo Text Match precisa de um valor no campo Text Match. Caso contrário, este Wait vai expirar.')}</span>
                 </div>
               )}
             </Field>
@@ -2115,12 +2124,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 editor should expose it consistently. Previously BrowserType was the only
                 one hidden, silently locking it to the 5 s default. */}
             {(isBrowserWait || actionType === 'BrowserClick' || actionType === 'BrowserRightClick' || isBrowserType || isBrowserNavigate || isBrowserSelect) && (
-            <Field label="Timeout (ms)">
+            <Field label="Timeout">
               <NumberInput
                 value={parseInt(timeout, 10) || 5000}
                 onChange={(n) => setTimeout_(String(n))}
                 min={1000}
                 step={1000}
+                suffix="ms"
                 inputWidth="w-full"
                 inputHeight="h-8"
                 ariaLabel="Timeout in milliseconds"
@@ -2133,18 +2143,17 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               <button
                 onClick={handleTestAction}
                 disabled={testRequestId !== null}
-                className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-accent-solid/40 bg-accent-solid/10 hover:bg-accent-solid/20 text-accent-light transition-colors disabled:opacity-60"
+                className="w-full h-8 flex items-center justify-center gap-1.5 px-2.5 rounded text-xs font-medium border border-accent-solid/40 bg-accent-solid/10 hover:bg-accent-solid/20 text-accent-light transition-colors disabled:opacity-60"
                 data-tip={tt('Run this action live to verify the selector / settings', 'Executa esta ação ao vivo para verificar o seletor / configurações')}
               >
                 <PlayCircle size={13} />
                 {testRequestId ? 'Running…' : 'Test action'}
               </button>
               {testResult && (
-                <div className={`mt-1.5 px-2 py-1.5 rounded text-[11px] ${
-                  testResult.success
-                    ? 'bg-[rgba(14,122,13,0.12)] border border-[rgba(14,122,13,0.4)] text-[#5edc5e]'
-                    : 'bg-[rgba(196,43,28,0.12)] border border-[rgba(196,43,28,0.4)] text-[#ff8a80]'
-                }`}>
+                <div
+                  className="mt-1.5 px-2 py-1.5 rounded text-[11px] border"
+                  style={resultCardStyle(testResult.success)}
+                >
                   <div className="flex items-center gap-1.5">
                     {testResult.success ? <Check size={11} /> : <X size={11} />}
                     <span className="font-medium">
@@ -2195,11 +2204,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 }`}
               />
             ) : (
-              <input
-                type="text"
+              // SendText payload — a textarea so long / multi-line text doesn't clip in a
+              // single-line box. Only reached when !isKeyAction (showKey ⇒ isSendText here).
+              <textarea
+                rows={2}
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
-                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                className="w-full min-h-[3.25rem] px-2 py-1.5 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid resize-y"
               />
             )}
           </Field>
@@ -2246,7 +2257,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     type="button"
                     onClick={handlePickPosition}
                     disabled={pickPositionRequestId != null}
-                    className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     data-tip={tt('Click anywhere on screen to set X/Y', 'Clique em qualquer lugar da tela para definir X/Y')}
                   >
                     <Crosshair size={13} />
@@ -2289,11 +2300,12 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               the engine walks past with zero work. Keeping the field would just invite
               users to set a value that gets silently ignored. */}
           {!isConditional && (
-          <Field label="Delay (ms)">
+          <Field label="Delay">
             <NumberInput
               value={parseInt(delay, 10) || 0}
               onChange={(n) => setDelay(String(n))}
               min={0}
+              suffix="ms"
               inputWidth="w-full"
               inputHeight="h-8"
               ariaLabel="Delay in milliseconds"
@@ -2316,15 +2328,17 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-subtle shrink-0">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded text-xs text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+            className="h-8 px-3 inline-flex items-center gap-1.5 rounded text-xs text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
           >
+            <X size={14} />
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={!!regexError}
-            className="px-3.5 py-1.5 rounded text-xs font-medium bg-accent-solid text-white hover:bg-accent-solid/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="h-8 px-3.5 inline-flex items-center gap-1.5 rounded text-xs font-medium bg-accent-solid text-white hover:bg-accent-solid/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
+            <Check size={14} />
             Save Changes
           </button>
         </div>

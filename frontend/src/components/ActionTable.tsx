@@ -47,8 +47,7 @@ const BLOCK_LEVEL_COLORS = [
 const blockColor = (level: number): string =>
   BLOCK_LEVEL_COLORS[((level % BLOCK_LEVEL_COLORS.length) + BLOCK_LEVEL_COLORS.length) % BLOCK_LEVEL_COLORS.length];
 
-function ActionIcon({ actionType }: { actionType: string }) {
-  const size = 12;
+export function ActionIcon({ actionType, size = 12 }: { actionType: string; size?: number }) {
   if (actionType.startsWith('Browser')) return <Globe size={size} />;
   if (actionType.includes('Click')) return <Mouse size={size} />;
   if (actionType === 'ScrollUp') return <ArrowUp size={size} />;
