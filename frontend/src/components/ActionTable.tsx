@@ -5,7 +5,7 @@ import type { CollisionDetection, DragStartEvent, DragEndEvent } from '@dnd-kit/
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { snapCenterToCursor } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
-import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Variable } from 'lucide-react';
+import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Variable, AppWindow, Clipboard } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -210,6 +210,51 @@ function ProbeDetails({ action }: { action: ActionItem }) {
             {action.pixelX != null && action.pixelY != null ? ` · ${action.pixelX}, ${action.pixelY}` : ''}
           </span>
         </>
+      )}
+    </span>
+  );
+}
+
+// The state-based If conditions (Window / Clipboard / Browser Element) added alongside
+// image/pixel. They carry no thumbnail or swatch, so ProbeDetails doesn't apply — they get
+// ConditionDetails below instead, which mirrors ProbeDetails' "type tag + value" shape so
+// the grid reads which condition family a row is without opening the Sheet.
+function isConditionAction(action: ActionItem): boolean {
+  return action.actionType === 'If'
+    && (action.conditionType === 'WindowOpen'
+      || action.conditionType === 'ClipboardMatch'
+      || action.conditionType === 'BrowserElementState');
+}
+
+// Details payload for If Window / If Clipboard / If Browser Element: an icon + short family
+// label (same chip style as ProbeDetails' image/pixel tag) followed by the matched value.
+// Icons match the toolbar's Insert-Conditional menu (AppWindow / Clipboard / Globe).
+function ConditionDetails({ action }: { action: ActionItem }) {
+  const meta =
+    action.conditionType === 'WindowOpen'
+      ? {
+          Icon: AppWindow,
+          label: 'window',
+          value: (() => {
+            const p = action.windowProcessName || '';
+            const t = action.windowTitle || '';
+            return p && t ? `${p} · ${t}` : p || t;
+          })(),
+        }
+      : action.conditionType === 'ClipboardMatch'
+        ? { Icon: Clipboard, label: 'clipboard', value: action.clipboardPattern || '' }
+        : { Icon: Globe, label: 'element', value: action.key || '' };
+  const { Icon, label, value } = meta;
+  return (
+    <span className="inline-flex items-center gap-1.5 align-middle translate-y-[-2px] text-xs min-w-0">
+      <span className="inline-flex items-center gap-1 px-1.5 py-px rounded text-[10px] bg-bg-elevated text-text-secondary shrink-0">
+        <Icon size={10} />
+        {label}
+      </span>
+      {value && (
+        <span className="font-mono text-text-secondary truncate" data-tip={value}>
+          {value}
+        </span>
       )}
     </span>
   );
@@ -1764,6 +1809,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     ) : isProbeAction(action) ? (
                       // Image/pixel probe (Wait* or If) — unified payload, no GUID.
                       <ProbeDetails action={action} />
+                    ) : isConditionAction(action) ? (
+                      // Window / Clipboard / Browser-Element If — icon tag + value.
+                      <ConditionDetails action={action} />
                     ) : (<>
                     {displayKey ? (
                       <span
