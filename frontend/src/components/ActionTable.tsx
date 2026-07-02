@@ -177,7 +177,7 @@ function ProbeDetails({ action }: { action: ActionItem }) {
   return (
     <span className="inline-flex items-center gap-1.5 align-middle translate-y-[-2px] text-xs min-w-0">
       {isIf && (
-        <span className="inline-flex items-center gap-1 px-1.5 py-px rounded text-[9px] bg-bg-elevated text-text-tertiary shrink-0">
+        <span className="inline-flex items-center gap-1 px-1.5 py-px rounded text-[10px] bg-bg-elevated text-text-secondary shrink-0">
           {isImage ? <ScanSearch size={10} /> : <Pipette size={10} />}
           {isImage ? 'image' : 'pixel'}
         </span>
@@ -1534,8 +1534,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                                 ? 'bg-bg-surface hover:bg-bg-elevated'
                                 // Odd-row stripe: a whisper of text-primary instead of a
                                 // fixed white overlay — follows the theme (darkens on
-                                // light themes) and keeps the zebra deliberately subtle.
-                                : 'bg-[color-mix(in_srgb,var(--color-text-primary)_1.5%,transparent)] hover:bg-bg-elevated'
+                                // light themes) and keeps the zebra extra-subtle (1%).
+                                : 'bg-[color-mix(in_srgb,var(--color-text-primary)_1%,transparent)] hover:bg-bg-elevated'
                   }`}
                 >
                   {/* Checkbox — the entire row is the drag target (handleRowMouseDown);
@@ -1749,7 +1749,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     ) : (<>
                     {displayKey ? (
                       <span
-                        className={`inline-flex items-center translate-y-[-2px] px-2 py-0.5 rounded text-xs font-mono text-text-primary bg-bg-input max-w-[220px] truncate ${
+                        className={`inline-flex items-center translate-y-[-2px] text-xs font-mono text-text-primary max-w-[220px] truncate ${
                           // Group A — Key cell IS the primary editor for this action
                           // (text body, profile picker, keystroke combo, single key).
                           // cursor-text reflects "you can type / edit" semantics; dblclick
