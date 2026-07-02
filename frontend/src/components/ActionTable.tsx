@@ -252,7 +252,10 @@ function ConditionDetails({ action }: { action: ActionItem }) {
         {label}
       </span>
       {value && (
-        <span className="font-mono text-text-secondary truncate" data-tip={value}>
+        // max-width caps the value so a long selector truncates INSIDE the 280px Details
+        // column instead of forcing the cell wider (bare `truncate` needs a bounded width to
+        // engage). ~190px = column minus the type chip; matches the displayKey max-w pattern.
+        <span className="font-mono text-text-secondary truncate max-w-[190px]" data-tip={value}>
           {value}
         </span>
       )}
