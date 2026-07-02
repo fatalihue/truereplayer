@@ -45,7 +45,7 @@ const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
   ],
 };
 
-const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'Pause', 'If', 'Else', 'EndIf']);
+const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'Pause', 'If', 'Else', 'EndIf']);
 
 // Semantic result-card colouring via theme tokens — success = replay green, failure/error =
 // recording red. Matches the inline-style pattern the foot-gun cards already use, so no
@@ -125,6 +125,8 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const [timeout, setTimeout_] = useState('');
   const [confidence, setConfidence] = useState('');
   const [browserText, setBrowserText] = useState('');
+  // SetVariable — the value half of "name = value"; the name reuses the `key` state.
+  const [variableValue, setVariableValue] = useState('');
   // Imperative handle to the Lexical-based BrowserType editor — used by the chip
   // buttons to insertText at the current cursor position instead of always appending.
   const browserTextEditorRef = useRef<LexicalEditorHandle | null>(null);
@@ -174,6 +176,14 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   // and lets the FALSE branch fire on error; "Halt" rethrows and stops replay.
   const [conditionNegate, setConditionNegate] = useState(false);
   const [ifOnProbeError, setIfOnProbeError] = useState<'TreatAsFalse' | 'Halt'>('TreatAsFalse');
+  // If Window (WindowOpen) probe fields
+  const [windowProcessName, setWindowProcessName] = useState('');
+  const [windowTitle, setWindowTitle] = useState('');
+  const [windowTitleMatchMode, setWindowTitleMatchMode] = useState<'contains' | 'regex'>('contains');
+  const [windowMatchForegroundOnly, setWindowMatchForegroundOnly] = useState(false);
+  // If Clipboard (ClipboardMatch) probe fields
+  const [clipboardPatternType, setClipboardPatternType] = useState<'contains' | 'equals' | 'regex'>('contains');
+  const [clipboardPattern, setClipboardPattern] = useState('');
   // Optional "wait up to N ms for the condition" poll timeout (0 = instant single check). Stored as
   // a string so the input can be cleared; coerced to a non-negative int on persist.
   const [conditionTimeout, setConditionTimeout] = useState('0');
@@ -385,6 +395,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
         : String(action.timeout || 5000));
       setConfidence(String(Math.round((action.confidence || 0.8) * 100)));
       setBrowserText(action.browserText || '');
+      setVariableValue(action.variableValue ?? '');
       setNewTab(action.newTab || false);
       setWaitMode(action.waitMode || 'appears');
       setUrlWaitPattern(action.urlWaitPattern || '');
@@ -435,6 +446,17 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       setConditionNegate(action.conditionNegate || false);
       setIfOnProbeError(action.ifOnProbeError === 'Halt' ? 'Halt' : 'TreatAsFalse');
       setConditionTimeout(String(action.conditionTimeout ?? 0));
+      // If Window / If Clipboard probe seeding — null/undefined collapse to the defaults.
+      setWindowProcessName(action.windowProcessName ?? '');
+      setWindowTitle(action.windowTitle ?? '');
+      setWindowTitleMatchMode(action.windowTitleMatchMode === 'regex' ? 'regex' : 'contains');
+      setWindowMatchForegroundOnly(action.windowMatchForegroundOnly || false);
+      setClipboardPatternType(
+        action.clipboardPatternType === 'equals' ? 'equals'
+          : action.clipboardPatternType === 'regex' ? 'regex'
+          : 'contains'
+      );
+      setClipboardPattern(action.clipboardPattern ?? '');
     }
   }, [action]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -459,6 +481,24 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     const effectiveKey = textMatch.trim() ? buildTextSelector(textMode, textMatch.trim()) : key;
     if (effectiveKey !== action.key) {
       send({ type: 'actions:edit', payload: { index: actionIndex, field: 'key', value: effectiveKey } });
+    }
+
+    // Selector-fallback persistence (browser element actions). A pick during THIS edit
+    // session populates `alternatives` — persist the full ranked list so replay can fall
+    // back tier B→C when the primary drifts. A manual selector edit with NO fresh pick
+    // invalidates any stored list (it may point at a different element) — clear it.
+    const isBrowserElementAction = actionType === 'BrowserClick' || actionType === 'BrowserRightClick'
+      || actionType === 'BrowserType' || actionType === 'BrowserWaitElement' || actionType === 'BrowserSelectOption'
+      || (actionType === 'If' && action.conditionType === 'BrowserElementState');
+    if (isBrowserElementAction) {
+      if (alternatives.length > 1) {
+        const nextJson = JSON.stringify(alternatives);
+        if (nextJson !== JSON.stringify(action.selectorAlternatives ?? null)) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'selectorAlternatives', value: nextJson } });
+        }
+      } else if (effectiveKey !== action.key && (action.selectorAlternatives?.length ?? 0) > 0) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'selectorAlternatives', value: '' } });
+      }
     }
     const newX = parseInt(x, 10);
     if (!isNaN(newX) && newX !== action.x) {
@@ -591,6 +631,49 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       if (persistedErr !== currentErr) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'ifOnProbeError', value: persistedErr } });
       }
+
+      // If Window probe fields — only meaningful on a WindowOpen row, but gating on the
+      // stored conditionType keeps a stale state write from landing on other IF families.
+      if (action.conditionType === 'WindowOpen') {
+        if (windowProcessName !== (action.windowProcessName ?? '')) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'windowProcessName', value: windowProcessName } });
+        }
+        if (windowTitle !== (action.windowTitle ?? '')) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'windowTitle', value: windowTitle } });
+        }
+        const currentTitleMode = action.windowTitleMatchMode === 'regex' ? 'regex' : 'contains';
+        if (windowTitleMatchMode !== currentTitleMode) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'windowTitleMatchMode', value: windowTitleMatchMode } });
+        }
+        if (!!windowMatchForegroundOnly !== !!(action.windowMatchForegroundOnly)) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'windowMatchForegroundOnly', value: String(windowMatchForegroundOnly) } });
+        }
+      }
+
+      // If Browser Element probe fields — key (selector) is saved by the generic
+      // effectiveKey block above; here the state mode + text pattern.
+      if (action.conditionType === 'BrowserElementState') {
+        const persistedIfMode = (waitMode === 'appears') ? '' : waitMode; // empty = default
+        if ((persistedIfMode || '') !== (action.waitMode || '')) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'waitMode', value: persistedIfMode } });
+        }
+        if (browserText !== (action.browserText || '')) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'browserText', value: browserText } });
+        }
+      }
+
+      // If Clipboard probe fields — same conditionType gating.
+      if (action.conditionType === 'ClipboardMatch') {
+        const currentPatternType = action.clipboardPatternType === 'equals' ? 'equals'
+          : action.clipboardPatternType === 'regex' ? 'regex'
+          : 'contains';
+        if (clipboardPatternType !== currentPatternType) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'clipboardPatternType', value: clipboardPatternType } });
+        }
+        if (clipboardPattern !== (action.clipboardPattern ?? '')) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'clipboardPattern', value: clipboardPattern } });
+        }
+      }
     }
 
     // Pause-specific fields: timeout in milliseconds. Hotkey shares the `key` field with other
@@ -651,6 +734,12 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       }
     }
 
+    // SetVariable — the value half of "name = value"; the NAME (key state) is already
+    // saved by the generic effectiveKey block above.
+    if (actionType === 'SetVariable' && variableValue !== (action.variableValue ?? '')) {
+      send({ type: 'actions:edit', payload: { index: actionIndex, field: 'variableValue', value: variableValue } });
+    }
+
     // BrowserSelectOption — match mode + browserText hold the option label/value/index.
     // browserText is already saved by the BrowserType branch above when actionType matches —
     // here we just persist the selectMatchMode separately. 'text' is the default and stays
@@ -674,7 +763,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
     // from actionType + action.conditionType which are already in the array, so the
     // callback rebinds whenever those change. Listing the derived flags would also
     // be a forward-reference error (they're declared further down the component body).
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, alternatives, send, onClose]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
@@ -1057,6 +1146,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
 
   const isKeyAction = actionType === 'KeyDown' || actionType === 'KeyUp';
   const isSendText = actionType === 'SendText';
+  const isSetVariable = actionType === 'SetVariable';
   const isWaitImage = actionType === 'WaitImage';
   const isWaitPixelColor = actionType === 'WaitPixelColor';
   const isPause = actionType === 'Pause';
@@ -1070,6 +1160,9 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   const isEndIf = actionType === 'EndIf';
   const isIfImage = isIf && action?.conditionType === 'ImageFound';
   const isIfPixel = isIf && action?.conditionType === 'PixelColorMatch';
+  const isIfWindow = isIf && action?.conditionType === 'WindowOpen';
+  const isIfClipboard = isIf && action?.conditionType === 'ClipboardMatch';
+  const isIfBrowser = isIf && action?.conditionType === 'BrowserElementState';
   const isConditional = isIf || isElse || isEndIf;
   const isBrowserType = actionType === 'BrowserType';
   const isBrowserNavigate = actionType === 'BrowserNavigate';
@@ -1110,9 +1203,13 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
   // Human-readable action name — defined once, used as the header headline (and reusable
   // for tooltips). Replaces the inline 17-branch ternary that used to live in the header.
   const actionLabel = isWaitImage ? 'Wait Image'
+    : isSetVariable ? 'Set Variable'
     : isWaitPixelColor ? 'Wait Pixel Color'
     : isIfImage ? 'If Image Found'
     : isIfPixel ? 'If Pixel Color Match'
+    : isIfWindow ? 'If Window Open'
+    : isIfClipboard ? 'If Clipboard'
+    : isIfBrowser ? 'If Browser Element'
     : isIf ? 'If'
     : isElse ? 'Else'
     : isEndIf ? 'End If'
@@ -1284,6 +1381,170 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 <option value="Halt">Halt replay</option>
               </select>
             </Field>
+          </>
+          )}
+
+          {/* If Window (WindowOpen) — state-based probe reusing the Window Target matching
+              semantics: empty field = wildcard, at least one criterion required. */}
+          {isIfWindow && (
+          <>
+            <Field
+              label="Process Name"
+              hint={tt('e.g. notepad.exe — ".exe" is assumed when omitted. Leave empty to match by title only.', 'ex.: notepad.exe — ".exe" é assumido se omitido. Deixe vazio para casar só pelo título.')}
+            >
+              <input
+                type="text"
+                value={windowProcessName}
+                onChange={(e) => setWindowProcessName(e.target.value)}
+                placeholder="notepad.exe"
+                spellCheck={false}
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              />
+            </Field>
+            <Field
+              label="Window Title"
+              hint={tt('Case-insensitive. Leave empty to match by process only — but set at least one of the two.', 'Sem diferenciar maiúsculas. Deixe vazio para casar só pelo processo — mas preencha ao menos um dos dois.')}
+            >
+              <input
+                type="text"
+                value={windowTitle}
+                onChange={(e) => setWindowTitle(e.target.value)}
+                placeholder=""
+                spellCheck={false}
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              />
+            </Field>
+            <Field label="Title Match">
+              <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
+                {(['contains', 'regex'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setWindowTitleMatchMode(m)}
+                    className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
+                      windowTitleMatchMode === m
+                        ? 'bg-bg-elevated text-text-primary'
+                        : 'text-text-tertiary hover:text-text-secondary'
+                    }`}
+                    data-tip={m === 'regex'
+                      ? tt('Title is a .NET regular expression (case-insensitive)', 'Título é uma expressão regular .NET (sem diferenciar maiúsculas)')
+                      : tt('Title must contain this text (case-insensitive)', 'Título deve conter este texto (sem diferenciar maiúsculas)')}
+                  >
+                    {m === 'contains' ? 'Contains' : 'Regex'}
+                  </button>
+                ))}
+              </div>
+            </Field>
+            <Checkbox
+              checked={windowMatchForegroundOnly}
+              onChange={setWindowMatchForegroundOnly}
+              label="Foreground window only"
+              title={tt('TRUE only if the matching window is currently in front — instead of existing anywhere.', 'TRUE somente se a janela correspondente estiver em primeiro plano — em vez de apenas existir.')}
+            />
+          </>
+          )}
+
+          {/* If Clipboard (ClipboardMatch) — branches on the clipboard's current TEXT. */}
+          {isIfClipboard && (
+          <>
+            <Field label="Match Type">
+              <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
+                {(['contains', 'equals', 'regex'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setClipboardPatternType(m)}
+                    className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
+                      clipboardPatternType === m
+                        ? 'bg-bg-elevated text-text-primary'
+                        : 'text-text-tertiary hover:text-text-secondary'
+                    }`}
+                  >
+                    {m === 'contains' ? 'Contains' : m === 'equals' ? 'Equals' : 'Regex'}
+                  </button>
+                ))}
+              </div>
+            </Field>
+            <Field
+              label="Pattern"
+              hint={tt('Compared against the clipboard TEXT, case-insensitive. Non-text clipboard (image/files) never matches.', 'Comparado com o TEXTO do clipboard, sem diferenciar maiúsculas. Clipboard não-texto (imagem/arquivos) nunca casa.')}
+            >
+              <input
+                type="text"
+                value={clipboardPattern}
+                onChange={(e) => setClipboardPattern(e.target.value)}
+                spellCheck={false}
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              />
+            </Field>
+          </>
+          )}
+
+          {/* If Browser Element (BrowserElementState) — one instant state check against the
+              live page via the extension's waitElement evaluator (timeout=0). Reuses
+              BrowserWaitElement's probe fields: key = selector, waitMode, browserText =
+              text pattern. A disconnected extension reads as "not found", never a halt. */}
+          {isIfBrowser && (
+          <>
+            <Field
+              label="CSS Selector"
+              hint={tt('Requires the browser extension connected; when it is not, the condition reads as NOT found instead of stopping the replay.', 'Requer a extensão do navegador conectada; sem ela, a condição lê como NÃO encontrado em vez de parar a reprodução.')}
+            >
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={textMatch.trim() ? buildTextSelector(textMode, textMatch.trim()) : key}
+                  onChange={(e) => { setKey(e.target.value); setTextMatch(''); }}
+                  placeholder=".btn-save"
+                  spellCheck={false}
+                  className="flex-1 h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                />
+                <button
+                  onClick={() => {
+                    const requestId = Math.random().toString(36).slice(2, 10);
+                    setPickElementRequestId(requestId);
+                    setIsPicking(true);
+                    setShowAlternatives(false);
+                    send({ type: 'browser:pickElement', payload: { requestId } });
+                  }}
+                  disabled={isPicking}
+                  className={`h-8 w-8 flex items-center justify-center rounded border transition-colors ${
+                    isPicking
+                      ? 'bg-accent-solid/20 border-accent-solid text-accent-light'
+                      : 'bg-bg-input border-border-default text-text-tertiary hover:text-text-primary hover:border-text-tertiary'
+                  }`}
+                  data-tip={tt('Pick element from page', 'Selecionar elemento da página')}
+                >
+                  <Crosshair size={14} />
+                </button>
+              </div>
+            </Field>
+            <Field label="State">
+              <select
+                value={waitMode}
+                onChange={(e) => setWaitMode(e.target.value)}
+                className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              >
+                <option value="appears">Visible (default)</option>
+                <option value="disappears">Not present / hidden</option>
+                <option value="enabled">Enabled</option>
+                <option value="text-match">Text matches</option>
+              </select>
+            </Field>
+            {waitMode === 'text-match' && (
+              <Field
+                label="Text Pattern"
+                hint={tt("Element's visible text must match. Supports the text-selector syntax: plain text = exact, or prefix with text*= / text~= / text/regex/.", 'O texto visível do elemento deve casar. Suporta a sintaxe de seletor de texto: texto puro = exato, ou prefixe com text*= / text~= / text/regex/.')}
+              >
+                <input
+                  type="text"
+                  value={browserText}
+                  onChange={(e) => setBrowserText(e.target.value)}
+                  spellCheck={false}
+                  className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                />
+              </Field>
+            )}
           </>
           )}
 
@@ -2214,6 +2475,44 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
               />
             )}
           </Field>
+          )}
+
+          {/* Set Variable — name + value pair written into the replay run's variable store.
+              Labels stay English per the locked i18n rule; guidance lives in the hints. */}
+          {isSetVariable && (
+            <>
+              <Field
+                label="Variable Name"
+                hint={tt(
+                  'Letters, digits and underscore. Read it back anywhere with {var:name} — matching is case-insensitive.',
+                  'Letras, dígitos e underscore. Leia com {var:name} em qualquer texto — sem diferenciar maiúsculas.'
+                )}
+              >
+                <input
+                  type="text"
+                  value={key}
+                  onChange={(e) => setKey(e.target.value)}
+                  placeholder="name"
+                  spellCheck={false}
+                  className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                />
+              </Field>
+              <Field
+                label="Value"
+                hint={tt(
+                  'Tokens like {clipboard}, {date} or {var:other} resolve when this action runs. Saving an empty value deletes the variable.',
+                  'Tokens como {clipboard}, {date} ou {var:other} resolvem quando a ação executa. Salvar valor vazio apaga a variável.'
+                )}
+              >
+                <textarea
+                  rows={2}
+                  value={variableValue}
+                  onChange={(e) => setVariableValue(e.target.value)}
+                  spellCheck={false}
+                  className="w-full min-h-[3.25rem] px-2 py-1.5 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid resize-y"
+                />
+              </Field>
+            </>
           )}
 
           {/* X / Y — Pick button (only on click halves, since scroll actions don't really

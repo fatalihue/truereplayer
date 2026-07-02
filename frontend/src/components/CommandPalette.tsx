@@ -6,6 +6,7 @@ import {
   Hourglass, ScanSearch, Repeat2, ClipboardPaste, Files, Replace,
   FolderPlus, Palette, PanelLeft, Table2, Keyboard,
   MousePointerClick, Pipette, Crosshair, Combine, Split, GitBranch, ScrollText,
+  Variable,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -132,6 +133,13 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:sendkeystroke')); },
           },
           {
+            // Set Variable — Pattern A insert (empty row + auto-open Sheet, handled by
+            // the backend's sheet:openIndex push). Read back with {var:name} tokens.
+            id: 'setvariable', label: 'Insert Set Variable',
+            icon: <Variable size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'SetVariable', insertIndex: computeInsertIndex() } }); onClose(); },
+          },
+          {
             id: 'waitimage', label: 'Insert Wait for Image',
             icon: <ScanSearch size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'WaitImage', insertIndex: computeInsertIndex() } }); onClose(); },
@@ -155,6 +163,21 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             id: 'ifpixel', label: 'Insert Conditional: Pixel Color',
             icon: <GitBranch size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'PixelColorMatch', insertIndex: computeInsertIndex() } }); onClose(); },
+          },
+          {
+            id: 'ifwindow', label: 'Insert Conditional: Window Open',
+            icon: <GitBranch size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'WindowOpen', insertIndex: computeInsertIndex() } }); onClose(); },
+          },
+          {
+            id: 'ifclipboard', label: 'Insert Conditional: Clipboard',
+            icon: <GitBranch size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'ClipboardMatch', insertIndex: computeInsertIndex() } }); onClose(); },
+          },
+          {
+            id: 'ifbrowser', label: 'Insert Conditional: Browser Element',
+            icon: <GitBranch size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'BrowserElementState', insertIndex: computeInsertIndex() } }); onClose(); },
           },
           {
             id: 'pause', label: 'Insert Pause',

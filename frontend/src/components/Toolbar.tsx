@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye } from 'lucide-react';
+import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Variable, AppWindow, Clipboard } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -541,6 +541,23 @@ export function Toolbar(_props: ToolbarProps) {
             <Type size={14} />
           </button>
 
+          {/* Set Variable — writes a name/value into the replay run's variable store,
+              read back with {var:name} in Send Text / Type Text. Pattern A: inserts an
+              empty row and auto-opens the Sheet (the backend sends sheet:openIndex). */}
+          <button
+            tabIndex={-1}
+            onClick={() => {
+              const sel = selectionRef.current;
+              const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
+              send({ type: 'actions:insertAction', payload: { actionType: 'SetVariable', insertIndex } });
+            }}
+            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip={tt('Insert Set Variable action — read it back with {var:name}', 'Inserir ação Set Variable — leia com {var:name}')}
+          >
+            <Variable size={14} />
+          </button>
+
           {/* Pause — wait for a hotkey or a timeout before continuing replay. Now
               opens a config-first dialog (Pattern B) instead of the old "insert empty
               then auto-open Sheet" flow — Cancel here means no row is created at all. */}
@@ -651,6 +668,44 @@ export function Toolbar(_props: ToolbarProps) {
                 >
                   <Pipette size={12} style={{ color: 'var(--color-action-if-fg)' }} />
                   If Pixel Color Match…
+                </button>
+                {/* Capture-less conditions — insert the If/EndIf pair immediately and
+                    auto-open the Sheet (backend sends sheet:openIndex); no screen overlay. */}
+                <button
+                  className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
+                  onClick={() => {
+                    const sel = selectionRef.current;
+                    const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
+                    send({ type: 'actions:insertConditional', payload: { conditionType: 'WindowOpen', insertIndex } });
+                    setShowConditionalMenu(false);
+                  }}
+                >
+                  <AppWindow size={12} style={{ color: 'var(--color-action-if-fg)' }} />
+                  If Window Open…
+                </button>
+                <button
+                  className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
+                  onClick={() => {
+                    const sel = selectionRef.current;
+                    const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
+                    send({ type: 'actions:insertConditional', payload: { conditionType: 'ClipboardMatch', insertIndex } });
+                    setShowConditionalMenu(false);
+                  }}
+                >
+                  <Clipboard size={12} style={{ color: 'var(--color-action-if-fg)' }} />
+                  If Clipboard…
+                </button>
+                <button
+                  className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
+                  onClick={() => {
+                    const sel = selectionRef.current;
+                    const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
+                    send({ type: 'actions:insertConditional', payload: { conditionType: 'BrowserElementState', insertIndex } });
+                    setShowConditionalMenu(false);
+                  }}
+                >
+                  <Globe size={12} style={{ color: 'var(--color-action-if-fg)' }} />
+                  If Browser Element…
                 </button>
               </div>
             )}

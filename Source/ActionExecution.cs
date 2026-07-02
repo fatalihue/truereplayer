@@ -1092,6 +1092,20 @@ namespace TrueReplayer.Services
         // Active call stack of profile names (excluding the root). Used for cycle detection
         // and for the status-bar "A → B → C" display.
         private readonly List<string> _callStack = new();
+        // Run-global variable store behind SetVariable / {var:name}. Cleared at the start of
+        // every replay run; deliberately NOT snapshot/restored around RunProfile sub-calls —
+        // variables share one scope across the whole chain (AHK model), unlike the window
+        // context. Keys are normalized to lowercase so {var:UserName} and {var:username} agree.
+        private readonly Dictionary<string, string> _runtimeVariables = new();
+        // {counter} source: the root replay loop's 1-based iteration. Written only by
+        // StartAsync's loop (RunProfile RepeatCount is a different knob and never touches it),
+        // so a sub-profile reads the same counter as its caller.
+        private int _currentIteration;
+        // {row} source: 1-based grid row of the action currently executing, set per action in
+        // ExecuteActionsAsync. Inside a RunProfile sub-call it tracks the SUB-profile's rows —
+        // the caller's next iteration re-stamps it before any of its own tokens resolve, so no
+        // save/restore is needed around the recursion.
+        private int _currentActionRow;
         // Hard cap on how deep RunProfile chains can recurse. Prevents accidental infinite loops
         // even if cycle detection were somehow bypassed.
         private const int MaxCallDepth = 5;
@@ -1306,12 +1320,19 @@ namespace TrueReplayer.Services
                     _callStack.Add(rootName);
                 NotifyChainChanged();
 
+                // Fresh run = fresh run state: variables from a previous run must not leak in,
+                // and the counter/row read as "not started" until the loop below stamps them.
+                _runtimeVariables.Clear();
+                _currentIteration = 0;
+                _currentActionRow = 0;
+
                 // Run replay on a dedicated thread to avoid blocking the thread pool
                 await Task.Factory.StartNew(async () =>
                 {
                     while (!token.IsCancellationRequested && (isInfinite || iteration < _loopCount))
                     {
                         iteration++;
+                        _currentIteration = iteration; // {counter} token source (1-based)
 
                         // Throttled status-bar update. First iteration is always pushed so the
                         // counter appears immediately; subsequent iterations are coalesced to
@@ -1510,6 +1531,7 @@ namespace TrueReplayer.Services
                 }
 
                 await Task.Delay(safeDelay, token);
+                _currentActionRow = i + 1; // {row} token source (1-based grid row)
                 dispatcherQueue.TryEnqueue(() => OnActionExecuting?.Invoke(action));
                 InputHookManager.IsReplayingAction = true;
 
@@ -1613,6 +1635,7 @@ namespace TrueReplayer.Services
                         case "ScrollUp": SimulateScroll(120); break;
                         case "ScrollDown": SimulateScroll(-120); break;
                         case "SendText": await SimulateClipboardPaste(action.Key, token); break;
+                        case "SetVariable": await ExecuteSetVariable(action); break;
                         case "WaitImage": await ExecuteWaitImage(action, token); break;
                         case "WaitPixelColor": await ExecuteWaitPixelColor(action, token); break;
                         case "RunProfile": await HandleRunProfile(action, token); break;
@@ -2346,6 +2369,55 @@ namespace TrueReplayer.Services
             return result;
         }
 
+        // Run-state carrier threaded into token resolution: the variable store plus the current
+        // loop iteration and data-row index. RunCtx.Empty (the default) is what the static Test
+        // Action path uses — there, stateful tokens resolve to empty/0. A later phase populates it
+        // from _runtimeVariables + the live loop counter; today it is the seam only, so the unified
+        // resolver stays behavior-identical to the pre-refactor scattered resolvers.
+        public readonly struct RunCtx
+        {
+            public IReadOnlyDictionary<string, string>? Variables { get; init; }
+            public int Iteration { get; init; }
+            public int Row { get; init; }
+            public static RunCtx Empty => default;
+        }
+
+        // Live run context handed to token resolution on the replay-instance path. The static
+        // Test-Action path never sees this — it resolves against RunCtx.Empty instead.
+        private RunCtx CurrentRunCtx => new()
+        {
+            Variables = _runtimeVariables,
+            Iteration = _currentIteration,
+            Row = _currentActionRow,
+        };
+
+        // Variable names: letters/digits/underscore, matched case-insensitively (stored keys are
+        // lowercased). Same shape as the {var:name} token regex below — keep the two in sync.
+        private static readonly Regex VariableNameRegex = new(@"^[A-Za-z0-9_]+$", RegexOptions.Compiled);
+
+        // SetVariable action: resolve the value's tokens against the live run state, then write
+        // (or, for an empty resolved value, delete) the entry. Pure state mutation — no input
+        // simulation, no extra delay beyond the row's own Delay.
+        private async Task ExecuteSetVariable(ActionItem action)
+        {
+            var name = action.Key?.Trim();
+            if (string.IsNullOrEmpty(name) || !VariableNameRegex.IsMatch(name))
+                return; // unusable name — no-op, same forgiveness as an unknown clipboard modifier
+            var key = name.ToLowerInvariant();
+            // escapeBracesInSubstitution:false — the dict stores raw text; brace-escaping (for the
+            // SendText segment parser) happens later, at {var} substitution time on that path.
+            var value = await ResolveTokens(action.VariableValue ?? string.Empty);
+            if (string.IsNullOrEmpty(value))
+                _runtimeVariables.Remove(key);   // empty value = delete (documented contract)
+            else
+                _runtimeVariables[key] = value;
+        }
+
+        // Instance entry to the unified resolver for the SendText/paste path: passes the saved
+        // clipboard backup + brace-escaping so ParseSendTextSegments doesn't re-interpret substituted braces.
+        private Task<string> ResolveTokens(string text, string? clipboardOverride = null, bool escapeBracesInSubstitution = false)
+            => ResolveTokensAsync(text, dispatcherQueue, CurrentRunCtx, clipboardOverride, escapeBracesInSubstitution);
+
         /// <summary>
         /// Replaces every {clipboard[:mods]} token in <paramref name="text"/> with the
         /// clipboard content transformed by the given modifiers. Reads the clipboard only once.
@@ -2354,9 +2426,34 @@ namespace TrueReplayer.Services
         /// values are replaced with sentinels so ParseSendTextSegments does not re-interpret them
         /// as another placeholder — used for the Win32 SendText path.
         /// </summary>
-        private Task<string> ResolveClipboardTokens(string text, string? clipboardOverride = null, bool escapeBracesInSubstitution = false)
+        /// <summary>
+        /// Reads the clipboard's TEXT content on the UI dispatcher (clipboard access requires
+        /// it). Returns null when the clipboard holds no text, the read fails, or the queue is
+        /// shutting down. Shared by token resolution, the SendText backup snapshot, and the
+        /// If-Clipboard probe so the TCS/TryEnqueue dance lives in exactly one place.
+        /// </summary>
+        internal static async Task<string?> ReadClipboardTextAsync(DispatcherQueue dispatcherQueue)
         {
-            return ResolveClipboardTokensAsync(text, dispatcherQueue, clipboardOverride, escapeBracesInSubstitution);
+            var tcsClip = new TaskCompletionSource<string?>();
+            if (!dispatcherQueue.TryEnqueue(async () =>
+            {
+                try
+                {
+                    var content = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
+                    if (content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
+                    {
+                        var clipText = await content.GetTextAsync();
+                        tcsClip.SetResult(clipText);
+                    }
+                    else tcsClip.SetResult(null);
+                }
+                catch { tcsClip.SetResult(null); }
+            }))
+            {
+                // Queue shut down (app closing) — unblock the awaiter with "no clipboard".
+                tcsClip.TrySetResult(null);
+            }
+            return await tcsClip.Task;
         }
 
         internal static async Task<string> ResolveClipboardTokensAsync(string text, DispatcherQueue dispatcherQueue, string? clipboardOverride = null, bool escapeBracesInSubstitution = false)
@@ -2364,34 +2461,9 @@ namespace TrueReplayer.Services
             if (string.IsNullOrEmpty(text)) return text;
             if (!ClipboardTokenRegex.IsMatch(text)) return text;
 
-            string? clipContent;
-            if (clipboardOverride != null)
-            {
-                clipContent = clipboardOverride;
-            }
-            else
-            {
-                var tcsClip = new TaskCompletionSource<string?>();
-                if (!dispatcherQueue.TryEnqueue(async () =>
-                {
-                    try
-                    {
-                        var content = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
-                        if (content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
-                        {
-                            var clipText = await content.GetTextAsync();
-                            tcsClip.SetResult(clipText);
-                        }
-                        else tcsClip.SetResult(null);
-                    }
-                    catch { tcsClip.SetResult(null); }
-                }))
-                {
-                    // Queue shut down (app closing) — unblock the awaiter with "no clipboard".
-                    tcsClip.TrySetResult(null);
-                }
-                clipContent = await tcsClip.Task;
-            }
+            string? clipContent = clipboardOverride != null
+                ? clipboardOverride
+                : await ReadClipboardTextAsync(dispatcherQueue);
 
             var raw = clipContent ?? string.Empty;
             return ClipboardTokenRegex.Replace(text, m =>
@@ -2403,20 +2475,85 @@ namespace TrueReplayer.Services
         }
 
         private Task<string> ResolveBrowserTextPlaceholders(string text)
-            => ResolveBrowserTextPlaceholdersAsync(text, dispatcherQueue);
+            => ResolveBrowserTextPlaceholdersAsync(text, dispatcherQueue, CurrentRunCtx);
 
         /// <summary>
         /// Resolves data placeholders ({clipboard[:mods]}, {datetime}, {date}, {time}) for
-        /// BrowserType actions. Special-key placeholders ({enter}, {tab}, …) are left untouched —
-        /// they are interpreted by the Chrome extension's own parser. Static so the Test Action
-        /// path can call it without an ActionReplayer instance.
+        /// BrowserType actions via the unified resolver. Special-key placeholders ({enter}, {tab}, …)
+        /// are left untouched — they are interpreted by the Chrome extension's own parser, so the
+        /// Browser path must NOT brace-escape. Static so the Test Action path can call it without an
+        /// ActionReplayer instance (runCtx defaults to RunCtx.Empty there).
         /// </summary>
-        internal static async Task<string> ResolveBrowserTextPlaceholdersAsync(string text, DispatcherQueue dispatcherQueue)
+        internal static Task<string> ResolveBrowserTextPlaceholdersAsync(string text, DispatcherQueue dispatcherQueue, RunCtx runCtx = default)
+            => ResolveTokensAsync(text, dispatcherQueue, runCtx, clipboardOverride: null, escapeBracesInSubstitution: false);
+
+        /// <summary>
+        /// The single token-resolution pipeline for user text (SendText + BrowserType). Order:
+        /// {clipboard[:mods]} first, then {datetime}/{date}/{time}. Stateful tokens
+        /// ({var:name}/{counter}/{row}) will resolve here from <paramref name="runCtx"/> in a later
+        /// phase — today runCtx is reserved (default = RunCtx.Empty), so output is byte-identical to
+        /// the previous scattered resolvers. <paramref name="escapeBracesInSubstitution"/> escapes
+        /// '{' / '}' in substituted clipboard values for the Win32 SendText path so
+        /// ParseSendTextSegments does not re-interpret them; the Browser path passes false. Static so
+        /// the Test Action path resolves without a live ActionReplayer.
+        /// </summary>
+        internal static async Task<string> ResolveTokensAsync(
+            string text, DispatcherQueue dispatcherQueue, RunCtx runCtx = default,
+            string? clipboardOverride = null, bool escapeBracesInSubstitution = false)
         {
             if (string.IsNullOrEmpty(text)) return text;
+            text = await ResolveClipboardTokensAsync(text, dispatcherQueue, clipboardOverride, escapeBracesInSubstitution);
+            text = ResolveDateTimeTokens(text);
+            text = ResolveRunStateTokens(text, runCtx, escapeBracesInSubstitution);
+            return text;
+        }
 
-            text = await ResolveClipboardTokensAsync(text, dispatcherQueue);
+        // Matches {var:name} — letters/digits/underscore, case-insensitive (mirrors
+        // VariableNameRegex; lookup lowercases the captured name).
+        private static readonly Regex VarTokenRegex = new(
+            @"\{var:([A-Za-z0-9_]+)\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        /// <summary>
+        /// Resolves the run-state tokens {var:name} / {counter} / {row} from
+        /// <paramref name="runCtx"/>. With RunCtx.Empty (the Test Action path) every {var}
+        /// resolves to empty and counter/row read as not-started → empty, mirroring how an
+        /// empty clipboard resolves — the token is always consumed, never left as literal
+        /// text. Variable VALUES get the same brace-escaping treatment as clipboard content
+        /// so a value like "{enter}" pastes as text on the SendText path instead of being
+        /// re-parsed as a key press.
+        /// </summary>
+        private static string ResolveRunStateTokens(string text, RunCtx runCtx, bool escapeBracesInSubstitution)
+        {
+            if (text.IndexOf('{') < 0) return text;
+
+            if (VarTokenRegex.IsMatch(text))
+            {
+                text = VarTokenRegex.Replace(text, m =>
+                {
+                    var name = m.Groups[1].Value.ToLowerInvariant();
+                    string value = string.Empty;
+                    runCtx.Variables?.TryGetValue(name, out value!);
+                    value ??= string.Empty;
+                    return escapeBracesInSubstitution ? EscapeBracesForParser(value) : value;
+                });
+            }
+
+            // Numeric run-state tokens — no braces in the substituted value, so no escaping.
+            // <= 0 means "no live run" (Test Action) → empty, consistent with {var} above.
+            if (text.Contains("{counter}", StringComparison.OrdinalIgnoreCase))
+                text = text.Replace("{counter}", runCtx.Iteration > 0 ? runCtx.Iteration.ToString() : string.Empty, StringComparison.OrdinalIgnoreCase);
+            if (text.Contains("{row}", StringComparison.OrdinalIgnoreCase))
+                text = text.Replace("{row}", runCtx.Row > 0 ? runCtx.Row.ToString() : string.Empty, StringComparison.OrdinalIgnoreCase);
+
+            return text;
+        }
+
+        // Resolves {datetime}/{date}/{time} ({datetime} first to avoid partial matches). The
+        // substituted values contain no braces, so no brace-escaping is needed here.
+        private static string ResolveDateTimeTokens(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
             var now = DateTime.Now;
             if (text.Contains("{datetime}", StringComparison.OrdinalIgnoreCase))
                 text = text.Replace("{datetime}", now.ToString("dd/MM/yyyy - HH:mm:ss"), StringComparison.OrdinalIgnoreCase);
@@ -2424,7 +2561,6 @@ namespace TrueReplayer.Services
                 text = text.Replace("{date}", now.ToString("dd/MM/yyyy"), StringComparison.OrdinalIgnoreCase);
             if (text.Contains("{time}", StringComparison.OrdinalIgnoreCase))
                 text = text.Replace("{time}", now.ToString("HH:mm:ss"), StringComparison.OrdinalIgnoreCase);
-
             return text;
         }
 
@@ -2433,47 +2569,13 @@ namespace TrueReplayer.Services
             if (string.IsNullOrEmpty(text)) return;
 
             // Save original clipboard content so we can restore it after pasting
-            var tcsBackup = new TaskCompletionSource<string?>();
-            if (!dispatcherQueue.TryEnqueue(async () =>
-            {
-                try
-                {
-                    var content = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
-                    if (content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
-                    {
-                        var clipText = await content.GetTextAsync();
-                        tcsBackup.SetResult(clipText);
-                    }
-                    else
-                    {
-                        tcsBackup.SetResult(null);
-                    }
-                }
-                catch
-                {
-                    tcsBackup.SetResult(null);
-                }
-            }))
-            {
-                // Queue shut down (app closing) — unblock the awaiter with "no backup".
-                tcsBackup.TrySetResult(null);
-            }
-            var originalClipboard = await tcsBackup.Task;
+            var originalClipboard = await ReadClipboardTextAsync(dispatcherQueue);
 
-            // Resolve {clipboard[:mods]} placeholders using the saved clipboard content
-            // so that subsequent writes to the clipboard (for pasting) don't affect token resolution.
-            // Escape '{' / '}' in the substituted value so clipboard content like "{enter}" is
-            // pasted as text instead of being re-interpreted as a key press.
-            text = await ResolveClipboardTokens(text, originalClipboard ?? string.Empty, escapeBracesInSubstitution: true);
-
-            // Resolve {datetime} before {date}/{time} to avoid partial matches
-            var now = DateTime.Now;
-            if (text.Contains("{datetime}", StringComparison.OrdinalIgnoreCase))
-                text = text.Replace("{datetime}", now.ToString("dd/MM/yyyy - HH:mm:ss"), StringComparison.OrdinalIgnoreCase);
-            if (text.Contains("{date}", StringComparison.OrdinalIgnoreCase))
-                text = text.Replace("{date}", now.ToString("dd/MM/yyyy"), StringComparison.OrdinalIgnoreCase);
-            if (text.Contains("{time}", StringComparison.OrdinalIgnoreCase))
-                text = text.Replace("{time}", now.ToString("HH:mm:ss"), StringComparison.OrdinalIgnoreCase);
+            // Resolve {clipboard[:mods]} + {datetime}/{date}/{time} in one pass via the unified
+            // resolver, using the saved clipboard content so subsequent clipboard writes (for
+            // pasting) don't affect token resolution. Escape '{' / '}' in the substituted clipboard
+            // value so content like "{enter}" is pasted as text, not re-interpreted as a key press.
+            text = await ResolveTokens(text, originalClipboard ?? string.Empty, escapeBracesInSubstitution: true);
 
             if (string.IsNullOrEmpty(text) || token.IsCancellationRequested)
             {
@@ -2766,17 +2868,114 @@ namespace TrueReplayer.Services
         {
             int timeoutMs = action.ConditionTimeout;
             if (timeoutMs <= 0)
-                return InstantProbe(action, token); // instant single check — unchanged legacy behaviour
+                return await InstantProbeAsync(action, token); // instant single check — unchanged legacy behaviour
 
             int pollMs = string.Equals(action.ConditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase) ? 50 : 200;
             var sw = System.Diagnostics.Stopwatch.StartNew();
             while (true)
             {
                 token.ThrowIfCancellationRequested();
-                if (InstantProbe(action, token)) return true;         // condition satisfied within the window
-                if (sw.ElapsedMilliseconds >= timeoutMs) return false; // window elapsed → take the Else/false branch
+                if (await InstantProbeAsync(action, token)) return true; // condition satisfied within the window
+                if (sw.ElapsedMilliseconds >= timeoutMs) return false;   // window elapsed → take the Else/false branch
                 await Task.Delay(pollMs, token);
             }
+        }
+
+        // Async-probing conditions fetch their data here before evaluating — the clipboard
+        // read must run on the UI dispatcher and the browser probe awaits the extension
+        // pipe; neither can block the sync InstantProbe (the replay thread awaiting a
+        // dispatcher/pipe hop synchronously would risk a deadlock). Everything else falls
+        // straight through to the sync InstantProbe unchanged. Keeps the same Negate /
+        // IfOnProbeError / cancellation contract as InstantProbe.
+        private async Task<bool> InstantProbeAsync(ActionItem action, CancellationToken token)
+        {
+            bool isClipboard = string.Equals(action.ConditionType, "ClipboardMatch", StringComparison.OrdinalIgnoreCase);
+            bool isBrowserElement = string.Equals(action.ConditionType, "BrowserElementState", StringComparison.OrdinalIgnoreCase);
+            if (!isClipboard && !isBrowserElement)
+                return InstantProbe(action, token);
+
+            token.ThrowIfCancellationRequested();
+            try
+            {
+                bool rawResult;
+                if (isClipboard)
+                {
+                    var clip = await ReadClipboardTextAsync(dispatcherQueue) ?? string.Empty;
+                    rawResult = EvaluateClipboardPattern(clip, action);
+                }
+                else
+                {
+                    rawResult = await ProbeBrowserElementStateAsync(action, token);
+                }
+                return action.ConditionNegate ? !rawResult : rawResult;
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // user stop always propagates — same rule as InstantProbe
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Info($"[InstantProbe] Probe error ({action.ConditionType}): {ex.Message}");
+                if (string.Equals(action.IfOnProbeError, "Halt", StringComparison.OrdinalIgnoreCase))
+                    throw;
+                return action.ConditionNegate; // TreatAsFalse + negate — mirrors InstantProbe's catch
+            }
+        }
+
+        // If-Browser-Element raw probe: one instant state check (appears/disappears/enabled/
+        // text-match) against the live page, reusing the extension's waitElement evaluator
+        // with timeout=0 so it never enters the wait loop. Reuses BrowserWaitElement's probe
+        // fields — Key (selector), WaitMode, BrowserText (text pattern) — the same way
+        // If-Image reuses WaitImage's. A missing/disconnected extension reads as "not found"
+        // (raw false) rather than an error, so an If never halts a replay just because the
+        // browser bridge is down; ConditionNegate still applies via the caller.
+        private async Task<bool> ProbeBrowserElementStateAsync(ActionItem action, CancellationToken token)
+        {
+            if (string.IsNullOrEmpty(action.Key)) return false; // unconfigured probe
+            if (_browserBridge == null || !_browserBridge.IsConnected) return false;
+            return await _browserBridge.ProbeElementStateAsync(action, token);
+        }
+
+        // If-Clipboard raw match: case-insensitive contains (default) / equals / regex, matching
+        // the case-insensitive convention of window-title matching. Empty pattern = unconfigured
+        // probe = no match (same shape as an If-Image with no reference image). An invalid regex
+        // throws ArgumentException, which the caller's catch routes through IfOnProbeError.
+        private static bool EvaluateClipboardPattern(string clip, ActionItem action)
+        {
+            var pattern = action.ClipboardPattern ?? string.Empty;
+            if (pattern.Length == 0) return false;
+            var mode = action.ClipboardPatternType?.ToLowerInvariant();
+            return mode switch
+            {
+                "equals" => string.Equals(clip, pattern, StringComparison.OrdinalIgnoreCase),
+                "regex" => Regex.IsMatch(clip, pattern, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50)),
+                _ => clip.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0, // contains (default)
+            };
+        }
+
+        // If-Window raw probe: builds a WindowTarget from the IF's fields and reuses
+        // WindowMatcher — identical semantics to the profile Window Target (empty field =
+        // wildcard; no criteria at all = no match). ForegroundOnly checks only the window
+        // currently in front instead of enumerating all top-level windows.
+        private static bool ProbeWindowOpen(ActionItem action)
+        {
+            var proc = action.WindowProcessName?.Trim();
+            // Forgiving process input: window targets store "chrome.exe" but users type
+            // "chrome" — every Windows process image has an extension, so append the
+            // missing ".exe" rather than silently never matching.
+            if (!string.IsNullOrEmpty(proc) && !proc.Contains('.'))
+                proc += ".exe";
+            var target = new Models.WindowTarget
+            {
+                ProcessName = string.IsNullOrWhiteSpace(proc) ? null : proc,
+                WindowTitle = string.IsNullOrWhiteSpace(action.WindowTitle) ? null : action.WindowTitle,
+                TitleMatchMode = string.Equals(action.WindowTitleMatchMode, "regex", StringComparison.OrdinalIgnoreCase)
+                    ? "regex" : "contains",
+            };
+            var regex = TrueReplayer.Helpers.WindowMatcher.CompileTitleRegex(target);
+            if (action.WindowMatchForegroundOnly)
+                return TrueReplayer.Helpers.WindowMatcher.Matches(NativeMethods.GetForegroundWindow(), target, regex);
+            return TrueReplayer.Helpers.WindowMatcher.FindWindow(target, regex) != IntPtr.Zero;
         }
 
         // Used by IF rows to decide which branch to take — a SINGLE-SHOT probe (the optional
@@ -2803,6 +3002,10 @@ namespace TrueReplayer.Services
                 else if (string.Equals(action.ConditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase))
                 {
                     rawResult = ProbePixelColorMatch(action);
+                }
+                else if (string.Equals(action.ConditionType, "WindowOpen", StringComparison.OrdinalIgnoreCase))
+                {
+                    rawResult = ProbeWindowOpen(action);
                 }
                 else
                 {

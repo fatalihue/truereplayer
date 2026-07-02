@@ -17,7 +17,7 @@ const DISPLAY_KEY_MAP: Record<string, string> = {
   'Next': 'Page Down', 'Prior': 'Page Up',
 };
 
-const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'RunProfile', 'Pause', 'If', 'Else', 'EndIf']);
+const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'RunProfile', 'Pause', 'If', 'Else', 'EndIf']);
 
 export function getDisplayKey(key: string): string {
   if (!key) return '';
@@ -75,6 +75,10 @@ function computeActionTypeColors(actionType: string): { bg: string; fg: string }
     return { bg: 'var(--color-action-key-bg)', fg: 'var(--color-action-key-fg)' };
   if (actionType === 'SendText')
     return { bg: 'var(--color-action-sendtext-bg)', fg: 'var(--color-action-sendtext-fg)' };
+  // SetVariable shares SendText's token — both are "text/data" actions and the 40+ theme
+  // presets don't carry a dedicated setvariable key; the Variable icon disambiguates.
+  if (actionType === 'SetVariable')
+    return { bg: 'var(--color-action-sendtext-bg)', fg: 'var(--color-action-sendtext-fg)' };
   if (actionType === 'WaitImage')
     return { bg: 'var(--color-action-waitimage-bg)', fg: 'var(--color-action-waitimage-fg)' };
   if (actionType === 'WaitPixelColor')
@@ -102,6 +106,7 @@ export function getActionTypeIcon(actionType: string): string {
   if (actionType.startsWith('Key')) return 'Keyboard';
   if (actionType === 'HoldKey') return 'Timer';
   if (actionType === 'SendText') return 'Type';
+  if (actionType === 'SetVariable') return 'Variable';
   if (actionType === 'WaitImage') return 'ScanSearch';
   if (actionType === 'WaitPixelColor') return 'Pipette';
   if (actionType === 'RunProfile') return 'Repeat2';

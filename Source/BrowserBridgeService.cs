@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.IO;
 using System.IO.Pipes;
+using System.Linq;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
@@ -339,6 +340,67 @@ namespace TrueReplayer.Services
         public record PickResult(string? Selector, System.Collections.Generic.IReadOnlyList<SelectorAlternative> Alternatives);
         public record SelectorAlternative(string Selector, string Tier, string Description);
 
+        /// <summary>
+        /// Instant element-state check for If-BrowserElementState conditions: sends a
+        /// waitElement command with timeout=0 so content.js evaluates the state ONCE and
+        /// returns immediately (no wait loop). Returns the raw outcome as a bool — a
+        /// not-found/hidden/disabled element, a pipe hiccup, or an unresponsive tab all
+        /// read as FALSE rather than throwing, because an If probe must branch, not halt.
+        /// User cancellation still propagates. The caller polls this when the IF carries a
+        /// ConditionTimeout ("wait for condition"), so each call must stay cheap.
+        /// </summary>
+        public async Task<bool> ProbeElementStateAsync(
+            TrueReplayer.Models.ActionItem action, CancellationToken token, int pipeTimeoutMs = 3000)
+        {
+            if (!IsConnected) return false;
+
+            var commandId = Guid.NewGuid().ToString("N")[..8];
+            var tcs = new TaskCompletionSource<JsonElement>();
+            _pendingCommands[commandId] = tcs;
+
+            SendMessage(new
+            {
+                type = "browser:executeCommand",
+                commandId,
+                command = "waitElement",
+                selector = action.Key ?? "",
+                text = action.BrowserText ?? "",     // text pattern for waitMode=text-match
+                timeout = 0,                          // instant single check — see content.js short-circuit
+                waitMode = action.WaitMode ?? "appears",
+                // Pick-time fallback selectors apply to probes too (same drift protection).
+                alternatives = action.SelectorAlternatives is { Count: > 0 }
+                    ? action.SelectorAlternatives
+                        .Select(x => new { selector = x.Selector, tier = x.Tier })
+                        .ToArray()
+                    : null
+            });
+
+            using var timeoutCts = new CancellationTokenSource(pipeTimeoutMs);
+            try
+            {
+                using (token.Register(() => tcs.TrySetCanceled()))
+                using (timeoutCts.Token.Register(() => tcs.TrySetException(new TimeoutException("probe pipe timeout"))))
+                {
+                    var result = await tcs.Task;
+                    return result.ValueKind == JsonValueKind.Object
+                        && result.TryGetProperty("success", out var s)
+                        && s.ValueKind == JsonValueKind.True;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // user stopped the replay — propagate, never swallow into "false"
+            }
+            catch
+            {
+                return false; // pipe timeout / extension error → state not satisfied
+            }
+            finally
+            {
+                _pendingCommands.TryRemove(commandId, out _);
+            }
+        }
+
         public async Task<JsonElement> ExecuteBrowserCommandAsync(
             TrueReplayer.Models.ActionItem action, CancellationToken token, int timeoutMs = 5000, string? resolvedText = null)
         {
@@ -400,7 +462,16 @@ namespace TrueReplayer.Services
                 typePaste = action.TypePaste,
                 typeDelay = action.TypeDelay,
                 // BrowserSelectOption (extension bump) — defaults to "text" when null.
-                selectMatchMode = action.SelectMatchMode ?? "text"
+                selectMatchMode = action.SelectMatchMode ?? "text",
+                // Ranked fallback selectors captured at pick time — the extension retries
+                // these in tier order when the primary selector times out. null when the
+                // action has none (older profiles / hand-typed selectors); older extensions
+                // ignore the key entirely.
+                alternatives = action.SelectorAlternatives is { Count: > 0 }
+                    ? action.SelectorAlternatives
+                        .Select(x => new { selector = x.Selector, tier = x.Tier })
+                        .ToArray()
+                    : null
             });
 
             using var timeoutCts = new CancellationTokenSource(pipeTimeout);
@@ -416,7 +487,19 @@ namespace TrueReplayer.Services
                         message: GetFriendlyTimeoutMessage(command, timeout),
                         tip: GetFriendlyTimeoutTip(command)))))
                 {
-                    return await tcs.Task;
+                    var result = await tcs.Task;
+                    // Surface fallback usage in the session log — the primary selector is
+                    // drifting and the user should re-pick before the fallbacks drift too.
+                    if (result.ValueKind == JsonValueKind.Object
+                        && result.TryGetProperty("matchedVia", out var mv)
+                        && mv.ValueKind == JsonValueKind.Object)
+                    {
+                        var mvSel = mv.TryGetProperty("selector", out var s) ? s.GetString() : null;
+                        var mvTier = mv.TryGetProperty("tier", out var t) ? t.GetString() : null;
+                        TrueReplayer.Services.DiagnosticLog.Info(
+                            $"[BrowserBridge] {command}: primary selector '{action.Key}' failed — matched via tier-{mvTier} fallback '{mvSel}'. Consider re-picking the element.");
+                    }
+                    return result;
                 }
             }
             finally

@@ -1,9 +1,21 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 
 namespace TrueReplayer.Models
 {
+    // One ranked selector candidate captured at pick time (tiers S/A/B/C, best-first).
+    // Persisted on browser actions so replay can fall back to the next candidate when the
+    // primary selector no longer matches (site DOM drifted). Description is display-only.
+    public class SelectorAlternativeItem
+    {
+        public string Selector { get; set; } = "";
+        public string Tier { get; set; } = "C";
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? Description { get; set; }
+    }
+
     public class ActionItem : INotifyPropertyChanged
     {
         // Stable identifier for React reconciliation — without this, the ActionTable uses
@@ -126,6 +138,36 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
         public int ConditionTimeout { get; set; }
 
+        // ── If Window (ConditionType == "WindowOpen") probe fields ──
+        // A state-based condition: TRUE when a visible top-level window matching
+        // ProcessName AND/OR Title exists (or is the foreground window when
+        // WindowMatchForegroundOnly). Reuses WindowMatcher — same semantics as the
+        // profile Window Target (empty field = wildcard, but at least one must be set).
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? WindowProcessName { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? WindowTitle { get; set; }
+
+        // "contains" (null/default) | "regex" — mirrors WindowTarget.TitleMatchMode.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? WindowTitleMatchMode { get; set; }
+
+        // false (default) = TRUE if the window exists anywhere; true = only if it is
+        // the FOREGROUND window right now.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool WindowMatchForegroundOnly { get; set; }
+
+        // ── If Clipboard (ConditionType == "ClipboardMatch") probe fields ──
+        // TRUE when the current clipboard TEXT matches ClipboardPattern under
+        // ClipboardPatternType: "contains" (null/default) | "equals" | "regex".
+        // All matching is case-insensitive (same default as window-title matching).
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? ClipboardPatternType { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? ClipboardPattern { get; set; }
+
         // Browser action properties
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? BrowserText { get; set; }
@@ -145,6 +187,13 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? PostNavigateSelector { get; set; }
 
+        // Ranked selector alternatives captured at pick time (browser actions). null/empty =
+        // no fallback data (pre-feature profiles, hand-typed selectors) → replay behaves
+        // exactly as before, single selector only. When present, the extension retries the
+        // remaining candidates in tier order before failing an element lookup.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<SelectorAlternativeItem>? SelectorAlternatives { get; set; }
+
         // BrowserType: when true, append text to existing field value instead of replacing it
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
         public bool TypeAppend { get; set; }
@@ -162,6 +211,14 @@ namespace TrueReplayer.Models
         // null = use the default "text" mode (saves space on disk for the common case).
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? SelectMatchMode { get; set; }
+
+        // SetVariable action: the value written into the replay run's variable store under
+        // the name held in Key (Key-reuse convention — same as RunProfile's profile name and
+        // the browser actions' selector). Tokens ({clipboard}, {date}, {var:other}, …) resolve
+        // at execution time; an empty resolved value DELETES the variable. Names are matched
+        // case-insensitively and must be letters/digits/underscore.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? VariableValue { get; set; }
 
         // When true, the action is retained in the list but skipped during replay.
         // Persisted so users can load a profile with actions pre-disabled.
@@ -272,7 +329,7 @@ namespace TrueReplayer.Models
             "KeyDown", "KeyUp", "Keystroke", "HoldKey", "ScrollUp", "ScrollDown", "SendText", "WaitImage",
             "BrowserClick", "BrowserRightClick", "BrowserType", "BrowserWaitElement", "BrowserNavigate",
             "BrowserSelectOption",
-            "RunProfile", "Pause",
+            "RunProfile", "Pause", "SetVariable",
             // Conditional structural rows never carry their OWN coordinates — the IF row
             // borrows X/Y from its underlying probe data (handled below in DisplayX/Y);
             // Else/EndIf are pure markers with no coordinate semantics at all.
@@ -340,6 +397,27 @@ namespace TrueReplayer.Models
                     {
                         return PixelColor ?? "";
                     }
+                    if (string.Equals(ConditionType, "WindowOpen", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // "process · title" (or whichever half is set) so the block intent
+                        // reads from the grid without opening the Sheet.
+                        bool hasProc = !string.IsNullOrWhiteSpace(WindowProcessName);
+                        bool hasTitle = !string.IsNullOrWhiteSpace(WindowTitle);
+                        if (hasProc && hasTitle) return $"{WindowProcessName} · {WindowTitle}";
+                        if (hasProc) return WindowProcessName!;
+                        if (hasTitle) return WindowTitle!;
+                        return "";
+                    }
+                    if (string.Equals(ConditionType, "ClipboardMatch", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return ClipboardPattern ?? "";
+                    }
+                    if (string.Equals(ConditionType, "BrowserElementState", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Same truncation as the browser actions' selector display below.
+                        if (string.IsNullOrEmpty(Key)) return "";
+                        return Key.Length > 40 ? Key[..37] + "..." : Key;
+                    }
                     return "";
                 }
 
@@ -405,15 +483,28 @@ namespace TrueReplayer.Models
             ConditionNegate = ConditionNegate,
             IfOnProbeError = IfOnProbeError,
             ConditionTimeout = ConditionTimeout,
+            WindowProcessName = WindowProcessName,
+            WindowTitle = WindowTitle,
+            WindowTitleMatchMode = WindowTitleMatchMode,
+            WindowMatchForegroundOnly = WindowMatchForegroundOnly,
+            ClipboardPatternType = ClipboardPatternType,
+            ClipboardPattern = ClipboardPattern,
             BrowserText = BrowserText,
             NewTab = NewTab,
             WaitMode = WaitMode,
             UrlWaitPattern = UrlWaitPattern,
             PostNavigateSelector = PostNavigateSelector,
+            SelectorAlternatives = SelectorAlternatives?.Select(x => new SelectorAlternativeItem
+            {
+                Selector = x.Selector,
+                Tier = x.Tier,
+                Description = x.Description,
+            }).ToList(),
             TypeAppend = TypeAppend,
             TypePaste = TypePaste,
             TypeDelay = TypeDelay,
             SelectMatchMode = SelectMatchMode,
+            VariableValue = VariableValue,
             IsSkipped = IsSkipped,
             IsFocusClick = IsFocusClick,
             RepeatCount = RepeatCount,

@@ -223,6 +223,9 @@ function connect() {
               // BrowserSelectOption — without this forward, content.js falls back to
               // 'text' matching and "Match by Value/Index" silently misbehaves.
               selectMatchMode: msg.selectMatchMode,
+              // Ranked fallback selectors — same forward-or-it-dies rule as selectMatchMode
+              // above: this relay rebuilds the message field by field.
+              alternatives: msg.alternatives,
             }).then((response) => {
               // Forward response — preserves response.success and response.error (object form)
               sendToNative({

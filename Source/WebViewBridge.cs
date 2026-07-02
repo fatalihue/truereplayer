@@ -223,7 +223,7 @@ namespace TrueReplayer
                 "MiddleClickDown", "MiddleClickUp",
                 "ScrollUp", "ScrollDown",
                 "KeyDown", "KeyUp", "HoldKey", "Keystroke",
-                "SendText",
+                "SendText", "SetVariable",
                 "WaitImage", "WaitPixelColor", "Pause", "RunProfile",
                 "If", "Else", "EndIf",
                 "BrowserClick", "BrowserRightClick", "BrowserType",
@@ -889,6 +889,15 @@ namespace TrueReplayer
                 conditionNegate = a.ConditionNegate,
                 ifOnProbeError = a.IfOnProbeError,
                 conditionTimeout = a.ConditionTimeout,
+                // If Window / If Clipboard probe fields — same forwarding-is-mandatory rule
+                // as the conditional fields above (this projection is the frontend's only
+                // source for them).
+                windowProcessName = a.WindowProcessName,
+                windowTitle = a.WindowTitle,
+                windowTitleMatchMode = a.WindowTitleMatchMode,
+                windowMatchForegroundOnly = a.WindowMatchForegroundOnly,
+                clipboardPatternType = a.ClipboardPatternType,
+                clipboardPattern = a.ClipboardPattern,
                 browserText = a.BrowserText ?? "",
                 newTab = a.NewTab,
                 isSkipped = a.IsSkipped,
@@ -913,7 +922,14 @@ namespace TrueReplayer
                 typePaste = a.TypePaste,
                 typeDelay = a.TypeDelay,
                 // BrowserSelectOption — match mode for choosing the <option>
-                selectMatchMode = a.SelectMatchMode
+                selectMatchMode = a.SelectMatchMode,
+                // Ranked fallback selectors (pick-time capture) — forwarded so the editor
+                // can show/refresh them and the save round-trip doesn't wipe them.
+                selectorAlternatives = a.SelectorAlternatives,
+                // SetVariable — the value half of "Key = VariableValue". This projection is
+                // the ONLY path the frontend learns of the field (see the holdDurationMs
+                // note above for why forgetting one here is a silent round-trip bug).
+                variableValue = a.VariableValue
             }).ToArray();
         }
 
@@ -2057,6 +2073,56 @@ namespace TrueReplayer
                     // so existing profiles round-trip clean.
                     action.IfOnProbeError = value == "Halt" ? "Halt" : null;
                     break;
+                case "variableValue":
+                    // SetVariable's value (the name lives in Key via the generic "key" case).
+                    // Empty is a REAL value ("delete the variable at replay"), so it is kept
+                    // as "" rather than collapsing to null — null means "never edited".
+                    action.VariableValue = value;
+                    break;
+                case "windowProcessName":
+                    action.WindowProcessName = string.IsNullOrEmpty(value) ? null : value;
+                    break;
+                case "windowTitle":
+                    action.WindowTitle = string.IsNullOrEmpty(value) ? null : value;
+                    break;
+                case "windowTitleMatchMode":
+                    // Default "contains" stays null on disk; only "regex" is persisted.
+                    action.WindowTitleMatchMode = value == "regex" ? "regex" : null;
+                    break;
+                case "windowMatchForegroundOnly":
+                    action.WindowMatchForegroundOnly = value == "true";
+                    break;
+                case "clipboardPatternType":
+                    // Default "contains" stays null on disk; only "equals"/"regex" persist.
+                    action.ClipboardPatternType = (value == "equals" || value == "regex") ? value : null;
+                    break;
+                case "clipboardPattern":
+                    action.ClipboardPattern = string.IsNullOrEmpty(value) ? null : value;
+                    break;
+                case "selectorAlternatives":
+                    // JSON-encoded array of {selector, tier, description} captured at pick
+                    // time; empty string clears (hand-typed selector invalidates old picks).
+                    // Malformed JSON (older/broken frontend) is ignored — keeping the
+                    // previous value beats crashing the edit pipeline.
+                    if (string.IsNullOrEmpty(value))
+                    {
+                        action.SelectorAlternatives = null;
+                    }
+                    else
+                    {
+                        try
+                        {
+                            var parsed = JsonSerializer.Deserialize<List<Models.SelectorAlternativeItem>>(value, JsonOptions);
+                            action.SelectorAlternatives = (parsed != null && parsed.Count > 0
+                                && parsed.All(p => !string.IsNullOrEmpty(p.Selector)))
+                                ? parsed : null;
+                        }
+                        catch (JsonException)
+                        {
+                            DiagnosticLog.Warn($"actions:edit selectorAlternatives: malformed JSON ignored at index {index}");
+                        }
+                    }
+                    break;
             }
 
             HasUnsavedChanges = true;
@@ -2532,6 +2598,26 @@ namespace TrueReplayer
                 return;
             }
 
+            // SetVariable: insert directly and open the Sheet so the user fills Name/Value
+            // (Pattern A — same flow the selector-less Browser actions use above).
+            if (actionType == "SetVariable")
+            {
+                int delay = int.TryParse(CustomDelay, out var vd) ? vd : 100;
+                actions.Insert(insertIndex, new ActionItem
+                {
+                    ActionType = "SetVariable",
+                    Key = "",
+                    Delay = delay
+                });
+                for (int i = 0; i < actions.Count; i++)
+                    actions[i].RowNumber = i + 1;
+                HasUnsavedChanges = true;
+                PushActionsUpdate();
+                mainController.UpdateButtonStates();
+                SendMessage("sheet:openIndex", new { index = insertIndex });
+                return;
+            }
+
             // Pause legacy path — kept as defence against any stale caller still
             // dispatching `actions:insertAction` with actionType="Pause". The toolbar /
             // context menu / command palette all now go through `actions:insertPause`
@@ -2660,9 +2746,45 @@ namespace TrueReplayer
                 _ = HandleInsertConditionalImageAsync(insertIndex);
             else if (string.Equals(conditionType, "PixelColorMatch", StringComparison.OrdinalIgnoreCase))
                 _ = HandleInsertConditionalPixelAsync(insertIndex);
-            // Unknown conditionType (e.g. future "WindowExists" from a stale frontend on
-            // an older backend) silently no-ops — better than inserting a half-configured
-            // IF the user can't interact with through the existing Sheet editor.
+            else if (string.Equals(conditionType, "WindowOpen", StringComparison.OrdinalIgnoreCase))
+                InsertConditionalDirect(insertIndex, "WindowOpen");
+            else if (string.Equals(conditionType, "ClipboardMatch", StringComparison.OrdinalIgnoreCase))
+                InsertConditionalDirect(insertIndex, "ClipboardMatch");
+            else if (string.Equals(conditionType, "BrowserElementState", StringComparison.OrdinalIgnoreCase))
+                InsertConditionalDirect(insertIndex, "BrowserElementState");
+            // Unknown conditionType (e.g. a future type from a newer frontend on an older
+            // backend) silently no-ops — better than inserting a half-configured IF the
+            // user can't interact with through the existing Sheet editor.
+        }
+
+        // Capture-less conditional insert (Window / Clipboard): these probes have no screen
+        // region or pixel to pick, so the {If, EndIf} pair lands immediately with empty probe
+        // fields and the Sheet auto-opens for the user to fill them — same ending as the
+        // image/pixel capture flows above.
+        private void InsertConditionalDirect(int insertIndex, string conditionType)
+        {
+            PushUndoState();
+            actions.Insert(insertIndex, new ActionItem
+            {
+                ActionType = "If",
+                ConditionType = conditionType,
+                Delay = 0,
+                Key = "",
+                Comment = "",
+            });
+            actions.Insert(insertIndex + 1, new ActionItem
+            {
+                ActionType = "EndIf",
+                Delay = 0,
+                Key = "",
+                Comment = "",
+            });
+            for (int i = 0; i < actions.Count; i++)
+                actions[i].RowNumber = i + 1;
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+            mainController.UpdateButtonStates();
+            SendMessage("sheet:openIndex", new { index = insertIndex });
         }
 
         private async Task HandleInsertConditionalImageAsync(int insertIndex)

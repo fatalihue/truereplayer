@@ -5,7 +5,7 @@ import type { CollisionDetection, DragStartEvent, DragEndEvent } from '@dnd-kit/
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { snapCenterToCursor } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
-import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus } from 'lucide-react';
+import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Variable } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -57,6 +57,7 @@ export function ActionIcon({ actionType, size = 12 }: { actionType: string; size
   if (actionType === 'HoldKey') return <Timer size={size} />;
   if (actionType.startsWith('Key')) return <Keyboard size={size} />;
   if (actionType === 'SendText') return <Type size={size} />;
+  if (actionType === 'SetVariable') return <Variable size={size} />;
   if (actionType === 'WaitImage') return <ScanSearch size={size} />;
   if (actionType === 'WaitPixelColor') return <Pipette size={size} />;
   // Match the toolbar's redesigned icons so the chip in the table reads the same
@@ -138,6 +139,7 @@ function actionPillLabel(action: ActionItem): string {
     case 'RunProfile': return 'Run Profile';
     case 'Pause': return 'Pause';
     case 'HoldKey': return 'Hold Key';
+    case 'SetVariable': return 'Set Variable';
     case 'DoubleClick': return 'Double Click';
     // Conditional labels are intentionally lowercase to read as "code keywords".
     // The IF pill is uniform ("if") regardless of probe family — the image-vs-pixel
@@ -1328,6 +1330,17 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           if (action.conditionType === 'PixelColorMatch') {
                             return action.pixelColor || '';
                           }
+                          if (action.conditionType === 'WindowOpen') {
+                            const proc = action.windowProcessName || '';
+                            const title = action.windowTitle || '';
+                            return proc && title ? `${proc} · ${title}` : (proc || title);
+                          }
+                          if (action.conditionType === 'ClipboardMatch') {
+                            return action.clipboardPattern || '';
+                          }
+                          if (action.conditionType === 'BrowserElementState') {
+                            return action.key || '';
+                          }
                           return '';
                         })()
                       : action.actionType === 'HoldKey'
@@ -1335,6 +1348,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         // cell (no separate duration chip) so the two duration-bearing actions
                         // share one format. Click-to-edit is handled by the <td> onClick below.
                         ? `${getDisplayKey(action.key)} / ${action.holdDurationMs && action.holdDurationMs > 0 ? action.holdDurationMs : 1000} ms`
+                      : action.actionType === 'SetVariable'
+                        // "name = value" reads like the assignment it is; a fresh row
+                        // (no name yet) stays blank like an unconfigured WaitImage.
+                        ? (action.key ? `${action.key} = ${action.variableValue ?? ''}` : '')
                       : getDisplayKey(action.key);
               const displayX = getDisplayX(action);
               const displayY = getDisplayY(action);
@@ -1664,7 +1681,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       || action.actionType === 'WaitPixelColor'
                       || action.actionType === 'Pause'
                       || action.actionType.startsWith('Browser')
-                      || action.actionType === 'If';
+                      || action.actionType === 'If'
+                      || action.actionType === 'SetVariable';
                     // td-level cursor mirrors the chip's intent so EMPTY cells (WaitImage /
                     // WaitPixelColor with no value yet) still show the right affordance.
                     // When a chip is rendered, its own cursor class wins inside the chip
@@ -1761,7 +1779,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             // full Sheet panel for editing; cursor-pointer signals the
                             // chip is interactive without implying inline edit.
                             : action.actionType === 'WaitImage' || action.actionType === 'WaitPixelColor' || action.actionType === 'Pause'
-                              || action.actionType.startsWith('Browser') || action.actionType === 'If'
+                              || action.actionType.startsWith('Browser') || action.actionType === 'If' || action.actionType === 'SetVariable'
                               ? 'cursor-pointer hover:text-accent-light'
                               : ''
                         }`}
@@ -1772,6 +1790,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           // get truncated at 92 px. Exposing the full string on hover
                           // saves the user from opening the editor just to read it.
                           : action.actionType.startsWith('Browser') ? action.key
+                          // Long variable values truncate at the cell width — expose the
+                          // full assignment on hover, same rationale as Browser selectors.
+                          : action.actionType === 'SetVariable' && action.key ? `${action.key} = ${action.variableValue ?? ''}`
                           : undefined
                         }
                         // dblclick handler lives on the parent <td> (see above) so

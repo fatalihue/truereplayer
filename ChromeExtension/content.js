@@ -559,14 +559,26 @@
     }
   }
 
+  // Set by waitForElement when a FALLBACK selector (not the primary) matched; cleared at
+  // the start of every executeCommand. The command dispatcher attaches it to the success
+  // response so the C# side can log which tier saved the run.
+  let lastFallbackMatch = null;
+
   /**
    * #6 — waitForElement with mode support.
    *   appears (default) — element exists and is visible
    *   disappears — element is gone or invisible
    *   enabled — element exists, visible, and not disabled
    *   text-match — element exists, visible, and its text matches textPattern
+   *
+   * `alternatives` (optional) — ranked fallback selectors ({selector, tier}) captured at
+   * pick time. On every check the candidates are tried in order (primary first), so a
+   * drifted primary falls through to tier B/C within the SAME timeout window instead of
+   * failing. Disappears mode ignores them: "gone" must mean the PRIMARY element is gone —
+   * a tier-C nth-child fallback could match a different element forever and never
+   * disappear.
    */
-  async function waitForElement(selector, timeout = 30000, mode = 'appears', textPattern = null) {
+  async function waitForElement(selector, timeout = 30000, mode = 'appears', textPattern = null, alternatives = null) {
     const parsed = parseTextSelector(selector);
 
     // #8 — Validate CSS selector syntax up front for clearer error
@@ -578,7 +590,31 @@
       );
     }
 
-    const checkPositive = () => findElementForMode(parsed, mode, textPattern);
+    // Candidate list: primary first, then the pick-time alternatives (deduped against the
+    // primary, invalid CSS skipped silently — a broken fallback must never break the run).
+    const candidates = [{ selector, parsed, tier: null }];
+    if (mode !== 'disappears' && Array.isArray(alternatives)) {
+      for (const alt of alternatives) {
+        if (!alt || typeof alt.selector !== 'string' || !alt.selector || alt.selector === selector) continue;
+        const altParsed = parseTextSelector(alt.selector);
+        if (altParsed.kind === 'css' && !isValidCssSelector(altParsed.value)) continue;
+        candidates.push({ selector: alt.selector, parsed: altParsed, tier: alt.tier || 'C' });
+      }
+    }
+
+    const checkPositive = () => {
+      for (let i = 0; i < candidates.length; i++) {
+        const el = findElementForMode(candidates[i].parsed, mode, textPattern);
+        if (el) {
+          if (i > 0) {
+            lastFallbackMatch = { selector: candidates[i].selector, tier: candidates[i].tier };
+            console.info('[TrueReplayer] Primary selector failed — matched via fallback', lastFallbackMatch);
+          }
+          return el;
+        }
+      }
+      return null;
+    };
     const checkDisappears = () => {
       const el = parsed.kind === 'text' ? findByParsedText(parsed) :
         (() => { try { return document.querySelector(parsed.value); } catch { return null; } })();
@@ -590,6 +626,13 @@
     if (mode === 'disappears') {
       // Immediate check
       if (checkDisappears()) return null;
+
+      // timeout <= 0 = instant single-check probe (If Browser Element) — evaluate once and
+      // answer now; never allocate the observer/timer machinery below.
+      if (timeout <= 0) {
+        throw mkError('ELEMENT_NOT_FOUND', 'Element still present.',
+          'Instant probe: the element has not disappeared.');
+      }
 
       return new Promise((resolve, reject) => {
         let resolved = false;
@@ -622,6 +665,13 @@
     const found = checkPositive();
     if (found) return found;
 
+    // timeout <= 0 = instant single-check probe — same rule as the disappears branch above.
+    if (timeout <= 0) {
+      throw mkError('ELEMENT_NOT_FOUND',
+        candidates.length > 1 ? `Element not found (tried ${candidates.length} selectors).` : 'Element not found.',
+        'Instant probe: no selector matched the required state.');
+    }
+
     return new Promise((resolve, reject) => {
       let resolved = false;
       const timer = setTimeout(() => {
@@ -642,6 +692,10 @@
         } else if (el && mode === 'enabled' && !isInteractable(el)) {
           reject(mkError('ELEMENT_DISABLED', `Element is disabled after ${seconds}s.`,
             'Button/input is disabled. Wait for the form/page to enable it.'));
+        } else if (candidates.length > 1) {
+          reject(mkError('ELEMENT_NOT_FOUND',
+            `Element not found after ${seconds}s (tried ${candidates.length} selectors).`,
+            'Primary selector and all pick-time fallbacks failed — the page changed too much. Re-pick the element.'));
         } else {
           reject(mkError('ELEMENT_NOT_FOUND', `Element not found after ${seconds}s.`,
             'Page might be loading slowly, or selector doesn\'t match anything. Try Pick again.'));
@@ -903,13 +957,15 @@
       waitMode, urlWaitPattern, postNavigateSelector,
       typeAppend, typePaste, typeDelay,
       selectMatchMode,
+      alternatives,
     } = msg;
 
+    lastFallbackMatch = null; // per-command reset — see the declaration near waitForElement
     let actionEl = null;
     try {
       switch (command) {
         case 'click': {
-          const el = await waitForElement(selector, timeout, 'appears');
+          const el = await waitForElement(selector, timeout, 'appears', null, alternatives);
           actionEl = el;
 
           // #4 — Reject early on disabled elements with specific code
@@ -1003,7 +1059,7 @@
         }
 
         case 'rightClick': {
-          const el = await waitForElement(selector, timeout, 'appears');
+          const el = await waitForElement(selector, timeout, 'appears', null, alternatives);
           actionEl = el;
 
           if (!isInteractable(el)) {
@@ -1052,7 +1108,7 @@
         }
 
         case 'type': {
-          const el = await waitForElement(selector, timeout, 'appears');
+          const el = await waitForElement(selector, timeout, 'appears', null, alternatives);
           actionEl = el;
 
           if (!isInteractable(el)) {
@@ -1129,7 +1185,7 @@
         case 'waitElement': {
           // #6 — Wait modes: appears (default) | disappears | enabled | text-match
           const mode = waitMode || 'appears';
-          const el = await waitForElement(selector, timeout, mode, msg.text);
+          const el = await waitForElement(selector, timeout, mode, msg.text, alternatives);
           if (el) {
             actionEl = el;
             flashHighlight(el, 'success', 200);
@@ -1192,7 +1248,7 @@
           // blocks .click()), and their <option> children fail visibility checks.
           // The standard automation pattern is to set `.value` directly and
           // dispatch `change` / `input` events. This command exposes that path.
-          const el = await waitForElement(selector, timeout, 'appears');
+          const el = await waitForElement(selector, timeout, 'appears', null, alternatives);
           actionEl = el;
 
           if (el.tagName !== 'SELECT') {
@@ -1279,6 +1335,9 @@
 
       case 'executeCommand':
         executeCommand(msg).then((result) => {
+          // Attach which fallback selector saved the run (if any) so the C# side can log
+          // it — a used fallback means the primary selector is drifting.
+          if (result && result.success && lastFallbackMatch) result.matchedVia = lastFallbackMatch;
           sendResponse(result);
         }).catch((err) => {
           // Without this, a thrown command leaves the caller awaiting a response forever.

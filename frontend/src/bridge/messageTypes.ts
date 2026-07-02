@@ -50,6 +50,10 @@ export interface ActionItem {
   // BrowserSelectOption: how to match the option in a native <select>.
   // null/undefined = "text" mode (default). Other values: "value" | "index".
   selectMatchMode?: string | null;
+  // Ranked fallback selectors captured at pick time (browser actions). Persisted so
+  // replay can retry tier B/C candidates when the primary selector drifts; cleared when
+  // the user hand-edits the selector without re-picking. null/absent = no fallback data.
+  selectorAlternatives?: SelectorAlternative[] | null;
   // WaitImage extras (all default-safe). null/undefined = current behaviour preserved.
   waitImageOnTimeout?: string | null;
   waitImageInvert?: boolean;
@@ -83,6 +87,22 @@ export interface ActionItem {
   // null/undefined = "TreatAsFalse" (probe exception → walk FALSE branch). "Halt"
   // rethrows and stops replay. Mirrors waitImageOnTimeout's vocabulary.
   ifOnProbeError?: string | null;
+  // If Window (conditionType 'WindowOpen') — state-based probe: TRUE when a visible
+  // window matching process AND/OR title exists (or is foreground when foregroundOnly).
+  // Empty field = wildcard; at least one must be set. titleMatchMode: null = 'contains'.
+  windowProcessName?: string | null;
+  windowTitle?: string | null;
+  windowTitleMatchMode?: string | null; // null='contains' | 'regex'
+  windowMatchForegroundOnly?: boolean;
+  // If Clipboard (conditionType 'ClipboardMatch') — TRUE when the clipboard TEXT matches
+  // the pattern. patternType: null='contains' | 'equals' | 'regex' (all case-insensitive).
+  clipboardPatternType?: string | null;
+  clipboardPattern?: string | null;
+  // SetVariable — the value written under the variable name held in `key` (Key-reuse
+  // convention). Read back with {var:name} in SendText / Type Text; names are matched
+  // case-insensitively; an empty resolved value deletes the variable at replay time.
+  // null/undefined = never edited (renders as empty in the Sheet).
+  variableValue?: string | null;
 }
 
 // #2 — Selector alternative returned by the picker
@@ -545,7 +565,11 @@ export type OutgoingMessage =
   // After capture, the backend inserts {If, EndIf} as a pair at insertIndex and
   // auto-opens the Sheet on the new IF row. If the user hits Esc during capture, nothing
   // is inserted — same "cancel means cancel" rule the Wait* flows follow.
-  | { type: 'actions:insertConditional'; payload: { conditionType: 'ImageFound' | 'PixelColorMatch'; insertIndex: number } }
+  // 'WindowOpen', 'ClipboardMatch' and 'BrowserElementState' are capture-less: the
+  // {If, EndIf} pair inserts immediately with empty probe fields and the Sheet auto-opens
+  // to fill them. BrowserElementState reuses BrowserWaitElement's probe fields (key =
+  // selector, waitMode, browserText = text pattern) the same way If-Image reuses WaitImage's.
+  | { type: 'actions:insertConditional'; payload: { conditionType: 'ImageFound' | 'PixelColorMatch' | 'WindowOpen' | 'ClipboardMatch' | 'BrowserElementState'; insertIndex: number } }
   // Conditional logic — delete the entire IF/ELSE/ENDIF block. Backend forward-scans
   // from ifRowIndex with a nested-IF stack to find the matching EndIf, then removes
   // the contiguous range [ifRowIndex..endIfIdx] inclusive (covers body + optional ELSE
