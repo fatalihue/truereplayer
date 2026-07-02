@@ -387,13 +387,19 @@ namespace TrueReplayer.Services
                         && s.ValueKind == JsonValueKind.True;
                 }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
-                throw; // user stopped the replay — propagate, never swallow into "false"
+                throw; // genuine user stop — propagate, never swallow into "false"
             }
             catch
             {
-                return false; // pipe timeout / extension error → state not satisfied
+                // Also catches a pipe DISCONNECT: the reader's cleanup cancels every in-flight
+                // TCS with a parameterless TrySetCanceled (CancellationToken.None), so the await
+                // above throws an OCE whose token is NOT the replay token — token.IsCancellationRequested
+                // is false, so it falls through here. That is not a user stop; treat it like a
+                // timeout and return false so the If BRANCHES instead of halting the replay
+                // (matches the disconnected-extension contract in ProbeBrowserElementStateAsync).
+                return false; // pipe timeout / disconnect / extension error → state not satisfied
             }
             finally
             {

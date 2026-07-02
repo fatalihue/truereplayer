@@ -279,6 +279,12 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
         setPickElementRequestId(null);
         if (payload.selector) {
           setKey(payload.selector);
+          // A fresh pick fully re-specifies the target element, so clear any text-match mode
+          // seeded from a prior text= selector — otherwise the textMatch-precedence at display/
+          // save time (`textMatch.trim() ? buildTextSelector(...) : key`) would silently override
+          // the picked selector. Most visible on the If-Browser editor, where key and textMatch
+          // share ONE field so the discarded pick vanishes with no feedback.
+          setTextMatch('');
           // #2 — Show alternatives popover when there are 2+ candidates
           const alts = payload.alternatives || [];
           if (alts.length > 1) {
@@ -2112,7 +2118,7 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                     return (
                       <button
                         key={i}
-                        onClick={() => { setKey(alt.selector); setShowAlternatives(false); }}
+                        onClick={() => { setKey(alt.selector); setTextMatch(''); setShowAlternatives(false); }}
                         className="w-full text-left px-2 py-1 rounded text-[11px] hover:bg-bg-card transition-colors flex items-center gap-1.5"
                         data-tip={alt.description}
                       >

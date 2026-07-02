@@ -2909,12 +2909,15 @@ namespace TrueReplayer.Services
                 }
                 return action.ConditionNegate ? !rawResult : rawResult;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
-                throw; // user stop always propagates — same rule as InstantProbe
+                throw; // genuine user stop always propagates — same rule as InstantProbe
             }
             catch (Exception ex)
             {
+                // A spurious OCE (e.g. token.None from a pipe-disconnect TCS cancel) does NOT match
+                // the guarded catch above and lands here — treated as a probe error → TreatAsFalse
+                // (or Halt if the row opts in), so a dropped bridge branches instead of halting.
                 DiagnosticLog.Info($"[InstantProbe] Probe error ({action.ConditionType}): {ex.Message}");
                 if (string.Equals(action.IfOnProbeError, "Halt", StringComparison.OrdinalIgnoreCase))
                     throw;
