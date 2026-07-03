@@ -527,6 +527,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       const indices = (e as CustomEvent).detail as number[];
       setSelectedIndices(new Set(indices));
       lastClickedIndex.current = indices[0] ?? null;
+      // Keep the keyboard cursor in step so a follow-up Arrow continues from
+      // the externally-selected row (kbCursorRef declared with the keyboard
+      // block; runs post-render).
+      kbCursorRef.current = indices[0] ?? null;
     };
     window.addEventListener('selection:set', handler);
     return () => window.removeEventListener('selection:set', handler);
@@ -592,6 +596,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     if (editingCell) return;
     if (dragOccurred.current) { dragOccurred.current = false; return; }
 
+    // Mouse clicks reposition the keyboard cursor so a follow-up Arrow/Space
+    // continues from the clicked row (kbCursorRef is declared with the keyboard
+    // navigation block below; assignment happens at click time, post-render).
+    kbCursorRef.current = idx;
+
     setSelectedIndices(prev => {
       if (e.ctrlKey || e.metaKey) {
         const next = new Set(prev);
@@ -619,6 +628,108 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       return new Set([idx]);
     });
   }, [editingCell]);
+
+  // ── Keyboard row navigation (UI Wave 3) ──
+  // The scroll container is the focus target (tabIndex=0); keys act on a cursor
+  // ref that mouse clicks keep in sync via lastClickedIndex. Arrow = move + select,
+  // Shift+Arrow = extend from the anchor, Space = toggle, Enter = open the row's
+  // editor (same routing the context menu's Edit uses), Home/End = jump.
+  const kbCursorRef = useRef<number | null>(null);
+
+  // One editor-routing function shared by the context menu's Edit and Enter —
+  // specialized dialogs for the single-payload actions, generic Sheet otherwise.
+  const openEditorForRow = useCallback((idx: number) => {
+    const rowAction = actions[idx];
+    if (!rowAction) return;
+    if (rowAction.actionType === 'SendText') {
+      setSendTextEdit({ index: idx, text: rowAction.key });
+    } else if (rowAction.actionType === 'RunProfile') {
+      setRunProfileEdit({
+        index: idx,
+        profileName: rowAction.key,
+        repeatCount: rowAction.repeatCount ?? 1,
+      });
+    } else if (rowAction.actionType === 'Keystroke' || rowAction.actionType === 'HoldKey') {
+      // Both share the unified Send Keystroke dialog — it seeds Press / Hold
+      // mode from the row's ActionType.
+      setKeystrokeEdit({ index: idx });
+    } else if (rowAction.actionType === 'Pause') {
+      // Pause reopens its own capture-pad dialog, not the Sheet.
+      setPauseEdit({ index: idx });
+    } else {
+      onOpenSheet?.(idx);
+    }
+  }, [actions, onOpenSheet]);
+
+  const scrollRowIntoView = useCallback((idx: number) => {
+    const id = actions[idx]?.id;
+    if (id == null || !scrollRef.current) return;
+    const rowEl = scrollRef.current.querySelector(`[data-row-id="${window.CSS.escape(String(id))}"]`);
+    rowEl?.scrollIntoView({ block: 'nearest' });
+  }, [actions]);
+
+  const handleGridKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Only when the CONTAINER itself is focused — keys typed into inline edit
+    // inputs (or any nested control) keep their normal behavior.
+    if (e.target !== e.currentTarget) return;
+    if (actions.length === 0) return;
+    // Alt+Arrow belongs to the Toolbar's reorder shortcut (window listener) —
+    // bail so the grid cursor never fights the reorder.
+    if (e.altKey) return;
+    // Mutating the selection mid-run is blocked at App level for body focus;
+    // mirror that here since the container is an interactive element.
+    if (buttonStates.recordingActive || buttonStates.replayActive) return;
+
+    const last = actions.length - 1;
+    // "No cursor yet" ≠ "cursor at 0": the first ArrowDown on a freshly focused
+    // grid should land on row 0, not skip to row 1.
+    const hasCursor = kbCursorRef.current !== null || lastClickedIndex.current !== null;
+    const cursor = kbCursorRef.current ?? lastClickedIndex.current ?? 0;
+
+    const moveTo = (next: number, extend: boolean) => {
+      e.preventDefault();
+      const clamped = Math.max(0, Math.min(last, next));
+      kbCursorRef.current = clamped;
+      if (extend && lastClickedIndex.current !== null) {
+        // Clamp the anchor too — after deletions it can point past the end and
+        // a range built from it would select phantom indices.
+        const anchor = Math.min(lastClickedIndex.current, last);
+        const start = Math.min(anchor, clamped);
+        const end = Math.max(anchor, clamped);
+        const next2 = new Set<number>();
+        for (let i = start; i <= end; i++) next2.add(i);
+        setSelectedIndices(next2);
+      } else {
+        lastClickedIndex.current = clamped;
+        setSelectedIndices(new Set([clamped]));
+      }
+      scrollRowIntoView(clamped);
+    };
+
+    switch (e.key) {
+      case 'ArrowDown': moveTo(hasCursor ? cursor + 1 : 0, e.shiftKey); break;
+      case 'ArrowUp': moveTo(cursor - 1, e.shiftKey); break;
+      case 'Home': moveTo(0, e.shiftKey); break;
+      case 'End': moveTo(last, e.shiftKey); break;
+      case ' ': {
+        e.preventDefault();
+        const at = Math.max(0, Math.min(last, cursor));
+        lastClickedIndex.current = at;
+        setSelectedIndices(prev => {
+          const next = new Set(prev);
+          if (next.has(at)) next.delete(at);
+          else next.add(at);
+          return next;
+        });
+        break;
+      }
+      case 'Enter': {
+        e.preventDefault();
+        if (!editingCell) openEditorForRow(Math.max(0, Math.min(last, cursor)));
+        break;
+      }
+    }
+  }, [actions.length, buttonStates.recordingActive, buttonStates.replayActive, editingCell, openEditorForRow, scrollRowIntoView]);
 
   // When the bulk bar FIRST appears, keep a freshly single-selected row clear of it.
   // The bar is an overlay (it no longer shrinks the scroll viewport), but a row in the
@@ -1100,6 +1211,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     if (!selectedIndices.has(idx)) {
       setSelectedIndices(new Set([idx]));
       lastClickedIndex.current = idx;
+      kbCursorRef.current = idx;
     }
     setActiveSubmenu(null);
     setContextMenu({ x: e.clientX, y: e.clientY, rowIndex: idx });
@@ -1240,7 +1352,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   return (
     <div
       className="relative flex-1 bg-bg-surface border border-border-subtle rounded-ui overflow-hidden flex flex-col outline-none"
-      tabIndex={0}
+      // -1: click-focusable for the bubbled Delete/Ctrl+A/Escape handling below,
+      // but OUT of the tab order — the inner scroll container (tabIndex=0, the
+      // keyboard-navigation target) is the grid's single tab stop.
+      tabIndex={-1}
       onKeyDown={handleKeyDown}
       // Reset the post-drag click-suppression flag at the START of every new pointer
       // interaction (capture phase → runs before dnd-kit activates and before any click).
@@ -1251,45 +1366,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       // Mirrors the old mousedown-based reset that the dnd-kit migration dropped.
       onPointerDownCapture={() => { dragOccurred.current = false; }}
     >
-      {/* Header */}
-      <div
-        className="grid items-center h-row border-b border-border-subtle shrink-0"
-        style={{ gridTemplateColumns: [
-          '28px', '50px',
-          // Details replaces the old Key (124) + X (65) + Y (65) trio —
-          // key/text/combo for keyboard-ish actions, "x, y" for mouse actions,
-          // condition payload for If rows, all in one cell. 190 → 240 → 280 px:
-          // widened in steps as Notes (1fr) kept ending up too large.
-          ...(columnVisibility.action ? ['152px'] : []),
-          ...(columnVisibility.details ? ['280px'] : []),
-          ...(columnVisibility.delay ? ['70px'] : []),
-          ...(columnVisibility.notes ? ['1fr'] : []),
-        ].join(' ') }}
-      >
-        <span className="flex items-center justify-center">
-          <button
-            type="button"
-            onClick={() => {
-              if (allSelected) {
-                setSelectedIndices(new Set());
-              } else {
-                setSelectedIndices(new Set(actions.map((_, i) => i)));
-              }
-            }}
-            className="flex items-center justify-center cursor-pointer"
-            data-tip={allSelected ? tt('Deselect all', 'Desmarcar todas') : tt('Select all', 'Selecionar todas')}
-          >
-            <CheckboxBox
-              checked={allSelected}
-            />
-          </button>
-        </span>
-        <span className="text-xs font-semibold text-text-tertiary pl-3">#</span>
-        {columnVisibility.action && <span className="text-xs font-semibold text-text-tertiary pl-1">Action</span>}
-        {columnVisibility.details && <span className="text-xs font-semibold text-text-tertiary pl-1">Details</span>}
-        {columnVisibility.delay && <span className="text-xs font-semibold text-text-tertiary pl-2 pr-2 text-right">Delay</span>}
-        {columnVisibility.notes && <span className="text-xs font-semibold text-text-tertiary pl-2 pr-2">Notes</span>}
-      </div>
+      {/* Header now lives INSIDE the table as a sticky <thead> (see below) — the
+          old standalone div-grid duplicated the column map (gridTemplateColumns
+          vs colgroup) and the two could drift out of alignment; a real thead
+          shares the colgroup by construction AND stays visible when the grid
+          scrolls. */}
 
       {/* Body — DndContext/SortableContext drive the live-sliding row reorder.
           Default measuring (rects captured once at drag start) is REQUIRED here:
@@ -1306,10 +1387,23 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       <div
         ref={scrollRef}
         data-actions-grid
+        // Focusable: the container is the keyboard-navigation target (Tab reaches
+        // it; Arrows/Space/Enter act on the row cursor — see handleGridKeyDown).
+        tabIndex={0}
+        role="region"
+        aria-label="Recorded actions"
+        onKeyDown={handleGridKeyDown}
+        // scroll-padding-top = one row height: the sticky thead occupies the top
+        // of the viewport, so every upward scrollIntoView target (keyboard cursor,
+        // exec-row follow, bulk-bar reveal) must land BELOW it, not under it.
+        style={{ scrollPaddingTop: 'var(--ui-row-height)' }}
         // pb-9 / scroll-pb-9 only while the floating bulk bar is shown: gives the
         // last row room to scroll above the bar and makes scrollIntoView respect it.
         className={`flex-1 overflow-y-auto ${bulkBarVisible ? 'pb-9 scroll-pb-9' : ''}`}
       >
+        {/* aria-selected rides on the rows (valid on the implicit row role); the
+            table itself keeps its native role — aria-multiselectable isn't valid
+            there and a full role="grid" retrofit needs cell-level focus (wave 4). */}
         <table className="w-full table-fixed">
           <colgroup>
             <col style={{ width: 28 }} />
@@ -1329,6 +1423,38 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                 the full row width and the block reads as one continuous amber band. */}
             {columnVisibility.notes && <col style={{ width: '100%' }} />}
           </colgroup>
+          {/* Sticky header — sticky sits on the THs (not the thead: Chromium only
+              reliably sticks table CELLS). Each th needs an OPAQUE bg (rows scroll
+              underneath) and the bottom border is an inset shadow because
+              border-collapse borders don't travel with sticky cells. z-10 clears
+              the rows' absolutely-positioned block rails. */}
+          <thead>
+            <tr className="h-row">
+              <th className="sticky top-0 z-10 bg-bg-surface shadow-[inset_0_-1px_0_var(--color-border-subtle)]">
+                <div className="flex items-center justify-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (allSelected) {
+                        setSelectedIndices(new Set());
+                      } else {
+                        setSelectedIndices(new Set(actions.map((_, i) => i)));
+                      }
+                    }}
+                    className="flex items-center justify-center cursor-pointer"
+                    data-tip={allSelected ? tt('Deselect all', 'Desmarcar todas') : tt('Select all', 'Selecionar todas')}
+                  >
+                    <CheckboxBox checked={allSelected} />
+                  </button>
+                </div>
+              </th>
+              <th className="sticky top-0 z-10 bg-bg-surface shadow-[inset_0_-1px_0_var(--color-border-subtle)] text-left text-xs font-semibold text-text-tertiary pl-3">#</th>
+              {columnVisibility.action && <th className="sticky top-0 z-10 bg-bg-surface shadow-[inset_0_-1px_0_var(--color-border-subtle)] text-left text-xs font-semibold text-text-tertiary pl-1">Action</th>}
+              {columnVisibility.details && <th className="sticky top-0 z-10 bg-bg-surface shadow-[inset_0_-1px_0_var(--color-border-subtle)] text-left text-xs font-semibold text-text-tertiary pl-1">Details</th>}
+              {columnVisibility.delay && <th className="sticky top-0 z-10 bg-bg-surface shadow-[inset_0_-1px_0_var(--color-border-subtle)] text-right text-xs font-semibold text-text-tertiary pl-2 pr-2">Delay</th>}
+              {columnVisibility.notes && <th className="sticky top-0 z-10 bg-bg-surface shadow-[inset_0_-1px_0_var(--color-border-subtle)] text-left text-xs font-semibold text-text-tertiary pl-2 pr-2">Notes</th>}
+            </tr>
+          </thead>
           <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
           <tbody ref={tbodyRef}>
             {actions.map((action, idx) => {
@@ -1546,6 +1672,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                   // id participate — index-keyed fallbacks can't be tracked across
                   // a reorder.
                   data-row-id={action.id ?? undefined}
+                  aria-selected={isSelected}
                   {...sortable.listeners}
                   onClick={(e) => handleRowClick(idx, e)}
                   onContextMenu={(e) => handleRowContextMenu(idx, e)}
@@ -2277,25 +2404,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           <button
             onMouseEnter={() => setActiveSubmenu(null)}
             onClick={() => {
-              const rowAction = actions[contextMenu.rowIndex];
-              if (rowAction?.actionType === 'SendText') {
-                setSendTextEdit({ index: contextMenu.rowIndex, text: rowAction.key });
-              } else if (rowAction?.actionType === 'RunProfile') {
-                setRunProfileEdit({
-                  index: contextMenu.rowIndex,
-                  profileName: rowAction.key,
-                  repeatCount: rowAction.repeatCount ?? 1,
-                });
-              } else if (rowAction?.actionType === 'Keystroke' || rowAction?.actionType === 'HoldKey') {
-                // Both share the unified Send Keystroke dialog now — the dialog
-                // seeds Press / Hold mode based on the row's ActionType.
-                setKeystrokeEdit({ index: contextMenu.rowIndex });
-              } else if (rowAction?.actionType === 'Pause') {
-                // Pause reopens its own capture-pad dialog, not the Sheet.
-                setPauseEdit({ index: contextMenu.rowIndex });
-              } else {
-                onOpenSheet?.(contextMenu.rowIndex);
-              }
+              // Shared routing with keyboard Enter — see openEditorForRow.
+              openEditorForRow(contextMenu.rowIndex);
               closeContextMenu();
             }}
             className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"

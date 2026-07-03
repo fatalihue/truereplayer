@@ -419,7 +419,15 @@ namespace TrueReplayer.Services
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             var windowId = Win32Interop.GetWindowIdFromWindow(hwnd);
             var appWindow = AppWindow.GetFromWindowId(windowId);
-            appWindow.Resize(new Windows.Graphics.SizeInt32(1180, 780));
+            // AppWindow.Resize takes PHYSICAL pixels — scale the 1180×780 DIP design
+            // size by the window's DPI (mirrors the WM_GETMINMAXINFO convention).
+            // Unscaled, a 125% display opened the window at 1180 physical = 944 DIP,
+            // under the React shell's ~1020px auto-collapse threshold — the app
+            // started with its side panels folded for no reason.
+            uint dpi = NativeMethods.GetDpiForWindowSafe(hwnd);
+            appWindow.Resize(new Windows.Graphics.SizeInt32(
+                (int)(1180 * dpi / 96.0),
+                (int)(780 * dpi / 96.0)));
             CustomizeTitleBar(appWindow);
             CenterWindow(appWindow, windowId);
         }
@@ -476,10 +484,17 @@ namespace TrueReplayer.Services
         private const int WM_GETMINMAXINFO = 0x0024;
         private const int WM_DISPLAYCHANGE = 0x007E;
         private const int SW_RESTORE = 9;
-        // Layout minimum in DIPs — matches the size WindowAppearanceService.Configure
-        // passes to appWindow.Resize. WM_GETMINMAXINFO works in physical pixels, so this
+        // Layout minimum in DIPs. WM_GETMINMAXINFO works in physical pixels, so this
         // is scaled by the window's DPI before being written to ptMinTrackSize.
-        private const int BaseMinWidthDip = 1180;
+        // 960 (not the 1180 the window still OPENS at — see WindowAppearanceService.
+        // Configure) so the app can be snapped to HALF of a 1920×1080 display next to
+        // the game being macroed — the single most common arrangement for the target
+        // workflow, at 100% display scaling. (At 125%+ the DPI-scaled floor exceeds
+        // the 960-physical-px half-screen slot; going lower would break the React
+        // layout, so scaled displays keep a slightly-over-half minimum.) Below
+        // ~1020px the React shell auto-collapses the side panels to their icon
+        // rails (App.tsx), so the center grid keeps a usable width.
+        private const int BaseMinWidthDip = 960;
         private const int BaseMinHeightDip = 780;
         private const uint SWP_NOMOVE = 0x0002;
         private const uint SWP_NOSIZE = 0x0001;

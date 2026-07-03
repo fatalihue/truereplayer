@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { BridgeProvider, useBridge } from './bridge/BridgeContext';
 import { AppStateProvider, useAppState } from './state/AppStateContext';
 import { SelectionProvider } from './state/SelectionContext';
-import { ThemeProvider } from './state/ThemeContext';
+import { ThemeProvider, useTheme } from './state/ThemeContext';
 import { ToastProvider } from './state/ToastContext';
 import { LanguageProvider } from './state/LanguageContext';
 import { TitleBar } from './components/TitleBar';
@@ -148,20 +148,82 @@ function AppShell() {
     setSheetActionIndex(index);
   }, []);
 
+  // Responsive auto-collapse — pairs with the C# window minimum dropping to
+  // 960px (half a 1080p display, the side-by-side-with-the-game arrangement):
+  // when the window crosses below the threshold, both side panels fold to
+  // their icon rails so the action grid keeps a usable width. Crossing-only
+  // logic (not continuous) so a panel the user expands while narrow STAYS
+  // expanded; panels WE collapsed re-expand when the window widens again.
+  // Deliberately bypasses handleToggleSettings so the auto state never
+  // touches the persisted ui:settingsCollapsed preference.
+  //
+  // The threshold is expressed in LAYOUT px and scaled by the UI zoom setting
+  // (root.style.zoom, default 95%): zoom scales the layout, not innerWidth, so
+  // the same window width fits more/less UI depending on zoom. 1074 layout px
+  // ≈ both expanded panels + a usable grid (≡ 1020 device px at the 95% default).
+  const NARROW_THRESHOLD_LAYOUT = 1074;
+  const { config: themeConfig } = useTheme();
+  const zoomScale = (themeConfig.uiSettings.zoom ?? 95) / 100;
+  const wasNarrowRef = useRef(false);
+  const autoCollapsedRef = useRef({ sidebar: false, settings: false });
+  useEffect(() => {
+    const isNarrow = () => window.innerWidth < NARROW_THRESHOLD_LAYOUT * zoomScale;
+    const applyNarrowState = (narrow: boolean) => {
+      if (narrow) {
+        setSidebarCollapsed(prev => {
+          if (!prev) autoCollapsedRef.current.sidebar = true;
+          return true;
+        });
+        setSettingsCollapsed(prev => {
+          if (!prev) autoCollapsedRef.current.settings = true;
+          return true;
+        });
+      } else {
+        if (autoCollapsedRef.current.sidebar) {
+          autoCollapsedRef.current.sidebar = false;
+          setSidebarCollapsed(false);
+        }
+        if (autoCollapsedRef.current.settings) {
+          autoCollapsedRef.current.settings = false;
+          setSettingsCollapsed(false);
+        }
+      }
+    };
+    // Re-evaluate on mount AND whenever the zoom setting changes (a zoom bump
+    // can push the layout across the threshold without any window resize).
+    const evaluate = () => {
+      const narrow = isNarrow();
+      if (narrow === wasNarrowRef.current) return;
+      wasNarrowRef.current = narrow;
+      applyNarrowState(narrow);
+    };
+    evaluate();
+    window.addEventListener('resize', evaluate);
+    return () => window.removeEventListener('resize', evaluate);
+  }, [zoomScale]);
+
   const handleToggleSidebar = useCallback(() => {
+    // A manual toggle takes ownership — the auto logic must not fight it.
+    autoCollapsedRef.current.sidebar = false;
     setSidebarCollapsed(prev => !prev);
   }, []);
 
   const handleToggleSettings = useCallback(() => {
+    autoCollapsedRef.current.settings = false;
     setSettingsCollapsed(prev => {
       localStorage.setItem('ui:settingsCollapsed', prev ? '0' : '1');
       return !prev;
     });
   }, []);
 
-  // Command palette triggers — sidebar toggle is in App state, so listen here
+  // Command palette triggers — sidebar toggle is in App state, so listen here.
+  // Clears the auto-collapse flag like the header button does: a palette toggle
+  // is just as manual, and the responsive logic must not fight it.
   useEffect(() => {
-    const handler = () => setSidebarCollapsed(prev => !prev);
+    const handler = () => {
+      autoCollapsedRef.current.sidebar = false;
+      setSidebarCollapsed(prev => !prev);
+    };
     window.addEventListener('cmd:togglesidebar', handler);
     return () => window.removeEventListener('cmd:togglesidebar', handler);
   }, []);

@@ -16,6 +16,12 @@ namespace TrueReplayer.Services
             public bool MinimizeToTray { get; set; } = true;
             public bool RunOnStartup { get; set; } = true;
             public bool StartMinimized { get; set; } = true;
+            // Notifications — out-of-window run-end cues (UI Wave 3). The window is
+            // usually BEHIND the game while a replay runs, so the in-window status
+            // pills are invisible exactly when they matter. Flash defaults ON (subtle,
+            // standard Windows affordance); sound is opt-in.
+            public bool RunEndFlash { get; set; } = true;
+            public bool RunEndSound { get; set; } = false;
             // Execution
             public bool UseCustomDelay { get; set; } = true;
             public int CustomDelay { get; set; } = 100;
@@ -130,6 +136,8 @@ namespace TrueReplayer.Services
             profile.AlwaysOnTop = s.AlwaysOnTop;
             profile.MinimizeToTray = s.MinimizeToTray;
             profile.StartMinimized = s.StartMinimized;
+            profile.RunEndFlash = s.RunEndFlash;
+            profile.RunEndSound = s.RunEndSound;
             profile.RecordMouse = s.RecordMouse;
             profile.RecordScroll = s.RecordScroll;
             profile.RecordKeyboard = s.RecordKeyboard;

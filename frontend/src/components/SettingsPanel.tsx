@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useContext, createContext } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle, Globe } from 'lucide-react';
+import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle, Globe, BellRing } from 'lucide-react';
 import { useLanguage, useTt } from '../state/LanguageContext';
 // `Search` import removed with the disabled Settings filter — re-add it to revive the filter.
 import { useAppState } from '../state/AppStateContext';
@@ -732,6 +732,9 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
   const railGlobal: RailEntry[] = [
     ...(settings.useCursorClick ? [] : [{ tab: 'global', title: 'Hotkeys', icon: Zap, color: '#60cdff' } as RailEntry]),
     { tab: 'global', title: 'Window', icon: Monitor, color: '#7a8599' },
+    // Amber, NOT #6bcb77 — the Updates entry below already owns that green and
+    // the rail dots are the only per-section identity when collapsed.
+    { tab: 'global', title: 'Notifications', icon: BellRing, color: '#ffa94d' },
     { tab: 'global', title: 'Appearance', icon: Palette, color: '#c084fc', onClick: () => window.dispatchEvent(new CustomEvent('cmd:themeeditor')) },
     { tab: 'global', title: 'Language', icon: Globe, color: '#4dd0a0' },
     { tab: 'global', title: 'Updates', icon: Download, color: '#6bcb77' },
@@ -1055,6 +1058,23 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 <CompactToggle
                   isOn={settings.runAsAdmin ?? false}
                   onChange={(v) => changeSetting('runAsAdmin', v)}
+                />
+              </SettingRow>
+            </Section>
+
+            {/* Notifications — out-of-window run-end cues. Both apply only while the
+                TrueReplayer window is NOT foreground (the game usually covers it). */}
+            <Section color="#ffa94d" title="Notifications">
+              <SettingRow label="Flash on Replay End" tooltip={tt('Pulse the taskbar button when a replay finishes or fails while another window is focused.', 'Pisca o botão da barra de tarefas quando um replay termina ou falha enquanto outra janela está em foco.')}>
+                <CompactToggle
+                  isOn={settings.runEndFlash}
+                  onChange={(v) => send({ type: 'window:runEndFlash', payload: { enabled: v } })}
+                />
+              </SettingRow>
+              <SettingRow label="Sound on Replay End" tooltip={tt('Play the system chime when a replay finishes or fails in the background (error uses the error sound).', 'Toca o som do sistema quando um replay termina ou falha em segundo plano (erros usam o som de erro).')}>
+                <CompactToggle
+                  isOn={settings.runEndSound}
+                  onChange={(v) => send({ type: 'window:runEndSound', payload: { enabled: v } })}
                 />
               </SettingRow>
             </Section>

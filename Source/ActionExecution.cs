@@ -242,6 +242,7 @@ namespace TrueReplayer.Services
         private void StartReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation, int delayVariationPercent, bool useRelativeCoords, Models.WindowTarget? windowTarget, bool bringToFocus, int lockWidth, int lockHeight, int lockX, int lockY, bool restorePosition, bool restoreSize, bool forceInfiniteLoop)
         {
             IsReplaying = true;
+            _userStopped = false;
             onButtonStateChanged?.Invoke("Stop", true);
 
             int loopCount = loopEnabled && int.TryParse(loopCountText, out int count) && count >= 0 ? count : 1;
@@ -271,7 +272,11 @@ namespace TrueReplayer.Services
             {
                 dispatcherQueue.TryEnqueue(() =>
                 {
-                    ResetReplayState();
+                    // Error status is pushed BEFORE ResetReplayState — the bridge's
+                    // run-end notifier keys on status transitions, and the old order
+                    // (reset first) made a faulted run fire the SUCCESS cue off the
+                    // replaying→ready edge and then the error cue right behind it.
+                    // Error-first notifies exactly once, with the error sound.
                     if (t.Exception?.InnerException is TimeoutException tex)
                         onStatusChanged?.Invoke($"error:{tex.Message}");
                     else if (t.Exception?.InnerException != null)
@@ -284,12 +289,21 @@ namespace TrueReplayer.Services
                     {
                         DiagnosticLog.Info("Replay finished");
                     }
+                    ResetReplayState();
                 });
             });
         }
 
+        // True while the CURRENT run is ending because the user asked it to (Stop
+        // hotkey, WhilePressed release, clicker toggle-off). ResetReplayState turns
+        // it into the "ready:stopped" status so the bridge's run-end notifier stays
+        // silent — a deliberate stop is not "something finished in the background",
+        // and WhilePressed would otherwise flash the taskbar on EVERY key release.
+        private volatile bool _userStopped;
+
         private void StopReplay()
         {
+            _userStopped = true;
             replayer.Stop();
             _cursorClickCts?.Cancel();
         }
@@ -344,6 +358,7 @@ namespace TrueReplayer.Services
             }
 
             IsReplaying = true;
+            _userStopped = false;
             _clickerLoopActive = true;
             _clickerPaused = false;
             _clickerResumeTcs = null;
@@ -553,7 +568,11 @@ namespace TrueReplayer.Services
             IsReplaying = false;
             onButtonStateChanged?.Invoke("Replay", false);
             updateButtonStates();
-            onStatusChanged?.Invoke("ready");
+            // "ready:stopped" = same READY state, but tagged so the bridge knows the
+            // run ended by user request and skips the out-of-window notification.
+            var stopped = _userStopped;
+            _userStopped = false;
+            onStatusChanged?.Invoke(stopped ? "ready:stopped" : "ready");
         }
     }
 

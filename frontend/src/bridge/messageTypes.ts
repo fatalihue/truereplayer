@@ -312,6 +312,10 @@ export interface SettingsState {
   minimizeToTray: boolean;
   runOnStartup: boolean;
   startMinimized: boolean;
+  // Out-of-window run-end cues — the window is usually behind the game when a
+  // replay finishes, so the in-window status pills are invisible right then.
+  runEndFlash: boolean;
+  runEndSound: boolean;
   runAsAdmin: boolean;
 }
 
@@ -615,6 +619,8 @@ export type OutgoingMessage =
   | { type: 'window:minimizeToTray'; payload: { enabled: boolean } }
   | { type: 'window:runOnStartup'; payload: { enabled: boolean } }
   | { type: 'window:startMinimized'; payload: { enabled: boolean } }
+  | { type: 'window:runEndFlash'; payload: { enabled: boolean } }
+  | { type: 'window:runEndSound'; payload: { enabled: boolean } }
   | { type: 'window:reloadUI'; payload: Record<string, never> }
   | { type: 'profile:export'; payload: { names: string[]; includeOrganization?: boolean } }
   | { type: 'profile:import'; payload: Record<string, never> }

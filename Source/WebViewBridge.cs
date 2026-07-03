@@ -725,6 +725,8 @@ namespace TrueReplayer
                     case "window:minimizeToTray": HandleMinimizeToTray(payload); break;
                     case "window:runOnStartup": HandleRunOnStartup(payload); break;
                     case "window:startMinimized": HandleStartMinimized(payload); break;
+                    case "window:runEndFlash": HandleRunEndFlash(payload); break;
+                    case "window:runEndSound": HandleRunEndSound(payload); break;
                     case "window:reloadUI": try { var url = webView.Source; webView.Navigate(url); } catch (Exception rex) { DiagnosticLog.Error("window:reloadUI navigation failed", rex); } break;
                     case "update:check": _ = CheckForUpdateAsync(); break;
                     case "update:apply": _ = HandleUpdateApply(); break;
@@ -782,13 +784,33 @@ namespace TrueReplayer
 
         // ── Push methods (C# → React) ──
 
+        // Previous run status — lets PushStatusChange detect the replaying→ready
+        // edge (a run just finished) for the out-of-window notification below.
+        private string _lastRunStatus = "ready";
+
         public void PushStatusChange(string status)
         {
-            if (status.StartsWith("error:"))
+            bool wasError = status.StartsWith("error:");
+            if (wasError)
             {
                 SendMessage("alert:show", new { message = status[6..] });
                 status = "ready";
             }
+            // "ready:stopped" = the run ended because the USER stopped it (Stop
+            // hotkey, WhilePressed release, clicker toggle-off). Same READY state
+            // for the frontend, but no run-end notification — a deliberate stop is
+            // not "something finished in the background".
+            bool userStopped = status == "ready:stopped";
+            if (userStopped) status = "ready";
+
+            // Out-of-window run-end cue: when a replay finishes on its own (or any
+            // run errors) the TrueReplayer window is usually BEHIND the game — the
+            // only place the status pills render is the only place the user can't
+            // see. Pulse the taskbar button (and optionally chime) when we're not
+            // foreground.
+            if (status == "ready" && (wasError || (_lastRunStatus == "replaying" && !userStopped)))
+                NotifyRunEnded(wasError);
+            _lastRunStatus = status;
 
             SendMessage("status:changed", new { status });
             PushButtonStates();
@@ -1235,6 +1257,8 @@ namespace TrueReplayer
                     minimizeToTray = profile.MinimizeToTray,
                     runOnStartup = TrayIconService.IsRunOnStartup(),
                     startMinimized = profile.StartMinimized,
+                    runEndFlash = profile.RunEndFlash,
+                    runEndSound = profile.RunEndSound,
                     runAsAdmin = AppSettingsManager.Load().RunAsAdmin
                 }
             });
@@ -1491,6 +1515,8 @@ namespace TrueReplayer
                     minimizeToTray = profile.MinimizeToTray,
                     runOnStartup = TrayIconService.IsRunOnStartup(),
                     startMinimized = profile.StartMinimized,
+                    runEndFlash = profile.RunEndFlash,
+                    runEndSound = profile.RunEndSound,
                     runAsAdmin = AppSettingsManager.Load().RunAsAdmin
                 },
                 toolbar = new { profileName = CurrentProfileName, actionCount = actions.Count },
@@ -6383,6 +6409,8 @@ namespace TrueReplayer
             UserProfile.Current.AlwaysOnTop = defaults.AlwaysOnTop;
             UserProfile.Current.MinimizeToTray = defaults.MinimizeToTray;
             UserProfile.Current.StartMinimized = defaults.StartMinimized;
+            UserProfile.Current.RunEndFlash = defaults.RunEndFlash;
+            UserProfile.Current.RunEndSound = defaults.RunEndSound;
             TrayIconService.SetRunOnStartup(defaults.RunOnStartup);
             window.UpdateAlwaysOnTop(defaults.AlwaysOnTop);
 
@@ -6411,6 +6439,8 @@ namespace TrueReplayer
                 MinimizeToTray = UserProfile.Current.MinimizeToTray,
                 RunOnStartup = TrayIconService.IsRunOnStartup(),
                 StartMinimized = UserProfile.Current.StartMinimized,
+                RunEndFlash = UserProfile.Current.RunEndFlash,
+                RunEndSound = UserProfile.Current.RunEndSound,
                 UseCustomDelay = UseCustomDelay,
                 CustomDelay = int.TryParse(CustomDelay, out var d) ? d : 100,
                 UseDelayVariation = UseDelayVariation,
@@ -6777,6 +6807,67 @@ namespace TrueReplayer
             UserProfile.Current.StartMinimized = enabled;
             SaveGlobalSettings();
             PushSettingsLoaded();
+        }
+
+        private void HandleRunEndFlash(JsonElement payload)
+        {
+            bool enabled = payload.GetProperty("enabled").GetBoolean();
+            UserProfile.Current.RunEndFlash = enabled;
+            SaveGlobalSettings();
+            PushSettingsLoaded();
+        }
+
+        private void HandleRunEndSound(JsonElement payload)
+        {
+            bool enabled = payload.GetProperty("enabled").GetBoolean();
+            UserProfile.Current.RunEndSound = enabled;
+            SaveGlobalSettings();
+            PushSettingsLoaded();
+        }
+
+        // Out-of-window run-end notification. Best-effort. Thread contract: every
+        // status push that reaches here is dispatcher-enqueued (the replay
+        // continuation wraps its pushes in dispatcherQueue.TryEnqueue), so this
+        // runs on the UI thread — which keeps WindowNative.GetWindowHandle(window)
+        // safe. The Win32 calls themselves (FlashWindowEx / MessageBeep /
+        // GetForegroundWindow) are thread-agnostic. Never let a notification
+        // failure break a status push.
+        private void NotifyRunEnded(bool error)
+        {
+            try
+            {
+                if (!UserProfile.Current.RunEndFlash && !UserProfile.Current.RunEndSound)
+                    return;
+                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+                // Foreground = the user is already looking at us; the in-window
+                // status change is enough.
+                if (NativeMethods.GetForegroundWindow() == hwnd)
+                    return;
+                if (UserProfile.Current.RunEndFlash)
+                {
+                    var fw = new NativeMethods.FLASHWINFO
+                    {
+                        cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.FLASHWINFO>(),
+                        hwnd = hwnd,
+                        // Flash the taskbar button until the window regains foreground —
+                        // the standard "something finished in the background" affordance.
+                        dwFlags = NativeMethods.FLASHW_TRAY | NativeMethods.FLASHW_TIMERNOFG,
+                        uCount = 0,
+                        dwTimeout = 0,
+                    };
+                    NativeMethods.FlashWindowEx(ref fw);
+                }
+                if (UserProfile.Current.RunEndSound)
+                {
+                    // System sound scheme's chime — respects the user's scheme
+                    // (including "No Sounds") and needs no bundled asset.
+                    NativeMethods.MessageBeep(error ? NativeMethods.MB_ICONERROR_BEEP : NativeMethods.MB_OK_BEEP);
+                }
+            }
+            catch (Exception ex)
+            {
+                TrueReplayer.Services.DiagnosticLog.Error("Run-end notification failed", ex);
+            }
         }
 
         // ── Collection change handler ──

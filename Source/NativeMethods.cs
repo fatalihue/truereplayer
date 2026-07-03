@@ -186,6 +186,43 @@ namespace TrueReplayer.Interop
         [DllImport("user32.dll")]
         public static extern bool IsIconic(IntPtr hWnd); // true if minimized
 
+        // ── Out-of-window run-status notifications (UI Wave 3) ──
+        // FlashWindowEx pulses the taskbar button; MessageBeep plays the system
+        // sound scheme's chime (no bundled audio asset, respects user's scheme
+        // incl. "No Sounds"). Both are fired only when the TrueReplayer window
+        // is NOT foreground — the game usually is.
+        [StructLayout(LayoutKind.Sequential)]
+        public struct FLASHWINFO
+        {
+            public uint cbSize;
+            public IntPtr hwnd;
+            public uint dwFlags;
+            public uint uCount;
+            public uint dwTimeout;
+        }
+
+        public const uint FLASHW_TRAY = 0x00000002;      // flash the taskbar button
+        public const uint FLASHW_TIMERNOFG = 0x0000000C; // flash until the window comes to the foreground
+
+        [DllImport("user32.dll")]
+        public static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
+
+        public const uint MB_OK_BEEP = 0x00000000;        // MB_OK — "done" chime
+        public const uint MB_ICONERROR_BEEP = 0x00000010; // MB_ICONERROR — "failed" chime
+
+        [DllImport("user32.dll")]
+        public static extern bool MessageBeep(uint uType);
+
+        [DllImport("user32.dll")]
+        public static extern uint GetDpiForWindow(IntPtr hWnd);
+
+        /// <summary>GetDpiForWindow with the 0-means-96 fallback every caller needs.</summary>
+        public static uint GetDpiForWindowSafe(IntPtr hWnd)
+        {
+            uint dpi = GetDpiForWindow(hWnd);
+            return dpi == 0 ? 96u : dpi;
+        }
+
         [DllImport("user32.dll")]
         public static extern bool IsZoomed(IntPtr hWnd); // true if maximized
 

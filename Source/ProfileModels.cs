@@ -76,6 +76,14 @@ namespace TrueReplayer.Models
         [JsonIgnore]
         public bool StartMinimized { get; set; } = false;
 
+        // Out-of-window run-end notifications — global (AppSettings.json), never
+        // serialized per-profile. See WebViewBridge.NotifyRunEnded.
+        [JsonIgnore]
+        public bool RunEndFlash { get; set; } = true;
+
+        [JsonIgnore]
+        public bool RunEndSound { get; set; } = false;
+
         public string BatchDelay { get; set; } = "Delay (ms)";
         public string? LastProfileDirectory { get; set; }
 
