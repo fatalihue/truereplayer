@@ -42,10 +42,6 @@ export function SecurityWarningModal({ onContinue, onCancel }: SecurityWarningMo
           <Button
             variant="secondary"
             onClick={onCancel}
-            data-tip={tt(
-              'Abort the import — nothing is imported and the profile does not run',
-              'Cancelar a importação — nada é importado e o profile não roda'
-            )}
           >
             Cancel
           </Button>

@@ -470,7 +470,6 @@ export function Toolbar(_props: ToolbarProps) {
               tabIndex={-1}
               onClick={() => send({ type: 'profile:click', payload: { name: activeProfile } })}
               disabled={insertsDisabled}
-              data-tip={clickerTip('Deselect profile', 'Desmarcar perfil')}
               // -ml-[13px] pulls the icon LEFT into the toolbar's own px-4 padding so the
               // X's vertical line matches the checkbox column center in the table below
               // (measured 12.7px gap before this fix). Purely cosmetic — the hover/click
@@ -501,7 +500,6 @@ export function Toolbar(_props: ToolbarProps) {
             disabled={!buttonStates.canUndo || insertsDisabled}
             onClick={() => send({ type: 'actions:undo', payload: {} })}
             className={`p-1.5 rounded transition-colors ${buttonStates.canUndo && !insertsDisabled ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled'}`}
-            data-tip={clickerTip('Undo (Ctrl+Z)', 'Desfazer (Ctrl+Z)')}
           >
             <Undo2 size={14} />
           </button>
@@ -510,7 +508,6 @@ export function Toolbar(_props: ToolbarProps) {
             disabled={!buttonStates.canRedo || insertsDisabled}
             onClick={() => send({ type: 'actions:redo', payload: {} })}
             className={`p-1.5 rounded transition-colors ${buttonStates.canRedo && !insertsDisabled ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled'}`}
-            data-tip={clickerTip('Redo (Ctrl+Y)', 'Refazer (Ctrl+Y)')}
           >
             <Redo2 size={14} />
           </button>
@@ -591,7 +588,6 @@ export function Toolbar(_props: ToolbarProps) {
             }}
             disabled={insertsDisabled}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip={clickerTip('Insert Send Keystroke action', 'Inserir ação Send Keystroke')}
           >
             <Keyboard size={14} />
           </button>
@@ -602,7 +598,6 @@ export function Toolbar(_props: ToolbarProps) {
             onClick={() => setShowSendTextDialog(true)}
             disabled={insertsDisabled}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip={clickerTip('Insert Send Text action', 'Inserir ação Send Text')}
           >
             <Type size={14} />
           </button>
@@ -636,7 +631,6 @@ export function Toolbar(_props: ToolbarProps) {
             }}
             disabled={insertsDisabled}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip={clickerTip('Insert Pause action', 'Inserir ação Pause')}
           >
             <Hourglass size={14} />
           </button>
@@ -661,7 +655,6 @@ export function Toolbar(_props: ToolbarProps) {
               onClick={() => setShowWaitMenu(!showWaitMenu)}
               disabled={insertsDisabled}
               className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled flex items-center gap-0.5"
-              data-tip={clickerTip('Insert Wait (Image / Pixel Color)', 'Inserir Wait (Image / Pixel Color)')}
             >
               <ScanEye size={14} />
               <ChevronDown size={9} className="opacity-60" />
@@ -708,7 +701,6 @@ export function Toolbar(_props: ToolbarProps) {
               onClick={() => setShowConditionalMenu(!showConditionalMenu)}
               disabled={insertsDisabled}
               className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled flex items-center gap-0.5"
-              data-tip={clickerTip('Insert Conditional (If / Else / EndIf)', 'Inserir Condicional (If / Else / EndIf)')}
             >
               <GitBranch size={14} />
               <ChevronDown size={9} className="opacity-60" />
@@ -792,7 +784,6 @@ export function Toolbar(_props: ToolbarProps) {
               onClick={() => setShowBrowserMenu(!showBrowserMenu)}
               disabled={insertsDisabled}
               className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled flex items-center gap-0.5"
-              data-tip={clickerTip('Browser Actions', 'Ações de Navegador')}
             >
               <Globe size={14} />
               <ChevronDown size={9} className="opacity-60" />
@@ -845,7 +836,6 @@ export function Toolbar(_props: ToolbarProps) {
             onClick={() => setShowRunProfileDialog(true)}
             disabled={insertsDisabled}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip={clickerTip('Insert Run Profile action', 'Inserir ação Run Profile')}
           >
             <Repeat2 size={14} />
           </button>

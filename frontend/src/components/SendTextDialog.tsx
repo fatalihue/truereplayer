@@ -184,7 +184,6 @@ interface ClipboardTransformPopoverProps {
 // Limit + token / preview) is shared with the chip click-to-edit popover via
 // ClipboardModifierBody — only the shell (header / footer / positioning) differs.
 function ClipboardTransformPopover({ onInsert, onClose }: ClipboardTransformPopoverProps) {
-  const tt = useTt();
   const [state, setState] = useState<TransformState>(DEFAULT_TRANSFORM);
   const { clipRaw, clipReady } = useClipboardContent();
   const popRef = useRef<HTMLDivElement>(null);
@@ -231,7 +230,6 @@ function ClipboardTransformPopover({ onInsert, onClose }: ClipboardTransformPopo
           type="button"
           onClick={onClose}
           className="text-text-tertiary hover:text-text-primary text-sm leading-none px-1"
-          data-tip={tt('Close', 'Fechar')}
         >
           ✕
         </button>
@@ -457,13 +455,13 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
               {/* Tool tabs — lived in the hand-rolled dialog header; DialogShell
                   owns the header now, so they sit atop the panel they switch. */}
               <div className="flex items-center justify-center gap-1 px-2 py-2 border-b border-border-subtle shrink-0">
-                <button type="button" onClick={() => selectPanel('emoji')} className={tabBtnClass(activePanel === 'emoji')} data-tip={tt('Emoji', 'Emoji')}>
+                <button type="button" onClick={() => selectPanel('emoji')} className={tabBtnClass(activePanel === 'emoji')}>
                   <Smile size={14} /> Emoji
                 </button>
-                <button type="button" onClick={() => selectPanel('variables')} className={tabBtnClass(activePanel === 'variables')} data-tip={tt('Variables', 'Variáveis')}>
+                <button type="button" onClick={() => selectPanel('variables')} className={tabBtnClass(activePanel === 'variables')}>
                   <Clock size={14} /> Variables
                 </button>
-                <button type="button" onClick={() => selectPanel('snippets')} className={tabBtnClass(activePanel === 'snippets')} data-tip={tt('Snippets', 'Trechos')}>
+                <button type="button" onClick={() => selectPanel('snippets')} className={tabBtnClass(activePanel === 'snippets')}>
                   <BookmarkPlus size={14} /> Snippets
                 </button>
               </div>
@@ -661,7 +659,6 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                               onClick={() => handleInsertSnippet(s.text)}
                               disabled={deletingSnippetId === s.id}
                               className="flex-1 text-left min-w-0 disabled:cursor-default"
-                              data-tip={deletingSnippetId === s.id ? '' : tt('Insert at cursor', 'Inserir no cursor')}
                             >
                               <div className="text-xs font-medium text-text-primary truncate">{s.name}</div>
                               <div className="text-[11px] text-text-tertiary truncate mt-0.5">{s.text}</div>
@@ -673,7 +670,6 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                   type="button"
                                   onClick={() => handleDeleteSnippet(s.id)}
                                   className="shrink-0 p-1 rounded text-red-300 bg-red-500/20 hover:bg-red-500/35 border border-red-500/40 transition-colors"
-                                  data-tip={tt('Confirm delete', 'Confirmar exclusão')}
                                   autoFocus
                                 >
                                   <Check size={12} />
@@ -682,7 +678,6 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                   type="button"
                                   onClick={() => setDeletingSnippetId(null)}
                                   className="shrink-0 p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-surface transition-colors"
-                                  data-tip={tt('Cancel', 'Cancelar')}
                                 >
                                   <X size={12} />
                                 </button>
@@ -693,7 +688,6 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                   type="button"
                                   onClick={() => setEditingSnippetId(s.id)}
                                   className="shrink-0 p-1 text-text-disabled hover:text-accent-light transition-colors opacity-0 group-hover:opacity-100"
-                                  data-tip={tt('Edit snippet', 'Editar trecho')}
                                 >
                                   <Pencil size={12} />
                                 </button>
@@ -701,7 +695,6 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                   type="button"
                                   onClick={() => setDeletingSnippetId(s.id)}
                                   className="shrink-0 p-1 text-text-disabled hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
-                                  data-tip={tt('Delete snippet', 'Excluir trecho')}
                                 >
                                   <Trash2 size={12} />
                                 </button>

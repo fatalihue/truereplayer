@@ -10,7 +10,6 @@ import {
 } from './clipboardModifiers';
 import { NumInput, Section } from './popoverAtoms';
 import { normalizeToken } from './tokenNormalize';
-import { useTt } from '../../state/LanguageContext';
 
 // Tokens that accept a `:N` repeat count (e.g. {enter:5}).
 const REPEATABLE_TOKEN_NAMES = new Set([
@@ -185,7 +184,6 @@ export function TokenChipPopover({
 }
 
 function Header({ token, onClose }: { token: string; onClose: () => void }) {
-  const tt = useTt();
   return (
     <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-border-subtle bg-bg-card shrink-0">
       <Wand2 size={14} className="text-accent-light shrink-0" />
@@ -196,7 +194,6 @@ function Header({ token, onClose }: { token: string; onClose: () => void }) {
         type="button"
         onClick={onClose}
         className="text-text-tertiary hover:text-text-primary text-sm leading-none px-1"
-        data-tip={tt('Close', 'Fechar')}
       >
         ✕
       </button>

@@ -246,7 +246,7 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
                         ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
                         : 'text-text-tertiary border-border-default bg-bg-elevated hover:text-text-secondary hover:bg-bg-card'
                     }`}
-                    data-tip={p.ms === 0 ? tt('No timeout — resume by hotkey only', 'Sem tempo limite — retoma apenas pela tecla de atalho') : tt(`Wait ${p.label}`, `Aguardar ${p.label}`)}
+                    data-tip={p.ms === 0 ? tt('No timeout — resume by hotkey only', 'Sem tempo limite — retoma apenas pela tecla de atalho') : undefined}
                   >
                     {p.label}
                   </button>

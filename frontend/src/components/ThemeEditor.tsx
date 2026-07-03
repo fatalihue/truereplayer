@@ -171,7 +171,6 @@ function ColorRow({ label, colorKey, value, baseValue, mode, contrastBg, onChang
         <button
           onClick={() => onReset(colorKey)}
           className={`p-0.5 rounded text-text-disabled hover:text-text-primary hover:bg-bg-elevated transition-colors ${isOverridden ? 'visible' : 'invisible'}`}
-          data-tip={tt('Reset to base', 'Restaurar para a base')}
         >
           <RotateCcw size={12} />
         </button>
@@ -319,7 +318,6 @@ function AppearanceColorRow({ label, value, defaultValue, onChange }: {
   defaultValue: string;
   onChange: (v: string) => void;
 }) {
-  const tt = useTt();
   const isCustom = value !== defaultValue;
   return (
     <div className="flex items-center gap-2 py-0.5 group">
@@ -347,7 +345,6 @@ function AppearanceColorRow({ label, value, defaultValue, onChange }: {
       <button
         onClick={() => onChange(defaultValue)}
         className={`p-0.5 rounded text-text-disabled hover:text-text-primary hover:bg-bg-elevated transition-colors ${isCustom ? 'visible' : 'invisible'}`}
-        data-tip={tt('Reset to default', 'Restaurar para o padrão')}
       >
         <RotateCcw size={12} />
       </button>
@@ -636,7 +633,6 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                     <button
                       onClick={(e) => { e.stopPropagation(); deleteCustomPreset(theme.id); }}
                       className="absolute top-1 right-1 w-5 h-5 rounded bg-bg-base/80 text-text-tertiary hover:text-recording opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center justify-center"
-                      data-tip={tt('Delete this custom preset', 'Excluir este preset personalizado')}
                     >
                       <X size={11} />
                     </button>

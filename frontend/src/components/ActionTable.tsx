@@ -1509,7 +1509,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       }
                     }}
                     className="flex items-center justify-center cursor-pointer"
-                    data-tip={allSelected ? tt('Deselect all', 'Desmarcar todas') : tt('Select all', 'Selecionar todas')}
                   >
                     <CheckboxBox checked={allSelected} />
                   </button>
@@ -1926,7 +1925,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       <EyeOff
                         size={11}
                         className="inline-block ml-1.5 text-text-tertiary translate-y-[-1px]"
-                        data-tip={tt('Skipped during replay', 'Ignorada durante o replay')}
                       />
                     )}
                   </td>
@@ -2064,7 +2062,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         onClick={(e) => { e.stopPropagation(); openEditorForRow(idx); }}
                         tabIndex={-1}
                         className="hidden group-hover:flex absolute right-1.5 top-1/2 -translate-y-1/2 items-center justify-center w-6 h-6 rounded bg-bg-elevated border border-border-subtle text-text-tertiary hover:text-text-primary hover:border-border-default transition-colors"
-                        data-tip={tt('Edit action (Enter)', 'Editar ação (Enter)')}
                       >
                         <Pencil size={12} />
                       </button>

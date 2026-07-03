@@ -201,7 +201,6 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
                     type="button"
                     onClick={() => setShowEmojiPicker(v => !v)}
                     className="w-12 h-12 flex items-center justify-center text-2xl bg-bg-input border border-border-subtle rounded hover:border-accent-solid transition-colors"
-                    data-tip={tt('Pick an emoji', 'Escolher um emoji')}
                   >
                     {iconEmoji || <Smile size={18} className="text-text-tertiary" />}
                   </button>
@@ -210,7 +209,6 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
                       type="button"
                       onClick={() => setIconEmoji(null)}
                       className="text-[10px] text-text-tertiary hover:text-text-primary transition-colors"
-                      data-tip={tt('Remove the profile icon', 'Remover o ícone do perfil')}
                     >
                       Clear
                     </button>
@@ -278,7 +276,6 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
                         type="button"
                         onClick={() => removeTag(t)}
                         className="hover:text-amber-400 transition-colors"
-                        data-tip={tt('Remove', 'Remover')}
                       >
                         <X size={10} />
                       </button>

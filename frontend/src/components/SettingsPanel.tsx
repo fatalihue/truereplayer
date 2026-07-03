@@ -84,7 +84,6 @@ function EnableChip({ value, isOn, onCommitValue, onToggle, onEnterActivate }: {
   onToggle: (v: boolean) => void;
   onEnterActivate?: (v: string) => void;
 }) {
-  const tt = useTt();
   const [local, setLocal] = useState(value);
   const focused = useRef(false);
   useEffect(() => { if (!focused.current) setLocal(value); }, [value]);
@@ -104,7 +103,6 @@ function EnableChip({ value, isOn, onCommitValue, onToggle, onEnterActivate }: {
         type="button"
         onClick={() => onToggle(!isOn)}
         aria-label={isOn ? 'Disable' : 'Enable'}
-        data-tip={isOn ? tt('On — click to turn off', 'Ligado — clique para desligar') : tt('Off — click to turn on', 'Desligado — clique para ligar')}
         className="h-full pl-2 pr-1.5 flex items-center shrink-0 cursor-pointer transition-colors hover:bg-[rgba(127,127,127,0.18)]"
       >
         <span
@@ -418,7 +416,6 @@ function ClickerSection({
                 value={unit}
                 onChange={(e) => setUnit(e.target.value as 'ms' | 'cps')}
                 className="w-6 h-8 text-center text-[10px] text-text-secondary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid font-mono cursor-pointer appearance-none shrink-0"
-                data-tip={tt('Unit', 'Unidade')}
               >
                 <option value="cps">/s</option>
                 <option value="ms">ms</option>
@@ -487,7 +484,6 @@ function ClickerSection({
                   !useArea,
                 )}
                 aria-label={useArea ? 'Disable area' : 'Enable area'}
-                data-tip={useArea ? tt('On — click to turn off', 'Ligado — clique para desligar') : tt('Off — click to turn on', 'Desligado — clique para ligar')}
                 className="h-full pl-2 pr-1.5 flex items-center shrink-0 cursor-pointer transition-colors hover:bg-[rgba(127,127,127,0.18)]"
               >
                 <span
@@ -517,7 +513,6 @@ function ClickerSection({
                     onChange('cursorClickArea', null);
                   }}
                   className="absolute right-0.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus:opacity-100 text-text-tertiary hover:text-text-primary text-[12px] leading-none px-0.5 transition-opacity"
-                  data-tip={tt('Clear area', 'Limpar área')}
                   tabIndex={-1}
                 >
                   ✕
@@ -760,7 +755,6 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
           <button
             onClick={onToggleCollapse}
             className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-            data-tip={tt('Expand', 'Expandir')} data-tip-pos="left"
           >
             <ChevronsLeft size={14} />
           </button>
@@ -770,7 +764,6 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             <button
               key={s.title}
               onClick={s.onClick ?? (() => expandToSection(s.tab, s.title))}
-              data-tip={s.title} data-tip-pos="left"
               className="w-8 h-8 flex items-center justify-center rounded hover:bg-bg-elevated transition-colors shrink-0"
             >
               <s.icon size={15} style={{ color: s.color }} />
@@ -781,7 +774,6 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             <button
               key={s.title}
               onClick={s.onClick ?? (() => expandToSection(s.tab, s.title))}
-              data-tip={s.title} data-tip-pos="left"
               className="w-8 h-8 flex items-center justify-center rounded hover:bg-bg-elevated transition-colors shrink-0"
             >
               <s.icon size={15} style={{ color: s.color }} />
@@ -819,7 +811,6 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
           <button
             onClick={onToggleCollapse}
             className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors shrink-0"
-            data-tip={tt('Collapse', 'Recolher')} data-tip-pos="left"
           >
             <ChevronsRight size={14} />
           </button>

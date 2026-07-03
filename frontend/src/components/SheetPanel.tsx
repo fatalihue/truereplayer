@@ -1269,7 +1269,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       >
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-4 border-b border-border-subtle shrink-0">
-          <button onClick={onClose} className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors shrink-0" data-tip={tt('Close panel', 'Fechar painel')}>
+          <button onClick={onClose} className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors shrink-0">
             <ArrowLeft size={16} />
           </button>
           {/* Action icon — reuses the grid's canonical ActionIcon so the drawer reads the
@@ -1286,7 +1286,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               {clickHalfSuffix && (
                 <span
                   className="px-1.5 py-[1px] rounded text-[10px] font-medium border bg-bg-card text-text-secondary border-border-default"
-                  data-tip={clickHalfSuffix === 'Down' ? tt('Button pressed down', 'Botão pressionado') : tt('Button released', 'Botão solto')}
                 >
                   {clickHalfSuffix === 'Down' ? '↓ press' : '↑ release'}
                 </span>
@@ -1361,7 +1360,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                       ? 'bg-bg-elevated text-text-primary'
                       : 'text-text-tertiary hover:text-text-secondary'
                   }`}
-                  data-tip={tt('TRUE branch fires when the probe succeeds (image / pixel found)', 'Ramo TRUE dispara quando o teste tem sucesso (image / pixel encontrado)')}
                 >
                   Found
                 </button>
@@ -1373,7 +1371,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                       ? 'bg-bg-elevated text-text-primary'
                       : 'text-text-tertiary hover:text-text-secondary'
                   }`}
-                  data-tip={tt('TRUE branch fires when the probe FAILS (image / pixel NOT found) — IFNOT', 'Ramo TRUE dispara quando o teste FALHA (image / pixel NÃO encontrado) — IFNOT')}
                 >
                   NOT Found
                 </button>
@@ -1544,7 +1541,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                       ? 'bg-accent-solid/20 border-accent-solid text-accent-light'
                       : 'bg-bg-input border-border-default text-text-tertiary hover:text-text-primary hover:border-text-tertiary'
                   }`}
-                  data-tip={tt('Pick element from page', 'Selecionar elemento da página')}
                 >
                   <Crosshair size={14} />
                 </button>
@@ -1700,7 +1696,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   <button
                     onClick={() => setWaitImageSearchRegion(null)}
                     className="h-8 px-2 flex items-center rounded text-xs text-text-tertiary hover:text-[var(--color-recording)] hover:bg-bg-card transition-colors"
-                    data-tip={tt('Clear search region (revert to full screen)', 'Limpar região de busca (voltar para tela cheia)')}
                   >
                     <X size={12} />
                   </button>
@@ -1849,7 +1844,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   onClick={handlePickPixelColor}
                   disabled={pickColorRequestId != null}
                   className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  data-tip={tt('Click anywhere on screen — captures X, Y, and the pixel colour in one shot', 'Clique em qualquer lugar da tela — captura X, Y e a cor do pixel de uma vez')}
                 >
                   <Pipette size={13} />
                   {pickColorRequestId != null ? 'Picking…' : 'Pick'}
@@ -2054,7 +2048,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                           ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
                           : 'text-text-tertiary border-border-default bg-bg-elevated hover:text-text-secondary hover:bg-bg-card'
                       }`}
-                      data-tip={p.ms === 0 ? tt('Wait forever (resume hotkey only)', 'Esperar para sempre (apenas tecla de retomada)') : tt(`Wait ${p.label}`, `Esperar ${p.label}`)}
                     >
                       {p.label}
                     </button>
@@ -2100,7 +2093,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 {isBrowserNavigate ? 'URL' : 'CSS Selector'}
                 {/* #2 — Tier shield indicator (only for non-Navigate selectors) */}
                 {!isBrowserNavigate && selectorForTier && (
-                  <span data-tip={tt(`${tierMeta.label} selector`, `Seletor ${tierMeta.label}`)} style={{ color: tierMeta.color, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                  <span style={{ color: tierMeta.color, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                     <tierMeta.Icon size={12} />
                     <span style={{ fontSize: 9, fontWeight: 600 }}>{tier}</span>
                   </span>
@@ -2129,7 +2122,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                         ? 'bg-accent-solid/20 border-accent-solid text-accent-light'
                         : 'bg-bg-input border-border-default text-text-tertiary hover:text-text-primary hover:border-text-tertiary'
                     }`}
-                    data-tip={tt('Pick element from page', 'Selecionar elemento da página')}
                   >
                     <Crosshair size={14} />
                   </button>
@@ -2144,7 +2136,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                     <button
                       onClick={() => setShowAlternatives(false)}
                       className="flex items-center text-text-tertiary hover:text-text-primary"
-                      data-tip={tt('Dismiss alternatives', 'Dispensar alternativas')}
                     >
                       <X size={12} />
                     </button>
@@ -2186,7 +2177,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   value={textMode}
                   onChange={(e) => setTextMode(e.target.value as TextMode)}
                   className="h-8 px-1.5 text-[11px] bg-bg-input border border-border-default rounded text-text-secondary outline-none focus:border-accent-solid"
-                  data-tip={tt('Match mode', 'Modo de correspondência')}
                 >
                   {TEXT_MODES.map(m => (
                     <option key={m.value} value={m.value}>{m.label}</option>
@@ -2599,7 +2589,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                     onClick={handlePickPosition}
                     disabled={pickPositionRequestId != null}
                     className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    data-tip={tt('Click anywhere on screen to set X/Y', 'Clique em qualquer lugar da tela para definir X/Y')}
                   >
                     <Crosshair size={13} />
                     {pickPositionRequestId != null ? 'Picking…' : 'Pick from screen'}
@@ -2613,7 +2602,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                         ? ''
                         : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
                     }`}
-                    data-tip={coordCopyFlash ? tt('Copied!', 'Copiado!') : tt('Copy X,Y to clipboard', 'Copiar X,Y para a área de transferência')}
                   >
                     {coordCopyFlash ? <Check size={12} /> : <Copy size={12} />}
                   </button>
@@ -2626,7 +2614,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                         ? ''
                         : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
                     }`}
-                    data-tip={coordPasteError ? tt('Clipboard does not contain valid coords', 'A área de transferência não contém coordenadas válidas') : tt('Paste X,Y from clipboard', 'Colar X,Y da área de transferência')}
                   >
                     {coordPasteError ? <X size={12} /> : <ClipboardPaste size={12} />}
                   </button>

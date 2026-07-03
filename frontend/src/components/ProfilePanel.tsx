@@ -1543,21 +1543,18 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               <button
                 onClick={onToggleCollapse}
                 className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-                data-tip={tt('Expand', 'Expandir')} data-tip-pos="right"
               >
                 <ChevronsRight size={14} />
               </button>
               <button
                 onClick={handleCreate}
                 className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-                data-tip={tt('New profile', 'Novo perfil')} data-tip-pos="right"
               >
                 <FilePlus size={14} />
               </button>
               <button
                 onClick={() => { pendingFocusSearch.current = true; onToggleCollapse?.(); }}
                 className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-                data-tip={tt('Search profiles', 'Buscar perfis')} data-tip-pos="right"
               >
                 <Search size={14} />
               </button>
@@ -1602,7 +1599,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       <button
                         onClick={onToggleCollapse}
                         className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-semibold bg-bg-elevated text-text-tertiary hover:bg-bg-card hover:text-text-primary transition-colors shrink-0"
-                        data-tip={tt(`${overflow} more — expand`, `${overflow} mais — expandir`)} data-tip-pos="right"
                       >
                         +{overflow}
                       </button>
@@ -1625,14 +1621,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             <button
               onClick={onToggleCollapse}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              data-tip={tt('Collapse profiles panel', 'Recolher painel de perfis')}
             >
               <ChevronsLeft size={14} />
             </button>
             <button
               onClick={handleOpenProfilesFolder}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              data-tip={tt('Open profiles folder', 'Abrir pasta de perfis')}
             >
               <ExternalLink size={14} />
             </button>
@@ -1646,14 +1640,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             <button
               onClick={handleCreateFolder}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              data-tip={tt('New folder', 'Nova pasta')}
             >
               <FolderPlus size={14} />
             </button>
             <button
               onClick={handleCreate}
               className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              data-tip={tt('New profile', 'Novo perfil')} data-tip-pos="end"
             >
               <FilePlus size={14} />
             </button>
@@ -2153,7 +2145,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       onClick={() => handleSetFolderColor(folderContextMenu.folderName, c)}
                       className="w-[26px] h-[26px] rounded-full border-2 hover:scale-110 transition-transform"
                       style={{ backgroundColor: c, borderColor: (profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName)?.color === c ? 'var(--color-text-primary)' : 'transparent' }}
-                      data-tip={c}
                     />
                   ))}
                 </div>
@@ -2686,7 +2677,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               onChange={(e) => setFolderDialogName(e.target.value)}
               onKeyDown={(e) => handleDialogKeyDown(e, confirmCreateFolder)}
               placeholder="Folder name..."
-              data-tip={tt('Name for the new folder. Must be unique (case-insensitive).', 'Nome da nova pasta. Deve ser único (sem diferenciar maiúsculas).')}
               className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
             />
             <div className="flex items-center gap-1.5 mt-3">
@@ -2739,7 +2729,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 else if (e.key === 'Escape') { e.preventDefault(); setShowRenameFolderDialog(null); }
               }}
               placeholder="New folder name..."
-              data-tip={tt('New name for this folder. Must be unique (case-insensitive).', 'Novo nome para esta pasta. Deve ser único (sem diferenciar maiúsculas).')}
               className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
             />
             {renameFolderNameTaken && (
