@@ -2,6 +2,8 @@ import { useState, useMemo, useEffect } from 'react';
 import { Download, AlertTriangle, FolderOpen, Keyboard, Hash, Pencil, Replace, Ban } from 'lucide-react';
 import type { ImportPreviewPayload, ImportConflictResolution } from '../bridge/messageTypes';
 import { Checkbox } from './Checkbox';
+import { DialogShell } from './common/DialogShell';
+import { Button } from './common/Button';
 import { useTt } from '../state/LanguageContext';
 
 interface ImportPreviewDialogProps {
@@ -98,13 +100,6 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
     onConfirm(names, conflictResolutions);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      onCancel();
-    }
-  };
-
   const toggleAll = (value: boolean) => {
     const next: Record<string, boolean> = {};
     preview.profiles.forEach(p => { next[p.name] = value && p.compatible; });
@@ -112,23 +107,40 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onKeyDown={(e) => e.stopPropagation()}
+    <DialogShell
+      icon={<Download size={14} style={{ color: 'var(--color-accent)' }} />}
+      title="Import Profiles"
+      // max-h keeps the review list scrollable inside the card on short windows
+      // (the profile list below is the flex-1 overflow-y-auto region).
+      widthClass="w-[640px] max-h-[90vh]"
+      onClose={onCancel}
+      // closeOnBackdrop FALSE: accidentally clicking outside while reviewing a
+      // dozen profiles would discard the selection + conflict choices. The user
+      // dismisses via the Cancel button, Esc, or completing the import.
+      closeOnBackdrop={false}
+      footerHint={<>{selectedCount} of {compatibleCount} will be imported</>}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>Cancel</Button>
+          <Button
+            variant="primary"
+            onClick={handleConfirm}
+            disabled={selectedCount === 0}
+            data-tip={tt(
+              'Import the checked profiles into your library, applying the conflict choices above. Reference images travel with the file and are restored too',
+              'Importa os perfis marcados para sua biblioteca, aplicando as escolhas de conflito acima. As imagens de referência vêm no arquivo e também são restauradas'
+            )}
+          >
+            Import Selected ({selectedCount})
+          </Button>
+        </>
+      }
+      // No Enter rule (unchanged from the hand-rolled version); this handler only
+      // preserves the old scrim-level stopPropagation so keystrokes typed while
+      // reviewing don't leak to app-level shortcut handlers. Esc is owned by the
+      // shell (it already stops propagation before this runs).
+      onCardKeyDown={(e) => e.stopPropagation()}
     >
-      {/* Backdrop click intentionally does NOT close the dialog — accidentally clicking
-          outside while reviewing a dozen profiles would discard the selection. The user
-          dismisses via the Cancel button, Esc, or completing the import. */}
-      <div
-        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[640px] max-w-[95vw] max-h-[90vh] flex flex-col"
-        onKeyDown={handleKeyDown}
-      >
-        {/* Header */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
-          <Download size={14} className="text-[#60cdff]" />
-          <h3 className="text-sm font-semibold text-text-primary">Import Profiles</h3>
-        </div>
-
         {/* File summary */}
         <div className="px-4 py-3 border-b border-border-subtle bg-bg-surface/30">
           <div className="flex items-center gap-2 text-xs">
@@ -141,7 +153,7 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
             <span>Your app: v{preview.runningVersion}</span>
             {preview.hasOrganization && (
               <span
-                className="text-[#60cdff]"
+                className="text-accent-light"
                 data-tip={tt(
                   'This file also carries the folder/grouping layout — imported profiles keep their original folders',
                   'Este arquivo também traz a organização de pastas — os perfis importados mantêm suas pastas originais'
@@ -317,34 +329,7 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
             );
           })}
         </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border-subtle">
-          <span className="text-[11px] text-text-tertiary">
-            {selectedCount} of {compatibleCount} will be imported
-          </span>
-          <div className="flex gap-2">
-            <button
-              onClick={onCancel}
-              className="px-4 py-1.5 text-xs font-medium text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle rounded transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleConfirm}
-              disabled={selectedCount === 0}
-              data-tip={tt(
-                'Import the checked profiles into your library, applying the conflict choices above. Reference images travel with the file and are restored too',
-                'Importa os perfis marcados para sua biblioteca, aplicando as escolhas de conflito acima. As imagens de referência vêm no arquivo e também são restauradas'
-              )}
-              className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Import Selected ({selectedCount})
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </DialogShell>
   );
 }
 

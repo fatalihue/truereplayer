@@ -425,7 +425,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           )}
           {filteredGroups.map(group => (
             <div key={group.id}>
-              <div className="px-3 py-1.5 text-[11px] font-semibold text-text-disabled">
+              <div className="px-3 py-1.5 label-micro text-text-tertiary">
                 {group.title}
               </div>
               {group.items.map(item => {
@@ -471,9 +471,11 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
 
         {/* Footer */}
         <div className="flex items-center gap-4 px-4 py-2 border-t border-border-subtle text-[11px] text-text-disabled">
-          <span><span className="kbd" style={{ fontSize: 9 }}>↑↓</span> navigate</span>
-          <span><span className="kbd" style={{ fontSize: 9 }}>↵</span> select</span>
-          <span><span className="kbd" style={{ fontSize: 9 }}>esc</span> close</span>
+          {/* No inline fontSize override — the shared .kbd utility's 10px is the app-wide
+              minimum for legible text (the old fontSize: 9 was flagged by the type audit). */}
+          <span><span className="kbd">↑↓</span> navigate</span>
+          <span><span className="kbd">↵</span> select</span>
+          <span><span className="kbd">esc</span> close</span>
         </div>
       </div>
     </div>,

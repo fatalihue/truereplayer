@@ -23,6 +23,10 @@
   --color-accent: #90caf9;
   --color-accent-solid: #42a5f5;
   --color-accent-hover: #bbdefb;
+  /* Alias — ~15 call sites use text-accent-light, which was never a defined
+     token (the utility silently produced no color). Maps to accent-hover so it
+     tracks every theme preset. */
+  --color-accent-light: var(--color-accent-hover);
 
   /* Ink (text/icon color) for solid semantic button fills — white or near-black,
      whichever passes contrast against the fill. Re-derived per theme via
@@ -32,6 +36,8 @@
   --color-replay-ink: #1c1c1c;
   --color-clicker-ink: #1c1c1c;
   --color-accent-ink: #1c1c1c;
+  /* Hover fill for solid accent buttons — away from the ink (see themes.ts). */
+  --color-accent-solid-hover: color-mix(in srgb, #42a5f5 85%, #ffffff);
 
   /* Semantic */
   --color-recording: #ff6b6b;
@@ -85,6 +91,30 @@
   /* Fonts */
   --font-mono: 'Consolas', 'Courier New', monospace;
 
+  /* Type ramp — 5 roles replace the ad-hoc size collection (Tailwind v4 --text-*
+     pairs generate text-caption/-minor/-body/-subtitle/-title utilities). 11px is
+     the floor for text that carries meaning; body matches --ui-font-size's 13px
+     default. Weights: 400/500/600 only, sentence case (platform convention). */
+  --text-caption: 11px;
+  --text-caption--line-height: 14px;
+  --text-minor: 12px;
+  --text-minor--line-height: 16px;
+  --text-body: 13px;
+  --text-body--line-height: 18px;
+  --text-subtitle: 15px;
+  --text-subtitle--line-height: 20px;
+  --text-title: 20px;
+  --text-title--line-height: 28px;
+
+  /* Motion tokens — three durations, asymmetric easing (decelerate hard on the
+     way IN, accelerate on the way OUT — exits get out of the way). Keyboard-
+     initiated surfaces should skip entrance motion entirely. */
+  --motion-fast: 100ms;
+  --motion-base: 150ms;
+  --motion-slow: 250ms;
+  --ease-enter: cubic-bezier(0, 0, 0, 1);
+  --ease-exit: cubic-bezier(1, 0, 1, 1);
+
   /* UI Settings (overridden at runtime by ThemeContext). Values must mirror
      DEFAULT_UI_SETTINGS in themes.ts so the pre-hydration frame matches. */
   --ui-font-size: 13px;
@@ -130,13 +160,34 @@ html, body, #root {
   -webkit-user-select: none;
 }
 
-/* Title bar drag region */
-/* Remove focus outline on all non-input elements (app is not keyboard-navigated) */
-*:not(input):not(textarea):focus {
-  outline: none !important;
+/* Focus visibility — keyboard focus gets a themed ring; mouse focus stays quiet.
+   Replaces the old blanket `outline: none !important` (which made keyboard
+   operation invisible app-wide and failed WCAG 2.4.7 at the root). :focus-visible
+   only matches keyboard/AT focus on non-text controls, so mouse users see no
+   change. Text inputs keep their own border-focused treatments and are exempt
+   from the ring (they'd double up). */
+:focus:not(:focus-visible) {
+  outline: none;
 }
-*:not(input):not(textarea):focus-visible {
-  outline: none !important;
+:focus-visible {
+  outline: 2px solid var(--color-accent-solid);
+  outline-offset: 1px;
+  /* 1px text-primary halo fills the offset gap so the indicator keeps a ≥3:1
+     layer even on presets where accent-solid sits close to the surface color
+     (WCAG 1.4.11 non-text contrast). */
+  box-shadow: 0 0 0 1px var(--color-text-primary);
+}
+/* Ring exemptions — text-entry surfaces carry their own border-focused
+   treatment (a second ring doubles up), range sliders keep the ring (their
+   only focus cue), and tabindex="-1" hosts are programmatic-focus-only
+   (dialog cards, capture pads) that Tab can never reach. */
+input:not([type="range"]):focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[contenteditable="true"]:focus-visible,
+[tabindex="-1"]:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 /* Allow tooltips on disabled buttons (so they still fire mouseover for the portal). */
@@ -240,14 +291,57 @@ html[data-animations="true"] .app-tip {
   to   { opacity: 1; transform: translateX(0); }
 }
 
-@keyframes bulk-bar-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(12px); }
-  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+/* Sheet exit — the missing half of slide-in-right (audit: 4 surfaces animate in,
+   nothing animates out). Faster than the entrance and on the exit curve. */
+@keyframes slide-out-right {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(16px); }
+}
+
+/* Docked BulkActionBar entrance (replaces the orphaned floating-bar
+   bulk-bar-in keyframe, which carried a translateX(-50%) the docked bar
+   no longer wants). */
+html[data-animations="true"] .bulk-bar-enter {
+  animation: slide-up var(--motion-base) var(--ease-enter);
 }
 
 @keyframes command-in {
   from { opacity: 0; transform: scale(0.97) translateY(-8px); }
   to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* DialogShell motion — symmetric enter/exit on the shared dialog chrome.
+   Enter decelerates in (--ease-enter), exit accelerates away (--ease-exit,
+   faster — exits get out of the way). The scrim cross-fades alongside. With
+   animations off, DialogShell closes synchronously (no animationend to wait
+   for), so nothing here is load-bearing for dismissal. */
+@keyframes dialog-in {
+  from { opacity: 0; transform: scale(0.97) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes dialog-out {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to   { opacity: 0; transform: scale(0.97) translateY(-4px); }
+}
+@keyframes fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+html[data-animations="true"] .dialog-scrim {
+  animation: fade-in var(--motion-base) ease;
+}
+html[data-animations="true"] .dialog-card {
+  animation: dialog-in var(--motion-base) var(--ease-enter);
+}
+/* Exit needs a DIFFERENT keyframe name than the entrance: re-declaring the
+   same name (even with `reverse`) on an element that already played it does
+   NOT restart the animation in Chromium — the scrim would snap invisible and
+   sit as a click-blocking transparent overlay for the card's exit duration. */
+html[data-animations="true"] .dialog-leaving {
+  animation: fade-out var(--motion-fast) var(--ease-exit) forwards;
+}
+html[data-animations="true"] .dialog-leaving .dialog-card {
+  animation: dialog-out var(--motion-fast) var(--ease-exit) forwards;
 }
 
 @keyframes fade-in {
@@ -310,7 +404,8 @@ html[data-animations="true"] .replay-btn-glow {
   height: 4px;
   border-radius: 9999px;
   background: var(--color-bg-elevated);
-  outline: none;
+  /* no outline:none here — the global :focus-visible ring is a range slider's
+     only keyboard-focus cue (text inputs have borders; this doesn't). */
 }
 
 .sheet-slider::-webkit-slider-thumb {
@@ -351,6 +446,19 @@ html[data-animations="true"] .drop-gap-slot {
    until the scroll settles (the flag is set by the auto-scroll loop). */
 [data-autoscrolling="true"] .drop-gap-slot {
   animation: none;
+}
+
+/* Micro-label — THE one recipe for section headers / group captions app-wide
+   (SettingsPanel sections, ProfilePanel PINNED/UNGROUPED, toolbar flyout headers,
+   sheet sections…). Replaces four drifted dialects of the same role; 11px is the
+   app-wide floor for meaningful text. Color intentionally NOT set here — surfaces
+   pair it with text-tertiary by default or their own accent dot. */
+@utility label-micro {
+  font-size: 11px;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 /* Kbd tag utilities */

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { BridgeProvider, useBridge } from './bridge/BridgeContext';
 import { AppStateProvider, useAppState } from './state/AppStateContext';
 import { SelectionProvider } from './state/SelectionContext';
@@ -25,12 +25,28 @@ import { ThemeEditor } from './components/ThemeEditor';
 // AppShell is rendered inside AppStateProvider so it can read settings to drive
 // mode-dependent visuals (Clicker mode glow, ActionTable replacement).
 function AppShell() {
-  const { settings } = useAppState();
+  const { settings, buttonStates } = useAppState();
   const { subscribe } = useBridge();
   const isClicker = settings.useCursorClick;
 
+  // Read by the global keydown handler through a ref so the handler can stay
+  // bound once (empty deps) instead of re-attaching on every run-state push.
+  const runActiveRef = useRef(false);
+  runActiveRef.current = buttonStates.recordingActive || buttonStates.replayActive;
+
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const [sheetActionIndex, setSheetActionIndex] = useState<number | null>(null);
+  // Sheet exit choreography — closing keeps the old index mounted while the
+  // panel slides out (SheetPanel animates on `leaving`, then calls onExited).
+  // With animations off we skip straight to unmount.
+  const [sheetLeaving, setSheetLeaving] = useState(false);
+  const closeSheet = useCallback(() => {
+    if (document.documentElement.getAttribute('data-animations') !== 'true') {
+      setSheetActionIndex(null);
+      return;
+    }
+    setSheetLeaving(true);
+  }, []);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // Settings panel collapse persists across restarts (unlike the profiles
   // sidebar, which is a transient workspace toggle) — users who tuck it away
@@ -91,6 +107,15 @@ function AppShell() {
 
       if (inEditable) return;
 
+      // Run-active lockout comes BEFORE the interactive early-return — if a
+      // control is already focused when a recording/replay starts, a stray
+      // Space/Enter/Tab aimed at the game must not actuate it or move focus.
+      if (runActiveRef.current
+        && ['Tab', ' ', 'Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault();
+        return;
+      }
+
       // Don't swallow keys aimed at a focused interactive control — Space/Enter
       // are how the browser activates buttons/checkboxes/links (it synthesizes a
       // click), and arrows drive selects. closest() catches nested targets too
@@ -100,8 +125,13 @@ function AppShell() {
       );
       if (interactive) return;
 
-      // Block Tab, Space, Enter, arrows from interacting with UI elements
-      if (['Tab', ' ', 'Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+      // Tab from <body> is pure focus NAVIGATION — it never actuates anything —
+      // and only idle flows reach this point (the run-active gate above), so it
+      // passes through. This is what makes keyboard entry into the UI possible.
+      if (e.key === 'Tab') return;
+
+      // Block Space, Enter, arrows from interacting with UI elements
+      if ([' ', 'Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();
       }
     };
@@ -114,6 +144,7 @@ function AppShell() {
   }, []);
 
   const handleOpenSheet = useCallback((index: number) => {
+    setSheetLeaving(false);
     setSheetActionIndex(index);
   }, []);
 
@@ -142,6 +173,7 @@ function AppShell() {
   useEffect(() => {
     return subscribe((msg) => {
       if (msg.type === 'sheet:openIndex') {
+        setSheetLeaving(false);
         setSheetActionIndex(msg.payload.index);
       }
     });
@@ -197,7 +229,12 @@ function AppShell() {
       />
       <SheetPanel
         actionIndex={sheetActionIndex}
-        onClose={() => setSheetActionIndex(null)}
+        onClose={closeSheet}
+        leaving={sheetLeaving}
+        onExited={() => {
+          setSheetActionIndex(null);
+          setSheetLeaving(false);
+        }}
       />
       {showThemeEditor && <ThemeEditor onClose={() => setShowThemeEditor(false)} />}
       <UpdateOverlay />

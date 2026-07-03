@@ -193,7 +193,10 @@ function StatCell({ value, label, dim = false }: { value: string; label: string;
       <div className="text-[18px] font-mono font-semibold text-text-primary tabular-nums leading-tight">
         {value}
       </div>
-      <div className="text-[9px] uppercase tracking-[0.15em] text-text-tertiary mt-1">
+      {/* text-caption (11px) = the type-ramp floor for meaningful text; tracking
+          eased 0.15em→0.12em so the absolute letterspacing (~1.3px) matches the
+          old 9px look and the label doesn't spread in these narrow cells. */}
+      <div className="text-caption uppercase tracking-[0.12em] text-text-tertiary mt-1">
         {label}
       </div>
     </div>

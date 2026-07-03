@@ -6,6 +6,7 @@ import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { Toggle } from './common/Toggle';
+import { SegmentedControl } from './common/SegmentedControl';
 
 // Compact 28×16 switch — the redesigned Settings panel uses the smaller size for every
 // on/off control; other surfaces (dialogs) keep the default 40×20 Toggle.
@@ -50,13 +51,13 @@ function Section({ color, title, children, collapsible = false, defaultOpen = tr
       {collapsible ? (
         <button onClick={toggleOpen} className="group w-full flex items-center gap-2 px-1.5 pt-2.5 pb-1">
           {dot}
-          <span className="text-[11px] font-medium tracking-wide text-text-tertiary flex-1 text-left group-hover:text-text-secondary transition-colors">{title}</span>
+          <span className="label-micro text-text-tertiary flex-1 text-left group-hover:text-text-secondary transition-colors">{title}</span>
           {isOpen ? <ChevronDown size={12} className="text-text-tertiary" /> : <ChevronRight size={12} className="text-text-tertiary" />}
         </button>
       ) : (
         <div className="flex items-center gap-2 px-1.5 pt-2.5 pb-1">
           {dot}
-          <span className="text-[11px] font-medium tracking-wide text-text-tertiary">{title}</span>
+          <span className="label-micro text-text-tertiary">{title}</span>
         </div>
       )}
       {isOpen && <div>{children}</div>}
@@ -82,7 +83,10 @@ function EnableChip({ value, isOn, onCommitValue, onToggle, onEnterActivate }: {
   useEffect(() => { if (!focused.current) setLocal(value); }, [value]);
   return (
     <div
-      className={`${CTRL_W} h-7 flex items-center rounded border overflow-hidden`}
+      // h-8 = the app-wide 32px control height (sheet convention, Fluent medium).
+      // focus-within:! beats the inline borderColor so keyboard/caret focus is
+      // visible on the chip — these inputs previously had no focused state at all.
+      className={`${CTRL_W} h-8 flex items-center rounded border overflow-hidden focus-within:!border-accent-solid`}
       style={isOn
         ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
         : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
@@ -130,7 +134,7 @@ function ValueField({ value, unit, onCommitValue }: {
   const focused = useRef(false);
   useEffect(() => { if (!focused.current) setLocal(value); }, [value]);
   return (
-    <div className={`${CTRL_W} h-7 flex items-center gap-1.5 px-2 rounded border border-border-default bg-bg-input`}>
+    <div className={`${CTRL_W} h-8 flex items-center gap-1.5 px-2 rounded border border-border-default bg-bg-input focus-within:border-accent-solid`}>
       <input
         type="text"
         value={local}
@@ -140,7 +144,9 @@ function ValueField({ value, unit, onCommitValue }: {
         onKeyDown={(e) => { if (e.key === 'Enter') { onCommitValue(local); (e.target as HTMLInputElement).blur(); } }}
         className="flex-1 min-w-0 bg-transparent outline-none text-ui font-mono text-right text-text-primary"
       />
-      {unit && <span className="text-[10px] shrink-0 text-text-disabled">{unit}</span>}
+      {/* tertiary, not disabled — the unit is real information (audit: text-disabled
+          was doing double duty for informative content at ~2:1). */}
+      {unit && <span className="text-[10px] shrink-0 text-text-tertiary">{unit}</span>}
     </div>
   );
 }
@@ -170,7 +176,10 @@ function SettingRow({ label, tooltip, children, danger }: { label: string; toolt
   // (the panel hugs the right window edge) instead of clipping off-screen.
   return (
     <div
-      className="relative flex items-center justify-between min-h-8 px-2.5 gap-2"
+      // py-0.5: rows holding h-8 controls grow to 36px so consecutive bordered
+      // fields keep a visible gap (h-8 exactly filled min-h-8 → 0px stacking);
+      // toggle-only rows stay at the 32px min.
+      className="relative flex items-center justify-between min-h-8 px-2.5 py-0.5 gap-2"
       data-tip={tooltip || undefined}
       data-tip-pos="left"
     >
@@ -245,7 +254,7 @@ function ComboInput({ value, onCommit, options, width = 'w-[80px]', editable = t
         onBlur={editable ? () => { focused.current = false; onCommit(text); setText(value); } : undefined}
         onKeyDown={editable ? (e) => { if (e.key === 'Enter') { onCommit(text); (e.target as HTMLInputElement).blur(); } } : undefined}
         onClick={editable ? undefined : () => setOpen((o) => !o)}
-        className={`w-full h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid ${editable ? '' : 'cursor-pointer'}`}
+        className={`w-full h-8 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid ${editable ? '' : 'cursor-pointer'}`}
       />
       <button
         type="button"
@@ -255,7 +264,7 @@ function ComboInput({ value, onCommit, options, width = 'w-[80px]', editable = t
         onClick={() => setOpen((o) => !o)}
         // Pinned to the right edge (justify-end) and slightly smaller so the longest centered
         // value (e.g. "Middle") clears it — the text stays centered in the full field.
-        className="absolute right-0 top-0 h-7 w-6 flex items-center justify-end pr-1 text-text-tertiary hover:text-text-secondary"
+        className="absolute right-0 top-0 h-8 w-6 flex items-center justify-end pr-1 text-text-tertiary hover:text-text-secondary"
         aria-label={editable ? 'Choose a preset' : 'Choose an option'}
       >
         <ChevronDown size={11} />
@@ -401,7 +410,7 @@ function ClickerSection({
               <select
                 value={unit}
                 onChange={(e) => setUnit(e.target.value as 'ms' | 'cps')}
-                className="w-6 h-7 text-center text-[10px] text-text-secondary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid font-mono cursor-pointer appearance-none shrink-0"
+                className="w-6 h-8 text-center text-[10px] text-text-secondary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid font-mono cursor-pointer appearance-none shrink-0"
                 data-tip={tt('Unit', 'Unidade')}
               >
                 <option value="cps">/s</option>
@@ -458,7 +467,7 @@ function ClickerSection({
               auto-enables useArea + disables Position jitter on a successful draw. */}
           <SettingRow label="Area" tooltip={tt('Clicks a random point in a screen box. Exclusive with Position.', 'Clica em um ponto aleatório em uma caixa na tela. Exclusivo com Position.')}>
             <div
-              className="w-[80px] h-7 flex items-center rounded border overflow-hidden relative group"
+              className="w-[80px] h-8 flex items-center rounded border overflow-hidden relative group"
               style={useArea
                 ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
                 : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
@@ -602,15 +611,30 @@ function HotkeyInput({ value, settingKey, onChange, width = 'w-[110px]' }: {
   // "New key..." placeholder if nothing held yet) with an accent border and a soft pulse
   // so it's obvious the input is waiting. Idle state shows the stored value in accent text
   // on a default border. Single visual language across every key-capture surface.
+  // Arming is deliberate — click or Enter/Space, never bare focus. Arming on
+  // onFocus meant keyboard navigation (Tab restored in Wave 2) would silently
+  // put the low-level hook into capture mode and rebind the next keypress.
+  const armCapture = () => {
+    setIsFocused(true);
+    setLocalValue('');
+    send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } });
+    armCaptureTimer();
+  };
   return (
     <input
       ref={inputRef}
       type="text"
       readOnly
       value={localValue}
-      onFocus={() => { setIsFocused(true); setLocalValue(''); send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } }); armCaptureTimer(); }}
+      onClick={() => { if (!isFocused) armCapture(); }}
+      onKeyDown={(e) => {
+        if (!isFocused && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          armCapture();
+        }
+      }}
       onBlur={() => { setIsFocused(false); setLocalValue(value); send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } }); disarmCaptureTimer(); }}
-      className={`${width} h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
+      className={`${width} h-8 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
         isFocused
           ? 'text-accent-light border-accent-solid animate-pulse'
           : 'text-accent border-border-default'
@@ -769,26 +793,17 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
           bar was ~39 px (default py-1.5 + 1 px border) vs the Toolbar's ~46 px, pulling
           the entire right column up by ~7 px. */}
       <div className="flex items-center gap-1 px-1.5 border-b border-border-subtle shrink-0 h-[47px]">
-        <button
-          onClick={() => setActiveTab('profile')}
-          className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-            activeTab === 'profile'
-              ? 'bg-bg-elevated text-text-primary'
-              : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-card'
-          }`}
-        >
-          Profile
-        </button>
-        <button
-          onClick={() => setActiveTab('global')}
-          className={`flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-            activeTab === 'global'
-              ? 'bg-bg-elevated text-text-primary'
-              : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-card'
-          }`}
-        >
-          Global
-        </button>
+        <SegmentedControl
+          ariaLabel="Settings scope"
+          className="flex-1"
+          grow
+          value={activeTab}
+          onChange={setActiveTab}
+          options={[
+            { value: 'profile', label: 'Profile' },
+            { value: 'global', label: 'Global' },
+          ]}
+        />
         {onToggleCollapse && (
           <button
             onClick={onToggleCollapse}
@@ -1064,7 +1079,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 <select
                   value={language}
                   onChange={(e) => setLanguage(e.target.value as 'en' | 'pt-BR')}
-                  className="h-7 px-2 text-ui bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid cursor-pointer text-text-primary"
+                  className="h-8 px-2 text-ui bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid cursor-pointer text-text-primary"
                 >
                   <option value="en">English</option>
                   <option value="pt-BR">Português (BR)</option>

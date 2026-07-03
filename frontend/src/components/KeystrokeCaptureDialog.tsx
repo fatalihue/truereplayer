@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Keyboard, AlertCircle } from 'lucide-react';
 import { NumberInput } from './common/NumberInput';
+import { DialogShell } from './common/DialogShell';
+import { Button } from './common/Button';
 import { useBridge } from '../bridge/BridgeContext';
 import { useTt } from '../state/LanguageContext';
 
@@ -137,16 +139,13 @@ export function KeystrokeCaptureDialog({
     holdMsRef.current = ms;
   }, [initialActionType, initialKey, initialRepeat, initialRepeatDelayMs, initialHoldDurationMs]);
 
-  const containerRef = useRef<HTMLDivElement>(null);
   // Stable refcount slot — see InputHookManager.RegisterCapture. Per-mount ID so
   // enable/disable target the same slot, and a sibling consumer (Settings hotkey
   // field, Pause dialog) can't accidentally turn the hook off via shared state.
   const ownerIdRef = useRef(`keystroke-capture-${crypto.randomUUID()}`);
   const { send, subscribe } = useBridge();
 
-  useEffect(() => {
-    containerRef.current?.focus();
-  }, []);
+  // (Esc focus handling moved into DialogShell — it focuses the card on mount.)
 
   // Capture mode wiring. Mount → enable backend low-level capture; subscribe to
   // composed combos. Numeric inputs (Times / Gap / Hold duration) suspend capture
@@ -235,43 +234,43 @@ export function KeystrokeCaptureDialog({
     : 'Send Keystroke';
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
-    >
-      <div
-        ref={containerRef}
-        tabIndex={-1}
-        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[440px] max-w-[90vw] flex flex-col outline-none"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          // Enter confirms ONLY when a numeric input is focused — in that state the
-          // backend capture is paused (handleFocusIn at line 162) so the Enter press
-          // doesn't double as a captured combo. Outside of input focus, Enter is
-          // captured as the "Enter" hotkey by the backend hook and arrives via
-          // 'hotkey:captured', so we deliberately do NOT confirm on it here. Esc
-          // always closes — outside the capture pad, Esc isn't a valid hotkey.
-          if (e.key === 'Escape') {
+    <DialogShell
+      icon={<Keyboard size={14} className="text-accent-light" />}
+      title={title}
+      onClose={onClose}
+      // Capture dialog: a stray click outside must not discard a captured combo
+      // (or the Times/Gap/Hold tuning) — dismissal is Esc or Cancel only.
+      closeOnBackdrop={false}
+      // Hint qualifies Enter — outside of input focus the backend hook captures
+      // Enter as the bound key, so the user gets no confirm-via-Enter from the
+      // capture pad. The numeric fields (Times / Gap / Hold duration) pause
+      // capture on focus, which is when Enter actually confirms.
+      footerHint="Enter (in number fields) to confirm · Esc to cancel"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={handleConfirm} disabled={captured === null}>
+            {isEditing ? 'Save' : 'Add'}
+          </Button>
+        </>
+      }
+      onCardKeyDown={(e) => {
+        // Enter confirms ONLY when a numeric input is focused — in that state the
+        // backend capture is paused (handleFocusIn in the capture effect) so the
+        // Enter press doesn't double as a captured combo. Outside of input focus,
+        // Enter is captured as the "Enter" hotkey by the backend hook and arrives
+        // via 'hotkey:captured', so we deliberately do NOT confirm on it here.
+        // Esc is owned by DialogShell.
+        if (e.key === 'Enter') {
+          const focusedTag = (document.activeElement as HTMLElement | null)?.tagName;
+          if (focusedTag === 'INPUT' && captured !== null) {
             e.preventDefault();
             e.stopPropagation();
-            onClose();
+            handleConfirm();
           }
-          if (e.key === 'Enter') {
-            const focusedTag = (document.activeElement as HTMLElement | null)?.tagName;
-            if (focusedTag === 'INPUT' && captured !== null) {
-              e.preventDefault();
-              e.stopPropagation();
-              handleConfirm();
-            }
-          }
-        }}
-      >
-        {/* Header */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
-          <Keyboard size={14} className="text-accent-light" />
-          <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
-        </div>
-
+        }
+      }}
+    >
         <div className="px-5 py-5 flex flex-col gap-4">
           {/* Capture pad — universal for both modes. Single press detects whatever
               modifiers the user is holding; Hold mode silently uses only the last
@@ -452,33 +451,6 @@ export function KeystrokeCaptureDialog({
             </div>
           )}
         </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border-subtle">
-          {/* Hint qualifies Enter — outside of input focus the backend hook captures
-              Enter as the bound key, so the user gets no confirm-via-Enter from the
-              capture pad. The numeric fields below (Times / Gap / Hold duration) pause
-              capture on focus, which is when Enter actually confirms. */}
-          <span className="text-[11px] text-text-tertiary">Enter (in number fields) to confirm · Esc to cancel</span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-1.5 text-xs font-medium text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle rounded transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirm}
-              disabled={captured === null}
-              className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isEditing ? 'Save' : 'Add'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </DialogShell>
   );
 }

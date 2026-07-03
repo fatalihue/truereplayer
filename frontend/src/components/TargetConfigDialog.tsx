@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { X, ChevronDown } from 'lucide-react';
+import { X, ChevronDown, Crosshair } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { useTt } from '../state/LanguageContext';
 import { Toggle } from './common/Toggle';
+import { DialogShell } from './common/DialogShell';
+import { Button } from './common/Button';
 
 type Scope = 'profile' | 'folder';
 
@@ -216,26 +218,28 @@ export function TargetConfigDialog({
     });
   }, [subscribe]);
 
-  // Esc priority (most specific → least): close process picker → cancel detection → close
-  // dialog. The transient overlay absorbs Esc first so the user can dismiss it without
-  // losing the dialog work; the dialog itself only closes when there's nothing to dismiss.
+  // Esc priority (most specific → least): close process picker → cancel detection →
+  // close dialog. The transient overlays absorb Esc at window-CAPTURE level — before
+  // React's root listeners — so DialogShell (which owns dialog-close Esc on the card)
+  // can't tear the whole dialog down while there's something more specific to dismiss.
+  // When neither overlay is active the handler leaves the event alone and it falls
+  // through to the shell's card keydown, which closes with the shared exit motion.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      e.stopPropagation();
       if (showProcessPicker) {
+        e.stopPropagation();
         setShowProcessPicker(false);
       } else if (isDetecting) {
+        e.stopPropagation();
         // Backend treats a second detectWindow message as toggle-off.
         send({ type: 'profile:detectWindow', payload: {} });
         setIsDetecting(false);
-      } else {
-        onCancel();
       }
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [isDetecting, showProcessPicker, send, onCancel]);
+  }, [isDetecting, showProcessPicker, send]);
 
   const handleDetect = () => {
     markEdited();
@@ -323,9 +327,45 @@ export function TargetConfigDialog({
     : <>Configure target for all profiles in <span className="text-text-primary font-medium">'{targetLabel}'</span>. Profiles with their own target override this.</>;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="relative w-[380px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
-        <h3 className="text-sm font-semibold text-text-primary mb-3">{header}</h3>
+    <DialogShell
+      icon={<Crosshair size={14} className="shrink-0 text-text-tertiary" />}
+      title={header}
+      widthClass="w-[380px]"
+      onClose={handleCancel}
+      // Multi-field form — typed process name / window title, live detection + picker
+      // state and five flags. A stray click on the scrim must not discard all that, so
+      // closeOnBackdrop is FALSE; dismissal is Esc or Cancel only.
+      closeOnBackdrop={false}
+      // No onCardKeyDown: this dialog never had Enter-to-submit (Enter is ambiguous
+      // across its many fields), and Esc is the shell's — plus the capture-phase
+      // overlay handler above for the picker/detection states.
+      //
+      // The footerHint slot doubles as the LEFT-aligned Remove affordance — the shell
+      // right-aligns everything in `footer`, and the hint slot is its only left-anchored
+      // footer region. Remove is a destructive-with-undo action (the parent shows a 10 s
+      // undo toast), hence the destructive variant.
+      footerHint={hasOwnTarget && onRemove ? (
+        <Button variant="destructive" onClick={handleRemove}>Remove</Button>
+      ) : undefined}
+      footer={
+        <>
+          <Button variant="secondary" onClick={handleCancel}>Cancel</Button>
+          {/* Gated while the coordinate-conversion prompt is pending — the old card's
+              toast physically covered the buttons to force a Convert-or-Skip choice;
+              in the shell the footer is a sibling the toast can't cover, so the gate
+              is explicit. Saving a flipped Relative-Coordinates flag without converting
+              silently reinterprets every stored X/Y in the wrong coordinate space. */}
+          <span data-tip={convertHint ? tt('Resolve the coordinate-conversion prompt first (Convert or Skip).', 'Resolva primeiro o aviso de conversão de coordenadas (Converter ou Pular).') : undefined}>
+            <Button variant="primary" onClick={() => handleSubmit()} disabled={submitDisabled || convertHint !== null}>
+              Set Target
+            </Button>
+          </span>
+        </>
+      }
+    >
+      {/* `relative` replaces the old card's positioning context — the convert-hint toast
+          below pins itself to this wrapper's bottom edge (just above the shell footer). */}
+      <div className="relative px-4 py-4">
         <p className="text-xs text-text-secondary mb-4">{description}</p>
 
         <div className="space-y-3">
@@ -563,11 +603,11 @@ export function TargetConfigDialog({
               this nudge, the toggle silently reinterprets every stored X/Y, breaking clicks,
               WaitImage regions, and WaitPixel coords against the wrong reference frame. */}
           {convertHint && (
-            // Floating toast OVERLAID on the dialog box (absolute, pinned to the bottom →
-            // does NOT grow the dialog; the inline hint used to push every row down and
-            // resize the box). Sits over the action-button area; opaque card + shadow so it
-            // reads as a layer on top. No timeout — stays until the user converts or skips
-            // (Skip clears it and reveals the buttons), same actions as the old hint.
+            // Floating toast OVERLAID on the dialog body (absolute, pinned to the bottom
+            // of the `relative` body wrapper → just above the shell footer; does NOT grow
+            // the dialog — the inline hint used to push every row down and resize the
+            // box). Opaque card + shadow so it reads as a layer on top. No timeout —
+            // stays until the user converts or skips, same actions as the old hint.
             <div className="absolute bottom-3 left-4 right-4 flex items-start gap-2 px-3 py-2 text-[11px] text-amber-300 bg-bg-card border border-amber-700/60 rounded-lg shadow-xl z-20">
               <span className="flex-1 leading-snug">
                 {convertibleActionCount} action{convertibleActionCount === 1 ? '' : 's'} captured in {convertHint === 'toRelative' ? 'absolute' : 'relative'} coords.{' '}
@@ -644,28 +684,7 @@ export function TargetConfigDialog({
             right-click menu → More ("Convert coords → Relative/Absolute") — it's rarely
             used, so it lives in a less prominent place now. The relative-toggle migration
             toast above still offers a one-click convert at the moment it's most relevant. */}
-
-        <div className="flex items-center mt-4">
-          {hasOwnTarget && onRemove && (
-            <button
-              onClick={handleRemove}
-              className="px-4 py-1.5 text-xs text-recording hover:text-recording/80 bg-bg-elevated rounded transition-colors"
-            >Remove</button>
-          )}
-          <div className="flex-1" />
-          <div className="flex gap-2">
-            <button
-              onClick={handleCancel}
-              className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
-            >Cancel</button>
-            <button
-              onClick={() => handleSubmit()}
-              disabled={submitDisabled}
-              className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
-            >Set Target</button>
-          </div>
-        </div>
       </div>
-    </div>
+    </DialogShell>
   );
 }

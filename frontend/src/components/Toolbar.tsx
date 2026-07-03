@@ -657,7 +657,7 @@ export function Toolbar(_props: ToolbarProps) {
             </button>
             {showWaitMenu && (
               <div ref={waitFlyout.ref} className={`absolute w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1 ${waitFlyout.flipX ? 'right-0' : 'left-0'} ${waitFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
-                <div className="px-3 py-1 text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
+                <div className="px-3 py-1 label-micro text-text-tertiary">
                   Insert Wait
                 </div>
                 <button
@@ -704,7 +704,7 @@ export function Toolbar(_props: ToolbarProps) {
             </button>
             {showConditionalMenu && (
               <div ref={conditionalFlyout.ref} className={`absolute w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1 ${conditionalFlyout.flipX ? 'right-0' : 'left-0'} ${conditionalFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
-                <div className="px-3 py-1 text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
+                <div className="px-3 py-1 label-micro text-text-tertiary">
                   Insert Conditional
                 </div>
                 {/* Active items — reuse the WaitImage / WaitPixelColor capture flows. */}
@@ -793,7 +793,7 @@ export function Toolbar(_props: ToolbarProps) {
                     same reason — long labels like "Navigate to URL" got close to the
                     edge at w-44, and the size discrepancy was visible when two menus
                     happened to open near each other during a UX sweep. */}
-                <div className="px-3 py-1 text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
+                <div className="px-3 py-1 label-micro text-text-tertiary">
                   Insert Browser Action
                 </div>
                 {([

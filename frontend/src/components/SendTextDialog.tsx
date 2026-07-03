@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Smile, Clock, BookmarkPlus, Trash2, ChevronRight, Wand2, Pencil, Search, Check, X } from 'lucide-react';
+import { Smile, Clock, BookmarkPlus, Trash2, ChevronRight, Wand2, Pencil, Search, Check, X, Type } from 'lucide-react';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import type { EmojiClickData } from 'emoji-picker-react';
+import { DialogShell } from './common/DialogShell';
+import { Button } from './common/Button';
 import { useTt } from '../state/LanguageContext';
 import { LexicalTokenEditor, type LexicalEditorHandle } from './lexical/LexicalTokenEditor';
 import { ClipboardModifierBody } from './lexical/ClipboardModifierBody';
@@ -357,27 +359,27 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
     setActivePanel(panel);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
+  // One Esc closes the dialog, but in-progress snippet save/delete/edit still
+  // get their own Esc step so a stray press can't discard typed snippet data
+  // AND the dialog. This must hold no matter WHERE focus sits — including the
+  // shell's header/footer buttons, which are outside the body wrapper — so the
+  // layer is a document-level CAPTURE listener (same pattern as
+  // ProfileInfoDialog's emoji-picker Esc), armed only while a snippet
+  // sub-state is open. Capture phase beats DialogShell's card handler.
+  const snippetLayerActive = savingSnippet || deletingSnippetId !== null || editingSnippetId !== null;
+  useEffect(() => {
+    if (!snippetLayerActive) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
       e.preventDefault();
-      // One Esc closes the dialog (used to take two — the first only collapsed
-      // the side panel). In-progress snippet edits still get their own Esc step
-      // so a stray press can't discard typed snippet data AND the dialog.
-      if (savingSnippet) {
-        setSavingSnippet(false);
-      } else if (deletingSnippetId !== null) {
-        setDeletingSnippetId(null);
-      } else if (editingSnippetId !== null) {
-        setEditingSnippetId(null);
-      } else {
-        onClose();
-      }
-    }
-    if (e.key === 'Enter' && e.ctrlKey) {
-      e.preventDefault();
-      handleConfirm();
-    }
-  };
+      e.stopPropagation();
+      if (savingSnippet) setSavingSnippet(false);
+      else if (deletingSnippetId !== null) setDeletingSnippetId(null);
+      else if (editingSnippetId !== null) setEditingSnippetId(null);
+    };
+    document.addEventListener('keydown', onEsc, true);
+    return () => document.removeEventListener('keydown', onEsc, true);
+  }, [snippetLayerActive, savingSnippet, deletingSnippetId, editingSnippetId]);
 
   const tabBtnClass = (active: boolean) =>
     `flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded transition-colors ${
@@ -387,34 +389,35 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
     }`;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onKeyDown={(e) => e.stopPropagation()}
+    <DialogShell
+      icon={<Type size={14} style={{ color: 'var(--color-action-sendtext-fg)' }} />}
+      title={mode === 'add' ? 'Insert Text' : 'Edit Text'}
+      widthClass="w-[950px] h-[90vh] max-h-[920px]"
+      onClose={onClose}
+      // Text-entry dialog: a stray scrim click must not discard typed text —
+      // dismissal is Esc or Cancel only.
+      closeOnBackdrop={false}
+      footerHint={<>{text.length} chars · Ctrl+Enter to confirm · Esc to cancel</>}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={handleConfirm} disabled={!text.trim()}>
+            {mode === 'add' ? 'Add' : 'Save'}
+          </Button>
+        </>
+      }
+      onCardKeyDown={(e) => {
+        // Ctrl+Enter confirms from anywhere in the dialog (incl. the editor).
+        // Esc is owned by DialogShell; the snippet-form Esc layering runs as a
+        // document-capture listener (see snippetLayerActive effect above), so
+        // it wins regardless of focus position.
+        if (e.key === 'Enter' && e.ctrlKey) {
+          e.preventDefault();
+          handleConfirm();
+        }
+      }}
     >
-      <div
-        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[950px] max-w-[95vw] h-[90vh] max-h-[920px] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
-      >
-        {/* Header with tool tabs */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle shrink-0">
-          <h3 className="text-sm font-semibold text-text-primary">
-            {mode === 'add' ? 'Insert Text' : 'Edit Text'}
-          </h3>
-          <div className="flex items-center gap-1">
-            <button type="button" onClick={() => selectPanel('emoji')} className={tabBtnClass(activePanel === 'emoji')} data-tip={tt('Emoji', 'Emoji')}>
-              <Smile size={14} /> Emoji
-            </button>
-            <button type="button" onClick={() => selectPanel('variables')} className={tabBtnClass(activePanel === 'variables')} data-tip={tt('Variables', 'Variáveis')}>
-              <Clock size={14} /> Variables
-            </button>
-            <button type="button" onClick={() => selectPanel('snippets')} className={tabBtnClass(activePanel === 'snippets')} data-tip={tt('Snippets', 'Trechos')}>
-              <BookmarkPlus size={14} /> Snippets
-            </button>
-          </div>
-        </div>
-
-        {/* Body: textarea + optional side panel */}
+        {/* Body: textarea + side panel */}
         <div className="flex flex-1 min-h-0">
           {/* Left: Lexical chip editor */}
           <div className="flex-1 min-w-0 p-4 flex flex-col">
@@ -428,9 +431,22 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
             </div>
           </div>
 
-          {/* Right: side panel — always visible, tool selected via the header tabs */}
+          {/* Right: side panel — always visible, tool selected via the tabs below */}
           {(
             <div className="w-[300px] shrink-0 border-l border-border-subtle flex flex-col">
+              {/* Tool tabs — lived in the hand-rolled dialog header; DialogShell
+                  owns the header now, so they sit atop the panel they switch. */}
+              <div className="flex items-center justify-center gap-1 px-2 py-2 border-b border-border-subtle shrink-0">
+                <button type="button" onClick={() => selectPanel('emoji')} className={tabBtnClass(activePanel === 'emoji')} data-tip={tt('Emoji', 'Emoji')}>
+                  <Smile size={14} /> Emoji
+                </button>
+                <button type="button" onClick={() => selectPanel('variables')} className={tabBtnClass(activePanel === 'variables')} data-tip={tt('Variables', 'Variáveis')}>
+                  <Clock size={14} /> Variables
+                </button>
+                <button type="button" onClick={() => selectPanel('snippets')} className={tabBtnClass(activePanel === 'snippets')} data-tip={tt('Snippets', 'Trechos')}>
+                  <BookmarkPlus size={14} /> Snippets
+                </button>
+              </div>
               {/* ── Emoji Panel ── */}
               {activePanel === 'emoji' && (
                 <div className="flex-1 min-h-0 overflow-hidden">
@@ -685,30 +701,6 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
             </div>
           )}
         </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-3 border-t border-border-subtle shrink-0">
-          <div className="flex items-center gap-3">
-            <span className="text-[11px] text-text-tertiary">{text.length} chars</span>
-            <span className="text-[11px] text-text-tertiary">Ctrl+Enter to confirm · Esc to cancel</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="px-4 py-1.5 text-xs font-medium text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle rounded transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleConfirm}
-              disabled={!text.trim()}
-              className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {mode === 'add' ? 'Add' : 'Save'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </DialogShell>
   );
 }

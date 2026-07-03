@@ -15,7 +15,9 @@ export interface NumberInputProps {
   step?: number;                      // increment per +/− click (default 1)
   suffix?: string;                    // unit shown after the input (e.g. "ms", "s", "%")
   inputWidth?: string;                // tailwind width class for the input only (defaults w-14)
-  inputHeight?: string;               // tailwind height for input + buttons (defaults h-6)
+  inputHeight?: string;               // tailwind height for input + buttons (defaults h-8 — the
+                                      // app-wide 32px control standard; pass smaller only for
+                                      // genuinely compact surfaces like inline popovers)
   className?: string;                 // outer wrapper class
   disabled?: boolean;
   placeholder?: string;
@@ -47,7 +49,7 @@ export function NumberInput({
   step = 1,
   suffix,
   inputWidth = 'w-14',
-  inputHeight = 'h-6',
+  inputHeight = 'h-8',
   className = '',
   disabled = false,
   placeholder,

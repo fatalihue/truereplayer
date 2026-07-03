@@ -1490,7 +1490,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   // ── Section Header Renderer ──
   const renderSectionLabel = (label: string) => (
     <div className="px-2.5 pt-2 pb-0.5">
-      <span className="text-[10px] font-semibold text-text-disabled tracking-wider uppercase">{label}</span>
+      {/* tertiary, not disabled — category labels are real information; the
+          disabled token computes ~1.4:1 on the default theme. */}
+      <span className="label-micro text-text-tertiary">{label}</span>
     </div>
   );
 
@@ -1592,7 +1594,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             feel crowded for not much semantic gain. The icon swaps + tooltips
             from the same pass DID land. */}
         <div className="flex items-center justify-between px-3 pt-2 pb-1">
-          <span className="text-xs font-semibold text-text-tertiary tracking-wider">PROFILES</span>
+          <span className="label-micro text-text-tertiary">PROFILES</span>
           <div className="flex items-center gap-0.5">
             <button
               onClick={onToggleCollapse}
@@ -2547,7 +2549,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               {/* Pinned (not in folders) */}
               {pinned.length > 0 && (
                 <div className="mb-1">
-                  <div className="px-2 py-1 text-[10px] font-semibold text-text-disabled uppercase tracking-wide">Pinned</div>
+                  <div className="px-2 py-1 label-micro text-text-tertiary">Pinned</div>
                   {pinned.map(name => (
                     <button
                       key={name}
@@ -2602,7 +2604,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               {/* Ungrouped */}
               {ungrouped.length > 0 && (
                 <div className="mb-1">
-                  {folders.length > 0 && <div className="px-2 py-1 text-[10px] font-semibold text-text-disabled uppercase tracking-wide">Ungrouped</div>}
+                  {folders.length > 0 && <div className="px-2 py-1 label-micro text-text-tertiary">Ungrouped</div>}
                   {ungrouped.map(p => (
                     <button
                       key={p.name}

@@ -17,6 +17,10 @@ import { Slider } from './sheet/Slider';
 interface SheetPanelProps {
   actionIndex: number | null;
   onClose: () => void;
+  /** Exit choreography (owned by App): while true the panel plays its slide-out,
+   *  then calls onExited so the parent can finally null the index. */
+  leaving?: boolean;
+  onExited?: () => void;
 }
 
 // Action types organised by FAMILY — the picker only offers conversions that stay within
@@ -109,10 +113,18 @@ const TIER_META: Record<'S' | 'A' | 'B' | 'C', { color: string; label: string; I
 };
 
 
-export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
+export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: SheetPanelProps) {
   const { actions } = useAppState();
   const { send, subscribe } = useBridge();
   const tt = useTt();
+
+  // Exit fallback — mirrors DialogShell: if the slide-out's animationend never
+  // fires (occluded window pauses CSS animations), unstick the unmount.
+  useEffect(() => {
+    if (!leaving) return;
+    const t = setTimeout(() => onExited?.(), 500);
+    return () => clearTimeout(t);
+  }, [leaving, onExited]);
 
   const action = actionIndex != null ? actions[actionIndex] : null;
 
@@ -1234,13 +1246,26 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
       {/* Backdrop — no click-to-close, user must Save/Cancel/arrow */}
       <div
         className="fixed inset-0 z-[60]"
-        style={{ background: 'rgba(0,0,0,0.3)' }}
+        style={{
+          background: 'rgba(0,0,0,0.3)',
+          animation: leaving ? 'fade-in var(--motion-base) var(--ease-exit) reverse forwards' : undefined,
+        }}
       />
 
-      {/* Panel */}
+      {/* Panel — enters with slide-in-right, exits with its mirror (leaving is
+          driven by App; onExited hands control back for the actual unmount). */}
       <div
         className="fixed right-0 top-0 bottom-0 w-[340px] z-[70] bg-bg-surface border-l border-border-default flex flex-col"
-        style={{ animation: 'slide-in-right 0.2s ease-out', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}
+        style={{
+          animation: leaving
+            ? 'slide-out-right var(--motion-base) var(--ease-exit) forwards'
+            // --motion-slow keeps the "exit is faster than entrance" relationship.
+            : 'slide-in-right var(--motion-slow) var(--ease-enter)',
+          boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+        }}
+        onAnimationEnd={(e) => {
+          if (leaving && e.target === e.currentTarget) onExited?.();
+        }}
       >
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-4 border-b border-border-subtle shrink-0">
@@ -1964,7 +1989,18 @@ export function SheetPanel({ actionIndex, onClose }: SheetPanelProps) {
                 readOnly
                 value={pauseHotkeyFocused ? '' : (key || '')}
                 placeholder="Click to capture…"
-                onFocus={() => {
+                // Arm on click or Enter/Space, never bare focus — keyboard
+                // navigation must not flip the low-level hook into capture mode
+                // (a Tab-through would swallow the next keypress as the hotkey).
+                onClick={() => {
+                  if (pauseHotkeyFocused) return;
+                  setPauseHotkeyFocused(true);
+                  armKeyCaptureTimer();
+                  send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: captureOwnerIdRef.current } });
+                }}
+                onKeyDown={(e) => {
+                  if (pauseHotkeyFocused || (e.key !== 'Enter' && e.key !== ' ')) return;
+                  e.preventDefault();
                   setPauseHotkeyFocused(true);
                   armKeyCaptureTimer();
                   send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: captureOwnerIdRef.current } });

@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Info, Smile, Hash, X } from 'lucide-react';
 import EmojiPicker, { Theme as EmojiTheme, EmojiStyle } from 'emoji-picker-react';
+import { DialogShell } from './common/DialogShell';
+import { Button } from './common/Button';
 import { useBridge } from '../bridge/BridgeContext';
 import { useTt } from '../state/LanguageContext';
 import type { ProfileMetadataPayload, TagListEntry } from '../bridge/messageTypes';
@@ -108,13 +110,14 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
     } else if (e.key === 'Backspace' && tagDraft === '' && tags.length > 0) {
       // Backspace on empty input removes the last tag — matches GitHub / Twitter UX.
       removeTag(tags[tags.length - 1]);
-    } else if (e.key === 'Escape') {
+    } else if (e.key === 'Escape' && showTagSuggestions) {
+      // Escape with the suggestion dropdown open closes just the dropdown —
+      // stopPropagation keeps DialogShell's Esc handler from also closing the
+      // dialog. With the dropdown closed we don't handle Esc here at all, so
+      // it bubbles to the shell and dismisses the dialog normally.
       e.preventDefault();
-      if (showTagSuggestions) {
-        setShowTagSuggestions(false);
-      } else {
-        onClose();
-      }
+      e.stopPropagation();
+      setShowTagSuggestions(false);
     }
   };
 
@@ -143,8 +146,10 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
   };
 
   // The emoji picker (emoji-picker-react) swallows Escape internally to clear its own search box,
-  // so the key never reaches handleKeyDown below. Catch it at the document level in CAPTURE phase
-  // while the picker is open and close it ourselves before the picker's handler runs.
+  // so the key never reaches the card's keydown handlers. Catch it at the document level in
+  // CAPTURE phase while the picker is open and close it ourselves before the picker's handler
+  // runs. The stopPropagation also keeps DialogShell's Esc handler from closing the whole
+  // dialog — while the picker is open, Esc means "close the picker", not "close the dialog".
   useEffect(() => {
     if (!showEmojiPicker) return;
     const onEsc = (e: KeyboardEvent) => {
@@ -158,38 +163,30 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
     return () => document.removeEventListener('keydown', onEsc, true);
   }, [showEmojiPicker]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key !== 'Escape') return;
-    // Escape closes the emoji picker first when it's open — previously this was a dead no-op
-    // (neither the dialog nor the picker closed). Only close the dialog when no popover is open.
-    if (showEmojiPicker) {
-      e.preventDefault();
-      setShowEmojiPicker(false);
-      return;
-    }
-    if (!showTagSuggestions) {
-      e.preventDefault();
-      onClose();
-    }
-  };
+  // (Esc is owned by DialogShell. The two popovers keep it from closing the
+  //  dialog by stopping propagation before it reaches the card: the emoji
+  //  picker via the document-level capture listener above, the tag-suggestion
+  //  dropdown inside handleTagKeyDown.)
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onKeyDown={(e) => e.stopPropagation()}
-      onClick={onClose}
+    <DialogShell
+      icon={<Info size={14} style={{ color: 'var(--color-accent)' }} />}
+      title={`Profile Info — ${profileName}`}
+      onClose={onClose}
+      // closeOnBackdrop=false: multi-field metadata form (description text,
+      // tags, icon emoji) — a stray click on the scrim must not discard
+      // unsaved edits. Dismissal is Esc or Cancel; Save commits.
+      closeOnBackdrop={false}
+      // max-h keeps the card inside the viewport so the body below can scroll
+      // (the emoji picker alone is 320px tall).
+      widthClass="w-[560px] max-h-[90vh]"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={handleSave} disabled={!loaded}>Save</Button>
+        </>
+      }
     >
-      <div
-        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[560px] max-w-[95vw] max-h-[90vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
-      >
-        {/* Header */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
-          <Info size={14} className="text-[#60cdff]" />
-          <h3 className="text-sm font-semibold text-text-primary">Profile Info — {profileName}</h3>
-        </div>
-
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {!loaded ? (
@@ -354,25 +351,7 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
             </>
           )}
         </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border-subtle">
-          <button
-            onClick={onClose}
-            className="px-4 py-1.5 text-xs font-medium text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle rounded transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={!loaded}
-            className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50"
-          >
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
+    </DialogShell>
   );
 }
 

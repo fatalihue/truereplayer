@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { Hourglass } from 'lucide-react';
 import { NumberInput } from './common/NumberInput';
+import { DialogShell } from './common/DialogShell';
+import { Button } from './common/Button';
 import { useBridge } from '../bridge/BridgeContext';
 import { useTt } from '../state/LanguageContext';
 
@@ -69,7 +71,6 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
   // from the row on edit. 0 = no timeout (resume by hotkey only).
   const [timeoutMs, setTimeoutMs] = useState<number>(initialTimeoutMs ?? 1000);
 
-  const containerRef = useRef<HTMLDivElement>(null);
   // Stable refcount slot ID — generated once per mount so enable/disable hit the
   // same backend HashSet entry (see InputHookManager.RegisterCapture). Keeps a
   // sibling capture consumer from stomping this dialog's slot on cleanup.
@@ -85,10 +86,7 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
     setTimeoutMs(initialTimeoutMs ?? 1000);
   }, [initialKey, initialTimeoutMs]);
 
-  // Focus the container so its keydown (Esc to close) works without a click first.
-  useEffect(() => {
-    containerRef.current?.focus();
-  }, []);
+  // (Esc focus handling moved into DialogShell — it focuses the card on mount.)
 
   // Capture wiring — identical pattern to KeystrokeCaptureDialog. Hook on for the
   // dialog's lifetime; suspended while a numeric input is focused so typing into
@@ -139,41 +137,38 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
   const timeoutLabel = `${timeoutMs} ms`;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
-    >
-      <div
-        ref={containerRef}
-        tabIndex={-1}
-        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[440px] max-w-[90vw] flex flex-col outline-none"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          // Esc always closes. Enter confirms ONLY while a numeric input is focused
-          // (in that state the backend capture is suspended, so Enter isn't doubling
-          // as a captured key). Outside input focus the backend hook grabs Enter as
-          // the bound key and forwards it via hotkey:captured — so no confirm here.
-          if (e.key === 'Escape') {
+    <DialogShell
+      icon={<Hourglass size={14} style={{ color: 'var(--color-action-pause-fg)' }} />}
+      title={isEditing ? 'Edit Pause' : 'Insert Pause'}
+      onClose={onClose}
+      // Capture dialog: a stray click outside must not discard a configured
+      // hotkey/timeout — dismissal is Esc or Cancel only.
+      closeOnBackdrop={false}
+      footerHint="Enter (in timeout) to confirm · Esc to cancel"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={handleConfirm} disabled={!canConfirm}>
+            {isEditing ? 'Save' : 'Add'}
+          </Button>
+        </>
+      }
+      onCardKeyDown={(e) => {
+        // Enter confirms ONLY while a numeric input is focused (in that state the
+        // backend capture is suspended, so Enter isn't doubling as a captured
+        // key). Outside input focus the backend hook grabs Enter as the bound key
+        // and forwards it via hotkey:captured — so no confirm here. Esc is owned
+        // by DialogShell.
+        if (e.key === 'Enter') {
+          const focusedTag = (document.activeElement as HTMLElement | null)?.tagName;
+          if (focusedTag === 'INPUT' && canConfirm) {
             e.preventDefault();
             e.stopPropagation();
-            onClose();
+            handleConfirm();
           }
-          if (e.key === 'Enter') {
-            const focusedTag = (document.activeElement as HTMLElement | null)?.tagName;
-            if (focusedTag === 'INPUT' && canConfirm) {
-              e.preventDefault();
-              e.stopPropagation();
-              handleConfirm();
-            }
-          }
-        }}
-      >
-        {/* Header */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
-          <Hourglass size={14} style={{ color: 'var(--color-action-pause-fg)' }} />
-          <h3 className="text-sm font-semibold text-text-primary">{isEditing ? 'Edit Pause' : 'Insert Pause'}</h3>
-        </div>
-
+        }
+      }}
+    >
         <div className="px-5 py-5 flex flex-col gap-4">
           {/* Capture pad — press any key/combo to set the resume hotkey directly.
               Optional: leaving it empty makes a timeout-only Pause. */}
@@ -233,7 +228,7 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
                 min={0}
                 step={stepFor(timeoutMs)}
                 inputWidth="w-24"
-                inputHeight="h-9"
+                inputHeight="h-8"
                 suffix="ms"
                 ariaLabel="Pause timeout in milliseconds"
               />
@@ -273,29 +268,6 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
                   : 'Set a hotkey or timeout — without either, the Pause is skipped at replay.'}
           </p>
         </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border-subtle">
-          <span className="text-[11px] text-text-tertiary">Enter (in timeout) to confirm · Esc to cancel</span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-1.5 text-xs font-medium text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle rounded transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirm}
-              disabled={!canConfirm}
-              className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isEditing ? 'Save' : 'Add'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </DialogShell>
   );
 }

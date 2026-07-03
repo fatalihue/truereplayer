@@ -5,7 +5,7 @@ import type { CollisionDetection, DragStartEvent, DragEndEvent } from '@dnd-kit/
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { snapCenterToCursor } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
-import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Variable, AppWindow, Clipboard } from 'lucide-react';
+import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Variable, AppWindow, Clipboard, Play, Pause, EyeOff } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -1580,9 +1580,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     isSkipped ? 'opacity-40' : ''
                   } ${
                     isPausedHere
-                      ? 'animate-pulse'
+                      ? 'animate-pulse shadow-[inset_3px_0_0_var(--color-action-pause-fg)]'
                       : isHighlighted
-                        ? 'bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] hover:bg-bg-elevated'
+                        // Executing row = a PROGRAM COUNTER, not a selection lookalike:
+                        // replay-green wash + solid inset bar (+ the ▶ glyph in the #
+                        // cell) instead of the old accent tint that sat 4% away from
+                        // the selection tint.
+                        ? 'bg-[color-mix(in_srgb,var(--color-replay)_10%,transparent)] shadow-[inset_3px_0_0_var(--color-replay)] hover:bg-bg-elevated'
                         : isSelected
                           ? 'bg-[color-mix(in_srgb,var(--color-accent)_8%,transparent)] hover:bg-bg-elevated'
                           : isStructural
@@ -1655,9 +1659,17 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     </div>
                   </td>
 
-                  {/* Row number */}
+                  {/* Row number — swaps to the program-counter glyph while the replay
+                      engine is ON this row (▶ running / ❚❚ paused-here), the second
+                      channel that keeps the executing row from reading as a selection. */}
                   <td className="pl-3">
-                    <span className="inline-block text-[11px] font-mono text-text-disabled leading-none translate-y-[-2px]">{action.rowNumber}</span>
+                    {isHighlighted ? (
+                      isPausedHere
+                        ? <Pause size={10} className="inline-block translate-y-[-1px]" style={{ color: 'var(--color-action-pause-fg)' }} fill="currentColor" />
+                        : <Play size={10} className="inline-block translate-y-[-1px]" style={{ color: 'var(--color-replay)' }} fill="currentColor" />
+                    ) : (
+                      <span className="inline-block text-[11px] font-mono text-text-disabled leading-none translate-y-[-2px]">{action.rowNumber}</span>
+                    )}
                   </td>
 
                   {/* Action type pill */}
@@ -1670,7 +1682,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     style={indentPx > 0 ? { paddingLeft: `${4 + indentPx}px` } : undefined}
                   >
                     <span
-                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium"
+                      // Skipped rows get a second channel beyond the opacity dim:
+                      // strike the pill label (the EyeOff badge below is the third) so
+                      // the state survives light themes and grayscale.
+                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${isSkipped ? 'line-through' : ''}`}
                       style={{ background: colors.bg, color: colors.fg }}
                     >
                       <ActionIcon actionType={action.actionType} />
@@ -1706,6 +1721,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           <Focus size={11} className="ml-0.5 opacity-80" />
                         )}
                     </span>
+                    {isSkipped && (
+                      <EyeOff
+                        size={11}
+                        className="inline-block ml-1.5 text-text-tertiary translate-y-[-1px]"
+                        data-tip={tt('Skipped during replay', 'Ignorada durante o replay')}
+                      />
+                    )}
                   </td>
                   )}
 

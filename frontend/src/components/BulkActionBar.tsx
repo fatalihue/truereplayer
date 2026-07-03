@@ -75,8 +75,11 @@ export function BulkActionBar({
 
   const inputWidth = activeInput === 'notes' ? 'w-40' : 'w-24';
 
+  // bulk-bar-enter: small slide-up on appear (the old floating-bar bulk-bar-in
+  // keyframe was orphaned when the bar became docked); gated on the Animations
+  // toggle in index.css like every other entrance.
   return (
-    <div className="flex items-center h-8 px-3 border-t border-accent-solid/30 shrink-0 bg-[color-mix(in_srgb,var(--color-accent)_6%,var(--color-bg-card))] shadow-[0_-4px_12px_rgba(0,0,0,0.18)]">
+    <div className="bulk-bar-enter flex items-center h-8 px-3 border-t border-accent-solid/30 shrink-0 bg-[color-mix(in_srgb,var(--color-accent)_6%,var(--color-bg-card))] shadow-[0_-4px_12px_rgba(0,0,0,0.18)]">
       {/* Left: selection info + clear. shrink-0 + whitespace-nowrap make sure the
           "N selected" text stays on one line even if the right-side button cluster
           grows enough to compress the flex layout — without these, narrow window

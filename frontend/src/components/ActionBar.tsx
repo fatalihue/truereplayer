@@ -1,4 +1,5 @@
 import { Circle, Play, Square, Save, FolderOpen, MousePointerClick, ListOrdered } from 'lucide-react';
+import { SegmentedControl } from './common/SegmentedControl';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -60,44 +61,32 @@ export function ActionBar() {
     <div className="flex items-center justify-between px-4 py-2.5 bg-bg-surface border border-border-subtle rounded-ui">
       {/* Left: Mode toggle + Primary actions */}
       <div className="flex items-center gap-2">
-        {/* Mode segmented control */}
-        <div
-          className="flex items-center bg-bg-input border border-border-default rounded p-0.5 gap-0.5"
-          role="tablist"
-          aria-label="Execution mode"
-        >
-          <button
-            role="tab"
-            aria-selected={!isClicker}
-            onClick={() => setMode(false)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[12px] font-semibold transition-colors ${
-              !isClicker
-                ? 'bg-replay/15 text-replay shadow-[inset_0_0_0_1px_rgba(107,203,119,0.35)]'
-                : 'text-text-tertiary hover:text-text-secondary'
-            }`}
-            data-tip={tt('Run the recorded actions in order', 'Executa as ações gravadas em ordem')}
-          >
-            {/* ListOrdered (not Play) so the mode pill doesn't visually duplicate the Replay
-                action button. Both pills now use a "type" icon (Macro = ordered list, Clicker
-                = cursor click), keeping the segmented control conceptually uniform. */}
-            <ListOrdered size={11} />
-            Macro
-          </button>
-          <button
-            role="tab"
-            aria-selected={isClicker}
-            onClick={() => setMode(true)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[12px] font-semibold transition-colors ${
-              isClicker
-                ? 'bg-[var(--color-clicker-bg)] text-[var(--color-clicker)] shadow-[inset_0_0_0_1px_var(--color-clicker-border)]'
-                : 'text-text-tertiary hover:text-text-secondary'
-            }`}
-            data-tip={tt('Click repeatedly at cursor position. Ignores recorded actions and profile hotkeys.', 'Clica repetidamente na posição do cursor. Ignora ações gravadas e hotkeys de perfil.')}
-          >
-            <MousePointerClick size={11} />
-            Clicker
-          </button>
-        </div>
+        {/* Mode segmented control — shared primitive; the semantic active tints
+            (Macro = replay green, Clicker = clicker purple) ride in via
+            activeClass. The macro ring's old hardcoded rgba is now a token mix.
+            ListOrdered (not Play) so the mode pill doesn't visually duplicate
+            the Replay action button. */}
+        <SegmentedControl
+          ariaLabel="Execution mode"
+          value={isClicker ? 'clicker' : 'macro'}
+          onChange={(v) => setMode(v === 'clicker')}
+          options={[
+            {
+              value: 'macro',
+              label: 'Macro',
+              icon: <ListOrdered size={11} />,
+              tip: tt('Run the recorded actions in order', 'Executa as ações gravadas em ordem'),
+              activeClass: 'bg-replay/15 text-replay shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-replay)_35%,transparent)]',
+            },
+            {
+              value: 'clicker',
+              label: 'Clicker',
+              icon: <MousePointerClick size={11} />,
+              tip: tt('Click repeatedly at cursor position. Ignores recorded actions and profile hotkeys.', 'Clica repetidamente na posição do cursor. Ignora ações gravadas e hotkeys de perfil.'),
+              activeClass: 'bg-[var(--color-clicker-bg)] text-[var(--color-clicker)] shadow-[inset_0_0_0_1px_var(--color-clicker-border)]',
+            },
+          ]}
+        />
 
         {/* Button picker used to live here — moved to the ClickerSection in the side
             panel so the panel is the single source of truth for every Clicker setting. */}

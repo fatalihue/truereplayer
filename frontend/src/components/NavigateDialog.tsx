@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { Globe } from 'lucide-react';
 import { Checkbox } from './Checkbox';
+import { DialogShell } from './common/DialogShell';
+import { Button } from './common/Button';
 import { useTt } from '../state/LanguageContext';
 
 interface NavigateDialogProps {
@@ -14,6 +16,9 @@ export function NavigateDialog({ onConfirm, onClose }: NavigateDialogProps) {
   const [newTab, setNewTab] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Focus the URL input on mount so the user can type immediately. Runs after
+  // DialogShell's own card-focus effect (child effects fire before the parent's),
+  // so the input keeps the final focus.
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
@@ -23,83 +28,59 @@ export function NavigateDialog({ onConfirm, onClose }: NavigateDialogProps) {
     if (trimmed) onConfirm(trimmed, newTab);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      e.stopPropagation();
-      handleConfirm();
-    }
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopPropagation();
-      onClose();
-    }
-  };
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onKeyDown={(e) => e.stopPropagation()}
-      onClick={onClose}
+    <DialogShell
+      icon={<Globe size={14} style={{ color: 'var(--color-action-browser-fg)' }} />}
+      title="Open URL"
+      widthClass="w-[480px]"
+      onClose={onClose}
+      // Text-entry dialog: a stray click on the scrim must not discard a
+      // typed URL — dismissal is Esc or Cancel only.
+      closeOnBackdrop={false}
+      footerHint="Enter to confirm · Esc to cancel"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={handleConfirm} disabled={!url.trim()}>
+            Add
+          </Button>
+        </>
+      }
+      onCardKeyDown={(e) => {
+        // Enter confirms from anywhere in the card (the URL input is the only
+        // text field). Esc is owned by DialogShell.
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+          handleConfirm();
+        }
+      }}
     >
-      <div
-        className="bg-bg-elevated border border-border-subtle rounded-lg shadow-xl w-[480px] max-w-[90vw] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
-      >
-        {/* Header */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
-          <Globe size={14} className="text-[#60cdff]" />
-          <h3 className="text-sm font-semibold text-text-primary">Open URL</h3>
-        </div>
+      <div className="px-4 py-4 space-y-3">
+        <input
+          ref={inputRef}
+          type="text"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://example.com"
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
+          data-tip={tt('The address to open in the browser. https:// is added if you omit it.', 'O endereço a abrir no browser. https:// é adicionado se você omitir.')}
+          className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-subtle rounded outline-none focus:border-accent-solid placeholder:text-text-disabled transition-colors"
+        />
 
-        {/* Body */}
-        <div className="px-4 py-4 space-y-3">
-          <input
-            ref={inputRef}
-            type="text"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://example.com"
-            spellCheck={false}
-            autoCorrect="off"
-            autoCapitalize="off"
-            data-tip={tt('The address to open in the browser. https:// is added if you omit it.', 'O endereço a abrir no browser. https:// é adicionado se você omitir.')}
-            className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-subtle rounded outline-none focus:border-accent-solid placeholder:text-text-disabled transition-colors"
-          />
+        <Checkbox
+          checked={newTab}
+          onChange={setNewTab}
+          label="Open in new tab"
+          title={tt('Open the URL in a new browser tab instead of the current one.', 'Abre a URL em uma nova aba do browser em vez da aba atual.')}
+        />
 
-          <Checkbox
-            checked={newTab}
-            onChange={setNewTab}
-            label="Open in new tab"
-            title={tt('Open the URL in a new browser tab instead of the current one.', 'Abre a URL em uma nova aba do browser em vez da aba atual.')}
-          />
-
-          <p className="text-[11px] text-text-tertiary">
-            Protocol (https://) will be added automatically if omitted.
-          </p>
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border-subtle">
-          <span className="text-[11px] text-text-tertiary">Enter to confirm · Esc to cancel</span>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="px-4 py-1.5 text-xs font-medium text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle rounded transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleConfirm}
-              disabled={!url.trim()}
-              className="px-4 py-1.5 text-xs font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Add
-            </button>
-          </div>
-        </div>
+        <p className="text-[11px] text-text-tertiary">
+          Protocol (https://) will be added automatically if omitted.
+        </p>
       </div>
-    </div>
+    </DialogShell>
   );
 }

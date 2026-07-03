@@ -1694,7 +1694,13 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   parts.push(`--color-recording-ink: ${pickInk(uiSettings.recordingColor)};`);
   parts.push(`--color-replay-ink: ${pickInk(uiSettings.replayColor)};`);
   parts.push(`--color-clicker-ink: ${pickInk(uiSettings.clickerColor)};`);
-  parts.push(`--color-accent-ink: ${pickInk(colors['accent-solid'])};`);
+  const accentInk = pickInk(colors['accent-solid']);
+  parts.push(`--color-accent-ink: ${accentInk};`);
+  // Hover fill for solid accent buttons — shifts AWAY from the ink (dark ink →
+  // lighter fill, white ink → darker fill) so hovering never erodes the
+  // contrast pickInk just guaranteed. Replaces alpha-hover (/80), whose blend
+  // with the backdrop could swing either way.
+  parts.push(`--color-accent-solid-hover: color-mix(in srgb, ${colors['accent-solid']} 85%, ${accentInk === '#ffffff' ? '#000000' : '#ffffff'});`);
   // Action type pill colors — the stored hue is treated as the action's identity,
   // not its literal ink: fg mixes the hue toward text-primary (dark themes ≈ the
   // original pastel; light themes automatically darken toward the near-black
