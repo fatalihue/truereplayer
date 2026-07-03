@@ -11,6 +11,7 @@ import { Toolbar, defaultColumnVisibility } from './components/Toolbar';
 import type { ColumnVisibility } from './components/Toolbar';
 import { ActionTable } from './components/ActionTable';
 import { ActionBar } from './components/ActionBar';
+import { ReplayProgressLine } from './components/ReplayProgressLine';
 import { SettingsPanel } from './components/SettingsPanel';
 import { StatusBar } from './components/StatusBar';
 import { Toast } from './components/Toast';
@@ -263,6 +264,9 @@ function AppShell() {
               need to thread through. ActionTable still receives columnVisibility
               directly from this same state below. */}
           <Toolbar />
+          {/* Indeterminate green sweep between toolbar and grid while a run is
+              live — see ReplayProgressLine. Self-hides when idle. */}
+          <ReplayProgressLine />
           {isClicker ? (
             <ClickerDashboard />
           ) : (

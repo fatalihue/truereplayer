@@ -440,6 +440,54 @@ html[data-animations="true"] .replay-btn-glow {
   animation: replay-btn-glow 1.6s ease-in-out infinite;
 }
 
+/* REPLAY progress line — an indeterminate "running" indicator that sweeps a
+   bright segment left→right across a faint track, sitting as a hairline between
+   the Toolbar and the grid while the replay/clicker engine runs
+   (ReplayProgressLine.tsx). Ports the update-splash indeterminate sweep to a 2px
+   stroke; the segment + track colour ride --replay-line-color (replay green by
+   default, clicker purple in clicker mode) so it stays palette-coherent. With
+   animations off the segment parks off-screen, leaving a static faint hairline
+   in the mode colour — still a legible "a run is live" cue. Keyframes stay top-
+   level/unlayered like the glows so Tailwind's layered utilities can't out-
+   cascade them. */
+@keyframes replay-line-sweep {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX(350%); }
+}
+.replay-progress-line {
+  position: relative;
+  height: 2px;
+  /* clip-path (not overflow:hidden) clips the sweeping segment to the track's
+     left/right edges — so the off-screen segment never overlaps the neighbouring
+     panels — while still letting the segment's soft glow bloom a few px ABOVE and
+     BELOW the 2px hairline (overflow:hidden would swallow the glow entirely). The
+     vertical bleed is intentional: a faint green aura over the toolbar/grid seam
+     reads as "a run is live". */
+  clip-path: inset(-7px 0 -7px 0);
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--replay-line-color, var(--color-replay)) 14%, transparent);
+}
+.replay-progress-line::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: inherit;
+  /* Parked off-screen left when motion is off, so the track shows as a static
+     hairline and no half-lit segment freezes mid-sweep. */
+  transform: translateX(-120%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--replay-line-color, var(--color-replay)),
+    transparent
+  );
+  box-shadow: 0 0 6px color-mix(in srgb, var(--replay-line-color, var(--color-replay)) 45%, transparent);
+}
+html[data-animations="true"] .replay-progress-line::before {
+  animation: replay-line-sweep 1.8s ease-in-out infinite;
+}
+
 /* Sheet panel slider — themed range input used by the Slider primitive
    (components/sheet/Slider.tsx). WebView2 is Chromium-only, so the -webkit
    pseudo-elements cover every runtime this app has. */
