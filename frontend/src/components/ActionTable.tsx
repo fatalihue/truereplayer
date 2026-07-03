@@ -1440,6 +1440,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               underneath) and the bottom border is an inset shadow because
               border-collapse borders don't travel with sticky cells. z-10 clears
               the rows' absolutely-positioned block rails. */}
+          {/* Header row is suppressed on an empty grid: with zero rows the sticky
+              thead's own height was the sole thing overflowing the scroll container
+              (empty state is h-full = container), forcing a pointless scrollbar. No
+              rows also means the column labels have nothing to label. */}
+          {actions.length > 0 && (
           <thead>
             <tr className="h-row">
               <th className="sticky top-0 z-10 bg-bg-surface shadow-[inset_0_-1px_0_var(--color-border-subtle)]">
@@ -1467,6 +1472,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               {columnVisibility.notes && <th className="sticky top-0 z-10 bg-bg-surface shadow-[inset_0_-1px_0_var(--color-border-subtle)] text-left text-xs font-semibold text-text-tertiary pl-2 pr-2">Notes</th>}
             </tr>
           </thead>
+          )}
           <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
           <tbody ref={tbodyRef}>
             {actions.map((action, idx) => {

@@ -25,23 +25,30 @@ const FilterContext = createContext('');
 
 // Flat section: a small colored dot + label, no bordered card and (by default) no collapse
 // chevron — the per-group cards + always-present expanders were the "boxy noise" users
-// flagged. Pass collapsible for a long/secondary group (e.g. Updates), which keeps the
-// chevron + persisted open state. data-section still drives the collapsed rail's scroll.
-function Section({ color, title, children, collapsible = false, defaultOpen = true }: {
+// flagged. Pass collapsible for a long/secondary group (e.g. Updates), which adds the
+// chevron; its open state persists across mounts unless persist={false} (see below).
+// data-section still drives the collapsed rail's scroll.
+function Section({ color, title, children, collapsible = false, defaultOpen = true, persist = true }: {
   color: string;
   title: string;
   children: React.ReactNode;
   collapsible?: boolean;
   defaultOpen?: boolean;
+  // Remember the open/closed choice across mounts (default). Pass persist={false}
+  // for a group that should ALWAYS mount at defaultOpen regardless of a prior
+  // choice — used by Updates, which the user wants reliably collapsed on every
+  // open; expanding it is a transient, per-view action, not a sticky preference.
+  persist?: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(() => {
     if (!collapsible) return true;
+    if (!persist) return defaultOpen;
     const saved = localStorage.getItem(`ui:settings-section:${title}`);
     return saved === null ? defaultOpen : saved === '1';
   });
   const toggleOpen = () => {
     setIsOpen(prev => {
-      localStorage.setItem(`ui:settings-section:${title}`, prev ? '0' : '1');
+      if (persist) localStorage.setItem(`ui:settings-section:${title}`, prev ? '0' : '1');
       return !prev;
     });
   };
@@ -1110,7 +1117,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
 
             {/* Updates — the app auto-checks on launch; this is just a manual re-check.
                 (The old always-on "Auto Check" switch was a no-op placeholder — removed.) */}
-            <Section color="#6bcb77" title="Updates" collapsible defaultOpen={false}>
+            <Section color="#6bcb77" title="Updates" collapsible defaultOpen={false} persist={false}>
               <button
                 onClick={() => {
                   setUpdateStatus('checking');
