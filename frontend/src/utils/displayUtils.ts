@@ -40,6 +40,17 @@ export function formatKeyCombo(combo: string): string {
   return parts.join(' + ');
 }
 
+// Format a millisecond value for display with locale thousands separators, so a
+// large delay reads at a glance: 30000 → "30.000" (pt-BR) / "30,000" (en). Values
+// under 1000 render as bare integers. The separator follows the UI language toggle
+// on purpose — a hardcoded "." would read as a decimal to an English user, and a
+// "," would to a Brazilian one. The unit ("ms") is added by the caller so it can be
+// styled as a separate quiet suffix. Floats are truncated; NaN/±∞ fall back to 0.
+export function formatMs(ms: number, language: 'en' | 'pt-BR'): string {
+  const n = Number.isFinite(ms) ? Math.trunc(ms) : 0;
+  return n.toLocaleString(language === 'pt-BR' ? 'pt-BR' : 'en-US');
+}
+
 // Pixel-coordinate display applies to the standalone WaitPixelColor action AND
 // to IF rows whose condition is PixelColorMatch — both store the watched point
 // in pixelX/pixelY and show it in the Details column.

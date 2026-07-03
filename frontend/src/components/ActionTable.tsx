@@ -1,4 +1,5 @@
 import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo, Fragment } from 'react';
+import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, closestCenter, pointerWithin } from '@dnd-kit/core';
 import type { CollisionDetection, DragStartEvent, DragEndEvent } from '@dnd-kit/core';
@@ -10,10 +11,11 @@ import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
-import { useTt } from '../state/LanguageContext';
+import { useTt, useLanguage } from '../state/LanguageContext';
+import type { Language } from '../state/LanguageContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { useToast } from '../state/ToastContext';
-import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors, formatKeyCombo } from '../utils/displayUtils';
+import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors, formatKeyCombo, formatMs } from '../utils/displayUtils';
 import { snapIndicesToBlocks } from '../utils/conditionalBlocks';
 import { SendTextDialog } from './SendTextDialog';
 import { SendTextPreview } from './SendTextPreview';
@@ -161,6 +163,48 @@ function isProbeAction(action: ActionItem): boolean {
     || (action.actionType === 'If' && (action.conditionType === 'ImageFound' || action.conditionType === 'PixelColorMatch'));
 }
 
+// Render a Details string, styling any "<n> ms" run to MATCH the Delay column:
+// the integer picks up locale thousands separators (30000 → "30.000") and the unit
+// shrinks to the quiet tertiary "ms" suffix, while any prefix (a Pause hotkey or a
+// HoldKey's key + " / ") stays in the cell's primary ink. Applied only to the
+// duration-bearing detail types (Pause / HoldKey) whose displayKey embeds "<n> ms";
+// the \b after ms avoids matching a stray digit-run that isn't actually a duration.
+const MS_RUN = /(\d+)\s*ms\b/g;
+function renderMsDetail(text: string, language: Language): ReactNode {
+  const out: ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let i = 0;
+  let matched = false;
+  MS_RUN.lastIndex = 0;
+  while ((m = MS_RUN.exec(text)) !== null) {
+    matched = true;
+    if (m.index > last) {
+      // The prefix ("F5 / " / "A / ") is a text run whose TRAILING space would be
+      // collapsed at the inline-flex boundary, gluing the key to the number. A
+      // non-breaking space (same advance width in the mono font) is never trimmed,
+      // so the "key / value" gap always renders.
+      out.push(text.slice(last, m.index).replace(/\s+$/, ' '));
+    }
+    out.push(
+      <span key={i++} className="text-text-secondary tabular-nums">
+        {formatMs(Number(m[1]), language)}
+        <span className="text-[9px] text-text-tertiary ml-0.5">ms</span>
+      </span>
+    );
+    last = m.index + m[0].length;
+  }
+  // No "<n> ms" run (e.g. a hotkey-only Pause, or the "—" placeholder): render the
+  // string untouched so nothing about non-duration rows changes.
+  if (!matched) return text;
+  if (last < text.length) out.push(text.slice(last));
+  // Wrap in ONE inline span. The Details cell's parent is inline-flex, so a bare
+  // prefix text run ("F5 / ") would have its trailing space trimmed at the flex-
+  // item boundary and glue to the number ("F5 /30.000ms"). Inside a single inline
+  // span, normal inline layout keeps that separating space.
+  return <span>{out}</span>;
+}
+
 // Standardized Details payload for the four probe rows. IMAGE → reference
 // thumbnail (never the GUID filename); PIXEL → colour swatch + hex + x,y. IF rows
 // additionally get a small type tag, since their pill is the generic "if"; Wait
@@ -276,6 +320,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const { actions, highlightedActionIndex, buttonStates, activeProfile, pauseState } = useAppState();
   const { send } = useBridge();
   const tt = useTt();
+  const { language } = useLanguage();
   const selectionRef = useSelectionRef();
   const scrollRef = useRef<HTMLDivElement>(null);
   const highlightedRowRef = useRef<HTMLTableRowElement>(null);
@@ -1425,7 +1470,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                 strings share the same 280 px lane (was 240). */}
             {columnVisibility.action && <col style={{ width: 152 }} />}
             {columnVisibility.details && <col style={{ width: 280 }} />}
-            {columnVisibility.delay && <col style={{ width: 70 }} />}
+            {/* 80 (was 70) so a thousands-separated delay — up to "999.999 ms" —
+                fits without bleeding left into Details. Steals ~10 px from the
+                flexible Notes column (width:100%), which is a non-issue. */}
+            {columnVisibility.delay && <col style={{ width: 80 }} />}
             {/* Notes column claims 100% of the remaining table width. In `table-fixed`,
                 a <col> without an explicit width gets ~0 and the leftover space sits
                 outside any cell — invisible for plain body rows (their bg is close to
@@ -1969,7 +2017,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             displayKey text — they don't have token syntax. */}
                         {action.actionType === 'SendText'
                           ? <SendTextPreview text={action.key} />
-                          : displayKey}
+                          // Pause / HoldKey embed a "<n> ms" duration in displayKey;
+                          // render it in the Delay column's format (thousands-separated
+                          // number + quiet "ms" suffix). All other types stay plain.
+                          : (action.actionType === 'Pause' || action.actionType === 'HoldKey')
+                            ? renderMsDetail(displayKey, language)
+                            : displayKey}
                         {/* The Keystroke × N badge that used to live here moved to
                             the Action pill so it stays visible even when the Key
                             column is narrow. The original badge was clickable to
@@ -2030,7 +2083,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       // one number ladder; the quiet "ms" suffix answers the unit
                       // question the bare integer used to leave open.
                       <span className="text-xs font-mono tabular-nums text-text-secondary hover:text-text-primary block text-right pr-2">
-                        {action.delay >= 0 ? action.delay : 0}
+                        {formatMs(action.delay >= 0 ? action.delay : 0, language)}
                         <span className="text-[9px] text-text-tertiary ml-0.5">ms</span>
                       </span>
                     )}
