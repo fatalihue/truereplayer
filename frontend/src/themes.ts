@@ -91,7 +91,15 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   // gold (43°) and Scroll green (127°), giving 43°+ to every neighbour. No
   // hardcoded semantic — PixelColor is "watch any colour", so the action is the
   // free agent of the palette.
-  actionPixelColorColor: '#84cc16',
+  //
+  // Darkened #84cc16 → #65a30d (v3→v4): under deuteranopia every 60–180° hue
+  // compresses toward yellow and discrimination falls back to LIGHTNESS — and
+  // the old lime sat within ~2 L* of Replay green (#6bcb77), making the two a
+  // colorblind twin pair in the grid. The darker lime opens a ~13 L* gap while
+  // keeping the hue slot. (Scroll mint vs Replay green share a hue by DESIGN —
+  // same "movement" family, separated by lightness — and If moved to teal in
+  // v2→v3, so this was the last confusable pair.)
+  actionPixelColorColor: '#65a30d',
   actionBrowserColor: '#fb923c',
   // True blue, picked to be distinct from Key cyan (#60cdff) and Mouse purple
   // (#a78bfa). Carries the "control flow / chain call" semantic.
@@ -119,12 +127,17 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   enableAnimations: true,
 };
 
+export const CURRENT_THEME_CONFIG_VERSION = 4;
+
 export interface ThemeConfig {
   // Schema version. v1 = original; v2 = palette pass (PixelColor / Scroll / Pause
   // defaults swapped); v3 = If color moved from amber to teal to resolve hue
-  // collision with SendText gold. loadThemeConfig migrates v1 → v2 → v3 in place.
-  // Listed as `number` rather than a literal union so future bumps don't require
-  // a type edit at every call site.
+  // collision with SendText gold; v4 = PixelColor lime darkened (#84cc16 →
+  // #65a30d) for deuteranopia lightness separation from Replay green.
+  // loadThemeConfig migrates v1 → … → v4 in place. Writers must use
+  // CURRENT_THEME_CONFIG_VERSION (below) — a stale literal at any write site
+  // silently re-runs migrations on the next load. Listed as `number` rather
+  // than a literal union so future bumps don't require a type edit everywhere.
   version: number;
   baseThemeId: string;
   colorOverrides: Partial<ThemeColors>;
@@ -1596,7 +1609,7 @@ export function loadThemeConfig(): ThemeConfig {
       // Merge UI settings with defaults for backwards compatibility (new fields)
       const merged: ThemeConfig = {
         ...parsed,
-        version: 3,
+        version: CURRENT_THEME_CONFIG_VERSION,
         uiSettings: { ...DEFAULT_UI_SETTINGS, ...parsed.uiSettings },
       };
 
@@ -1622,12 +1635,20 @@ export function loadThemeConfig(): ThemeConfig {
         if (ui.actionIfColor === '#fbbf24') ui.actionIfColor = DEFAULT_UI_SETTINGS.actionIfColor;
       }
 
+      // v3 → v4 migration: PixelColor lime darkened (#84cc16 → #65a30d) for
+      // deuteranopia lightness separation from Replay green — see the
+      // DEFAULT_UI_SETTINGS comment. Same only-if-still-default pattern.
+      if (parsed.version < 4) {
+        const ui = merged.uiSettings;
+        if (ui.actionPixelColorColor === '#84cc16') ui.actionPixelColorColor = DEFAULT_UI_SETTINGS.actionPixelColorColor;
+      }
+
       return merged;
     }
   } catch {
     // Not JSON — old format (plain theme ID string)
     if (getThemeById(raw)) {
-      return { version: 3, baseThemeId: raw, colorOverrides: {}, uiSettings: { ...DEFAULT_UI_SETTINGS } };
+      return { version: CURRENT_THEME_CONFIG_VERSION, baseThemeId: raw, colorOverrides: {}, uiSettings: { ...DEFAULT_UI_SETTINGS } };
     }
   }
 
@@ -1646,7 +1667,21 @@ export function saveThemeConfig(config: ThemeConfig): void {
 }
 
 export function makeDefaultConfig(): ThemeConfig {
-  return { version: 3, baseThemeId: DEFAULT_THEME_ID, colorOverrides: {}, uiSettings: { ...DEFAULT_UI_SETTINGS } };
+  return {
+    version: CURRENT_THEME_CONFIG_VERSION,
+    baseThemeId: DEFAULT_THEME_ID,
+    colorOverrides: {},
+    uiSettings: {
+      ...DEFAULT_UI_SETTINGS,
+      // First run only (no stored config): seed the Animations toggle from the
+      // OS reduced-motion preference. A stored config always wins — the user
+      // can flip it back on in the Theme Editor at any time.
+      enableAnimations: typeof window !== 'undefined'
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? false
+        : DEFAULT_UI_SETTINGS.enableAnimations,
+    },
+  };
 }
 
 // ── Theme Resolution ──

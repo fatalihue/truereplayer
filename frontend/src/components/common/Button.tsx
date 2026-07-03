@@ -17,13 +17,15 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react';
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive';
 type ButtonSize = 'sm' | 'md';
 
+// Pressed = one step dimmer (Fluent physics: fills darken on press, never
+// scale-transform — that reads web/mobile, not Windows).
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   // hover uses the derived --color-accent-solid-hover (shifts away from the ink)
   // instead of /80 alpha, which could erode the contrast pickInk guaranteed.
-  primary: 'bg-accent-solid hover:bg-[var(--color-accent-solid-hover)] text-[color:var(--color-accent-ink)]',
-  secondary: 'text-text-secondary bg-bg-card hover:bg-bg-surface border border-border-subtle',
-  ghost: 'text-text-secondary hover:text-text-primary hover:bg-bg-elevated',
-  destructive: 'bg-recording text-[color:var(--color-recording-ink)] hover:opacity-85',
+  primary: 'bg-accent-solid hover:bg-[var(--color-accent-solid-hover)] active:brightness-90 text-[color:var(--color-accent-ink)]',
+  secondary: 'text-text-secondary bg-bg-card hover:bg-bg-surface active:bg-bg-elevated border border-border-subtle',
+  ghost: 'text-text-secondary hover:text-text-primary hover:bg-bg-elevated active:bg-bg-card',
+  destructive: 'bg-recording text-[color:var(--color-recording-ink)] hover:opacity-85 active:opacity-75',
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {

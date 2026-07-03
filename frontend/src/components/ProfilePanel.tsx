@@ -48,7 +48,16 @@ const CONVERTIBLE_CLICK_TYPES = new Set([
 
 export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePanelProps) {
   const tt = useTt();
-  const { profiles, profileOrder, actions } = useAppState();
+  const { profiles, profileOrder, actions, settings, buttonStates } = useAppState();
+  // Clicker-mode coherence: the ActionBar already declares "Profiles are
+  // unavailable in Clicker mode" (Save/Load disabled), yet clicking a row here
+  // still activated one — third surface, third story. Activation is now gated;
+  // organization (drag, folders, context menu) stays available.
+  const isClicker = settings.useCursorClick;
+  // Mid-run activation gate: switching (or deselecting) the profile yanks the
+  // action list from under the engine — the backend HandleProfileClick has no
+  // run guard, so the UI is the only gate.
+  const runActive = buttonStates.recordingActive || buttonStates.replayActive;
 
   // Pre-compute the count of actions whose stored coordinates would benefit from a
   // Convert to Relative/Absolute pass. Used by TargetConfigDialog to show its migration
@@ -1343,13 +1352,30 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     <div
       key={p.name}
       data-drag-item={`profile:${p.name}`}
+      // Keyboard-reachable (Wave 4): rows were click-only divs, so Tab could
+      // never reach the sidebar. Enter/Space activate; the global focus ring
+      // provides the visible focus (unlayered rule beats the outline-none
+      // utility below, same mechanism as the dialog cards).
+      tabIndex={0}
+      role="button"
+      data-tip={isClicker ? tt('Profile activation is unavailable in Clicker mode — switch to Macro', 'Ativação de perfis indisponível no modo Clicker — mude para Macro') : undefined}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        if (isClicker || runActive) return;
+        send({ type: 'profile:click', payload: { name: p.name } });
+      }}
       onMouseDown={(e) => handleProfileMouseDown(e, p.name)}
       onClick={(e) => {
         // Don't fire click if we were dragging
         if (dragActive.current) { e.preventDefault(); return; }
+        if (isClicker || runActive) return; // activation gated — tooltip explains
         send({ type: 'profile:click', payload: { name: p.name } });
-        // Blur the row after dispatching so it doesn't retain keyboard focus.
-        (e.target as HTMLElement).blur();
+        // Blur the ROW (currentTarget) after dispatching — e.target is usually a
+        // child span/img whose blur() is a no-op while the tabIndex=0 row itself
+        // holds focus, and a silently-focused row would let a later stray
+        // Space/Enter re-toggle the profile.
+        e.currentTarget.blur();
       }}
       onContextMenu={(e) => handleContextMenu(e, p.name)}
       className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-left transition-colors outline-none select-none cursor-grab active:cursor-grabbing ${

@@ -29,6 +29,21 @@ interface Snippet {
 
 const SNIPPETS_KEY = 'trueplayer_snippets';
 
+// Relative luminance (WCAG) of a #rgb/#rrggbb hex, 0 = black … 1 = white.
+// Inlined because themes.ts doesn't export a helper; used to pick the emoji
+// picker's light/dark variant from the active theme's base surface. Returns 0
+// (→ dark, the previous hardcoded behavior) on anything unparseable.
+function hexLuminance(hex: string): number {
+  const h = hex.trim().replace('#', '');
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  if (!/^[0-9a-fA-F]{6}/.test(full)) return 0;
+  const [r, g, b] = [0, 2, 4].map((i) => {
+    const c = parseInt(full.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
 function loadSnippets(): Snippet[] {
   try {
     const raw = localStorage.getItem(SNIPPETS_KEY);
@@ -96,21 +111,17 @@ function SnippetEditForm({
         className="w-full px-2 py-1.5 text-[11px] font-mono text-text-primary bg-bg-input border border-border-subtle rounded outline-none focus:border-accent-solid resize-none placeholder:text-text-disabled"
       />
       <div className="flex items-center gap-2">
-        <button
-          type="button"
+        <Button variant="secondary" size="sm" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
           onClick={() => canSave && onSave(name, text)}
           disabled={!canSave}
-          className="px-3 py-1 text-[11px] font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Save
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="px-2 py-1 text-[11px] text-text-tertiary hover:text-text-primary transition-colors"
-        >
-          Cancel
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -246,7 +257,7 @@ function ClipboardTransformPopover({ onInsert, onClose }: ClipboardTransformPopo
         <button
           type="button"
           onClick={handleInsert}
-          className="h-7 px-3 text-[11px] font-semibold rounded text-white shadow-sm transition-colors"
+          className="h-7 px-3 text-[11px] font-semibold rounded text-[color:var(--color-accent-ink)] shadow-sm transition-colors"
           style={{
             background: 'linear-gradient(180deg, var(--color-accent-solid), color-mix(in srgb, var(--color-accent-solid) 82%, #000))',
             boxShadow: '0 2px 6px color-mix(in srgb, var(--color-accent-solid) 30%, transparent)',
@@ -278,6 +289,15 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
   // show on demand so the Variables panel stays compact.
   const [moreKeysOpen, setMoreKeysOpen] = useState(false);
   const lexicalApiRef = useRef<LexicalEditorHandle | null>(null);
+
+  // Pick the emoji picker's built-in LIGHT/DARK variant from the ACTIVE theme's
+  // base surface — NOT Theme.AUTO (the app theme is user-picked, not OS-driven).
+  // Computed once per dialog mount; a theme switch mid-dialog is an edge case
+  // and the picker re-reads on the next open.
+  const emojiTheme = useMemo(() => {
+    const base = getComputedStyle(document.documentElement).getPropertyValue('--color-bg-base');
+    return hexLuminance(base) > 0.5 ? Theme.LIGHT : Theme.DARK;
+  }, []);
 
   useEffect(() => {
     lexicalApiRef.current?.focus();
@@ -452,7 +472,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                 <div className="flex-1 min-h-0 overflow-hidden">
                   <EmojiPicker
                     onEmojiClick={handleEmojiClick}
-                    theme={Theme.DARK}
+                    theme={emojiTheme}
                     width="100%"
                     height="100%"
                     searchPlaceholder="Search emoji..."
@@ -509,7 +529,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                 className={`flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono border rounded transition-colors ${
                                   transformOpen
                                     ? 'text-accent-light bg-accent-solid/15 border-accent-solid/50'
-                                    : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40'
+                                    : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-warning hover:border-warning/40'
                                 }`}
                                 data-tip={tt('Build a {clipboard:...} transform', 'Crie uma transformação {clipboard:...}')}
                               >
@@ -517,12 +537,12 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                                 {item.label}
                               </button>
                             ) : (
-                              // Gold hover (#FFC107) mirrors the BrowserType chip palette in
+                              // Gold hover (--color-warning) mirrors the BrowserType chip palette in
                               // SheetPanel so users see the same affordance across both editors.
                               <button
                                 type="button"
                                 onClick={() => handleVarInsert(item.var)}
-                                className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-[#FFC107] hover:border-[#FFC107]/40 transition-colors"
+                                className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-warning hover:border-warning/40 transition-colors"
                               >
                                 {item.label}
                               </button>
@@ -569,21 +589,17 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                           className="h-7 px-2 text-xs text-text-primary bg-bg-input border border-border-subtle rounded outline-none focus:border-accent-solid placeholder:text-text-disabled"
                         />
                         <div className="flex items-center gap-2">
-                          <button
-                            type="button"
+                          <Button variant="secondary" size="sm" onClick={() => setSavingSnippet(false)}>
+                            Cancel
+                          </Button>
+                          <Button
+                            variant="primary"
+                            size="sm"
                             onClick={handleSaveSnippet}
                             disabled={!snippetName.trim() || !text.trim()}
-                            className="px-3 py-1 text-[11px] font-medium text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             Save
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setSavingSnippet(false)}
-                            className="px-2 py-1 text-[11px] text-text-tertiary hover:text-text-primary transition-colors"
-                          >
-                            Cancel
-                          </button>
+                          </Button>
                         </div>
                       </div>
                     ) : (

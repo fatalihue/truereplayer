@@ -54,19 +54,14 @@ type ToolbarProps = Record<string, never>;
  * NATURAL width at base size, regardless of which class is currently
  * applied to the visible span.
  *
- * `actionCount` is optional — renders as a faded "· N action(s)" suffix
- * after the name. The status bar shows it too, but having it inline
- * reinforces context when the user is glancing at the toolbar without
- * looking down. The mirror element below includes the suffix so the
- * size detection accounts for it.
+ * (The "· N actions" suffix was removed in Wave 4 — the StatusBar already
+ * shows name + count, and repeating it here spent the centre column's
+ * scarcest space on a duplicate.)
  */
-function ResponsiveProfileName({ name, actionCount }: { name: string; actionCount?: number }) {
-  const tt = useTt();
+function ResponsiveProfileName({ name }: { name: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   const [size, setSize] = useState<'base' | 'sm'>('base');
-  const showCount = typeof actionCount === 'number' && actionCount > 0;
-  const countLabel = showCount ? `${actionCount} ${actionCount === 1 ? 'action' : 'actions'}` : '';
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -84,37 +79,44 @@ function ResponsiveProfileName({ name, actionCount }: { name: string; actionCoun
     const ro = new ResizeObserver(update);
     ro.observe(container);
     return () => ro.disconnect();
-  }, [name, countLabel]);
+  }, [name]);
 
   return (
     <div ref={containerRef} className="flex-1 min-w-0 relative">
+      {/* data-tip carries the full name for the truncation case. */}
       <span
         className={`block font-semibold text-text-primary truncate ${size === 'sm' ? 'text-sm' : 'text-base'}`}
-        data-tip={showCount ? tt(`${name} · ${countLabel}`, `${name} · ${countLabel}`) : name}
+        data-tip={name}
       >
         {name}
-        {showCount && (
-          <span className="ml-1.5 font-normal text-text-tertiary">· {countLabel}</span>
-        )}
       </span>
       {/* Off-screen mirror used only to measure the unconstrained natural width
-          at base size. Kept aria-hidden so screen readers don't see it twice.
-          Mirror INCLUDES the count suffix so width detection is accurate. */}
+          at base size. Kept aria-hidden so screen readers don't see it twice. */}
       <span
         ref={measureRef}
         className="absolute -left-[9999px] top-0 font-semibold text-base whitespace-nowrap pointer-events-none"
         aria-hidden="true"
       >
-        {name}{showCount && <span className="ml-1.5 font-normal">· {countLabel}</span>}
+        {name}
       </span>
     </div>
   );
 }
 
 export function Toolbar(_props: ToolbarProps) {
-  const { toolbar, buttonStates, actions, activeProfile } = useAppState();
+  const { toolbar, buttonStates, actions, activeProfile, settings } = useAppState();
   const { send } = useBridge();
   const tt = useTt();
+  // Clicker-mode coherence: the macro action list is invisible in Clicker mode,
+  // yet these buttons used to stay live and silently mutate it. Every mutating
+  // toolbar control now shares one gate + one explanation. (ActionBar already
+  // tells the same story for Save/Load.)
+  const isClicker = settings.useCursorClick;
+  const insertsDisabled = buttonStates.recordingActive || buttonStates.replayActive || isClicker;
+  // Wraps each button's own bilingual hint: in Clicker mode the reason the
+  // button is off matters more than what it would insert.
+  const clickerTip = (en: string, ptBr: string) =>
+    isClicker ? tt('Not available in Clicker mode — switch to Macro', 'Indisponível no modo Clicker — mude para Macro') : tt(en, ptBr);
   /* DISABLED — Toggle Columns dropdown.
    * Re-enable by:
    *   1. Changing ToolbarProps back to { columnVisibility, onColumnVisibilityChange }
@@ -251,11 +253,16 @@ export function Toolbar(_props: ToolbarProps) {
     };
   }, [actions.length, selectionRef]);
 
-  // Global keyboard shortcuts forwarded from App.tsx (which has no bridge access)
+  // Global keyboard shortcuts forwarded from App.tsx (which has no bridge access).
+  // Undo/Redo share the buttons' gate via a ref (the listener stays bound once):
+  // Ctrl+Z during a replay could reshape the list the engine is executing, and
+  // in Clicker mode it would mutate the invisible macro list.
+  const insertsDisabledRef = useRef(insertsDisabled);
+  insertsDisabledRef.current = insertsDisabled;
   useEffect(() => {
     const onSave = () => send({ type: 'profile:save', payload: {} });
-    const onUndo = () => send({ type: 'actions:undo', payload: {} });
-    const onRedo = () => send({ type: 'actions:redo', payload: {} });
+    const onUndo = () => { if (!insertsDisabledRef.current) send({ type: 'actions:undo', payload: {} }); };
+    const onRedo = () => { if (!insertsDisabledRef.current) send({ type: 'actions:redo', payload: {} }); };
     window.addEventListener('cmd:save', onSave);
     window.addEventListener('cmd:undo', onUndo);
     window.addEventListener('cmd:redo', onRedo);
@@ -387,11 +394,12 @@ export function Toolbar(_props: ToolbarProps) {
           send({ type: 'actions:copyInternal', payload: { indices: Array.from(sel) } });
         }
       }
-      // Mutating shortcuts (paste, reorder) are blocked during record/replay so a
-      // stray keystroke can't reshape the actions list while data is being captured
-      // or executed — mirrors the disabled state of the Move/Paste toolbar buttons.
-      // Ctrl+C above is read-only, so it stays allowed (it returns before reaching here).
-      if (buttonStates.recordingActive || buttonStates.replayActive) return;
+      // Mutating shortcuts (paste, reorder) share the buttons' full gate —
+      // record/replay AND Clicker mode (the Toolbar stays mounted there and a
+      // stale selection survives ActionTable's unmount, so Ctrl+V / Alt+arrows
+      // could silently reshape the invisible macro list). Ctrl+C above is
+      // read-only, so it stays allowed (it returns before reaching here).
+      if (insertsDisabledRef.current) return;
       if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
         e.preventDefault();
         const sel = selectionRef.current;
@@ -461,8 +469,8 @@ export function Toolbar(_props: ToolbarProps) {
             <button
               tabIndex={-1}
               onClick={() => send({ type: 'profile:click', payload: { name: activeProfile } })}
-              disabled={buttonStates.recordingActive || buttonStates.replayActive}
-              data-tip={tt('Deselect profile', 'Desmarcar perfil')}
+              disabled={insertsDisabled}
+              data-tip={clickerTip('Deselect profile', 'Desmarcar perfil')}
               // -ml-[13px] pulls the icon LEFT into the toolbar's own px-4 padding so the
               // X's vertical line matches the checkbox column center in the table below
               // (measured 12.7px gap before this fix). Purely cosmetic — the hover/click
@@ -473,7 +481,10 @@ export function Toolbar(_props: ToolbarProps) {
               <X size={14} />
             </button>
           )}
-          <ResponsiveProfileName name={toolbar.profileName} actionCount={toolbar.actionCount} />
+          {/* Count suffix dropped (owner decision): the StatusBar already shows
+              "name · N actions"; repeating it here spent the centre column's
+              scarcest space on a duplicate. */}
+          <ResponsiveProfileName name={toolbar.profileName} />
         </div>
 
         {/* Right: tools — prevent focus on click so Space/Enter can't re-trigger.
@@ -487,19 +498,19 @@ export function Toolbar(_props: ToolbarProps) {
           {/* Undo / Redo */}
           <button
             tabIndex={-1}
-            disabled={!buttonStates.canUndo}
+            disabled={!buttonStates.canUndo || insertsDisabled}
             onClick={() => send({ type: 'actions:undo', payload: {} })}
-            className={`p-1.5 rounded transition-colors ${buttonStates.canUndo ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled'}`}
-            data-tip={tt('Undo (Ctrl+Z)', 'Desfazer (Ctrl+Z)')}
+            className={`p-1.5 rounded transition-colors ${buttonStates.canUndo && !insertsDisabled ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled'}`}
+            data-tip={clickerTip('Undo (Ctrl+Z)', 'Desfazer (Ctrl+Z)')}
           >
             <Undo2 size={14} />
           </button>
           <button
             tabIndex={-1}
-            disabled={!buttonStates.canRedo}
+            disabled={!buttonStates.canRedo || insertsDisabled}
             onClick={() => send({ type: 'actions:redo', payload: {} })}
-            className={`p-1.5 rounded transition-colors ${buttonStates.canRedo ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled'}`}
-            data-tip={tt('Redo (Ctrl+Y)', 'Refazer (Ctrl+Y)')}
+            className={`p-1.5 rounded transition-colors ${buttonStates.canRedo && !insertsDisabled ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled'}`}
+            data-tip={clickerTip('Redo (Ctrl+Y)', 'Refazer (Ctrl+Y)')}
           >
             <Redo2 size={14} />
           </button>
@@ -578,9 +589,9 @@ export function Toolbar(_props: ToolbarProps) {
               keystrokeCaptureInsertIndex.current = sel.size > 0 ? Math.min(...sel) : actions.length;
               setShowKeystrokeCapture(true);
             }}
-            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            disabled={insertsDisabled}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip={tt('Insert Send Keystroke action', 'Inserir ação Send Keystroke')}
+            data-tip={clickerTip('Insert Send Keystroke action', 'Inserir ação Send Keystroke')}
           >
             <Keyboard size={14} />
           </button>
@@ -589,9 +600,9 @@ export function Toolbar(_props: ToolbarProps) {
           <button
             tabIndex={-1}
             onClick={() => setShowSendTextDialog(true)}
-            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            disabled={insertsDisabled}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip={tt('Insert Send Text action', 'Inserir ação Send Text')}
+            data-tip={clickerTip('Insert Send Text action', 'Inserir ação Send Text')}
           >
             <Type size={14} />
           </button>
@@ -606,9 +617,9 @@ export function Toolbar(_props: ToolbarProps) {
               const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
               send({ type: 'actions:insertAction', payload: { actionType: 'SetVariable', insertIndex } });
             }}
-            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            disabled={insertsDisabled}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip={tt('Insert Set Variable action — read it back with {var:name}', 'Inserir ação Set Variable — leia com {var:name}')}
+            data-tip={clickerTip('Insert Set Variable action — read it back with {var:name}', 'Inserir ação Set Variable — leia com {var:name}')}
           >
             <Variable size={14} />
           </button>
@@ -623,9 +634,9 @@ export function Toolbar(_props: ToolbarProps) {
               pauseDialogInsertIndex.current = sel.size > 0 ? Math.min(...sel) : actions.length;
               setShowPauseDialog(true);
             }}
-            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            disabled={insertsDisabled}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip={tt('Insert Pause action', 'Inserir ação Pause')}
+            data-tip={clickerTip('Insert Pause action', 'Inserir ação Pause')}
           >
             <Hourglass size={14} />
           </button>
@@ -648,9 +659,9 @@ export function Toolbar(_props: ToolbarProps) {
             <button
               tabIndex={-1}
               onClick={() => setShowWaitMenu(!showWaitMenu)}
-              disabled={buttonStates.recordingActive || buttonStates.replayActive}
+              disabled={insertsDisabled}
               className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled flex items-center gap-0.5"
-              data-tip={tt('Insert Wait (Image / Pixel Color)', 'Inserir Wait (Image / Pixel Color)')}
+              data-tip={clickerTip('Insert Wait (Image / Pixel Color)', 'Inserir Wait (Image / Pixel Color)')}
             >
               <ScanEye size={14} />
               <ChevronDown size={9} className="opacity-60" />
@@ -695,9 +706,9 @@ export function Toolbar(_props: ToolbarProps) {
             <button
               tabIndex={-1}
               onClick={() => setShowConditionalMenu(!showConditionalMenu)}
-              disabled={buttonStates.recordingActive || buttonStates.replayActive}
+              disabled={insertsDisabled}
               className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled flex items-center gap-0.5"
-              data-tip={tt('Insert Conditional (If / Else / EndIf)', 'Inserir Condicional (If / Else / EndIf)')}
+              data-tip={clickerTip('Insert Conditional (If / Else / EndIf)', 'Inserir Condicional (If / Else / EndIf)')}
             >
               <GitBranch size={14} />
               <ChevronDown size={9} className="opacity-60" />
@@ -779,9 +790,9 @@ export function Toolbar(_props: ToolbarProps) {
             <button
               tabIndex={-1}
               onClick={() => setShowBrowserMenu(!showBrowserMenu)}
-              disabled={buttonStates.recordingActive || buttonStates.replayActive}
+              disabled={insertsDisabled}
               className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled flex items-center gap-0.5"
-              data-tip={tt('Browser Actions', 'Ações de Navegador')}
+              data-tip={clickerTip('Browser Actions', 'Ações de Navegador')}
             >
               <Globe size={14} />
               <ChevronDown size={9} className="opacity-60" />
@@ -832,9 +843,9 @@ export function Toolbar(_props: ToolbarProps) {
           <button
             tabIndex={-1}
             onClick={() => setShowRunProfileDialog(true)}
-            disabled={buttonStates.recordingActive || buttonStates.replayActive}
+            disabled={insertsDisabled}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
-            data-tip={tt('Insert Run Profile action', 'Inserir ação Run Profile')}
+            data-tip={clickerTip('Insert Run Profile action', 'Inserir ação Run Profile')}
           >
             <Repeat2 size={14} />
           </button>
@@ -852,9 +863,9 @@ export function Toolbar(_props: ToolbarProps) {
             <button
               tabIndex={-1}
               onClick={() => setShowClearConfirm(prev => !prev)}
-              disabled={buttonStates.recordingActive || buttonStates.replayActive || actions.length === 0}
+              disabled={insertsDisabled || actions.length === 0}
               className="p-1.5 rounded text-text-tertiary hover:bg-recording-bg hover:text-recording transition-colors disabled:text-text-disabled disabled:hover:bg-transparent disabled:hover:text-text-disabled"
-              data-tip={tt('Clear all actions in this profile', 'Limpar todas as ações deste perfil')}
+              data-tip={clickerTip('Clear all actions in this profile', 'Limpar todas as ações deste perfil')}
             >
               <Trash2 size={14} />
             </button>
@@ -880,7 +891,7 @@ export function Toolbar(_props: ToolbarProps) {
                     }}
                     // Same gate as the trigger — covers the render-tick race between
                     // the run-state push and a click on the already-open popover.
-                    disabled={buttonStates.recordingActive || buttonStates.replayActive}
+                    disabled={insertsDisabled}
                     className="px-2.5 py-1 rounded text-[11px] font-semibold bg-recording text-[color:var(--color-recording-ink)] hover:opacity-85 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     Clear all

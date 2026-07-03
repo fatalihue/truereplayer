@@ -68,6 +68,10 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   const groups: CommandGroup[] = useMemo(() => {
     const isRecording = buttonStates.recordingActive;
     const isReplaying = buttonStates.replayActive;
+    // Clicker-mode gate — mirrors the Toolbar's insertsDisabled story: these
+    // entries mutate the macro list, which is invisible in Clicker mode.
+    const isClicker = settings.useCursorClick;
+    const clickerHint = tt('Not available in Clicker mode — switch to Macro', 'Indisponível no modo Clicker — mude para Macro');
 
     return [
       {
@@ -76,6 +80,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         items: [
           {
             id: 'record',
+            disabled: isClicker, disabledHint: clickerHint,
             label: isRecording ? 'Stop Recording' : 'Start Recording',
             icon: isRecording
               ? <Square size={14} className="text-recording" />
@@ -120,6 +125,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           },
           {
             id: 'sendtext', label: 'Insert Send Text',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <Type size={14} className="text-text-secondary" />,
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:sendtext')); },
           },
@@ -129,6 +135,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             // sendkey / presskeyn / holdkey palette entries that all opened slightly
             // different dialogs for what are now slices of the same action.
             id: 'sendkeystroke', label: 'Insert Send Keystroke',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <Keyboard size={14} className="text-text-secondary" />,
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:sendkeystroke')); },
           },
@@ -136,11 +143,13 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             // Set Variable — Pattern A insert (empty row + auto-open Sheet, handled by
             // the backend's sheet:openIndex push). Read back with {var:name} tokens.
             id: 'setvariable', label: 'Insert Set Variable',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <Variable size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'SetVariable', insertIndex: computeInsertIndex() } }); onClose(); },
           },
           {
             id: 'waitimage', label: 'Insert Wait for Image',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <ScanSearch size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'WaitImage', insertIndex: computeInsertIndex() } }); onClose(); },
           },
@@ -149,6 +158,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             // actions:insertWaitPixelColor handler so the eyedropper opens immediately
             // (matches the Toolbar's Pipette button).
             id: 'waitpixel', label: 'Insert Wait for Pixel Color',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <Pipette size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:insertWaitPixelColor', payload: { insertIndex: computeInsertIndex() } }); onClose(); },
           },
@@ -156,31 +166,37 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             // Conditional (IF ... ENDIF) blocks — image- and pixel-driven. Mirrors the Toolbar's
             // Conditional menu; inserts the block, the user configures the probe in the grid.
             id: 'ifimage', label: 'Insert Conditional: Image Found',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <GitBranch size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'ImageFound', insertIndex: computeInsertIndex() } }); onClose(); },
           },
           {
             id: 'ifpixel', label: 'Insert Conditional: Pixel Color',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <GitBranch size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'PixelColorMatch', insertIndex: computeInsertIndex() } }); onClose(); },
           },
           {
             id: 'ifwindow', label: 'Insert Conditional: Window Open',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <GitBranch size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'WindowOpen', insertIndex: computeInsertIndex() } }); onClose(); },
           },
           {
             id: 'ifclipboard', label: 'Insert Conditional: Clipboard',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <GitBranch size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'ClipboardMatch', insertIndex: computeInsertIndex() } }); onClose(); },
           },
           {
             id: 'ifbrowser', label: 'Insert Conditional: Browser Element',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <GitBranch size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'BrowserElementState', insertIndex: computeInsertIndex() } }); onClose(); },
           },
           {
             id: 'pause', label: 'Insert Pause',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <Hourglass size={14} className="text-text-secondary" />,
             // Pattern B normalization — fire the cmd:pause event so the Toolbar
             // opens the PauseDialog (config-first) instead of inserting an empty
@@ -189,6 +205,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           },
           {
             id: 'runprofile', label: 'Insert Run Profile',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <Repeat2 size={14} className="text-text-secondary" />,
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:runprofile')); },
           },
@@ -199,16 +216,19 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           },
           {
             id: 'pasteactions', label: 'Paste Actions',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <ClipboardPaste size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:paste', payload: { insertIndex: computeInsertIndex() } }); onClose(); },
           },
           {
             id: 'convertrelative', label: 'Convert Coordinates to Relative',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <Replace size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:convertCoordinates', payload: { direction: 'toRelative' } }); onClose(); },
           },
           {
             id: 'convertabsolute', label: 'Convert Coordinates to Absolute',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <Replace size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:convertCoordinates', payload: { direction: 'toAbsolute' } }); onClose(); },
           },
@@ -216,11 +236,13 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             // Convert the whole profile between paired (Down/Up) and combined (Keystroke/Click)
             // representations — the on-demand counterpart to the Combined Actions toggle.
             id: 'converttocombined', label: 'Convert Actions to Combined',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <Combine size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:convertMode', payload: { direction: 'toCombined' } }); onClose(); },
           },
           {
             id: 'converttopaired', label: 'Convert Actions to Paired',
+            disabled: isClicker, disabledHint: clickerHint,
             icon: <Split size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:convertMode', payload: { direction: 'toPaired' } }); onClose(); },
           },
@@ -230,8 +252,8 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             // confirm) so no path can clear the list in a single ungated click.
             id: 'clearactions', label: 'Clear All Actions',
             icon: <Trash2 size={14} className="text-text-secondary" />,
-            disabled: isRecording || isReplaying || actions.length === 0,
-            disabledHint: (isRecording || isReplaying)
+            disabled: isClicker || isRecording || isReplaying || actions.length === 0,
+            disabledHint: isClicker ? clickerHint : (isRecording || isReplaying)
               ? tt('Stop recording/replay first', 'Pare a gravação/replay primeiro')
               : tt('No actions to clear', 'Nenhuma ação para limpar'),
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:clearactions')); },
@@ -399,8 +421,8 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
-        className="w-[520px] bg-bg-card border border-border-default rounded-xl overflow-hidden"
-        style={{ animation: 'command-in 0.15s ease-out', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}
+        className="command-enter w-[520px] bg-bg-card border border-border-default rounded-xl overflow-hidden"
+        style={{ boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}
       >
         {/* Search input */}
         <div className="flex items-center gap-2.5 px-4 py-3.5 border-b border-border-subtle">

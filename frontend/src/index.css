@@ -47,6 +47,10 @@
   --color-clicker: #c084fc;
   --color-clicker-bg: rgba(192, 132, 252, 0.12);
   --color-clicker-border: rgba(192, 132, 252, 0.3);
+  /* Warning — fixed semantic amber (foot-gun notes, capture caveats, coordinate
+     migration toasts). Was ~10 scattered #FFC107 literals; consumers use
+     text-warning / border-warning/N / bg-warning/N or color-mix derivations. */
+  --color-warning: #FFC107;
 
   /* Action type pills — fg is the hue mixed toward text-primary (keeps ink legible
      on light presets); bg stays a TRANSLUCENT tint so pills composite over row
@@ -65,6 +69,20 @@
   --color-action-waitimage-bg: color-mix(in srgb, #e879f9 12%, transparent);
   --color-action-browser-fg: color-mix(in srgb, #fb923c 72%, var(--color-text-primary));
   --color-action-browser-bg: color-mix(in srgb, #fb923c 12%, transparent);
+  /* The remaining four action families were missing their pre-hydration
+     fallbacks entirely (the block-rail LEVELS array reads --color-action-if-fg
+     and its comment always claimed a :root default existed). Values mirror
+     DEFAULT_UI_SETTINGS: pixelcolor lime #65a30d (v4 CVD darken), runprofile
+     blue, pause slate, if teal. */
+  --color-action-pixelcolor-fg: color-mix(in srgb, #65a30d 72%, var(--color-text-primary));
+  --color-action-pixelcolor-bg: color-mix(in srgb, #65a30d 12%, transparent);
+  --color-action-runprofile-fg: color-mix(in srgb, #3b82f6 72%, var(--color-text-primary));
+  --color-action-runprofile-bg: color-mix(in srgb, #3b82f6 12%, transparent);
+  --color-action-pause-fg: color-mix(in srgb, #94a3b8 72%, var(--color-text-primary));
+  --color-action-pause-bg: color-mix(in srgb, #94a3b8 12%, transparent);
+  --color-action-if-fg: color-mix(in srgb, #2dd4bf 72%, var(--color-text-primary));
+  --color-action-if-bg: color-mix(in srgb, #2dd4bf 12%, transparent);
+  --color-action-if-border: color-mix(in srgb, #2dd4bf 35%, transparent);
 
   /* Conditional-block nesting palette ("rainbow brackets"). Level 0 is the user's
      configurable IF colour (--color-action-if-fg) so single-level blocks look
@@ -248,13 +266,15 @@ html[data-animations="true"] .app-tip {
   background: transparent;
 }
 
+/* Ink-derived thumb — the old rgba(255,255,255,…) was near-invisible on every
+   light preset (white on white). */
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: color-mix(in srgb, var(--color-text-primary) 18%, transparent);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: color-mix(in srgb, var(--color-text-primary) 30%, transparent);
 }
 
 /* Theme-driven utility classes */
@@ -274,6 +294,12 @@ html[data-animations="true"] .app-tip {
 @keyframes toast-in {
   from { opacity: 0; transform: translateX(20px); }
   to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Toast entrance — gated on the animations toggle (was an inline style in
+   Toast.tsx that ignored it). */
+html[data-animations="true"] .toast-enter {
+  animation: toast-in var(--motion-slow) var(--ease-enter);
 }
 
 @keyframes spin {
@@ -308,6 +334,12 @@ html[data-animations="true"] .bulk-bar-enter {
 @keyframes command-in {
   from { opacity: 0; transform: scale(0.97) translateY(-8px); }
   to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Command palette entrance — gated on the animations toggle (was an inline
+   style in CommandPalette.tsx that ignored it). */
+html[data-animations="true"] .command-enter {
+  animation: command-in var(--motion-base) var(--ease-enter);
 }
 
 /* DialogShell motion — symmetric enter/exit on the shared dialog chrome.
@@ -352,6 +384,11 @@ html[data-animations="true"] .dialog-leaving .dialog-card {
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
+}
+/* TitleBar status dot — pulses only during live runs, gated on the toggle
+   (previously an inline style that pulsed forever, idle included). */
+html[data-animations="true"] .status-dot-pulse {
+  animation: pulse-dot 2s ease-in-out infinite;
 }
 
 /* REC-mode badge pulse — the TitleBar "Recording" badge emits an expanding red
@@ -499,31 +536,8 @@ input[type="number"]::-webkit-outer-spin-button {
   margin: 0;
 }
 
-/* Subtle dark-themed checkbox */
-.checkbox-subtle {
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  border: 1.5px solid var(--color-border-default);
-  border-radius: 3px;
-  background: transparent;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  flex-shrink: 0;
-}
-
-.checkbox-subtle:hover {
-  border-color: var(--color-text-tertiary);
-}
-
-.checkbox-subtle:checked {
-  background: var(--color-accent-solid);
-  border-color: var(--color-accent-solid);
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 12px;
-}
+/* (.checkbox-subtle deleted — superseded by the shared Checkbox component; the
+   only remaining reference was a comment in Checkbox.tsx.) */
 
 /* Grip handle for drag rows */
 .grip-handle {

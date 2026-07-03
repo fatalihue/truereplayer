@@ -17,6 +17,7 @@ import {
   loadCustomPresets,
   saveCustomPresets,
   makeCustomPresetId,
+  CURRENT_THEME_CONFIG_VERSION,
 } from '../themes';
 
 interface ThemeContextValue {
@@ -242,7 +243,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
 
     setConfig({
-      version: 3, // current ThemeConfig schema version — writing 1 forced a needless re-migration on next load
+      version: CURRENT_THEME_CONFIG_VERSION, // writing a stale version re-runs migrations on next load
       baseThemeId: baseId,
       colorOverrides: overrides,
       uiSettings: { ...DEFAULT_UI_SETTINGS, ...theme.uiSettings },

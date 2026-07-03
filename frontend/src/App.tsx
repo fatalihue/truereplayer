@@ -15,6 +15,7 @@ import { SettingsPanel } from './components/SettingsPanel';
 import { StatusBar } from './components/StatusBar';
 import { Toast } from './components/Toast';
 import { TooltipLayer } from './components/common/TooltipLayer';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { UpdateOverlay } from './components/UpdateOverlay';
 import { ExtensionUpdateBanner } from './components/ExtensionUpdateBanner';
 import { ClickerDashboard } from './components/ClickerDashboard';
@@ -309,18 +310,26 @@ function AppShell() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <BridgeProvider>
-        <AppStateProvider>
-          <SelectionProvider>
-            <ToastProvider>
-              <LanguageProvider>
-                <AppShell />
-              </LanguageProvider>
-            </ToastProvider>
-          </SelectionProvider>
-        </AppStateProvider>
-      </BridgeProvider>
-    </ThemeProvider>
+    // Two boundaries: the OUTER one catches provider-level crashes (its
+    // fallback carries hardcoded color fallbacks for exactly that case); the
+    // INNER one catches shell crashes while keeping the providers alive, so
+    // theme variables still style the fallback card.
+    <ErrorBoundary>
+      <ThemeProvider>
+        <BridgeProvider>
+          <AppStateProvider>
+            <SelectionProvider>
+              <ToastProvider>
+                <LanguageProvider>
+                  <ErrorBoundary>
+                    <AppShell />
+                  </ErrorBoundary>
+                </LanguageProvider>
+              </ToastProvider>
+            </SelectionProvider>
+          </AppStateProvider>
+        </BridgeProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }

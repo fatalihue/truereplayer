@@ -762,22 +762,33 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const startEdit = useCallback((index: number, field: EditingCell['field'], currentValue: string) => {
     setEditingCell({ index, field });
     setEditValue(currentValue);
+    setEditInvalid(false);
   }, []);
 
-  // Commit the edit
-  const commitEdit = useCallback(() => {
+  // Invalid-input flag for the coords editor — drives the red border below.
+  // Cleared on every keystroke and on every startEdit.
+  const [editInvalid, setEditInvalid] = useState(false);
+
+  // Commit the edit. `source` decides what an invalid value does: an explicit
+  // Enter keeps the editor OPEN with a red border (visible rejection, same
+  // pattern as the BulkActionBar delay field); a blur can't sensibly hold
+  // focus hostage, so it cancels as before.
+  const commitEdit = useCallback((source: 'key' | 'blur' = 'blur') => {
     if (!editingCell) return;
     if (editingCell.field === 'coords') {
       // Merged "x, y" editor — accepts "123,456", "123, 456" or "123 456"
       // (same forgiving formats as the Sheet panel's Paste-coords button).
-      // Both numbers are required; anything else cancels silently rather than
-      // half-updating one axis.
+      // Both numbers are required so a typo can't half-update one axis.
       const m = editValue.trim().match(/^(-?\d+)\s*[,;\s]\s*(-?\d+)$/);
       if (m) {
         send({ type: 'actions:edit', payload: { index: editingCell.index, field: 'x', value: m[1] } });
         send({ type: 'actions:edit', payload: { index: editingCell.index, field: 'y', value: m[2] } });
+      } else if (source === 'key') {
+        setEditInvalid(true);
+        return; // stay open — the red border says why nothing happened
       }
       setEditingCell(null);
+      setEditInvalid(false);
       return;
     }
     send({
@@ -790,6 +801,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   // Cancel the edit
   const cancelEdit = useCallback(() => {
     setEditingCell(null);
+    setEditInvalid(false);
   }, []);
 
   // Handle keyboard on the table container
@@ -834,7 +846,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const handleEditKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === 'Tab') {
       e.preventDefault();
-      commitEdit();
+      commitEdit('key');
     } else if (e.key === 'Escape') {
       e.preventDefault();
       cancelEdit();
@@ -1349,6 +1361,17 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   // wrong "Deselect all" tooltip on a fresh grid).
   const allSelected = actions.length > 0 && selectedIndices.size === actions.length;
 
+  // Insertion caret target — every insert path (toolbar, palette, recording in
+  // insert mode) lands BEFORE the first selected row; a 2px accent line on that
+  // row makes the destination visible before any insert button is clicked.
+  // No selection = append at the end (no caret). Hidden while any drag is live
+  // (row drag or profile drop) so it can't read as a second drop indicator
+  // next to the drop-gap slot. Hoisted out of the row map.
+  const insertTargetIdx =
+    dragIndices === null && dropTarget === null && selectedIndices.size > 0
+      ? Math.min(...selectedIndices)
+      : null;
+
   return (
     <div
       className="relative flex-1 bg-bg-surface border border-border-subtle rounded-ui overflow-hidden flex flex-col outline-none"
@@ -1459,6 +1482,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           <tbody ref={tbodyRef}>
             {actions.map((action, idx) => {
               const colors = getActionTypeColors(action.actionType);
+              const isInsertTarget = idx === insertTargetIdx;
               const isHighlighted = highlightedActionIndex === idx;
               // While the replay engine is awaiting a Pause action's resume condition, the
               // highlighted row IS the paused action — flag it so the row treatment can swap
@@ -1626,6 +1650,16 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     className="h-row border-b border-border-subtle relative pointer-events-none bg-[color-mix(in_srgb,var(--row-block-color)_6%,transparent)]"
                   >
                     <td colSpan={99} className="p-0 relative">
+                      {/* Insertion caret relocates here when this ghost renders above
+                          the insert-target EndIf row — inserts land before the REAL
+                          row, and visually that slot is the top of this ghost. */}
+                      {idx === insertTargetIdx && (
+                        <div
+                          className="absolute top-0 left-0 right-0 h-[2px] bg-accent-solid pointer-events-none z-[5]"
+                          data-insert-caret
+                          aria-hidden="true"
+                        />
+                      )}
                       <button
                         type="button"
                         onClick={() => send({ type: 'actions:addElseBranch', payload: { ifRowIndex: blockIf } })}
@@ -1637,7 +1671,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           // body rows use. 78 (col-2 boundary) + addElseDepth*14 (depth indent)
                           // + 4 (default pl-1) lands the button just past the IF's rail.
                           marginLeft: `${78 + addElseDepth * 14 + 4}px`,
-                          color: 'var(--row-block-color)',
+                          // 72%-mix toward text-primary (the W1 pill recipe) — the raw
+                          // block hue was sub-AA on light themes at deep nesting levels.
+                          color: 'color-mix(in srgb, var(--row-block-color) 72%, var(--color-text-primary))',
                           borderColor: 'color-mix(in srgb, var(--row-block-color) 35%, transparent)',
                           background: 'transparent',
                         }}
@@ -1749,6 +1785,19 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       subsequent td (checkbox / # / Action / Key / X / Y / Delay / Notes)
                       one column to the right — the alignment bug we hit before this fix. */}
                   <td className="w-7">
+                    {/* Insertion caret — 2px accent line across the row's TOP edge
+                        (anchored to the tr like the rails). Marks where every
+                        insert path will land: before this (first-selected) row.
+                        When an Add-Else ghost renders above this row, the caret
+                        moves to the ghost (see the ghost tr) so it sits in the
+                        correct visual slot. */}
+                    {isInsertTarget && !showAddElseBefore && (
+                      <div
+                        className="absolute top-0 left-0 right-0 h-[2px] bg-accent-solid pointer-events-none z-[5]"
+                        data-insert-caret
+                        aria-hidden="true"
+                      />
+                    )}
                     {railCount > 0 && Array.from({ length: railCount }, (_, i) => {
                       const isInnermost = i === railCount - 1;
                       const strong = isStructural && isInnermost;
@@ -1936,16 +1985,26 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     }}
                   >
                     {editingCell?.index === idx && editingCell.field === 'coords' ? (
-                      <input
-                        ref={editInputRef}
-                        type="text"
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        onKeyDown={handleEditKeyDown}
-                        onBlur={commitEdit}
-                        placeholder="x, y"
-                        className="w-[100px] h-6 px-1 text-xs font-mono text-text-primary bg-bg-input border border-accent-solid rounded outline-none"
-                      />
+                      <span className="relative inline-block">
+                        <input
+                          ref={editInputRef}
+                          type="text"
+                          value={editValue}
+                          onChange={(e) => { setEditValue(e.target.value); setEditInvalid(false); }}
+                          onKeyDown={handleEditKeyDown}
+                          onBlur={() => commitEdit('blur')}
+                          placeholder="x, y"
+                          className={`w-[100px] h-6 px-1 text-xs font-mono text-text-primary bg-bg-input border rounded outline-none ${editInvalid ? 'border-recording' : 'border-accent-solid'}`}
+                        />
+                        {/* Inline hint, not data-tip: TooltipLayer is mouseover-driven
+                            and the pointer is rarely over the input at rejection time
+                            (the user just pressed Enter). Clears on the next keystroke. */}
+                        {editInvalid && (
+                          <span className="absolute left-0 top-full mt-1 z-20 px-2 py-1 rounded text-[10px] whitespace-nowrap bg-bg-card border border-recording/40 text-recording pointer-events-none">
+                            {tt('Needs both coordinates — e.g. 960, 540', 'Precisa das duas coordenadas — ex.: 960, 540')}
+                          </span>
+                        )}
+                      </span>
                     ) : editingCell?.index === idx && editingCell.field === 'key' ? (
                       <input
                         ref={editInputRef}
@@ -2061,7 +2120,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
                         onKeyDown={handleEditKeyDown}
-                        onBlur={commitEdit}
+                        onBlur={() => commitEdit('blur')}
                         className="w-16 h-6 px-1 text-xs font-mono text-right text-text-primary bg-bg-input border border-accent-solid rounded outline-none"
                       />
                     ) : (
@@ -2080,7 +2139,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       (same guard chain as the Details cell). */}
                   {columnVisibility.notes && (
                   <td
-                    className="pl-2 pr-2 cursor-text"
+                    className="pl-2 pr-2 cursor-text relative"
                     onClick={(e) => {
                       if (editingCell) return;
                       if (dragOccurred.current) return;
@@ -2096,13 +2155,32 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
                         onKeyDown={handleEditKeyDown}
-                        onBlur={commitEdit}
+                        onBlur={() => commitEdit('blur')}
                         className="w-full h-6 px-1 text-xs text-text-primary bg-bg-input border border-accent-solid rounded outline-none"
                       />
                     ) : (
-                      <span className="text-xs text-text-tertiary truncate block hover:text-text-secondary">
+                      <span className={`text-xs text-text-tertiary truncate block hover:text-text-secondary${contextMenuEnabled && !editingCell ? ' group-hover:pr-7' : ''}`}>
                         {action.comment || '\u00A0'}
                       </span>
+                    )}
+                    {/* Hover-reveal Edit \u2014 the audit's discoverability fix for the
+                        single-click-edit model (editing was signalled only by a
+                        cursor change). Routes through openEditorForRow, same as
+                        the context menu's Edit and keyboard Enter. Hidden mid-run
+                        (contextMenuEnabled) and while an inline editor is open;
+                        tabIndex -1 (keyboard users have Enter on the row). */}
+                    {contextMenuEnabled && !editingCell && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEditorForRow(idx);
+                        }}
+                        tabIndex={-1}
+                        className="hidden group-hover:flex absolute right-1.5 top-1/2 -translate-y-1/2 items-center justify-center w-6 h-6 rounded bg-bg-elevated border border-border-subtle text-text-tertiary hover:text-text-primary hover:border-border-default transition-colors"
+                        data-tip={tt('Edit action (Enter)', 'Editar a\u00E7\u00E3o (Enter)')}
+                      >
+                        <Pencil size={12} />
+                      </button>
                     )}
                   </td>
                   )}

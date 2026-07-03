@@ -108,7 +108,7 @@ function estimateTier(selector: string): 'S' | 'A' | 'B' | 'C' {
 const TIER_META: Record<'S' | 'A' | 'B' | 'C', { color: string; label: string; Icon: typeof ShieldCheck }> = {
   S: { color: '#0E7A0D', label: 'Stable',    Icon: ShieldCheck },
   A: { color: '#60CDFF', label: 'Strong',    Icon: ShieldCheck },
-  B: { color: '#FFC107', label: 'Decent',    Icon: ShieldQuestion },
+  B: { color: 'var(--color-warning)', label: 'Decent',    Icon: ShieldQuestion },
   C: { color: '#C42B1C', label: 'Fragile',   Icon: ShieldAlert },
 };
 

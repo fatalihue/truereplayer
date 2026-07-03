@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Section, CheckRow, RadioRow, NumInput } from './popoverAtoms';
+import { Section, CheckRow, RadioRow, RadioGroup, NumInput } from './popoverAtoms';
 import {
   applyTransformPreview,
   buildClipboardToken,
@@ -72,71 +72,75 @@ export function ClipboardModifierBody({
       </Section>
 
       <Section label="Extract">
-        <RadioRow
-          checked={state.extract === 'none'}
-          onChange={() => setExtract('none')}
-          label="Everything"
-        />
-        <RadioRow
-          checked={state.extract === 'line'}
-          onChange={() => setExtract('line')}
-          label="Line #"
-          input={
-            <NumInput
-              value={state.extractN}
-              onChange={setExtractN}
-              disabled={state.extract !== 'line'}
-              min={1}
-            />
-          }
-        />
-        <RadioRow
-          checked={state.extract === 'word'}
-          onChange={() => setExtract('word')}
-          label="Word #"
-          input={
-            <NumInput
-              value={state.extractN}
-              onChange={setExtractN}
-              disabled={state.extract !== 'word'}
-              min={1}
-            />
-          }
-        />
+        <RadioGroup label="Extract">
+          <RadioRow
+            checked={state.extract === 'none'}
+            onChange={() => setExtract('none')}
+            label="Everything"
+          />
+          <RadioRow
+            checked={state.extract === 'line'}
+            onChange={() => setExtract('line')}
+            label="Line #"
+            input={
+              <NumInput
+                value={state.extractN}
+                onChange={setExtractN}
+                disabled={state.extract !== 'line'}
+                min={1}
+              />
+            }
+          />
+          <RadioRow
+            checked={state.extract === 'word'}
+            onChange={() => setExtract('word')}
+            label="Word #"
+            input={
+              <NumInput
+                value={state.extractN}
+                onChange={setExtractN}
+                disabled={state.extract !== 'word'}
+                min={1}
+              />
+            }
+          />
+        </RadioGroup>
       </Section>
 
       <Section label="Limit length">
-        <RadioRow
-          checked={state.limit === 'none'}
-          onChange={() => setLimit('none')}
-          label="None"
-        />
-        <RadioRow
-          checked={state.limit === 'first'}
-          onChange={() => setLimit('first')}
-          label="First N chars"
-          input={
-            <NumInput
-              value={state.limitN}
-              onChange={setLimitN}
-              disabled={state.limit !== 'first'}
-              min={0}
-            />
-          }
-        />
-        <RadioRow
-          checked={state.limit === 'last'}
-          onChange={() => setLimit('last')}
-          label="Last N chars"
-          input={
-            <NumInput
-              value={state.limitN}
-              onChange={setLimitN}
-              disabled={state.limit !== 'last'}
-              min={0}
-            />
-          }
-        />
+        <RadioGroup label="Limit length">
+          <RadioRow
+            checked={state.limit === 'none'}
+            onChange={() => setLimit('none')}
+            label="None"
+          />
+          <RadioRow
+            checked={state.limit === 'first'}
+            onChange={() => setLimit('first')}
+            label="First N chars"
+            input={
+              <NumInput
+                value={state.limitN}
+                onChange={setLimitN}
+                disabled={state.limit !== 'first'}
+                min={0}
+              />
+            }
+          />
+          <RadioRow
+            checked={state.limit === 'last'}
+            onChange={() => setLimit('last')}
+            label="Last N chars"
+            input={
+              <NumInput
+                value={state.limitN}
+                onChange={setLimitN}
+                disabled={state.limit !== 'last'}
+                min={0}
+              />
+            }
+          />
+        </RadioGroup>
       </Section>
 
       <div className="px-3.5 py-1.5 bg-bg-surface border-b border-border-subtle">

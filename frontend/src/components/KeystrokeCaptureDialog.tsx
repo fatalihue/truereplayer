@@ -276,7 +276,7 @@ export function KeystrokeCaptureDialog({
               modifiers the user is holding; Hold mode silently uses only the last
               key, with a warning chip when modifiers got dropped. */}
           <div
-            className="bg-bg-input border border-dashed border-[#FFC107]/40 rounded-md py-5 px-4 text-center min-h-[156px] flex flex-col justify-center"
+            className="bg-bg-input border border-dashed border-warning/40 rounded-md py-5 px-4 text-center min-h-[156px] flex flex-col justify-center"
             data-tip={tt('Press a key or combo to capture it (incl. Win+ combos the browser cannot see). Press again to replace.', 'Pressione uma tecla ou combo para capturar (incl. combos Win+ que o browser nao ve). Pressione de novo para substituir.')}
           >
             {captured === null ? (
@@ -293,7 +293,7 @@ export function KeystrokeCaptureDialog({
                   {keystrokeDisplay(captured).split('+').map((part, idx, arr) => (
                     <span key={`${part}-${idx}`} className="inline-flex items-center gap-1">
                       <kbd
-                        className="inline-block px-2.5 py-1 bg-bg-elevated border border-border-default rounded font-mono text-[13px] font-semibold text-[#FFC107]"
+                        className="inline-block px-2.5 py-1 bg-bg-elevated border border-border-default rounded font-mono text-[13px] font-semibold text-warning"
                         style={{ boxShadow: '0 2px 0 rgba(0,0,0,0.3)' }}
                       >
                         {part}
@@ -436,11 +436,11 @@ export function KeystrokeCaptureDialog({
                   rather than a silent strip so the user can choose to drop Hold
                   mode or recapture without modifiers. */}
               {hasModifiers && (
-                <div className="flex items-start gap-2 px-2.5 py-2 rounded bg-[#FFC107]/10 border border-[#FFC107]/30">
-                  <AlertCircle size={12} className="text-[#FFC107] mt-[1px] shrink-0" />
+                <div className="flex items-start gap-2 px-2.5 py-2 rounded bg-warning/10 border border-warning/30">
+                  <AlertCircle size={12} className="text-warning mt-[1px] shrink-0" />
                   <div className="text-[10px] text-text-secondary leading-relaxed">
                     Hold mode supports single keys only. Saving will hold{' '}
-                    <kbd className="px-1 py-px bg-bg-elevated border border-border-default rounded font-mono text-[10px] text-[#FFC107]">
+                    <kbd className="px-1 py-px bg-bg-elevated border border-border-default rounded font-mono text-[10px] text-warning">
                       {keystrokeDisplay(heldKey)}
                     </kbd>{' '}
                     and ignore the modifiers. To hold a combo, insert two rows: a

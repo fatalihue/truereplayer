@@ -30,6 +30,7 @@ export function Toast() {
         return (
           <div
             key={toast.id}
+            className="toast-enter"
             // Freeze the countdown while the pointer is over the toast — an 8s
             // error shouldn't be a reading race.
             onMouseEnter={() => pauseToast(toast.id)}
@@ -44,7 +45,6 @@ export function Toast() {
               borderRadius: 'var(--ui-border-radius)',
               boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
               maxWidth: 380,
-              animation: 'toast-in 0.2s ease-out',
               pointerEvents: 'auto',
             }}
           >

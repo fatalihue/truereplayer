@@ -10,7 +10,9 @@ const CAPTION_BUTTONS_WIDTH_PX = 140;
 const statusConfig = {
   ready:     { dot: 'bg-replay',    text: 'Ready',     bg: 'bg-replay-bg',    border: 'border-replay/20' },
   recording: { dot: 'bg-recording', text: 'Recording', bg: 'bg-recording-bg', border: 'border-recording/20' },
-  replaying: { dot: 'bg-accent',    text: 'Replaying', bg: 'bg-[rgba(96,205,255,0.1)]', border: 'border-accent/20' },
+  // bg was a literal rgba(96,205,255,…) — a stale cyan frozen from an old accent
+  // that never followed theme changes. accent/10 tracks every preset.
+  replaying: { dot: 'bg-accent',    text: 'Replaying', bg: 'bg-accent/10',    border: 'border-accent/20' },
 };
 
 interface TitleBarProps {
@@ -40,8 +42,9 @@ export function TitleBar({ onOpenCommandPalette }: TitleBarProps) {
           onClick={onOpenCommandPalette}
           className="no-drag flex items-center gap-2 px-3 py-1 bg-bg-surface border border-border-subtle rounded-ui hover:border-border-default hover:bg-bg-elevated transition-colors cursor-pointer min-w-[260px]"
         >
-          <Search size={13} className="text-text-disabled" />
-          <span className="text-xs text-text-disabled flex-1 text-left">Search profiles, actions, commands...</span>
+          {/* tertiary, not disabled — this is a live control's label (~2:1 as disabled) */}
+          <Search size={13} className="text-text-tertiary" />
+          <span className="text-xs text-text-tertiary flex-1 text-left">Search profiles, actions, commands...</span>
           <div className="flex gap-0.5">
             <span className="kbd">Ctrl</span>
             <span className="kbd">K</span>
@@ -59,7 +62,10 @@ export function TitleBar({ onOpenCommandPalette }: TitleBarProps) {
         className={`no-drag flex items-center gap-1.5 px-2.5 py-1 rounded-full ${cfg.bg} border ${cfg.border} ${status === 'recording' ? 'rec-badge-pulse' : status === 'replaying' ? 'replay-badge-pulse' : ''}`}
         style={{ marginRight: CAPTION_BUTTONS_WIDTH_PX }}
       >
-        <div className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} style={{ animation: 'pulse-dot 2s ease-in-out infinite' }} />
+        {/* Dot pulses only while a run is LIVE — an idle "Ready" pulsing forever
+            was motion with no meaning (and ignored the Animations toggle: inline
+            style bypassed the data-animations gate; the class rule respects it). */}
+        <div className={`w-1.5 h-1.5 rounded-full ${cfg.dot} ${status !== 'ready' ? 'status-dot-pulse' : ''}`} />
         <span className="text-[11px] font-medium text-text-primary">{cfg.text}</span>
       </div>
     </div>

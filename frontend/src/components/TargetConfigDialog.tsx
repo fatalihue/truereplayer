@@ -608,7 +608,7 @@ export function TargetConfigDialog({
             // the dialog — the inline hint used to push every row down and resize the
             // box). Opaque card + shadow so it reads as a layer on top. No timeout —
             // stays until the user converts or skips, same actions as the old hint.
-            <div className="absolute bottom-3 left-4 right-4 flex items-start gap-2 px-3 py-2 text-[11px] text-amber-300 bg-bg-card border border-amber-700/60 rounded-lg shadow-xl z-20">
+            <div className="absolute bottom-3 left-4 right-4 flex items-start gap-2 px-3 py-2 text-[11px] text-[color-mix(in_srgb,var(--color-warning)_85%,var(--color-text-primary))] bg-bg-card border border-warning/35 rounded-lg shadow-xl z-20">
               <span className="flex-1 leading-snug">
                 {convertibleActionCount} action{convertibleActionCount === 1 ? '' : 's'} captured in {convertHint === 'toRelative' ? 'absolute' : 'relative'} coords.{' '}
                 {convertHint === 'toRelative'
