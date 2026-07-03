@@ -16,19 +16,19 @@ export function KbdTag({ combo, accent = false, unified = false }: KbdTagProps) 
   if (!combo) return null;
   const cls = accent ? 'kbd kbd-accent' : 'kbd';
 
-  if (unified) {
-    // The raw combo is already the display string ("Ctrl+F9"); a lone "+" key
-    // shows as itself. px-1.5 relaxes the chip's min-width so a multi-key combo
-    // isn't cramped.
-    return <span className={`${cls} px-1.5`}>{combo}</span>;
-  }
-
   // Split on '+' as the separator, but keep a literal '+' KEY intact: it shows up as a trailing
   // empty segment (e.g. "Ctrl++" → ['Ctrl','','']) which we map back to '+'. "+" alone is the
   // lone plus key.
   const parts = combo === '+'
     ? ['+']
     : combo.split('+').map((p, i, arr) => (p === '' && i === arr.length - 1 ? '+' : p)).filter(p => p !== '');
+
+  if (unified) {
+    // One chip, keys joined with a spaced separator ("Alt + A", not "Alt+A").
+    // Built from `parts` so a literal '+' key still renders correctly. px-1.5
+    // relaxes the chip's min-width so a multi-key combo isn't cramped.
+    return <span className={`${cls} px-1.5`}>{parts.join(' + ')}</span>;
+  }
 
   return (
     <div className="flex items-center gap-0.5">

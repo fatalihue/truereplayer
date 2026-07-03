@@ -5,7 +5,7 @@ import {
   Trash2, Download, Upload, RefreshCw,
   Hourglass, ScanSearch, Repeat2, ClipboardPaste, Files, Replace,
   FolderPlus, Palette, PanelLeft, Table2, Keyboard,
-  MousePointer, Pipette, Crosshair, Combine, Split, GitBranch, ScrollText,
+  MousePointerClick, Pipette, Crosshair, Combine, Split, GitBranch, ScrollText,
   Variable,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
@@ -119,7 +119,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             // ModeToggleHotkey (ScrollLock by default).
             id: 'mode',
             label: settings.useCursorClick ? 'Switch to Macro Mode' : 'Switch to Clicker Mode',
-            icon: <MousePointer size={14} style={{ color: settings.useCursorClick ? 'var(--color-clicker)' : undefined }} className={settings.useCursorClick ? '' : 'text-text-secondary'} />,
+            icon: <MousePointerClick size={14} style={{ color: settings.useCursorClick ? 'var(--color-clicker)' : undefined }} className={settings.useCursorClick ? '' : 'text-text-secondary'} />,
             shortcut: settings.modeToggleHotkey,
             onAction: () => { send({ type: 'settings:change', payload: { key: 'useCursorClick', value: !settings.useCursorClick } }); onClose(); },
           },

@@ -1,4 +1,4 @@
-import { Circle, Play, Square, Save, FolderOpen, MousePointer, List } from 'lucide-react';
+import { Circle, Play, Square, Save, FolderOpen, MousePointerClick, List } from 'lucide-react';
 import { SegmentedControl } from './common/SegmentedControl';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -44,18 +44,18 @@ export function ActionBar() {
   //                Stop (busy)     → blue      (stop replay)
   //   Clicker mode Click idle      → purple    (start clicking)
   //                Stop (busy)     → blue      (stop clicking)
-  // Ink comes from the per-fill --color-*-ink tokens (contrast-picked in
-  // applyThemeConfig) — the fills are user-configurable, so a hardcoded
-  // text-white can land at ≈ 2:1 (it did, on the default replay green).
+  // White text on all three primary fills (owner preference — the contrast-
+  // picked dark ink read as unattractive on the saturated Record/Replay/Click
+  // colours). The --color-*-ink tokens still drive the quieter confirm buttons.
   const recordBtnClass = isRecording
-    ? 'bg-accent-solid hover:bg-accent-solid/80 text-[color:var(--color-accent-ink)]'
-    : 'bg-recording hover:bg-recording/80 text-[color:var(--color-recording-ink)]';
+    ? 'bg-accent-solid hover:bg-accent-solid/80 text-white'
+    : 'bg-recording hover:bg-recording/80 text-white';
 
   const replayBtnClass = isReplaying
-    ? 'bg-accent-solid hover:bg-accent-solid/80 text-[color:var(--color-accent-ink)]'
+    ? 'bg-accent-solid hover:bg-accent-solid/80 text-white'
     : (isClicker
-        ? 'bg-[var(--color-clicker)] hover:opacity-85 text-[color:var(--color-clicker-ink)]'
-        : 'bg-replay hover:bg-replay/80 text-[color:var(--color-replay-ink)]');
+        ? 'bg-[var(--color-clicker)] hover:opacity-85 text-white'
+        : 'bg-replay hover:bg-replay/80 text-white');
 
   return (
     <div className="flex items-center justify-between px-4 py-2.5 bg-bg-surface border border-border-subtle rounded-ui">
@@ -81,7 +81,7 @@ export function ActionBar() {
             {
               value: 'clicker',
               label: 'Clicker',
-              icon: <MousePointer size={11} />,
+              icon: <MousePointerClick size={11} />,
               tip: tt('Click repeatedly at cursor position. Ignores recorded actions and profile hotkeys.', 'Clica repetidamente na posição do cursor. Ignora ações gravadas e hotkeys de perfil.'),
               activeClass: 'bg-[var(--color-clicker-bg)] text-[var(--color-clicker)] shadow-[inset_0_0_0_1px_var(--color-clicker-border)]',
             },
@@ -109,8 +109,8 @@ export function ActionBar() {
             className={`flex items-center gap-2 px-5 py-2 rounded text-[13px] font-semibold transition-colors ${recordBtnClass} ${PRIMARY_BTN} ${isRecording ? 'record-btn-glow' : ''} disabled:opacity-40 disabled:cursor-not-allowed`}
           >
             {isRecording
-              ? <Square size={11} fill="currentColor" className="shrink-0" />
-              : <Circle size={8} fill="currentColor" className="shrink-0" />}
+              ? <Square size={11} fill="white" className="shrink-0" />
+              : <Circle size={8} fill="white" className="shrink-0" />}
             {buttonStates.recordButtonText}
           </button>
         )}
@@ -122,10 +122,10 @@ export function ActionBar() {
           className={`flex items-center gap-2 px-5 py-2 rounded text-[13px] font-semibold transition-colors ${replayBtnClass} ${PRIMARY_BTN} ${isReplaying ? 'replay-btn-glow' : ''} disabled:opacity-50 disabled:cursor-not-allowed`}
         >
           {isReplaying
-            ? <Square size={11} fill="currentColor" className="shrink-0" />
+            ? <Square size={11} fill="white" className="shrink-0" />
             : isClicker
-              ? <MousePointer size={12} className="shrink-0" />
-              : <Play size={12} fill="currentColor" className="shrink-0" />}
+              ? <MousePointerClick size={12} className="shrink-0" />
+              : <Play size={12} fill="white" className="shrink-0" />}
           {buttonStates.replayButtonText}
         </button>
       </div>
