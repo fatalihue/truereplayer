@@ -27,7 +27,14 @@ export function KbdTag({ combo, accent = false, unified = false }: KbdTagProps) 
     // One chip, keys joined with a spaced separator ("Alt + A", not "Alt+A").
     // Built from `parts` so a literal '+' key still renders correctly. px-1.5
     // relaxes the chip's min-width so a multi-key combo isn't cramped.
-    return <span className={`${cls} px-1.5`}>{parts.join(' + ')}</span>;
+    // Wrapped in the SAME block flex container as the multi-chip branch below:
+    // a bare inline chip sits in its parent's 24px line box and made the
+    // ProfilePanel rows ~3px taller; the flex wrapper is a 20px block instead.
+    return (
+      <div className="flex items-center">
+        <span className={`${cls} px-1.5`}>{parts.join(' + ')}</span>
+      </div>
+    );
   }
 
   return (
