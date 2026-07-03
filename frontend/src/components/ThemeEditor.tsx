@@ -1061,6 +1061,12 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                   onChange={(v) => setUISetting('actionSendTextColor', v)}
                 />
                 <AppearanceColorRow
+                  label="Set Variable"
+                  value={config.uiSettings.actionSetVariableColor}
+                  defaultValue={DEFAULT_UI_SETTINGS.actionSetVariableColor}
+                  onChange={(v) => setUISetting('actionSetVariableColor', v)}
+                />
+                <AppearanceColorRow
                   label="Wait Image"
                   value={config.uiSettings.actionWaitImageColor}
                   defaultValue={DEFAULT_UI_SETTINGS.actionWaitImageColor}

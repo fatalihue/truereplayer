@@ -6,7 +6,7 @@ import {
   Hourglass, ScanSearch, Repeat2, ClipboardPaste, Files, Replace,
   FolderPlus, Palette, PanelLeft, Table2, Keyboard,
   MousePointerClick, Pipette, Crosshair, Combine, Split, GitBranch, ScrollText,
-  Variable,
+  Braces,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -144,7 +144,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             // the backend's sheet:openIndex push). Read back with {var:name} tokens.
             id: 'setvariable', label: 'Insert Set Variable',
             disabled: isClicker, disabledHint: clickerHint,
-            icon: <Variable size={14} className="text-text-secondary" />,
+            icon: <Braces size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'SetVariable', insertIndex: computeInsertIndex() } }); onClose(); },
           },
           {

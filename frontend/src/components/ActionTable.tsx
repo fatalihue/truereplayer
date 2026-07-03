@@ -6,7 +6,7 @@ import type { CollisionDetection, DragStartEvent, DragEndEvent } from '@dnd-kit/
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { snapCenterToCursor } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
-import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Variable, AppWindow, Clipboard, Play, Pause, EyeOff } from 'lucide-react';
+import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Braces, AppWindow, Clipboard, Play, Pause, EyeOff } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -59,7 +59,9 @@ export function ActionIcon({ actionType, size = 12 }: { actionType: string; size
   if (actionType === 'HoldKey') return <Timer size={size} />;
   if (actionType.startsWith('Key')) return <Keyboard size={size} />;
   if (actionType === 'SendText') return <Type size={size} />;
-  if (actionType === 'SetVariable') return <Variable size={size} />;
+  // Braces {} — reads as "variable / interpolation", matching the {var:name}
+  // token syntax used to read the value back. Clearer than the old Variable glyph.
+  if (actionType === 'SetVariable') return <Braces size={size} />;
   if (actionType === 'WaitImage') return <ScanSearch size={size} />;
   if (actionType === 'WaitPixelColor') return <Pipette size={size} />;
   // Match the toolbar's redesigned icons so the chip in the table reads the same
@@ -1944,7 +1946,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     // coords/key editor branches below stay wired to editingCell
                     // (still reachable via the Delay/Notes cells' own startEdit),
                     // but nothing in THIS cell sets those fields anymore.
-                    className="pl-1"
+                    // `relative` anchors the hover-edit pencil to THIS cell's right
+                    // edge (moved here from Notes so it sits nearer the middle).
+                    className="pl-1 relative"
                   >
                     {editingCell?.index === idx && editingCell.field === 'coords' ? (
                       <span className="relative inline-block">
@@ -2048,6 +2052,23 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       </span>
                     )}
                     </>)}
+                    {/* Hover-reveal Edit pencil — anchored to the DETAILS cell's
+                        right edge (the `relative` above). Moved here from the Notes
+                        column so it sits nearer the grid's middle and is easier to
+                        reach. Opaque fill floats over the cell's rightmost content
+                        on hover; routes through openEditorForRow like the context
+                        menu's Edit and keyboard Enter. Hidden mid-run and while an
+                        inline editor is open; tabIndex -1 (Enter covers keyboard). */}
+                    {contextMenuEnabled && !editingCell && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openEditorForRow(idx); }}
+                        tabIndex={-1}
+                        className="hidden group-hover:flex absolute right-1.5 top-1/2 -translate-y-1/2 items-center justify-center w-6 h-6 rounded bg-bg-elevated border border-border-subtle text-text-tertiary hover:text-text-primary hover:border-border-default transition-colors"
+                        data-tip={tt('Edit action (Enter)', 'Editar ação (Enter)')}
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    )}
                   </td>
                     );
                   })()}
@@ -2094,7 +2115,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       (same guard chain as the Details cell). */}
                   {columnVisibility.notes && (
                   <td
-                    className="pl-2 pr-2 cursor-text relative"
+                    className="pl-2 pr-2 cursor-text"
                     onClick={(e) => {
                       if (editingCell) return;
                       if (dragOccurred.current) return;
@@ -2114,37 +2135,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         className="w-full h-6 px-1 text-xs text-text-primary bg-bg-input border border-accent-solid rounded outline-none"
                       />
                     ) : (
-                      // No group-hover padding shift here \u2014 that shoved the note
-                      // text left 28px the instant you hovered (padding isn't
-                      // transitioned), which read as the row "jumping". The pencil
-                      // below is absolute with an opaque fill, so it floats over
-                      // the note's right edge instead of displacing it.
+                      // No group-hover padding shift here \u2014 a hover-only padding
+                      // change shoved the note text sideways and read as the row
+                      // "jumping". The row stays static; the edit pencil lives in the
+                      // Details cell now.
                       <span className="text-xs text-text-tertiary truncate block hover:text-text-secondary">
                         {action.comment || '\u00A0'}
                       </span>
-                    )}
-                    {/* Hover-reveal Edit \u2014 the audit's discoverability fix for the
-                        single-click-edit model (editing was signalled only by a
-                        cursor change). Routes through openEditorForRow, same as
-                        the context menu's Edit and keyboard Enter. Hidden mid-run
-                        (contextMenuEnabled) and while an inline editor is open;
-                        tabIndex -1 (keyboard users have Enter on the row). */}
-                    {contextMenuEnabled && !editingCell && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEditorForRow(idx);
-                        }}
-                        tabIndex={-1}
-                        // absolute so it floats over the note's right edge without
-                        // pushing layout (the row-jump-on-hover bug). Works via the
-                        // @layer base [data-tip] rule in index.css \u2014 otherwise this
-                        // button's data-tip would force it back to position:relative.
-                        className="hidden group-hover:flex absolute right-1.5 top-1/2 -translate-y-1/2 items-center justify-center w-6 h-6 rounded bg-bg-elevated border border-border-subtle text-text-tertiary hover:text-text-primary hover:border-border-default transition-colors"
-                        data-tip={tt('Edit action (Enter)', 'Editar a\u00E7\u00E3o (Enter)')}
-                      >
-                        <Pencil size={12} />
-                      </button>
                     )}
                   </td>
                   )}

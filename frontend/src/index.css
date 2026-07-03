@@ -65,6 +65,9 @@
   --color-action-scroll-bg: color-mix(in srgb, #6bcb77 12%, transparent);
   --color-action-sendtext-fg: color-mix(in srgb, #d4a020 72%, var(--color-text-primary));
   --color-action-sendtext-bg: color-mix(in srgb, #d4a020 12%, transparent);
+  /* SetVariable — own magenta hue (was sharing SendText's gold). */
+  --color-action-setvariable-fg: color-mix(in srgb, #e05cbf 72%, var(--color-text-primary));
+  --color-action-setvariable-bg: color-mix(in srgb, #e05cbf 12%, transparent);
   --color-action-waitimage-fg: color-mix(in srgb, #e879f9 72%, var(--color-text-primary));
   --color-action-waitimage-bg: color-mix(in srgb, #e879f9 12%, transparent);
   --color-action-browser-fg: color-mix(in srgb, #fb923c 72%, var(--color-text-primary));

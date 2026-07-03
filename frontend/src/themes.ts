@@ -45,6 +45,10 @@ export interface ThemeUISettings {
   actionKeyColor: string;
   actionScrollColor: string;
   actionSendTextColor: string;
+  // SetVariable was sharing SendText's gold — the two "text/data" actions looked
+  // identical. Its own hue (default a vivid magenta) sits in the one perceptually-
+  // open pill slot left on the wheel, clear of every other action.
+  actionSetVariableColor: string;
   actionWaitImageColor: string;
   actionPixelColorColor: string;
   actionBrowserColor: string;
@@ -85,6 +89,11 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   // semantic carried by Scroll actions.
   actionScrollColor: '#8be597',
   actionSendTextColor: '#d4a020',
+  // Magenta (~315°) — the last open pill slot: ~23° from WaitImage's fuchsia and
+  // far from the SendText gold it used to share. Only near the block-1 rose RAIL
+  // (a different visual role), never another pill. Its own icon (Braces) reinforces
+  // the split.
+  actionSetVariableColor: '#e05cbf',
   actionWaitImageColor: '#e879f9',
   // Lime — replaced the old cyan (#22d3ee) which collided with Key (#60cdff) at
   // only 13° of hue separation. Lime occupies the open slot between SendText
@@ -1746,6 +1755,7 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
     ['key', uiSettings.actionKeyColor],
     ['scroll', uiSettings.actionScrollColor],
     ['sendtext', uiSettings.actionSendTextColor],
+    ['setvariable', uiSettings.actionSetVariableColor ?? DEFAULT_UI_SETTINGS.actionSetVariableColor],
     ['waitimage', uiSettings.actionWaitImageColor],
     ['pixelcolor', uiSettings.actionPixelColorColor],
     ['browser', uiSettings.actionBrowserColor],

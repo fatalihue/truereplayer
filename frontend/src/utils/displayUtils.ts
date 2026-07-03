@@ -101,10 +101,10 @@ function computeActionTypeColors(actionType: string): { bg: string; fg: string }
     return { bg: 'var(--color-action-key-bg)', fg: 'var(--color-action-key-fg)' };
   if (actionType === 'SendText')
     return { bg: 'var(--color-action-sendtext-bg)', fg: 'var(--color-action-sendtext-fg)' };
-  // SetVariable shares SendText's token — both are "text/data" actions and the 40+ theme
-  // presets don't carry a dedicated setvariable key; the Variable icon disambiguates.
+  // SetVariable has its own magenta token now (it used to share SendText's gold, which
+  // made the two "text/data" actions look identical in the grid).
   if (actionType === 'SetVariable')
-    return { bg: 'var(--color-action-sendtext-bg)', fg: 'var(--color-action-sendtext-fg)' };
+    return { bg: 'var(--color-action-setvariable-bg)', fg: 'var(--color-action-setvariable-fg)' };
   if (actionType === 'WaitImage')
     return { bg: 'var(--color-action-waitimage-bg)', fg: 'var(--color-action-waitimage-fg)' };
   if (actionType === 'WaitPixelColor')
@@ -132,7 +132,7 @@ export function getActionTypeIcon(actionType: string): string {
   if (actionType.startsWith('Key')) return 'Keyboard';
   if (actionType === 'HoldKey') return 'Timer';
   if (actionType === 'SendText') return 'Type';
-  if (actionType === 'SetVariable') return 'Variable';
+  if (actionType === 'SetVariable') return 'Braces';
   if (actionType === 'WaitImage') return 'ScanSearch';
   if (actionType === 'WaitPixelColor') return 'Pipette';
   if (actionType === 'RunProfile') return 'Repeat2';

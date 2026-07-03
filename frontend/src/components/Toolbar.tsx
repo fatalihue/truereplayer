@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Variable, AppWindow, Clipboard, ChevronDown } from 'lucide-react';
+import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Braces, AppWindow, Clipboard, ChevronDown } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -494,7 +494,7 @@ export function Toolbar(_props: ToolbarProps) {
             scannability. The clarity wins (icon swaps, deselect X, paste
             badge, destructive Trash, tooltip pass) all stay; only the
             grouping containers were rolled back. */}
-        <div className="flex items-center gap-1 shrink-0" onMouseDown={(e) => e.preventDefault()}>
+        <div className="flex items-center gap-0.5 shrink-0" onMouseDown={(e) => e.preventDefault()}>
           {/* Undo / Redo */}
           <button
             tabIndex={-1}
@@ -517,7 +517,7 @@ export function Toolbar(_props: ToolbarProps) {
 
           {/* History | inserts divider — renders the grouping the insert-order
               comment below describes instead of leaving it implicit. */}
-          <div className="w-px h-4 bg-border-subtle mx-1" />
+          <div className="w-px h-4 bg-border-subtle mx-0.5" />
 
           {/* DISABLED — Toggle Columns button.
               See the commented state block at the top of this component for the
@@ -565,7 +565,7 @@ export function Toolbar(_props: ToolbarProps) {
             )}
           </div>
 
-          <div className="w-px h-4 bg-border-subtle mx-1" />
+          <div className="w-px h-4 bg-border-subtle mx-0.5" />
           */}
 
           {/* ── Insert actions ─────────────────────────────────────────────
@@ -621,7 +621,7 @@ export function Toolbar(_props: ToolbarProps) {
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
             data-tip={clickerTip('Insert Set Variable action — read it back with {var:name}', 'Inserir ação Set Variable — leia com {var:name}')}
           >
-            <Variable size={14} />
+            <Braces size={14} />
           </button>
 
           {/* Pause — wait for a hotkey or a timeout before continuing replay. Now
@@ -645,7 +645,7 @@ export function Toolbar(_props: ToolbarProps) {
               this line open flyout menus (Wait / Conditional / Browser) — the
               chevron each one carries is the "this opens a menu" affordance that
               separates them from the one-click inserts to the left. */}
-          <div className="w-px h-4 bg-border-subtle mx-1" />
+          <div className="w-px h-4 bg-border-subtle mx-0.5" />
 
           {/* Wait — sub-picker for the two blocking-probe variants. Replaces the
               previous standalone Wait Image + Wait Pixel buttons; the consolidated
@@ -850,7 +850,7 @@ export function Toolbar(_props: ToolbarProps) {
             <Repeat2 size={14} />
           </button>
 
-          <div className="w-px h-4 bg-border-subtle mx-1" />
+          <div className="w-px h-4 bg-border-subtle mx-0.5" />
 
           {/* Clear All — destructive hover (red text + faint red bg) mirrors
               BulkActionBar's Delete. Two-step confirm popover + the same
