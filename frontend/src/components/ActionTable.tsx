@@ -1287,7 +1287,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         <span className="text-xs font-semibold text-text-tertiary pl-3">#</span>
         {columnVisibility.action && <span className="text-xs font-semibold text-text-tertiary pl-1">Action</span>}
         {columnVisibility.details && <span className="text-xs font-semibold text-text-tertiary pl-1">Details</span>}
-        {columnVisibility.delay && <span className="text-xs font-semibold text-text-tertiary pl-2">Delay</span>}
+        {columnVisibility.delay && <span className="text-xs font-semibold text-text-tertiary pl-2 pr-2 text-right">Delay</span>}
         {columnVisibility.notes && <span className="text-xs font-semibold text-text-tertiary pl-2 pr-2">Notes</span>}
       </div>
 
@@ -1913,11 +1913,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         onChange={(e) => setEditValue(e.target.value)}
                         onKeyDown={handleEditKeyDown}
                         onBlur={commitEdit}
-                        className="w-16 h-6 px-1 text-xs font-mono text-text-primary bg-bg-input border border-accent-solid rounded outline-none"
+                        className="w-16 h-6 px-1 text-xs font-mono text-right text-text-primary bg-bg-input border border-accent-solid rounded outline-none"
                       />
                     ) : (
-                      <span className="text-xs font-mono text-text-secondary hover:text-text-primary">
+                      // Right-aligned + tabular-nums so a column of delays reads as
+                      // one number ladder; the quiet "ms" suffix answers the unit
+                      // question the bare integer used to leave open.
+                      <span className="text-xs font-mono tabular-nums text-text-secondary hover:text-text-primary block text-right pr-2">
                         {action.delay >= 0 ? action.delay : 0}
+                        <span className="text-[9px] text-text-tertiary ml-0.5">ms</span>
                       </span>
                     )}
                   </td>

@@ -43,15 +43,18 @@ export function ActionBar() {
   //                Stop (busy)     → blue      (stop replay)
   //   Clicker mode Click idle      → purple    (start clicking)
   //                Stop (busy)     → blue      (stop clicking)
+  // Ink comes from the per-fill --color-*-ink tokens (contrast-picked in
+  // applyThemeConfig) — the fills are user-configurable, so a hardcoded
+  // text-white can land at ≈ 2:1 (it did, on the default replay green).
   const recordBtnClass = isRecording
-    ? 'bg-accent-solid hover:bg-accent-solid/80'
-    : 'bg-recording hover:bg-recording/80';
+    ? 'bg-accent-solid hover:bg-accent-solid/80 text-[color:var(--color-accent-ink)]'
+    : 'bg-recording hover:bg-recording/80 text-[color:var(--color-recording-ink)]';
 
   const replayBtnClass = isReplaying
-    ? 'bg-accent-solid hover:bg-accent-solid/80'
+    ? 'bg-accent-solid hover:bg-accent-solid/80 text-[color:var(--color-accent-ink)]'
     : (isClicker
-        ? 'bg-[var(--color-clicker)] hover:opacity-85'
-        : 'bg-replay hover:bg-replay/80');
+        ? 'bg-[var(--color-clicker)] hover:opacity-85 text-[color:var(--color-clicker-ink)]'
+        : 'bg-replay hover:bg-replay/80 text-[color:var(--color-replay-ink)]');
 
   return (
     <div className="flex items-center justify-between px-4 py-2.5 bg-bg-surface border border-border-subtle rounded-ui">
@@ -114,11 +117,11 @@ export function ActionBar() {
               send({ type: 'recording:toggle', payload: { insertIndex } });
             }}
             disabled={!buttonStates.recordEnabled}
-            className={`flex items-center gap-2 px-5 py-2 rounded text-[13px] font-semibold text-white transition-colors ${recordBtnClass} ${PRIMARY_BTN} ${isRecording ? 'record-btn-glow' : ''} disabled:opacity-40 disabled:cursor-not-allowed`}
+            className={`flex items-center gap-2 px-5 py-2 rounded text-[13px] font-semibold transition-colors ${recordBtnClass} ${PRIMARY_BTN} ${isRecording ? 'record-btn-glow' : ''} disabled:opacity-40 disabled:cursor-not-allowed`}
           >
             {isRecording
-              ? <Square size={11} fill="white" className="shrink-0" />
-              : <Circle size={8} fill="white" className="shrink-0" />}
+              ? <Square size={11} fill="currentColor" className="shrink-0" />
+              : <Circle size={8} fill="currentColor" className="shrink-0" />}
             {buttonStates.recordButtonText}
           </button>
         )}
@@ -127,13 +130,13 @@ export function ActionBar() {
         <button
           onClick={handleReplay}
           disabled={!buttonStates.replayEnabled}
-          className={`flex items-center gap-2 px-5 py-2 rounded text-[13px] font-semibold text-white transition-colors ${replayBtnClass} ${PRIMARY_BTN} ${isReplaying ? 'replay-btn-glow' : ''} disabled:opacity-50 disabled:cursor-not-allowed`}
+          className={`flex items-center gap-2 px-5 py-2 rounded text-[13px] font-semibold transition-colors ${replayBtnClass} ${PRIMARY_BTN} ${isReplaying ? 'replay-btn-glow' : ''} disabled:opacity-50 disabled:cursor-not-allowed`}
         >
           {isReplaying
-            ? <Square size={11} fill="white" className="shrink-0" />
+            ? <Square size={11} fill="currentColor" className="shrink-0" />
             : isClicker
               ? <MousePointerClick size={12} className="shrink-0" />
-              : <Play size={12} fill="white" className="shrink-0" />}
+              : <Play size={12} fill="currentColor" className="shrink-0" />}
           {buttonStates.replayButtonText}
         </button>
       </div>

@@ -717,9 +717,11 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
   // hover; clicking expands the panel on the right tab with that section open
   // and scrolled into view). No overflow-hidden here: the tooltips render to
   // the LEFT of the rail, outside the strip's box, and would be clipped.
+  // width + colors in the transition list so the global theme-change fade isn't
+  // overridden by a bare transition-[width] (see ProfilePanel).
   if (collapsed) {
     return (
-      <div className="w-12 flex flex-col shrink-0 bg-bg-surface border border-border-subtle rounded-ui transition-[width] duration-200">
+      <div className="w-12 flex flex-col shrink-0 bg-bg-surface border border-border-subtle rounded-ui transition-[width,background-color,border-color] duration-200">
         <div className="flex items-center justify-center border-b border-border-subtle shrink-0 h-[47px]">
           <button
             onClick={onToggleCollapse}
@@ -760,7 +762,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
     // No overflow-hidden: the collapse button's tooltip renders to the left of
     // the tab bar and would be clipped at the panel edge (scrolling is handled
     // by the tab-content div below).
-    <div className="w-[224px] flex flex-col shrink-0 bg-bg-surface border border-border-subtle rounded-ui transition-[width] duration-200">
+    <div className="w-[224px] flex flex-col shrink-0 bg-bg-surface border border-border-subtle rounded-ui transition-[width,background-color,border-color] duration-200">
       {/* Tab Bar — explicit 44 px height (matches the Toolbar's measured rendered height in
           the centre column) so the section header below this tab bar lines up vertically
           with the action grid's column-header row in the centre. Without this, the tab

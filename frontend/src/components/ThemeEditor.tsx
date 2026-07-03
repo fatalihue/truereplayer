@@ -1397,7 +1397,10 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                         boxShadow: row.selected
                           ? 'inset 2px 0 0 var(--color-accent)'
                           : row.rail
-                            ? `inset 2px 0 0 ${row.rail === 'strong' ? 'var(--color-action-if-fg)' : 'var(--color-action-if-border)'}`
+                            // Thin rail derives from if-fg (35% mix) — the same source the
+                            // real grid's level-0 rail uses — so the preview tracks the fg
+                            // re-derivation instead of the raw-hue if-border token.
+                            ? `inset 2px 0 0 ${row.rail === 'strong' ? 'var(--color-action-if-fg)' : 'color-mix(in srgb, var(--color-action-if-fg) 35%, transparent)'}`
                             : undefined,
                       }}
                     >
@@ -1411,7 +1414,11 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
                         }}
                       >{row.pill}</span>
                       <span className="text-[9px] text-text-secondary truncate">{row.label}</span>
-                      <span className={`font-mono text-[8px] ${row.delay === '—' ? 'text-text-disabled' : 'text-text-secondary'}`}>{row.delay}</span>
+                      {/* Mirrors the real grid's delay cell: right-aligned tabular digits + quiet ms unit. */}
+                      <span className={`font-mono tabular-nums text-[8px] text-right ${row.delay === '—' ? 'text-text-disabled' : 'text-text-secondary'}`}>
+                        {row.delay}
+                        {row.delay !== '—' && <span className="text-[7px] text-text-tertiary ml-0.5">ms</span>}
+                      </span>
                     </div>
                   ))}
                 </div>

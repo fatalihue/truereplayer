@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Variable, AppWindow, Clipboard } from 'lucide-react';
+import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Variable, AppWindow, Clipboard, ChevronDown } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -190,6 +190,11 @@ export function Toolbar(_props: ToolbarProps) {
   const waitFlyout = useFlyoutFlip(showWaitMenu, 'below');
   const conditionalFlyout = useFlyoutFlip(showConditionalMenu, 'below');
   const browserFlyout = useFlyoutFlip(showBrowserMenu, 'below');
+  // Clear All confirm popover — the only destructive toolbar action gets a
+  // two-step confirm, anchored/dismissed exactly like the sibling flyouts.
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const clearMenuRef = useRef<HTMLDivElement>(null);
+  const clearFlyout = useFlyoutFlip(showClearConfirm, 'below');
 
   // Listen for command palette trigger
   useEffect(() => {
@@ -203,6 +208,19 @@ export function Toolbar(_props: ToolbarProps) {
     window.addEventListener('cmd:runprofile', handler);
     return () => window.removeEventListener('cmd:runprofile', handler);
   }, []);
+
+  // Clear All from the command palette — opens the SAME confirm popover the
+  // toolbar button uses (re-checking the gate here since the palette item and
+  // this listener can race a run starting).
+  useEffect(() => {
+    const onClear = () => {
+      if (buttonStates.recordingActive || buttonStates.replayActive) return;
+      if (actions.length === 0) return;
+      setShowClearConfirm(true);
+    };
+    window.addEventListener('cmd:clearactions', onClear);
+    return () => window.removeEventListener('cmd:clearactions', onClear);
+  }, [buttonStates.recordingActive, buttonStates.replayActive, actions.length]);
 
   // Pause from the command palette — same insertIndex-stash trick as the keystroke
   // path below so a race during dialog config doesn't lose the original target row.
@@ -319,6 +337,39 @@ export function Toolbar(_props: ToolbarProps) {
       document.removeEventListener('keydown', keyHandler, true);
     };
   }, [showWaitMenu]);
+
+  // Close the Clear-All confirm if a run starts (or the list empties) while it's
+  // open — runs are usually started by global hotkeys, which produce no mousedown,
+  // so the outside-click dismiss never fires and the trigger's disabled gate only
+  // guards OPENING the popover, not one that's already up.
+  useEffect(() => {
+    if (!showClearConfirm) return;
+    if (buttonStates.recordingActive || buttonStates.replayActive || actions.length === 0) {
+      setShowClearConfirm(false);
+    }
+  }, [showClearConfirm, buttonStates.recordingActive, buttonStates.replayActive, actions.length]);
+
+  // Same outside-click + Escape dismiss for the Clear All confirm popover.
+  useEffect(() => {
+    if (!showClearConfirm) return;
+    const handler = (e: MouseEvent) => {
+      if (clearMenuRef.current && !clearMenuRef.current.contains(e.target as Node)) {
+        setShowClearConfirm(false);
+      }
+    };
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      setShowClearConfirm(false);
+    };
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('keydown', keyHandler, true);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('keydown', keyHandler, true);
+    };
+  }, [showClearConfirm]);
 
   // Toolbar-owned keyboard shortcuts: Ctrl+C copy, Ctrl+V paste, Alt+↑/↓ reorder.
   // (Undo/redo are intentionally NOT here — App.tsx owns Ctrl+Z/Ctrl+Y; see below.)
@@ -453,6 +504,10 @@ export function Toolbar(_props: ToolbarProps) {
             <Redo2 size={14} />
           </button>
 
+          {/* History | inserts divider — renders the grouping the insert-order
+              comment below describes instead of leaving it implicit. */}
+          <div className="w-px h-4 bg-border-subtle mx-1" />
+
           {/* DISABLED — Toggle Columns button.
               See the commented state block at the top of this component for the
               re-enable steps. The trailing grid column was already cleaned up so
@@ -575,6 +630,12 @@ export function Toolbar(_props: ToolbarProps) {
             <Hourglass size={14} />
           </button>
 
+          {/* Direct inserts | menu-based inserts divider. The three buttons after
+              this line open flyout menus (Wait / Conditional / Browser) — the
+              chevron each one carries is the "this opens a menu" affordance that
+              separates them from the one-click inserts to the left. */}
+          <div className="w-px h-4 bg-border-subtle mx-1" />
+
           {/* Wait — sub-picker for the two blocking-probe variants. Replaces the
               previous standalone Wait Image + Wait Pixel buttons; the consolidated
               entry mirrors how the Conditional button groups Image/Pixel probes for
@@ -588,10 +649,11 @@ export function Toolbar(_props: ToolbarProps) {
               tabIndex={-1}
               onClick={() => setShowWaitMenu(!showWaitMenu)}
               disabled={buttonStates.recordingActive || buttonStates.replayActive}
-              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled flex items-center gap-0.5"
               data-tip={tt('Insert Wait (Image / Pixel Color)', 'Inserir Wait (Image / Pixel Color)')}
             >
               <ScanEye size={14} />
+              <ChevronDown size={9} className="opacity-60" />
             </button>
             {showWaitMenu && (
               <div ref={waitFlyout.ref} className={`absolute w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1 ${waitFlyout.flipX ? 'right-0' : 'left-0'} ${waitFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
@@ -634,10 +696,11 @@ export function Toolbar(_props: ToolbarProps) {
               tabIndex={-1}
               onClick={() => setShowConditionalMenu(!showConditionalMenu)}
               disabled={buttonStates.recordingActive || buttonStates.replayActive}
-              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled flex items-center gap-0.5"
               data-tip={tt('Insert Conditional (If / Else / EndIf)', 'Inserir Condicional (If / Else / EndIf)')}
             >
               <GitBranch size={14} />
+              <ChevronDown size={9} className="opacity-60" />
             </button>
             {showConditionalMenu && (
               <div ref={conditionalFlyout.ref} className={`absolute w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1 ${conditionalFlyout.flipX ? 'right-0' : 'left-0'} ${conditionalFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
@@ -717,10 +780,11 @@ export function Toolbar(_props: ToolbarProps) {
               tabIndex={-1}
               onClick={() => setShowBrowserMenu(!showBrowserMenu)}
               disabled={buttonStates.recordingActive || buttonStates.replayActive}
-              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled flex items-center gap-0.5"
               data-tip={tt('Browser Actions', 'Ações de Navegador')}
             >
               <Globe size={14} />
+              <ChevronDown size={9} className="opacity-60" />
             </button>
             {showBrowserMenu && (
               <div ref={browserFlyout.ref} className={`absolute w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1 ${browserFlyout.flipX ? 'right-0' : 'left-0'} ${browserFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
@@ -778,19 +842,53 @@ export function Toolbar(_props: ToolbarProps) {
           <div className="w-px h-4 bg-border-subtle mx-1" />
 
           {/* Clear All — destructive hover (red text + faint red bg) mirrors
-              BulkActionBar's Delete. Copy/Paste removed from the toolbar
-              (redundant with the Ctrl+C / Ctrl+V hotkeys and the BulkActionBar's
-              buttons when a selection exists); Toggle Columns moved to the grid
-              header where it belongs semantically; Theme Editor moved to
-              Settings → Appearance. */}
-          <button
-            tabIndex={-1}
-            onClick={() => send({ type: 'actions:clear', payload: {} })}
-            className="p-1.5 rounded text-text-tertiary hover:bg-recording-bg hover:text-recording transition-colors"
-            data-tip={tt('Clear all actions in this profile', 'Limpar todas as ações deste perfil')}
-          >
-            <Trash2 size={14} />
-          </button>
+              BulkActionBar's Delete. Two-step confirm popover + the same
+              recording/replay disabled gate every sibling mutating button has
+              (a mid-run clear used to be able to yank the list out from under
+              the engine, with only Undo as the safety net). Copy/Paste removed
+              from the toolbar (redundant with the Ctrl+C / Ctrl+V hotkeys and
+              the BulkActionBar's buttons when a selection exists). */}
+          <div className="relative" ref={clearMenuRef}>
+            <button
+              tabIndex={-1}
+              onClick={() => setShowClearConfirm(prev => !prev)}
+              disabled={buttonStates.recordingActive || buttonStates.replayActive || actions.length === 0}
+              className="p-1.5 rounded text-text-tertiary hover:bg-recording-bg hover:text-recording transition-colors disabled:text-text-disabled disabled:hover:bg-transparent disabled:hover:text-text-disabled"
+              data-tip={tt('Clear all actions in this profile', 'Limpar todas as ações deste perfil')}
+            >
+              <Trash2 size={14} />
+            </button>
+            {showClearConfirm && (
+              <div ref={clearFlyout.ref} className={`absolute w-60 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 p-3 ${clearFlyout.flipX ? 'right-0' : 'left-0'} ${clearFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+                <div className="text-xs font-semibold text-text-primary">
+                  Clear all {actions.length} action{actions.length === 1 ? '' : 's'}?
+                </div>
+                <div className="mt-1 text-[11px] text-text-tertiary leading-relaxed">
+                  {tt('Removes every action in this profile. Ctrl+Z undoes it.', 'Remove todas as ações deste perfil. Ctrl+Z desfaz.')}
+                </div>
+                <div className="mt-2.5 flex justify-end gap-1.5">
+                  <button
+                    onClick={() => setShowClearConfirm(false)}
+                    className="px-2.5 py-1 rounded text-[11px] text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      send({ type: 'actions:clear', payload: {} });
+                      setShowClearConfirm(false);
+                    }}
+                    // Same gate as the trigger — covers the render-tick race between
+                    // the run-state push and a click on the already-open popover.
+                    disabled={buttonStates.recordingActive || buttonStates.replayActive}
+                    className="px-2.5 py-1 rounded text-[11px] font-semibold bg-recording text-[color:var(--color-recording-ink)] hover:opacity-85 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Clear all
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

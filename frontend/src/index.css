@@ -24,6 +24,15 @@
   --color-accent-solid: #42a5f5;
   --color-accent-hover: #bbdefb;
 
+  /* Ink (text/icon color) for solid semantic button fills — white or near-black,
+     whichever passes contrast against the fill. Re-derived per theme via
+     contrastRatio() in themes.ts applyThemeConfig; the defaults below match the
+     default fills (all light pastels → dark ink). */
+  --color-recording-ink: #1c1c1c;
+  --color-replay-ink: #1c1c1c;
+  --color-clicker-ink: #1c1c1c;
+  --color-accent-ink: #1c1c1c;
+
   /* Semantic */
   --color-recording: #ff6b6b;
   --color-recording-bg: rgba(255, 107, 107, 0.1);
@@ -33,19 +42,23 @@
   --color-clicker-bg: rgba(192, 132, 252, 0.12);
   --color-clicker-border: rgba(192, 132, 252, 0.3);
 
-  /* Action type pills */
-  --color-action-mouse-fg: #a78bfa;
-  --color-action-mouse-bg: rgba(167, 139, 250, 0.1);
-  --color-action-key-fg: #60cdff;
-  --color-action-key-bg: rgba(96, 205, 255, 0.1);
-  --color-action-scroll-fg: #6bcb77;
-  --color-action-scroll-bg: rgba(107, 203, 119, 0.1);
-  --color-action-sendtext-fg: #d4a020;
-  --color-action-sendtext-bg: rgba(212, 160, 32, 0.1);
-  --color-action-waitimage-fg: #e879f9;
-  --color-action-waitimage-bg: rgba(232, 121, 249, 0.1);
-  --color-action-browser-fg: #fb923c;
-  --color-action-browser-bg: rgba(251, 146, 60, 0.1);
+  /* Action type pills — fg is the hue mixed toward text-primary (keeps ink legible
+     on light presets); bg stays a TRANSLUCENT tint so pills composite over row
+     hover/selection/highlight/block washes. Runtime values are re-derived per
+     theme in themes.ts applyThemeConfig with the same recipe; these fallbacks
+     only cover the pre-hydration frame. */
+  --color-action-mouse-fg: color-mix(in srgb, #a78bfa 72%, var(--color-text-primary));
+  --color-action-mouse-bg: color-mix(in srgb, #a78bfa 12%, transparent);
+  --color-action-key-fg: color-mix(in srgb, #60cdff 72%, var(--color-text-primary));
+  --color-action-key-bg: color-mix(in srgb, #60cdff 12%, transparent);
+  --color-action-scroll-fg: color-mix(in srgb, #6bcb77 72%, var(--color-text-primary));
+  --color-action-scroll-bg: color-mix(in srgb, #6bcb77 12%, transparent);
+  --color-action-sendtext-fg: color-mix(in srgb, #d4a020 72%, var(--color-text-primary));
+  --color-action-sendtext-bg: color-mix(in srgb, #d4a020 12%, transparent);
+  --color-action-waitimage-fg: color-mix(in srgb, #e879f9 72%, var(--color-text-primary));
+  --color-action-waitimage-bg: color-mix(in srgb, #e879f9 12%, transparent);
+  --color-action-browser-fg: color-mix(in srgb, #fb923c 72%, var(--color-text-primary));
+  --color-action-browser-bg: color-mix(in srgb, #fb923c 12%, transparent);
 
   /* Conditional-block nesting palette ("rainbow brackets"). Level 0 is the user's
      configurable IF colour (--color-action-if-fg) so single-level blocks look
@@ -72,10 +85,11 @@
   /* Fonts */
   --font-mono: 'Consolas', 'Courier New', monospace;
 
-  /* UI Settings (overridden at runtime by ThemeContext) */
+  /* UI Settings (overridden at runtime by ThemeContext). Values must mirror
+     DEFAULT_UI_SETTINGS in themes.ts so the pre-hydration frame matches. */
   --ui-font-size: 13px;
-  --ui-border-radius: 6px;
-  --ui-row-height: 36px;
+  --ui-border-radius: 3px;
+  --ui-row-height: 34px;
 }
 
 /* Global resets */
@@ -85,21 +99,23 @@
 
 /* Animations toggle — when html[data-animations="true"] is set (default), opt key
    surfaces into a short color/background transition so theme changes don't snap
-   harshly. Buttons keep their own per-component transitions; this rule is
-   intentionally narrow to avoid making large lists feel laggy. */
-html[data-animations="true"] body,
-html[data-animations="true"] body * {
-  transition:
-    background-color 180ms ease,
-    color 180ms ease,
-    border-color 180ms ease;
-}
-/* Disable transitions inside dropdowns/menus/text inputs while typing — avoids
-   a perceived "lag" when characters paint. */
-html[data-animations="true"] input,
-html[data-animations="true"] textarea,
-html[data-animations="true"] select {
-  transition: border-color 180ms ease, background-color 180ms ease;
+   harshly. Lives in @layer base with :where() so any element that declares its own
+   transition (Tailwind transition-* utilities live in @layer utilities, which wins
+   over base) keeps it — the unlayered/full-specificity version of this rule used to
+   clobber every width/transform/opacity transition in the app because the
+   `transition:` shorthand resets transition-property. */
+@layer base {
+  html[data-animations="true"] :where(body, body *) {
+    transition:
+      background-color 180ms ease,
+      color 180ms ease,
+      border-color 180ms ease;
+  }
+  /* Disable transitions inside dropdowns/menus/text inputs while typing — avoids
+     a perceived "lag" when characters paint. */
+  html[data-animations="true"] :where(input, textarea, select) {
+    transition: border-color 180ms ease, background-color 180ms ease;
+  }
 }
 
 html, body, #root {

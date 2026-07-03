@@ -225,9 +225,16 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             onAction: () => { send({ type: 'actions:convertMode', payload: { direction: 'toPaired' } }); onClose(); },
           },
           {
+            // Same gate as the toolbar's Clear All button, and routed through its
+            // confirm popover (cmd:clearactions → Toolbar opens the two-step
+            // confirm) so no path can clear the list in a single ungated click.
             id: 'clearactions', label: 'Clear All Actions',
             icon: <Trash2 size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:clear', payload: {} }); onClose(); },
+            disabled: isRecording || isReplaying || actions.length === 0,
+            disabledHint: (isRecording || isReplaying)
+              ? tt('Stop recording/replay first', 'Pare a gravação/replay primeiro')
+              : tt('No actions to clear', 'Nenhuma ação para limpar'),
+            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:clearactions')); },
           },
         ],
       },
@@ -331,6 +338,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
     // so unrelated settings changes (e.g. movement knobs) don't rebuild every command group.
   }, [
     profiles, activeProfile, buttonStates, send, onClose, computeInsertIndex, tt,
+    actions.length,
     settings.recordingHotkey, settings.replayHotkey, settings.modeToggleHotkey,
     settings.useCursorClick, settings.enableLoop, settings.loopCount,
     settings.loopIntervalEnabled, settings.loopInterval,

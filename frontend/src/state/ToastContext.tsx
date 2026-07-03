@@ -25,6 +25,10 @@ interface ToastContextValue {
   toasts: ToastItem[];
   showToast: (message: string, options?: ToastOptions | ToastType) => void;
   dismissToast: (id: number) => void;
+  // Hover-pause: the renderer freezes the auto-dismiss countdown while the
+  // pointer is over a toast (reading an 8s error shouldn't be a race).
+  pauseToast: (id: number) => void;
+  resumeToast: (id: number) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -46,6 +50,22 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   // Track auto-dismiss timers so they can be cancelled on manual dismiss and on unmount —
   // otherwise a pending timer (up to 8s for errors) fires setToasts after the provider is gone.
   const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  // Absolute dismiss deadline per toast (set when its timer is armed) + the
+  // remaining budget captured at pause time. Two maps so pause → resume can't
+  // confuse "deadline" with "time left".
+  const deadlinesRef = useRef<Map<number, number>>(new Map());
+  const remainingRef = useRef<Map<number, number>>(new Map());
+
+  const armTimer = useCallback((id: number, ms: number) => {
+    deadlinesRef.current.set(id, Date.now() + ms);
+    const timer = setTimeout(() => {
+      timersRef.current.delete(id);
+      deadlinesRef.current.delete(id);
+      remainingRef.current.delete(id);
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, ms);
+    timersRef.current.set(id, timer);
+  }, []);
 
   const dismissToast = useCallback((id: number) => {
     const timer = timersRef.current.get(id);
@@ -53,8 +73,29 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       clearTimeout(timer);
       timersRef.current.delete(id);
     }
+    deadlinesRef.current.delete(id);
+    remainingRef.current.delete(id);
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
+
+  const pauseToast = useCallback((id: number) => {
+    const timer = timersRef.current.get(id);
+    if (!timer) return;
+    clearTimeout(timer);
+    timersRef.current.delete(id);
+    const deadline = deadlinesRef.current.get(id);
+    remainingRef.current.set(id, Math.max(0, (deadline ?? Date.now()) - Date.now()));
+  }, []);
+
+  const resumeToast = useCallback((id: number) => {
+    if (timersRef.current.has(id)) return; // never paused (or already resumed)
+    const remaining = remainingRef.current.get(id);
+    if (remaining == null) return;
+    remainingRef.current.delete(id);
+    // 1.5s floor so a toast the user just finished reading doesn't vanish the
+    // instant the pointer leaves it.
+    armTimer(id, Math.max(remaining, 1500));
+  }, [armTimer]);
 
   // Accepts either a ToastType string (legacy 2-arg call sites) or an options object.
   const showToast = useCallback((message: string, opts?: ToastOptions | ToastType) => {
@@ -64,12 +105,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const duration = options.duration
       ?? (options.action ? 6000 : (resolvedType === 'error' ? 8000 : 3000));
     setToasts(prev => [...prev, { id, message, type: resolvedType, action: options.action }]);
-    const timer = setTimeout(() => {
-      timersRef.current.delete(id);
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, duration);
-    timersRef.current.set(id, timer);
-  }, []);
+    armTimer(id, duration);
+  }, [armTimer]);
 
   // Cancel any still-pending auto-dismiss timers when the provider unmounts.
   useEffect(() => {
@@ -91,7 +128,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, [subscribe, showToast]);
 
   return (
-    <ToastContext.Provider value={{ toasts, showToast, dismissToast }}>
+    <ToastContext.Provider value={{ toasts, showToast, dismissToast, pauseToast, resumeToast }}>
       {children}
     </ToastContext.Provider>
   );

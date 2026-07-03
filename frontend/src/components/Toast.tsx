@@ -1,4 +1,4 @@
-import { CheckCircle2, XCircle, Info } from 'lucide-react';
+import { CheckCircle2, XCircle, Info, X } from 'lucide-react';
 import { useToast, type ToastType } from '../state/ToastContext';
 
 const iconMap: Record<ToastType, { Icon: React.ElementType; color: string }> = {
@@ -8,7 +8,7 @@ const iconMap: Record<ToastType, { Icon: React.ElementType; color: string }> = {
 };
 
 export function Toast() {
-  const { toasts, dismissToast } = useToast();
+  const { toasts, dismissToast, pauseToast, resumeToast } = useToast();
 
   if (toasts.length === 0) return null;
 
@@ -30,6 +30,10 @@ export function Toast() {
         return (
           <div
             key={toast.id}
+            // Freeze the countdown while the pointer is over the toast — an 8s
+            // error shouldn't be a reading race.
+            onMouseEnter={() => pauseToast(toast.id)}
+            onMouseLeave={() => resumeToast(toast.id)}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -58,6 +62,14 @@ export function Toast() {
                 {toast.action.label}
               </button>
             )}
+            <button
+              onClick={() => dismissToast(toast.id)}
+              className="p-1 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+              style={{ flexShrink: 0 }}
+              aria-label="Dismiss notification"
+            >
+              <X size={12} />
+            </button>
           </div>
         );
       })}

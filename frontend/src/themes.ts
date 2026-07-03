@@ -1516,6 +1516,19 @@ export function contrastRatio(fgHex: string, bgHex: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
+/**
+ * Text/icon ink for a solid button fill: white or near-black, whichever contrasts
+ * more against the fill. Semantic fills (recording red, replay green, clicker
+ * purple, accent blue) are user-configurable, so the ink can't be hardcoded —
+ * white 13px text on the default replay green computes ≈ 2:1 and is exactly the
+ * kind of pairing this exists to prevent.
+ */
+export function pickInk(fillHex: string): string {
+  return contrastRatio('#ffffff', fillHex) >= contrastRatio('#1c1c1c', fillHex)
+    ? '#ffffff'
+    : '#1c1c1c';
+}
+
 // ── Accent Derivation ──
 
 export function deriveAccentVariants(accentHex: string): Pick<ThemeColors, 'accent' | 'accent-solid' | 'accent-hover'> {
@@ -1675,29 +1688,40 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   parts.push(`--color-clicker: ${uiSettings.clickerColor};`);
   parts.push(`--color-clicker-bg: color-mix(in srgb, ${uiSettings.clickerColor} 12%, transparent);`);
   parts.push(`--color-clicker-border: color-mix(in srgb, ${uiSettings.clickerColor} 30%, transparent);`);
-  // Action type pill colors + auto-derived backgrounds
-  parts.push(`--color-action-mouse-fg: ${uiSettings.actionMouseColor};`);
-  parts.push(`--color-action-mouse-bg: color-mix(in srgb, ${uiSettings.actionMouseColor} 10%, transparent);`);
-  parts.push(`--color-action-key-fg: ${uiSettings.actionKeyColor};`);
-  parts.push(`--color-action-key-bg: color-mix(in srgb, ${uiSettings.actionKeyColor} 10%, transparent);`);
-  parts.push(`--color-action-scroll-fg: ${uiSettings.actionScrollColor};`);
-  parts.push(`--color-action-scroll-bg: color-mix(in srgb, ${uiSettings.actionScrollColor} 10%, transparent);`);
-  parts.push(`--color-action-sendtext-fg: ${uiSettings.actionSendTextColor};`);
-  parts.push(`--color-action-sendtext-bg: color-mix(in srgb, ${uiSettings.actionSendTextColor} 10%, transparent);`);
-  parts.push(`--color-action-waitimage-fg: ${uiSettings.actionWaitImageColor};`);
-  parts.push(`--color-action-waitimage-bg: color-mix(in srgb, ${uiSettings.actionWaitImageColor} 10%, transparent);`);
-  parts.push(`--color-action-pixelcolor-fg: ${uiSettings.actionPixelColorColor};`);
-  parts.push(`--color-action-pixelcolor-bg: color-mix(in srgb, ${uiSettings.actionPixelColorColor} 10%, transparent);`);
-  parts.push(`--color-action-browser-fg: ${uiSettings.actionBrowserColor};`);
-  parts.push(`--color-action-browser-bg: color-mix(in srgb, ${uiSettings.actionBrowserColor} 10%, transparent);`);
-  parts.push(`--color-action-runprofile-fg: ${uiSettings.actionRunProfileColor};`);
-  parts.push(`--color-action-runprofile-bg: color-mix(in srgb, ${uiSettings.actionRunProfileColor} 10%, transparent);`);
-  parts.push(`--color-action-pause-fg: ${uiSettings.actionPauseColor};`);
-  parts.push(`--color-action-pause-bg: color-mix(in srgb, ${uiSettings.actionPauseColor} 10%, transparent);`);
-  parts.push(`--color-action-if-fg: ${uiSettings.actionIfColor};`);
-  parts.push(`--color-action-if-bg: color-mix(in srgb, ${uiSettings.actionIfColor} 10%, transparent);`);
-  // Tinted border for the conditional block scope rail. 35% alpha so it stays
-  // visible at depth-1 while still reading as a secondary structural cue.
+  // Ink for solid semantic fills (Recording/Replay/Clicker buttons + accent "Stop"
+  // state) — contrast-picked per fill so no user color choice can produce the old
+  // white-on-mid-green ≈ 2:1 pairing.
+  parts.push(`--color-recording-ink: ${pickInk(uiSettings.recordingColor)};`);
+  parts.push(`--color-replay-ink: ${pickInk(uiSettings.replayColor)};`);
+  parts.push(`--color-clicker-ink: ${pickInk(uiSettings.clickerColor)};`);
+  parts.push(`--color-accent-ink: ${pickInk(colors['accent-solid'])};`);
+  // Action type pill colors — the stored hue is treated as the action's identity,
+  // not its literal ink: fg mixes the hue toward text-primary (dark themes ≈ the
+  // original pastel; light themes automatically darken toward the near-black
+  // text-primary instead of washing out), bg tints the hue over bg-surface so the
+  // chip stays visible on any preset. Same recipe as the index.css fallbacks.
+  const actionHues: [string, string][] = [
+    ['mouse', uiSettings.actionMouseColor],
+    ['key', uiSettings.actionKeyColor],
+    ['scroll', uiSettings.actionScrollColor],
+    ['sendtext', uiSettings.actionSendTextColor],
+    ['waitimage', uiSettings.actionWaitImageColor],
+    ['pixelcolor', uiSettings.actionPixelColorColor],
+    ['browser', uiSettings.actionBrowserColor],
+    ['runprofile', uiSettings.actionRunProfileColor],
+    ['pause', uiSettings.actionPauseColor],
+    ['if', uiSettings.actionIfColor],
+  ];
+  for (const [key, hue] of actionHues) {
+    parts.push(`--color-action-${key}-fg: color-mix(in srgb, ${hue} 72%, ${colors['text-primary']});`);
+    // bg stays TRANSLUCENT (mixed over transparent, not bg-surface): pills must
+    // composite over row hover/selection/highlight/block washes and the drag
+    // ghost — an opaque fill punches a hole through all of them. The light-theme
+    // legibility win lives in the fg recipe above.
+    parts.push(`--color-action-${key}-bg: color-mix(in srgb, ${hue} 12%, transparent);`);
+  }
+  // Tinted border for the conditional block scope rail — keeps the RAW hue (35%
+  // alpha): rails are structural, not text, and want the pure identity color.
   parts.push(`--color-action-if-border: color-mix(in srgb, ${uiSettings.actionIfColor} 35%, transparent);`);
   // Font
   parts.push(`--font-mono: '${uiSettings.fontMono}', 'Courier New', monospace;`);

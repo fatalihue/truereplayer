@@ -1499,7 +1499,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       {/* No overflow-hidden on the panel root: the data-tip tooltips (pos right/end)
           render outside the strip's box and would be clipped — same fix as the
           SettingsPanel. */}
-      <div className={`flex flex-col bg-bg-surface border border-border-subtle rounded-ui shrink-0 transition-[width] duration-200 ${collapsed ? 'w-12' : 'w-[260px]'}`}>
+      {/* width + colors in the transition list: a bare transition-[width] overrides
+          the global theme-change fade, so the panel's background/border would snap
+          on theme switch while everything around it cross-fades. */}
+      <div className={`flex flex-col bg-bg-surface border border-border-subtle rounded-ui shrink-0 transition-[width,background-color,border-color] duration-200 ${collapsed ? 'w-12' : 'w-[260px]'}`}>
         {collapsed ? (
           <>
             {/* Collapsed rail — mirrors the SettingsPanel rail: quick actions up
