@@ -25,6 +25,21 @@ export function getDisplayKey(key: string): string {
   return DISPLAY_KEY_MAP[key] ?? key;
 }
 
+// Space the '+' separators in a keystroke combo for readability in the grid:
+// "Ctrl+Alt+F" → "Ctrl + Alt + F" (matches the ProfilePanel hotkey chips). A
+// combo is already in display form (Ctrl/Alt/…), so no per-key remapping — just
+// re-space. A lone '+' key and a trailing literal '+' (e.g. "Ctrl++") are kept
+// intact, same split rule as KbdTag.
+export function formatKeyCombo(combo: string): string {
+  if (!combo) return '';
+  if (combo === '+') return '+';
+  const parts = combo
+    .split('+')
+    .map((p, i, arr) => (p === '' && i === arr.length - 1 ? '+' : p))
+    .filter(p => p !== '');
+  return parts.join(' + ');
+}
+
 // Pixel-coordinate display applies to the standalone WaitPixelColor action AND
 // to IF rows whose condition is PixelColorMatch — both store the watched point
 // in pixelX/pixelY and show it in the Details column.

@@ -13,7 +13,7 @@ import { useBridge } from '../bridge/BridgeContext';
 import { useTt } from '../state/LanguageContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { useToast } from '../state/ToastContext';
-import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors } from '../utils/displayUtils';
+import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors, formatKeyCombo } from '../utils/displayUtils';
 import { snapIndicesToBlocks } from '../utils/conditionalBlocks';
 import { SendTextDialog } from './SendTextDialog';
 import { SendTextPreview } from './SendTextPreview';
@@ -1361,17 +1361,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   // wrong "Deselect all" tooltip on a fresh grid).
   const allSelected = actions.length > 0 && selectedIndices.size === actions.length;
 
-  // Insertion caret target — every insert path (toolbar, palette, recording in
-  // insert mode) lands BEFORE the first selected row; a 2px accent line on that
-  // row makes the destination visible before any insert button is clicked.
-  // No selection = append at the end (no caret). Hidden while any drag is live
-  // (row drag or profile drop) so it can't read as a second drop indicator
-  // next to the drop-gap slot. Hoisted out of the row map.
-  const insertTargetIdx =
-    dragIndices === null && dropTarget === null && selectedIndices.size > 0
-      ? Math.min(...selectedIndices)
-      : null;
-
   return (
     <div
       className="relative flex-1 bg-bg-surface border border-border-subtle rounded-ui overflow-hidden flex flex-col outline-none"
@@ -1482,7 +1471,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           <tbody ref={tbodyRef}>
             {actions.map((action, idx) => {
               const colors = getActionTypeColors(action.actionType);
-              const isInsertTarget = idx === insertTargetIdx;
               const isHighlighted = highlightedActionIndex === idx;
               // While the replay engine is awaiting a Pause action's resume condition, the
               // highlighted row IS the paused action — flag it so the row treatment can swap
@@ -1550,6 +1538,11 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         // "name = value" reads like the assignment it is; a fresh row
                         // (no name yet) stays blank like an unconfigured WaitImage.
                         ? (action.key ? `${action.key} = ${action.variableValue ?? ''}` : '')
+                      : action.actionType === 'Keystroke'
+                        // Combined keystrokes read as spaced combos ("Ctrl + Alt + F"),
+                        // matching the ProfilePanel hotkey chips. Single keys are
+                        // unchanged (no separator to space).
+                        ? formatKeyCombo(action.key)
                       : getDisplayKey(action.key);
               const displayX = getDisplayX(action);
               const displayY = getDisplayY(action);
@@ -1649,16 +1642,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     className="h-row border-b border-border-subtle relative pointer-events-none bg-[color-mix(in_srgb,var(--row-block-color)_6%,transparent)]"
                   >
                     <td colSpan={99} className="p-0 relative">
-                      {/* Insertion caret relocates here when this ghost renders above
-                          the insert-target EndIf row — inserts land before the REAL
-                          row, and visually that slot is the top of this ghost. */}
-                      {idx === insertTargetIdx && (
-                        <div
-                          className="absolute top-0 left-0 right-0 h-[2px] bg-accent-solid pointer-events-none z-[5]"
-                          data-insert-caret
-                          aria-hidden="true"
-                        />
-                      )}
                       <button
                         type="button"
                         onClick={() => send({ type: 'actions:addElseBranch', payload: { ifRowIndex: blockIf } })}
@@ -1784,19 +1767,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       subsequent td (checkbox / # / Action / Key / X / Y / Delay / Notes)
                       one column to the right — the alignment bug we hit before this fix. */}
                   <td className="w-7">
-                    {/* Insertion caret — 2px accent line across the row's TOP edge
-                        (anchored to the tr like the rails). Marks where every
-                        insert path will land: before this (first-selected) row.
-                        When an Add-Else ghost renders above this row, the caret
-                        moves to the ghost (see the ghost tr) so it sits in the
-                        correct visual slot. */}
-                    {isInsertTarget && !showAddElseBefore && (
-                      <div
-                        className="absolute top-0 left-0 right-0 h-[2px] bg-accent-solid pointer-events-none z-[5]"
-                        data-insert-caret
-                        aria-hidden="true"
-                      />
-                    )}
                     {railCount > 0 && Array.from({ length: railCount }, (_, i) => {
                       const isInnermost = i === railCount - 1;
                       const strong = isStructural && isInnermost;

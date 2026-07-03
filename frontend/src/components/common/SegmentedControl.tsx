@@ -25,6 +25,10 @@ export interface SegmentedControlProps<T extends string> {
   ariaLabel: string;
   /** Stretch segments to share the track evenly (tab-bar style). */
   grow?: boolean;
+  /** Drop the inset input-colored track (bg + border + padding) so the control
+   *  blends into its surface — used by the SettingsPanel tabs, whose dark track
+   *  read as "another input field". The active segment's own fill still shows. */
+  plain?: boolean;
   className?: string;
 }
 
@@ -36,11 +40,12 @@ export function SegmentedControl<T extends string>({
   onChange,
   ariaLabel,
   grow = false,
+  plain = false,
   className = '',
 }: SegmentedControlProps<T>) {
   return (
     <div
-      className={`flex items-center bg-bg-input border border-border-default rounded p-0.5 gap-0.5 ${className}`}
+      className={`flex items-center gap-0.5 ${plain ? '' : 'bg-bg-input border border-border-default rounded p-0.5'} ${className}`}
       role="tablist"
       aria-label={ariaLabel}
     >

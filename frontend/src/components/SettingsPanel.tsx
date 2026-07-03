@@ -800,6 +800,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
           ariaLabel="Settings scope"
           className="flex-1"
           grow
+          plain
           value={activeTab}
           onChange={setActiveTab}
           options={[
