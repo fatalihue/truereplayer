@@ -18,9 +18,9 @@ namespace TrueReplayer.Services
             public bool StartMinimized { get; set; } = true;
             // Notifications — out-of-window run-end cues (UI Wave 3). The window is
             // usually BEHIND the game while a replay runs, so the in-window status
-            // pills are invisible exactly when they matter. Flash defaults ON (subtle,
-            // standard Windows affordance); sound is opt-in.
-            public bool RunEndFlash { get; set; } = true;
+            // pills are invisible exactly when they matter. Both opt-in (owner
+            // decision) — some users find a taskbar flash intrusive.
+            public bool RunEndFlash { get; set; } = false;
             public bool RunEndSound { get; set; } = false;
             // Execution
             public bool UseCustomDelay { get; set; } = true;

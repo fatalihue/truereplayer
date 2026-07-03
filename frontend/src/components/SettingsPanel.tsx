@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useContext, createContext } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle, Globe, BellRing } from 'lucide-react';
+import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointer, Palette, Gamepad2, AlertTriangle, Globe, BellRing } from 'lucide-react';
 import { useLanguage, useTt } from '../state/LanguageContext';
 // `Search` import removed with the disabled Settings filter — re-add it to revive the filter.
 import { useAppState } from '../state/AppStateContext';
@@ -722,7 +722,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
     settings.useCursorClick
       ? [
           { tab: 'profile', title: 'Hotkeys', icon: Zap, color: '#60cdff' },
-          { tab: 'profile', title: 'Clicker', icon: MousePointerClick, color: 'var(--color-clicker)' },
+          { tab: 'profile', title: 'Clicker', icon: MousePointer, color: 'var(--color-clicker)' },
         ]
       : [
           { tab: 'profile', title: 'Execution', icon: Timer, color: '#ffd93d' },

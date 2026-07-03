@@ -213,9 +213,17 @@ select:focus-visible,
   pointer-events: auto !important;
   cursor: default !important;
 }
-/* Kept so any element that relied on data-tip for relative-positioning of its own
-   absolute children doesn't shift. The tooltip itself is a body portal (see below). */
-[data-tip] { position: relative; }
+/* Default positioning context so a data-tip element with absolutely-positioned
+   CHILDREN anchors them (the tooltip itself is a body portal, so it doesn't rely
+   on this). In @layer base — NOT unlayered — so a Tailwind position utility on
+   the same element (.absolute/.fixed/.sticky, which live in @layer utilities)
+   WINS. Unlayered, this rule out-cascaded those utilities and silently forced
+   every data-tip'd absolute/fixed element back into flow (the "row jumps on
+   hover" pencil bug + several corner-✕ overlays). Elements with no position
+   utility still get `relative` from here. */
+@layer base {
+  [data-tip] { position: relative; }
+}
 
 /* Unified tooltip — ONE body-portal renderer (TooltipLayer) drives every tooltip via the
    data-tip attribute: instant, never clipped (escapes panel/modal overflow), wraps at a max

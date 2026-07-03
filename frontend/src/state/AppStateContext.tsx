@@ -56,9 +56,9 @@ const defaultSettings = {
   minimizeToTray: true,
   runOnStartup: true,
   startMinimized: true,
-  // Must match AppSettingsManager.AppSettings defaults (flash on, sound opt-in)
-  // so there's no wrong-value flash before settings:loaded arrives.
-  runEndFlash: true,
+  // Must match AppSettingsManager.AppSettings defaults (both opt-in) so there's
+  // no wrong-value flash before settings:loaded arrives.
+  runEndFlash: false,
   runEndSound: false,
   runAsAdmin: false,
 };

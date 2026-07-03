@@ -1553,7 +1553,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       : getDisplayKey(action.key);
               const displayX = getDisplayX(action);
               const displayY = getDisplayY(action);
-              const canEditXY = isMouseAction(action.actionType);
 
               const isDragged = dragIndexSet?.has(idx) ?? false;
               // Skip propagation: when an IF row carries IsSkipped, every row inside
@@ -1912,77 +1911,16 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       "x, y" coordinate pair, If-pixel rows render both (hex chip +
                       probe coords). */}
                   {columnVisibility.details && (() => {
-                    // Compute group membership once so the dblclick router and the
-                    // td-level cursor class don't drift out of sync. Group A = inline
-                    // edit / specialised dialog; Group B = open Sheet; mouse rows =
-                    // inline "x, y" edit; the rest (Scroll, Else, EndIf) = no-op.
-                    const isGroupA =
-                      action.actionType === 'SendText'
-                      || action.actionType === 'RunProfile'
-                      || action.actionType === 'Keystroke'
-                      || action.actionType === 'HoldKey'
-                      || action.actionType.startsWith('Key'); // KeyDown / KeyUp
-                    const isGroupB =
-                      action.actionType === 'WaitImage'
-                      || action.actionType === 'WaitPixelColor'
-                      || action.actionType === 'Pause'
-                      || action.actionType.startsWith('Browser')
-                      || action.actionType === 'If'
-                      || action.actionType === 'SetVariable';
-                    // td-level cursor mirrors the chip's intent so EMPTY cells (WaitImage /
-                    // WaitPixelColor with no value yet) still show the right affordance.
-                    // When a chip is rendered, its own cursor class wins inside the chip
-                    // hitbox; the td cursor only paints the surrounding padding.
-                    const tdCursor = isGroupA
-                      ? 'cursor-text'
-                      : isGroupB
-                        ? 'cursor-pointer'
-                        : canEditXY
-                          ? 'cursor-text'
-                          : '';
                     return (
                   <td
-                    className={`pl-1 ${tdCursor}`}
-                    // SINGLE click at the <td> level so EMPTY cells respond too.
-                    // Guards, in order: an open editor anywhere means this click is a
-                    // commit-elsewhere/focus click, not an edit request; a click right
-                    // after a drag is the drop release (handleRowClick consumes and
-                    // resets the flag); modifier clicks are selection gestures and
-                    // bubble to the row handler untouched. When the click IS an edit,
-                    // stopPropagation keeps the row's select/deselect toggle out of it.
-                    onClick={(e) => {
-                      if (editingCell) return;
-                      if (dragOccurred.current) return;
-                      if (e.ctrlKey || e.metaKey || e.shiftKey) return;
-                      if (action.actionType === 'SendText') {
-                        e.stopPropagation();
-                        setSendTextEdit({ index: idx, text: action.key });
-                      } else if (action.actionType === 'RunProfile') {
-                        e.stopPropagation();
-                        setRunProfileEdit({ index: idx, profileName: action.key, repeatCount: action.repeatCount ?? 1 });
-                      } else if (action.actionType === 'Keystroke' || action.actionType === 'HoldKey') {
-                        e.stopPropagation();
-                        setKeystrokeEdit({ index: idx });
-                      } else if (action.actionType.startsWith('Key')) {
-                        // KeyDown/KeyUp edit on a single click like every other cell
-                        // (the earlier select-first guard was removed at user request).
-                        e.stopPropagation();
-                        startEdit(idx, 'key', action.key);
-                      } else if (action.actionType === 'Pause') {
-                        // Pause reopens its own dialog (capture pad + timeout), not
-                        // the Sheet — same window the toolbar uses to insert one.
-                        e.stopPropagation();
-                        setPauseEdit({ index: idx });
-                      } else if (isGroupB) {
-                        e.stopPropagation();
-                        onOpenSheet?.(idx);
-                      } else if (canEditXY) {
-                        e.stopPropagation();
-                        startEdit(idx, 'coords', `${action.x}, ${action.y}`);
-                      }
-                      // Scroll, Else, EndIf — fall through with no click action.
-                      // Their Details cell has no editable meaning.
-                    }}
+                    // No onClick: clicking Details no longer opens an editor (owner
+                    // decision — the hover pencil / Enter / context-menu are the
+                    // single edit path now). A plain click bubbles to the row's
+                    // handler and selects the row like any other cell. The inline
+                    // coords/key editor branches below stay wired to editingCell
+                    // (still reachable via the Delay/Notes cells' own startEdit),
+                    // but nothing in THIS cell sets those fields anymore.
+                    className="pl-1"
                   >
                     {editingCell?.index === idx && editingCell.field === 'coords' ? (
                       <span className="relative inline-block">
@@ -2026,22 +1964,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     ) : (<>
                     {displayKey ? (
                       <span
-                        className={`inline-flex items-center translate-y-[-2px] text-xs font-mono text-text-primary max-w-[220px] truncate ${
-                          // Group A — Key cell IS the primary editor for this action
-                          // (text body, profile picker, keystroke combo, single key).
-                          // cursor-text reflects "you can type / edit" semantics; dblclick
-                          // routes to the specialized dialog or inline capture.
-                          action.actionType === 'SendText' || action.actionType.startsWith('Key') || action.actionType === 'HoldKey' || action.actionType === 'RunProfile'
-                            ? 'cursor-text hover:text-accent-light'
-                            // Group B — Key cell shows a derived identifier (image
-                            // filename, pixel hex, selector, etc.). dblclick opens the
-                            // full Sheet panel for editing; cursor-pointer signals the
-                            // chip is interactive without implying inline edit.
-                            : action.actionType === 'WaitImage' || action.actionType === 'WaitPixelColor' || action.actionType === 'Pause'
-                              || action.actionType.startsWith('Browser') || action.actionType === 'If' || action.actionType === 'SetVariable'
-                              ? 'cursor-pointer hover:text-accent-light'
-                              : ''
-                        }`}
+                        // No edit-affordance cursor/hover: the Details cell is display
+                        // only now (editing is the hover pencil). data-tip still
+                        // surfaces the full string for truncated content.
+                        className="inline-flex items-center translate-y-[-2px] text-xs font-mono text-text-primary max-w-[220px] truncate"
                         data-tip={
                           action.actionType === 'SendText' ? action.key
                           : action.actionType === 'RunProfile' ? tt(`Run profile "${action.key}"`, `Executar perfil "${action.key}"`)
@@ -2087,7 +2013,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         one edit target. */}
                     {displayX !== '' && (
                       <span
-                        className={`text-xs font-mono text-text-secondary tabular-nums ${displayKey ? 'ml-1.5' : ''} ${canEditXY ? 'cursor-text hover:text-text-primary' : ''}`}
+                        className={`text-xs font-mono text-text-secondary tabular-nums ${displayKey ? 'ml-1.5' : ''}`}
                       >
                         {displayX}, {displayY}
                       </span>
@@ -2159,7 +2085,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         className="w-full h-6 px-1 text-xs text-text-primary bg-bg-input border border-accent-solid rounded outline-none"
                       />
                     ) : (
-                      <span className={`text-xs text-text-tertiary truncate block hover:text-text-secondary${contextMenuEnabled && !editingCell ? ' group-hover:pr-7' : ''}`}>
+                      // No group-hover padding shift here \u2014 that shoved the note
+                      // text left 28px the instant you hovered (padding isn't
+                      // transitioned), which read as the row "jumping". The pencil
+                      // below is absolute with an opaque fill, so it floats over
+                      // the note's right edge instead of displacing it.
+                      <span className="text-xs text-text-tertiary truncate block hover:text-text-secondary">
                         {action.comment || '\u00A0'}
                       </span>
                     )}
@@ -2176,6 +2107,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           openEditorForRow(idx);
                         }}
                         tabIndex={-1}
+                        // absolute so it floats over the note's right edge without
+                        // pushing layout (the row-jump-on-hover bug). Works via the
+                        // @layer base [data-tip] rule in index.css \u2014 otherwise this
+                        // button's data-tip would force it back to position:relative.
                         className="hidden group-hover:flex absolute right-1.5 top-1/2 -translate-y-1/2 items-center justify-center w-6 h-6 rounded bg-bg-elevated border border-border-subtle text-text-tertiary hover:text-text-primary hover:border-border-default transition-colors"
                         data-tip={tt('Edit action (Enter)', 'Editar a\u00E7\u00E3o (Enter)')}
                       >

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Play, Pause as PauseIcon, MousePointerClick, Folder, ListOrdered, Gauge, Clock, Repeat } from 'lucide-react';
+import { Play, Pause as PauseIcon, MousePointer, Folder, List, Gauge, Clock, Repeat } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { usePauseTick } from '../hooks/usePauseTick';
@@ -116,7 +116,7 @@ export function StatusBar() {
           const { elapsed: clickerElapsed, rateLabel } = formatClickerStats(clickerStats.count, clickerStats.elapsedMs);
           return (
             <span className="flex items-center gap-2 font-mono" style={{ color: 'var(--color-clicker)' }}>
-              <MousePointerClick size={11} className="shrink-0" />
+              <MousePointer size={11} className="shrink-0" />
               <span className="text-text-secondary">Clicked</span>
               <strong className="text-text-primary">{clickerStats.count.toLocaleString()}</strong>
               <span className="text-text-disabled">·</span>
@@ -128,7 +128,7 @@ export function StatusBar() {
         })() : (
           <>
             <span className="flex items-center gap-1.5 font-medium" style={{ color: 'var(--color-clicker)' }}>
-              <MousePointerClick size={11} />
+              <MousePointer size={11} />
               Clicker
             </span>
             <Sep />
@@ -157,7 +157,7 @@ export function StatusBar() {
               </span>
               <Sep />
               <span className="flex items-center gap-1.5 text-text-tertiary">
-                <ListOrdered size={11} />
+                <List size={11} />
                 <span className="text-text-secondary">{statusBar.actionCount} actions</span>
               </span>
             </>

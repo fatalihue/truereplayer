@@ -1492,7 +1492,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             removeTitle={tt(`Remove hotkey ${p.hotkey}`, `Remover hotkey ${p.hotkey}`)}
             onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'hotkey', name: p.name, label: `hotkey ${p.hotkey}` }); }}
           >
-            <KbdTag combo={p.hotkey} />
+            <KbdTag combo={p.hotkey} unified />
           </RemovableChip>
         )}
 

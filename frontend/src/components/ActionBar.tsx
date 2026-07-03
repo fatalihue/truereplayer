@@ -1,4 +1,4 @@
-import { Circle, Play, Square, Save, FolderOpen, MousePointerClick, ListOrdered } from 'lucide-react';
+import { Circle, Play, Square, Save, FolderOpen, MousePointer, List } from 'lucide-react';
 import { SegmentedControl } from './common/SegmentedControl';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -64,8 +64,8 @@ export function ActionBar() {
         {/* Mode segmented control — shared primitive; the semantic active tints
             (Macro = replay green, Clicker = clicker purple) ride in via
             activeClass. The macro ring's old hardcoded rgba is now a token mix.
-            ListOrdered (not Play) so the mode pill doesn't visually duplicate
-            the Replay action button. */}
+            List (not Play) so the mode pill doesn't visually duplicate the
+            Replay action button. Glyphs match the redesign mockup. */}
         <SegmentedControl
           ariaLabel="Execution mode"
           value={isClicker ? 'clicker' : 'macro'}
@@ -74,14 +74,14 @@ export function ActionBar() {
             {
               value: 'macro',
               label: 'Macro',
-              icon: <ListOrdered size={11} />,
+              icon: <List size={11} />,
               tip: tt('Run the recorded actions in order', 'Executa as ações gravadas em ordem'),
               activeClass: 'bg-replay/15 text-replay shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-replay)_35%,transparent)]',
             },
             {
               value: 'clicker',
               label: 'Clicker',
-              icon: <MousePointerClick size={11} />,
+              icon: <MousePointer size={11} />,
               tip: tt('Click repeatedly at cursor position. Ignores recorded actions and profile hotkeys.', 'Clica repetidamente na posição do cursor. Ignora ações gravadas e hotkeys de perfil.'),
               activeClass: 'bg-[var(--color-clicker-bg)] text-[var(--color-clicker)] shadow-[inset_0_0_0_1px_var(--color-clicker-border)]',
             },
@@ -124,7 +124,7 @@ export function ActionBar() {
           {isReplaying
             ? <Square size={11} fill="currentColor" className="shrink-0" />
             : isClicker
-              ? <MousePointerClick size={12} className="shrink-0" />
+              ? <MousePointer size={12} className="shrink-0" />
               : <Play size={12} fill="currentColor" className="shrink-0" />}
           {buttonStates.replayButtonText}
         </button>
