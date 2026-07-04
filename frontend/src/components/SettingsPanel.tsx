@@ -15,14 +15,16 @@ function CompactToggle(props: { isOn: boolean; onChange: (v: boolean) => void; d
   return <Toggle {...props} size="sm" />;
 }
 
-// Default width for right-column controls (comboboxes, hotkey capture fields, and every
-// Clicker chip) so they line up in a single column. 110px is set by the widest content that
-// can't shrink — a hotkey combo like "Ctrl+PageDown" — and comfortably fits a thousands-
-// separated "10.000 ms" too. The macro Execution EnableChips (Delay/Loops/Interval/Jitter)
-// deliberately opt OUT of this to a tighter 96px (their EnableChip default) — they only ever
-// hold a number, so the extra slack read as loose; the Clicker chips pass width={CTRL_W}
-// explicitly so THAT section stays uniform.
+// Width for hotkey-capture fields and comboboxes that must fit a "Ctrl+PageDown" combo
+// (110px = the widest un-shrinkable content; also fits a thousands-separated "10.000 ms").
+// Value/number chips use the tighter 96px instead — the EnableChip default in macro mode,
+// and CLICKER_W in clicker mode — since they only ever hold a number.
 const CTRL_W = 'w-[110px]';
+
+// Clicker settings fields (Button / Rate / Loops / Interval / Jitter / Position / Area) match
+// the macro Execution chips' width (the EnableChip default 96px) so the two modes' value columns
+// line up. The clicker HOTKEY fields keep CTRL_W — they need room for a "Ctrl+PageDown" combo.
+const CLICKER_W = 'w-[96px]';
 
 // Upper bounds for the timing / scatter fields — typing past these snaps back to the cap on
 // commit (blur/Enter). A typo-guard (stops an accidental extra zero making a macro appear to
@@ -415,9 +417,10 @@ function ClickerSection({
     // Uses the shared Section so it matches macro mode exactly (header above a single
     // inset group, same row layout). Purple icon/title keep the "you're in Clicker" cue.
     <Section color="var(--color-clicker)" title="Clicker">
-          {/* Flat/chip layout: every right-column control is one CTRL_W (110px) box, flush right,
-              so chips, combos and the area control all line up. Value+enable rows are a single
-              EnableChip; Button/Rate are pickers; Area is chip-shaped (dot + picker). */}
+          {/* Flat/chip layout: every settings control is one CLICKER_W (96px) box, flush right,
+              so chips, combos and the area control all line up — and match the macro Execution
+              chips' width across a mode switch. Value+enable rows are a single EnableChip;
+              Button/Rate are pickers; Area is chip-shaped (dot + picker). */}
           {/* Mouse button picker — moved here from the ActionBar so the panel is the single
               source of truth for "every Clicker setting". Left/Right/Middle, always applied. */}
           <SettingRow label="Button" tooltip={tt('Mouse button to click', 'Botão do mouse a clicar')}>
@@ -425,7 +428,7 @@ function ClickerSection({
               editable={false}
               value={button}
               onCommit={(v) => onChange('cursorClickButton', v)}
-              width={CTRL_W}
+              width={CLICKER_W}
               options={[
                 { value: 'Left', label: 'Left' },
                 { value: 'Right', label: 'Right' },
@@ -434,8 +437,8 @@ function ClickerSection({
             />
           </SettingRow>
           <SettingRow label="Rate" tooltip={tt('Click rate: /s or delay (ms). Type or pick a preset.', 'Taxa de clique: /s ou atraso (ms). Digite ou escolha um preset.')}>
-            {/* Combo + /s↔ms unit toggle share one CTRL_W slot so the row aligns with the chips. */}
-            <div className={`${CTRL_W} flex items-center gap-1`}>
+            {/* Combo + /s↔ms unit toggle share one CLICKER_W slot so the row aligns with the chips. */}
+            <div className={`${CLICKER_W} flex items-center gap-1`}>
               <ComboInput
                 /* Key on (unit, localDelayMs) so it remounts with the right displayValue when
                    either changes — toggling the unit, or picking a preset (commitRate updates
@@ -463,7 +466,7 @@ function ClickerSection({
               value={loops}
               isOn={useLoops}
               max={999}
-              width={CTRL_W}
+              width={CLICKER_W}
               onCommitValue={(v) => onChange('cursorClickLoops', v)}
               onToggle={(v) => onChange('cursorClickUseLoops', v)}
               onEnterActivate={() => activateIfOff(useLoops, 'cursorClickUseLoops')}
@@ -474,7 +477,7 @@ function ClickerSection({
               value={interval}
               isOn={useInterval}
               unit="ms" format max={MAX_DELAY_MS}
-              width={CTRL_W}
+              width={CLICKER_W}
               onCommitValue={(v) => onChange('cursorClickInterval', v)}
               onToggle={(v) => onChange('cursorClickUseInterval', v)}
               onEnterActivate={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
@@ -485,7 +488,7 @@ function ClickerSection({
               value={rateJitter}
               isOn={useRateJitter}
               unit="%" max={100}
-              width={CTRL_W}
+              width={CLICKER_W}
               onCommitValue={(v) => onChange('cursorClickDelayJitter', v)}
               onToggle={(v) => onChange('cursorClickUseJitter', v)}
               onEnterActivate={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
@@ -496,7 +499,7 @@ function ClickerSection({
               value={positionJitter}
               isOn={usePositionJitter}
               max={MAX_POSITION_PX}
-              width={CTRL_W}
+              width={CLICKER_W}
               onCommitValue={(v) => onChange('cursorClickPositionJitter', v)}
               onToggle={(v) => setExclusive(
                 { key: 'cursorClickUsePositionJitter', on: usePositionJitter },
@@ -515,7 +518,7 @@ function ClickerSection({
               auto-enables useArea + disables Position jitter on a successful draw. */}
           <SettingRow label="Area" tooltip={tt('Clicks a random point in a screen box. Exclusive with Position.', 'Clica em um ponto aleatório em uma caixa na tela. Exclusivo com Position.')}>
             <div
-              className={`${CTRL_W} h-7 flex items-center rounded border overflow-hidden relative group`}
+              className={`${CLICKER_W} h-7 flex items-center rounded border overflow-hidden relative group`}
               style={useArea
                 ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
                 : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
@@ -696,7 +699,7 @@ interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsPanelProps) {
-  const { settings, settingsResetEpoch } = useAppState();
+  const { settings, settingsResetEpoch, buttonStates, clickerStats } = useAppState();
   const { language, setLanguage } = useLanguage();
   const tt = useTt();
   const { send, subscribe } = useBridge();
@@ -715,14 +718,27 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
     });
   }, [subscribe]);
 
-  // Entering Clicker mode jumps to the Profile tab — the Clicker settings live there, so
-  // landing on a stale Global section would hide them. Only fires on the macro→clicker
-  // transition, so the user can still open Global manually while in Clicker mode.
+  // Switching mode in EITHER direction jumps to the Profile tab — each mode's settings live
+  // there (the Clicker panel / the macro Execution+Recording stack), so landing on a stale
+  // Global section would hide them. Fires only on an actual macro↔clicker toggle (a value
+  // CHANGE), never on mount, so it doesn't fight the initial 'profile' default; the user can
+  // still open Global manually afterwards.
   const prevClickerMode = useRef(settings.useCursorClick);
   useEffect(() => {
-    if (settings.useCursorClick && !prevClickerMode.current) setActiveTab('profile');
+    if (settings.useCursorClick !== prevClickerMode.current) setActiveTab('profile');
     prevClickerMode.current = settings.useCursorClick;
   }, [settings.useCursorClick]);
+
+  // When a run STARTS — a macro profile fires (replayActive) or the Clicker begins clicking
+  // (clickerStats.active) — surface the Profile tab if the user is parked on Global, so the
+  // running context (the actions / the Clicker panel) is what they see. Only on the false→true
+  // edge and only from Global, so it never yanks the user off a tab they chose mid-run.
+  const prevRunActive = useRef(false);
+  const runActive = buttonStates.replayActive || clickerStats.active;
+  useEffect(() => {
+    if (runActive && !prevRunActive.current && activeTab === 'global') setActiveTab('profile');
+    prevRunActive.current = runActive;
+  }, [runActive, activeTab]);
 
   const changeSetting = (key: string, value: string | boolean | number | object | null) => {
     send({ type: 'settings:change', payload: { key, value } });
