@@ -58,13 +58,13 @@ function Section({ color, title, children, collapsible = false, defaultOpen = tr
   return (
     <div data-section={title}>
       {collapsible ? (
-        <button onClick={toggleOpen} className="group w-full flex items-center gap-2 px-1.5 pt-2.5 pb-1">
+        <button onClick={toggleOpen} className="group w-full flex items-center gap-2 px-1.5 pt-1.5 pb-0.5">
           {dot}
           <span className="label-micro text-text-tertiary flex-1 text-left group-hover:text-text-secondary transition-colors">{title}</span>
           {isOpen ? <ChevronDown size={12} className="text-text-tertiary" /> : <ChevronRight size={12} className="text-text-tertiary" />}
         </button>
       ) : (
-        <div className="flex items-center gap-2 px-1.5 pt-2.5 pb-1">
+        <div className="flex items-center gap-2 px-1.5 pt-1.5 pb-0.5">
           {dot}
           <span className="label-micro text-text-tertiary">{title}</span>
         </div>
@@ -108,7 +108,7 @@ function EnableChip({ value, isOn, unit, format, max, onCommitValue, onToggle, o
   };
   return (
     <div
-      className={`${CTRL_W} h-8 flex items-center rounded border overflow-hidden focus-within:!border-accent-solid`}
+      className={`w-[96px] h-7 flex items-center rounded border overflow-hidden focus-within:!border-accent-solid`}
       style={isOn
         ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
         : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
@@ -157,7 +157,7 @@ function ValueField({ value, unit, onCommitValue }: {
   const focused = useRef(false);
   useEffect(() => { if (!focused.current) setLocal(value); }, [value]);
   return (
-    <div className={`${CTRL_W} h-8 flex items-center gap-1.5 px-2 rounded border border-border-default bg-bg-input focus-within:border-accent-solid`}>
+    <div className={`${CTRL_W} h-7 flex items-center gap-1.5 px-2 rounded border border-border-default bg-bg-input focus-within:border-accent-solid`}>
       <input
         type="text"
         value={local}
@@ -199,10 +199,10 @@ function SettingRow({ label, tooltip, children, danger }: { label: string; toolt
   // (the panel hugs the right window edge) instead of clipping off-screen.
   return (
     <div
-      // py-0.5: rows holding h-8 controls grow to 36px so consecutive bordered
-      // fields keep a visible gap (h-8 exactly filled min-h-8 → 0px stacking);
-      // toggle-only rows stay at the 32px min.
-      className="relative flex items-center justify-between min-h-8 px-2.5 py-0.5 gap-2"
+      // Compact rhythm: h-7 (28px) controls + py-0.5 → 32px input rows with a
+      // visible gap between consecutive bordered fields; toggle-only rows sit at
+      // the min-h-7 floor. (Was h-8/min-h-8 → 36px; tightened at the user's request.)
+      className="relative flex items-center justify-between min-h-7 px-2.5 py-0.5 gap-2"
       data-tip={tooltip || undefined}
       data-tip-pos="left"
     >
@@ -277,7 +277,7 @@ function ComboInput({ value, onCommit, options, width = CTRL_W, editable = true 
         onBlur={editable ? () => { focused.current = false; onCommit(text); setText(value); } : undefined}
         onKeyDown={editable ? (e) => { if (e.key === 'Enter') { onCommit(text); (e.target as HTMLInputElement).blur(); } } : undefined}
         onClick={editable ? undefined : () => setOpen((o) => !o)}
-        className={`w-full h-8 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid ${editable ? '' : 'cursor-pointer'}`}
+        className={`w-full h-7 px-2 text-ui font-mono text-text-primary bg-bg-input border border-border-default rounded text-center outline-none focus:border-accent-solid ${editable ? '' : 'cursor-pointer'}`}
       />
       <button
         type="button"
@@ -287,7 +287,7 @@ function ComboInput({ value, onCommit, options, width = CTRL_W, editable = true 
         onClick={() => setOpen((o) => !o)}
         // Pinned to the right edge (justify-end) and slightly smaller so the longest centered
         // value (e.g. "Middle") clears it — the text stays centered in the full field.
-        className="absolute right-0 top-0 h-8 w-6 flex items-center justify-end pr-1 text-text-tertiary hover:text-text-secondary"
+        className="absolute right-0 top-0 h-7 w-6 flex items-center justify-end pr-1 text-text-tertiary hover:text-text-secondary"
         aria-label={editable ? 'Choose a preset' : 'Choose an option'}
       >
         <ChevronDown size={11} />
@@ -433,7 +433,7 @@ function ClickerSection({
               <select
                 value={unit}
                 onChange={(e) => setUnit(e.target.value as 'ms' | 'cps')}
-                className="w-6 h-8 text-center text-[10px] text-text-secondary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid font-mono cursor-pointer appearance-none shrink-0"
+                className="w-6 h-7 text-center text-[10px] text-text-secondary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid font-mono cursor-pointer appearance-none shrink-0"
               >
                 <option value="cps">/s</option>
                 <option value="ms">ms</option>
@@ -492,7 +492,7 @@ function ClickerSection({
               auto-enables useArea + disables Position jitter on a successful draw. */}
           <SettingRow label="Area" tooltip={tt('Clicks a random point in a screen box. Exclusive with Position.', 'Clica em um ponto aleatório em uma caixa na tela. Exclusivo com Position.')}>
             <div
-              className={`${CTRL_W} h-8 flex items-center rounded border overflow-hidden relative group`}
+              className={`${CTRL_W} h-7 flex items-center rounded border overflow-hidden relative group`}
               style={useArea
                 ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
                 : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
@@ -657,7 +657,7 @@ function HotkeyInput({ value, settingKey, onChange, width = CTRL_W }: {
         }
       }}
       onBlur={() => { setIsFocused(false); setLocalValue(value); send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } }); disarmCaptureTimer(); }}
-      className={`${width} h-8 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
+      className={`${width} h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
         isFocused
           ? 'text-accent-light border-accent-solid animate-pulse'
           : 'text-accent border-border-default'
@@ -1123,7 +1123,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 <select
                   value={language}
                   onChange={(e) => setLanguage(e.target.value as 'en' | 'pt-BR')}
-                  className="h-8 px-2 text-ui bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid cursor-pointer text-text-primary"
+                  className="h-7 px-2 text-ui bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid cursor-pointer text-text-primary"
                 >
                   <option value="en">English</option>
                   <option value="pt-BR">Português (BR)</option>
