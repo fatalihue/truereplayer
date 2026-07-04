@@ -1002,8 +1002,10 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               )}
             </Section>
 
-            {/* Recording — pure capture filters, switches only (Profile Keys moved to
-                Global · Hotkeys in the 2026-07 reorg). */}
+            {/* Recording — switches, same as every other on/off row. Profile Keys keeps
+                the danger accent (left bar + red icon/label) when off, since its shortcuts
+                and hotstrings stop firing. (The 2026-07 reorg tried moving it to
+                Global · Hotkeys; the owner preferred it here, next to what it gates.) */}
             <Section color="#ff6b6b" title="Recording">
               <SettingRow label="Mouse Clicks">
                 <CompactToggle isOn={settings.recordMouse} onChange={(v) => changeSetting('recordMouse', v)} />
@@ -1017,9 +1019,9 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               <SettingRow label="Combined Actions" tooltip={tt('Records each click/keypress as one action (not Down+Up). Merges double-clicks, folds modifiers (Ctrl+C). Holds & drags need this off.', 'Grava cada clique/tecla como uma ação (não Down+Up). Mescla cliques duplos, agrupa modificadores (Ctrl+C). Holds e arrastos precisam disto desligado.')}>
                 <CompactToggle isOn={settings.recordCombinedInput} onChange={(v) => changeSetting('recordCombinedInput', v)} />
               </SettingRow>
-              {/* Profile Keys (the replay master-toggle) moved to Global · Hotkeys (2026-07
-                  reorg) — it was the only non-recording control among these capture filters,
-                  and its state is global anyway. It now sits beside its own toggle hotkey. */}
+              <SettingRow label="Profile Keys" danger={!settings.profileKeyEnabled} tooltip={tt("Profile shortcuts & hotstrings won't fire while off.", 'Atalhos e hotstrings do perfil não disparam enquanto desligado.')}>
+                <CompactToggle isOn={settings.profileKeyEnabled} onChange={(v) => changeSetting('profileKeyEnabled', v)} />
+              </SettingRow>
               <SettingRow label="Browser Actions" tooltip={tt('Record Chrome CSS selectors instead of coordinates.', 'Grava seletores CSS do Chrome em vez de coordenadas.')}>
                 <CompactToggle isOn={settings.browserSelectorEnabled ?? true} onChange={(v) => changeSetting('browserSelectorEnabled', v)} />
               </SettingRow>
@@ -1046,17 +1048,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   onChange={changeHotkey}
                 />
               </SettingRow>
-              {/* Master-toggle + its toggle key, adjacent rows (moved here from
-                  Profile · Recording in the 2026-07 reorg — the switch is a replay/trigger
-                  control with global state, not a capture filter). Two rows, not one:
-                  toggle + the 110px hotkey field leave ~30px for the label in this panel,
-                  which wrapped it and painted it under the switch in the danger state.
-                  Keeps the danger accent when off, since profile shortcuts and hotstrings
-                  stop firing. */}
-              <SettingRow label="Profile Keys" danger={!settings.profileKeyEnabled} tooltip={tt("Profile shortcuts & hotstrings won't fire while off.", 'Atalhos e hotstrings do perfil não disparam enquanto desligado.')}>
-                <CompactToggle isOn={settings.profileKeyEnabled} onChange={(v) => changeSetting('profileKeyEnabled', v)} />
-              </SettingRow>
-              <SettingRow label="Toggle Key" tooltip={tt('Flips Profile Keys on/off.', 'Liga/desliga o Profile Keys.')}>
+              <SettingRow label="Profile Keys">
                 <HotkeyInput
                   value={settings.profileKeyToggleHotkey}
                   settingKey="profileKeyToggleHotkey"
