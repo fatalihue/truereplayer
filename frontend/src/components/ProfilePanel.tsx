@@ -2682,21 +2682,23 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               placeholder="Folder name..."
               className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
             />
-            {/* 8-col grid (not flex-wrap) so the 16 swatches form two even rows of 8 —
-                justify-items-center keeps each circle centred in its equal cell. No "Color:"
-                label: a folder-colour swatch grid needs no caption. */}
-            <div className="grid grid-cols-8 gap-2 justify-items-center mt-4">
-              {FOLDER_COLORS.map(c => (
-                <button
-                  key={c}
-                  onClick={() => setFolderDialogColor(c)}
-                  aria-label={`Colour ${c}`}
-                  className={`w-5 h-5 rounded-full border-2 transition-transform ${
-                    folderDialogColor === c ? 'border-white scale-110' : 'border-transparent hover:scale-110'
-                  }`}
-                  style={{ backgroundColor: c }}
-                />
-              ))}
+            {/* Centred, content-width 8-col grid so the 16 swatches form two even rows of 8
+                sitting tight together (no stretched cells) and the whole block is centred in
+                the dialog. No "Color:" label — a folder-colour swatch grid needs no caption. */}
+            <div className="mt-4 flex justify-center">
+              <div className="grid grid-cols-8 gap-1.5">
+                {FOLDER_COLORS.map(c => (
+                  <button
+                    key={c}
+                    onClick={() => setFolderDialogColor(c)}
+                    aria-label={`Colour ${c}`}
+                    className={`w-5 h-5 rounded-full border-2 transition-transform ${
+                      folderDialogColor === c ? 'border-white scale-110' : 'border-transparent hover:scale-110'
+                    }`}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
             </div>
             {createFolderNameTaken && (
               <p className="text-[11px] text-recording mt-2">A folder named "{folderDialogName.trim()}" already exists.</p>
