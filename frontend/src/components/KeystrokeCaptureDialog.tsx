@@ -357,6 +357,7 @@ export function KeystrokeCaptureDialog({
                   onChange={(n) => setRepeat(clampRepeat(n))}
                   min={1}
                   max={MAX_REPEAT}
+                  inputWidth="w-20"
                   ariaLabel="Repeat count"
                 />
               </div>
@@ -401,7 +402,7 @@ export function KeystrokeCaptureDialog({
                   min={MIN_HOLD_MS}
                   max={MAX_HOLD_MS}
                   step={stepFor(holdMs)}
-                  inputWidth="w-24"
+                  inputWidth="w-20"
                   thousands
                   suffix="ms" suffixInside
                   ariaLabel="Hold duration (ms)"
