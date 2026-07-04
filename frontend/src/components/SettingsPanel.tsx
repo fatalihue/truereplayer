@@ -24,6 +24,14 @@ function CompactToggle(props: { isOn: boolean; onChange: (v: boolean) => void; d
 // explicitly so THAT section stays uniform.
 const CTRL_W = 'w-[110px]';
 
+// Upper bounds for the timing / scatter fields — typing past these snaps back to the cap on
+// commit (blur/Enter). A typo-guard (stops an accidental extra zero making a macro appear to
+// hang), NOT a hard behavioural limit: 60 s covers any reasonable inter-action or loop pause —
+// longer waits belong in a Pause action — and ±500 px scatters across a large control while the
+// Area tool handles bigger regions. Loops (999) and Jitter (100) keep their own inline caps.
+const MAX_DELAY_MS = 60000;
+const MAX_POSITION_PX = 500;
+
 // Live "Filter settings" query (lowercased). SettingRow reads it and hides itself when its
 // label doesn't match, so the search needs no prop-drilling through every row.
 const FilterContext = createContext('');
@@ -376,9 +384,12 @@ function ClickerSection({
   const commitRate = (raw: string) => {
     const num = parseFloat(raw);
     if (isNaN(num) || num <= 0) return;
-    const ms = unit === 'cps'
+    // Clamp to [1, MAX_DELAY_MS]. In /s mode a tiny cps (e.g. 0.001) maps to a huge delay, so
+    // the cap applies to the resulting ms either way — a typo can't leave the clicker idle for
+    // minutes. Whole clicks-per-second stay well under the cap (1/s = 1000 ms).
+    const ms = Math.min(MAX_DELAY_MS, unit === 'cps'
       ? Math.max(1, Math.round(1000 / num))
-      : Math.max(1, Math.round(num));
+      : Math.max(1, Math.round(num)));
     setLocalDelayMs(ms);              // optimistic — keeps the input stable on next render
     onChange('cursorClickDelay', String(ms));
   };
@@ -462,7 +473,7 @@ function ClickerSection({
             <EnableChip
               value={interval}
               isOn={useInterval}
-              unit="ms" format
+              unit="ms" format max={MAX_DELAY_MS}
               width={CTRL_W}
               onCommitValue={(v) => onChange('cursorClickInterval', v)}
               onToggle={(v) => onChange('cursorClickUseInterval', v)}
@@ -484,6 +495,7 @@ function ClickerSection({
             <EnableChip
               value={positionJitter}
               isOn={usePositionJitter}
+              max={MAX_POSITION_PX}
               width={CTRL_W}
               onCommitValue={(v) => onChange('cursorClickPositionJitter', v)}
               onToggle={(v) => setExclusive(
@@ -910,7 +922,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 <EnableChip
                   value={settings.customDelay}
                   isOn={settings.useCustomDelay}
-                  unit="ms" format
+                  unit="ms" format max={MAX_DELAY_MS}
                   onCommitValue={(v) => changeSetting('customDelay', v)}
                   onToggle={(v) => changeSetting('useCustomDelay', v)}
                   onEnterActivate={(v) => {
@@ -939,7 +951,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 <EnableChip
                   value={settings.loopInterval}
                   isOn={settings.loopIntervalEnabled}
-                  unit="ms" format
+                  unit="ms" format max={MAX_DELAY_MS}
                   onCommitValue={(v) => changeSetting('loopInterval', v)}
                   onToggle={(v) => changeSetting('loopIntervalEnabled', v)}
                   onEnterActivate={() => { if (!settings.loopIntervalEnabled) changeSetting('loopIntervalEnabled', true); }}

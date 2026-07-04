@@ -23,7 +23,7 @@ const defaultSettings = {
   cursorClickStartHotkey: 'PageDown',
   cursorClickPauseHotkey: 'PageUp',
   // Clicker v2 — defaults match the AppSettings backend (delay=100 ms, jitter=1 %,
-  // hold=10 ms, position=10 px, interval=200 ms; every switch starts off). Real values
+  // hold=10 ms, position=1 px, interval=200 ms; every switch starts off). Real values
   // arrive on settings:loaded after the post-upgrade migration (which copies the legacy
   // profile-shared delay/jitter/loops/interval into these fields). Keeping these in sync
   // with AppSettings.cs avoids a one-frame "wrong default" flash before settings:loaded
@@ -32,7 +32,7 @@ const defaultSettings = {
   cursorClickDelayJitter: '1',
   cursorClickUseJitter: false,
   cursorClickHold: '10',
-  cursorClickPositionJitter: '10',
+  cursorClickPositionJitter: '1',
   cursorClickUsePositionJitter: false,
   // null = no rect saved. useArea is the on/off toggle (preserves the rect when temporarily off).
   cursorClickUseArea: false,

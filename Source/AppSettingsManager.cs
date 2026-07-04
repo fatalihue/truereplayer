@@ -51,7 +51,7 @@ namespace TrueReplayer.Services
             public int CursorClickDelayJitterPct { get; set; } = 1;
             public bool CursorClickUseJitter { get; set; } = false;
             public int CursorClickHoldMs { get; set; } = 10;
-            public int CursorClickPositionJitter { get; set; } = 10;
+            public int CursorClickPositionJitter { get; set; } = 1;
             public bool CursorClickUsePositionJitter { get; set; } = false;
             // Click area — rectangle on screen where each click lands at a random point inside.
             // Mutually exclusive with CursorClickUsePositionJitter (UI enforces). Coordinates are

@@ -102,7 +102,7 @@ namespace TrueReplayer
         public string CursorClickDelayJitter { get; set; } = "1";
         public bool CursorClickUseJitter { get; set; } = false;
         public string CursorClickHold { get; set; } = "10";
-        public string CursorClickPositionJitter { get; set; } = "0";
+        public string CursorClickPositionJitter { get; set; } = "1";
         public bool CursorClickUsePositionJitter { get; set; } = false;
         // null = no rect saved. CursorClickUseArea is the on/off toggle and is preserved
         // separately so a user can toggle off without losing the saved rect.
@@ -6354,7 +6354,7 @@ namespace TrueReplayer
                 CursorClickDelayJitterPct = 1,
                 CursorClickUseJitter = false,
                 CursorClickHoldMs = 10,
-                CursorClickPositionJitter = 10,
+                CursorClickPositionJitter = 1,
                 CursorClickUsePositionJitter = false,
                 CursorClickLoops = 0,
                 CursorClickUseLoops = false,
@@ -6467,7 +6467,7 @@ namespace TrueReplayer
                 CursorClickDelayJitterPct = int.TryParse(CursorClickDelayJitter, out var ccdj) ? ccdj : 1,
                 CursorClickUseJitter = CursorClickUseJitter,
                 CursorClickHoldMs = int.TryParse(CursorClickHold, out var cch) ? cch : 10,
-                CursorClickPositionJitter = int.TryParse(CursorClickPositionJitter, out var ccpj) ? ccpj : 0,
+                CursorClickPositionJitter = int.TryParse(CursorClickPositionJitter, out var ccpj) ? ccpj : 1,
                 CursorClickUsePositionJitter = CursorClickUsePositionJitter,
                 CursorClickUseArea = CursorClickUseArea,
                 // On-disk schema stays 5 fields for forward-compat. When the rect is null,
@@ -6679,7 +6679,7 @@ namespace TrueReplayer
                     CursorClickHold = valueElement.GetString() ?? "10";
                     break;
                 case "cursorClickPositionJitter":
-                    CursorClickPositionJitter = valueElement.GetString() ?? "0";
+                    CursorClickPositionJitter = valueElement.GetString() ?? "1";
                     break;
                 case "cursorClickUsePositionJitter":
                     CursorClickUsePositionJitter = valueElement.GetBoolean();
