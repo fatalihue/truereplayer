@@ -1,5 +1,7 @@
 import { Minus, Plus } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLanguage } from '../../state/LanguageContext';
+import { formatMs } from '../../utils/displayUtils';
 
 export interface NumberInputProps {
   // `null` = unset / blank — renders empty with placeholder visible. Used by call sites
@@ -25,6 +27,11 @@ export interface NumberInputProps {
   id?: string;
   // Optional aria-label when no visible label exists nearby.
   ariaLabel?: string;
+  // Show the value with locale thousands separators (10000 → "10.000" pt-BR /
+  // "10,000" en) while NOT focused; on focus it swaps to the raw digits so typing
+  // stays simple. Forces type=text + inputMode=numeric so the separator can render
+  // (type=number can't). Use for large ms/duration fields.
+  thousands?: boolean;
   // Optional onBlur — some call sites need to react to commit (e.g. validate then re-clamp).
   onBlur?: () => void;
   // Auto-focus on mount — useful inside modal dialogs where React's plain `autoFocus`
@@ -57,7 +64,11 @@ export function NumberInput({
   ariaLabel,
   onBlur,
   autoFocus = false,
+  thousands = false,
 }: NumberInputProps) {
+  const { language } = useLanguage();
+  // Raw digits are shown while editing; the thousands-formatted value only while blurred.
+  const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   // Mount-only focus. React's `autoFocus` attribute is honoured by the JSX runtime via a
   // node.focus() call after mount, but portal/modal mounting in WebView2 has occasionally
@@ -102,7 +113,9 @@ export function NumberInput({
   }, [clamp, onChange]);
 
   const handleTextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value;
+    // In thousands mode the input is type=text, so a pasted "10.000" could arrive with
+    // separators — keep only digits (and a leading '-') so parsing stays correct.
+    const raw = thousands ? e.target.value.replace(/[^\d-]/g, '') : e.target.value;
     setText(raw);
     // Parse + commit when the user has typed something parseable. Empty / partial like
     // "-" / "." stay in local state and don't fire onChange until they become a number.
@@ -116,6 +129,7 @@ export function NumberInput({
   };
 
   const handleBlur = () => {
+    setIsFocused(false);
     // Clear path — empty/invalid text. When the parent supports onClear AND had a value
     // before, fire it (parent restores its null/unset sentinel). Otherwise snap back to
     // last good number.
@@ -164,9 +178,13 @@ export function NumberInput({
       <input
         ref={inputRef}
         id={id}
-        type="number"
-        value={text}
+        // type=text (not number) in thousands mode so the separator renders; inputMode
+        // keeps the numeric keypad on touch and the caret/wheel behaviour otherwise.
+        type={thousands ? 'text' : 'number'}
+        inputMode={thousands ? 'numeric' : undefined}
+        value={thousands && !isFocused && text !== '' && Number.isFinite(Number(text)) ? formatMs(Number(text), language) : text}
         onChange={handleTextChange}
+        onFocus={() => setIsFocused(true)}
         onBlur={handleBlur}
         onWheel={handleWheel}
         min={min}

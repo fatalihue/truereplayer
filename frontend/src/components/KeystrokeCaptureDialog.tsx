@@ -4,7 +4,8 @@ import { NumberInput } from './common/NumberInput';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
 import { useBridge } from '../bridge/BridgeContext';
-import { useTt } from '../state/LanguageContext';
+import { useLanguage } from '../state/LanguageContext';
+import { formatMs } from '../utils/displayUtils';
 
 /**
  * Unified "Send Keystroke" dialog. One capture pad + a Press/Hold mode toggle covers
@@ -89,7 +90,7 @@ export function KeystrokeCaptureDialog({
   onConfirm,
   onClose,
 }: KeystrokeCaptureDialogProps) {
-  const tt = useTt();
+  const { language } = useLanguage();
 
   // `isEditing` flips Esc behaviour and the button label. Decoupled from mode so
   // we can edit a Keystroke row, switch to Hold, and save — converting the row's
@@ -245,7 +246,7 @@ export function KeystrokeCaptureDialog({
       // Enter as the bound key, so the user gets no confirm-via-Enter from the
       // capture pad. The numeric fields (Times / Gap / Hold duration) pause
       // capture on focus, which is when Enter actually confirms.
-      footerHint="Enter (in number fields) to confirm · Esc to cancel"
+      footerHint=""
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -277,7 +278,6 @@ export function KeystrokeCaptureDialog({
               key, with a warning chip when modifiers got dropped. */}
           <div
             className="bg-bg-input border border-dashed border-warning/40 rounded-md py-5 px-4 text-center min-h-[156px] flex flex-col justify-center"
-            data-tip={tt('Press a key or combo to capture it (incl. Win+ combos the browser cannot see). Press again to replace.', 'Pressione uma tecla ou combo para capturar (incl. combos Win+ que o browser nao ve). Pressione de novo para substituir.')}
           >
             {captured === null ? (
               <>
@@ -332,9 +332,6 @@ export function KeystrokeCaptureDialog({
                   key={m}
                   type="button"
                   onClick={() => setMode(m)}
-                  data-tip={m === 'press'
-                    ? tt('Tap the key once, or N times with a gap between presses.', 'Pressiona a tecla uma vez, ou N vezes com intervalo entre os toques.')
-                    : tt('Keep a single key held down for the set duration (modifiers are dropped).', 'Mantem uma unica tecla pressionada pela duracao definida (modificadores sao descartados).')}
                   className={`px-3 py-1.5 rounded text-[12px] font-medium transition-colors ${
                     mode === m
                       ? 'bg-accent-solid text-white'
@@ -353,7 +350,6 @@ export function KeystrokeCaptureDialog({
               <div className="flex items-center justify-between gap-3">
                 <label
                   className="text-[12px] font-medium text-text-secondary"
-                  data-tip={tt('How many times to press the key. 1 = single press; up to 999.', 'Quantas vezes pressionar a tecla. 1 = um toque; ate 999.')}
                 >Times to repeat</label>
                 <NumberInput
                   value={repeat}
@@ -370,7 +366,6 @@ export function KeystrokeCaptureDialog({
               <div className="flex items-center justify-between gap-3">
                 <label
                   className={`text-[12px] font-medium transition-colors ${repeat > 1 ? 'text-text-secondary' : 'text-text-tertiary'}`}
-                  data-tip={tt('Pause between each press, in ms (0–5000). Only used when Times > 1.', 'Pausa entre cada toque, em ms (0–5000). So vale quando Times > 1.')}
                 >
                   Gap between presses (ms)
                 </label>
@@ -380,6 +375,7 @@ export function KeystrokeCaptureDialog({
                   min={0}
                   max={MAX_REPEAT_DELAY}
                   disabled={repeat <= 1}
+                  thousands
                   ariaLabel="Gap between presses (ms)"
                 />
               </div>
@@ -392,7 +388,6 @@ export function KeystrokeCaptureDialog({
               <div className="flex items-center justify-between gap-3">
                 <label
                   className="text-[12px] font-medium text-text-secondary"
-                  data-tip={tt('How long the key stays pressed, in ms (10–60000). Use the presets for common values.', 'Por quanto tempo a tecla fica pressionada, em ms (10–60000). Use os presets para valores comuns.')}
                 >Hold duration (ms)</label>
                 {/* Step is dynamic (stepFor returns 1000 once we're at/above 1s, 100
                     below it). NumberInput's step is constant per render, so we recompute
@@ -404,6 +399,7 @@ export function KeystrokeCaptureDialog({
                   max={MAX_HOLD_MS}
                   step={stepFor(holdMs)}
                   inputWidth="w-20"
+                  thousands
                   ariaLabel="Hold duration (ms)"
                 />
               </div>
@@ -413,7 +409,6 @@ export function KeystrokeCaptureDialog({
                   fresh value). User can still fine-tune via the spinner / typed
                   entry afterwards — presets are shortcuts, not locks. */}
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-[10px] text-text-tertiary">Presets:</span>
                 {HOLD_PRESETS.map(ms => (
                   <button
                     key={ms}
@@ -425,7 +420,7 @@ export function KeystrokeCaptureDialog({
                         : 'bg-bg-card hover:bg-bg-input border border-border-subtle text-text-tertiary hover:text-text-secondary'
                     }`}
                   >
-                    {ms >= 1000 ? `${ms / 1000}s` : `${ms}ms`}
+                    {formatMs(ms, language)} ms
                   </button>
                 ))}
               </div>

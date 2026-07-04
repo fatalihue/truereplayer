@@ -7,6 +7,7 @@ import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { Toggle } from './common/Toggle';
 import { SegmentedControl } from './common/SegmentedControl';
+import { formatMs } from '../utils/displayUtils';
 
 // Compact 28×16 switch — the redesigned Settings panel uses the smaller size for every
 // on/off control; other surfaces (dialogs) keep the default 40×20 Toggle.
@@ -17,7 +18,7 @@ function CompactToggle(props: { isOn: boolean; onChange: (v: boolean) => void; d
 // One shared width for every right-column control (chips, value fields, comboboxes) so
 // they line up on a single edge and read as the same size. The panel is narrow (~224px),
 // so keep it compact.
-const CTRL_W = 'w-[80px]';
+const CTRL_W = 'w-[96px]';
 
 // Live "Filter settings" query (lowercased). SettingRow reads it and hides itself when its
 // label doesn't match, so the search needs no prop-drilling through every row.
@@ -77,28 +78,28 @@ function Section({ color, title, children, collapsible = false, defaultOpen = tr
 // CTRL_W as the plain value fields so the column stays aligned. The dot toggles enable;
 // editing the number commits on blur/Enter (Enter also runs onEnterActivate — e.g. flip the
 // setting on when the user types a value into a disabled chip).
-function EnableChip({ value, isOn, onCommitValue, onToggle, onEnterActivate }: {
+function EnableChip({ value, isOn, unit, format, onCommitValue, onToggle, onEnterActivate }: {
   value: string;
   isOn: boolean;
+  unit?: string;
+  format?: boolean;
   onCommitValue: (v: string) => void;
   onToggle: (v: boolean) => void;
   onEnterActivate?: (v: string) => void;
 }) {
+  const { language } = useLanguage();
   const [local, setLocal] = useState(value);
-  const focused = useRef(false);
-  useEffect(() => { if (!focused.current) setLocal(value); }, [value]);
+  const [isFocused, setIsFocused] = useState(false);
+  useEffect(() => { if (!isFocused) setLocal(value); }, [value, isFocused]);
+  const display = !isFocused && format && local !== '' && Number.isFinite(Number(local))
+    ? formatMs(Number(local), language) : local;
   return (
     <div
-      // h-8 = the app-wide 32px control height (sheet convention, Fluent medium).
-      // focus-within:! beats the inline borderColor so keyboard/caret focus is
-      // visible on the chip — these inputs previously had no focused state at all.
       className={`${CTRL_W} h-8 flex items-center rounded border overflow-hidden focus-within:!border-accent-solid`}
       style={isOn
         ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
         : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
     >
-      {/* The whole left zone (not just the dot) is the on/off target — full height + ~20px wide
-          with a hover highlight, so it's easy to hit. The number stays editable on its own. */}
       <button
         type="button"
         onClick={() => onToggle(!isOn)}
@@ -114,15 +115,19 @@ function EnableChip({ value, isOn, onCommitValue, onToggle, onEnterActivate }: {
       </button>
       <input
         type="text"
-        value={local}
-        onChange={(e) => setLocal(e.target.value)}
-        onFocus={() => { focused.current = true; }}
-        onBlur={() => { focused.current = false; onCommitValue(local); }}
+        inputMode="numeric"
+        value={display}
+        onChange={(e) => setLocal(format ? e.target.value.replace(/[^\d-]/g, '') : e.target.value)}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => { setIsFocused(false); onCommitValue(local); }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') { onCommitValue(local); onEnterActivate?.(local); (e.target as HTMLInputElement).blur(); }
         }}
-        className={`flex-1 min-w-0 bg-transparent outline-none text-ui font-mono text-right pr-2 ${isOn ? 'text-text-primary' : 'text-text-tertiary'}`}
+        className={`flex-1 min-w-0 bg-transparent outline-none text-ui font-mono text-right ${isOn ? 'text-text-primary' : 'text-text-tertiary'}`}
       />
+      {unit
+        ? <span className="text-[10px] shrink-0 text-text-tertiary pl-1 pr-2">{unit}</span>
+        : <span className="pr-2" />}
     </div>
   );
 }
@@ -211,7 +216,7 @@ function SettingRow({ label, tooltip, children, danger }: { label: string; toolt
 // UI zoom, which double-scales fixed coords, and absolute shares the field's coordinate space
 // so it lands exactly under the input. These rows sit near the top of their group, so the
 // short menu stays within the inset and isn't clipped. Closes on outside-click / Escape.
-function ComboInput({ value, onCommit, options, width = 'w-[80px]', editable = true }: {
+function ComboInput({ value, onCommit, options, width = CTRL_W, editable = true }: {
   value: string;
   onCommit: (v: string) => void;
   options: { value: string; label: string }[];
@@ -379,7 +384,7 @@ function ClickerSection({
     // Uses the shared Section so it matches macro mode exactly (header above a single
     // inset group, same row layout). Purple icon/title keep the "you're in Clicker" cue.
     <Section color="var(--color-clicker)" title="Clicker">
-          {/* Flat/chip layout: every right-column control is one CTRL_W (80px) box, flush right,
+          {/* Flat/chip layout: every right-column control is one CTRL_W (96px) box, flush right,
               so chips, combos and the area control all line up. Value+enable rows are a single
               EnableChip; Button/Rate are pickers; Area is chip-shaped (dot + picker). */}
           {/* Mouse button picker — moved here from the ActionBar so the panel is the single
@@ -389,7 +394,7 @@ function ClickerSection({
               editable={false}
               value={button}
               onCommit={(v) => onChange('cursorClickButton', v)}
-              width="w-[80px]"
+              width={CTRL_W}
               options={[
                 { value: 'Left', label: 'Left' },
                 { value: 'Right', label: 'Right' },
@@ -399,7 +404,7 @@ function ClickerSection({
           </SettingRow>
           <SettingRow label="Rate" tooltip={tt('Click rate: /s or delay (ms). Type or pick a preset.', 'Taxa de clique: /s ou atraso (ms). Digite ou escolha um preset.')}>
             {/* Combo + /s↔ms unit toggle share one CTRL_W slot so the row aligns with the chips. */}
-            <div className="w-[80px] flex items-center gap-1">
+            <div className={`${CTRL_W} flex items-center gap-1`}>
               <ComboInput
                 /* Key on (unit, localDelayMs) so it remounts with the right displayValue when
                    either changes — toggling the unit, or picking a preset (commitRate updates
@@ -435,6 +440,7 @@ function ClickerSection({
             <EnableChip
               value={interval}
               isOn={useInterval}
+              unit="ms" format
               onCommitValue={(v) => onChange('cursorClickInterval', v)}
               onToggle={(v) => onChange('cursorClickUseInterval', v)}
               onEnterActivate={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
@@ -444,6 +450,7 @@ function ClickerSection({
             <EnableChip
               value={rateJitter}
               isOn={useRateJitter}
+              unit="%"
               onCommitValue={(v) => onChange('cursorClickDelayJitter', v)}
               onToggle={(v) => onChange('cursorClickUseJitter', v)}
               onEnterActivate={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
@@ -471,7 +478,7 @@ function ClickerSection({
               auto-enables useArea + disables Position jitter on a successful draw. */}
           <SettingRow label="Area" tooltip={tt('Clicks a random point in a screen box. Exclusive with Position.', 'Clica em um ponto aleatório em uma caixa na tela. Exclusivo com Position.')}>
             <div
-              className="w-[80px] h-8 flex items-center rounded border overflow-hidden relative group"
+              className={`${CTRL_W} h-8 flex items-center rounded border overflow-hidden relative group`}
               style={useArea
                 ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
                 : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
@@ -845,10 +852,10 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   Decoupled from the global macro hotkeys; active only in Clicker mode. */}
               <Section color="#60cdff" title="Hotkeys">
                 <SettingRow label="Start" tooltip={tt('Run / stop the clicker.', 'Inicia / para o clicker.')}>
-                  <HotkeyInput value={settings.cursorClickStartHotkey} settingKey="cursorClickStartHotkey" onChange={changeHotkey} width="w-[80px]" />
+                  <HotkeyInput value={settings.cursorClickStartHotkey} settingKey="cursorClickStartHotkey" onChange={changeHotkey} width={CTRL_W} />
                 </SettingRow>
                 <SettingRow label="Pause" tooltip={tt('Pause / resume the clicker.', 'Pausa / retoma o clicker.')}>
-                  <HotkeyInput value={settings.cursorClickPauseHotkey} settingKey="cursorClickPauseHotkey" onChange={changeHotkey} width="w-[80px]" />
+                  <HotkeyInput value={settings.cursorClickPauseHotkey} settingKey="cursorClickPauseHotkey" onChange={changeHotkey} width={CTRL_W} />
                 </SettingRow>
               </Section>
               <ClickerSection
@@ -878,6 +885,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 <EnableChip
                   value={settings.customDelay}
                   isOn={settings.useCustomDelay}
+                  unit="ms" format
                   onCommitValue={(v) => changeSetting('customDelay', v)}
                   onToggle={(v) => changeSetting('useCustomDelay', v)}
                   onEnterActivate={(v) => {
@@ -905,6 +913,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 <EnableChip
                   value={settings.loopInterval}
                   isOn={settings.loopIntervalEnabled}
+                  unit="ms" format
                   onCommitValue={(v) => changeSetting('loopInterval', v)}
                   onToggle={(v) => changeSetting('loopIntervalEnabled', v)}
                   onEnterActivate={() => { if (!settings.loopIntervalEnabled) changeSetting('loopIntervalEnabled', true); }}
@@ -914,6 +923,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 <EnableChip
                   value={settings.delayVariation}
                   isOn={settings.useDelayVariation}
+                  unit="%"
                   onCommitValue={(v) => changeSetting('delayVariation', v)}
                   onToggle={(v) => changeSetting('useDelayVariation', v)}
                   onEnterActivate={() => { if (!settings.useDelayVariation) changeSetting('useDelayVariation', true); }}
@@ -1064,13 +1074,13 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             {/* Notifications — out-of-window run-end cues. Both apply only while the
                 TrueReplayer window is NOT foreground (the game usually covers it). */}
             <Section color="#ffa94d" title="Notifications">
-              <SettingRow label="Flash on Replay End" tooltip={tt('Pulse the taskbar button when a replay finishes or fails while another window is focused.', 'Pisca o botão da barra de tarefas quando um replay termina ou falha enquanto outra janela está em foco.')}>
+              <SettingRow label="Flash on Replay End">
                 <CompactToggle
                   isOn={settings.runEndFlash}
                   onChange={(v) => send({ type: 'window:runEndFlash', payload: { enabled: v } })}
                 />
               </SettingRow>
-              <SettingRow label="Sound on Replay End" tooltip={tt('Play the system chime when a replay finishes or fails in the background (error uses the error sound).', 'Toca o som do sistema quando um replay termina ou falha em segundo plano (erros usam o som de erro).')}>
+              <SettingRow label="Sound on Replay End">
                 <CompactToggle
                   isOn={settings.runEndSound}
                   onChange={(v) => send({ type: 'window:runEndSound', payload: { enabled: v } })}
@@ -1081,7 +1091,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             {/* Appearance — flat Section (matches the rest) with one action row that opens
                 the Theme Editor. Section preserves data-section for the collapsed rail. */}
             <Section color="#c084fc" title="Appearance">
-              <SettingRow label="Theme & layout" tooltip={tt('Colours, font, row height, per-action accents.', 'Cores, fonte, altura da linha, destaques por ação.')}>
+              <SettingRow label="Theme & layout">
                 <button
                   onClick={() => window.dispatchEvent(new CustomEvent('cmd:themeeditor'))}
                   className="flex items-center gap-1 text-ui text-accent-solid hover:underline"
@@ -1094,7 +1104,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             {/* Language — optional PT-BR tooltips. Names/labels stay English; only the tooltip
                 text is localised. Frontend-only (localStorage), switches live. */}
             <Section color="#4dd0a0" title="Language">
-              <SettingRow label="Tooltips" tooltip={tt('Show tooltips in English or Brazilian Portuguese. Labels/names stay in English.', 'Mostra os tooltips em inglês ou português (BR). Nomes/rótulos permanecem em inglês.')}>
+              <SettingRow label="Tooltips">
                 <select
                   value={language}
                   onChange={(e) => setLanguage(e.target.value as 'en' | 'pt-BR')}

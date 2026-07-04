@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Repeat2 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
-import { useTt } from '../state/LanguageContext';
 import { NumberInput } from './common/NumberInput';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
@@ -24,7 +23,6 @@ export interface RunProfileDialogProps {
  */
 export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClose }: RunProfileDialogProps) {
   const { profiles } = useAppState();
-  const tt = useTt();
   const [profileName, setProfileName] = useState(initial?.profileName ?? '');
   const [repeatCount, setRepeatCount] = useState(initial?.repeatCount ?? 1);
   const selectRef = useRef<HTMLSelectElement>(null);
@@ -108,10 +106,6 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
                 ref={selectRef}
                 value={profileName}
                 onChange={(e) => setProfileName(e.target.value)}
-                data-tip={tt(
-                  "Profile whose actions run inline here. Self-references and disabled profiles are hidden.",
-                  "Profile cujas ações rodam inline aqui. Auto-referências e profiles desativados ficam ocultos."
-                )}
                 className="h-8 px-2 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
               >
                 {eligibleProfiles.map((p) => (
@@ -127,13 +121,7 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
                 Repeat
               </label>
               <div className="flex items-center gap-2">
-                <span
-                  className="inline-flex"
-                  data-tip={tt(
-                    "How many times the selected profile runs each time this action is reached (1–999). The target's own Loops/Interval are ignored.",
-                    "Quantas vezes o profile selecionado roda cada vez que esta ação é alcançada (1–999). Os Loops/Interval do próprio alvo são ignorados."
-                  )}
-                >
+                <span className="inline-flex">
                   <NumberInput
                     value={repeatCount}
                     onChange={setRepeatCount}
@@ -151,10 +139,9 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
             </div>
 
             <div className="text-[11px] text-text-tertiary leading-relaxed bg-bg-card border border-border-subtle rounded px-2.5 py-2">
-              The selected profile's actions run inline at this point. Its own
-              Loops / Interval settings are ignored — use the Repeat field above
-              instead. Disabled profiles are skipped. Cycles (A → B → A) and
-              chains deeper than 5 levels are blocked automatically.
+              Runs the profile's actions inline here. Its own Loops / Interval
+              are ignored — use Repeat above. Disabled profiles are skipped;
+              cycles and 5+ level chains are blocked.
             </div>
           </>
         )}

@@ -25,6 +25,10 @@ interface ProfilePanelProps {
   onToggleCollapse?: () => void;
 }
 
+// Named header action button (New / Folder / Open / Export) — icon + short label,
+// sharing the row width. Replaces the old icon-only + tooltip header buttons.
+const PROFILE_ACTION_BTN = 'flex-1 flex items-center justify-center gap-1 px-1.5 h-7 rounded text-[11px] font-medium hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors';
+
 const FOLDER_COLORS = [
   // Blues & purples (neon & vivid)
   '#00FFFF', '#0099FF', '#0066FF', '#6B5BFF', '#BF00FF',
@@ -1617,39 +1621,29 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             from the same pass DID land. */}
         <div className="flex items-center justify-between px-3 pt-2 pb-1">
           <span className="label-micro text-text-tertiary">PROFILES</span>
-          <div className="flex items-center gap-0.5">
-            <button
-              onClick={onToggleCollapse}
-              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-            >
-              <ChevronsLeft size={14} />
-            </button>
-            <button
-              onClick={handleOpenProfilesFolder}
-              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-            >
-              <ExternalLink size={14} />
-            </button>
-            <button
-              onClick={handleExportClick}
-              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-              data-tip={tt('Import or export profiles', 'Importar ou exportar perfis')}
-            >
-              <ArrowLeftRight size={14} />
-            </button>
-            <button
-              onClick={handleCreateFolder}
-              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-            >
-              <FolderPlus size={14} />
-            </button>
-            <button
-              onClick={handleCreate}
-              className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-            >
-              <FilePlus size={14} />
-            </button>
-          </div>
+          {/* Collapse stays a bare icon (self-explanatory); the action buttons below
+              carry names now that the tooltips were pruned. */}
+          <button
+            onClick={onToggleCollapse}
+            className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+          >
+            <ChevronsLeft size={14} />
+          </button>
+        </div>
+        {/* Named action row — New / Folder / Open / Export, each sharing the width. */}
+        <div className="flex items-center gap-0.5 px-3 pb-1.5">
+          <button onClick={handleCreate} className={PROFILE_ACTION_BTN}>
+            <FilePlus size={13} /><span>New</span>
+          </button>
+          <button onClick={handleCreateFolder} className={PROFILE_ACTION_BTN}>
+            <FolderPlus size={13} /><span>Folder</span>
+          </button>
+          <button onClick={handleOpenProfilesFolder} className={PROFILE_ACTION_BTN}>
+            <ExternalLink size={13} /><span>Open</span>
+          </button>
+          <button onClick={handleExportClick} className={PROFILE_ACTION_BTN}>
+            <ArrowLeftRight size={13} /><span>Export</span>
+          </button>
         </div>
 
         {/* Search — supports "#tag" prefix to filter by tag instead of name */}
@@ -2373,13 +2367,20 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             <p className="text-xs text-text-secondary mb-3">
               Press a key combination for <span className="text-text-primary font-medium">'{showHotkeyDialog}'</span>
             </p>
+            {/* Matches the SettingsPanel global-hotkey field: a blinking "New key…"
+                placeholder while awaiting a combo (the old literal "..." value was
+                a stand-in for this), solid accent once captured. */}
             <input
               ref={hotkeyInputRef}
               type="text"
               readOnly
-              value={hotkeyCapture}
-              data-tip={tt('Press the key combination to capture it here (Ctrl, Alt, Win, F-keys all work).', 'Pressione a combinação de teclas para capturá-la aqui (Ctrl, Alt, Win, F-keys funcionam).')}
-              className="w-full h-9 px-3 text-sm font-mono text-accent bg-bg-input border border-accent-solid rounded text-center outline-none"
+              value={!hotkeyCapture || hotkeyCapture === '...' ? '' : hotkeyCapture}
+              placeholder="New key..."
+              className={`w-full h-9 px-3 text-sm font-mono bg-bg-input border border-accent-solid rounded text-center outline-none placeholder:text-accent-light/50 ${
+                !hotkeyCapture || hotkeyCapture === '...'
+                  ? 'text-accent-light animate-pulse'
+                  : 'text-accent'
+              }`}
             />
 
             {/* Trigger Mode */}
@@ -2463,7 +2464,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               }}
               placeholder="e.g. /id"
               maxLength={32}
-              data-tip={tt('Text you type that auto-triggers this profile. Letters, digits and - . / , ; = only.', 'Texto que você digita e que aciona este perfil automaticamente. Só letras, dígitos e - . / , ; = .')}
               className="w-full h-9 px-3 text-sm font-mono text-accent bg-bg-input border border-accent-solid rounded outline-none"
             />
             <p className="text-[11px] text-text-tertiary mt-1.5">
@@ -2473,7 +2473,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             <button
               type="button"
               onClick={() => setHotstringInstant(!hotstringInstant)}
-              data-tip={tt('On: fires the moment the last character is typed. Off: waits for Enter, Space or Tab first.', 'Ligado: dispara assim que o último caractere é digitado. Desligado: espera por Enter, Space ou Tab antes.')}
               className="flex items-center gap-2 mt-3 cursor-pointer text-left"
             >
               <CheckboxBox checked={hotstringInstant} />

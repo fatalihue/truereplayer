@@ -144,7 +144,7 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
       // Capture dialog: a stray click outside must not discard a configured
       // hotkey/timeout — dismissal is Esc or Cancel only.
       closeOnBackdrop={false}
-      footerHint="Enter (in timeout) to confirm · Esc to cancel"
+      footerHint=""
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -227,6 +227,7 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
                 onChange={setTimeoutMs}
                 min={0}
                 step={stepFor(timeoutMs)}
+                thousands
                 inputWidth="w-24"
                 inputHeight="h-8"
                 suffix="ms"

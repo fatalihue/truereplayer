@@ -4,7 +4,6 @@ import EmojiPicker, { Theme as EmojiTheme, EmojiStyle } from 'emoji-picker-react
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
 import { useBridge } from '../bridge/BridgeContext';
-import { useTt } from '../state/LanguageContext';
 import type { ProfileMetadataPayload, TagListEntry } from '../bridge/messageTypes';
 
 interface ProfileInfoDialogProps {
@@ -34,7 +33,6 @@ const TAG_REGEX = /^[a-z0-9\-_+.]+$/;
  */
 export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogProps) {
   const { send, subscribe } = useBridge();
-  const tt = useTt();
 
   const [loaded, setLoaded] = useState(false);
   const [original, setOriginal] = useState<ProfileMetadataPayload | null>(null);
@@ -253,7 +251,6 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
                   onChange={(e) => setDescription(e.target.value.slice(0, MAX_DESCRIPTION))}
                   placeholder="What does this profile do?"
                   rows={3}
-                  data-tip={tt(`Notes about this profile (up to ${MAX_DESCRIPTION} chars)`, `Notas sobre este perfil (até ${MAX_DESCRIPTION} caracteres)`)}
                   className="w-full px-3 py-2 text-xs text-text-primary bg-bg-input border border-border-subtle rounded outline-none focus:border-accent-solid placeholder:text-text-disabled transition-colors resize-none"
                 />
                 <div className="text-[10px] text-text-tertiary text-right">
@@ -291,7 +288,6 @@ export function ProfileInfoDialog({ profileName, onClose }: ProfileInfoDialogPro
                     onBlur={() => setTimeout(() => setShowTagSuggestions(false), 150)}
                     placeholder={tags.length === 0 ? 'Add a tag…' : ''}
                     disabled={tags.length >= MAX_TAGS}
-                    data-tip={tt('Lowercase letters, digits, - _ + . only; Enter or comma to add', 'Apenas letras minúsculas, dígitos, - _ + . ; Enter ou vírgula para adicionar')}
                     className="flex-1 min-w-[100px] bg-transparent text-xs text-text-primary outline-none placeholder:text-text-disabled disabled:opacity-50"
                   />
                 </div>

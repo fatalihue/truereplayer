@@ -35,6 +35,11 @@ export const defaultColumnVisibility: ColumnVisibility = {
 // the insert payload so the C# side leaves RepeatDelayMs null (clean profile JSON).
 const DEFAULT_REPEAT_DELAY_MS = 30;
 
+// Shared layout for the toolbar's icon buttons: a stacked icon-over-label chip so
+// every tool names itself (the tooltips that used to do this were pruned). Colour
+// state (hover / disabled / danger) is appended per button.
+const TOOL_BTN = 'flex flex-col items-center justify-center gap-0.5 px-2 h-[40px] rounded text-[10px] font-medium leading-none transition-colors disabled:cursor-not-allowed';
+
 // Toggle Columns button is currently DISABLED — the code below is preserved in
 // comments for when the user decides on a final home for it. The grid header's
 // trailing 24 px column was already removed (no row-spacer waste either way), so
@@ -499,22 +504,24 @@ export function Toolbar(_props: ToolbarProps) {
             tabIndex={-1}
             disabled={!buttonStates.canUndo || insertsDisabled}
             onClick={() => send({ type: 'actions:undo', payload: {} })}
-            className={`p-1.5 rounded transition-colors ${buttonStates.canUndo && !insertsDisabled ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled'}`}
+            className={`${TOOL_BTN} ${buttonStates.canUndo && !insertsDisabled ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled'}`}
           >
-            <Undo2 size={14} />
+            <Undo2 size={15} />
+            <span>Undo</span>
           </button>
           <button
             tabIndex={-1}
             disabled={!buttonStates.canRedo || insertsDisabled}
             onClick={() => send({ type: 'actions:redo', payload: {} })}
-            className={`p-1.5 rounded transition-colors ${buttonStates.canRedo && !insertsDisabled ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled'}`}
+            className={`${TOOL_BTN} ${buttonStates.canRedo && !insertsDisabled ? 'text-text-tertiary hover:bg-bg-elevated hover:text-text-primary' : 'text-text-disabled'}`}
           >
-            <Redo2 size={14} />
+            <Redo2 size={15} />
+            <span>Redo</span>
           </button>
 
           {/* History | inserts divider — renders the grouping the insert-order
               comment below describes instead of leaving it implicit. */}
-          <div className="w-px h-4 bg-border-subtle mx-0.5" />
+          <div className="w-px h-7 bg-border-subtle mx-0.5" />
 
           {/* DISABLED — Toggle Columns button.
               See the commented state block at the top of this component for the
@@ -587,9 +594,10 @@ export function Toolbar(_props: ToolbarProps) {
               setShowKeystrokeCapture(true);
             }}
             disabled={insertsDisabled}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            className={`${TOOL_BTN} hover:bg-bg-elevated text-text-tertiary hover:text-text-primary disabled:text-text-disabled`}
           >
-            <Keyboard size={14} />
+            <Keyboard size={15} />
+            <span>Keystroke</span>
           </button>
 
           {/* Send Text */}
@@ -597,9 +605,10 @@ export function Toolbar(_props: ToolbarProps) {
             tabIndex={-1}
             onClick={() => setShowSendTextDialog(true)}
             disabled={insertsDisabled}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            className={`${TOOL_BTN} hover:bg-bg-elevated text-text-tertiary hover:text-text-primary disabled:text-text-disabled`}
           >
-            <Type size={14} />
+            <Type size={15} />
+            <span>Text</span>
           </button>
 
           {/* Set Variable — writes a name/value into the replay run's variable store,
@@ -613,10 +622,11 @@ export function Toolbar(_props: ToolbarProps) {
               send({ type: 'actions:insertAction', payload: { actionType: 'SetVariable', insertIndex } });
             }}
             disabled={insertsDisabled}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            className={`${TOOL_BTN} hover:bg-bg-elevated text-text-tertiary hover:text-text-primary disabled:text-text-disabled`}
             data-tip={clickerTip('Insert Set Variable action — read it back with {var:name}', 'Inserir ação Set Variable — leia com {var:name}')}
           >
-            <Braces size={14} />
+            <Braces size={15} />
+            <span>Variable</span>
           </button>
 
           {/* Pause — wait for a hotkey or a timeout before continuing replay. Now
@@ -630,16 +640,17 @@ export function Toolbar(_props: ToolbarProps) {
               setShowPauseDialog(true);
             }}
             disabled={insertsDisabled}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            className={`${TOOL_BTN} hover:bg-bg-elevated text-text-tertiary hover:text-text-primary disabled:text-text-disabled`}
           >
-            <Hourglass size={14} />
+            <Hourglass size={15} />
+            <span>Pause</span>
           </button>
 
           {/* Direct inserts | menu-based inserts divider. The three buttons after
               this line open flyout menus (Wait / Conditional / Browser) — the
               chevron each one carries is the "this opens a menu" affordance that
               separates them from the one-click inserts to the left. */}
-          <div className="w-px h-4 bg-border-subtle mx-0.5" />
+          <div className="w-px h-7 bg-border-subtle mx-0.5" />
 
           {/* Wait — sub-picker for the two blocking-probe variants. Replaces the
               previous standalone Wait Image + Wait Pixel buttons; the consolidated
@@ -654,10 +665,10 @@ export function Toolbar(_props: ToolbarProps) {
               tabIndex={-1}
               onClick={() => setShowWaitMenu(!showWaitMenu)}
               disabled={insertsDisabled}
-              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled flex items-center gap-0.5"
+              className={`${TOOL_BTN} hover:bg-bg-elevated text-text-tertiary hover:text-text-primary disabled:text-text-disabled`}
             >
-              <ScanEye size={14} />
-              <ChevronDown size={9} className="opacity-60" />
+              <ScanEye size={15} />
+              <span className="flex items-center gap-0.5 leading-none">Wait<ChevronDown size={8} className="opacity-60" /></span>
             </button>
             {showWaitMenu && (
               <div ref={waitFlyout.ref} className={`absolute w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1 ${waitFlyout.flipX ? 'right-0' : 'left-0'} ${waitFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
@@ -700,10 +711,10 @@ export function Toolbar(_props: ToolbarProps) {
               tabIndex={-1}
               onClick={() => setShowConditionalMenu(!showConditionalMenu)}
               disabled={insertsDisabled}
-              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled flex items-center gap-0.5"
+              className={`${TOOL_BTN} hover:bg-bg-elevated text-text-tertiary hover:text-text-primary disabled:text-text-disabled`}
             >
-              <GitBranch size={14} />
-              <ChevronDown size={9} className="opacity-60" />
+              <GitBranch size={15} />
+              <span className="flex items-center gap-0.5 leading-none">If<ChevronDown size={8} className="opacity-60" /></span>
             </button>
             {showConditionalMenu && (
               <div ref={conditionalFlyout.ref} className={`absolute w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1 ${conditionalFlyout.flipX ? 'right-0' : 'left-0'} ${conditionalFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
@@ -783,10 +794,10 @@ export function Toolbar(_props: ToolbarProps) {
               tabIndex={-1}
               onClick={() => setShowBrowserMenu(!showBrowserMenu)}
               disabled={insertsDisabled}
-              className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled flex items-center gap-0.5"
+              className={`${TOOL_BTN} hover:bg-bg-elevated text-text-tertiary hover:text-text-primary disabled:text-text-disabled`}
             >
-              <Globe size={14} />
-              <ChevronDown size={9} className="opacity-60" />
+              <Globe size={15} />
+              <span className="flex items-center gap-0.5 leading-none">Browser<ChevronDown size={8} className="opacity-60" /></span>
             </button>
             {showBrowserMenu && (
               <div ref={browserFlyout.ref} className={`absolute w-56 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 py-1 ${browserFlyout.flipX ? 'right-0' : 'left-0'} ${browserFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
@@ -835,12 +846,13 @@ export function Toolbar(_props: ToolbarProps) {
             tabIndex={-1}
             onClick={() => setShowRunProfileDialog(true)}
             disabled={insertsDisabled}
-            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            className={`${TOOL_BTN} hover:bg-bg-elevated text-text-tertiary hover:text-text-primary disabled:text-text-disabled`}
           >
-            <Repeat2 size={14} />
+            <Repeat2 size={15} />
+            <span>Run</span>
           </button>
 
-          <div className="w-px h-4 bg-border-subtle mx-0.5" />
+          <div className="w-px h-7 bg-border-subtle mx-0.5" />
 
           {/* Clear All — destructive hover (red text + faint red bg) mirrors
               BulkActionBar's Delete. Two-step confirm popover + the same
@@ -854,10 +866,11 @@ export function Toolbar(_props: ToolbarProps) {
               tabIndex={-1}
               onClick={() => setShowClearConfirm(prev => !prev)}
               disabled={insertsDisabled || actions.length === 0}
-              className="p-1.5 rounded text-text-tertiary hover:bg-recording-bg hover:text-recording transition-colors disabled:text-text-disabled disabled:hover:bg-transparent disabled:hover:text-text-disabled"
+              className={`${TOOL_BTN} text-text-tertiary hover:bg-recording-bg hover:text-recording disabled:text-text-disabled disabled:hover:bg-transparent disabled:hover:text-text-disabled`}
               data-tip={clickerTip('Clear all actions in this profile', 'Limpar todas as ações deste perfil')}
             >
-              <Trash2 size={14} />
+              <Trash2 size={15} />
+              <span>Clear</span>
             </button>
             {showClearConfirm && (
               <div ref={clearFlyout.ref} className={`absolute w-60 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 p-3 ${clearFlyout.flipX ? 'right-0' : 'left-0'} ${clearFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>

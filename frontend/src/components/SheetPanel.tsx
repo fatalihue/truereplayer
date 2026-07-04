@@ -1638,7 +1638,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   onClick={handleTestMatch}
                   disabled={!action?.imagePath || testMatchRequestId != null}
                   className="flex-1 flex items-center justify-center gap-1.5 h-8 px-2.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  data-tip={tt('Capture the screen now and report the match score', 'Captura a tela agora e informa a pontuação de correspondência')}
                 >
                   <PlayCircle size={12} />
                   {testMatchRequestId != null ? 'Testing…' : 'Test match'}
@@ -1687,7 +1686,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 <button
                   onClick={handleConfigureSearchRegion}
                   className="h-8 px-2.5 flex items-center gap-1.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors"
-                  data-tip={tt('Draw a sub-rectangle of the screen to limit where the match runs. Reduces CPU and false positives.', 'Desenhe um sub-retângulo da tela para limitar onde a correspondência roda. Reduz CPU e falsos positivos.')}
+                  data-tip={tt('Limit matching to a screen region — faster, fewer false positives.', 'Limita a correspondência a uma região da tela — mais rápido, menos falsos positivos.')}
                 >
                   <Frame size={12} />
                   Configure
@@ -1709,7 +1708,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 wait behavior → test it". */}
             <Field
               label="Tolerance (%)"
-              hint={tt('80% is a reasonable default. Raise toward 95 for stricter matches; drop below 70 for compressed / scaled UI elements.', 'Padrão razoável é 80%. Aumente para ~95 para correspondências mais estritas; abaixe abaixo de 70 para elementos de UI comprimidos / redimensionados.')}
+              hint={tt('Default 80%. Raise to ~95 for strict; drop below 70 for compressed UI.', 'Padrão 80%. Aumente para ~95 para estrito; abaixe de 70 para UI comprimida.')}
             >
               <Slider
                 value={parseInt(confidence, 10) || 80}
@@ -1834,7 +1833,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   type="button"
                   onClick={handleTestPixelMatch}
                   className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded whitespace-nowrap transition-colors"
-                  data-tip={tt('Read the live pixel and compare against the target colour', 'Lê o pixel ao vivo e compara com a cor-alvo')}
                 >
                   <PlayCircle size={13} />
                   Test match
@@ -1892,7 +1890,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 who really want > 50 can still type it. */}
             <Field
               label="Tolerance (Per Channel)"
-              hint={tt('0 = exact match. Try 5–15 for game UI colours that compress slightly.', '0 = correspondência exata. Tente 5–15 para cores de UI de jogos que comprimem levemente.')}
+              hint={tt('Try 5–15 for compressed UI colours.', 'Tente 5–15 para cores de UI comprimidas.')}
             >
               <Slider
                 value={parseInt(pixelTolerance, 10) || 0}
@@ -2437,7 +2435,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 onClick={handleTestAction}
                 disabled={testRequestId !== null}
                 className="w-full h-8 flex items-center justify-center gap-1.5 px-2.5 rounded text-xs font-medium border border-accent-solid/40 bg-accent-solid/10 hover:bg-accent-solid/20 text-accent-light transition-colors disabled:opacity-60"
-                data-tip={tt('Run this action live to verify the selector / settings', 'Executa esta ação ao vivo para verificar o seletor / configurações')}
               >
                 <PlayCircle size={13} />
                 {testRequestId ? 'Running…' : 'Test action'}
@@ -2597,25 +2594,25 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                     type="button"
                     onClick={handleCopyCoords}
                     style={coordCopyFlash ? { borderColor: 'var(--color-replay)', color: 'var(--color-replay)', backgroundColor: 'var(--color-replay-bg)' } : undefined}
-                    className={`h-8 w-8 shrink-0 flex items-center justify-center border rounded transition-colors ${
+                    className={`h-8 shrink-0 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border rounded transition-colors ${
                       coordCopyFlash
                         ? ''
                         : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
                     }`}
                   >
-                    {coordCopyFlash ? <Check size={12} /> : <Copy size={12} />}
+                    {coordCopyFlash ? <Check size={12} /> : <Copy size={12} />} {coordCopyFlash ? 'Copied' : 'Copy'}
                   </button>
                   <button
                     type="button"
                     onClick={handlePasteCoords}
                     style={coordPasteError ? { borderColor: 'var(--color-recording)', color: 'var(--color-recording)', backgroundColor: 'var(--color-recording-bg)' } : undefined}
-                    className={`h-8 w-8 shrink-0 flex items-center justify-center border rounded transition-colors ${
+                    className={`h-8 shrink-0 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border rounded transition-colors ${
                       coordPasteError
                         ? ''
                         : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
                     }`}
                   >
-                    {coordPasteError ? <X size={12} /> : <ClipboardPaste size={12} />}
+                    {coordPasteError ? <X size={12} /> : <ClipboardPaste size={12} />} Paste
                   </button>
                 </div>
               )}
@@ -2633,6 +2630,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               value={parseInt(delay, 10) || 0}
               onChange={(n) => setDelay(String(n))}
               min={0}
+              thousands
               suffix="ms"
               inputWidth="w-full"
               inputHeight="h-8"

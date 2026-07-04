@@ -542,15 +542,6 @@ export function TargetConfigDialog({
                   : 'bg-replay/10 text-replay border-replay/30 hover:bg-replay/15'
                 : 'text-text-secondary border-border-default hover:bg-bg-elevated'
           }`}
-          // The button doubles as the result chip (truncated in this 380px dialog); the data-tip
-          // reveals the full result/error on hover so a long window title or error isn't lost.
-          data-tip={testInFlight
-            ? tt('Sending test request…', 'Enviando requisição de teste…')
-            : testResult
-              ? (testResult.error
-                  ? testResult.error
-                  : `${testResult.matches ? 'Matches' : 'No match'} — ${testResult.foregroundProcess || '?'}${testResult.foregroundTitle ? ' / ' + testResult.foregroundTitle : ''}`)
-              : tt('Check whether the current config matches the window in front (excluding TrueReplayer)', 'Verifica se a configuração atual corresponde à janela em frente (excluindo o TrueReplayer)')}
         >
           <div className="truncate">
             {testInFlight ? (
@@ -573,7 +564,7 @@ export function TargetConfigDialog({
                 </>
               )
             ) : (
-              'Test against foreground window'
+              'Test front window'
             )}
           </div>
         </button>
@@ -585,12 +576,7 @@ export function TargetConfigDialog({
               saving a profile in a coord space that can't be anchored to anything). The
               data-tip on the row surfaces the reason (or, when enabled, what it does) via the
               body-portal tooltip on hover. */}
-          <div
-            className="flex items-center justify-between"
-            data-tip={relativeToggleDisabled
-              ? tt('Set a process name or window title first — relative coordinates need a target window to anchor to.', 'Defina primeiro um nome de processo ou título de janela — coordenadas relativas precisam de uma janela-alvo para se ancorar.')
-              : tt('Store click coordinates relative to the target window, so the macro keeps hitting the right spot when the window moves or resizes.', 'Armazena as coordenadas de clique relativas à janela-alvo, então a macro continua acertando o ponto certo mesmo se a janela mover ou redimensionar.')}
-          >
+          <div className="flex items-center justify-between">
             <span className={`text-xs ${relativeToggleDisabled ? 'text-text-disabled' : 'text-text-secondary'}`}>Relative Coordinates</span>
             <Toggle
               isOn={relativeCoordinates}
@@ -650,7 +636,7 @@ export function TargetConfigDialog({
             </div>
           )}
           <div className="flex items-center justify-between">
-            <span className="text-xs text-text-secondary" data-tip={tt('Bring the target window to the foreground (and un-minimize it) before replay starts', 'Traz a janela-alvo para o primeiro plano (e a desminimiza) antes de iniciar a reprodução')}>Bring to Focus</span>
+            <span className="text-xs text-text-secondary">Bring to Focus</span>
             <Toggle isOn={bringToFocus} onChange={setBringToFocus} />
           </div>
           {/* Restore Position/Size + Update Geometry apply to both profile and folder scopes —
@@ -658,11 +644,11 @@ export function TargetConfigDialog({
               them with its own target). Convert Coordinates is profile-only because it rewrites
               the actions of the active profile, not a property of the target itself. */}
           <div className="flex items-center justify-between">
-            <span className="text-xs text-text-secondary" data-tip={tt('Restore the target window to its saved position before replay', 'Restaura a janela-alvo para a posição salva antes da reprodução')}>Restore Position</span>
+            <span className="text-xs text-text-secondary">Restore Position</span>
             <Toggle isOn={restorePosition} onChange={setRestorePosition} />
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-text-secondary" data-tip={tt('Restore the target window to its saved size before replay (un-maximizes if needed)', 'Restaura a janela-alvo para o tamanho salvo antes da reprodução (desmaximiza se necessário)')}>Restore Size</span>
+            <span className="text-xs text-text-secondary">Restore Size</span>
             <Toggle isOn={restoreSize} onChange={setRestoreSize} />
           </div>
           {onUpdateGeometry && (
