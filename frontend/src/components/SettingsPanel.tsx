@@ -21,9 +21,10 @@ function CompactToggle(props: { isOn: boolean; onChange: (v: boolean) => void; d
 // and CLICKER_W in clicker mode — since they only ever hold a number.
 const CTRL_W = 'w-[110px]';
 
-// Clicker settings fields (Button / Rate / Loops / Interval / Jitter / Position / Area) match
-// the macro Execution chips' width (the EnableChip default 96px) so the two modes' value columns
-// line up. The clicker HOTKEY fields keep CTRL_W — they need room for a "Ctrl+PageDown" combo.
+// Width for EVERY clicker-mode field — the settings chips (Button / Rate / Loops / Interval /
+// Jitter / Position / Area) AND the Start / Pause hotkey fields — so the whole clicker column is
+// one uniform 96px (matching the macro Execution chips across a mode switch). The default clicker
+// hotkeys are single keys (PageDown / PageUp) that fit; a long modified combo would truncate.
 const CLICKER_W = 'w-[96px]';
 
 // Upper bounds for the timing / scatter fields — typing past these snaps back to the cap on
@@ -699,7 +700,7 @@ interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsPanelProps) {
-  const { settings, settingsResetEpoch, buttonStates, clickerStats } = useAppState();
+  const { settings, settingsResetEpoch, status } = useAppState();
   const { language, setLanguage } = useLanguage();
   const tt = useTt();
   const { send, subscribe } = useBridge();
@@ -729,12 +730,15 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
     prevClickerMode.current = settings.useCursorClick;
   }, [settings.useCursorClick]);
 
-  // When a run STARTS — a macro profile fires (replayActive) or the Clicker begins clicking
-  // (clickerStats.active) — surface the Profile tab if the user is parked on Global, so the
-  // running context (the actions / the Clicker panel) is what they see. Only on the false→true
-  // edge and only from Global, so it never yanks the user off a tab they chose mid-run.
+  // When a run STARTS — a macro profile fires or the Clicker begins clicking, both of which
+  // set status='replaying' — surface the Profile tab if the user is parked on Global, so the
+  // running context (the actions / the Clicker panel) is what they see. Keyed off `status`,
+  // NOT clickerStats.active/replayActive: clickerStats.active LATCHES true after the first
+  // Clicker run (the reducer preserves it on status:changed), which poisoned an OR-combination
+  // so it only fired once; `status` cleanly toggles ready↔replaying every run. Edge-only, and
+  // only from Global, so it never yanks the user off a tab they chose mid-run.
   const prevRunActive = useRef(false);
-  const runActive = buttonStates.replayActive || clickerStats.active;
+  const runActive = status === 'replaying';
   useEffect(() => {
     if (runActive && !prevRunActive.current && activeTab === 'global') setActiveTab('profile');
     prevRunActive.current = runActive;
@@ -906,10 +910,10 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   Decoupled from the global macro hotkeys; active only in Clicker mode. */}
               <Section color="#60cdff" title="Hotkeys">
                 <SettingRow label="Start" tooltip={tt('Run / stop the clicker.', 'Inicia / para o clicker.')}>
-                  <HotkeyInput value={settings.cursorClickStartHotkey} settingKey="cursorClickStartHotkey" onChange={changeHotkey} width={CTRL_W} />
+                  <HotkeyInput value={settings.cursorClickStartHotkey} settingKey="cursorClickStartHotkey" onChange={changeHotkey} width={CLICKER_W} />
                 </SettingRow>
                 <SettingRow label="Pause" tooltip={tt('Pause / resume the clicker.', 'Pausa / retoma o clicker.')}>
-                  <HotkeyInput value={settings.cursorClickPauseHotkey} settingKey="cursorClickPauseHotkey" onChange={changeHotkey} width={CTRL_W} />
+                  <HotkeyInput value={settings.cursorClickPauseHotkey} settingKey="cursorClickPauseHotkey" onChange={changeHotkey} width={CLICKER_W} />
                 </SettingRow>
               </Section>
               <ClickerSection
