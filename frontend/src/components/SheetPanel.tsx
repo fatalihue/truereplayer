@@ -1382,13 +1382,14 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 (On Probe Error) reads last as the edge case. */}
             <Field
               label="Wait for condition"
-              hint={tt('0 = check once and branch instantly (default). Above 0 = poll up to this many ms for the condition to become true before deciding: if it does, the TRUE branch fires; if the time runs out, the FALSE / Else branch fires.', '0 = checa uma vez e ramifica na hora (padrão). Acima de 0 = faz polling por até tantos ms pela condição ficar verdadeira antes de decidir: se ficar, dispara o ramo TRUE; se o tempo acabar, dispara o ramo FALSE / Else.')}
+              hint={tt('How long to keep re-checking before giving up. 0 = check once.', 'Por quanto tempo continuar checando antes de desistir. 0 = checa uma vez.')}
             >
               <NumberInput
                 value={parseInt(conditionTimeout, 10) || 0}
                 onChange={(n) => setConditionTimeout(String(n))}
                 min={0}
                 step={500}
+                thousands
                 suffix="ms"
                 inputWidth="w-24"
                 inputHeight="h-8"
@@ -1398,7 +1399,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
 
             <Field
               label="On Probe Error"
-              hint={tt("Default: probe exception falls through to the FALSE branch so the replay continues. Halt rethrows so flaky probes don't silently mask bugs.", 'Padrão: uma exceção no teste cai para o ramo FALSE e a reprodução continua. Interromper relança o erro para que testes instáveis não mascarem bugs silenciosamente.')}
+              hint={tt('What to do if the check itself errors.', 'O que fazer se a própria checagem der erro.')}
             >
               <select
                 value={ifOnProbeError}
@@ -1747,6 +1748,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   onChange={(n) => setTimeout_(String(n))}
                   min={1000}
                   step={1000}
+                  thousands
                   inputWidth="w-full"
                   inputHeight="h-8"
                   ariaLabel="Timeout in milliseconds"
@@ -1928,6 +1930,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   onChange={(n) => setTimeout_(String(n))}
                   min={1000}
                   step={1000}
+                  thousands
                   inputWidth="w-full"
                   inputHeight="h-8"
                   ariaLabel="Timeout in milliseconds"
@@ -2015,6 +2018,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 onChange={(n) => setTimeout_(String(n))}
                 min={0}
                 step={1000}
+                thousands
                 suffix="ms"
                 inputWidth="w-full"
                 inputHeight="h-8"
@@ -2421,6 +2425,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 onChange={(n) => setTimeout_(String(n))}
                 min={1000}
                 step={1000}
+                thousands
                 suffix="ms"
                 inputWidth="w-full"
                 inputHeight="h-8"

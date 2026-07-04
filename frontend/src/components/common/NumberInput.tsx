@@ -186,6 +186,9 @@ export function NumberInput({
         onChange={handleTextChange}
         onFocus={() => setIsFocused(true)}
         onBlur={handleBlur}
+        // Enter commits + reformats the field (blur runs the clamp/format path). Not
+        // stopped, so a dialog's own Enter-to-submit still fires afterwards.
+        onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); }}
         onWheel={handleWheel}
         min={min}
         max={max}

@@ -18,7 +18,7 @@ function CompactToggle(props: { isOn: boolean; onChange: (v: boolean) => void; d
 // One shared width for every right-column control (chips, value fields, comboboxes) so
 // they line up on a single edge and read as the same size. The panel is narrow (~224px),
 // so keep it compact.
-const CTRL_W = 'w-[96px]';
+const CTRL_W = 'w-[80px]';
 
 // Live "Filter settings" query (lowercased). SettingRow reads it and hides itself when its
 // label doesn't match, so the search needs no prop-drilling through every row.
@@ -78,11 +78,14 @@ function Section({ color, title, children, collapsible = false, defaultOpen = tr
 // CTRL_W as the plain value fields so the column stays aligned. The dot toggles enable;
 // editing the number commits on blur/Enter (Enter also runs onEnterActivate — e.g. flip the
 // setting on when the user types a value into a disabled chip).
-function EnableChip({ value, isOn, unit, format, onCommitValue, onToggle, onEnterActivate }: {
+function EnableChip({ value, isOn, unit, format, max, onCommitValue, onToggle, onEnterActivate }: {
   value: string;
   isOn: boolean;
   unit?: string;
   format?: boolean;
+  // Upper bound applied on commit (Loops 999, Jitter 100): typing a larger number
+  // snaps back to max on blur/Enter.
+  max?: number;
   onCommitValue: (v: string) => void;
   onToggle: (v: boolean) => void;
   onEnterActivate?: (v: string) => void;
@@ -93,9 +96,20 @@ function EnableChip({ value, isOn, unit, format, onCommitValue, onToggle, onEnte
   useEffect(() => { if (!isFocused) setLocal(value); }, [value, isFocused]);
   const display = !isFocused && format && local !== '' && Number.isFinite(Number(local))
     ? formatMs(Number(local), language) : local;
+  const commit = () => {
+    let v = local;
+    if (max != null && local !== '') {
+      const n = parseInt(local, 10);
+      if (!isNaN(n) && n > max) { v = String(max); setLocal(v); }
+    }
+    onCommitValue(v);
+    return v;
+  };
   return (
+    // Only the thousands-formatted (large ms) fields get the wider 96px slot; the
+    // rest keep the compact CTRL_W so the panel isn't bigger than it needs to be.
     <div
-      className={`${CTRL_W} h-8 flex items-center rounded border overflow-hidden focus-within:!border-accent-solid`}
+      className={`${format ? 'w-[96px]' : CTRL_W} h-8 flex items-center rounded border overflow-hidden focus-within:!border-accent-solid`}
       style={isOn
         ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
         : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
@@ -119,9 +133,9 @@ function EnableChip({ value, isOn, unit, format, onCommitValue, onToggle, onEnte
         value={display}
         onChange={(e) => setLocal(format ? e.target.value.replace(/[^\d-]/g, '') : e.target.value)}
         onFocus={() => setIsFocused(true)}
-        onBlur={() => { setIsFocused(false); onCommitValue(local); }}
+        onBlur={() => { setIsFocused(false); commit(); }}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') { onCommitValue(local); onEnterActivate?.(local); (e.target as HTMLInputElement).blur(); }
+          if (e.key === 'Enter') { const v = commit(); onEnterActivate?.(v); (e.target as HTMLInputElement).blur(); }
         }}
         className={`flex-1 min-w-0 bg-transparent outline-none text-ui font-mono text-right ${isOn ? 'text-text-primary' : 'text-text-tertiary'}`}
       />
@@ -431,6 +445,7 @@ function ClickerSection({
             <EnableChip
               value={loops}
               isOn={useLoops}
+              max={999}
               onCommitValue={(v) => onChange('cursorClickLoops', v)}
               onToggle={(v) => onChange('cursorClickUseLoops', v)}
               onEnterActivate={() => activateIfOff(useLoops, 'cursorClickUseLoops')}
@@ -450,7 +465,7 @@ function ClickerSection({
             <EnableChip
               value={rateJitter}
               isOn={useRateJitter}
-              unit="%"
+              unit="%" max={100}
               onCommitValue={(v) => onChange('cursorClickDelayJitter', v)}
               onToggle={(v) => onChange('cursorClickUseJitter', v)}
               onEnterActivate={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
@@ -904,6 +919,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 <EnableChip
                   value={settings.loopCount}
                   isOn={settings.enableLoop}
+                  max={999}
                   onCommitValue={(v) => changeSetting('loopCount', v)}
                   onToggle={(v) => changeSetting('enableLoop', v)}
                   onEnterActivate={() => { if (!settings.enableLoop) changeSetting('enableLoop', true); }}
@@ -923,7 +939,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 <EnableChip
                   value={settings.delayVariation}
                   isOn={settings.useDelayVariation}
-                  unit="%"
+                  unit="%" max={100}
                   onCommitValue={(v) => changeSetting('delayVariation', v)}
                   onToggle={(v) => changeSetting('useDelayVariation', v)}
                   onEnterActivate={() => { if (!settings.useDelayVariation) changeSetting('useDelayVariation', true); }}

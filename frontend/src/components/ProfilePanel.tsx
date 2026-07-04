@@ -25,10 +25,6 @@ interface ProfilePanelProps {
   onToggleCollapse?: () => void;
 }
 
-// Named header action button (New / Folder / Open / Export) — icon + short label,
-// sharing the row width. Replaces the old icon-only + tooltip header buttons.
-const PROFILE_ACTION_BTN = 'flex-1 flex items-center justify-center gap-1 px-1.5 h-7 rounded text-[11px] font-medium hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors';
-
 const FOLDER_COLORS = [
   // Blues & purples (neon & vivid)
   '#00FFFF', '#0099FF', '#0066FF', '#6B5BFF', '#BF00FF',
@@ -1614,36 +1610,25 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           </>
         ) : (
           <>
-        {/* Header — flat row of 6 icon buttons. An earlier draft wrapped them in
-            three boxed-group containers mirroring the toolbar redesign, but the
-            panel is narrow (~247 px) and the extra padding/borders made the row
-            feel crowded for not much semantic gain. The icon swaps + tooltips
-            from the same pass DID land. */}
         <div className="flex items-center justify-between px-3 pt-2 pb-1">
           <span className="label-micro text-text-tertiary">PROFILES</span>
-          {/* Collapse stays a bare icon (self-explanatory); the action buttons below
-              carry names now that the tooltips were pruned. */}
-          <button
-            onClick={onToggleCollapse}
-            className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-          >
-            <ChevronsLeft size={14} />
-          </button>
-        </div>
-        {/* Named action row — New / Folder / Open / Export, each sharing the width. */}
-        <div className="flex items-center gap-0.5 px-3 pb-1.5">
-          <button onClick={handleCreate} className={PROFILE_ACTION_BTN}>
-            <FilePlus size={13} /><span>New</span>
-          </button>
-          <button onClick={handleCreateFolder} className={PROFILE_ACTION_BTN}>
-            <FolderPlus size={13} /><span>Folder</span>
-          </button>
-          <button onClick={handleOpenProfilesFolder} className={PROFILE_ACTION_BTN}>
-            <ExternalLink size={13} /><span>Open</span>
-          </button>
-          <button onClick={handleExportClick} className={PROFILE_ACTION_BTN}>
-            <ArrowLeftRight size={13} /><span>Export</span>
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button onClick={onToggleCollapse} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors">
+              <ChevronsLeft size={14} />
+            </button>
+            <button onClick={handleOpenProfilesFolder} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('Open profiles folder', 'Abrir pasta de perfis')}>
+              <ExternalLink size={14} />
+            </button>
+            <button onClick={handleExportClick} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('Export profiles', 'Exportar perfis')}>
+              <ArrowLeftRight size={14} />
+            </button>
+            <button onClick={handleCreateFolder} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('New folder', 'Nova pasta')}>
+              <FolderPlus size={14} />
+            </button>
+            <button onClick={handleCreate} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('New profile', 'Novo perfil')}>
+              <FilePlus size={14} />
+            </button>
+          </div>
         </div>
 
         {/* Search — supports "#tag" prefix to filter by tag instead of name */}
