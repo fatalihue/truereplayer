@@ -174,12 +174,45 @@ export function NumberInput({
   const canDec = value != null && (min === undefined || value > min);
   const canInc = max === undefined || value == null || value < max;
 
-  // Blurred display: apply thousands grouping, and in suffixInside mode append the unit so the
-  // field reads like the grid ("1.000 ms"). Focused / empty / non-numeric → raw text so typing
-  // (and the placeholder) stay clean.
-  const showFormatted = !isFocused && text !== '' && Number.isFinite(Number(text));
-  const numPart = showFormatted && thousands ? formatMs(Number(text), language) : text;
-  const displayValue = showFormatted && suffixInside && suffix ? `${numPart} ${suffix}` : numPart;
+  // Blurred display: apply thousands grouping so the number reads "1.000". Focused / empty /
+  // non-numeric → raw digits so typing (and the placeholder) stay clean. The unit, in
+  // suffixInside mode, is a SEPARATE dim span (below) — never part of the editable value — so
+  // it stays visible while typing and can't be selected or deleted (matches SettingsPanel).
+  const displayValue = !isFocused && text !== '' && Number.isFinite(Number(text)) && thousands
+    ? formatMs(Number(text), language)
+    : text;
+
+  // Built once so it can render bare (default) or wrapped with an inside unit (suffixInside).
+  // Wrapped: the input goes borderless + right-aligned and the bordered box moves to the
+  // wrapper, so the dim "ms" span sits inside the same border as the number.
+  const inputClassName = suffixInside
+    ? `flex-1 min-w-0 ${inputHeight} pl-1.5 pr-1 text-right text-xs font-mono text-text-primary bg-transparent border-0 outline-none tabular-nums`
+    : `${inputWidth} ${inputHeight} px-1 text-center text-xs font-mono text-text-primary bg-bg-input border border-border-default outline-none focus:border-accent-solid focus:z-10 tabular-nums disabled:opacity-50`;
+  const inputEl = (
+    <input
+      ref={inputRef}
+      id={id}
+      // type=text (not number) in text-mode so the separator renders; inputMode keeps the
+      // numeric keypad on touch and the caret/wheel behaviour otherwise.
+      type={textMode ? 'text' : 'number'}
+      inputMode={textMode ? 'numeric' : undefined}
+      value={displayValue}
+      onChange={handleTextChange}
+      onFocus={() => setIsFocused(true)}
+      onBlur={handleBlur}
+      // Enter commits + reformats the field (blur runs the clamp/format path). Not stopped, so
+      // a dialog's own Enter-to-submit still fires afterwards.
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); }}
+      onWheel={handleWheel}
+      min={min}
+      max={max}
+      step={step}
+      disabled={disabled}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      className={inputClassName}
+    />
+  );
 
   return (
     <span className={`inline-flex items-stretch gap-0 ${className}`}>
@@ -192,29 +225,18 @@ export function NumberInput({
       >
         <Minus size={12} />
       </button>
-      <input
-        ref={inputRef}
-        id={id}
-        // type=text (not number) in thousands mode so the separator renders; inputMode
-        // keeps the numeric keypad on touch and the caret/wheel behaviour otherwise.
-        type={textMode ? 'text' : 'number'}
-        inputMode={textMode ? 'numeric' : undefined}
-        value={displayValue}
-        onChange={handleTextChange}
-        onFocus={() => setIsFocused(true)}
-        onBlur={handleBlur}
-        // Enter commits + reformats the field (blur runs the clamp/format path). Not
-        // stopped, so a dialog's own Enter-to-submit still fires afterwards.
-        onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); }}
-        onWheel={handleWheel}
-        min={min}
-        max={max}
-        step={step}
-        disabled={disabled}
-        placeholder={placeholder}
-        aria-label={ariaLabel}
-        className={`${inputWidth} ${inputHeight} px-1 text-center text-xs font-mono text-text-primary bg-bg-input border border-border-default outline-none focus:border-accent-solid focus:z-10 tabular-nums disabled:opacity-50`}
-      />
+      {suffixInside ? (
+        // Unit rendered as a persistent, dim, non-selectable span sharing the input's border
+        // box (like SettingsPanel's EnableChip): always visible — even while typing — and never
+        // part of the editable value. Hidden only when the field is blank so a placeholder
+        // (e.g. char-delay "auto") reads cleanly without a dangling unit.
+        <span className={`${inputWidth} ${inputHeight} inline-flex items-stretch overflow-hidden bg-bg-input border border-border-default focus-within:border-accent-solid focus-within:z-10 ${disabled ? 'opacity-50' : ''}`}>
+          {inputEl}
+          {text !== '' && suffix && (
+            <span className="shrink-0 self-center select-none pointer-events-none text-[10px] text-text-tertiary font-mono pl-0.5 pr-1.5">{suffix}</span>
+          )}
+        </span>
+      ) : inputEl}
       <button
         type="button"
         onClick={() => commit((value ?? (min ?? 0)) + step)}

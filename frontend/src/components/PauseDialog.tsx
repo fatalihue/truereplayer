@@ -214,10 +214,7 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
               then resumes only via the captured hotkey above. */}
           <div className="flex flex-col gap-2">
             <label className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wider">Timeout</label>
-            <div
-              className="flex items-center gap-2"
-              data-tip={tt('How long to wait before continuing, in ms. 0 = no timeout (resume by hotkey only)', 'Quanto aguardar antes de continuar, em ms. 0 = sem tempo limite (retoma apenas pela tecla de atalho)')}
-            >
+            <div className="flex items-center gap-2">
               <NumberInput
                 value={timeoutMs}
                 onChange={setTimeoutMs}
