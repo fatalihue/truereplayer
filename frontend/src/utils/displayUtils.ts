@@ -26,17 +26,20 @@ export function getDisplayKey(key: string): string {
 }
 
 // Space the '+' separators in a keystroke combo for readability in the grid:
-// "Ctrl+Alt+F" → "Ctrl + Alt + F" (matches the ProfilePanel hotkey chips). A
-// combo is already in display form (Ctrl/Alt/…), so no per-key remapping — just
-// re-space. A lone '+' key and a trailing literal '+' (e.g. "Ctrl++") are kept
-// intact, same split rule as KbdTag.
+// "Ctrl+Alt+F" → "Ctrl + Alt + F" (matches the ProfilePanel hotkey chips). Each
+// part is run through getDisplayKey so raw enum names get the DISPLAY_KEY_MAP
+// cleanup — a single "NumAdd" renders "Num+", "D1" renders "1" — matching how the
+// HoldKey row (which uses getDisplayKey directly) shows the same key. A lone '+'
+// key and a trailing literal '+' (e.g. "Ctrl++") are kept intact, same split rule
+// as KbdTag.
 export function formatKeyCombo(combo: string): string {
   if (!combo) return '';
   if (combo === '+') return '+';
   const parts = combo
     .split('+')
     .map((p, i, arr) => (p === '' && i === arr.length - 1 ? '+' : p))
-    .filter(p => p !== '');
+    .filter(p => p !== '')
+    .map(getDisplayKey);
   return parts.join(' + ');
 }
 
