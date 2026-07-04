@@ -15,10 +15,11 @@ function CompactToggle(props: { isOn: boolean; onChange: (v: boolean) => void; d
   return <Toggle {...props} size="sm" />;
 }
 
-// One shared width for every right-column control (chips, value fields, comboboxes) so
-// they line up on a single edge and read as the same size. The panel is narrow (~224px),
-// so keep it compact.
-const CTRL_W = 'w-[80px]';
+// One shared width for EVERY right-column control across BOTH tabs (chips, value fields,
+// comboboxes, hotkey capture fields) so switching tabs never shifts a control's size or
+// position. 110px is set by the widest content that can't shrink — a hotkey combo like
+// "Ctrl+PageDown" — and comfortably fits a thousands-separated "10.000 ms" too.
+const CTRL_W = 'w-[110px]';
 
 // Live "Filter settings" query (lowercased). SettingRow reads it and hides itself when its
 // label doesn't match, so the search needs no prop-drilling through every row.
@@ -106,10 +107,8 @@ function EnableChip({ value, isOn, unit, format, max, onCommitValue, onToggle, o
     return v;
   };
   return (
-    // Only the thousands-formatted (large ms) fields get the wider 96px slot; the
-    // rest keep the compact CTRL_W so the panel isn't bigger than it needs to be.
     <div
-      className={`${format ? 'w-[96px]' : CTRL_W} h-8 flex items-center rounded border overflow-hidden focus-within:!border-accent-solid`}
+      className={`${CTRL_W} h-8 flex items-center rounded border overflow-hidden focus-within:!border-accent-solid`}
       style={isOn
         ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
         : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
@@ -398,7 +397,7 @@ function ClickerSection({
     // Uses the shared Section so it matches macro mode exactly (header above a single
     // inset group, same row layout). Purple icon/title keep the "you're in Clicker" cue.
     <Section color="var(--color-clicker)" title="Clicker">
-          {/* Flat/chip layout: every right-column control is one CTRL_W (96px) box, flush right,
+          {/* Flat/chip layout: every right-column control is one CTRL_W (110px) box, flush right,
               so chips, combos and the area control all line up. Value+enable rows are a single
               EnableChip; Button/Rate are pickers; Area is chip-shaped (dot + picker). */}
           {/* Mouse button picker — moved here from the ActionBar so the panel is the single
@@ -553,7 +552,7 @@ function ClickerSection({
   );
 }
 
-function HotkeyInput({ value, settingKey, onChange, width = 'w-[110px]' }: {
+function HotkeyInput({ value, settingKey, onChange, width = CTRL_W }: {
   value: string;
   settingKey: string;
   onChange: (key: string, hotkey: string) => void;
