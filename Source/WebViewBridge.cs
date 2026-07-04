@@ -60,7 +60,7 @@ namespace TrueReplayer
         // In-memory settings state (replaces reading from XAML controls)
         public string CustomDelay { get; set; } = "100";
         public bool UseCustomDelay { get; set; } = true;
-        public string DelayVariation { get; set; } = "20";
+        public string DelayVariation { get; set; } = "1";
         public bool UseDelayVariation { get; set; } = false;
         public string LoopCount { get; set; } = "0";
         public bool EnableLoop { get; set; } = false;
@@ -99,7 +99,7 @@ namespace TrueReplayer
         // Stored in AppSettings; mirrored here for fast access. Strings (not ints) to mirror
         // the existing pattern for delay/loop/interval which use textbox-backed values.
         public string CursorClickDelay { get; set; } = "100";
-        public string CursorClickDelayJitter { get; set; } = "0";
+        public string CursorClickDelayJitter { get; set; } = "1";
         public bool CursorClickUseJitter { get; set; } = false;
         public string CursorClickHold { get; set; } = "10";
         public string CursorClickPositionJitter { get; set; } = "0";
@@ -1255,7 +1255,7 @@ namespace TrueReplayer
                     modeToggleHotkey = profile.ModeToggleHotkey,
                     alwaysOnTop = profile.AlwaysOnTop,
                     minimizeToTray = profile.MinimizeToTray,
-                    runOnStartup = TrayIconService.IsRunOnStartup(),
+                    runOnStartup = AppSettingsManager.Load().RunOnStartup,
                     startMinimized = profile.StartMinimized,
                     runEndFlash = profile.RunEndFlash,
                     runEndSound = profile.RunEndSound,
@@ -1513,7 +1513,7 @@ namespace TrueReplayer
                     modeToggleHotkey = profile.ModeToggleHotkey,
                     alwaysOnTop = profile.AlwaysOnTop,
                     minimizeToTray = profile.MinimizeToTray,
-                    runOnStartup = TrayIconService.IsRunOnStartup(),
+                    runOnStartup = AppSettingsManager.Load().RunOnStartup,
                     startMinimized = profile.StartMinimized,
                     runEndFlash = profile.RunEndFlash,
                     runEndSound = profile.RunEndSound,
@@ -6351,7 +6351,7 @@ namespace TrueReplayer
                 UseCursorClick = preserveCursorMode,
                 CursorClickButton = preserveCursorButton,
                 CursorClickDelayMs = 100,
-                CursorClickDelayJitterPct = 10,
+                CursorClickDelayJitterPct = 1,
                 CursorClickUseJitter = false,
                 CursorClickHoldMs = 10,
                 CursorClickPositionJitter = 10,
@@ -6437,14 +6437,17 @@ namespace TrueReplayer
             {
                 AlwaysOnTop = UserProfile.Current.AlwaysOnTop,
                 MinimizeToTray = UserProfile.Current.MinimizeToTray,
-                RunOnStartup = TrayIconService.IsRunOnStartup(),
+                // Persist the user's intent, not the registry state. On dev/portable builds
+                // SetRunOnStartup is a no-op (WindowShellServices guards on IsInstalledLocation),
+                // so sourcing this from the registry would keep resetting the toggle to off.
+                RunOnStartup = AppSettingsManager.Load().RunOnStartup,
                 StartMinimized = UserProfile.Current.StartMinimized,
                 RunEndFlash = UserProfile.Current.RunEndFlash,
                 RunEndSound = UserProfile.Current.RunEndSound,
                 UseCustomDelay = UseCustomDelay,
                 CustomDelay = int.TryParse(CustomDelay, out var d) ? d : 100,
                 UseDelayVariation = UseDelayVariation,
-                DelayVariation = int.TryParse(DelayVariation, out var dv) ? dv : 20,
+                DelayVariation = int.TryParse(DelayVariation, out var dv) ? dv : 1,
                 EnableLoop = EnableLoop,
                 LoopCount = int.TryParse(LoopCount, out var c) ? c : 0,
                 LoopIntervalEnabled = LoopIntervalEnabled,
@@ -6461,7 +6464,7 @@ namespace TrueReplayer
                 CursorClickPauseHotkey = CursorClickPauseHotkey,
                 // Clicker v2 — persist the dedicated Clicker settings alongside the legacy ones.
                 CursorClickDelayMs = int.TryParse(CursorClickDelay, out var ccd) ? ccd : 100,
-                CursorClickDelayJitterPct = int.TryParse(CursorClickDelayJitter, out var ccdj) ? ccdj : 0,
+                CursorClickDelayJitterPct = int.TryParse(CursorClickDelayJitter, out var ccdj) ? ccdj : 1,
                 CursorClickUseJitter = CursorClickUseJitter,
                 CursorClickHoldMs = int.TryParse(CursorClickHold, out var cch) ? cch : 10,
                 CursorClickPositionJitter = int.TryParse(CursorClickPositionJitter, out var ccpj) ? ccpj : 0,
@@ -6606,7 +6609,7 @@ namespace TrueReplayer
                     UseCustomDelay = valueElement.GetBoolean();
                     break;
                 case "delayVariation":
-                    DelayVariation = valueElement.GetString() ?? "20";
+                    DelayVariation = valueElement.GetString() ?? "1";
                     break;
                 case "useDelayVariation":
                     UseDelayVariation = valueElement.GetBoolean();
@@ -6667,7 +6670,7 @@ namespace TrueReplayer
                     CursorClickDelay = valueElement.GetString() ?? "100";
                     break;
                 case "cursorClickDelayJitter":
-                    CursorClickDelayJitter = valueElement.GetString() ?? "0";
+                    CursorClickDelayJitter = valueElement.GetString() ?? "1";
                     break;
                 case "cursorClickUseJitter":
                     CursorClickUseJitter = valueElement.GetBoolean();
@@ -6797,6 +6800,10 @@ namespace TrueReplayer
         private void HandleRunOnStartup(JsonElement payload)
         {
             bool enabled = payload.GetProperty("enabled").GetBoolean();
+            // SetRunOnStartup persists the intent to AppSettings unconditionally (and writes the
+            // registry only on installed builds — WindowShellServices guards on IsInstalledLocation).
+            // The read-back sites now source RunOnStartup from AppSettings, so the toggle sticks even
+            // on dev/portable copies where the registry write is intentionally skipped.
             TrayIconService.SetRunOnStartup(enabled);
             PushSettingsLoaded();
         }

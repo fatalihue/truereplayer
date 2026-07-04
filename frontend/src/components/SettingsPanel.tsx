@@ -15,10 +15,13 @@ function CompactToggle(props: { isOn: boolean; onChange: (v: boolean) => void; d
   return <Toggle {...props} size="sm" />;
 }
 
-// One shared width for EVERY right-column control across BOTH tabs (chips, value fields,
-// comboboxes, hotkey capture fields) so switching tabs never shifts a control's size or
-// position. 110px is set by the widest content that can't shrink — a hotkey combo like
-// "Ctrl+PageDown" — and comfortably fits a thousands-separated "10.000 ms" too.
+// Default width for right-column controls (comboboxes, hotkey capture fields, and every
+// Clicker chip) so they line up in a single column. 110px is set by the widest content that
+// can't shrink — a hotkey combo like "Ctrl+PageDown" — and comfortably fits a thousands-
+// separated "10.000 ms" too. The macro Execution EnableChips (Delay/Loops/Interval/Jitter)
+// deliberately opt OUT of this to a tighter 96px (their EnableChip default) — they only ever
+// hold a number, so the extra slack read as loose; the Clicker chips pass width={CTRL_W}
+// explicitly so THAT section stays uniform.
 const CTRL_W = 'w-[110px]';
 
 // Live "Filter settings" query (lowercased). SettingRow reads it and hides itself when its
@@ -58,13 +61,13 @@ function Section({ color, title, children, collapsible = false, defaultOpen = tr
   return (
     <div data-section={title}>
       {collapsible ? (
-        <button onClick={toggleOpen} className="group w-full flex items-center gap-2 px-1.5 pt-1.5 pb-0.5">
+        <button onClick={toggleOpen} className="group w-full flex items-center gap-2 px-1.5 pt-2 pb-0.5">
           {dot}
           <span className="label-micro text-text-tertiary flex-1 text-left group-hover:text-text-secondary transition-colors">{title}</span>
           {isOpen ? <ChevronDown size={12} className="text-text-tertiary" /> : <ChevronRight size={12} className="text-text-tertiary" />}
         </button>
       ) : (
-        <div className="flex items-center gap-2 px-1.5 pt-1.5 pb-0.5">
+        <div className="flex items-center gap-2 px-1.5 pt-2 pb-0.5">
           {dot}
           <span className="label-micro text-text-tertiary">{title}</span>
         </div>
@@ -79,7 +82,7 @@ function Section({ color, title, children, collapsible = false, defaultOpen = tr
 // CTRL_W as the plain value fields so the column stays aligned. The dot toggles enable;
 // editing the number commits on blur/Enter (Enter also runs onEnterActivate — e.g. flip the
 // setting on when the user types a value into a disabled chip).
-function EnableChip({ value, isOn, unit, format, max, onCommitValue, onToggle, onEnterActivate }: {
+function EnableChip({ value, isOn, unit, format, max, width, onCommitValue, onToggle, onEnterActivate }: {
   value: string;
   isOn: boolean;
   unit?: string;
@@ -87,6 +90,9 @@ function EnableChip({ value, isOn, unit, format, max, onCommitValue, onToggle, o
   // Upper bound applied on commit (Loops 999, Jitter 100): typing a larger number
   // snaps back to max on blur/Enter.
   max?: number;
+  // Field width. Defaults to the compact 96px used by the macro Execution fields;
+  // the Clicker section passes CTRL_W so its fields all line up at one width.
+  width?: string;
   onCommitValue: (v: string) => void;
   onToggle: (v: boolean) => void;
   onEnterActivate?: (v: string) => void;
@@ -108,7 +114,7 @@ function EnableChip({ value, isOn, unit, format, max, onCommitValue, onToggle, o
   };
   return (
     <div
-      className={`w-[96px] h-7 flex items-center rounded border overflow-hidden focus-within:!border-accent-solid`}
+      className={`${width ?? 'w-[96px]'} h-7 flex items-center rounded border overflow-hidden focus-within:!border-accent-solid`}
       style={isOn
         ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
         : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
@@ -199,10 +205,11 @@ function SettingRow({ label, tooltip, children, danger }: { label: string; toolt
   // (the panel hugs the right window edge) instead of clipping off-screen.
   return (
     <div
-      // Compact rhythm: h-7 (28px) controls + py-0.5 → 32px input rows with a
-      // visible gap between consecutive bordered fields; toggle-only rows sit at
-      // the min-h-7 floor. (Was h-8/min-h-8 → 36px; tightened at the user's request.)
-      className="relative flex items-center justify-between min-h-7 px-2.5 py-0.5 gap-2"
+      // Compact-but-not-cramped rhythm: h-7 (28px) controls + py-[3px] → ~34px input
+      // rows with a visible gap between consecutive bordered fields; toggle rows sit at
+      // the min-h-8 floor (32px). Between the original 36px (too tall) and the 32px
+      // first pass (too tight) — eased a touch at the user's request.
+      className="relative flex items-center justify-between min-h-8 px-2.5 py-[3px] gap-2"
       data-tip={tooltip || undefined}
       data-tip-pos="left"
     >
@@ -445,6 +452,7 @@ function ClickerSection({
               value={loops}
               isOn={useLoops}
               max={999}
+              width={CTRL_W}
               onCommitValue={(v) => onChange('cursorClickLoops', v)}
               onToggle={(v) => onChange('cursorClickUseLoops', v)}
               onEnterActivate={() => activateIfOff(useLoops, 'cursorClickUseLoops')}
@@ -455,6 +463,7 @@ function ClickerSection({
               value={interval}
               isOn={useInterval}
               unit="ms" format
+              width={CTRL_W}
               onCommitValue={(v) => onChange('cursorClickInterval', v)}
               onToggle={(v) => onChange('cursorClickUseInterval', v)}
               onEnterActivate={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
@@ -465,6 +474,7 @@ function ClickerSection({
               value={rateJitter}
               isOn={useRateJitter}
               unit="%" max={100}
+              width={CTRL_W}
               onCommitValue={(v) => onChange('cursorClickDelayJitter', v)}
               onToggle={(v) => onChange('cursorClickUseJitter', v)}
               onEnterActivate={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
@@ -474,6 +484,7 @@ function ClickerSection({
             <EnableChip
               value={positionJitter}
               isOn={usePositionJitter}
+              width={CTRL_W}
               onCommitValue={(v) => onChange('cursorClickPositionJitter', v)}
               onToggle={(v) => setExclusive(
                 { key: 'cursorClickUsePositionJitter', on: usePositionJitter },

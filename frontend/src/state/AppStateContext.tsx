@@ -6,7 +6,7 @@ import type { AppState, IncomingMessage } from '../bridge/messageTypes';
 const defaultSettings = {
   customDelay: '100',
   useCustomDelay: true,
-  delayVariation: '10',
+  delayVariation: '1',
   useDelayVariation: false,
   loopCount: '0',
   enableLoop: false,
@@ -22,14 +22,14 @@ const defaultSettings = {
   cursorClickButton: 'Left',
   cursorClickStartHotkey: 'PageDown',
   cursorClickPauseHotkey: 'PageUp',
-  // Clicker v2 — defaults match the AppSettings backend (delay=100 ms, jitter=10 %,
+  // Clicker v2 — defaults match the AppSettings backend (delay=100 ms, jitter=1 %,
   // hold=10 ms, position=10 px, interval=200 ms; every switch starts off). Real values
   // arrive on settings:loaded after the post-upgrade migration (which copies the legacy
   // profile-shared delay/jitter/loops/interval into these fields). Keeping these in sync
   // with AppSettings.cs avoids a one-frame "wrong default" flash before settings:loaded
   // arrives on cold start.
   cursorClickDelay: '100',
-  cursorClickDelayJitter: '10',
+  cursorClickDelayJitter: '1',
   cursorClickUseJitter: false,
   cursorClickHold: '10',
   cursorClickPositionJitter: '10',

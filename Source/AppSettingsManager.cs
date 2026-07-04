@@ -26,7 +26,7 @@ namespace TrueReplayer.Services
             public bool UseCustomDelay { get; set; } = true;
             public int CustomDelay { get; set; } = 100;
             public bool UseDelayVariation { get; set; } = false;
-            public int DelayVariation { get; set; } = 10;
+            public int DelayVariation { get; set; } = 1;
             public bool EnableLoop { get; set; } = false;
             public int LoopCount { get; set; } = 0;
             public bool LoopIntervalEnabled { get; set; } = false;
@@ -48,7 +48,7 @@ namespace TrueReplayer.Services
             // bridge will copy the active profile's customDelay/jitter/loops/interval into
             // these fields so upgrading users see no behavioural change.
             public int CursorClickDelayMs { get; set; } = -1;
-            public int CursorClickDelayJitterPct { get; set; } = 10;
+            public int CursorClickDelayJitterPct { get; set; } = 1;
             public bool CursorClickUseJitter { get; set; } = false;
             public int CursorClickHoldMs { get; set; } = 10;
             public int CursorClickPositionJitter { get; set; } = 10;
