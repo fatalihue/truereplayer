@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
-import { Search, SearchX, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink, Info, MoreHorizontal, Hash } from 'lucide-react';
+import { Search, SearchX, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink, Info, MoreHorizontal, Hash, Upload } from 'lucide-react';
 import type { ProfileEntry, ImportPreviewPayload, ImportConflictResolution } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -25,15 +25,19 @@ interface ProfilePanelProps {
   onToggleCollapse?: () => void;
 }
 
+// Curated to the app's own hues (2026-07 reorg — the old list was 20 pure neons,
+// the last surface fighting the quiet palette). Every tone already exists in the
+// UI: action colours, conditional-block rails, Settings group dots. Picker options
+// only — folders keep whatever colour is saved in profile-order.json.
 const FOLDER_COLORS = [
-  // Blues & purples (neon & vivid)
-  '#00FFFF', '#0099FF', '#0066FF', '#6B5BFF', '#BF00FF',
-  // Pinks & reds
-  '#FF00FF', '#FF1493', '#FF073A', '#FF4500', '#E74856',
-  // Oranges & yellows
-  '#FF8C00', '#FFB900', '#FFFF00', '#CCFF00', '#39FF14',
-  // Greens, teals, neutrals
-  '#00CC6A', '#00B7C3', '#FFFFFF', '#8E8E8E', '#444444',
+  // Blues & indigos
+  '#60cdff', '#42a5f5', '#5d5fd1', '#a78bfa',
+  // Purples & pinks
+  '#c084fc', '#e879f9', '#f472b6', '#ef5da8',
+  // Reds, oranges & golds
+  '#ff6b6b', '#fb923c', '#d4a020', '#ffd93d',
+  // Greens, teal & slate
+  '#9a9a3e', '#6bcb77', '#4dd0a0', '#7a8599',
 ];
 
 // Native click action types — used to count coordinates that would benefit from a
@@ -116,7 +120,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [dialogValue, setDialogValue] = useState('');
   const [showCreateFolderDialog, setShowCreateFolderDialog] = useState(false);
   const [folderDialogName, setFolderDialogName] = useState('');
-  const [folderDialogColor, setFolderDialogColor] = useState('#60CDFF');
+  // Lowercase to match FOLDER_COLORS entries — the picker highlights by exact
+  // string equality, so '#60CDFF' would render the default swatch unselected.
+  const [folderDialogColor, setFolderDialogColor] = useState('#60cdff');
   const [showRenameFolderDialog, setShowRenameFolderDialog] = useState<string | null>(null);
   const [showFolderTargetDialog, setShowFolderTargetDialog] = useState<string | null>(null);
   const [showMoveToFolderMenu, setShowMoveToFolderMenu] = useState<string | null>(null);
@@ -485,7 +491,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   useEffect(() => {
     const handler = () => {
       setFolderDialogName('');
-      setFolderDialogColor('#60CDFF');
+      setFolderDialogColor('#60cdff');
       setShowCreateFolderDialog(true);
     };
     window.addEventListener('cmd:newfolder', handler);
@@ -812,7 +818,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   // ── Folder handlers ──
   const handleCreateFolder = () => {
     setFolderDialogName('');
-    setFolderDialogColor('#60CDFF');
+    setFolderDialogColor('#60cdff');
     setShowCreateFolderDialog(true);
   };
 
@@ -1514,8 +1520,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   );
 
   // ── Section Header Renderer ──
+  // Pinned carries the Pin glyph (same icon as the context menu's Pin/Unpin) so the
+  // section has a visual identity like folders do (colour + icon); Ungrouped stays
+  // bare on purpose — it's the absence of a group, not a group.
   const renderSectionLabel = (label: string) => (
-    <div className="px-2.5 pt-2 pb-0.5">
+    <div className="px-2.5 pt-2 pb-0.5 flex items-center gap-1.5">
+      {label === 'Pinned' && <Pin size={10} className="text-text-tertiary shrink-0" />}
       {/* tertiary, not disabled — category labels are real information; the
           disabled token computes ~1.4:1 on the default theme. */}
       <span className="label-micro text-text-tertiary">{label}</span>
@@ -1612,16 +1622,24 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           <>
         <div className="flex items-center justify-between px-3 pt-2 pb-1">
           <span className="label-micro text-text-tertiary">PROFILES</span>
+          {/* Grouped by function (2026-07 reorg), Toolbar divider idiom: panel chrome
+              (collapse) | library utilities (open folder, export) | creation (new
+              folder, new profile — hottest spot, at the end). Export uses Upload, the
+              same glyph the Command Palette uses for "Export All Profiles"; the old
+              ArrowLeftRight read as "convert/swap" (it still marks the coordinate
+              converters in the context menu, where that meaning is right). */}
           <div className="flex items-center gap-0.5">
             <button onClick={onToggleCollapse} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors">
               <ChevronsLeft size={14} />
             </button>
+            <div className="w-px h-3.5 bg-border-subtle mx-0.5" />
             <button onClick={handleOpenProfilesFolder} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('Open profiles folder', 'Abrir pasta de perfis')}>
               <ExternalLink size={14} />
             </button>
             <button onClick={handleExportClick} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('Export profiles', 'Exportar perfis')}>
-              <ArrowLeftRight size={14} />
+              <Upload size={14} />
             </button>
+            <div className="w-px h-3.5 bg-border-subtle mx-0.5" />
             <button onClick={handleCreateFolder} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('New folder', 'Nova pasta')}>
               <FolderPlus size={14} />
             </button>
@@ -2117,7 +2135,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 style={colorFlyout.flipX ? { paddingRight: '4px' } : { paddingLeft: '4px' }}
               >
               <div className="p-2.5 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
-                <div className="flex flex-wrap gap-1.5" style={{ width: '156px' }}>
+                {/* 122px = exactly 4 swatches per row → a clean 4×4 grid for the 16 tones. */}
+                <div className="flex flex-wrap gap-1.5" style={{ width: '122px' }}>
                   {FOLDER_COLORS.map(c => (
                     <button
                       key={c}
@@ -2663,7 +2682,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               placeholder="Folder name..."
               className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
             />
-            <div className="flex items-center gap-1.5 mt-3">
+            {/* flex-wrap: 16 swatches still exceed the dialog width on one line — without
+                it flexbox silently shrinks the fixed w-5 circles into ovals. */}
+            <div className="flex items-center flex-wrap gap-1.5 mt-3">
               <span className="text-xs text-text-tertiary mr-1">Color:</span>
               {FOLDER_COLORS.map(c => (
                 <button
