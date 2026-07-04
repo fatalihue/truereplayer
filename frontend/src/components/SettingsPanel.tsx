@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useContext, createContext } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle, Globe, BellRing } from 'lucide-react';
+import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle, Power, BellRing } from 'lucide-react';
 import { useLanguage, useTt } from '../state/LanguageContext';
 // `Search` import removed with the disabled Settings filter — re-add it to revive the filter.
 import { useAppState } from '../state/AppStateContext';
@@ -755,10 +755,9 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
 
   // Rail entries mirror the sections of each tab (profile side swaps to the
   // Clicker panel when Clicker mode is on, like the expanded panel does).
-  // `onClick` overrides the default expand-to-section behaviour — Appearance
-  // uses it to open the Theme Editor straight from the rail, matching the
-  // expanded panel's Appearance button (which is itself a direct action, not a
-  // collapsible section).
+  // `onClick` overrides the default expand-to-section behaviour for entries that
+  // are a direct action rather than a section (none currently — the old Appearance
+  // shortcut became the two-row Interface section, which expands like the rest).
   type RailEntry = { tab: 'profile' | 'global'; title: string; icon: React.ElementType; color: string; onClick?: () => void };
   // In Clicker mode the relevant hotkeys are the clicker Start/Pause group, which lives in the
   // Profile tab (the global macro hotkeys are inert in Clicker mode). So the rail mirrors the
@@ -775,15 +774,17 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
           { tab: 'profile', title: 'Game Mode', icon: Gamepad2, color: '#51cf66' },
           { tab: 'profile', title: 'Recording', icon: Mic, color: '#ff6b6b' },
         ];
+  // Colors: one distinct hue per group across BOTH tabs (2026-07 reorg) — no shared greens,
+  // no reuse of the Clicker purple. All hues already exist in the app: #b3814e = the
+  // conditional-block bronze (--color-block-3), #fb923c = the Browser action orange,
+  // #f472b6 = the Pixel action pink, #4dd0a0 = the old Language teal.
   const railGlobal: RailEntry[] = [
     ...(settings.useCursorClick ? [] : [{ tab: 'global', title: 'Hotkeys', icon: Zap, color: '#60cdff' } as RailEntry]),
     { tab: 'global', title: 'Window', icon: Monitor, color: '#7a8599' },
-    // Amber, NOT #6bcb77 — the Updates entry below already owns that green and
-    // the rail dots are the only per-section identity when collapsed.
-    { tab: 'global', title: 'Notifications', icon: BellRing, color: '#ffa94d' },
-    { tab: 'global', title: 'Appearance', icon: Palette, color: '#c084fc', onClick: () => window.dispatchEvent(new CustomEvent('cmd:themeeditor')) },
-    { tab: 'global', title: 'Language', icon: Globe, color: '#4dd0a0' },
-    { tab: 'global', title: 'Updates', icon: Download, color: '#6bcb77' },
+    { tab: 'global', title: 'Startup', icon: Power, color: '#b3814e' },
+    { tab: 'global', title: 'Notifications', icon: BellRing, color: '#fb923c' },
+    { tab: 'global', title: 'Interface', icon: Palette, color: '#f472b6' },
+    { tab: 'global', title: 'Updates', icon: Download, color: '#4dd0a0' },
   ];
 
   // Collapsed: a slim icon rail — one button per section (tooltips name them on
@@ -1001,9 +1002,8 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               )}
             </Section>
 
-            {/* Recording — switches, same as every other on/off row. Profile Keys keeps
-                the danger accent (left bar + red icon/label) when off, since its shortcuts
-                and hotstrings stop firing. */}
+            {/* Recording — pure capture filters, switches only (Profile Keys moved to
+                Global · Hotkeys in the 2026-07 reorg). */}
             <Section color="#ff6b6b" title="Recording">
               <SettingRow label="Mouse Clicks">
                 <CompactToggle isOn={settings.recordMouse} onChange={(v) => changeSetting('recordMouse', v)} />
@@ -1017,9 +1017,9 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               <SettingRow label="Combined Actions" tooltip={tt('Records each click/keypress as one action (not Down+Up). Merges double-clicks, folds modifiers (Ctrl+C). Holds & drags need this off.', 'Grava cada clique/tecla como uma ação (não Down+Up). Mescla cliques duplos, agrupa modificadores (Ctrl+C). Holds e arrastos precisam disto desligado.')}>
                 <CompactToggle isOn={settings.recordCombinedInput} onChange={(v) => changeSetting('recordCombinedInput', v)} />
               </SettingRow>
-              <SettingRow label="Profile Keys" danger={!settings.profileKeyEnabled} tooltip={tt("Profile shortcuts & hotstrings won't fire while off.", 'Atalhos e hotstrings do perfil não disparam enquanto desligado.')}>
-                <CompactToggle isOn={settings.profileKeyEnabled} onChange={(v) => changeSetting('profileKeyEnabled', v)} />
-              </SettingRow>
+              {/* Profile Keys (the replay master-toggle) moved to Global · Hotkeys (2026-07
+                  reorg) — it was the only non-recording control among these capture filters,
+                  and its state is global anyway. It now sits beside its own toggle hotkey. */}
               <SettingRow label="Browser Actions" tooltip={tt('Record Chrome CSS selectors instead of coordinates.', 'Grava seletores CSS do Chrome em vez de coordenadas.')}>
                 <CompactToggle isOn={settings.browserSelectorEnabled ?? true} onChange={(v) => changeSetting('browserSelectorEnabled', v)} />
               </SettingRow>
@@ -1046,7 +1046,17 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   onChange={changeHotkey}
                 />
               </SettingRow>
-              <SettingRow label="Profile Keys">
+              {/* Master-toggle + its toggle key, adjacent rows (moved here from
+                  Profile · Recording in the 2026-07 reorg — the switch is a replay/trigger
+                  control with global state, not a capture filter). Two rows, not one:
+                  toggle + the 110px hotkey field leave ~30px for the label in this panel,
+                  which wrapped it and painted it under the switch in the danger state.
+                  Keeps the danger accent when off, since profile shortcuts and hotstrings
+                  stop firing. */}
+              <SettingRow label="Profile Keys" danger={!settings.profileKeyEnabled} tooltip={tt("Profile shortcuts & hotstrings won't fire while off.", 'Atalhos e hotstrings do perfil não disparam enquanto desligado.')}>
+                <CompactToggle isOn={settings.profileKeyEnabled} onChange={(v) => changeSetting('profileKeyEnabled', v)} />
+              </SettingRow>
+              <SettingRow label="Toggle Key" tooltip={tt('Flips Profile Keys on/off.', 'Liga/desliga o Profile Keys.')}>
                 <HotkeyInput
                   value={settings.profileKeyToggleHotkey}
                   settingKey="profileKeyToggleHotkey"
@@ -1069,7 +1079,9 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               </SettingRow>
             </Section>
 
-            {/* Window */}
+            {/* Window — window behaviour only (the startup trio got its own Startup
+                section in the 2026-07 reorg; "Run as Administrator" no longer lives
+                under "window"). */}
             <Section color="#7a8599" title="Window">
               <SettingRow label="Always On Top">
                 <CompactToggle
@@ -1083,6 +1095,11 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   onChange={(v) => send({ type: 'window:minimizeToTray', payload: { enabled: v } })}
                 />
               </SettingRow>
+            </Section>
+
+            {/* Startup — how the app launches. Bronze = --color-block-3, the one hue
+                family no other group uses. */}
+            <Section color="#b3814e" title="Startup">
               <SettingRow label="Run on Startup">
                 <CompactToggle
                   isOn={settings.runOnStartup}
@@ -1111,7 +1128,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
 
             {/* Notifications — out-of-window run-end cues. Both apply only while the
                 TrueReplayer window is NOT foreground (the game usually covers it). */}
-            <Section color="#ffa94d" title="Notifications">
+            <Section color="#fb923c" title="Notifications">
               <SettingRow label="Flash on Replay End">
                 <CompactToggle
                   isOn={settings.runEndFlash}
@@ -1126,9 +1143,12 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               </SettingRow>
             </Section>
 
-            {/* Appearance — flat Section (matches the rest) with one action row that opens
-                the Theme Editor. Section preserves data-section for the collapsed rail. */}
-            <Section color="#c084fc" title="Appearance">
+            {/* Interface — how the UI looks & speaks (the old single-row Appearance and
+                Language sections, merged in the 2026-07 reorg). Theme & layout opens the
+                Theme Editor; Tooltips picks the tooltip language (names/labels stay
+                English — only tooltip text is localised; frontend-only, switches live).
+                Pink (#f472b6, the Pixel action hue) frees the Clicker purple. */}
+            <Section color="#f472b6" title="Interface">
               <SettingRow label="Theme & layout">
                 <button
                   onClick={() => window.dispatchEvent(new CustomEvent('cmd:themeeditor'))}
@@ -1137,11 +1157,6 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   Customise <ChevronRight size={12} />
                 </button>
               </SettingRow>
-            </Section>
-
-            {/* Language — optional PT-BR tooltips. Names/labels stay English; only the tooltip
-                text is localised. Frontend-only (localStorage), switches live. */}
-            <Section color="#4dd0a0" title="Language">
               <SettingRow label="Tooltips">
                 <select
                   value={language}
@@ -1156,7 +1171,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
 
             {/* Updates — the app auto-checks on launch; this is just a manual re-check.
                 (The old always-on "Auto Check" switch was a no-op placeholder — removed.) */}
-            <Section color="#6bcb77" title="Updates" collapsible defaultOpen={false} persist={false}>
+            <Section color="#4dd0a0" title="Updates" collapsible defaultOpen={false} persist={false}>
               <button
                 onClick={() => {
                   setUpdateStatus('checking');

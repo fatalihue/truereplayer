@@ -61,7 +61,7 @@ function AppShell() {
   const [columnVisibility, _setColumnVisibility] = useState<ColumnVisibility>(defaultColumnVisibility);
   // Theme Editor is mounted at the App level (not inside Toolbar) because its
   // open/close trigger now comes from multiple surfaces (Settings panel's
-  // Appearance section, Command Palette, future shortcuts). Listens to the
+  // Interface section, Command Palette, future shortcuts). Listens to the
   // shared cmd:themeeditor event so every caller stays decoupled.
   const [showThemeEditor, setShowThemeEditor] = useState(false);
   useEffect(() => {
