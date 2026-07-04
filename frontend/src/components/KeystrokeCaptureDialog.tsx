@@ -358,6 +358,7 @@ export function KeystrokeCaptureDialog({
                   min={1}
                   max={MAX_REPEAT}
                   inputWidth="w-20"
+                  ghostSuffix="ms"
                   ariaLabel="Repeat count"
                 />
               </div>

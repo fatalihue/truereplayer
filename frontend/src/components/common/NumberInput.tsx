@@ -38,6 +38,11 @@ export interface NumberInputProps {
   // on focus the field shows raw digits so typing stays clean, and the external suffix span is
   // suppressed. Pair with `suffix` (the unit text) and usually `thousands` (locale grouping).
   suffixInside?: boolean;
+  // Reserve space for a unit that is NOT shown, and right-align the number, so a unit-less field
+  // lines up pixel-perfectly with a `suffixInside` sibling in the same column (e.g. "Times to
+  // repeat" beside "Gap … ms"). Pass the sibling's unit text ("ms"); it renders with
+  // visibility:hidden so its width matches exactly. Ignored when `suffixInside` is set.
+  ghostSuffix?: string;
   // Optional onBlur — some call sites need to react to commit (e.g. validate then re-clamp).
   onBlur?: () => void;
   // Auto-focus on mount — useful inside modal dialogs where React's plain `autoFocus`
@@ -72,6 +77,7 @@ export function NumberInput({
   autoFocus = false,
   thousands = false,
   suffixInside = false,
+  ghostSuffix,
 }: NumberInputProps) {
   const { language } = useLanguage();
   // Text-mode (type=text + digit-strip) is needed for both locale grouping and an inside unit,
@@ -182,10 +188,14 @@ export function NumberInput({
     ? formatMs(Number(text), language)
     : text;
 
+  // suffixInside shows a real dim unit; ghostSuffix reserves the identical slot invisibly (for
+  // alignment). Both use the borderless-input-in-a-bordered-wrapper layout with a right-aligned
+  // number; the plain path keeps the centered bordered input.
+  const insideLayout = suffixInside || !!ghostSuffix;
   // Built once so it can render bare (default) or wrapped with an inside unit (suffixInside).
   // Wrapped: the input goes borderless + right-aligned and the bordered box moves to the
   // wrapper, so the dim "ms" span sits inside the same border as the number.
-  const inputClassName = suffixInside
+  const inputClassName = insideLayout
     ? `flex-1 min-w-0 ${inputHeight} pl-1.5 pr-1 text-right text-xs font-mono text-text-primary bg-transparent border-0 outline-none tabular-nums`
     : `${inputWidth} ${inputHeight} px-1 text-center text-xs font-mono text-text-primary bg-bg-input border border-border-default outline-none focus:border-accent-solid focus:z-10 tabular-nums disabled:opacity-50`;
   const inputEl = (
@@ -225,15 +235,19 @@ export function NumberInput({
       >
         <Minus size={12} />
       </button>
-      {suffixInside ? (
+      {insideLayout ? (
         // Unit rendered as a persistent, dim, non-selectable span sharing the input's border
         // box (like SettingsPanel's EnableChip): always visible — even while typing — and never
         // part of the editable value. Hidden only when the field is blank so a placeholder
-        // (e.g. char-delay "auto") reads cleanly without a dangling unit.
+        // (e.g. char-delay "auto") reads cleanly without a dangling unit. In ghostSuffix mode the
+        // same span renders invisibly (visibility:hidden) purely to reserve width for alignment.
         <span className={`${inputWidth} ${inputHeight} inline-flex items-stretch overflow-hidden bg-bg-input border border-border-default focus-within:border-accent-solid focus-within:z-10 ${disabled ? 'opacity-50' : ''}`}>
           {inputEl}
-          {text !== '' && suffix && (
+          {suffixInside && text !== '' && suffix && (
             <span className="shrink-0 self-center select-none pointer-events-none text-[10px] text-text-tertiary font-mono pl-0.5 pr-1.5">{suffix}</span>
+          )}
+          {ghostSuffix && !suffixInside && (
+            <span aria-hidden="true" className="shrink-0 self-center select-none pointer-events-none text-[10px] font-mono pl-0.5 pr-1.5 invisible">{ghostSuffix}</span>
           )}
         </span>
       ) : inputEl}
