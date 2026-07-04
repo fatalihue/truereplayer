@@ -4,13 +4,13 @@ import { ArrowLeft, RefreshCw, Crosshair, Copy, ClipboardPaste, ShieldCheck, Shi
 import { ActionIcon } from './ActionTable';
 import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
-import { useTt } from '../state/LanguageContext';
+import { useTt, useLanguage } from '../state/LanguageContext';
 import type { SelectorAlternative, BrowserTestResult } from '../bridge/messageTypes';
 import { Checkbox } from './Checkbox';
 import { NumberInput } from './common/NumberInput';
 import { ImageCropper } from './ImageCropper';
 import { LexicalTokenEditor, type LexicalEditorHandle } from './lexical/LexicalTokenEditor';
-import { getDisplayKey } from '../utils/displayUtils';
+import { getDisplayKey, formatMs } from '../utils/displayUtils';
 import { Field } from './sheet/Field';
 import { Slider } from './sheet/Slider';
 
@@ -117,6 +117,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const { actions } = useAppState();
   const { send, subscribe } = useBridge();
   const tt = useTt();
+  const { language } = useLanguage();
 
   // Exit fallback — mirrors DialogShell: if the slide-out's animationend never
   // fires (occluded window pauses CSS animations), unstick the unmount.
@@ -1390,7 +1391,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 min={0}
                 step={500}
                 thousands
-                suffix="ms"
+                suffix="ms" suffixInside
                 inputWidth="w-24"
                 inputHeight="h-8"
                 ariaLabel="Wait for condition in milliseconds"
@@ -1742,13 +1743,14 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 1000 so the +/- spinner moves a second at a time. */}
             {!isIf && (
             <div className="flex gap-2.5">
-              <Field label="Timeout (ms)" className="flex-1">
+              <Field label="Timeout" className="flex-1">
                 <NumberInput
                   value={(() => { const n = parseFloat(timeout); return Number.isFinite(n) && n > 0 ? n : 5000; })()}
                   onChange={(n) => setTimeout_(String(n))}
                   min={1000}
                   step={1000}
                   thousands
+                  suffix="ms" suffixInside
                   inputWidth="w-full"
                   inputHeight="h-8"
                   ariaLabel="Timeout in milliseconds"
@@ -1924,13 +1926,14 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 step 1000) — same unit as every other action duration. */}
             {!isIf && (
             <div className="flex gap-2.5">
-              <Field label="Timeout (ms)" className="flex-1">
+              <Field label="Timeout" className="flex-1">
                 <NumberInput
                   value={(() => { const n = parseFloat(timeout); return Number.isFinite(n) && n > 0 ? n : 5000; })()}
                   onChange={(n) => setTimeout_(String(n))}
                   min={1000}
                   step={1000}
                   thousands
+                  suffix="ms" suffixInside
                   inputWidth="w-full"
                   inputHeight="h-8"
                   ariaLabel="Timeout in milliseconds"
@@ -2019,7 +2022,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 min={0}
                 step={1000}
                 thousands
-                suffix="ms"
+                suffix="ms" suffixInside
                 inputWidth="w-full"
                 inputHeight="h-8"
                 ariaLabel="Timeout in milliseconds"
@@ -2029,29 +2032,23 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   the values they set are milliseconds. The Manual input above still works for
                   anything in between. Active preset is highlighted to show what's set. */}
               <div className="flex flex-wrap gap-1 mt-1.5">
-                {([
-                  { label: '1s', ms: 1000 },
-                  { label: '5s', ms: 5000 },
-                  { label: '30s', ms: 30000 },
-                  { label: '1m', ms: 60000 },
-                  { label: '5m', ms: 300000 },
-                  { label: '∞', ms: 0 },
-                ] as const).map(p => {
+                {([100, 500, 1000, 5000, 30000, 0] as const).map(ms => {
                   const parsed = parseFloat(timeout);
                   const currentMs = isNaN(parsed) ? 0 : parsed;
-                  const isActive = currentMs === p.ms;
+                  const isActive = currentMs === ms;
+                  const label = ms === 0 ? '∞' : `${formatMs(ms, language)} ms`;
                   return (
                     <button
-                      key={p.label}
+                      key={ms}
                       type="button"
-                      onClick={() => setTimeout_(String(p.ms))}
+                      onClick={() => setTimeout_(String(ms))}
                       className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
                         isActive
                           ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
                           : 'text-text-tertiary border-border-default bg-bg-elevated hover:text-text-secondary hover:bg-bg-card'
                       }`}
                     >
-                      {p.label}
+                      {label}
                     </button>
                   );
                 })}
@@ -2339,8 +2336,9 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   min={0}
                   disabled={typePaste}
                   placeholder="auto"
-                  suffix="ms"
-                  inputWidth="w-14"
+                  thousands
+                  suffix="ms" suffixInside
+                  inputWidth="w-16"
                   inputHeight="h-8"
                   ariaLabel="Char delay (ms)"
                 />
@@ -2426,7 +2424,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 min={1000}
                 step={1000}
                 thousands
-                suffix="ms"
+                suffix="ms" suffixInside
                 inputWidth="w-full"
                 inputHeight="h-8"
                 ariaLabel="Timeout in milliseconds"
@@ -2636,7 +2634,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               onChange={(n) => setDelay(String(n))}
               min={0}
               thousands
-              suffix="ms"
+              suffix="ms" suffixInside
               inputWidth="w-full"
               inputHeight="h-8"
               ariaLabel="Delay in milliseconds"

@@ -4,7 +4,8 @@ import { NumberInput } from './common/NumberInput';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
 import { useBridge } from '../bridge/BridgeContext';
-import { useTt } from '../state/LanguageContext';
+import { useTt, useLanguage } from '../state/LanguageContext';
+import { formatMs } from '../utils/displayUtils';
 
 interface PauseDialogProps {
   /**
@@ -46,22 +47,17 @@ interface PauseDialogProps {
  */
 
 /** Timeout is shown/edited in ms (matches the grid + Send Keystroke's ms knobs).
- *  Presets keep human-readable labels while carrying ms values. ∞ (ms=0) pairs
- *  with a captured hotkey to form a "wait forever until X is pressed" Pause. */
-const TIMEOUT_PRESETS = [
-  { label: '1s', ms: 1000 },
-  { label: '5s', ms: 5000 },
-  { label: '30s', ms: 30000 },
-  { label: '1m', ms: 60000 },
-  { label: '5m', ms: 300000 },
-  { label: '∞', ms: 0 },
-] as const;
+ *  Chips carry ms values; the label is rendered from the value (locale-grouped "1.000 ms")
+ *  at draw time. ∞ (ms=0) pairs with a captured hotkey to form a "wait forever until X is
+ *  pressed" Pause. */
+const TIMEOUT_PRESETS = [100, 500, 1000, 5000, 30000, 0] as const;
 
 /** Coarser steps once we're in whole-second territory; 100 ms below 1 s. */
 const stepFor = (ms: number) => (ms >= 1000 ? 1000 : 100);
 
 export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }: PauseDialogProps) {
   const tt = useTt();
+  const { language } = useLanguage();
   const isEditing = initialKey !== undefined;
 
   // Captured resume hotkey. null = none configured (empty pad). Seed from the
@@ -134,7 +130,7 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
 
   // Timeout for the mode hint — always milliseconds, consistent with the grid and
   // the ms NumberInput above (was "X second(s)" for clean multiples).
-  const timeoutLabel = `${timeoutMs} ms`;
+  const timeoutLabel = `${formatMs(timeoutMs, language)} ms`;
 
   return (
     <DialogShell
@@ -230,26 +226,27 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
                 thousands
                 inputWidth="w-24"
                 inputHeight="h-8"
-                suffix="ms"
+                suffix="ms" suffixInside
                 ariaLabel="Pause timeout in milliseconds"
               />
             </div>
             <div className="flex flex-wrap gap-1">
-              {TIMEOUT_PRESETS.map((p) => {
-                const isActive = timeoutMs === p.ms;
+              {TIMEOUT_PRESETS.map((ms) => {
+                const isActive = timeoutMs === ms;
+                const label = ms === 0 ? '∞' : `${formatMs(ms, language)} ms`;
                 return (
                   <button
-                    key={p.label}
+                    key={ms}
                     type="button"
-                    onClick={() => setTimeoutMs(p.ms)}
+                    onClick={() => setTimeoutMs(ms)}
                     className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
                       isActive
                         ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
                         : 'text-text-tertiary border-border-default bg-bg-elevated hover:text-text-secondary hover:bg-bg-card'
                     }`}
-                    data-tip={p.ms === 0 ? tt('No timeout — resume by hotkey only', 'Sem tempo limite — retoma apenas pela tecla de atalho') : undefined}
+                    data-tip={ms === 0 ? tt('No timeout — resume by hotkey only', 'Sem tempo limite — retoma apenas pela tecla de atalho') : undefined}
                   >
-                    {p.label}
+                    {label}
                   </button>
                 );
               })}

@@ -270,11 +270,12 @@ function DelayEditor({ token, onChange }: { token: string; onChange: (t: string)
   return (
     <Section label="Delay">
       <div className="flex items-center gap-2 py-1">
-        <NumInput value={ms} onChange={update} min={0} width={80} />
-        <span className="text-[11px] text-text-tertiary">milliseconds</span>
+        {/* width here is the TOTAL span (input + the two 24px steppers), unlike the dialogs'
+            inputWidth which sizes the input alone — so it needs extra room to fit "60.000 ms". */}
+        <NumInput value={ms} onChange={update} min={0} width={140} thousands suffix="ms" suffixInside />
       </div>
       <div className="text-[10px] text-text-tertiary mt-1">
-        Pause for this many ms before continuing.
+        Pause for this long before continuing.
       </div>
     </Section>
   );

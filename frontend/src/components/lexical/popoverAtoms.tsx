@@ -122,12 +122,18 @@ export function NumInput({
   disabled,
   min = 0,
   width = 54,
+  thousands,
+  suffix,
+  suffixInside,
 }: {
   value: number;
   onChange: (n: number) => void;
   disabled?: boolean;
   min?: number;
   width?: number;
+  thousands?: boolean;
+  suffix?: string;
+  suffixInside?: boolean;
 }) {
   return (
     <span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', width }}>
@@ -138,6 +144,9 @@ export function NumInput({
         disabled={disabled}
         inputWidth="w-full"
         inputHeight="h-7"
+        thousands={thousands}
+        suffix={suffix}
+        suffixInside={suffixInside}
       />
     </span>
   );

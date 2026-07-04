@@ -49,10 +49,11 @@ const DEFAULT_HOLD_MS = 1000;
 const MIN_HOLD_MS = 10;
 const MAX_HOLD_MS = 60000;
 
-// Common hold durations, surfaced as one-click chips. 250 ms (typical human key
-// press) wasn't in the legacy HoldKeyDialog presets but lands naturally between
-// "fast tap" (100 ms) and "deliberate hold" (500 ms), so it's worth offering.
-const HOLD_PRESETS = [100, 250, 500, 1000, 2000, 5000];
+// Common hold durations, surfaced as one-click chips. Mirrors the Insert Pause timeout
+// chips (100 ms → 30 s) for a consistent duration-picker feel; there's no ∞ here because a
+// key can't be held indefinitely (the backend caps a hold at MAX_HOLD_MS and an unbounded
+// hold would freeze the replay with the key stuck down).
+const HOLD_PRESETS = [100, 500, 1000, 5000, 30000];
 
 /** Spinner step: 1 s once we're past 1 s, 100 ms below — match HoldKeyDialog's feel. */
 const stepFor = (v: number) => v >= 1000 ? 1000 : 100;
@@ -227,7 +228,7 @@ export function KeystrokeCaptureDialog({
 
   // Duration readout — always milliseconds, matching the grid badge and every other
   // action duration (was seconds for clean multiples of 1000).
-  const durationLabel = `${holdMs} ms`;
+  const durationLabel = `${formatMs(holdMs, language)} ms`;
 
   // Title flips by intent: edit vs insert, then by mode.
   const title = isEditing
@@ -367,7 +368,7 @@ export function KeystrokeCaptureDialog({
                 <label
                   className={`text-[12px] font-medium transition-colors ${repeat > 1 ? 'text-text-secondary' : 'text-text-tertiary'}`}
                 >
-                  Gap between presses (ms)
+                  Gap between presses
                 </label>
                 <NumberInput
                   value={repeatDelay}
@@ -376,6 +377,8 @@ export function KeystrokeCaptureDialog({
                   max={MAX_REPEAT_DELAY}
                   disabled={repeat <= 1}
                   thousands
+                  suffix="ms" suffixInside
+                  inputWidth="w-20"
                   ariaLabel="Gap between presses (ms)"
                 />
               </div>
@@ -388,7 +391,7 @@ export function KeystrokeCaptureDialog({
               <div className="flex items-center justify-between gap-3">
                 <label
                   className="text-[12px] font-medium text-text-secondary"
-                >Hold duration (ms)</label>
+                >Hold duration</label>
                 {/* Step is dynamic (stepFor returns 1000 once we're at/above 1s, 100
                     below it). NumberInput's step is constant per render, so we recompute
                     via the parent's clamp on each change. */}
@@ -398,8 +401,9 @@ export function KeystrokeCaptureDialog({
                   min={MIN_HOLD_MS}
                   max={MAX_HOLD_MS}
                   step={stepFor(holdMs)}
-                  inputWidth="w-20"
+                  inputWidth="w-24"
                   thousands
+                  suffix="ms" suffixInside
                   ariaLabel="Hold duration (ms)"
                 />
               </div>

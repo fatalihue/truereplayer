@@ -32,6 +32,12 @@ export interface NumberInputProps {
   // stays simple. Forces type=text + inputMode=numeric so the separator can render
   // (type=number can't). Use for large ms/duration fields.
   thousands?: boolean;
+  // Render the unit (`suffix`) INSIDE the field, appended to the displayed value while not
+  // focused ("1.000 ms"), instead of as a separate label outside the stepper — matches the
+  // grid's inline "<n> ms" look. Implies text-mode input (digit-strip on type) like `thousands`;
+  // on focus the field shows raw digits so typing stays clean, and the external suffix span is
+  // suppressed. Pair with `suffix` (the unit text) and usually `thousands` (locale grouping).
+  suffixInside?: boolean;
   // Optional onBlur — some call sites need to react to commit (e.g. validate then re-clamp).
   onBlur?: () => void;
   // Auto-focus on mount — useful inside modal dialogs where React's plain `autoFocus`
@@ -65,8 +71,12 @@ export function NumberInput({
   onBlur,
   autoFocus = false,
   thousands = false,
+  suffixInside = false,
 }: NumberInputProps) {
   const { language } = useLanguage();
+  // Text-mode (type=text + digit-strip) is needed for both locale grouping and an inside unit,
+  // since a type=number input can render neither a separator nor a trailing " ms".
+  const textMode = thousands || suffixInside;
   // Raw digits are shown while editing; the thousands-formatted value only while blurred.
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -113,9 +123,9 @@ export function NumberInput({
   }, [clamp, onChange]);
 
   const handleTextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // In thousands mode the input is type=text, so a pasted "10.000" could arrive with
-    // separators — keep only digits (and a leading '-') so parsing stays correct.
-    const raw = thousands ? e.target.value.replace(/[^\d-]/g, '') : e.target.value;
+    // In text-mode the input is type=text, so a pasted "10.000" or "1.000 ms" could arrive with
+    // separators / the unit — keep only digits (and a leading '-') so parsing stays correct.
+    const raw = textMode ? e.target.value.replace(/[^\d-]/g, '') : e.target.value;
     setText(raw);
     // Parse + commit when the user has typed something parseable. Empty / partial like
     // "-" / "." stay in local state and don't fire onChange until they become a number.
@@ -164,6 +174,13 @@ export function NumberInput({
   const canDec = value != null && (min === undefined || value > min);
   const canInc = max === undefined || value == null || value < max;
 
+  // Blurred display: apply thousands grouping, and in suffixInside mode append the unit so the
+  // field reads like the grid ("1.000 ms"). Focused / empty / non-numeric → raw text so typing
+  // (and the placeholder) stay clean.
+  const showFormatted = !isFocused && text !== '' && Number.isFinite(Number(text));
+  const numPart = showFormatted && thousands ? formatMs(Number(text), language) : text;
+  const displayValue = showFormatted && suffixInside && suffix ? `${numPart} ${suffix}` : numPart;
+
   return (
     <span className={`inline-flex items-stretch gap-0 ${className}`}>
       <button
@@ -180,9 +197,9 @@ export function NumberInput({
         id={id}
         // type=text (not number) in thousands mode so the separator renders; inputMode
         // keeps the numeric keypad on touch and the caret/wheel behaviour otherwise.
-        type={thousands ? 'text' : 'number'}
-        inputMode={thousands ? 'numeric' : undefined}
-        value={thousands && !isFocused && text !== '' && Number.isFinite(Number(text)) ? formatMs(Number(text), language) : text}
+        type={textMode ? 'text' : 'number'}
+        inputMode={textMode ? 'numeric' : undefined}
+        value={displayValue}
         onChange={handleTextChange}
         onFocus={() => setIsFocused(true)}
         onBlur={handleBlur}
@@ -207,7 +224,7 @@ export function NumberInput({
       >
         <Plus size={12} />
       </button>
-      {suffix && <span className="text-[11px] text-text-disabled self-center ml-1.5">{suffix}</span>}
+      {suffix && !suffixInside && <span className="text-[11px] text-text-disabled self-center ml-1.5">{suffix}</span>}
     </span>
   );
 }
