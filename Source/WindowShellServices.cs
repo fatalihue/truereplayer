@@ -594,25 +594,57 @@ namespace TrueReplayer.Services
 
         public void BringToForeground()
         {
-            // AttachThreadInput trick: attach our thread to the foreground thread
-            // so Windows allows SetForegroundWindow from background
-            var foregroundHwnd = GetForegroundWindow();
-            uint foregroundThread = GetWindowThreadProcessId(foregroundHwnd, out _);
-            uint currentThread = GetCurrentThreadId();
-
-            if (foregroundThread != currentThread)
-                AttachThreadInput(foregroundThread, currentThread, true);
-
-            // If hidden in the system tray (appWindow.Hide()), bring it back
+            // Make the window on-screen FIRST (unhide from tray, un-minimize) so the activation
+            // below has a visible target regardless of prior state.
             if (!IsWindowVisible(hwnd))
                 appWindow.Show();
-            // Only restore if minimized — preserves maximized state
+            // Only restore if minimized — preserves maximized state.
             if (IsIconic(hwnd))
                 ShowWindow(hwnd, SW_RESTORE);
-            SetForegroundWindow(hwnd);
 
-            if (foregroundThread != currentThread)
-                AttachThreadInput(foregroundThread, currentThread, false);
+            // Already the foreground window? Skip the activation dance entirely.
+            if (GetForegroundWindow() == hwnd)
+                return;
+
+            uint currentThread = GetCurrentThreadId();
+            IntPtr foregroundHwnd = GetForegroundWindow();
+            // GetForegroundWindow returns NULL during focus transitions (menu just closed, an app
+            // releasing fullscreen, etc.). Passing that to GetWindowThreadProcessId yields thread 0,
+            // and AttachThreadInput(0, …) silently fails — so SetForegroundWindow gets rejected by
+            // Windows' foreground lock and the window doesn't come up. That is the intermittent
+            // "pressed the hotkey and nothing happened, worked next time" bug. Guard the 0 case so
+            // we skip the (useless) attach instead of poisoning the whole call.
+            uint foregroundThread = foregroundHwnd != IntPtr.Zero
+                ? GetWindowThreadProcessId(foregroundHwnd, out _)
+                : 0;
+
+            // AttachThreadInput trick: share the foreground thread's input queue so Windows treats
+            // our SetForegroundWindow as coming from the active thread. Track success so we only
+            // detach what we actually attached (and always detach, via finally).
+            bool attached = false;
+            if (foregroundThread != 0 && foregroundThread != currentThread)
+                attached = AttachThreadInput(foregroundThread, currentThread, true);
+
+            // Belt-and-suspenders: temporarily zero the foreground-lock timeout so Windows honours
+            // SetForegroundWindow from a background process even when the attach trick alone isn't
+            // enough. The user's real value is saved and restored in finally so this can't leak.
+            uint prevLockTimeout = 0;
+            bool lockTimeoutZeroed = false;
+            try
+            {
+                if (SystemParametersInfo(SPI_GETFOREGROUNDLOCKTIMEOUT, 0, ref prevLockTimeout, 0))
+                    lockTimeoutZeroed = SystemParametersInfo(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, IntPtr.Zero, SPIF_SENDCHANGE);
+
+                BringWindowToTop(hwnd);
+                SetForegroundWindow(hwnd);
+            }
+            finally
+            {
+                if (lockTimeoutZeroed)
+                    SystemParametersInfo(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, new IntPtr(prevLockTimeout), SPIF_SENDCHANGE);
+                if (attached)
+                    AttachThreadInput(foregroundThread, currentThread, false);
+            }
         }
 
         public void UpdateAlwaysOnTop(bool isAlwaysOnTop)
@@ -643,5 +675,13 @@ namespace TrueReplayer.Services
         [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
         [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hWnd);
+        [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr hWnd);
+        // Two overloads: GET writes the value through a ref; SET passes the new value IN the
+        // pvParam slot itself (SPI_SETFOREGROUNDLOCKTIMEOUT is a "value-in-pointer" action).
+        [DllImport("user32.dll", SetLastError = true)] private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref uint pvParam, uint fWinIni);
+        [DllImport("user32.dll", SetLastError = true)] private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+        private const uint SPI_GETFOREGROUNDLOCKTIMEOUT = 0x2000;
+        private const uint SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001;
+        private const uint SPIF_SENDCHANGE = 0x0002;
     }
 }
