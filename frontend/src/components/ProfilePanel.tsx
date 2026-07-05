@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
-import { Search, SearchX, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink, Info, MoreHorizontal, Hash, Upload } from 'lucide-react';
+import { Search, SearchX, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink, Info, MoreHorizontal, Hash, Upload, Check } from 'lucide-react';
 import type { ProfileEntry, ImportPreviewPayload, ImportConflictResolution } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -25,20 +25,25 @@ interface ProfilePanelProps {
   onToggleCollapse?: () => void;
 }
 
-// Curated to the app's own hues (2026-07 reorg — the old list was 20 pure neons,
-// the last surface fighting the quiet palette). Every tone already exists in the
-// UI: action colours, conditional-block rails, Settings group dots. Picker options
-// only — folders keep whatever colour is saved in profile-order.json.
+// A 24-tone spectrum (3 rows of 8) for folder labels — the owner asked for more variety
+// than the previous 16, kept muted enough to sit with the quiet palette. Ordered as a
+// continuous hue wheel so the picker reads as a spectrum. Picker options only — folders
+// keep whatever colour is saved in profile-order.json.
 const FOLDER_COLORS = [
-  // Blues & indigos
-  '#60cdff', '#42a5f5', '#5d5fd1', '#a78bfa',
-  // Purples & pinks
-  '#c084fc', '#e879f9', '#f472b6', '#ef5da8',
-  // Reds, oranges & golds
-  '#ff6b6b', '#fb923c', '#d4a020', '#ffd93d',
-  // Greens, teal & slate
-  '#9a9a3e', '#6bcb77', '#4dd0a0', '#7a8599',
+  // Reds → golds
+  '#f43f5e', '#ff6b6b', '#fb923c', '#f59e0b', '#d4a020', '#ffd93d', '#84cc16', '#9a9a3e',
+  // Greens → cyans → blues
+  '#22c55e', '#6bcb77', '#4dd0a0', '#14b8a6', '#06b6d4', '#60cdff', '#42a5f5', '#3b82f6',
+  // Indigos → pinks → neutrals
+  '#5d5fd1', '#a78bfa', '#c084fc', '#e879f9', '#ef5da8', '#f472b6', '#b3814e', '#7a8599',
 ];
+
+// Selected-swatch check ink: dark on light swatches, white on dark ones (relative luminance).
+function isLightFolderColor(hex: string): boolean {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 150;
+}
 
 // Native click action types — used to count coordinates that would benefit from a
 // Convert to Relative/Absolute pass. Module-scoped so it isn't rebuilt every render.
@@ -2135,16 +2140,33 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 style={colorFlyout.flipX ? { paddingRight: '4px' } : { paddingLeft: '4px' }}
               >
               <div className="p-2.5 bg-bg-card border border-border-default rounded-md shadow-lg z-[60]">
-                {/* 122px = exactly 4 swatches per row → a clean 4×4 grid for the 16 tones. */}
-                <div className="flex flex-wrap gap-1.5" style={{ width: '122px' }}>
-                  {FOLDER_COLORS.map(c => (
-                    <button
-                      key={c}
-                      onClick={() => handleSetFolderColor(folderContextMenu.folderName, c)}
-                      className="w-[26px] h-[26px] rounded-full border-2 hover:scale-110 transition-transform"
-                      style={{ backgroundColor: c, borderColor: (profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName)?.color === c ? 'var(--color-text-primary)' : 'transparent' }}
-                    />
-                  ))}
+                {/* Same rounded-tile grid as the New Folder dialog — 8 columns, 3 rows for
+                    the 24 tones; the folder's current colour shows a ring + check. */}
+                <div className="grid grid-cols-8 gap-1.5" style={{ width: '212px' }}>
+                  {FOLDER_COLORS.map(c => {
+                    const selected = (profileOrder?.folders ?? []).find(f => f.name === folderContextMenu.folderName)?.color === c;
+                    return (
+                      <button
+                        key={c}
+                        onClick={() => handleSetFolderColor(folderContextMenu.folderName, c)}
+                        aria-label={`Colour ${c}`}
+                        className="relative w-full aspect-square rounded-md transition-transform hover:scale-110"
+                        style={{
+                          backgroundColor: c,
+                          boxShadow: selected ? '0 0 0 2px var(--color-bg-card), 0 0 0 4px var(--color-text-primary)' : undefined,
+                        }}
+                      >
+                        {selected && (
+                          <Check
+                            size={11}
+                            strokeWidth={3}
+                            className="absolute inset-0 m-auto"
+                            style={{ color: isLightFolderColor(c) ? 'rgba(0,0,0,0.72)' : '#fff' }}
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               </div>
@@ -2682,23 +2704,44 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               placeholder="Folder name..."
               className="w-full h-9 px-3 text-sm text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
             />
-            {/* Centred, content-width 8-col grid so the 16 swatches form two even rows of 8
-                sitting tight together (no stretched cells) and the whole block is centred in
-                the dialog. No "Color:" label — a folder-colour swatch grid needs no caption. */}
-            <div className="mt-4 flex justify-center">
-              <div className="grid grid-cols-8 gap-1.5">
-                {FOLDER_COLORS.map(c => (
+            {/* Colour picker — a full-width 8×3 grid of rounded tiles. Square cells tile the
+                dialog width edge-to-edge (symmetric by construction, no stray gaps); the
+                selected tile gets a ring + a check (dark or white ink by luminance). */}
+            <div className="grid grid-cols-8 gap-1.5 mt-4">
+              {FOLDER_COLORS.map(c => {
+                const selected = folderDialogColor === c;
+                return (
                   <button
                     key={c}
                     onClick={() => setFolderDialogColor(c)}
                     aria-label={`Colour ${c}`}
-                    className={`w-5 h-5 rounded-full border-2 transition-transform ${
-                      folderDialogColor === c ? 'border-white scale-110' : 'border-transparent hover:scale-110'
-                    }`}
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </div>
+                    className="relative w-full aspect-square rounded-md transition-transform hover:scale-110"
+                    style={{
+                      backgroundColor: c,
+                      boxShadow: selected ? '0 0 0 2px var(--color-bg-card), 0 0 0 4px var(--color-text-primary)' : undefined,
+                    }}
+                  >
+                    {selected && (
+                      <Check
+                        size={12}
+                        strokeWidth={3}
+                        className="absolute inset-0 m-auto"
+                        style={{ color: isLightFolderColor(c) ? 'rgba(0,0,0,0.72)' : '#fff' }}
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {/* Live preview — how the folder will read in the sidebar: icon tinted with the
+                chosen colour + the name as you type it. */}
+            <div className="flex items-center gap-2 mt-3.5 px-2.5 py-2 rounded-md bg-bg-elevated border border-border-subtle">
+              <ChevronDown size={12} className="shrink-0" style={{ color: folderDialogColor }} />
+              <FolderOpen size={13} className="shrink-0" style={{ color: folderDialogColor }} />
+              <span className="text-xs font-medium text-text-secondary truncate">
+                {folderDialogName.trim() || 'Folder name'}
+              </span>
+              <span className="ml-auto text-[9px] uppercase tracking-wide text-text-disabled shrink-0">preview</span>
             </div>
             {createFolderNameTaken && (
               <p className="text-[11px] text-recording mt-2">A folder named "{folderDialogName.trim()}" already exists.</p>
