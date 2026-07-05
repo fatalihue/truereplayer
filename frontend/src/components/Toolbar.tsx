@@ -382,7 +382,13 @@ export function Toolbar(_props: ToolbarProps) {
   // (Undo/redo are intentionally NOT here — App.tsx owns Ctrl+Z/Ctrl+Y; see below.)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') return;
+      // Skip when the user is typing in a text field — INPUT/TEXTAREA OR a contentEditable
+      // (the Insert Text / SendText Lexical editor is contentEditable, not a textarea). Without
+      // the isContentEditable check, Ctrl+C/Ctrl+V inside that editor got hijacked: Ctrl+C copied
+      // the selected grid action instead of the text, and Ctrl+V pasted grid actions instead of
+      // letting the editor paste. Mirrors the editable-target guard in App.tsx / ActionTable.
+      const t = e.target as HTMLElement;
+      if (t?.tagName === 'INPUT' || t?.tagName === 'TEXTAREA' || t?.isContentEditable) return;
       // Undo/Redo (Ctrl+Z / Ctrl+Y / Shift+Ctrl+Z) are intentionally NOT handled here.
       // App.tsx owns those keystrokes globally — it preventDefaults and dispatches
       // cmd:undo / cmd:redo, which the cmd-listener effect above forwards to the bridge.
