@@ -1225,7 +1225,7 @@ namespace TrueReplayer.Controllers
         /// The old `ShowImportConflictDialogAsync` is no longer called; the React dialog
         /// surfaces all decisions up-front so the import runs without further prompts.
         /// </summary>
-        public async Task<(int imported, int skipped, bool hasOrganization, int imageFailures)> ConfirmImportAsync(
+        public async Task<(int imported, int skipped, bool hasOrganization, int imageFailures, List<string> writtenNames)> ConfirmImportAsync(
             ProfileExportEnvelope envelope,
             HashSet<string> selectedNames,
             Dictionary<string, ImportConflictResult> conflictResolutions)
@@ -1405,7 +1405,11 @@ namespace TrueReplayer.Controllers
             if (hasOrganization && imported > 0)
                 await MergeImportedOrganizationAsync(envelope.Organization!, importedRenames);
 
-            return (imported, skipped, hasOrganization, imageFailures);
+            // Final on-disk names actually written this batch (== source name unless a collision
+            // bumped it to "name (N)"). The bridge uses this to detect whether the profile
+            // currently loaded in the grid was overwritten, so it can reload it instead of
+            // leaving a stale in-memory copy that a later Save would clobber the import with.
+            return (imported, skipped, hasOrganization, imageFailures, importedRenames.Values.ToList());
         }
 
         // Guards against a malicious/buggy .trprofile envelope smuggling path separators or

@@ -6,6 +6,8 @@ import { useBridge } from '../bridge/BridgeContext';
 import { KbdTag } from './common/KbdTag';
 import { RemovableChip } from './common/RemovableChip';
 import { CheckboxBox } from './Checkbox';
+import { DialogShell } from './common/DialogShell';
+import { Button } from './common/Button';
 import { TargetConfigDialog } from './TargetConfigDialog';
 import { SecurityWarningModal } from './SecurityWarningModal';
 import { ImportPreviewDialog } from './ImportPreviewDialog';
@@ -122,6 +124,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [exportSelection, setExportSelection] = useState<Record<string, boolean>>({});
   const [exportSearch, setExportSearch] = useState('');
+  // Whether the export bundles the folder/pin/grouping layout. Was hardcoded true at every
+  // call site; now user-controllable via a checkbox in the export dialog. Defaults on.
+  const [includeExportOrg, setIncludeExportOrg] = useState(true);
   const [dialogValue, setDialogValue] = useState('');
   const [showCreateFolderDialog, setShowCreateFolderDialog] = useState(false);
   const [folderDialogName, setFolderDialogName] = useState('');
@@ -351,6 +356,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const handleExportClick = () => {
     setExportSelection({});
     setExportSearch('');
+    setIncludeExportOrg(true);
     setShowExportDialog(true);
   };
 
@@ -461,10 +467,13 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   };
 
   const confirmExport = () => {
-    // Scope to the visible profiles so a filtered-out (but still-checked) profile is not shipped.
-    const selectedNames = visibleExportNames.filter(name => exportSelection[name]);
+    // Export EVERY checked profile, including ones the current search filter hides. Scoping to
+    // the visible set silently dropped profiles the user had checked before filtering — they
+    // stayed visually ticked but never shipped. The dialog footer surfaces any hidden-but-checked
+    // count so the total is never a surprise.
+    const selectedNames = profiles.map(p => p.name).filter(name => exportSelection[name]);
     if (selectedNames.length > 0) {
-      send({ type: 'profile:export', payload: { names: selectedNames, includeOrganization: true } });
+      send({ type: 'profile:export', payload: { names: selectedNames, includeOrganization: includeExportOrg } });
     }
     setShowExportDialog(false);
   };
@@ -2549,45 +2558,87 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           const inFolder = (profileOrder?.folders ?? []).some(f => f.items.includes(n));
           return !inFolder && matchesExport(n);
         });
-        // Count only visible + selected so the filter never inflates the total with hidden picks.
+        // Select-All / per-folder counts scope to the search-visible rows (that's what the
+        // control toggles). The FOOTER total, by contrast, spans every checked profile —
+        // including ones the filter currently hides — because that's the set confirmExport ships.
         const visibleNames = profiles.filter(p => matchesExport(p.name)).map(p => p.name);
         const selectedCount = visibleNames.filter(n => exportSelection[n]).length;
+        const totalSelectedCount = profiles.filter(p => exportSelection[p.name]).length;
+        const hiddenSelectedCount = totalSelectedCount
+          - profiles.filter(p => exportSelection[p.name] && matchesExport(p.name)).length;
 
         return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-[360px] bg-bg-card border border-border-default rounded-lg p-5 shadow-xl">
-            <h3 className="text-sm font-semibold text-text-primary mb-3">Import / Export</h3>
-
+          <DialogShell
+            icon={<Upload size={14} style={{ color: 'var(--color-accent)' }} />}
+            title="Export Profiles"
+            widthClass="w-[380px] max-h-[85vh]"
+            onClose={() => setShowExportDialog(false)}
+            // Don't discard a multi-profile selection on a stray outside click, matching the
+            // Import Preview dialog.
+            closeOnBackdrop={false}
+            footerHint={
+              <>
+                {totalSelectedCount} selected
+                {hiddenSelectedCount > 0 && <> · {hiddenSelectedCount} hidden by filter</>}
+              </>
+            }
+            footer={
+              <>
+                {/* Secondary entry point — importing is the inverse of this dialog. All three
+                    share min-w so the footer reads as an even button row. */}
+                <Button
+                  variant="secondary"
+                  className="min-w-[84px]"
+                  onClick={() => { handleImportClick(); setShowExportDialog(false); }}
+                >
+                  Import
+                </Button>
+                <Button variant="secondary" className="min-w-[84px]" onClick={() => setShowExportDialog(false)}>Cancel</Button>
+                <Button
+                  variant="primary"
+                  className="min-w-[84px]"
+                  onClick={confirmExport}
+                  disabled={totalSelectedCount === 0}
+                >
+                  Export
+                </Button>
+              </>
+            }
+          >
             {/* Search */}
-            <div className="flex items-center gap-2 px-2.5 py-1.5 mb-2 bg-bg-input border border-border-default rounded">
-              <Search size={12} className="text-text-disabled shrink-0" />
-              <input
-                type="text"
-                placeholder="Filter profiles..."
-                value={exportSearch}
-                onChange={(e) => setExportSearch(e.target.value)}
-                className="bg-transparent text-xs text-text-primary placeholder:text-text-disabled outline-none flex-1 min-w-0"
-              />
-              {exportSearch && (
-                <button onClick={() => setExportSearch('')} className="text-text-disabled hover:text-text-secondary transition-colors shrink-0">
-                  <X size={11} />
-                </button>
-              )}
+            <div className="px-4 pt-3">
+              <div className="flex items-center gap-2 px-2.5 py-1.5 bg-bg-input border border-border-default rounded">
+                <Search size={12} className="text-text-disabled shrink-0" />
+                <input
+                  type="text"
+                  placeholder="Filter profiles..."
+                  value={exportSearch}
+                  onChange={(e) => setExportSearch(e.target.value)}
+                  className="bg-transparent text-xs text-text-primary placeholder:text-text-disabled outline-none flex-1 min-w-0"
+                />
+                {exportSearch && (
+                  <button onClick={() => setExportSearch('')} className="text-text-disabled hover:text-text-secondary transition-colors shrink-0">
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* Select All */}
-            <button
-              type="button"
-              onClick={toggleExportSelectAll}
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-elevated cursor-pointer border-b border-border-subtle mb-1 text-left"
-            >
-              <CheckboxBox checked={allExportSelected} />
-              <span className="text-xs font-medium text-text-secondary">Select All</span>
-              <span className="ml-auto text-[10px] text-text-disabled">{selectedCount}/{visibleNames.length}</span>
-            </button>
+            {/* Select All (visible) */}
+            <div className="px-4 pt-2">
+              <button
+                type="button"
+                onClick={toggleExportSelectAll}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-elevated cursor-pointer border-b border-border-subtle text-left"
+              >
+                <CheckboxBox checked={allExportSelected} />
+                <span className="text-xs font-medium text-text-secondary">Select All</span>
+                <span className="ml-auto text-[10px] text-text-disabled">{selectedCount}/{visibleNames.length}</span>
+              </button>
+            </div>
 
             {/* Scrollable list organized by folders */}
-            <div className="h-[240px] overflow-y-auto">
+            <div className="flex-1 overflow-y-auto px-4 py-1 min-h-[160px]">
               {/* Pinned (not in folders) */}
               {pinned.length > 0 && (
                 <div className="mb-1">
@@ -2662,31 +2713,19 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               )}
             </div>
 
-            <div className="flex justify-between mt-3 border-t border-border-subtle pt-3">
+            {/* Include folder organization — the export bundles pins/folders/grouping so the
+                recipient rebuilds the same layout. Was hardcoded on; now opt-out. */}
+            <div className="px-4 py-2.5 border-t border-border-subtle">
               <button
-                onClick={() => { handleImportClick(); setShowExportDialog(false); }}
-                className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
+                type="button"
+                onClick={() => setIncludeExportOrg(v => !v)}
+                className="w-full flex items-center gap-2 text-left"
               >
-                Import
+                <CheckboxBox checked={includeExportOrg} />
+                <span className="text-xs text-text-secondary">Include folder organization</span>
               </button>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowExportDialog(false)}
-                  className="px-4 py-1.5 text-xs text-text-secondary hover:text-text-primary bg-bg-elevated rounded transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={confirmExport}
-                  disabled={selectedCount === 0}
-                  className="px-4 py-1.5 text-xs text-white bg-accent-solid hover:bg-accent-solid/80 rounded transition-colors disabled:opacity-40"
-                >
-                  Export ({selectedCount})
-                </button>
-              </div>
             </div>
-          </div>
-        </div>
+          </DialogShell>
         );
       })()}
 

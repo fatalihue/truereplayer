@@ -31,20 +31,32 @@ namespace TrueReplayer.Services
     /// is skipped for known processes. Self-invalidates via file <c>LastWriteTimeUtc</c>, so
     /// app updates that change the icon get picked up on next lookup without manual TTL.
     ///
-    /// Null results (resolution failed) are kept in memory for the session to avoid retry
-    /// loops, but <b>never persisted</b> — next launch tries fresh, since the user may have
-    /// installed the missing app in between.
+    /// Null results (resolution failed) are cached in memory with a short TTL
+    /// (<see cref="NegativeTtlMs"/>) so a genuinely-missing target doesn't redo the
+    /// process+registry walk on every push, yet an app launched or installed mid-session is
+    /// retried and picked up on the next push <b>without an app restart</b>. Negatives are
+    /// <b>never persisted</b> — next launch tries fresh regardless.
     /// </summary>
     public static class AppIconService
     {
         // Cache value semantics:
         //   - non-null CacheEntry  → resolved successfully; revalidate via LastWriteTime
-        //   - null                 → resolution failed this session; don't retry, don't persist
+        //   - null                 → resolution failed; retried after NegativeTtlMs
+        //                            (see _negativeExpiryTicks), never persisted
         //   - key absent           → never tried in this session; full lookup needed
         private sealed record CacheEntry(string Path, long LastWriteTimeUtcTicks, string PngBase64);
 
         private static readonly Dictionary<string, CacheEntry?> _cache =
             new(StringComparer.OrdinalIgnoreCase);
+        // Expiry (Environment.TickCount64 ms) at which a negative cache entry becomes eligible
+        // for retry. Purely in-memory (negatives are never persisted) so it resets on restart;
+        // keyed like _cache, only meaningful when _cache[key] == null.
+        private static readonly Dictionary<string, long> _negativeExpiryTicks =
+            new(StringComparer.OrdinalIgnoreCase);
+        // How long a failed resolution is trusted before a fresh attempt. Long enough to throttle
+        // the process+registry walk across a burst of pushes, short enough that opening the target
+        // app surfaces its icon within seconds (on the next push) instead of only after a restart.
+        private const long NegativeTtlMs = 10_000;
         private static readonly object _lock = new();
         private static bool _diskLoaded;
         private static Timer? _saveTimer;
@@ -72,8 +84,20 @@ namespace TrueReplayer.Services
                 hadEntry = _cache.TryGetValue(processName, out entry);
                 if (hadEntry && entry == null)
                 {
-                    // Known-failed this session — don't retry until next launch.
-                    return null;
+                    // Negative entry (resolution failed earlier). Honour it only until its TTL
+                    // elapses; after that re-resolve so a target that became available mid-session
+                    // (user launched the app, or installed it) is picked up on the next push
+                    // without an app restart.
+                    if (_negativeExpiryTicks.TryGetValue(processName, out var expiry)
+                        && Environment.TickCount64 < expiry)
+                    {
+                        return null;
+                    }
+                    // Expired — drop the marker and fall through to a full re-resolve.
+                    _cache.Remove(processName);
+                    _negativeExpiryTicks.Remove(processName);
+                    hadEntry = false;
+                    entry = null;
                 }
             }
 
@@ -138,11 +162,15 @@ namespace TrueReplayer.Services
                 if (png != null && !string.IsNullOrEmpty(resolvedPath))
                 {
                     _cache[processName] = new CacheEntry(resolvedPath!, lastWriteTicks, png);
+                    _negativeExpiryTicks.Remove(processName);
                     needSave = true;
                 }
                 else
                 {
                     _cache[processName] = null;
+                    // Retry this failed lookup after the TTL, so a mid-session launch/install is
+                    // eventually resolved instead of being stuck null until the next restart.
+                    _negativeExpiryTicks[processName] = Environment.TickCount64 + NegativeTtlMs;
                     // Schedule save only if disk used to have this entry — otherwise we'd
                     // touch the file for no reason. `hadEntry` covers the "loaded from disk
                     // and now invalid" case; if it was never on disk, no-op.

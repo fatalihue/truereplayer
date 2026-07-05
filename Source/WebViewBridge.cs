@@ -5968,8 +5968,11 @@ namespace TrueReplayer
                 targetWindowTitle = p.TargetWindow?.WindowTitle,
                 // Conflict detection — the receiver may already have a profile with the same
                 // name. Surface that here so the dialog can show a "will be renamed" / "will
-                // overwrite" hint up-front instead of only learning at confirm time.
-                nameConflict = profileController.ProfileEntries.Any(e => e.Name == p.Name)
+                // overwrite" hint up-front instead of only learning at confirm time. Case-
+                // INSENSITIVE to match the confirm path (File.Exists on NTFS + the OrdinalIgnoreCase
+                // allocation maps): 'farm' vs local 'Farm' IS a real collision, so the user must
+                // get the Overwrite/Skip choice instead of a silent surprise rename.
+                nameConflict = profileController.ProfileEntries.Any(e => string.Equals(e.Name, p.Name, StringComparison.OrdinalIgnoreCase))
             }).ToArray();
 
             SendMessage("profile:importPreview", new
@@ -6045,11 +6048,44 @@ namespace TrueReplayer
 
             try
             {
-                var (imported, skipped, hasOrganization, imageFailures) = await profileController.ConfirmImportAsync(
+                var (imported, skipped, hasOrganization, imageFailures, writtenNames) = await profileController.ConfirmImportAsync(
                     _pendingImportEnvelope, selectedNames, conflictResolutions);
 
                 if (imported > 0)
                 {
+                    // Capture hotkey collisions BEFORE any reload/refresh below re-runs
+                    // GetProfileHotkeys and clears the list. ConfirmImportAsync already ran
+                    // RefreshProfileListAsync internally, so _hotkeyCollisions reflects the
+                    // post-import armed set.
+                    var hotkeyCollisions = profileController.GetAndClearHotkeyCollisions();
+
+                    // If the import OVERWROTE the profile currently loaded in the grid, its
+                    // on-disk file changed underneath us. Reload it so UserProfile.Current +
+                    // the grid reflect the imported content — otherwise replay fires the STALE
+                    // in-memory actions and the next Save writes that stale copy back over the
+                    // freshly imported file. A Rename resolution writes a NEW "name (N)" file
+                    // and leaves the active profile untouched, so writtenNames won't contain
+                    // CurrentProfileName in that case. Mirrors the reset the delete handler does.
+                    if (!string.IsNullOrEmpty(CurrentProfileName)
+                        && CurrentProfileName != "No Profile"
+                        && writtenNames.Any(n => string.Equals(n, CurrentProfileName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        var reloaded = await profileController.LoadProfileByNameAsync(CurrentProfileName);
+                        if (reloaded != null)
+                        {
+                            var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == CurrentProfileName);
+                            UserProfile.Current = reloaded;
+                            AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
+                            CurrentProfilePath = entry?.FilePath;
+                            HasUnsavedChanges = false;
+                            UserProfile.Current.UseRelativeCoordinates = profileController.GetEffectiveRelativeCoordinates(CurrentProfileName);
+                            UserProfile.Current.BringToFocus = profileController.GetEffectiveBringToFocus(CurrentProfileName);
+                            ApplyProfile(reloaded);
+                            profileController.UpdateProfileColors(CurrentProfileName);
+                            TrayIconService.UpdateTrayIcon();
+                        }
+                    }
+
                     PushProfilesUpdate();
                     string msg = $"Imported {imported} profile(s).";
                     if (skipped > 0) msg += $" {skipped} skipped.";
@@ -6059,6 +6095,13 @@ namespace TrueReplayer
                     // render red — the frontend infers an error from words like "couldn't". 'info'
                     // (neutral) for the warning case, 'success' (green) for a clean import.
                     SendMessage("alert:show", new { message = msg, type = imageFailures > 0 ? "info" : "success" });
+
+                    // Surface any hotkey collisions the imported profiles introduced with existing
+                    // ones — the hotkeys are already armed (RefreshProfileListAsync re-registered
+                    // them), but without this the colliding profiles would "silently fight" until
+                    // the next launch. Mirrors the assign-hotkey handler's drain.
+                    foreach (var collisionMsg in hotkeyCollisions)
+                        SendMessage("alert:show", new { message = collisionMsg });
                 }
                 else if (skipped > 0)
                 {

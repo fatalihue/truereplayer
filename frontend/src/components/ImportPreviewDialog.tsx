@@ -4,7 +4,6 @@ import type { ImportPreviewPayload, ImportConflictResolution } from '../bridge/m
 import { Checkbox } from './Checkbox';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
-import { useTt } from '../state/LanguageContext';
 
 interface ImportPreviewDialogProps {
   preview: ImportPreviewPayload;
@@ -30,7 +29,6 @@ interface ImportPreviewDialogProps {
  * during confirm; this dialog only shows whether a name conflict EXISTS via a chip.
  */
 export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPreviewDialogProps) {
-  const tt = useTt();
   // Default selection: every compatible profile checked. The user opts out per item
   // rather than opting in — matches the "I'm importing this file because I want it all"
   // mental model and matches Stream Deck / VS Code profile import UX.
@@ -89,6 +87,15 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
     return p?.compatible === true;
   }).length;
 
+  // Rows that are checked + compatible but whose name-conflict is resolved to "skip" WON'T
+  // actually be written — the backend counts them as skipped. Excluding them from the count
+  // keeps the button/footer honest: "Import Selected (3)" that yields "All 2 were skipped" was
+  // the reported bug. selectedCount is the raw checked set; effectiveImportCount is what lands.
+  const skipResolvedCount = preview.profiles.filter(p =>
+    !!selected[p.name] && p.compatible && p.nameConflict && (conflictResolutions[p.name] ?? 'rename') === 'skip'
+  ).length;
+  const effectiveImportCount = selectedCount - skipResolvedCount;
+
   const compatibleCount = preview.profiles.filter(p => p.compatible).length;
   const incompatibleCount = preview.profiles.length - compatibleCount;
 
@@ -118,20 +125,20 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
       // dozen profiles would discard the selection + conflict choices. The user
       // dismisses via the Cancel button, Esc, or completing the import.
       closeOnBackdrop={false}
-      footerHint={<>{selectedCount} of {compatibleCount} will be imported</>}
+      footerHint={
+        skipResolvedCount > 0
+          ? <>{effectiveImportCount} will be imported · {skipResolvedCount} skipped</>
+          : <>{effectiveImportCount} of {compatibleCount} will be imported</>
+      }
       footer={
         <>
           <Button variant="secondary" onClick={onCancel}>Cancel</Button>
           <Button
             variant="primary"
             onClick={handleConfirm}
-            disabled={selectedCount === 0}
-            data-tip={tt(
-              'Import the checked profiles into your library, applying the conflict choices above. Reference images travel with the file and are restored too',
-              'Importa os perfis marcados para sua biblioteca, aplicando as escolhas de conflito acima. As imagens de referência vêm no arquivo e também são restauradas'
-            )}
+            disabled={effectiveImportCount === 0}
           >
-            Import Selected ({selectedCount})
+            Import Selected ({effectiveImportCount})
           </Button>
         </>
       }
@@ -152,13 +159,7 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
             <span>Format: v{preview.envelopeVersion}</span>
             <span>Your app: v{preview.runningVersion}</span>
             {preview.hasOrganization && (
-              <span
-                className="text-accent-light"
-                data-tip={tt(
-                  'This file also carries the folder/grouping layout — imported profiles keep their original folders',
-                  'Este arquivo também traz a organização de pastas — os perfis importados mantêm suas pastas originais'
-                )}
-              >
+              <span className="text-accent-light">
                 + folder organization
               </span>
             )}
@@ -170,13 +171,7 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
           <span>
             {preview.profiles.length} profile{preview.profiles.length === 1 ? '' : 's'} in this file
             {incompatibleCount > 0 && (
-              <span
-                className="text-amber-400 ml-2"
-                data-tip={tt(
-                  'Built for a newer TrueReplayer than yours — greyed out and cannot be selected. Update the app to import them',
-                  'Feitos para uma versão do TrueReplayer mais nova que a sua — desativados e não podem ser selecionados. Atualize o app para importá-los'
-                )}
-              >
+              <span className="text-amber-400 ml-2">
                 ({incompatibleCount} incompatible)
               </span>
             )}
@@ -185,10 +180,6 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
             <button
               onClick={() => toggleAll(true)}
               disabled={compatibleCount === 0}
-              data-tip={tt(
-                'Check every compatible profile (incompatible ones stay off)',
-                'Marca todos os perfis compatíveis (os incompatíveis ficam desmarcados)'
-              )}
               className="hover:text-text-primary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Select all
@@ -208,13 +199,7 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
             "override" overrides. Lets the user resolve everything in one click. */}
         {conflictCount > 0 && (
           <div className="px-4 py-3 border-b border-border-subtle bg-amber-900/25 flex items-center gap-4 flex-wrap">
-            <span
-              className="text-xs font-medium text-amber-400 flex items-center gap-2"
-              data-tip={tt(
-                'Some profiles share a name with one you already have. Pick how to handle all of them at once; you can still override individual rows below',
-                'Alguns perfis têm o mesmo nome de um que você já possui. Escolha como tratar todos de uma vez; você ainda pode ajustar linhas individuais abaixo'
-              )}
-            >
+            <span className="text-xs font-medium text-amber-400 flex items-center gap-2">
               <AlertTriangle size={14} />
               {conflictCount} name conflict{conflictCount === 1 ? '' : 's'} — apply to all:
             </span>
@@ -350,16 +335,14 @@ interface ResolutionChipsProps {
 }
 
 function ResolutionChips({ value, onChange, size = 'sm' }: ResolutionChipsProps) {
-  const tt = useTt();
   const options: {
     key: ImportConflictResolution;
     label: string;
-    tooltip: string;
     Icon: React.ComponentType<{ size?: number; className?: string }>;
   }[] = [
-    { key: 'rename', label: 'Rename', tooltip: tt('Import with a new name (appends " (2)", " (3)"…)', 'Importa com um novo nome (anexa " (2)", " (3)"…)'), Icon: Pencil },
-    { key: 'overwrite', label: 'Overwrite', tooltip: tt('Replace the existing local profile', 'Substitui o perfil local existente'), Icon: Replace },
-    { key: 'skip', label: 'Skip', tooltip: tt('Leave the existing profile alone — don\'t import this one', 'Mantém o perfil existente — não importa este'), Icon: Ban },
+    { key: 'rename', label: 'Rename', Icon: Pencil },
+    { key: 'overwrite', label: 'Overwrite', Icon: Replace },
+    { key: 'skip', label: 'Skip', Icon: Ban },
   ];
 
   // Size variants. lg pumps padding + adds an icon; sm stays as the tight overlay
@@ -379,7 +362,6 @@ function ResolutionChips({ value, onChange, size = 'sm' }: ResolutionChipsProps)
             key={opt.key}
             type="button"
             onClick={() => onChange(opt.key)}
-            data-tip={opt.tooltip}
             className={`${btnPad} ${textSize} flex items-center gap-1.5 transition-colors ${
               active
                 ? 'bg-accent-solid/30 text-text-primary'

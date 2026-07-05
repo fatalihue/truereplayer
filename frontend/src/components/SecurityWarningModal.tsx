@@ -3,7 +3,6 @@ import { AlertTriangle } from 'lucide-react';
 import { Checkbox } from './Checkbox';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
-import { useTt } from '../state/LanguageContext';
 
 interface SecurityWarningModalProps {
   /** Called when the user clicks "I understand". `dontShowAgain` true means persist the ack. */
@@ -25,7 +24,6 @@ interface SecurityWarningModalProps {
  * next import — that's intentional, the user hasn't acknowledged anything yet.
  */
 export function SecurityWarningModal({ onContinue, onCancel }: SecurityWarningModalProps) {
-  const tt = useTt();
   const [dontShowAgain, setDontShowAgain] = useState(false);
 
   return (
@@ -48,10 +46,6 @@ export function SecurityWarningModal({ onContinue, onCancel }: SecurityWarningMo
           <Button
             variant="primary"
             onClick={() => onContinue(dontShowAgain)}
-            data-tip={tt(
-              'Proceed and import the profile — it can click, type, and trigger automatically',
-              'Prosseguir e importar o profile — ele pode clicar, digitar e disparar automaticamente'
-            )}
           >
             I understand, continue
           </Button>
@@ -79,10 +73,6 @@ export function SecurityWarningModal({ onContinue, onCancel }: SecurityWarningMo
             checked={dontShowAgain}
             onChange={setDontShowAgain}
             label="Don't show this again"
-            title={tt(
-              'Skip this warning on future imports (only saved if you click continue)',
-              'Pular este aviso em importações futuras (só é salvo se você clicar em continuar)'
-            )}
           />
         </div>
       </div>
