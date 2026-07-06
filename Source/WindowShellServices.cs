@@ -474,6 +474,13 @@ namespace TrueReplayer.Services
         private readonly AppWindow appWindow;
         private bool closingConfirmed;
 
+        // Resize-snap hysteresis state, live only during a drag. _snapW/_snapH: currently stuck to
+        // the default size on that axis. _lastSizeW/H: the previous frame's raw proposed dimension,
+        // used to detect a fast drag CROSSING the target between frames. Reset on WM_ENTERSIZEMOVE /
+        // WM_EXITSIZEMOVE so no state leaks between drags. UI-thread only (window message loop).
+        private bool _snapW, _snapH;
+        private int _lastSizeW = -1, _lastSizeH = -1;
+
         /// Callback that returns true if close should proceed (no unsaved changes or user confirmed).
         /// Set from MainWindow after bridge is initialized.
         public Func<Task<bool>>? OnCloseRequested { get; set; }
@@ -483,6 +490,12 @@ namespace TrueReplayer.Services
         private const int WM_RBUTTONUP = 0x0205;
         private const int WM_GETMINMAXINFO = 0x0024;
         private const int WM_DISPLAYCHANGE = 0x007E;
+        private const int WM_SIZING = 0x0214;
+        private const int WM_ENTERSIZEMOVE = 0x0231;
+        private const int WM_EXITSIZEMOVE = 0x0232;
+        // WM_SIZING wParam — which resize handle the user is dragging.
+        private const int WMSZ_LEFT = 1, WMSZ_RIGHT = 2, WMSZ_TOP = 3, WMSZ_TOPLEFT = 4,
+            WMSZ_TOPRIGHT = 5, WMSZ_BOTTOM = 6, WMSZ_BOTTOMLEFT = 7, WMSZ_BOTTOMRIGHT = 8;
         private const int SW_RESTORE = 9;
         // Layout minimum in DIPs. WM_GETMINMAXINFO works in physical pixels, so this
         // is scaled by the window's DPI before being written to ptMinTrackSize.
@@ -496,6 +509,23 @@ namespace TrueReplayer.Services
         // rails (App.tsx), so the center grid keeps a usable width.
         private const int BaseMinWidthDip = 960;
         private const int BaseMinHeightDip = 780;
+        // The size the window OPENS at (WindowAppearanceService.Configure). Used as a magnetic
+        // "snap-to-original" target while a resize edge is dragged: as the proposed size nears this,
+        // the edge sticks here (see the enter/exit zones below) — a soft preset that lets the user
+        // restore the original dimensions without hunting for an exact pixel, while indicating "this
+        // is the default." It never COMMITS the size: releasing the mouse keeps whatever is showing,
+        // snapped or not. Same physical-pixel convention as ptMinTrackSize above, so the snap width
+        // lines up exactly with the open size.
+        private const int BaseDefaultWidthDip = 1180;
+        private const int BaseDefaultHeightDip = 780;
+        // Hysteresis for the snap so it holds firmly instead of a symmetric threshold that a fast
+        // drag can slip past. SnapEnterDip: how close (DIP) a drag must get to GRAB the default size.
+        // SnapExitDip (larger): how far PAST the target the drag must then pull to BREAK FREE — the
+        // gap between them is the "stickiness", forcing a deliberate extra drag to leave. A fast drag
+        // that CROSSES the target between two frames also grabs, so it catches even when the pointer
+        // jumps over the enter zone in one step.
+        private const int SnapEnterDip = 16;
+        private const int SnapExitDip = 40;
         private const uint SWP_NOMOVE = 0x0002;
         private const uint SWP_NOSIZE = 0x0001;
         private const uint SWP_NOACTIVATE = 0x0010;
@@ -571,6 +601,25 @@ namespace TrueReplayer.Services
                 return IntPtr.Zero;
             }
 
+            if (msg == WM_ENTERSIZEMOVE || msg == WM_EXITSIZEMOVE)
+            {
+                // Clear the snap hysteresis at the boundaries of a drag so a fresh resize always
+                // starts unstuck (and stale state never survives to the next one).
+                _snapW = _snapH = false;
+                _lastSizeW = _lastSizeH = -1;
+                return HwndHookManager.CallOriginalWndProc(hwnd, msg, wParam, lParam);
+            }
+
+            if (msg == WM_SIZING)
+            {
+                // Magnetic snap to the original open size while a resize edge is dragged. When it
+                // snaps we rewrite the proposed rect and return TRUE (handled) so the drag loop uses
+                // it; otherwise fall through so normal resizing is completely untouched.
+                if (TrySnapToDefaultSize(hwnd, (int)wParam, lParam))
+                    return new IntPtr(1);
+                return HwndHookManager.CallOriginalWndProc(hwnd, msg, wParam, lParam);
+            }
+
             if (msg == WM_USER + 1)
             {
                 if ((int)lParam == WM_LBUTTONDBLCLK)
@@ -590,6 +639,76 @@ namespace TrueReplayer.Services
                 NativeMethods.VirtualScreen.Invalidate();
             }
             return HwndHookManager.CallOriginalWndProc(hwnd, msg, wParam, lParam);
+        }
+
+        // Snaps the in-progress WM_SIZING rect (screen coords, physical px) to the default open size,
+        // moving ONLY the dragged edge so the opposite one stays put. Width and height snap
+        // independently (a corner drag can grab one axis without forcing the other) with per-axis
+        // hysteresis via UpdateSnap. Returns true when it rewrote the rect. The default width (1180)
+        // sits above the min (960) and below the unbounded max, so it's a real interior snap point;
+        // the default height equals the min, so a height snap just makes the floor magnetic.
+        private bool TrySnapToDefaultSize(IntPtr hwnd, int edge, IntPtr lParam)
+        {
+            uint dpi = GetDpiForWindow(hwnd);
+            if (dpi == 0) dpi = 96;
+            int targetW = (int)(BaseDefaultWidthDip * dpi / 96.0);
+            int targetH = (int)(BaseDefaultHeightDip * dpi / 96.0);
+            int enter = (int)(SnapEnterDip * dpi / 96.0);
+            int exit = (int)(SnapExitDip * dpi / 96.0);
+
+            var rect = Marshal.PtrToStructure<NativeMethods.RECT>(lParam);
+            bool changed = false;
+
+            bool left = edge is WMSZ_LEFT or WMSZ_TOPLEFT or WMSZ_BOTTOMLEFT;
+            bool right = edge is WMSZ_RIGHT or WMSZ_TOPRIGHT or WMSZ_BOTTOMRIGHT;
+            if (left || right)
+            {
+                int w = rect.Right - rect.Left;
+                if (UpdateSnap(ref _snapW, ref _lastSizeW, w, targetW, enter, exit))
+                {
+                    if (left) rect.Left = rect.Right - targetW;
+                    else rect.Right = rect.Left + targetW;
+                    changed = true;
+                }
+            }
+
+            bool top = edge is WMSZ_TOP or WMSZ_TOPLEFT or WMSZ_TOPRIGHT;
+            bool bottom = edge is WMSZ_BOTTOM or WMSZ_BOTTOMLEFT or WMSZ_BOTTOMRIGHT;
+            if (top || bottom)
+            {
+                int h = rect.Bottom - rect.Top;
+                if (UpdateSnap(ref _snapH, ref _lastSizeH, h, targetH, enter, exit))
+                {
+                    if (top) rect.Top = rect.Bottom - targetH;
+                    else rect.Bottom = rect.Top + targetH;
+                    changed = true;
+                }
+            }
+
+            if (changed) Marshal.StructureToPtr(rect, lParam, false);
+            return changed;
+        }
+
+        // Advances one axis's snap state for a single resize frame and returns whether it is snapped
+        // (should be pinned to target). Not snapped → GRAB when within `enter` of target, or when the
+        // drag CROSSED the target since the last frame (opposite signs → catches a fast drag that
+        // jumped the enter zone). Snapped → HOLD until the raw proposed size pulls more than `exit`
+        // past target, then release. `exit > enter` is what makes it stick. Records the raw size for
+        // next-frame crossing detection.
+        private static bool UpdateSnap(ref bool snapped, ref int lastSize, int size, int target, int enter, int exit)
+        {
+            if (snapped)
+            {
+                if (Math.Abs(size - target) > exit) snapped = false;
+            }
+            else
+            {
+                bool near = Math.Abs(size - target) <= enter;
+                bool crossed = lastSize >= 0 && (long)(lastSize - target) * (size - target) < 0;
+                if (near || crossed) snapped = true;
+            }
+            lastSize = size;
+            return snapped;
         }
 
         public void BringToForeground()
