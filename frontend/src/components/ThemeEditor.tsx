@@ -326,6 +326,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
   const [resetMenuOpen, setResetMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const saveInputRef = useRef<HTMLInputElement>(null);
+  const resetMenuRef = useRef<HTMLDivElement>(null);
 
   const hasOverrides = Object.keys(config.colorOverrides).length > 0;
   const basePreset = themes.find(t => t.id === config.baseThemeId) ?? themes[0];
@@ -378,9 +379,13 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
     });
   }, []);
 
-  // Reset menu — close on outside mousedown / Esc (Esc swallowed so the dialog stays open).
+  // Reset menu — close on outside mousedown / Esc. Focus the menu when it opens so its
+  // own onKeyDown catches Esc (stopPropagation) instead of the keystroke bubbling to
+  // DialogShell and closing the whole editor — mouse-open otherwise leaves focus on the
+  // toggle button, outside the menu, so the Esc-swallow never fired.
   useEffect(() => {
     if (!resetMenuOpen) return;
+    resetMenuRef.current?.focus();
     const onDown = () => setResetMenuOpen(false);
     window.addEventListener('mousedown', onDown);
     return () => window.removeEventListener('mousedown', onDown);
@@ -485,7 +490,9 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
       </button>
       {resetMenuOpen && (
         <div
-          className="absolute bottom-full left-0 mb-1 w-[220px] bg-bg-card border border-border-default rounded shadow-xl p-1 z-10"
+          ref={resetMenuRef}
+          tabIndex={-1}
+          className="absolute bottom-full left-0 mb-1 w-[220px] bg-bg-card border border-border-default rounded shadow-xl p-1 z-10 outline-none"
           onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setResetMenuOpen(false); } }}
         >
           <button
