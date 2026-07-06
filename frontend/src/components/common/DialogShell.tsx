@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type KeyboardEvent, type MouseEvent } from 'react';
+import { X } from 'lucide-react';
 
 /**
  * Shared chrome for the modal-dialog family — the scrim + card + header/footer
@@ -29,6 +30,13 @@ export interface DialogShellProps {
   onClose: () => void;
   /** Dismiss when the scrim is clicked. Default true; capture dialogs pass false. */
   closeOnBackdrop?: boolean;
+  /** Render an X close button in the header (wired to the shell's own requestClose,
+   *  so it plays the exit animation). Off by default — most dialogs close via footer. */
+  showClose?: boolean;
+  /** Veto a backdrop-click close. Called with the scrim click event; return true to
+   *  IGNORE the click (e.g. clicks in the OS title-bar guard zone: (e)=>e.clientY<40).
+   *  Only consulted when closeOnBackdrop is on. */
+  scrimMouseDownGuard?: (e: MouseEvent<HTMLDivElement>) => boolean;
   /** Left-aligned hint text in the footer (e.g. "Enter to confirm · Esc to cancel"). */
   footerHint?: ReactNode;
   /** Right-aligned footer actions (Button components). Omit for footerless dialogs.
@@ -46,6 +54,8 @@ export function DialogShell({
   widthClass = 'w-[440px]',
   onClose,
   closeOnBackdrop = true,
+  showClose = false,
+  scrimMouseDownGuard,
   footerHint,
   footer,
   onCardKeyDown,
@@ -95,7 +105,7 @@ export function DialogShell({
         if (pressOnScrim.current) e.preventDefault();
       }}
       onClick={closeOnBackdrop
-        ? (e) => { if (pressOnScrim.current && e.target === e.currentTarget) requestClose(); }
+        ? (e) => { if (pressOnScrim.current && e.target === e.currentTarget && !scrimMouseDownGuard?.(e)) requestClose(); }
         : undefined}
     >
       <div
@@ -145,6 +155,15 @@ export function DialogShell({
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
           {icon}
           <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+          {showClose && (
+            <button
+              onClick={requestClose}
+              aria-label="Close"
+              className="ml-auto w-7 h-7 flex items-center justify-center rounded text-text-tertiary hover:text-text-primary hover:bg-bg-card transition-colors"
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
 
         {children}
