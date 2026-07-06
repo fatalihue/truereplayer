@@ -244,7 +244,13 @@ export function NumberInput({
         <span className={`${inputWidth} ${inputHeight} inline-flex items-stretch overflow-hidden bg-bg-input border border-border-default focus-within:border-accent-solid focus-within:z-10 ${disabled ? 'opacity-50' : ''}`}>
           {inputEl}
           {suffixInside && text !== '' && suffix && (
-            <span className="shrink-0 self-center select-none pointer-events-none text-[10px] text-text-tertiary font-mono pl-0.5 pr-1.5">{suffix}</span>
+            // relative top-[2px]: the value (text-xs) and the unit (text-[10px]) are each vertically
+            // centered by a DIFFERENT mechanism — the native input centers its own text, the unit is
+            // flex-self-centered — which leaves their text baselines ~2px apart (the smaller unit sits
+            // higher). Nudging the unit down by the measured 2px baseline delta makes "1.000 ms" read
+            // as one baseline-aligned line. Uniform for this 12px/10px pairing, so it holds for every
+            // suffixInside call site.
+            <span className="shrink-0 self-center relative top-[2px] select-none pointer-events-none text-[10px] text-text-tertiary font-mono pl-0.5 pr-1.5">{suffix}</span>
           )}
           {ghostSuffix && !suffixInside && (
             <span aria-hidden="true" className="shrink-0 self-center select-none pointer-events-none text-[10px] font-mono pl-0.5 pr-1.5 invisible">{ghostSuffix}</span>
