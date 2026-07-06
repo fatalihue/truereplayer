@@ -1398,7 +1398,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         e.currentTarget.blur();
       }}
       onContextMenu={(e) => handleContextMenu(e, p.name)}
-      className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-left transition-colors outline-none select-none cursor-grab active:cursor-grabbing ${
+      className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-left transition-colors outline-none select-none cursor-grab active:cursor-grabbing ${
         dragProfile === p.name && dragActive.current ? 'opacity-50 ' : ''
       }${p.isDisabled ? 'opacity-40 ' : ''}${
         p.isActive
@@ -1694,7 +1694,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         </div>
 
         {/* Profile List - Sectioned */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-1.5 pb-1">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-1 pb-1">
           {isSearching ? (
             // Flat search results — with an explicit empty state instead of the
             // silent blank list the panel used to show.
@@ -1779,9 +1779,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       className={`rounded transition-colors ${isDragOver ? 'bg-accent-solid/20 ring-2 ring-accent-solid/50' : ''} ${isFolderDragging ? 'opacity-50' : ''}`}
                     >
                       <div
-                        // px-2.5 / gap-2 matches the profile rows — folders used to sit
-                        // 2px tighter for no reason, which read as misalignment.
-                        className={`w-full flex items-center gap-2 px-2.5 py-1.5 mt-1 rounded text-left hover:bg-bg-card transition-colors group cursor-grab active:cursor-grabbing select-none ${selectedFolder === folder.name ? 'bg-bg-card ring-1 ring-accent-solid/30' : ''}`}
+                        // px-2 / gap-1.5 matches the profile rows (tightened to reclaim side
+                        // gutter for longer names + hotkeys without widening the panel).
+                        className={`w-full flex items-center gap-1.5 px-2 py-1.5 mt-1 rounded text-left hover:bg-bg-card transition-colors group cursor-grab active:cursor-grabbing select-none ${selectedFolder === folder.name ? 'bg-bg-card ring-1 ring-accent-solid/30' : ''}`}
                         onMouseDown={(e) => handleFolderMouseDown(e, folder.name)}
                         onClick={() => { if (!folderDragActive.current) setSelectedFolder(prev => prev === folder.name ? null : folder.name); }}
                         onContextMenu={(e) => handleFolderContextMenu(e, folder.name)}
@@ -1829,7 +1829,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         )}
                       </div>
                       {!folder.collapsed && hasVisibleProfiles && (
-                        <div className="ml-3 pl-1.5" style={{ borderLeft: `2px solid ${folder.color}40` }}>
+                        <div className="ml-2 pl-1" style={{ borderLeft: `2px solid ${folder.color}40` }}>
                           {folder.profiles.map(renderProfileRow)}
                         </div>
                       )}
