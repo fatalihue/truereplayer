@@ -243,8 +243,10 @@ $ghArgs += $assets
 gh @ghArgs
 NativeCheck "gh release create"
 
-$state = (gh release view "v$new" --repo $RelRepo --json isDraft,isPrerelease,assets --jq '"isDraft=\(.isDraft) isPrerelease=\(.isPrerelease) assets=\(.assets|length)"')
-Ok "release v$new created - $state"
+# Parse gh's JSON in PowerShell (a --jq expression with \(...) interpolation gets its
+# outer quotes stripped by PS arg-parsing and breaks jq).
+$rel = (gh release view "v$new" --repo $RelRepo --json isDraft,isPrerelease,assets | ConvertFrom-Json)
+Ok "release v$new created - isDraft=$($rel.isDraft) isPrerelease=$($rel.isPrerelease) assets=$($rel.assets.Count)"
 
 Step "Cleanup"
 Remove-Item -Recurse -Force releases -ErrorAction SilentlyContinue
