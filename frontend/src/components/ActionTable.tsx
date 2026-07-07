@@ -1996,7 +1996,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         className="inline-flex items-center translate-y-[-2px] text-xs font-mono text-text-primary max-w-[220px] truncate"
                         data-tip={
                           action.actionType === 'SendText' ? action.key
-                          : action.actionType === 'RunProfile' ? tt(`Run profile "${action.key}"`, `Executar perfil "${action.key}"`)
                           // Browser actions can have long CSS selectors / URLs that
                           // get truncated at 92 px. Exposing the full string on hover
                           // saves the user from opening the editor just to read it.

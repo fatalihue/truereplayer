@@ -201,7 +201,6 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
                     type="button"
                     onClick={() => setCaptured(null)}
                     className="text-text-tertiary hover:text-text-secondary underline underline-offset-2"
-                    data-tip={tt('Remove the resume hotkey — leaves a timeout-only Pause', 'Remove a tecla de retomada — deixa um Pause apenas por tempo limite')}
                   >
                     Clear
                   </button>

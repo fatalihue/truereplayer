@@ -709,7 +709,11 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     if (actionType === 'BrowserType' && browserText !== (action.browserText || '')) {
       send({ type: 'actions:edit', payload: { index: actionIndex, field: 'browserText', value: browserText } });
     }
-    if (actionType === 'BrowserWaitElement' || actionType === 'BrowserClick' || actionType === 'BrowserRightClick') {
+    // Timeout persists for EVERY browser command — the engine honours action.Timeout for all
+    // six types (ActionExecution.cs Browser switch arm). Previously only Wait/Click/RightClick
+    // saved it, so edits on Type/Navigate/SelectOption were silently dropped even though the
+    // Timeout field is shown for them.
+    if (actionType.startsWith('Browser')) {
       const newTimeoutMs = Math.max(1000, parseFloat(timeout) || 5000);
       if (newTimeoutMs !== (action.timeout || 5000)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(Math.round(newTimeoutMs)) } });
@@ -1601,7 +1605,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 type="button"
                 onClick={() => action?.imageBase64 && setCropperOpen(true)}
                 disabled={!action?.imageBase64}
-                data-tip={action?.imageBase64 ? tt('Click to crop the reference image', 'Clique para recortar a imagem de referência') : ''}
                 className="w-full rounded border border-border-default bg-bg-elevated overflow-hidden block hover:border-accent-solid/60 transition-colors disabled:cursor-default disabled:hover:border-border-default"
               >
                 {action?.imageBase64 ? (
@@ -1743,7 +1746,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 1000 so the +/- spinner moves a second at a time. */}
             {!isIf && (
             <div className="flex gap-2.5">
-              <Field label="Timeout" className="flex-1">
+              <Field label="Timeout" className="w-[124px] shrink-0">
                 <NumberInput
                   value={(() => { const n = parseFloat(timeout); return Number.isFinite(n) && n > 0 ? n : 5000; })()}
                   onChange={(n) => setTimeout_(String(n))}
@@ -1753,6 +1756,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   suffix="ms" suffixInside
                   inputWidth="w-full"
                   inputHeight="h-8"
+                  className="w-full"
                   ariaLabel="Timeout in milliseconds"
                 />
               </Field>
@@ -1782,7 +1786,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   checked={waitImageClickOnMatch}
                   onChange={setWaitImageClickOnMatch}
                   label="Click on found location"
-                  title={tt("Left-clicks the centre of the matched region as soon as it's found.", 'Dá um clique esquerdo no centro da região correspondente assim que for encontrada.')}
                 />
               </Field>
             )}
@@ -1926,7 +1929,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 step 1000) — same unit as every other action duration. */}
             {!isIf && (
             <div className="flex gap-2.5">
-              <Field label="Timeout" className="flex-1">
+              <Field label="Timeout" className="w-[124px] shrink-0">
                 <NumberInput
                   value={(() => { const n = parseFloat(timeout); return Number.isFinite(n) && n > 0 ? n : 5000; })()}
                   onChange={(n) => setTimeout_(String(n))}
@@ -1936,6 +1939,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   suffix="ms" suffixInside
                   inputWidth="w-full"
                   inputHeight="h-8"
+                  className="w-full"
                   ariaLabel="Timeout in milliseconds"
                 />
               </Field>
@@ -1963,7 +1967,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   checked={pixelClickOnMatch}
                   onChange={setPixelClickOnMatch}
                   label="Click on found location"
-                  title={tt('Left-clicks the watched pixel (X, Y) as soon as it matches the target colour.', 'Dá um clique esquerdo no pixel monitorado (X, Y) assim que ele corresponder à cor-alvo.')}
                 />
               </Field>
             )}
@@ -2412,28 +2415,9 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             </Field>
             )}
 
-            {/* Timeout — every browser action. The engine reads action.Timeout for all
-                five command types (ActionExecution.cs in the Browser switch arm), so the
-                editor should expose it consistently. Previously BrowserType was the only
-                one hidden, silently locking it to the 5 s default. */}
-            {(isBrowserWait || actionType === 'BrowserClick' || actionType === 'BrowserRightClick' || isBrowserType || isBrowserNavigate || isBrowserSelect) && (
-            <Field label="Timeout">
-              <NumberInput
-                value={parseInt(timeout, 10) || 5000}
-                onChange={(n) => setTimeout_(String(n))}
-                min={1000}
-                step={1000}
-                thousands
-                suffix="ms" suffixInside
-                inputWidth="w-full"
-                inputHeight="h-8"
-                ariaLabel="Timeout in milliseconds"
-              />
-            </Field>
-            )}
-
-            {/* #3 — Test action */}
-            <div className="pt-1">
+            {/* Test action, then the timing pair (Timeout + Delay) directly below it, so the
+                cluster reads Test action -> Timeout -> Delay. */}
+            <div>
               <button
                 onClick={handleTestAction}
                 disabled={testRequestId !== null}
@@ -2466,6 +2450,44 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 </div>
               )}
             </div>
+
+            {/* Timeout — shown for every browser action (renders unconditionally inside the
+                isBrowser block, matching its paired Delay below). The engine reads action.Timeout
+                for all six command types (ActionExecution.cs Browser switch arm). Compact w-[124px]
+                field matches the WaitImage/WaitPixel Timeout token; the only divergence is browser
+                has no side-by-side "On Timeout" select, so it stands alone on its row. */}
+            <Field label="Timeout" className="w-[124px]">
+              <NumberInput
+                value={parseInt(timeout, 10) || 5000}
+                onChange={(n) => setTimeout_(String(n))}
+                min={1000}
+                step={1000}
+                thousands
+                suffix="ms" suffixInside
+                inputWidth="w-full"
+                inputHeight="h-8"
+                className="w-full"
+                ariaLabel="Timeout in milliseconds"
+              />
+            </Field>
+
+            {/* Delay — browser-local copy of the shared Delay field so it sits directly under
+                Timeout as the last row of the cluster (Test -> Timeout -> Delay). Bound to the
+                same delay/setDelay state, so handleSave persistence is unchanged; the shared
+                trailing Delay is suppressed for isBrowser to avoid a duplicate. */}
+            <Field label="Delay" className="w-[124px]">
+              <NumberInput
+                value={parseInt(delay, 10) || 0}
+                onChange={(n) => setDelay(String(n))}
+                min={0}
+                thousands
+                suffix="ms" suffixInside
+                inputWidth="w-full"
+                inputHeight="h-8"
+                className="w-full"
+                ariaLabel="Delay in milliseconds"
+              />
+            </Field>
           </>
           )}
 
@@ -2626,9 +2648,11 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               meaningful "delay AFTER" (the probe is instant and the branch is taken
               before the next action fires its own delay); Else/EndIf are pure markers
               the engine walks past with zero work. Keeping the field would just invite
-              users to set a value that gets silently ignored. */}
-          {!isConditional && (
-          <Field label="Delay">
+              users to set a value that gets silently ignored. Also suppressed for browser
+              actions — they render their own Delay inside the Test/Timeout/Delay cluster
+              (bound to the same delay state), so this would be a duplicate. */}
+          {!isConditional && !isBrowser && (
+          <Field label="Delay" className="w-[124px]">
             <NumberInput
               value={parseInt(delay, 10) || 0}
               onChange={(n) => setDelay(String(n))}
@@ -2637,6 +2661,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               suffix="ms" suffixInside
               inputWidth="w-full"
               inputHeight="h-8"
+              className="w-full"
               ariaLabel="Delay in milliseconds"
             />
           </Field>
