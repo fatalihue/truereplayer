@@ -2477,6 +2477,28 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             Edit
           </button>
 
+          {/* Reset cycle position — SetVariable cycle rows only. Clears the in-memory
+              cursor so the next run starts at the first list item again (editing the
+              list keeps the position on purpose; this is the explicit "start over" the
+              list can't trigger itself). Sits right under Edit per user request. */}
+          {(() => {
+            const row = actions[contextMenu.rowIndex];
+            if (!row || row.actionType !== 'SetVariable' || row.variableMode !== 'cycle') return null;
+            return (
+              <button
+                onMouseEnter={() => setActiveSubmenu(null)}
+                onClick={() => {
+                  send({ type: 'actions:resetCycle', payload: { index: contextMenu.rowIndex } });
+                  closeContextMenu();
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+              >
+                <RotateCcw size={13} className="text-text-tertiary" />
+                Reset cycle position
+              </button>
+            );
+          })()}
+
           {/* Type-specific quick action — only ONE of these renders, based on the
               right-clicked row's actionType. Keeps the menu height predictable
               regardless of what was clicked. */}
@@ -2787,30 +2809,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         >
                           <ChevronsUpDown size={13} className={expandOk ? 'text-text-tertiary' : 'text-text-disabled'} />
                           Expand × N
-                        </button>
-                      </>
-                    );
-                  })()}
-
-                  {/* Reset cycle position — SetVariable cycle rows only. Clears the
-                      in-memory cursor so the next run starts at the first list item
-                      again (editing the list keeps the position on purpose; this is
-                      the explicit "start over" the list can't trigger itself). */}
-                  {(() => {
-                    const row = actions[contextMenu.rowIndex];
-                    if (!row || row.actionType !== 'SetVariable' || row.variableMode !== 'cycle') return null;
-                    return (
-                      <>
-                        <div className="my-1 border-t border-border-subtle" />
-                        <button
-                          onClick={() => {
-                            send({ type: 'actions:resetCycle', payload: { index: contextMenu.rowIndex } });
-                            closeContextMenu();
-                          }}
-                          className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-                        >
-                          <RotateCcw size={13} className="text-text-tertiary" />
-                          Reset cycle position
                         </button>
                       </>
                     );
