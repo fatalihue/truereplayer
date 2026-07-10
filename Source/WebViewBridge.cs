@@ -223,7 +223,7 @@ namespace TrueReplayer
                 "MiddleClickDown", "MiddleClickUp",
                 "ScrollUp", "ScrollDown",
                 "KeyDown", "KeyUp", "HoldKey", "Keystroke",
-                "SendText", "SetVariable",
+                "SendText", "SetVariable", "ActivateWindow",
                 "WaitImage", "WaitPixelColor", "Pause", "RunProfile",
                 "If", "Else", "EndIf",
                 "BrowserClick", "BrowserRightClick", "BrowserType",
@@ -691,6 +691,7 @@ namespace TrueReplayer
                     case "profile:removeFolderWindowTarget": HandleRemoveFolderWindowTarget(payload); break;
                     case "profile:detectWindow": HandleProfileDetectWindow(); break;
                     case "profile:testWindowMatch": HandleTestWindowMatch(payload); break;
+                    case "window:testProbe": HandleWindowTestProbe(payload); break;
                     case "process:list": HandleProcessList(); break;
                     case "profile:openFolder": HandleProfileOpenFolder(payload); break;
                     case "profile:pin": HandleProfilePin(payload); break;
@@ -951,7 +952,12 @@ namespace TrueReplayer
                 // SetVariable — the value half of "Key = VariableValue". This projection is
                 // the ONLY path the frontend learns of the field (see the holdDurationMs
                 // note above for why forgetting one here is a silent round-trip bug).
-                variableValue = a.VariableValue
+                variableValue = a.VariableValue,
+                // ActivateWindow — launch + failure-policy fields (matcher fields are the
+                // shared window* trio above).
+                launchPath = a.LaunchPath,
+                launchArgs = a.LaunchArgs,
+                activateOnTimeout = a.ActivateOnTimeout
             }).ToArray();
         }
 
@@ -2118,6 +2124,19 @@ namespace TrueReplayer
                 case "windowMatchForegroundOnly":
                     action.WindowMatchForegroundOnly = value == "true";
                     break;
+                case "launchPath":
+                    // ActivateWindow: what to launch when no matching window exists.
+                    // Empty → null so focus-only rows keep their JSON minimal.
+                    action.LaunchPath = string.IsNullOrEmpty(value) ? null : value;
+                    break;
+                case "launchArgs":
+                    action.LaunchArgs = string.IsNullOrEmpty(value) ? null : value;
+                    break;
+                case "activateOnTimeout":
+                    // Same convention as waitImageOnTimeout — only "Continue" is persisted;
+                    // the default "Halt" stays null on disk so saved profiles read clean.
+                    action.ActivateOnTimeout = value == "Continue" ? "Continue" : null;
+                    break;
                 case "clipboardPatternType":
                     // Default "contains" stays null on disk; only "equals"/"regex" persist.
                     action.ClipboardPatternType = (value == "equals" || value == "regex") ? value : null;
@@ -2634,6 +2653,28 @@ namespace TrueReplayer
                     ActionType = "SetVariable",
                     Key = "",
                     Delay = delay
+                });
+                for (int i = 0; i < actions.Count; i++)
+                    actions[i].RowNumber = i + 1;
+                HasUnsavedChanges = true;
+                PushActionsUpdate();
+                mainController.UpdateButtonStates();
+                SendMessage("sheet:openIndex", new { index = insertIndex });
+                return;
+            }
+
+            // ActivateWindow: insert directly and open the Sheet so the user fills the
+            // matcher/launch fields (Pattern A, same as SetVariable). Timeout seeds at
+            // 10 s — window "wait for it to load" budgets are longer than probe waits.
+            if (actionType == "ActivateWindow")
+            {
+                int delay = int.TryParse(CustomDelay, out var awd) ? awd : 100;
+                actions.Insert(insertIndex, new ActionItem
+                {
+                    ActionType = "ActivateWindow",
+                    Key = "",
+                    Delay = delay,
+                    Timeout = 10000
                 });
                 for (int i = 0; i < actions.Count; i++)
                     actions[i].RowNumber = i + 1;
@@ -5550,6 +5591,90 @@ namespace TrueReplayer
                 matches,
                 foregroundProcess = fgProcess,
                 foregroundTitle = fgTitle
+            });
+        }
+
+        /// <summary>
+        /// Exists-ANYWHERE window probe for the ActivateWindow Sheet editor's Test button —
+        /// unlike <c>profile:testWindowMatch</c> (foreground-only, the Target dialog's
+        /// semantics), this answers "would ActivateWindow find this window right now?".
+        /// Uses the same matcher builder + self-exclusion as the action's execution path,
+        /// and carries a requestId so a Sheet-hosted consumer can pair replies (the legacy
+        /// pair relies on being the dialog's sole consumer).
+        /// </summary>
+        private void HandleWindowTestProbe(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var rProp) ? rProp.GetString() ?? "" : "";
+            string processName = payload.TryGetProperty("processName", out var pProp) ? pProp.GetString() ?? "" : "";
+            string windowTitle = payload.TryGetProperty("windowTitle", out var tProp) ? tProp.GetString() ?? "" : "";
+            string titleMatchMode = payload.TryGetProperty("titleMatchMode", out var mProp) ? mProp.GetString() ?? "contains" : "contains";
+
+            if (string.IsNullOrWhiteSpace(processName) && string.IsNullOrWhiteSpace(windowTitle))
+            {
+                SendMessage("window:testProbeResult", new {
+                    requestId,
+                    found = false,
+                    error = "Fill at least one of Process Name or Window Title to test.",
+                    matchProcess = "",
+                    matchTitle = ""
+                });
+                return;
+            }
+
+            var (target, regex) = TrueReplayer.Services.ActionReplayer.BuildWindowTarget(processName, windowTitle, titleMatchMode);
+            if (string.Equals(target.TitleMatchMode, "regex", StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(windowTitle) && regex == null)
+            {
+                SendMessage("window:testProbeResult", new {
+                    requestId,
+                    found = false,
+                    error = "Invalid regex pattern.",
+                    matchProcess = "",
+                    matchTitle = ""
+                });
+                return;
+            }
+
+            IntPtr hwnd = TrueReplayer.Services.ActionReplayer.FindWindowExcludingSelf(target, regex);
+            if (hwnd == IntPtr.Zero)
+            {
+                SendMessage("window:testProbeResult", new {
+                    requestId,
+                    found = false,
+                    matchProcess = "",
+                    matchTitle = ""
+                });
+                return;
+            }
+
+            // Identify the match so the editor can show "Found — notepad.exe · Untitled".
+            var probeTitleBuf = new System.Text.StringBuilder(512);
+            NativeMethods.GetWindowText(hwnd, probeTitleBuf, probeTitleBuf.Capacity);
+            string matchTitle = probeTitleBuf.ToString();
+
+            string matchProcess = "";
+            NativeMethods.GetWindowThreadProcessId(hwnd, out uint probePid);
+            IntPtr probeHp = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, probePid);
+            if (probeHp != IntPtr.Zero)
+            {
+                try
+                {
+                    var pnSb = new System.Text.StringBuilder(512);
+                    uint len = NativeMethods.GetProcessImageFileName(probeHp, pnSb, (uint)pnSb.Capacity);
+                    if (len > 0)
+                    {
+                        string full = pnSb.ToString();
+                        matchProcess = full.Substring(full.LastIndexOf('\\') + 1);
+                    }
+                }
+                finally { NativeMethods.CloseHandle(probeHp); }
+            }
+
+            SendMessage("window:testProbeResult", new {
+                requestId,
+                found = true,
+                matchProcess,
+                matchTitle
             });
         }
 

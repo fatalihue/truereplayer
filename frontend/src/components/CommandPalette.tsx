@@ -6,7 +6,7 @@ import {
   Hourglass, ScanSearch, Repeat2, ClipboardPaste, Files, Replace,
   FolderPlus, Palette, PanelLeft, Table2, Keyboard,
   MousePointerClick, Pipette, Crosshair, Combine, Split, GitBranch, ScrollText,
-  Braces,
+  Braces, AppWindow,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -31,6 +31,9 @@ interface CommandItem {
   // since users searching for "duplicate" otherwise see zero matches and wonder why).
   disabled?: boolean;
   disabledHint?: string;
+  // Extra search terms (not displayed) so an entry is findable by what users call
+  // it, not just its canonical label — e.g. "Activate Window" matches "focus"/"launch".
+  keywords?: string[];
   onAction: () => void;
 }
 
@@ -210,6 +213,15 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:runprofile')); },
           },
           {
+            // Activate Window — Pattern A insert (empty row + auto-open Sheet).
+            // Keywords cover the verbs users reach for: focus / open / launch.
+            id: 'activatewindow', label: 'Insert Activate Window',
+            disabled: isClicker, disabledHint: clickerHint,
+            keywords: ['focus window', 'open app', 'launch program', 'bring to front', 'foreground'],
+            icon: <AppWindow size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'ActivateWindow', insertIndex: computeInsertIndex() } }); onClose(); },
+          },
+          {
             id: 'copyactions', label: 'Copy as Table',
             icon: <Table2 size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:copy', payload: {} }); onClose(); },
@@ -372,7 +384,8 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
     if (!q) return groups;
     return groups.map(g => ({
       ...g,
-      items: g.items.filter(item => item.label.toLowerCase().includes(q)),
+      items: g.items.filter(item => item.label.toLowerCase().includes(q)
+        || item.keywords?.some(k => k.toLowerCase().includes(q))),
     })).filter(g => g.items.length > 0);
   }, [groups, query]);
 

@@ -17,7 +17,7 @@ const DISPLAY_KEY_MAP: Record<string, string> = {
   'Next': 'Page Down', 'Prior': 'Page Up',
 };
 
-const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'RunProfile', 'Pause', 'If', 'Else', 'EndIf']);
+const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'RunProfile', 'Pause', 'If', 'Else', 'EndIf']);
 
 export function getDisplayKey(key: string): string {
   if (!key) return '';
@@ -114,6 +114,13 @@ function computeActionTypeColors(actionType: string): { bg: string; fg: string }
     return { bg: 'var(--color-action-pixelcolor-bg)', fg: 'var(--color-action-pixelcolor-fg)' };
   if (actionType === 'RunProfile')
     return { bg: 'var(--color-action-runprofile-bg)', fg: 'var(--color-action-runprofile-fg)' };
+  // ActivateWindow: dedicated tokens with a runprofile fallback so all 48 themes work
+  // untouched — a theme can opt into a distinct tint later by defining the tokens.
+  if (actionType === 'ActivateWindow')
+    return {
+      bg: 'var(--color-action-activatewindow-bg, var(--color-action-runprofile-bg))',
+      fg: 'var(--color-action-activatewindow-fg, var(--color-action-runprofile-fg))',
+    };
   if (actionType === 'Pause')
     return { bg: 'var(--color-action-pause-bg)', fg: 'var(--color-action-pause-fg)' };
   return { bg: 'transparent', fg: 'var(--color-text-tertiary)' };
@@ -139,6 +146,7 @@ export function getActionTypeIcon(actionType: string): string {
   if (actionType === 'WaitImage') return 'ScanSearch';
   if (actionType === 'WaitPixelColor') return 'Pipette';
   if (actionType === 'RunProfile') return 'Repeat2';
+  if (actionType === 'ActivateWindow') return 'AppWindow';
   if (actionType === 'Pause') return 'Hourglass';
   // Conditional logic — Lucide's GitBranch is the universal "branch / decision"
   // glyph and matches the mockup. Else uses the two-way swap arrows, EndIf uses

@@ -855,6 +855,23 @@ export function Toolbar(_props: ToolbarProps) {
             <Repeat2 size={14} />
           </button>
 
+          {/* Activate Window — focus (and optionally launch) another app mid-macro.
+              Sits with Run Profile: both are orchestration rows. Pattern A: inserts
+              an empty row and auto-opens the Sheet (backend sends sheet:openIndex). */}
+          <button
+            tabIndex={-1}
+            onClick={() => {
+              const sel = selectionRef.current;
+              const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
+              send({ type: 'actions:insertAction', payload: { actionType: 'ActivateWindow', insertIndex } });
+            }}
+            disabled={insertsDisabled}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip={clickerTip('Activate Window', 'Ativar janela')}
+          >
+            <AppWindow size={14} />
+          </button>
+
           <div className="w-px h-4 bg-border-subtle mx-0.5" />
 
           {/* Clear All — destructive hover (red text + faint red bg) mirrors

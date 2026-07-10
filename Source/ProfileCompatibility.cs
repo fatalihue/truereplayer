@@ -84,6 +84,16 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "DoubleClick", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 5, 4), "Double click"),
 
+            // ActivateWindow (launch/wait/focus a window mid-run) — older builds have no
+            // replay switch case and would silently skip the row, leaving the following
+            // actions to fire against whatever window happens to be focused. Pinned to
+            // the build that introduces it (2.7.5) so an own-build export → import
+            // round-trips cleanly — IsCompatible would reject a pin above the running
+            // version. BUMP this in lockstep with the app version when the feature is
+            // released under a higher number (expected 2.8.0).
+            (p => p.Actions.Any(a => string.Equals(a.ActionType, "ActivateWindow", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 7, 5), "Activate Window"),
+
             // Restore Size split from Restore Position in 2.0.5; older builds only honour Position.
             (p => p.RestoreSize,
                 new Version(2, 0, 5), "RestoreSize"),

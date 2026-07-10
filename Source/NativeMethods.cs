@@ -301,6 +301,21 @@ namespace TrueReplayer.Interop
         public static extern bool SetForegroundWindow(IntPtr hWnd);
 
         [DllImport("user32.dll")]
+        public static extern bool BringWindowToTop(IntPtr hWnd);
+
+        // Two overloads: GET writes the value through a ref; SET passes the new value IN the
+        // pvParam slot itself (SPI_SETFOREGROUNDLOCKTIMEOUT is a "value-in-pointer" action).
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref uint pvParam, uint fWinIni);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+
+        public const uint SPI_GETFOREGROUNDLOCKTIMEOUT = 0x2000;
+        public const uint SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001;
+        public const uint SPIF_SENDCHANGE = 0x0002;
+
+        [DllImport("user32.dll")]
         public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
 
         [DllImport("kernel32.dll")]

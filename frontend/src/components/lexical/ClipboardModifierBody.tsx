@@ -1,10 +1,12 @@
 import React, { useMemo } from 'react';
 import { Section, CheckRow, RadioRow, RadioGroup, NumInput } from './popoverAtoms';
+import { CheckboxBox } from '../Checkbox';
 import {
   applyTransformPreview,
   buildClipboardToken,
   type Extract,
   type Limit,
+  type ListPick,
   type TransformState,
 } from './clipboardModifiers';
 
@@ -35,6 +37,7 @@ export function ClipboardModifierBody({
   const setLimit = (v: Limit) => setState((s) => ({ ...s, limit: v }));
   const setExtractN = (n: number) => setState((s) => ({ ...s, extractN: Math.max(1, n) }));
   const setLimitN = (n: number) => setState((s) => ({ ...s, limitN: Math.max(0, n) }));
+  const setListPick = (v: ListPick) => setState((s) => ({ ...s, listPick: v }));
 
   return (
     <>
@@ -107,6 +110,96 @@ export function ClipboardModifierBody({
         </RadioGroup>
       </Section>
 
+      {/* List ops — operate on the content as LINES, before the single-line Extract
+          above narrows it down. Order in the emitted token mirrors the backend
+          pipeline: range/lines → sort → dedupe → reverse → join. */}
+      <Section label="Lines">
+        <RadioGroup label="Lines">
+          <RadioRow
+            checked={state.listPick === 'none'}
+            onChange={() => setListPick('none')}
+            label="All lines"
+          />
+          <RadioRow
+            checked={state.listPick === 'range'}
+            onChange={() => setListPick('range')}
+            label="Range"
+            input={
+              <span className="flex items-center gap-1">
+                <NumInput
+                  value={state.rangeFrom}
+                  onChange={(n) => setState((s) => ({ ...s, rangeFrom: Math.max(1, n) }))}
+                  disabled={state.listPick !== 'range'}
+                  min={1}
+                />
+                <span className="text-[11px] text-text-tertiary">–</span>
+                <NumInput
+                  value={state.rangeTo}
+                  onChange={(n) => setState((s) => ({ ...s, rangeTo: Math.max(1, n) }))}
+                  disabled={state.listPick !== 'range'}
+                  min={1}
+                />
+              </span>
+            }
+          />
+          <RadioRow
+            checked={state.listPick === 'lines'}
+            onChange={() => setListPick('lines')}
+            label="Pick #s"
+            input={
+              <input
+                type="text"
+                value={state.linesSpec}
+                onChange={(e) => setState((s) => ({ ...s, linesSpec: e.target.value.replace(/[^0-9,]/g, '') }))}
+                disabled={state.listPick !== 'lines'}
+                placeholder="3,1,2"
+                className="h-7 w-[70px] px-1.5 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid disabled:opacity-50"
+              />
+            }
+          />
+        </RadioGroup>
+        <div className="grid grid-flow-col grid-rows-2 gap-x-3 mt-1">
+          <CheckRow
+            checked={state.sort}
+            onChange={() => setState((s) => ({ ...s, sort: !s.sort }))}
+            label="Sort A–Z"
+          />
+          <CheckRow
+            checked={state.dedupe}
+            onChange={() => setState((s) => ({ ...s, dedupe: !s.dedupe }))}
+            label="Dedupe"
+          />
+          <CheckRow
+            checked={state.reverse}
+            onChange={() => setState((s) => ({ ...s, reverse: !s.reverse }))}
+            label="Reverse"
+          />
+        </div>
+        <div className="flex items-center gap-2 py-0.5">
+          {/* Hand-rolled CheckRow variant: the separator input needs to sit inline,
+              and CheckRow's button spans the full row width. Separator can't contain
+              { } : (token grammar) — stripped on input. */}
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={state.join}
+            onClick={() => setState((s) => ({ ...s, join: !s.join }))}
+            className="flex items-center gap-2 text-xs text-text-secondary hover:text-text-primary"
+          >
+            <CheckboxBox checked={state.join} />
+            <span>Join with</span>
+          </button>
+          <input
+            type="text"
+            value={state.joinSep}
+            onChange={(e) => setState((s) => ({ ...s, joinSep: e.target.value.replace(/[{}:]/g, '') }))}
+            disabled={!state.join}
+            placeholder=","
+            className="h-7 w-[70px] px-1.5 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid disabled:opacity-50"
+          />
+        </div>
+      </Section>
+
       <Section label="Limit length">
         <RadioGroup label="Limit length">
           <RadioRow
@@ -165,7 +258,7 @@ export function ClipboardModifierBody({
         </div>
         <div className="text-[9px] uppercase tracking-wide text-text-tertiary mb-0.5">Preview</div>
         <div
-          className="font-mono text-[11px] px-2 py-0.5 rounded border-l-2 break-all min-h-[20px]"
+          className="font-mono text-[11px] px-2 py-0.5 rounded border-l-2 whitespace-pre-wrap break-all min-h-[20px] max-h-[72px] overflow-auto"
           style={{
             background: 'rgba(107, 203, 119, 0.08)',
             borderColor: 'rgba(107, 203, 119, 0.5)',

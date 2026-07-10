@@ -220,6 +220,33 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? VariableValue { get; set; }
 
+        // ── ActivateWindow (ActionType == "ActivateWindow") ──
+        // Combined find → launch-if-missing → wait → focus action. The window MATCHER
+        // reuses the If-Window fields above (WindowProcessName / WindowTitle /
+        // WindowTitleMatchMode; WindowMatchForegroundOnly is ignored for this type) and
+        // Timeout is the wait-for-window budget. Window existence is the ONLY success
+        // criterion — the launched process is never tracked, so single-instance apps
+        // that forward to an existing process behave identically to a plain focus.
+
+        // What to launch when no matching window exists yet: an exe path, a bare
+        // program name, a .lnk, a document, or a URL — passed to ShellExecute.
+        // null/empty = never launch (focus-only). With BOTH matcher fields empty this
+        // becomes a fire-and-forget "pure run" (open a URL/document and move on).
+        // Tokens ({var:...}, {clipboard}, ...) resolve at execution time.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? LaunchPath { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? LaunchArgs { get; set; }
+
+        // Failure policy shared by all three failure modes (launch threw / window never
+        // appeared / activation could not be verified). null = "Halt" (default): report
+        // and stop the replay — keyboard actions follow the OS foreground, so continuing
+        // after a silent focus failure would type into the wrong app. Only "Continue" is
+        // ever persisted (same convention as WaitImageOnTimeout).
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? ActivateOnTimeout { get; set; }
+
         // When true, the action is retained in the list but skipped during replay.
         // Persisted so users can load a profile with actions pre-disabled.
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
@@ -329,7 +356,7 @@ namespace TrueReplayer.Models
             "KeyDown", "KeyUp", "Keystroke", "HoldKey", "ScrollUp", "ScrollDown", "SendText", "WaitImage",
             "BrowserClick", "BrowserRightClick", "BrowserType", "BrowserWaitElement", "BrowserNavigate",
             "BrowserSelectOption",
-            "RunProfile", "Pause", "SetVariable",
+            "RunProfile", "Pause", "SetVariable", "ActivateWindow",
             // Conditional structural rows never carry their OWN coordinates — the IF row
             // borrows X/Y from its underlying probe data (handled below in DisplayX/Y);
             // Else/EndIf are pure markers with no coordinate semantics at all.
@@ -426,6 +453,27 @@ namespace TrueReplayer.Models
                     string.Equals(ActionType, "EndIf", StringComparison.OrdinalIgnoreCase))
                     return "";
 
+                // ActivateWindow — matcher summary ("proc · title", marking launch-capable
+                // rows), or "run: <path>" for pure-run rows (no matcher). Must run before
+                // the Key-empty early-out below: these rows never carry a Key.
+                if (string.Equals(ActionType, "ActivateWindow", StringComparison.OrdinalIgnoreCase))
+                {
+                    bool hasProc = !string.IsNullOrWhiteSpace(WindowProcessName);
+                    bool hasTitle = !string.IsNullOrWhiteSpace(WindowTitle);
+                    bool hasLaunch = !string.IsNullOrWhiteSpace(LaunchPath);
+                    string matcher =
+                        hasProc && hasTitle ? $"{WindowProcessName} · {WindowTitle}" :
+                        hasProc ? WindowProcessName! :
+                        hasTitle ? WindowTitle! : "";
+                    if (matcher.Length > 0) return hasLaunch ? $"{matcher} — launch" : matcher;
+                    if (hasLaunch)
+                    {
+                        var path = LaunchPath!.Trim();
+                        return path.Length > 40 ? $"run: {path[..37]}..." : $"run: {path}";
+                    }
+                    return "";
+                }
+
                 if (string.IsNullOrEmpty(Key)) return "";
 
                 if (ActionType == "SendText") return Key;
@@ -505,6 +553,9 @@ namespace TrueReplayer.Models
             TypeDelay = TypeDelay,
             SelectMatchMode = SelectMatchMode,
             VariableValue = VariableValue,
+            LaunchPath = LaunchPath,
+            LaunchArgs = LaunchArgs,
+            ActivateOnTimeout = ActivateOnTimeout,
             IsSkipped = IsSkipped,
             IsFocusClick = IsFocusClick,
             RepeatCount = RepeatCount,

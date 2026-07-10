@@ -49,7 +49,7 @@ const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
   ],
 };
 
-const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'Pause', 'If', 'Else', 'EndIf']);
+const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'Pause', 'If', 'Else', 'EndIf']);
 
 // Semantic result-card colouring via theme tokens — success = replay green, failure/error =
 // recording red. Matches the inline-style pattern the foot-gun cards already use, so no
@@ -114,7 +114,7 @@ const TIER_META: Record<'S' | 'A' | 'B' | 'C', { color: string; label: string; I
 
 
 export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: SheetPanelProps) {
-  const { actions } = useAppState();
+  const { actions, profiles, activeProfile } = useAppState();
   const { send, subscribe } = useBridge();
   const tt = useTt();
   const { language } = useLanguage();
@@ -197,6 +197,15 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   // If Clipboard (ClipboardMatch) probe fields
   const [clipboardPatternType, setClipboardPatternType] = useState<'contains' | 'equals' | 'regex'>('contains');
   const [clipboardPattern, setClipboardPattern] = useState('');
+  // ActivateWindow — launch fields + failure policy. The window MATCHER reuses the
+  // If-Window state trio above (windowProcessName / windowTitle / windowTitleMatchMode).
+  const [launchPath, setLaunchPath] = useState('');
+  const [launchArgs, setLaunchArgs] = useState('');
+  const [activateOnTimeout, setActivateOnTimeout] = useState<'Halt' | 'Continue'>('Halt');
+  // Exists-anywhere Test probe tracking — same requestId-gating pattern as the browser
+  // Test Action (the reply is gated on the id so a stale reply can't land elsewhere).
+  const [windowProbeRequestId, setWindowProbeRequestId] = useState<string | null>(null);
+  const [windowProbeResult, setWindowProbeResult] = useState<{ found: boolean; matchProcess: string; matchTitle: string; error?: string } | null>(null);
   // Optional "wait up to N ms for the condition" poll timeout (0 = instant single check). Stored as
   // a string so the input can be cleared; coerced to a non-negative int on persist.
   const [conditionTimeout, setConditionTimeout] = useState('0');
@@ -265,6 +274,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const pickColorRequestIdRef = useRef(pickColorRequestId);
   const testPixelRequestIdRef = useRef(testPixelRequestId);
   const pickElementRequestIdRef = useRef(pickElementRequestId);
+  const windowProbeRequestIdRef = useRef(windowProbeRequestId);
   // Configure-region is fire-and-forget (no UI state), so a plain ref tracks the in-flight
   // request and guards waitimage:searchRegionSet against a stale reply landing on a different
   // action after the user switched (the panel doesn't remount on action change).
@@ -276,6 +286,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     pickColorRequestIdRef.current = pickColorRequestId;
     testPixelRequestIdRef.current = testPixelRequestId;
     pickElementRequestIdRef.current = pickElementRequestId;
+    windowProbeRequestIdRef.current = windowProbeRequestId;
   });
 
   // Listen for pick element result + test result from extension. Subscribed once (stable deps);
@@ -378,6 +389,12 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
           setTestPixelResult({ matches: r.matches, sampledHex: r.sampledHex, error: r.error });
           setTestPixelRequestId(null);
         }
+      } else if (msg.type === 'window:testProbeResult') {
+        const r = msg.payload as { requestId: string; found: boolean; matchProcess: string; matchTitle: string; error?: string };
+        if (windowProbeRequestIdRef.current && r.requestId === windowProbeRequestIdRef.current) {
+          setWindowProbeResult({ found: r.found, matchProcess: r.matchProcess, matchTitle: r.matchTitle, error: r.error });
+          setWindowProbeRequestId(null);
+        }
       }
     });
   }, [subscribe, clearTestTimeout, clearTestMatchTimeout]);
@@ -476,6 +493,12 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
           : 'contains'
       );
       setClipboardPattern(action.clipboardPattern ?? '');
+      // ActivateWindow seeding — the matcher trio is seeded by the If-Window block above.
+      setLaunchPath(action.launchPath ?? '');
+      setLaunchArgs(action.launchArgs ?? '');
+      setActivateOnTimeout(action.activateOnTimeout === 'Continue' ? 'Continue' : 'Halt');
+      setWindowProbeResult(null);
+      setWindowProbeRequestId(null);
     }
   }, [action]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -763,6 +786,36 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       send({ type: 'actions:edit', payload: { index: actionIndex, field: 'variableValue', value: variableValue } });
     }
 
+    // ActivateWindow — matcher (shared window* fields, no conditionType gate: the type
+    // itself is the discriminator), launch fields, wait budget and failure policy.
+    if (actionType === 'ActivateWindow') {
+      if (windowProcessName !== (action.windowProcessName ?? '')) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'windowProcessName', value: windowProcessName } });
+      }
+      if (windowTitle !== (action.windowTitle ?? '')) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'windowTitle', value: windowTitle } });
+      }
+      const currentAwTitleMode = action.windowTitleMatchMode === 'regex' ? 'regex' : 'contains';
+      if (windowTitleMatchMode !== currentAwTitleMode) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'windowTitleMatchMode', value: windowTitleMatchMode } });
+      }
+      if (launchPath !== (action.launchPath ?? '')) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'launchPath', value: launchPath } });
+      }
+      if (launchArgs !== (action.launchArgs ?? '')) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'launchArgs', value: launchArgs } });
+      }
+      const persistedPolicy = activateOnTimeout === 'Continue' ? 'Continue' : '';
+      const currentPolicy = action.activateOnTimeout === 'Continue' ? 'Continue' : '';
+      if (persistedPolicy !== currentPolicy) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'activateOnTimeout', value: persistedPolicy } });
+      }
+      const newAwTimeout = Math.max(1000, Math.round(parseFloat(timeout) || 10000));
+      if (newAwTimeout !== (action.timeout || 5000)) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(newAwTimeout) } });
+      }
+    }
+
     // BrowserSelectOption — match mode + browserText hold the option label/value/index.
     // browserText is already saved by the BrowserType branch above when actionType matches —
     // here we just persist the selectMatchMode separately. 'text' is the default and stays
@@ -786,7 +839,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // from actionType + action.conditionType which are already in the array, so the
     // callback rebinds whenever those change. Listing the derived flags would also
     // be a forward-reference error (they're declared further down the component body).
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, alternatives, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, launchPath, launchArgs, activateOnTimeout, alternatives, send, onClose]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
@@ -1012,6 +1065,19 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     });
   }, [actionIndex, action, actionType, key, textMatch, textMode, timeout, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, send, clearTestTimeout]);
 
+  // ActivateWindow — exists-anywhere probe: "would this action find the window right
+  // now?". Same matcher semantics the replay uses (".exe" auto-append, self-excluded).
+  // Local OS query, answers immediately — no safety timeout needed.
+  const handleTestWindowProbe = useCallback(() => {
+    const requestId = Math.random().toString(36).slice(2, 10);
+    setWindowProbeRequestId(requestId);
+    setWindowProbeResult(null);
+    send({
+      type: 'window:testProbe',
+      payload: { requestId, processName: windowProcessName, windowTitle, titleMatchMode: windowTitleMatchMode },
+    });
+  }, [windowProcessName, windowTitle, windowTitleMatchMode, send]);
+
   // WaitImage: capture screen now and report best confidence + matched rect against the reference
   // image. Doesn't run the replay — pure calibration helper.
   const handleTestMatch = useCallback(() => {
@@ -1170,6 +1236,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const isKeyAction = actionType === 'KeyDown' || actionType === 'KeyUp';
   const isSendText = actionType === 'SendText';
   const isSetVariable = actionType === 'SetVariable';
+  const isActivateWindow = actionType === 'ActivateWindow';
   const isWaitImage = actionType === 'WaitImage';
   const isWaitPixelColor = actionType === 'WaitPixelColor';
   const isPause = actionType === 'Pause';
@@ -1227,6 +1294,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   // for tooltips). Replaces the inline 17-branch ternary that used to live in the header.
   const actionLabel = isWaitImage ? 'Wait Image'
     : isSetVariable ? 'Set Variable'
+    : isActivateWindow ? 'Activate Window'
     : isWaitPixelColor ? 'Wait Pixel Color'
     : isIfImage ? 'If Image Found'
     : isIfPixel ? 'If Pixel Color Match'
@@ -2278,7 +2346,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                       ? 'text-accent-light bg-accent-solid/15 border-accent-solid/50'
                       : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-accent hover:border-accent-solid/40'
                   }`}
-                  data-tip={showMoreTypeChips ? tt('Hide extra tokens', 'Ocultar tokens extras') : tt('More tokens (Tab, Date, Time, Escape, Backspace, Delete, arrows)', 'Mais tokens (Tab, Date, Time, Escape, Backspace, Delete, setas)')}
+                  data-tip={showMoreTypeChips ? tt('Hide extra tokens', 'Ocultar tokens extras') : tt('More tokens (Tab, Date, Time, Random, Escape, Backspace, Delete, arrows)', 'Mais tokens (Tab, Date, Time, Random, Escape, Backspace, Delete, setas)')}
                 >
                   ⋯
                 </button>
@@ -2290,6 +2358,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                     { var: '{Tab}', label: 'Tab' },
                     { var: '{Date}', label: 'Date' },
                     { var: '{Time}', label: 'Time' },
+                    { var: '{Random:1-10}', label: 'Random' },
                     { var: '{Escape}', label: 'Escape' },
                     { var: '{Backspace}', label: 'Backspace' },
                     { var: '{Delete}', label: 'Delete' },
@@ -2567,6 +2636,160 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 />
               </Field>
             </>
+          )}
+
+          {/* Activate Window — find → launch-if-missing → wait → focus. The matcher block
+              mirrors the If-Window editor (same shared window* state); then LAUNCH, then
+              the Test → Timeout → policy timing cluster (browser-editor convention). */}
+          {isActivateWindow && (
+          <>
+            <Field
+              label="Process Name"
+              hint={tt('e.g. notepad.exe — ".exe" is assumed when omitted. Leave empty to match by title only.', 'ex.: notepad.exe — ".exe" é assumido se omitido. Deixe vazio para casar só pelo título.')}
+            >
+              <input
+                type="text"
+                value={windowProcessName}
+                onChange={(e) => setWindowProcessName(e.target.value)}
+                placeholder="notepad.exe"
+                spellCheck={false}
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              />
+            </Field>
+            <Field
+              label="Window Title"
+              hint={tt('Case-insensitive. UWP/Store apps: match by title — their process is ApplicationFrameHost.exe.', 'Sem diferenciar maiúsculas. Apps UWP/Store: case pelo título — o processo deles é ApplicationFrameHost.exe.')}
+            >
+              <input
+                type="text"
+                value={windowTitle}
+                onChange={(e) => setWindowTitle(e.target.value)}
+                placeholder=""
+                spellCheck={false}
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              />
+            </Field>
+            <Field label="Title Match">
+              <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
+                {(['contains', 'regex'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setWindowTitleMatchMode(m)}
+                    className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
+                      windowTitleMatchMode === m
+                        ? 'bg-bg-elevated text-text-primary'
+                        : 'text-text-tertiary hover:text-text-secondary'
+                    }`}
+                    data-tip={m === 'regex'
+                      ? tt('Title is a .NET regular expression (case-insensitive)', 'Título é uma expressão regular .NET (sem diferenciar maiúsculas)')
+                      : tt('Title must contain this text (case-insensitive)', 'Título deve conter este texto (sem diferenciar maiúsculas)')}
+                  >
+                    {m === 'contains' ? 'Contains' : 'Regex'}
+                  </button>
+                ))}
+              </div>
+            </Field>
+            <Field
+              label="Launch if not found"
+              hint={tt('Program path, URL, document or shortcut — opened only when no window matches. Empty = just wait & focus. Leave the window fields above empty too for a plain run.', 'Caminho de programa, URL, documento ou atalho — aberto só quando nenhuma janela casa. Vazio = apenas esperar e focar. Deixe os campos de janela acima vazios também para um run puro.')}
+            >
+              <input
+                type="text"
+                value={launchPath}
+                onChange={(e) => setLaunchPath(e.target.value)}
+                placeholder="notepad.exe · https://… · C:\path\app.exe"
+                spellCheck={false}
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              />
+            </Field>
+            <Field label="Arguments">
+              <input
+                type="text"
+                value={launchArgs}
+                onChange={(e) => setLaunchArgs(e.target.value)}
+                disabled={!launchPath.trim()}
+                spellCheck={false}
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid disabled:opacity-50"
+              />
+            </Field>
+
+            {/* Test (exists-anywhere probe) + result card, then Timeout + On Timeout. */}
+            <div>
+              <button
+                onClick={handleTestWindowProbe}
+                disabled={windowProbeRequestId !== null || (!windowProcessName.trim() && !windowTitle.trim())}
+                className="w-full h-8 flex items-center justify-center gap-1.5 px-2.5 rounded text-xs font-medium border border-accent-solid/40 bg-accent-solid/10 hover:bg-accent-solid/20 text-accent-light transition-colors disabled:opacity-60"
+              >
+                <PlayCircle size={13} />
+                {windowProbeRequestId ? 'Testing…' : 'Test'}
+              </button>
+              {windowProbeResult && (
+                <div
+                  className="mt-1.5 px-2 py-1.5 rounded text-[11px] border"
+                  style={resultCardStyle(windowProbeResult.found)}
+                >
+                  <div className="flex items-center gap-1.5">
+                    {windowProbeResult.found ? <Check size={11} /> : <X size={11} />}
+                    <span className="font-medium">
+                      {windowProbeResult.found
+                        ? `Found — ${[windowProbeResult.matchProcess, windowProbeResult.matchTitle].filter(Boolean).join(' · ')}`
+                        : (windowProbeResult.error || 'Not found')}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2.5">
+              <Field label="Timeout" className="w-[124px]">
+                <NumberInput
+                  value={parseInt(timeout, 10) || 10000}
+                  onChange={(n) => setTimeout_(String(n))}
+                  min={1000}
+                  step={1000}
+                  thousands
+                  suffix="ms" suffixInside
+                  inputWidth="w-full"
+                  inputHeight="h-8"
+                  className="w-full"
+                  ariaLabel="Wait-for-window timeout in milliseconds"
+                />
+              </Field>
+              <Field label="On Timeout">
+                <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
+                  {(['Halt', 'Continue'] as const).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setActivateOnTimeout(p)}
+                      className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
+                        activateOnTimeout === p
+                          ? 'bg-bg-elevated text-text-primary'
+                          : 'text-text-tertiary hover:text-text-secondary'
+                      }`}
+                      data-tip={p === 'Halt'
+                        ? tt('Stop the replay when the window cannot be found or focused — keyboard actions follow the focused window, so continuing would type into the wrong app.', 'Para o replay quando a janela não é encontrada ou focada — ações de teclado seguem a janela em foco, então continuar digitaria no app errado.')
+                        : tt('Log and move on to the next action even if the window was not found or focused.', 'Registra e segue para a próxima ação mesmo se a janela não foi encontrada ou focada.')}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+            </div>
+
+            {/* Passive guidance when the profile has a Window Target — coordinates keep
+                translating against the PROFILE target regardless of this action. */}
+            {profiles.find(p => p.name === activeProfile)?.hasEffectiveTarget && (
+              <div className="text-[10px] leading-relaxed text-text-tertiary">
+                {tt(
+                  "Coordinates keep following the profile's Window Target — for multi-window macros leave the profile target empty, or split per-window steps into sub-profiles with their own targets (Run Profile).",
+                  'As coordenadas continuam seguindo o Window Target do perfil — para macros multi-janela, deixe o target do perfil vazio ou divida os passos por janela em sub-perfis com seus próprios targets (Run Profile).'
+                )}
+              </div>
+            )}
+          </>
           )}
 
           {/* X / Y — Pick button (only on click halves, since scroll actions don't really

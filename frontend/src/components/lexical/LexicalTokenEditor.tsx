@@ -45,15 +45,27 @@ const KNOWN_TOKEN_NAMES: ReadonlySet<string> = new Set([
   'left',
   'right',
   'delay',
+  'random',
 ]);
 
-const TOKEN_REGEX = /\{[a-zA-Z]+(?::[a-zA-Z0-9]+)*\}/g;
+// Modifier segments allow digits/letters plus ',' and '-' so {Random:1-10},
+// {Clipboard:range:2-4} and {Clipboard:lines:3,1,2} chip correctly. Separators
+// with other characters (e.g. join:" - ") stay plain text when typed — they
+// still work at runtime; chips built via the popover keep chip-ness regardless.
+const TOKEN_REGEX = /\{[a-zA-Z]+(?::[a-zA-Z0-9,-]+)*\}/g;
 // Non-global form for single-match .exec() — stateless, so safe to share across calls.
 const TOKEN_REGEX_SINGLE = new RegExp(TOKEN_REGEX.source);
 
 export interface LexicalEditorHandle {
   /** Insert text at the current cursor; known `{...}` substrings become chips. */
   insertText: (text: string) => void;
+  /**
+   * Insert ONE pre-built token as a chip, bypassing the TOKEN_REGEX gate — for
+   * popover-built tokens whose modifier args may contain characters the typing
+   * grammar doesn't chip (e.g. a join separator of " " or "; "). Plain insertText
+   * would drop those as raw text while visually identical configs became chips.
+   */
+  insertToken: (token: string) => void;
   focus: () => void;
 }
 
@@ -118,27 +130,37 @@ function ImperativeAPIPlugin({
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
+    // Shared insert plumbing: focus, resolve a usable range selection (falling
+    // back to end-of-document when the editor was never focused), insert nodes.
+    // Takes a FACTORY, not nodes: $create*Node calls are only legal inside
+    // editor.update() — building the nodes outside it throws and the insert
+    // silently no-ops (the palette-chip-does-nothing bug).
+    const insertNodesAtCursor = (makeNodes: () => LexicalNode[]) => {
+      editor.focus();
+      editor.update(() => {
+        const nodes = makeNodes();
+        if (nodes.length === 0) return;
+        let selection = $getSelection();
+        // Editor never focused yet (e.g. inserting via side-panel button on a
+        // fresh dialog) — fall back to the end of the document.
+        if (!$isRangeSelection(selection)) {
+          const last = $getRoot().getLastChild();
+          if (last && $isElementNode(last)) {
+            last.selectEnd();
+            selection = $getSelection();
+          }
+        }
+        if ($isRangeSelection(selection)) {
+          selection.insertNodes(nodes);
+        }
+      });
+    };
+
     apiRef.current = {
-      insertText: (text: string) => {
-        editor.focus();
-        editor.update(() => {
-          const nodes = buildNodesFromText(text);
-          if (nodes.length === 0) return;
-          let selection = $getSelection();
-          // Editor never focused yet (e.g. inserting via side-panel button on a
-          // fresh dialog) — fall back to the end of the document.
-          if (!$isRangeSelection(selection)) {
-            const last = $getRoot().getLastChild();
-            if (last && $isElementNode(last)) {
-              last.selectEnd();
-              selection = $getSelection();
-            }
-          }
-          if ($isRangeSelection(selection)) {
-            selection.insertNodes(nodes);
-          }
-        });
-      },
+      insertText: (text: string) => insertNodesAtCursor(() => buildNodesFromText(text)),
+      // No regex gate: the caller vouches this is one well-formed token (the
+      // Advanced popover builds it via buildClipboardToken).
+      insertToken: (token: string) => insertNodesAtCursor(() => [$createTokenNode(token)]),
       focus: () => editor.focus(),
     };
     return () => {

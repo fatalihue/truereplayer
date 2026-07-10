@@ -1276,24 +1276,17 @@ namespace TrueReplayer.Services
                 // will send a duplicate keyup which is harmless.
                 ReleasePhysicallyHeldModifiers();
 
-                // Bring target window to focus if enabled
+                // Bring target window to focus if enabled. Full activation stack
+                // (restore-if-minimized, NULL-foreground-guarded AttachThreadInput,
+                // foreground-lock bypass, verified) — see WindowActivation. Best-effort:
+                // a refused switch doesn't block the run, matching the old behavior.
                 if (_bringToFocus && _windowTarget != null)
                 {
                     var targetHwnd = FindTargetWindow();
                     if (targetHwnd != IntPtr.Zero)
                     {
-                        // Only restore if minimized — preserves maximized/fullscreen state
-                        if (NativeMethods.IsIconic(targetHwnd))
-                            NativeMethods.ShowWindow(targetHwnd, 9); // SW_RESTORE
-                        // AttachThreadInput trick to bypass foreground restriction
-                        var fgHwnd = NativeMethods.GetForegroundWindow();
-                        uint fgThread = NativeMethods.GetWindowThreadProcessId(fgHwnd, out _);
-                        uint curThread = NativeMethods.GetCurrentThreadId();
-                        if (fgThread != curThread)
-                            NativeMethods.AttachThreadInput(fgThread, curThread, true);
-                        NativeMethods.SetForegroundWindow(targetHwnd);
-                        if (fgThread != curThread)
-                            NativeMethods.AttachThreadInput(fgThread, curThread, false);
+                        await TrueReplayer.Helpers.WindowActivation.ActivateAsync(
+                            targetHwnd, _windowTarget, _windowTargetTitleRegex, token);
                         await Task.Delay(300, token); // Wait for window to restore and gain focus
                     }
                 }
@@ -1655,6 +1648,7 @@ namespace TrueReplayer.Services
                         case "ScrollDown": SimulateScroll(-120); break;
                         case "SendText": await SimulateClipboardPaste(action.Key, token); break;
                         case "SetVariable": await ExecuteSetVariable(action); break;
+                        case "ActivateWindow": await ExecuteActivateWindow(action, token); break;
                         case "WaitImage": await ExecuteWaitImage(action, token); break;
                         case "WaitPixelColor": await ExecuteWaitPixelColor(action, token); break;
                         case "RunProfile": await HandleRunProfile(action, token); break;
@@ -1739,16 +1733,9 @@ namespace TrueReplayer.Services
                 var targetHwnd = FindTargetWindow();
                 if (targetHwnd != IntPtr.Zero)
                 {
-                    if (NativeMethods.IsIconic(targetHwnd))
-                        NativeMethods.ShowWindow(targetHwnd, 9); // SW_RESTORE
-                    var fgHwnd = NativeMethods.GetForegroundWindow();
-                    uint fgThread = NativeMethods.GetWindowThreadProcessId(fgHwnd, out _);
-                    uint curThread = NativeMethods.GetCurrentThreadId();
-                    if (fgThread != curThread)
-                        NativeMethods.AttachThreadInput(fgThread, curThread, true);
-                    NativeMethods.SetForegroundWindow(targetHwnd);
-                    if (fgThread != curThread)
-                        NativeMethods.AttachThreadInput(fgThread, curThread, false);
+                    // Full activation stack, best-effort (see WindowActivation).
+                    await TrueReplayer.Helpers.WindowActivation.ActivateAsync(
+                        targetHwnd, _windowTarget, _windowTargetTitleRegex, token);
                     await Task.Delay(200, token);
                 }
             }
@@ -1923,7 +1910,11 @@ namespace TrueReplayer.Services
                         var hwnd = FindTargetWindow();
                         if (hwnd != IntPtr.Zero)
                         {
-                            NativeMethods.SetForegroundWindow(hwnd);
+                            // Full activation stack, best-effort (see WindowActivation) —
+                            // the bare SetForegroundWindow this used to call is routinely
+                            // rejected by the foreground lock when TR isn't active.
+                            await TrueReplayer.Helpers.WindowActivation.ActivateAsync(
+                                hwnd, _windowTarget, _windowTargetTitleRegex, token);
                             await Task.Delay(80, token);
                         }
                     }
@@ -2150,6 +2141,143 @@ namespace TrueReplayer.Services
             DiagnosticLog.Warn($"Replay aborted: relative-coords target window not found [{name} {_windowTarget?.WindowTitle}]".TrimEnd());
             OnReplayError?.Invoke($"Target window '{name}' not found — open it and retry");
             try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
+        }
+
+        // ── ActivateWindow ──
+        // Combined find → launch-if-missing → wait → focus. The matcher reuses the
+        // If-Window fields (WindowProcessName/WindowTitle/WindowTitleMatchMode); Timeout
+        // is the wait-for-window budget; window EXISTENCE is the only success criterion —
+        // the launched process is never tracked, so single-instance apps that forward to
+        // an already-running instance behave identically to a plain focus.
+        private async Task ExecuteActivateWindow(ActionItem action, CancellationToken token)
+        {
+            var (target, regex) = BuildWindowTargetFromAction(action);
+            bool hasMatcher = target.ProcessName != null || target.WindowTitle != null;
+
+            // LaunchPath/LaunchArgs accept the same tokens as SendText ({var:}, {clipboard}, …).
+            string? path = string.IsNullOrWhiteSpace(action.LaunchPath)
+                ? null
+                : (await ResolveTokens(action.LaunchPath)).Trim();
+            if (string.IsNullOrEmpty(path)) path = null;
+            string? args = path != null && !string.IsNullOrWhiteSpace(action.LaunchArgs)
+                ? await ResolveTokens(action.LaunchArgs)
+                : null;
+
+            if (!hasMatcher)
+            {
+                // Pure-run row: no matcher → fire-and-forget shell run (URL, document,
+                // .lnk, exe). A row with neither matcher nor launch no-ops, same
+                // forgiveness as a SetVariable without a name.
+                if (path == null) return;
+                if (!TryLaunch(path, args, out var runError))
+                    HandleActivateWindowFailure(action, $"launch failed: {runError}");
+                return;
+            }
+
+            IntPtr hwnd = FindWindowExcludingSelf(target, regex);
+
+            // Launch AT MOST once, and only when no window matched first — re-running
+            // the program on every poll would spawn N copies of a slow-starting app.
+            if (hwnd == IntPtr.Zero && path != null)
+            {
+                if (!TryLaunch(path, args, out var launchError))
+                {
+                    HandleActivateWindowFailure(action, $"launch failed: {launchError}");
+                    return;
+                }
+            }
+
+            int timeoutMs = action.Timeout > 0 ? action.Timeout : 10000;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (hwnd == IntPtr.Zero)
+            {
+                if (sw.ElapsedMilliseconds >= timeoutMs)
+                {
+                    HandleActivateWindowFailure(action, "window not found");
+                    return;
+                }
+                await Task.Delay(200, token); // token-aware — the Stop hotkey aborts instantly
+                hwnd = FindWindowExcludingSelf(target, regex);
+            }
+
+            if (!await TrueReplayer.Helpers.WindowActivation.ActivateAsync(hwnd, target, regex, token))
+            {
+                HandleActivateWindowFailure(action, "could not bring window to foreground");
+                return;
+            }
+            await Task.Delay(300, token); // settle — same wait the replay-start focus uses
+        }
+
+        // One failure policy for all three modes (launch threw / window never appeared /
+        // activation unverified). Default = halt: keyboard actions follow the OS foreground,
+        // so continuing after a silent focus failure would type into the wrong app.
+        private void HandleActivateWindowFailure(ActionItem action, string reason)
+        {
+            bool hasProc = !string.IsNullOrWhiteSpace(action.WindowProcessName);
+            bool hasTitle = !string.IsNullOrWhiteSpace(action.WindowTitle);
+            string label =
+                hasProc && hasTitle ? $"{action.WindowProcessName} · {action.WindowTitle}" :
+                hasProc ? action.WindowProcessName! :
+                hasTitle ? action.WindowTitle! :
+                action.LaunchPath ?? "?";
+
+            if (string.Equals(action.ActivateOnTimeout, "Continue", StringComparison.OrdinalIgnoreCase))
+            {
+                DiagnosticLog.Warn($"Activate Window '{label}': {reason} — Continue policy, moving on");
+                return;
+            }
+            DiagnosticLog.Warn($"Replay aborted: Activate Window '{label}' — {reason}");
+            OnReplayError?.Invoke($"Activate Window: '{label}' — {reason}");
+            try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
+        }
+
+        private static bool TryLaunch(string path, string? args, out string error)
+        {
+            try
+            {
+                // UseShellExecute so bare names resolve via PATH/App Paths and URLs,
+                // documents and .lnk files open with their registered handler — same
+                // semantics as Win+R. The Process object is irrelevant (window existence
+                // is the success criterion), dispose it immediately.
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = path,
+                    Arguments = args ?? string.Empty,
+                    UseShellExecute = true,
+                };
+                System.Diagnostics.Process.Start(psi)?.Dispose();
+                error = string.Empty;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
+
+        // WindowMatcher.FindWindow with TrueReplayer's own windows excluded — a target
+        // like title-contains "True" must never match (and then activate) ourselves.
+        // Same self-skip rule the window picker applies.
+        internal static IntPtr FindWindowExcludingSelf(Models.WindowTarget target, Regex? regex)
+        {
+            uint ownPid = (uint)Environment.ProcessId;
+            var titleBuffer = new System.Text.StringBuilder(512);
+            var procBuffer = new System.Text.StringBuilder(512);
+            IntPtr result = IntPtr.Zero;
+            NativeMethods.EnumWindows((hwnd, lParam) =>
+            {
+                if (!NativeMethods.IsWindowVisible(hwnd)) return true;
+                NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+                if (pid == ownPid) return true;
+                if (TrueReplayer.Helpers.WindowMatcher.Matches(hwnd, target, regex, titleBuffer, procBuffer))
+                {
+                    result = hwnd;
+                    return false; // stop enumeration
+                }
+                return true;
+            }, IntPtr.Zero);
+            return result;
         }
 
         /// <summary>
@@ -2379,6 +2507,88 @@ namespace TrueReplayer.Services
                         }
                         else i++;
                         break;
+
+                    // ── List modifiers — operate on CRLF-normalized lines (same split rule
+                    // as line:N above) and re-join with "\n". Old app versions skip these
+                    // via the default case below, degrading to the unmodified content.
+                    case "range":
+                        // range:a-b → keep lines a..b (1-based, inclusive; bounds swap when
+                        // reversed; clamped to the available lines; no overlap → empty).
+                        if (i + 1 < parts.Length && TryParseLineRange(parts[i + 1], out var rangeFrom, out var rangeTo))
+                        {
+                            var lines = SplitContentLines(result);
+                            int from = Math.Max(1, rangeFrom);
+                            int to = Math.Min(lines.Length, rangeTo);
+                            result = from <= to ? string.Join("\n", lines[(from - 1)..to]) : string.Empty;
+                            i += 2;
+                        }
+                        else i++;
+                        break;
+                    case "lines":
+                        // lines:3,1,2 → pick lines by 1-based index in the given order
+                        // (duplicates allowed — it's a reorder/pick, not a filter);
+                        // invalid or out-of-range indices are skipped. The arg is only
+                        // consumed when it actually contains a digit — same validating
+                        // posture as line/word, so a typo'd "lines:upper" doesn't eat
+                        // the next modifier.
+                        if (i + 1 < parts.Length && parts[i + 1].AsSpan().IndexOfAnyInRange('0', '9') >= 0)
+                        {
+                            var lines = SplitContentLines(result);
+                            var picked = new List<string>();
+                            foreach (var tok in parts[i + 1].Split(','))
+                            {
+                                if (int.TryParse(tok, out var n) && n >= 1 && n <= lines.Length)
+                                    picked.Add(lines[n - 1]);
+                            }
+                            result = string.Join("\n", picked);
+                            i += 2;
+                        }
+                        else i++;
+                        break;
+                    case "reverse":
+                        {
+                            var lines = SplitContentLines(result);
+                            Array.Reverse(lines);
+                            result = string.Join("\n", lines);
+                        }
+                        i++;
+                        break;
+                    case "sort":
+                        {
+                            // Case-insensitive alphabetical — matches the app-wide
+                            // case-insensitive matching convention.
+                            var lines = SplitContentLines(result);
+                            Array.Sort(lines, StringComparer.OrdinalIgnoreCase);
+                            result = string.Join("\n", lines);
+                        }
+                        i++;
+                        break;
+                    case "dedupe":
+                        {
+                            // Keeps the FIRST occurrence of each line; case-insensitive.
+                            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                            var kept = new List<string>();
+                            foreach (var line in SplitContentLines(result))
+                                if (seen.Add(line)) kept.Add(line);
+                            result = string.Join("\n", kept);
+                        }
+                        i++;
+                        break;
+                    case "join":
+                        // join:sep → collapse the lines into one with the separator.
+                        // ALWAYS consumes exactly the next part ("join:" = empty separator)
+                        // — the one modifier whose arg is freeform text, so unconditional
+                        // consumption keeps the grammar unambiguous (a separator that
+                        // happens to spell a modifier name is still a separator). A
+                        // hand-typed trailing {clipboard:...:join} with no arg at all
+                        // falls back to a single space.
+                        {
+                            string sep = i + 1 < parts.Length ? parts[i + 1] : " ";
+                            result = string.Join(sep, SplitContentLines(result));
+                        }
+                        i += 2; // safely past-the-end when no arg — the while condition exits
+                        break;
+
                     default:
                         // Unknown modifier — skip it (forward-compat)
                         i++;
@@ -2386,6 +2596,23 @@ namespace TrueReplayer.Services
                 }
             }
             return result;
+        }
+
+        // Shared line split for the list modifiers — same CRLF normalization the
+        // line:N modifier uses, kept as one helper so all list ops agree on it.
+        private static string[] SplitContentLines(string content)
+            => content.Replace("\r\n", "\n").Split('\n');
+
+        // Parses the "a-b" argument of range:a-b (both 1-based ints; reversed bounds
+        // swap, mirroring {random:a-b}'s forgiveness).
+        private static bool TryParseLineRange(string s, out int from, out int to)
+        {
+            from = 0; to = 0;
+            int dash = s.IndexOf('-');
+            if (dash <= 0 || dash >= s.Length - 1) return false;
+            if (!int.TryParse(s[..dash], out from) || !int.TryParse(s[(dash + 1)..], out to)) return false;
+            if (from > to) (from, to) = (to, from);
+            return true;
         }
 
         // Run-state carrier threaded into token resolution: the variable store plus the current
@@ -2523,8 +2750,35 @@ namespace TrueReplayer.Services
             if (string.IsNullOrEmpty(text)) return text;
             text = await ResolveClipboardTokensAsync(text, dispatcherQueue, clipboardOverride, escapeBracesInSubstitution);
             text = ResolveDateTimeTokens(text);
+            text = ResolveRandomTokens(text);
             text = ResolveRunStateTokens(text, runCtx, escapeBracesInSubstitution);
             return text;
+        }
+
+        // Matches {random:a-b} — two non-negative integers separated by a hyphen.
+        // IgnoreCase because the frontend chip normalizer title-cases token names
+        // ({Random:1-10}), same rationale as the clipboard/var regexes.
+        private static readonly Regex RandomTokenRegex = new(
+            @"\{random:(\d+)-(\d+)\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // Stateless {random:a-b} → uniform integer in [a, b] (inclusive; bounds swap when
+        // reversed). Each occurrence rolls independently — "{random:1-6} {random:1-6}" is
+        // two dice. Unparseable/overflowing numbers resolve to empty, the same consume-
+        // always forgiveness as an empty clipboard. Output is digits-only, so no brace
+        // escaping is needed on the SendText path (same note as {counter}/{row}).
+        private static string ResolveRandomTokens(string text)
+        {
+            if (text.IndexOf("{random:", StringComparison.OrdinalIgnoreCase) < 0) return text;
+            return RandomTokenRegex.Replace(text, m =>
+            {
+                if (!long.TryParse(m.Groups[1].Value, out var a) ||
+                    !long.TryParse(m.Groups[2].Value, out var b))
+                    return string.Empty; // digits beyond long range — treat as invalid
+                if (a > b) (a, b) = (b, a);
+                if (b == long.MaxValue) b--; // keep the inclusive upper bound addable
+                return Random.Shared.NextInt64(a, b + 1).ToString();
+            });
         }
 
         // Matches {var:name} — letters/digits/underscore, case-insensitive (mirrors
@@ -2981,24 +3235,35 @@ namespace TrueReplayer.Services
         // currently in front instead of enumerating all top-level windows.
         private static bool ProbeWindowOpen(ActionItem action)
         {
-            var proc = action.WindowProcessName?.Trim();
-            // Forgiving process input: window targets store "chrome.exe" but users type
-            // "chrome" — every Windows process image has an extension, so append the
-            // missing ".exe" rather than silently never matching.
+            var (target, regex) = BuildWindowTargetFromAction(action);
+            if (action.WindowMatchForegroundOnly)
+                return TrueReplayer.Helpers.WindowMatcher.Matches(NativeMethods.GetForegroundWindow(), target, regex);
+            return TrueReplayer.Helpers.WindowMatcher.FindWindow(target, regex) != IntPtr.Zero;
+        }
+
+        // Shared matcher builder for the per-action window fields (If-Window probe,
+        // ActivateWindow, and the bridge's window:testProbe). Forgiving process input:
+        // window targets store "chrome.exe" but users type "chrome" — every Windows
+        // process image has an extension, so append the missing ".exe" rather than
+        // silently never matching.
+        internal static (Models.WindowTarget Target, Regex? TitleRegex) BuildWindowTarget(
+            string? processName, string? windowTitle, string? titleMatchMode)
+        {
+            var proc = processName?.Trim();
             if (!string.IsNullOrEmpty(proc) && !proc.Contains('.'))
                 proc += ".exe";
             var target = new Models.WindowTarget
             {
                 ProcessName = string.IsNullOrWhiteSpace(proc) ? null : proc,
-                WindowTitle = string.IsNullOrWhiteSpace(action.WindowTitle) ? null : action.WindowTitle,
-                TitleMatchMode = string.Equals(action.WindowTitleMatchMode, "regex", StringComparison.OrdinalIgnoreCase)
+                WindowTitle = string.IsNullOrWhiteSpace(windowTitle) ? null : windowTitle,
+                TitleMatchMode = string.Equals(titleMatchMode, "regex", StringComparison.OrdinalIgnoreCase)
                     ? "regex" : "contains",
             };
-            var regex = TrueReplayer.Helpers.WindowMatcher.CompileTitleRegex(target);
-            if (action.WindowMatchForegroundOnly)
-                return TrueReplayer.Helpers.WindowMatcher.Matches(NativeMethods.GetForegroundWindow(), target, regex);
-            return TrueReplayer.Helpers.WindowMatcher.FindWindow(target, regex) != IntPtr.Zero;
+            return (target, TrueReplayer.Helpers.WindowMatcher.CompileTitleRegex(target));
         }
+
+        private static (Models.WindowTarget Target, Regex? TitleRegex) BuildWindowTargetFromAction(ActionItem action)
+            => BuildWindowTarget(action.WindowProcessName, action.WindowTitle, action.WindowTitleMatchMode);
 
         // Used by IF rows to decide which branch to take — a SINGLE-SHOT probe (the optional
         // "wait up to N ms for the condition" polling lives in EvaluateConditionWithTimeout above).
@@ -3378,6 +3643,12 @@ namespace TrueReplayer.Services
 
         private async Task PasteTextViaClipboard(string text, CancellationToken token)
         {
+            // CF_UNICODETEXT convention is CRLF, and classic Win32 EDIT / WinForms
+            // multiline targets do NOT break lines on a lone LF. The list modifiers
+            // (sort/range/lines/dedupe/reverse) emit LF-joined text — normalize any
+            // bare LF back to CRLF before it hits the clipboard. Browser-path text
+            // never routes through here, so LF-tolerant consumers are unaffected.
+            text = text.Replace("\r\n", "\n").Replace("\n", "\r\n");
             var tcs = new TaskCompletionSource<bool>();
             if (!dispatcherQueue.TryEnqueue(() =>
             {

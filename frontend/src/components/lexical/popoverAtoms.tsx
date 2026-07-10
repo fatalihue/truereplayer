@@ -89,6 +89,11 @@ export function RadioGroup({ label, children }: { label: string; children: React
       aria-label={label}
       onKeyDown={(e) => {
         if (!['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'].includes(e.key)) return;
+        // Never hijack arrows originating in a text-entry element nested in a row's
+        // input slot (Pick #s spec, NumInputs) — caret movement / steppers must win.
+        // Same guard family as the app's global contentEditable keyguards.
+        const target = e.target as HTMLElement;
+        if (target.closest('input, textarea, [contenteditable="true"]')) return;
         const radios = ref.current
           ? Array.from(ref.current.querySelectorAll<HTMLButtonElement>('[role="radio"]'))
           : [];

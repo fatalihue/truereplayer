@@ -32,8 +32,12 @@ export function normalizeToken(token: string): string {
   const lowerName = name.toLowerCase();
   const normalizedName =
     COMPOUND_NAMES[lowerName] ?? name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
-  const normalizedMods = parts.slice(1).map((p) =>
-    /^[a-zA-Z]+$/.test(p) ? p.toLowerCase() : p,
-  );
+  const mods = parts.slice(1);
+  const normalizedMods = mods.map((p, idx) => {
+    // join's argument is freeform separator TEXT — case-folding it would change
+    // what actually gets typed (join:AND ≠ join:and). Keep it verbatim.
+    if (idx > 0 && mods[idx - 1].toLowerCase() === 'join') return p;
+    return /^[a-zA-Z]+$/.test(p) ? p.toLowerCase() : p;
+  });
   return `{${[normalizedName, ...normalizedMods].join(':')}}`;
 }

@@ -103,6 +103,15 @@ export interface ActionItem {
   // case-insensitively; an empty resolved value deletes the variable at replay time.
   // null/undefined = never edited (renders as empty in the Sheet).
   variableValue?: string | null;
+  // ActivateWindow — find → launch-if-missing → wait → focus. The window MATCHER
+  // reuses windowProcessName/windowTitle/windowTitleMatchMode above; `timeout` is the
+  // wait-for-window budget. launchPath: exe / bare name / .lnk / document / URL opened
+  // via ShellExecute when no window matches (empty = focus-only; with the matcher ALSO
+  // empty it's a fire-and-forget "pure run"). activateOnTimeout: null = 'Halt'
+  // (default — stop the replay on any failure) | 'Continue'.
+  launchPath?: string | null;
+  launchArgs?: string | null;
+  activateOnTimeout?: string | null;
 }
 
 // #2 — Selector alternative returned by the picker
@@ -415,6 +424,10 @@ export type IncomingMessage =
   | { type: 'windowTarget:detected'; payload: { processName: string; windowTitle: string } }
   | { type: 'windowTarget:detectState'; payload: { detecting: boolean } }
   | { type: 'windowTarget:testResult'; payload: { matches: boolean; foregroundProcess: string; foregroundTitle: string; error?: string } }
+  // Exists-ANYWHERE window probe reply for the ActivateWindow Sheet editor's Test button.
+  // Carries the requestId back so the Sheet can pair replies (unlike the legacy
+  // windowTarget:testResult pair, which relies on the Target dialog being sole consumer).
+  | { type: 'window:testProbeResult'; payload: { requestId: string; found: boolean; matchProcess: string; matchTitle: string; error?: string } }
   // Backend signal that the combined "Apply target & convert" path on profile:setWindowTarget
   // completed successfully (target saved AND coords migrated). The dialog listens to dismiss
   // the migration hint and reset its `edited` flag so a second click can't re-trigger the
@@ -522,6 +535,9 @@ export type OutgoingMessage =
   | { type: 'profile:removeFolderWindowTarget'; payload: { folderName: string } }
   | { type: 'profile:detectWindow'; payload: Record<string, never> }
   | { type: 'profile:testWindowMatch'; payload: { processName: string; windowTitle: string; titleMatchMode: string } }
+  // Exists-anywhere probe for the ActivateWindow editor — same matcher semantics the
+  // action uses at replay (".exe" auto-append, self-excluded), NOT foreground-only.
+  | { type: 'window:testProbe'; payload: { requestId: string; processName: string; windowTitle: string; titleMatchMode: string } }
   | { type: 'process:list'; payload: Record<string, never> }
   | { type: 'profile:openFolder'; payload: { name?: string } }
   | { type: 'profile:pin'; payload: { name: string } }

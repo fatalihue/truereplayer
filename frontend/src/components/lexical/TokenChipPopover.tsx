@@ -29,13 +29,14 @@ const REPEATABLE_TOKEN_NAMES = new Set([
   'right',
 ]);
 
-type TokenKind = 'clipboard' | 'delay' | 'repeatable' | 'static';
+type TokenKind = 'clipboard' | 'delay' | 'repeatable' | 'random' | 'static';
 
 function getTokenKind(token: string): TokenKind {
   const inner = token.slice(1, -1);
   const name = inner.split(':')[0].toLowerCase();
   if (name === 'clipboard') return 'clipboard';
   if (name === 'delay') return 'delay';
+  if (name === 'random') return 'random';
   if (REPEATABLE_TOKEN_NAMES.has(name)) return 'repeatable';
   return 'static';
 }
@@ -52,6 +53,16 @@ function parseDelay(token: string): { ms: number } {
   const parts = inner.split(':');
   const parsed = parts[1] !== undefined ? parseInt(parts[1], 10) : 500;
   return { ms: !Number.isFinite(parsed) || parsed < 0 ? 500 : parsed };
+}
+
+function parseRandom(token: string): { min: number; max: number } {
+  const inner = token.slice(1, -1);
+  const m = inner.match(/^random:(\d+)-(\d+)$/i);
+  if (!m) return { min: 1, max: 10 };
+  const a = parseInt(m[1], 10);
+  const b = parseInt(m[2], 10);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return { min: 1, max: 10 };
+  return a <= b ? { min: a, max: b } : { min: b, max: a };
 }
 
 interface TokenChipPopoverProps {
@@ -174,6 +185,7 @@ export function TokenChipPopover({
         {kind === 'clipboard' && <ClipboardEditor token={token} onChange={updateLive} />}
         {kind === 'delay' && <DelayEditor token={token} onChange={updateLive} />}
         {kind === 'repeatable' && <RepeatableEditor token={token} onChange={updateLive} />}
+        {kind === 'random' && <RandomEditor token={token} onChange={updateLive} />}
         {kind === 'static' && <StaticInfo />}
       </div>
 
@@ -305,6 +317,33 @@ function RepeatableEditor({
       </div>
       <div className="text-[10px] text-text-tertiary mt-1">
         Press <code className="text-accent-light">{`{${initial.name}}`}</code> {n}× when this action runs.
+      </div>
+    </Section>
+  );
+}
+
+function RandomEditor({ token, onChange }: { token: string; onChange: (t: string) => void }) {
+  const initial = parseRandom(token);
+  const [min, setMin] = useState(initial.min);
+  const [max, setMax] = useState(initial.max);
+
+  // Report changes only on real user input (see DelayEditor note) — merely opening
+  // the chip must not rewrite it. Reversed bounds are legal; the backend swaps.
+  const update = (nextMin: number, nextMax: number) => {
+    setMin(nextMin);
+    setMax(nextMax);
+    onChange(`{random:${nextMin}-${nextMax}}`);
+  };
+
+  return (
+    <Section label="Random number">
+      <div className="flex items-center gap-2 py-1">
+        <NumInput value={min} onChange={(v) => update(v, max)} min={0} width={86} thousands />
+        <span className="text-[11px] text-text-tertiary">to</span>
+        <NumInput value={max} onChange={(v) => update(min, v)} min={0} width={86} thousands />
+      </div>
+      <div className="text-[10px] text-text-tertiary mt-1">
+        A fresh integer between the two bounds (inclusive) each time this text runs.
       </div>
     </Section>
   );

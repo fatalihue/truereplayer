@@ -68,6 +68,9 @@ export function ActionIcon({ actionType, size = 12 }: { actionType: string; size
   // as the entry that inserts the action: Hourglass (not Pause-glyph) for the
   // delay action, Repeat2 (not Workflow) for sub-macro calls.
   if (actionType === 'RunProfile') return <Repeat2 size={size} />;
+  // AppWindow — same glyph the If-Window condition chip uses, so "window-ish"
+  // rows share one visual identity across the grid.
+  if (actionType === 'ActivateWindow') return <AppWindow size={size} />;
   if (actionType === 'Pause') return <Hourglass size={size} />;
   // Conditional logic — GitBranch is the universal "branch / decision" glyph and
   // matches the toolbar's + If button. Else uses the two-way swap arrows; EndIf
@@ -144,6 +147,7 @@ function actionPillLabel(action: ActionItem): string {
     case 'Pause': return 'Pause';
     case 'HoldKey': return 'Hold Key';
     case 'SetVariable': return 'Set Variable';
+    case 'ActivateWindow': return 'Activate Window';
     case 'DoubleClick': return 'Double Click';
     // Conditional labels are intentionally lowercase to read as "code keywords".
     // The IF pill is uniform ("if") regardless of probe family — the image-vs-pixel
@@ -1593,6 +1597,14 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         // "name = value" reads like the assignment it is; a fresh row
                         // (no name yet) stays blank like an unconfigured WaitImage.
                         ? (action.key ? `${action.key} = ${action.variableValue ?? ''}` : '')
+                      : action.actionType === 'ActivateWindow'
+                        // Matcher summary "proc · title" (— launch marks launch-capable
+                        // rows); pure-run rows read "run: <path>". Mirrors C# DisplayKey.
+                        ? (() => {
+                            const matcher = [action.windowProcessName, action.windowTitle].filter(s => s && s.trim()).join(' · ');
+                            if (matcher) return action.launchPath ? `${matcher} — launch` : matcher;
+                            return action.launchPath ? `run: ${action.launchPath}` : '';
+                          })()
                       : action.actionType === 'Keystroke'
                         // Combined keystrokes read as spaced combos ("Ctrl + Alt + F"),
                         // matching the ProfilePanel hotkey chips. Single keys are
@@ -2003,6 +2015,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           // Long variable values truncate at the cell width — expose the
                           // full assignment on hover, same rationale as Browser selectors.
                           : action.actionType === 'SetVariable' && action.key ? `${action.key} = ${action.variableValue ?? ''}`
+                          // Launch paths / matcher summaries truncate too — displayKey
+                          // already holds the full untruncated string for this type.
+                          : action.actionType === 'ActivateWindow' && displayKey ? displayKey
                           : undefined
                         }
                         // dblclick handler lives on the parent <td> (see above) so

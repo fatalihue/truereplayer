@@ -152,7 +152,8 @@ const VARIABLE_GROUPS: VarGroup[] = [
       { var: '{delay:500}', label: 'Delay', breakAfter: true },
       { var: '{date}', label: 'Date' },
       { var: '{time}', label: 'Time' },
-      { var: '{datetime}', label: 'DateTime' },
+      { var: '{datetime}', label: 'DateTime', breakAfter: true },
+      { var: '{random:1-10}', label: 'Random' },
     ],
   },
   {
@@ -557,10 +558,12 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                     Tip: click any chip in the editor to edit its parameters — repeat count, delay ms, clipboard modifiers.
                   </div>
 
-                  {/* Transform popover (overlays the panel) */}
+                  {/* Transform popover (overlays the panel). insertToken (not insertText):
+                      a popover-built token always becomes a chip even when its join
+                      separator contains characters the typing grammar doesn't chip. */}
                   {transformOpen && (
                     <ClipboardTransformPopover
-                      onInsert={(token) => handleVarInsert(token)}
+                      onInsert={(token) => lexicalApiRef.current?.insertToken(token)}
                       onClose={() => setTransformOpen(false)}
                     />
                   )}
