@@ -644,6 +644,7 @@ namespace TrueReplayer
                     case "actions:bulkUpdateComment": HandleBulkUpdateComment(payload); break;
                     case "actions:toggleSkip": HandleActionsToggleSkip(payload); break;
                     case "actions:toggleFocusClick": HandleActionsToggleFocusClick(payload); break;
+                    case "actions:resetCycle": HandleActionsResetCycle(payload); break;
                     case "actions:reorder": HandleActionsReorder(payload); break;
                     case "actions:convertMode": HandleConvertActionMode(payload); break;
                     case "actions:insertAction": HandleInsertAction(payload); break;
@@ -953,6 +954,7 @@ namespace TrueReplayer
                 // the ONLY path the frontend learns of the field (see the holdDurationMs
                 // note above for why forgetting one here is a silent round-trip bug).
                 variableValue = a.VariableValue,
+                variableMode = a.VariableMode,
                 // ActivateWindow — launch + failure-policy fields (matcher fields are the
                 // shared window* trio above).
                 launchPath = a.LaunchPath,
@@ -2111,6 +2113,11 @@ namespace TrueReplayer
                     // as "" rather than collapsing to null — null means "never edited".
                     action.VariableValue = value;
                     break;
+                case "variableMode":
+                    // Only the non-default "cycle" is persisted; "set" stays null on disk
+                    // (same convention as waitImageOnTimeout / activateOnTimeout).
+                    action.VariableMode = value == "cycle" ? "cycle" : null;
+                    break;
                 case "windowProcessName":
                     action.WindowProcessName = string.IsNullOrEmpty(value) ? null : value;
                     break;
@@ -2370,6 +2377,21 @@ namespace TrueReplayer
 
             HasUnsavedChanges = true;
             PushActionsUpdate();
+        }
+
+        // Reset a SetVariable cycle row's position back to item 1. Pure runtime state —
+        // no profile edit, no undo, no save: it only clears the in-memory cursor so the
+        // next execution starts over at the first item. Confirmed with a toast.
+        private void HandleActionsResetCycle(JsonElement payload)
+        {
+            int index = payload.GetProperty("index").GetInt32();
+            if (index < 0 || index >= actions.Count) return;
+            var action = actions[index];
+            if (!string.Equals(action.ActionType, "SetVariable", StringComparison.Ordinal)
+                || !string.Equals(action.VariableMode, "cycle", StringComparison.OrdinalIgnoreCase))
+                return;
+            replayService.ResetCycleCursor(action.Id);
+            SendMessage("alert:show", new { message = $"Cycle '{action.Key}' reset to the first item", type = "success" });
         }
 
         private void HandleActionsReorder(JsonElement payload)

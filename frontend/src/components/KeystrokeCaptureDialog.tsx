@@ -106,6 +106,20 @@ export function KeystrokeCaptureDialog({
   // Capture state — seeded from initialKey on edit so Save is enabled immediately.
   const [captured, setCaptured] = useState<string | null>(initialKey ?? null);
 
+  // Manual text entry — the escape hatch for values the low-level hook can never
+  // produce: {var:name}/{clipboard} tokens (resolved by the replay engine, possibly
+  // into a whole combo) and hand-typed combos. Auto-enters manual mode when editing
+  // a row whose key already contains a token, so the value is immediately editable.
+  const [manualEntry, setManualEntry] = useState(() => (initialKey ?? '').includes('{'));
+  // Ref mirror for the capture subscription below — while typing manually, a stray
+  // key press must not overwrite the typed value via 'hotkey:captured'.
+  const manualEntryRef = useRef(manualEntry);
+  useEffect(() => { manualEntryRef.current = manualEntry; });
+  const manualInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (manualEntry) manualInputRef.current?.focus();
+  }, [manualEntry]);
+
   // Press-mode state.
   const [repeat, setRepeat] = useState<number>(initialRepeat ?? 1);
   const [repeatDelay, setRepeatDelay] = useState<number>(initialRepeatDelayMs ?? DEFAULT_REPEAT_DELAY_MS);
@@ -134,6 +148,7 @@ export function KeystrokeCaptureDialog({
   useEffect(() => {
     setMode(initialActionType === 'HoldKey' ? 'hold' : 'press');
     setCaptured(initialKey ?? null);
+    setManualEntry((initialKey ?? '').includes('{'));
     setRepeat(initialRepeat ?? 1);
     setRepeatDelay(initialRepeatDelayMs ?? DEFAULT_REPEAT_DELAY_MS);
     const ms = initialHoldDurationMs ?? DEFAULT_HOLD_MS;
@@ -157,12 +172,21 @@ export function KeystrokeCaptureDialog({
   // matches the old "wait for the real key" filter while still letting the user
   // see what modifiers are held mid-press.
   useEffect(() => {
-    send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } });
+    // Manual mode OWNS the keyboard — never arm the low-level hook while it is on.
+    // An armed hook swallows EVERY keystroke system-wide (InputHookManager returns 1
+    // for all keys in capture mode), which on the auto-manual edit flow left the
+    // autofocused input dead and Esc unable to close the dialog: the input's focusin
+    // fired BEFORE this effect attached its listener, so nothing ever disabled the
+    // hook. Keying the effect on manualEntry makes the toggle authoritative.
+    send({ type: 'hotkey:capture', payload: { enabled: !manualEntry, ownerId: ownerIdRef.current } });
     const isPureModifier = (combo: string) =>
       /^(Win|Ctrl|Alt|Shift)(\+(Win|Ctrl|Alt|Shift))*$/.test(combo);
 
     const unsub = subscribe((msg) => {
       if (msg.type !== 'hotkey:captured') return;
+      // Manual mode owns the value — a key pressed while the manual input is NOT
+      // focused (capture re-armed by focusout) must not clobber the typed text.
+      if (manualEntryRef.current) return;
       const combo = msg.payload.combo;
       setCaptured((prev) => {
         // Don't overwrite an already-captured combo with a bare modifier press —
@@ -178,7 +202,9 @@ export function KeystrokeCaptureDialog({
       }
     };
     const handleFocusOut = (e: FocusEvent) => {
-      if ((e.target as HTMLElement)?.tagName === 'INPUT') {
+      // Never re-arm on blur while manual mode is on — the hook must stay off for
+      // the whole manual session, not just while the text input has focus.
+      if ((e.target as HTMLElement)?.tagName === 'INPUT' && !manualEntryRef.current) {
         send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } });
       }
     };
@@ -191,7 +217,7 @@ export function KeystrokeCaptureDialog({
       document.removeEventListener('focusout', handleFocusOut);
       unsub();
     };
-  }, [send, subscribe]);
+  }, [send, subscribe, manualEntry]);
 
   // Clamp helpers — applied on commit (handleConfirm) and on +/− spinner clicks.
   // Free-form typing is allowed to fall below the lower bound in transient states
@@ -209,17 +235,20 @@ export function KeystrokeCaptureDialog({
   const heldKey = captured ? captured.split('+').pop() ?? captured : '';
 
   const handleConfirm = () => {
-    if (!captured) return;
+    // Trim on commit: manual entry can produce whitespace-only or trailing-space
+    // values the capture hook never could — a whitespace key would silently no-op
+    // at replay with zero diagnostics.
+    if (!captured?.trim()) return;
     if (mode === 'hold') {
       onConfirm({
         actionType: 'HoldKey',
-        key: heldKey,
+        key: heldKey.trim(),
         holdDurationMs: clampHold(holdMsRef.current),
       });
     } else {
       onConfirm({
         actionType: 'Keystroke',
-        key: captured,
+        key: captured.trim(),
         repeat: clampRepeat(repeat),
         repeatDelayMs: clampDelay(repeatDelay),
       });
@@ -251,7 +280,7 @@ export function KeystrokeCaptureDialog({
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={handleConfirm} disabled={captured === null}>
+          <Button variant="primary" onClick={handleConfirm} disabled={!captured?.trim()}>
             {isEditing ? 'Save' : 'Add'}
           </Button>
         </>
@@ -280,7 +309,32 @@ export function KeystrokeCaptureDialog({
           <div
             className="bg-bg-input border border-dashed border-warning/40 rounded-md py-5 px-4 text-center min-h-[156px] flex flex-col justify-center"
           >
-            {captured === null ? (
+            {manualEntry ? (
+              <>
+                <input
+                  ref={manualInputRef}
+                  type="text"
+                  value={captured ?? ''}
+                  onChange={(e) => setCaptured(e.target.value || null)}
+                  placeholder="F5 · Ctrl+S · {var:name}"
+                  spellCheck={false}
+                  className="w-full h-9 px-2 text-[13px] font-mono bg-bg-elevated border border-border-default rounded text-warning text-center outline-none focus:border-accent-solid"
+                />
+                <div className="mt-2.5 text-[10px] text-text-tertiary leading-relaxed">
+                  {mode === 'hold' ? (
+                    // Hold goes through SimulateKey (single virtual-key) — a token
+                    // resolving to a combo would silently no-op, so don't teach it here.
+                    <>Tokens like <code className="text-accent-light">{'{var:name}'}</code> resolve
+                    when the action runs — for Hold, the token must resolve to a{' '}
+                    <span className="text-text-secondary">single key</span> (F5, W, Space…).</>
+                  ) : (
+                    <>Tokens like <code className="text-accent-light">{'{var:name}'}</code> or{' '}
+                    <code className="text-accent-light">{'{clipboard}'}</code> resolve when the
+                    action runs — even into a full combo like Ctrl+V.</>
+                  )}
+                </div>
+              </>
+            ) : captured === null ? (
               <>
                 <div className="text-[12px] text-text-tertiary mb-1">Press any key or combo</div>
                 <div className="text-[10px] text-text-tertiary">
@@ -320,6 +374,17 @@ export function KeystrokeCaptureDialog({
               </>
             )}
           </div>
+
+          {/* Capture ↔ manual toggle. Manual is the only way to put a {var}/{clipboard}
+              token (or a combo the OS shell would swallow) into the Key field — the
+              low-level hook can never capture those. */}
+          <button
+            type="button"
+            onClick={() => setManualEntry(v => !v)}
+            className="self-center -mt-2 text-[10px] text-text-tertiary hover:text-text-secondary underline decoration-dotted transition-colors"
+          >
+            {manualEntry ? 'Back to key capture' : 'Type manually ({var} tokens allowed)'}
+          </button>
 
           {/* Mode toggle — switches the body below between Press and Hold settings.
               Two equal-width buttons read as a segmented control without needing a

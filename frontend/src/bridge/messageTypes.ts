@@ -103,6 +103,11 @@ export interface ActionItem {
   // case-insensitively; an empty resolved value deletes the variable at replay time.
   // null/undefined = never edited (renders as empty in the Sheet).
   variableValue?: string | null;
+  // SetVariable mode: null/undefined = 'set' (store resolved value as-is) |
+  // 'cycle' (value is a list, one item per line; each execution stores the NEXT
+  // line, wrapping; the cursor survives across runs so repeated hotkey presses
+  // walk the list — resets on app restart).
+  variableMode?: string | null;
   // ActivateWindow — find → launch-if-missing → wait → focus. The window MATCHER
   // reuses windowProcessName/windowTitle/windowTitleMatchMode above; `timeout` is the
   // wait-for-window budget. launchPath: exe / bare name / .lnk / document / URL opened
@@ -565,6 +570,8 @@ export type OutgoingMessage =
   | { type: 'actions:bulkUpdateComment'; payload: { indices: number[]; comment: string } }
   | { type: 'actions:toggleSkip'; payload: { indices: number[] } }
   | { type: 'actions:toggleFocusClick'; payload: { indices: number[] } }
+  // Reset a SetVariable cycle row to its first item (clears the in-memory cursor).
+  | { type: 'actions:resetCycle'; payload: { index: number } }
   | { type: 'actions:reorder'; payload: { indices: number[]; targetIndex: number } }
   | { type: 'actions:insertAction'; payload: { actionType: string; insertIndex: number } }
   // Pause insert (Pattern B normalization) — replaces the old "insertAction with

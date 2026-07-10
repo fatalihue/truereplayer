@@ -140,6 +140,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const [browserText, setBrowserText] = useState('');
   // SetVariable — the value half of "name = value"; the name reuses the `key` state.
   const [variableValue, setVariableValue] = useState('');
+  // SetVariable mode: 'set' (default) | 'cycle' (value = list, next line per execution).
+  const [variableMode, setVariableMode] = useState<'set' | 'cycle'>('set');
   // Imperative handle to the Lexical-based BrowserType editor — used by the chip
   // buttons to insertText at the current cursor position instead of always appending.
   const browserTextEditorRef = useRef<LexicalEditorHandle | null>(null);
@@ -432,6 +434,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       setConfidence(String(Math.round((action.confidence || 0.8) * 100)));
       setBrowserText(action.browserText || '');
       setVariableValue(action.variableValue ?? '');
+      setVariableMode(action.variableMode === 'cycle' ? 'cycle' : 'set');
       setNewTab(action.newTab || false);
       setWaitMode(action.waitMode || 'appears');
       setUrlWaitPattern(action.urlWaitPattern || '');
@@ -782,8 +785,15 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
 
     // SetVariable — the value half of "name = value"; the NAME (key state) is already
     // saved by the generic effectiveKey block above.
-    if (actionType === 'SetVariable' && variableValue !== (action.variableValue ?? '')) {
-      send({ type: 'actions:edit', payload: { index: actionIndex, field: 'variableValue', value: variableValue } });
+    if (actionType === 'SetVariable') {
+      if (variableValue !== (action.variableValue ?? '')) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'variableValue', value: variableValue } });
+      }
+      const currentVarMode = action.variableMode === 'cycle' ? 'cycle' : 'set';
+      if (variableMode !== currentVarMode) {
+        // Backend persists only 'cycle'; 'set' round-trips to null on disk.
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'variableMode', value: variableMode === 'cycle' ? 'cycle' : '' } });
+      }
     }
 
     // ActivateWindow — matcher (shared window* fields, no conditionType gate: the type
@@ -839,7 +849,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // from actionType + action.conditionType which are already in the array, so the
     // callback rebinds whenever those change. Listing the derived flags would also
     // be a forward-reference error (they're declared further down the component body).
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, launchPath, launchArgs, activateOnTimeout, alternatives, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, launchPath, launchArgs, activateOnTimeout, alternatives, send, onClose]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
@@ -2620,17 +2630,44 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
                 />
               </Field>
+              <Field label="Mode">
+                <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
+                  {(['set', 'cycle'] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setVariableMode(m)}
+                      className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
+                        variableMode === m
+                          ? 'bg-bg-elevated text-text-primary'
+                          : 'text-text-tertiary hover:text-text-secondary'
+                      }`}
+                      data-tip={m === 'cycle'
+                        ? tt('Value is a LIST (one item per line): each execution stores the NEXT line, wrapping around. The position survives between runs — pressing the hotkey repeatedly walks the list. Resets when the app restarts.', 'O valor é uma LISTA (um item por linha): cada execução grava a PRÓXIMA linha, voltando ao início no fim. A posição sobrevive entre execuções — apertar o hotkey repetidamente percorre a lista. Zera ao reiniciar o app.')
+                        : tt('Store the resolved value as-is on every execution.', 'Grava o valor resolvido como está, em toda execução.')}
+                    >
+                      {m === 'set' ? 'Set' : 'Cycle'}
+                    </button>
+                  ))}
+                </div>
+              </Field>
               <Field
-                label="Value"
-                hint={tt(
-                  'Tokens like {clipboard}, {date} or {var:other} resolve when this action runs. Saving an empty value deletes the variable.',
-                  'Tokens como {clipboard}, {date} ou {var:other} resolvem quando a ação executa. Salvar valor vazio apaga a variável.'
-                )}
+                label={variableMode === 'cycle' ? 'List (one item per line)' : 'Value'}
+                hint={variableMode === 'cycle'
+                  ? tt(
+                      'Each run of this action stores the NEXT line under the name above. Tokens resolve first — a value of just {clipboard} cycles through the clipboard’s lines.',
+                      'Cada execução desta ação grava a PRÓXIMA linha no nome acima. Tokens resolvem antes — um valor com só {clipboard} percorre as linhas da área de transferência.'
+                    )
+                  : tt(
+                      'Tokens like {clipboard}, {date} or {var:other} resolve when this action runs. Saving an empty value deletes the variable.',
+                      'Tokens como {clipboard}, {date} ou {var:other} resolvem quando a ação executa. Salvar valor vazio apaga a variável.'
+                    )}
               >
                 <textarea
-                  rows={2}
+                  rows={variableMode === 'cycle' ? 4 : 2}
                   value={variableValue}
                   onChange={(e) => setVariableValue(e.target.value)}
+                  placeholder={variableMode === 'cycle' ? 'item 1\nitem 2\nitem 3' : undefined}
                   spellCheck={false}
                   className="w-full min-h-[3.25rem] px-2 py-1.5 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid resize-y"
                 />

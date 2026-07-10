@@ -6,7 +6,7 @@ import type { CollisionDetection, DragStartEvent, DragEndEvent } from '@dnd-kit/
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { snapCenterToCursor } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
-import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Braces, AppWindow, Clipboard, Play, Pause, EyeOff } from 'lucide-react';
+import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Braces, AppWindow, Clipboard, Play, Pause, EyeOff, RotateCcw } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -1596,7 +1596,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       : action.actionType === 'SetVariable'
                         // "name = value" reads like the assignment it is; a fresh row
                         // (no name yet) stays blank like an unconfigured WaitImage.
-                        ? (action.key ? `${action.key} = ${action.variableValue ?? ''}` : '')
+                        // Cycle mode reads "name ⟳ N items" — the value is a list, not
+                        // one assignment, so showing line 1 would misrepresent it.
+                        ? (!action.key ? ''
+                          : action.variableMode === 'cycle'
+                            ? (() => {
+                                const n = (action.variableValue ?? '').split('\n').filter(l => l.trim()).length;
+                                return `${action.key} ⟳ ${n} item${n === 1 ? '' : 's'}`;
+                              })()
+                            : `${action.key} = ${action.variableValue ?? ''}`)
                       : action.actionType === 'ActivateWindow'
                         // Matcher summary "proc · title" (— launch marks launch-capable
                         // rows); pure-run rows read "run: <path>". Mirrors C# DisplayKey.
@@ -2014,7 +2022,12 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           : action.actionType.startsWith('Browser') ? action.key
                           // Long variable values truncate at the cell width — expose the
                           // full assignment on hover, same rationale as Browser selectors.
-                          : action.actionType === 'SetVariable' && action.key ? `${action.key} = ${action.variableValue ?? ''}`
+                          // Cycle rows list the items (· separated — the tip layer collapses
+                          // newlines) instead of asserting an "=" assignment that never happens.
+                          : action.actionType === 'SetVariable' && action.key
+                            ? (action.variableMode === 'cycle'
+                                ? `${action.key} ⟳ ${(action.variableValue ?? '').split('\n').filter(l => l.trim()).join(' · ')}`
+                                : `${action.key} = ${action.variableValue ?? ''}`)
                           // Launch paths / matcher summaries truncate too — displayKey
                           // already holds the full untruncated string for this type.
                           : action.actionType === 'ActivateWindow' && displayKey ? displayKey
@@ -2774,6 +2787,30 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         >
                           <ChevronsUpDown size={13} className={expandOk ? 'text-text-tertiary' : 'text-text-disabled'} />
                           Expand × N
+                        </button>
+                      </>
+                    );
+                  })()}
+
+                  {/* Reset cycle position — SetVariable cycle rows only. Clears the
+                      in-memory cursor so the next run starts at the first list item
+                      again (editing the list keeps the position on purpose; this is
+                      the explicit "start over" the list can't trigger itself). */}
+                  {(() => {
+                    const row = actions[contextMenu.rowIndex];
+                    if (!row || row.actionType !== 'SetVariable' || row.variableMode !== 'cycle') return null;
+                    return (
+                      <>
+                        <div className="my-1 border-t border-border-subtle" />
+                        <button
+                          onClick={() => {
+                            send({ type: 'actions:resetCycle', payload: { index: contextMenu.rowIndex } });
+                            closeContextMenu();
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                        >
+                          <RotateCcw size={13} className="text-text-tertiary" />
+                          Reset cycle position
                         </button>
                       </>
                     );

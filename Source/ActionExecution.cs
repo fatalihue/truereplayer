@@ -216,6 +216,12 @@ namespace TrueReplayer.Services
             replayer.SetProfileNameProvider(getProfileName);
         }
 
+        // Reset a SetVariable cycle row to its first item (see ActionReplayer.ResetCycleCursor).
+        public void ResetCycleCursor(string actionId)
+        {
+            replayer.ResetCycleCursor(actionId);
+        }
+
         public void SetProfileLookup(Func<string, Task<Models.UserProfile?>> lookup)
         {
             replayer.SetProfileLookup(lookup);
@@ -1147,6 +1153,18 @@ namespace TrueReplayer.Services
             _browserBridge = browserBridge;
         }
 
+        // Reset a cycle row's position back to item 1. Removes the cursor entry for
+        // this action under the ACTIVE UI profile (the profile the user is looking at
+        // when they right-click the row), so the next execution starts at the first
+        // item again. No-op when the row never cycled (no entry yet). Keyed the same
+        // way ExecuteSetVariable creates the entry — profile name + '|' + action Id.
+        public void ResetCycleCursor(string actionId)
+        {
+            if (string.IsNullOrEmpty(actionId)) return;
+            var profile = _getProfileName?.Invoke() ?? "default";
+            _cycleCursors.Remove(profile + "|" + actionId);
+        }
+
         public void SetProfileNameProvider(Func<string> getProfileName)
         {
             _getProfileName = getProfileName;
@@ -1335,6 +1353,7 @@ namespace TrueReplayer.Services
                 // Fresh run = fresh run state: variables from a previous run must not leak in,
                 // and the counter/row read as "not started" until the loop below stamps them.
                 _runtimeVariables.Clear();
+                _pendingTokenKeyDowns.Clear();
                 _currentIteration = 0;
                 _currentActionRow = 0;
 
@@ -1551,8 +1570,27 @@ namespace TrueReplayer.Services
                 {
                     switch (action.ActionType)
                     {
-                        case "KeyDown": SimulateKey(action.Key, true); break;
-                        case "KeyUp": SimulateKey(action.Key, false); break;
+                        case "KeyDown": {
+                            // Token keys record their resolution under the RAW key text so the
+                            // matching KeyUp releases exactly what was pressed — {var} can change
+                            // (SetVariable in between), {random} re-rolls, {clipboard} is live.
+                            // Without the pairing, the up would target a different key and the
+                            // pressed one would stay stuck past a normally-completed run.
+                            var downKey = await ResolveKeyTokens(action.Key);
+                            if (action.Key.IndexOf('{') >= 0)
+                                _pendingTokenKeyDowns[action.Key] = downKey;
+                            SimulateKey(downKey, true);
+                            break;
+                        }
+                        case "KeyUp": {
+                            string upKey;
+                            if (action.Key.IndexOf('{') >= 0 && _pendingTokenKeyDowns.Remove(action.Key, out var pairedDown))
+                                upKey = pairedDown;
+                            else
+                                upKey = await ResolveKeyTokens(action.Key);
+                            SimulateKey(upKey, false);
+                            break;
+                        }
                         case "HoldKey": {
                             // Send KEYDOWN, hold the configured duration, then KEYUP. The
                             // SimulateKey tracker (Add on isDown / Remove on !isDown) keeps
@@ -1562,10 +1600,13 @@ namespace TrueReplayer.Services
                             int duration = action.HoldDurationMs > 0
                                 ? Math.Max(10, Math.Min(60000, action.HoldDurationMs))
                                 : ActionItem.DefaultHoldDurationMs;
-                            SimulateKey(action.Key, true);
+                            // Resolve ONCE and reuse for both halves — the down and up must
+                            // agree on the key string or the stuck-key tracker desyncs.
+                            var holdKey = await ResolveKeyTokens(action.Key);
+                            SimulateKey(holdKey, true);
                             try { await Task.Delay(duration, token); }
                             catch (OperationCanceledException) { /* ResetKeyState releases */ }
-                            SimulateKey(action.Key, false);
+                            SimulateKey(holdKey, false);
                             break;
                         }
                         case "Keystroke": {
@@ -1576,9 +1617,12 @@ namespace TrueReplayer.Services
                             // of waiting for the whole burst to finish.
                             int repeats = Math.Max(1, Math.Min(999, action.RepeatCount));
                             int gap = Math.Max(0, Math.Min(5000, action.RepeatDelayMs ?? ActionItem.DefaultRepeatDelayMs));
+                            // Resolve once, outside the burst — no other action runs between
+                            // repeats, so the value can't legitimately change mid-burst.
+                            var combo = await ResolveKeyTokens(action.Key);
                             for (int r = 0; r < repeats; r++) {
                                 if (token.IsCancellationRequested) break;
-                                SimulateKeystroke(action.Key, token);
+                                SimulateKeystroke(combo, token);
                                 if (r < repeats - 1 && gap > 0) {
                                     try { await Task.Delay(gap, token); }
                                     catch (OperationCanceledException) { break; }
@@ -2641,9 +2685,28 @@ namespace TrueReplayer.Services
         // lowercased). Same shape as the {var:name} token regex below — keep the two in sync.
         private static readonly Regex VariableNameRegex = new(@"^[A-Za-z0-9_]+$", RegexOptions.Compiled);
 
+        // Cycle-mode cursors, keyed by executing-profile-name + ActionItem.Id.
+        // Deliberately NOT cleared in StartAsync — surviving across runs is the
+        // feature: each hotkey press walks the list one item further. Session-lifetime
+        // only (the replayer instance is created once per app session); an app restart
+        // starts lists over at item 1. The profile-name half of the key matters:
+        // Profile Duplicate is a raw File.Copy and import keeps envelope Actions
+        // verbatim, so the SAME action Id can exist in several profiles — Id alone
+        // would make copies share (and fight over) one cursor. Row-level copies are
+        // covered the other way: Clone() gives duplicated rows a fresh Id. Renaming a
+        // profile resets its cursors (acceptable for session-only state); deleted rows
+        // strand a dead int (negligible).
+        private readonly Dictionary<string, int> _cycleCursors = new(StringComparer.Ordinal);
+
         // SetVariable action: resolve the value's tokens against the live run state, then write
         // (or, for an empty resolved value, delete) the entry. Pure state mutation — no input
         // simulation, no extra delay beyond the row's own Delay.
+        //
+        // Cycle mode (VariableMode == "cycle"): the RESOLVED value is treated as a list
+        // (one item per line, blank lines dropped) and each execution stores the NEXT
+        // line, wrapping around. Resolution happens before the split on purpose — a
+        // value of just {clipboard} cycles through the clipboard's lines. The modulo
+        // keeps an old cursor valid when the list shrinks between presses.
         private async Task ExecuteSetVariable(ActionItem action)
         {
             var name = action.Key?.Trim();
@@ -2653,6 +2716,25 @@ namespace TrueReplayer.Services
             // escapeBracesInSubstitution:false — the dict stores raw text; brace-escaping (for the
             // SendText segment parser) happens later, at {var} substitution time on that path.
             var value = await ResolveTokens(action.VariableValue ?? string.Empty);
+
+            if (string.Equals(action.VariableMode, "cycle", StringComparison.OrdinalIgnoreCase))
+            {
+                var items = value.Replace("\r\n", "\n").Split('\n')
+                    .Where(l => !string.IsNullOrWhiteSpace(l))
+                    .ToArray();
+                if (items.Length == 0)
+                {
+                    _runtimeVariables.Remove(key); // empty list = delete (same contract as set mode)
+                    return;
+                }
+                var idPart = string.IsNullOrEmpty(action.Id) ? key : action.Id; // Id always set in practice
+                var cursorKey = CurrentExecutingProfileName + "|" + idPart;
+                _cycleCursors.TryGetValue(cursorKey, out int cursor);
+                _runtimeVariables[key] = items[((cursor % items.Length) + items.Length) % items.Length];
+                _cycleCursors[cursorKey] = (cursor + 1) % items.Length;
+                return;
+            }
+
             if (string.IsNullOrEmpty(value))
                 _runtimeVariables.Remove(key);   // empty value = delete (documented contract)
             else
@@ -3701,6 +3783,32 @@ namespace TrueReplayer.Services
         // event arrives. Without it, fast apps (some games, terminals) can drop the
         // modifier from their state machine and treat the keystroke as if only the key
         // was pressed bare. 10 ms is below human-perceptible latency.
+        // Keystroke / KeyDown / KeyUp / HoldKey: the Key field accepts the same tokens
+        // as the text fields ({var:name}, {clipboard}, {random:a-b}, …). Resolved here,
+        // BEFORE SimulateKeystroke's '+' split, so a variable holding a whole combo
+        // ("Ctrl+V") works. Plain keys (no '{') never touch the async resolver — the
+        // hot path in tight repeat loops stays synchronous. escapeBraces:false — the
+        // resolved value must remain a literal key name; ParseSendTextSegments never
+        // runs on this path.
+        private async Task<string> ResolveKeyTokens(string key)
+        {
+            if (string.IsNullOrEmpty(key) || key.IndexOf('{') < 0) return key;
+            var resolved = (await ResolveTokens(key)).Trim();
+            if (resolved.Length == 0)
+                DiagnosticLog.Warn($"Key '{key}' resolved to empty — press skipped");
+            return resolved;
+        }
+
+        // KeyDown resolutions awaiting their KeyUp, keyed by the RAW (token) key text.
+        // Guarantees a down/up pair with identical token text presses and releases the
+        // SAME key even when the token would resolve differently by the KeyUp row.
+        private readonly Dictionary<string, string> _pendingTokenKeyDowns = new(StringComparer.OrdinalIgnoreCase);
+
+        // Last key SimulateKey warned about — dedupes the unrecognizable-key warning so
+        // a misspelled key inside a tight/infinite loop logs once, not once per press
+        // (DiagnosticLog appends synchronously per line; it is for low-volume events).
+        private string? _lastUnrecognizedKeyWarned;
+
         private void SimulateKeystroke(string keystroke, CancellationToken token = default)
         {
             if (string.IsNullOrWhiteSpace(keystroke)) return;
@@ -3753,7 +3861,22 @@ namespace TrueReplayer.Services
 
         private void SimulateKey(string key, bool isDown)
         {
-            if (!Helpers.KeyUtils.TryResolveVirtualKeyCode(key, out ushort vk)) return;
+            if (!Helpers.KeyUtils.TryResolveVirtualKeyCode(key, out ushort vk))
+            {
+                // Was a silent no-op — surface it in the session log: an unresolvable
+                // key here is almost always a typo'd key name or a {var} that resolved
+                // to something that isn't a key. Empty strings stay quiet (the resolver
+                // already logged the resolved-to-empty case), and repeats of the SAME
+                // bad key are deduped — a Keystroke ×999 or an infinite loop must not
+                // turn one typo into thousands of synchronous log appends.
+                if (!string.IsNullOrWhiteSpace(key)
+                    && !string.Equals(_lastUnrecognizedKeyWarned, key, StringComparison.Ordinal))
+                {
+                    _lastUnrecognizedKeyWarned = key;
+                    DiagnosticLog.Warn($"Key press skipped: '{key}' is not a recognizable key");
+                }
+                return;
+            }
             bool isExtended = ExtendedVkCodes.Contains(vk);
             ushort scan = (ushort)NativeMethods.MapVirtualKey(vk, 0);
 

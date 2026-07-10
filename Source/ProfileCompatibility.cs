@@ -94,6 +94,14 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "ActivateWindow", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 7, 5), "Activate Window"),
 
+            // SetVariable Cycle mode — older builds drop the unknown VariableMode property
+            // and run the row in SET mode, storing the ENTIRE multi-line list instead of
+            // one item per execution (silent semantic change, exactly what this matrix
+            // gates). Pinned to the build that introduces it (2.7.5) — BUMP in lockstep
+            // with the app version at release (expected 2.8.0), same as Activate Window.
+            (p => p.Actions.Any(a => string.Equals(a.VariableMode, "cycle", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 7, 5), "Set Variable cycle mode"),
+
             // Restore Size split from Restore Position in 2.0.5; older builds only honour Position.
             (p => p.RestoreSize,
                 new Version(2, 0, 5), "RestoreSize"),

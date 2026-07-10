@@ -220,6 +220,17 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? VariableValue { get; set; }
 
+        // SetVariable mode. null (default) = "set": store the resolved value as-is.
+        // "cycle": treat the resolved value as a LIST (one item per line) and store the
+        // NEXT line on each execution, wrapping around. The cursor lives OUTSIDE the
+        // run state (ActionReplayer._cycleCursors, keyed by this action's Id), so
+        // pressing the profile hotkey repeatedly walks the list one item per press —
+        // it survives across runs and resets only on app restart. Because tokens
+        // resolve BEFORE the split, a value of just {clipboard} cycles through the
+        // clipboard's lines.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? VariableMode { get; set; }
+
         // ── ActivateWindow (ActionType == "ActivateWindow") ──
         // Combined find → launch-if-missing → wait → focus action. The window MATCHER
         // reuses the If-Window fields above (WindowProcessName / WindowTitle /
@@ -553,6 +564,7 @@ namespace TrueReplayer.Models
             TypeDelay = TypeDelay,
             SelectMatchMode = SelectMatchMode,
             VariableValue = VariableValue,
+            VariableMode = VariableMode,
             LaunchPath = LaunchPath,
             LaunchArgs = LaunchArgs,
             ActivateOnTimeout = ActivateOnTimeout,
