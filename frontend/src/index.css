@@ -557,6 +557,12 @@ html[data-animations="true"] .drop-gap-slot {
   text-transform: uppercase;
 }
 
+/* Insert Text writing surface — full-bleed editor with an inset accent hairline
+   on focus (a border would shift the layout; inset box-shadow doesn't). */
+.sendtext-editor:focus-within {
+  box-shadow: inset 0 0 0 1px var(--color-accent-solid);
+}
+
 /* Kbd tag utilities */
 @utility kbd {
   display: inline-flex;

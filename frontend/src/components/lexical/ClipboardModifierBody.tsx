@@ -253,16 +253,22 @@ export function ClipboardModifierBody({
           )}
         </div>
         <div className="text-[9px] uppercase tracking-wide text-text-tertiary mb-0.5">Token</div>
-        <div className="font-mono text-[11.5px] px-2 py-0.5 mb-1.5 rounded text-[#f0abfc] bg-[#d946ef]/10 break-all">
+        <div
+          className="font-mono text-[11.5px] px-2 py-0.5 mb-1.5 rounded break-all"
+          style={{
+            color: 'var(--color-action-sendtext-fg)',
+            background: 'color-mix(in srgb, var(--color-action-sendtext-fg) 10%, transparent)',
+          }}
+        >
           {token}
         </div>
         <div className="text-[9px] uppercase tracking-wide text-text-tertiary mb-0.5">Preview</div>
         <div
           className="font-mono text-[11px] px-2 py-0.5 rounded border-l-2 whitespace-pre-wrap break-all min-h-[20px] max-h-[72px] overflow-auto"
           style={{
-            background: 'rgba(107, 203, 119, 0.08)',
-            borderColor: 'rgba(107, 203, 119, 0.5)',
-            color: '#6bcb77',
+            background: 'color-mix(in srgb, var(--color-replay) 8%, transparent)',
+            borderColor: 'color-mix(in srgb, var(--color-replay) 50%, transparent)',
+            color: 'var(--color-replay)',
           }}
         >
           {preview === '' ? <span className="italic text-text-disabled">(empty)</span> : preview}

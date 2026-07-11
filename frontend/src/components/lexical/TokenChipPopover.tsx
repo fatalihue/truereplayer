@@ -29,7 +29,7 @@ const REPEATABLE_TOKEN_NAMES = new Set([
   'right',
 ]);
 
-type TokenKind = 'clipboard' | 'delay' | 'repeatable' | 'random' | 'static';
+type TokenKind = 'clipboard' | 'delay' | 'repeatable' | 'random' | 'var' | 'rowcol' | 'static';
 
 function getTokenKind(token: string): TokenKind {
   const inner = token.slice(1, -1);
@@ -37,8 +37,19 @@ function getTokenKind(token: string): TokenKind {
   if (name === 'clipboard') return 'clipboard';
   if (name === 'delay') return 'delay';
   if (name === 'random') return 'random';
+  // {var:name} edits its variable name; bare {row} is a static counter while
+  // {row:column} edits its data-table column name.
+  if (name === 'var') return 'var';
+  if (name === 'row' && inner.includes(':')) return 'rowcol';
   if (REPEATABLE_TOKEN_NAMES.has(name)) return 'repeatable';
   return 'static';
+}
+
+// The name arg of {var:...}/{row:...} — verbatim (normalizeToken never touches it).
+function parseNameArg(token: string): string {
+  const inner = token.slice(1, -1);
+  const idx = inner.indexOf(':');
+  return idx >= 0 ? inner.slice(idx + 1) : '';
 }
 
 function parseRepeatable(token: string): { name: string; n: number } {
@@ -160,6 +171,9 @@ export function TokenChipPopover({
   return ReactDOM.createPortal(
     <div
       ref={popRef}
+      // Marker for host-level Esc routers (SendTextDialog): when a chip popover
+      // is open, its own capture-phase Esc owns the key — routers must stand down.
+      data-token-popover=""
       onMouseDown={(e) => e.stopPropagation()}
       style={{
         position: 'fixed',
@@ -167,7 +181,7 @@ export function TokenChipPopover({
         zIndex: 100,
         width: kind === 'clipboard' ? 300 : 260,
         background: 'var(--color-bg-elevated, #2d2d2d)',
-        border: '1px solid rgba(96, 205, 255, 0.35)',
+        border: '1px solid color-mix(in srgb, var(--color-accent-solid) 35%, transparent)',
         boxShadow: '0 16px 40px rgba(0, 0, 0, 0.55)',
         animation: 'token-chip-pop-in 0.14s ease',
         maxHeight: 'calc(100vh - 24px)',
@@ -186,7 +200,9 @@ export function TokenChipPopover({
         {kind === 'delay' && <DelayEditor token={token} onChange={updateLive} />}
         {kind === 'repeatable' && <RepeatableEditor token={token} onChange={updateLive} />}
         {kind === 'random' && <RandomEditor token={token} onChange={updateLive} />}
-        {kind === 'static' && <StaticInfo />}
+        {kind === 'var' && <NameEditor token={token} tokenName="var" onChange={updateLive} />}
+        {kind === 'rowcol' && <NameEditor token={token} tokenName="row" onChange={updateLive} />}
+        {kind === 'static' && <StaticInfo token={token} />}
       </div>
 
       <Footer kind={kind} onDelete={onDelete} />
@@ -199,7 +215,10 @@ function Header({ token, onClose }: { token: string; onClose: () => void }) {
   return (
     <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-border-subtle bg-bg-card shrink-0">
       <Wand2 size={14} className="text-accent-light shrink-0" />
-      <div className="text-xs font-mono text-[#f0abfc] flex-1 truncate">
+      <div
+        className="text-xs font-mono flex-1 truncate"
+        style={{ color: 'var(--color-action-sendtext-fg)' }}
+      >
         {token}
       </div>
       <button
@@ -349,10 +368,91 @@ function RandomEditor({ token, onChange }: { token: string; onChange: (t: string
   );
 }
 
-function StaticInfo() {
+// Shared editor for the name-bearing tokens: {var:name} (runtime variable) and
+// {row:column} (data-table column). Emits only on real input with a non-empty
+// name — clearing the field never emits a broken `{var:}`, and merely opening
+// then closing the chip never rewrites it (same guard family as DelayEditor).
+function NameEditor({
+  token,
+  tokenName,
+  onChange,
+}: {
+  token: string;
+  tokenName: 'var' | 'row';
+  onChange: (t: string) => void;
+}) {
+  const [name, setName] = useState(() => parseNameArg(token));
+  const label = tokenName === 'var' ? 'Variable name' : 'Data column';
+
+  const update = (raw: string) => {
+    // Same charset the typing grammar chips ([A-Za-z0-9_]) — anything else
+    // would produce a token the editor immediately un-chips on round-trip.
+    const clean = raw.replace(/[^A-Za-z0-9_]/g, '');
+    setName(clean);
+    if (clean.length > 0) onChange(`{${tokenName}:${clean}}`);
+  };
+
+  return (
+    <Section label={label}>
+      <div className="py-1">
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => update(e.target.value)}
+          autoFocus
+          spellCheck={false}
+          placeholder={tokenName === 'var' ? 'name' : 'column'}
+          className="h-7 w-full px-2 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid placeholder:text-text-disabled"
+        />
+      </div>
+      <div className="text-[10px] text-text-tertiary mt-1">
+        {tokenName === 'var'
+          ? 'Replaced with the value a Set Variable action stored under this name.'
+          : "Replaced with this column's cell of the current data row (loop over data)."}
+      </div>
+    </Section>
+  );
+}
+
+// Zero-pads to two digits — matches the backend's dd/MM/yyyy HH:mm:ss formats.
+function p2(n: number): string {
+  return n < 10 ? '0' + n : String(n);
+}
+
+// Live resolved value / description for tokens without editable parameters.
+// Date/time formats mirror the backend's ResolveDateTimeTokens exactly.
+function staticTokenInfo(token: string): { value?: string; note?: string } {
+  const name = token.slice(1, -1).split(':')[0].toLowerCase();
+  const now = new Date();
+  const date = `${p2(now.getDate())}/${p2(now.getMonth() + 1)}/${now.getFullYear()}`;
+  const time = `${p2(now.getHours())}:${p2(now.getMinutes())}:${p2(now.getSeconds())}`;
+  switch (name) {
+    case 'date': return { value: date };
+    case 'time': return { value: time };
+    case 'datetime': return { value: `${date} - ${time}` };
+    case 'counter': return { note: 'Replaced with the current loop iteration (1, 2, 3…) while replaying.' };
+    case 'row': return { note: "Replaced with the current action's grid row number while replaying." };
+    default: return {};
+  }
+}
+
+function StaticInfo({ token }: { token: string }) {
+  const { value, note } = staticTokenInfo(token);
+  if (value) {
+    return (
+      <div className="px-3.5 py-3">
+        <div className="text-[10px] uppercase tracking-wide font-semibold text-text-tertiary mb-1">
+          Resolves now to
+        </div>
+        <div className="text-xs font-mono text-text-primary bg-bg-input border border-border-subtle rounded px-2 py-1">
+          {value}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="px-3.5 py-3 text-[11px] text-text-tertiary">
-      This token has no editable parameters. Use Delete to remove it.
+      {note ?? 'This token has no editable parameters. Use Delete to remove it.'}
     </div>
   );
 }

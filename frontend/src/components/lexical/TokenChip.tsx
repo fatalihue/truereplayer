@@ -1,8 +1,24 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { $getNodeByKey, type NodeKey } from 'lexical';
 import { TokenNode } from './TokenNode';
 import { TokenChipPopover } from './TokenChipPopover';
+
+// Host-provided handler for editing a {clipboard...} chip in a LARGER surface
+// than the default 300px popover. SendTextDialog provides one (routing to its
+// full-body Clipboard Surface); SheetPanel doesn't — chips there fall back to
+// the popover, byte-identical to the old behavior. Defined here (not in
+// LexicalTokenEditor) so the provider module can import it without a cycle.
+export interface ClipboardChipEditRequest {
+  /** The chip's current token text, e.g. `{Clipboard:trim:upper}`. */
+  token: string;
+  /** Commit a replacement token back onto the chip (no-ops if unchanged upstream). */
+  commit: (next: string) => void;
+  /** Remove the chip from the editor. */
+  remove: () => void;
+}
+export const ClipboardChipEditContext =
+  createContext<((req: ClipboardChipEditRequest) => void) | null>(null);
 
 // React decorator content for a TokenNode. Owns the popover open state AND the
 // commit logic — every close path (Esc, click outside, ✕, clicking the chip
@@ -13,6 +29,7 @@ import { TokenChipPopover } from './TokenChipPopover';
 // what used to cause controlled inputs in the popover to lose characters.
 export function TokenChip({ nodeKey, token }: { nodeKey: NodeKey; token: string }) {
   const [editor] = useLexicalComposerContext();
+  const onClipboardChipEdit = useContext(ClipboardChipEditContext);
   const [open, setOpen] = useState(false);
   // Use the state-setter as the ref callback so we never read a ref value
   // during render — the popover anchor lives in state and updates when the
@@ -52,6 +69,24 @@ export function TokenChip({ nodeKey, token }: { nodeKey: NodeKey; token: string 
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    // Clipboard chips route to the host's large edit surface when one is
+    // provided (Insert Text dialog); otherwise (SheetPanel) the popover below
+    // opens exactly as before. Do NOT remove this dispatch as "dead" — the
+    // provider lives in a different tree (SendTextDialog via context).
+    if (onClipboardChipEdit && /^\{clipboard(?::|\})/i.test(token)) {
+      onClipboardChipEdit({
+        token,
+        commit: (next: string) => {
+          if (next === token) return;
+          editor.update(() => {
+            const node = $getNodeByKey(nodeKey);
+            if (node instanceof TokenNode) node.setToken(next);
+          });
+        },
+        remove: handleDelete,
+      });
+      return;
+    }
     if (open) handleClose();
     else setOpen(true);
   };

@@ -22,9 +22,12 @@ import {
   type LexicalNode,
 } from 'lexical';
 import { TokenNode, $createTokenNode, $isTokenNode } from './TokenNode';
+import { ClipboardChipEditContext, type ClipboardChipEditRequest } from './TokenChip';
 
 // Tokens recognised by the backend at runtime. Anything outside this set stays
 // as plain text — typo'd `{xpto}` shouldn't masquerade as a real token chip.
+// {esc} (SendText's literal-brace escape) is deliberately NOT here — chipping
+// it would hide the escape mechanism it exists to expose.
 const KNOWN_TOKEN_NAMES: ReadonlySet<string> = new Set([
   'clipboard',
   'date',
@@ -46,15 +49,35 @@ const KNOWN_TOKEN_NAMES: ReadonlySet<string> = new Set([
   'right',
   'delay',
   'random',
+  // Run-state tokens (2.8.0): first-class chips like everything else the
+  // backend resolves — {var:name}, {counter}, {row}, {row:column}.
+  'var',
+  'counter',
+  'row',
 ]);
 
-// Modifier segments allow digits/letters plus ',' and '-' so {Random:1-10},
-// {Clipboard:range:2-4} and {Clipboard:lines:3,1,2} chip correctly. Separators
-// with other characters (e.g. join:" - ") stay plain text when typed — they
-// still work at runtime; chips built via the popover keep chip-ness regardless.
-const TOKEN_REGEX = /\{[a-zA-Z]+(?::[a-zA-Z0-9,-]+)*\}/g;
+// Modifier segments allow digits/letters plus ',', '-' and '_' so {Random:1-10},
+// {Clipboard:lines:3,1,2} and {var:my_name} chip correctly. Separators with
+// other characters (e.g. join:" - ") stay plain text when typed — they still
+// work at runtime; chips built via the popover keep chip-ness regardless.
+const TOKEN_REGEX = /\{[a-zA-Z]+(?::[a-zA-Z0-9,_-]+)*\}/g;
 // Non-global form for single-match .exec() — stateless, so safe to share across calls.
 const TOKEN_REGEX_SINGLE = new RegExp(TOKEN_REGEX.source);
+
+// Counts the known-token chips a serialized payload contains — powers the
+// "N tokens" figure in the Insert Text status strip. Same regex + whitelist as
+// the chipping pipeline so the count always matches what the user sees as chips.
+export function countKnownTokens(text: string): number {
+  if (!text.includes('{')) return 0;
+  let count = 0;
+  const regex = new RegExp(TOKEN_REGEX.source, 'g');
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const name = match[0].slice(1, -1).split(':')[0].toLowerCase();
+    if (KNOWN_TOKEN_NAMES.has(name)) count++;
+  }
+  return count;
+}
 
 export interface LexicalEditorHandle {
   /** Insert text at the current cursor; known `{...}` substrings become chips. */
@@ -74,6 +97,14 @@ interface LexicalTokenEditorProps {
   onChange: (text: string) => void;
   onSubmit?: () => void;
   apiRef: React.MutableRefObject<LexicalEditorHandle | null>;
+  /** ContentEditable classes. Default = the compact SheetPanel look; the Insert
+   *  Text dialog passes its roomier full-bleed recipe. */
+  contentClassName?: string;
+  /** Placeholder classes — must mirror contentClassName's padding. */
+  placeholderClassName?: string;
+  /** When provided, clicking a {clipboard...} chip routes HERE instead of the
+   *  built-in 300px popover (see ClipboardChipEditContext). */
+  onClipboardChipEdit?: (req: ClipboardChipEditRequest) => void;
 }
 
 // Splits `text` into alternating plain TextNodes and TokenNodes. Unknown tokens
@@ -347,6 +378,9 @@ export function LexicalTokenEditor({
   onChange,
   onSubmit,
   apiRef,
+  contentClassName = 'w-full h-full px-3 py-2 text-sm leading-[1.5] outline-none whitespace-pre-wrap break-words text-text-primary overflow-auto',
+  placeholderClassName = 'absolute top-2 left-3 text-sm text-text-disabled pointer-events-none select-none',
+  onClipboardChipEdit,
 }: LexicalTokenEditorProps) {
   const initialConfig = {
     namespace: 'SendText',
@@ -361,17 +395,19 @@ export function LexicalTokenEditor({
 
   return (
     <LexicalComposer initialConfig={initialConfig}>
+      {/* Context flows through Lexical's decorator portals, so TokenChip sees it. */}
+      <ClipboardChipEditContext.Provider value={onClipboardChipEdit ?? null}>
       <div className="relative w-full h-full">
         <PlainTextPlugin
           contentEditable={
             <ContentEditable
-              className="w-full h-full px-3 py-2 text-sm leading-[1.5] outline-none whitespace-pre-wrap break-words text-text-primary overflow-auto"
+              className={contentClassName}
               aria-label="Text to send"
               spellCheck={false}
             />
           }
           placeholder={
-            <div className="absolute top-2 left-3 text-sm text-text-disabled pointer-events-none select-none">
+            <div className={placeholderClassName}>
               Type the text to send...
             </div>
           }
@@ -392,6 +428,7 @@ export function LexicalTokenEditor({
         <ChipKeyboardPlugin />
         <SubmitPlugin onSubmit={onSubmit} />
       </div>
+      </ClipboardChipEditContext.Provider>
     </LexicalComposer>
   );
 }

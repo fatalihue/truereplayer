@@ -26,6 +26,10 @@ export interface DialogShellProps {
   title: string;
   /** Tailwind width class for the card. */
   widthClass?: string;
+  /** Tailwind max-width clamp for the card. Default preserves the historical 90vw
+   *  clamp; space-hungry dialogs (Insert Text) pass a tighter-gutter clamp like
+   *  'max-w-[calc(100vw-24px)]' to use the whole window at the minimum app size. */
+  maxWidthClass?: string;
   /** Called after the exit animation completes (or immediately when animations are off). */
   onClose: () => void;
   /** Dismiss when the scrim is clicked. Default true; capture dialogs pass false. */
@@ -52,6 +56,7 @@ export function DialogShell({
   icon,
   title,
   widthClass = 'w-[440px]',
+  maxWidthClass = 'max-w-[90vw]',
   onClose,
   closeOnBackdrop = true,
   showClose = false,
@@ -114,7 +119,7 @@ export function DialogShell({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`dialog-card bg-bg-elevated border border-border-subtle rounded-lg shadow-xl ${widthClass} max-w-[90vw] flex flex-col outline-none`}
+        className={`dialog-card bg-bg-elevated border border-border-subtle rounded-lg shadow-xl ${widthClass} ${maxWidthClass} flex flex-col outline-none`}
         onClick={(e) => e.stopPropagation()}
         // Only the card's OWN dialog-out end may unmount — animationend bubbles,
         // so a child's finishing animation must not close the dialog early.
