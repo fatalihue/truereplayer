@@ -3246,7 +3246,9 @@ namespace TrueReplayer.Services
         {
             bool isClipboard = string.Equals(action.ConditionType, "ClipboardMatch", StringComparison.OrdinalIgnoreCase);
             bool isBrowserElement = string.Equals(action.ConditionType, "BrowserElementState", StringComparison.OrdinalIgnoreCase);
-            if (!isClipboard && !isBrowserElement)
+            bool isVariable = string.Equals(action.ConditionType, "Variable", StringComparison.OrdinalIgnoreCase);
+            bool isFileExists = string.Equals(action.ConditionType, "FileExists", StringComparison.OrdinalIgnoreCase);
+            if (!isClipboard && !isBrowserElement && !isVariable && !isFileExists)
                 return InstantProbe(action, token);
 
             token.ThrowIfCancellationRequested();
@@ -3257,6 +3259,14 @@ namespace TrueReplayer.Services
                 {
                     var clip = await ReadClipboardTextAsync(dispatcherQueue) ?? string.Empty;
                     rawResult = EvaluateClipboardPattern(clip, action);
+                }
+                else if (isVariable)
+                {
+                    rawResult = await ProbeVariableAsync(action);
+                }
+                else if (isFileExists)
+                {
+                    rawResult = await ProbeFileExistsAsync(action);
                 }
                 else
                 {
@@ -3347,6 +3357,92 @@ namespace TrueReplayer.Services
         private static (Models.WindowTarget Target, Regex? TitleRegex) BuildWindowTargetFromAction(ActionItem action)
             => BuildWindowTarget(action.WindowProcessName, action.WindowTitle, action.WindowTitleMatchMode);
 
+        // If-Random raw probe: TRUE with probability RandomPercent/100. Stateless, rolls
+        // fresh each check (Random.Shared, same source as delay jitter and {random:a-b}).
+        // 0 → never, 100 → always. Clamped so a hand-edited out-of-range value is sane.
+        private static bool ProbeRandom(ActionItem action)
+        {
+            int pct = Math.Clamp(action.RandomPercent, 0, 100);
+            return Random.Shared.Next(100) < pct;
+        }
+
+        // If-Process raw probe: TRUE when a process with the given image name is running,
+        // window or not (broader than If-Window). Reuses the process-name field of If-Window
+        // and the GetProcessesByName pattern (same as AppIconService). ".exe" stripped since
+        // GetProcessesByName wants the bare name.
+        private static bool ProbeProcessRunning(ActionItem action)
+        {
+            var name = action.WindowProcessName?.Trim();
+            if (string.IsNullOrEmpty(name)) return false;
+            if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                name = name[..^4];
+            System.Diagnostics.Process[] procs;
+            try { procs = System.Diagnostics.Process.GetProcessesByName(name); }
+            catch { return false; }
+            try { return procs.Length > 0; }
+            finally { foreach (var p in procs) p.Dispose(); }
+        }
+
+        // If-Time raw probe: TRUE when local time is inside [TimeStart, TimeEnd] AND today is
+        // selected in DaysOfWeek. Empty times = day-only (time check passes). start > end =
+        // overnight window (22:00–02:00 → in-window when now ≥ start OR now ≤ end). Local time
+        // to match the token engine's {time}. DaysOfWeek 0 = every day.
+        private static bool ProbeTimeWindow(ActionItem action)
+        {
+            var now = DateTime.Now;
+            bool dayOk = action.DaysOfWeek == 0 || (action.DaysOfWeek & (1 << (int)now.DayOfWeek)) != 0;
+            if (!dayOk) return false;
+
+            bool hasStart = TimeSpan.TryParse(action.TimeStart, System.Globalization.CultureInfo.InvariantCulture, out var start);
+            bool hasEnd = TimeSpan.TryParse(action.TimeEnd, System.Globalization.CultureInfo.InvariantCulture, out var end);
+            if (!hasStart || !hasEnd) return true; // day-only mode (or partial config) — day already matched
+
+            var t = now.TimeOfDay;
+            return start <= end
+                ? (t >= start && t <= end)      // normal same-day window
+                : (t >= start || t <= end);     // overnight wrap-around
+        }
+
+        // If-Variable raw probe: compares the runtime variable named in Key against the
+        // resolved operand. Async because the operand runs the full token pipeline (may hit
+        // {clipboard}). Missing variable → "". gt/lt coerce to numeric when both sides parse
+        // (InvariantCulture); eq/neq/contains are case-insensitive string (house style).
+        private async Task<bool> ProbeVariableAsync(ActionItem action)
+        {
+            var name = action.Key?.Trim();
+            if (string.IsNullOrEmpty(name)) return false; // unconfigured
+            var lhs = _runtimeVariables.TryGetValue(name.ToLowerInvariant(), out var v) ? v : string.Empty;
+            var rhs = await ResolveTokens(action.ConditionOperand ?? string.Empty);
+            var op = action.ConditionOperator?.ToLowerInvariant() ?? "eq";
+            switch (op)
+            {
+                case "neq":
+                    return !string.Equals(lhs, rhs, StringComparison.OrdinalIgnoreCase);
+                case "contains":
+                    return lhs.IndexOf(rhs, StringComparison.OrdinalIgnoreCase) >= 0;
+                case "gt":
+                case "lt":
+                    bool lok = double.TryParse(lhs, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var ln);
+                    bool rok = double.TryParse(rhs, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var rn);
+                    if (lok && rok) return op == "gt" ? ln > rn : ln < rn;
+                    // Non-numeric → lexical comparison so the operator still means something.
+                    int cmp = string.Compare(lhs, rhs, StringComparison.OrdinalIgnoreCase);
+                    return op == "gt" ? cmp > 0 : cmp < 0;
+                default: // "eq"
+                    return string.Equals(lhs, rhs, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        // If-File raw probe: TRUE when the resolved path exists as a file OR directory.
+        // Async so the path can carry {clipboard}/{var}/{date} tokens. Empty → false.
+        private async Task<bool> ProbeFileExistsAsync(ActionItem action)
+        {
+            var path = (await ResolveTokens(action.FilePath ?? string.Empty)).Trim();
+            if (string.IsNullOrEmpty(path)) return false;
+            try { return System.IO.File.Exists(path) || System.IO.Directory.Exists(path); }
+            catch { return false; } // malformed path (illegal chars, too long) → not found
+        }
+
         // Used by IF rows to decide which branch to take — a SINGLE-SHOT probe (the optional
         // "wait up to N ms for the condition" polling lives in EvaluateConditionWithTimeout above).
         // One screen capture + match (image) or one pixel read (pixel), completes in ~tens of
@@ -3375,6 +3471,18 @@ namespace TrueReplayer.Services
                 else if (string.Equals(action.ConditionType, "WindowOpen", StringComparison.OrdinalIgnoreCase))
                 {
                     rawResult = ProbeWindowOpen(action);
+                }
+                else if (string.Equals(action.ConditionType, "Random", StringComparison.OrdinalIgnoreCase))
+                {
+                    rawResult = ProbeRandom(action);
+                }
+                else if (string.Equals(action.ConditionType, "ProcessRunning", StringComparison.OrdinalIgnoreCase))
+                {
+                    rawResult = ProbeProcessRunning(action);
+                }
+                else if (string.Equals(action.ConditionType, "TimeWindow", StringComparison.OrdinalIgnoreCase))
+                {
+                    rawResult = ProbeTimeWindow(action);
                 }
                 else
                 {

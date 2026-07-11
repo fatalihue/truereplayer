@@ -98,6 +98,18 @@ export interface ActionItem {
   // the pattern. patternType: null='contains' | 'equals' | 'regex' (all case-insensitive).
   clipboardPatternType?: string | null;
   clipboardPattern?: string | null;
+  // If Random (conditionType 'Random') — TRUE with probability randomPercent/100.
+  randomPercent?: number;
+  // If Variable (conditionType 'Variable') — compares the variable named in `key`
+  // against conditionOperand under conditionOperator (eq|neq|contains|gt|lt).
+  conditionOperator?: string | null;
+  conditionOperand?: string | null;
+  // If File exists (conditionType 'FileExists') — TRUE when the resolved path exists.
+  filePath?: string | null;
+  // If Time (conditionType 'TimeWindow') — "HH:mm" window + day bitmask (Sun=1<<0…Sat=1<<6; 0=every day).
+  timeStart?: string | null;
+  timeEnd?: string | null;
+  daysOfWeek?: number;
   // SetVariable — the value written under the variable name held in `key` (Key-reuse
   // convention). Read back with {var:name} in SendText / Type Text; names are matched
   // case-insensitively; an empty resolved value deletes the variable at replay time.
@@ -596,7 +608,7 @@ export type OutgoingMessage =
   // {If, EndIf} pair inserts immediately with empty probe fields and the Sheet auto-opens
   // to fill them. BrowserElementState reuses BrowserWaitElement's probe fields (key =
   // selector, waitMode, browserText = text pattern) the same way If-Image reuses WaitImage's.
-  | { type: 'actions:insertConditional'; payload: { conditionType: 'ImageFound' | 'PixelColorMatch' | 'WindowOpen' | 'ClipboardMatch' | 'BrowserElementState'; insertIndex: number } }
+  | { type: 'actions:insertConditional'; payload: { conditionType: 'ImageFound' | 'PixelColorMatch' | 'WindowOpen' | 'ClipboardMatch' | 'BrowserElementState' | 'Random' | 'Variable' | 'ProcessRunning' | 'FileExists' | 'TimeWindow'; insertIndex: number } }
   // Conditional logic — delete the entire IF/ELSE/ENDIF block. Backend forward-scans
   // from ifRowIndex with a nested-IF stack to find the matching EndIf, then removes
   // the contiguous range [ifRowIndex..endIfIdx] inclusive (covers body + optional ELSE

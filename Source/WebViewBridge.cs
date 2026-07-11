@@ -922,6 +922,15 @@ namespace TrueReplayer
                 windowMatchForegroundOnly = a.WindowMatchForegroundOnly,
                 clipboardPatternType = a.ClipboardPatternType,
                 clipboardPattern = a.ClipboardPattern,
+                // If Random / If Variable / If File / If Time probe fields — same
+                // forwarding-is-mandatory rule (this projection is the frontend's only source).
+                randomPercent = a.RandomPercent,
+                conditionOperator = a.ConditionOperator,
+                conditionOperand = a.ConditionOperand,
+                filePath = a.FilePath,
+                timeStart = a.TimeStart,
+                timeEnd = a.TimeEnd,
+                daysOfWeek = a.DaysOfWeek,
                 browserText = a.BrowserText ?? "",
                 newTab = a.NewTab,
                 isSkipped = a.IsSkipped,
@@ -2151,6 +2160,33 @@ namespace TrueReplayer
                 case "clipboardPattern":
                     action.ClipboardPattern = string.IsNullOrEmpty(value) ? null : value;
                     break;
+                case "randomPercent":
+                    // If Random: probability 0..100. Clamp a malformed payload rather than reject.
+                    if (int.TryParse(value, out int rp))
+                        action.RandomPercent = Math.Clamp(rp, 0, 100);
+                    break;
+                case "conditionOperator":
+                    // If Variable: eq (default) | neq | contains | gt | lt. Default stays null on disk.
+                    action.ConditionOperator = (value == "neq" || value == "contains" || value == "gt" || value == "lt")
+                        ? value : null;
+                    break;
+                case "conditionOperand":
+                    action.ConditionOperand = string.IsNullOrEmpty(value) ? null : value;
+                    break;
+                case "filePath":
+                    action.FilePath = string.IsNullOrEmpty(value) ? null : value;
+                    break;
+                case "timeStart":
+                    action.TimeStart = string.IsNullOrEmpty(value) ? null : value;
+                    break;
+                case "timeEnd":
+                    action.TimeEnd = string.IsNullOrEmpty(value) ? null : value;
+                    break;
+                case "daysOfWeek":
+                    // If Time: bitmask Sun=1<<0 … Sat=1<<6. 0 = every day.
+                    if (int.TryParse(value, out int dow))
+                        action.DaysOfWeek = dow & 0x7F;
+                    break;
                 case "selectorAlternatives":
                     // JSON-encoded array of {selector, tier, description} captured at pick
                     // time; empty string clears (hand-typed selector invalidates old picks).
@@ -2841,6 +2877,18 @@ namespace TrueReplayer
                 InsertConditionalDirect(insertIndex, "ClipboardMatch");
             else if (string.Equals(conditionType, "BrowserElementState", StringComparison.OrdinalIgnoreCase))
                 InsertConditionalDirect(insertIndex, "BrowserElementState");
+            // Capture-less state conditions — no screen region / pixel to pick, so they land
+            // immediately with empty fields and the Sheet auto-opens (like Window/Clipboard).
+            else if (string.Equals(conditionType, "Random", StringComparison.OrdinalIgnoreCase))
+                InsertConditionalDirect(insertIndex, "Random");
+            else if (string.Equals(conditionType, "Variable", StringComparison.OrdinalIgnoreCase))
+                InsertConditionalDirect(insertIndex, "Variable");
+            else if (string.Equals(conditionType, "ProcessRunning", StringComparison.OrdinalIgnoreCase))
+                InsertConditionalDirect(insertIndex, "ProcessRunning");
+            else if (string.Equals(conditionType, "FileExists", StringComparison.OrdinalIgnoreCase))
+                InsertConditionalDirect(insertIndex, "FileExists");
+            else if (string.Equals(conditionType, "TimeWindow", StringComparison.OrdinalIgnoreCase))
+                InsertConditionalDirect(insertIndex, "TimeWindow");
             // Unknown conditionType (e.g. a future type from a newer frontend on an older
             // backend) silently no-ops — better than inserting a half-configured IF the
             // user can't interact with through the existing Sheet editor.
@@ -2860,6 +2908,11 @@ namespace TrueReplayer
                 Delay = 0,
                 Key = "",
                 Comment = "",
+                // If Random seeds at a 50% coin-flip so a freshly inserted row is
+                // immediately functional; 0% would be "never true" — a silently dead
+                // condition. Only the Random family carries this default (others reuse
+                // string/null fields that seed sensibly empty).
+                RandomPercent = string.Equals(conditionType, "Random", StringComparison.OrdinalIgnoreCase) ? 50 : 0,
             });
             actions.Insert(insertIndex + 1, new ActionItem
             {

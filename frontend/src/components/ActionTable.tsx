@@ -6,7 +6,7 @@ import type { CollisionDetection, DragStartEvent, DragEndEvent } from '@dnd-kit/
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { snapCenterToCursor } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
-import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Braces, AppWindow, Clipboard, Play, Pause, EyeOff, RotateCcw } from 'lucide-react';
+import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Braces, AppWindow, Clipboard, Play, Pause, EyeOff, RotateCcw, Dice5, Cpu, FileCheck, Clock } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -273,12 +273,31 @@ function isConditionAction(action: ActionItem): boolean {
   return action.actionType === 'If'
     && (action.conditionType === 'WindowOpen'
       || action.conditionType === 'ClipboardMatch'
-      || action.conditionType === 'BrowserElementState');
+      || action.conditionType === 'BrowserElementState'
+      || action.conditionType === 'Random'
+      || action.conditionType === 'Variable'
+      || action.conditionType === 'ProcessRunning'
+      || action.conditionType === 'FileExists'
+      || action.conditionType === 'TimeWindow');
 }
 
-// Details payload for If Window / If Clipboard / If Browser Element: an icon + short family
-// label (same chip style as ProbeDetails' image/pixel tag) followed by the matched value.
-// Icons match the toolbar's Insert-Conditional menu (AppWindow / Clipboard / Globe).
+// Compact "Mon–Fri 09:00–17:00" style label for an If-Time row (mirrors the C#
+// DisplayKey). Days bitmask Sun=1<<0 … Sat=1<<6; 0/all = every day (blank).
+function formatTimeWindow(action: ActionItem): string {
+  const mask = (action.daysOfWeek ?? 0) & 0x7F;
+  let days = '';
+  if (mask !== 0 && mask !== 0x7F) {
+    if (mask === 0b0111110) days = 'Mon–Fri';
+    else if (mask === 0b1000001) days = 'Sat–Sun';
+    else days = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].filter((_, d) => (mask & (1 << d)) !== 0).join(',');
+  }
+  const time = action.timeStart && action.timeEnd ? `${action.timeStart}–${action.timeEnd}` : '';
+  return [days, time].filter(Boolean).join(' ');
+}
+
+// Details payload for the state-based If conditions: an icon + short family label
+// (same chip style as ProbeDetails' image/pixel tag) followed by the matched value.
+// Icons match the toolbar's Insert-Conditional menu.
 function ConditionDetails({ action }: { action: ActionItem }) {
   const meta =
     action.conditionType === 'WindowOpen'
@@ -293,6 +312,22 @@ function ConditionDetails({ action }: { action: ActionItem }) {
         }
       : action.conditionType === 'ClipboardMatch'
         ? { Icon: Clipboard, label: 'clipboard', value: action.clipboardPattern || '' }
+      : action.conditionType === 'Random'
+        ? { Icon: Dice5, label: 'random', value: `${action.randomPercent ?? 0}%` }
+      : action.conditionType === 'Variable'
+        ? {
+            Icon: Braces,
+            label: 'variable',
+            value: action.key
+              ? `${action.key} ${({ neq: '≠', contains: 'has', gt: '>', lt: '<' } as Record<string, string>)[action.conditionOperator ?? 'eq'] ?? '='} ${action.conditionOperand ?? ''}`
+              : '',
+          }
+      : action.conditionType === 'ProcessRunning'
+        ? { Icon: Cpu, label: 'process', value: action.windowProcessName || '' }
+      : action.conditionType === 'FileExists'
+        ? { Icon: FileCheck, label: 'file', value: action.filePath || '' }
+      : action.conditionType === 'TimeWindow'
+        ? { Icon: Clock, label: 'time', value: formatTimeWindow(action) }
         : { Icon: Globe, label: 'element', value: action.key || '' };
   const { Icon, label, value } = meta;
   return (

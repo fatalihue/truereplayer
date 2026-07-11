@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Braces, AppWindow, Clipboard, ChevronDown } from 'lucide-react';
+import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Braces, AppWindow, Clipboard, ChevronDown, Dice5, Cpu, FileCheck, Clock } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -786,6 +786,27 @@ export function Toolbar(_props: ToolbarProps) {
                   <Globe size={12} style={{ color: 'var(--color-action-if-fg)' }} />
                   If Browser Element…
                 </button>
+                {([
+                  { ct: 'Random', Icon: Dice5, label: 'If Random…' },
+                  { ct: 'Variable', Icon: Braces, label: 'If Variable…' },
+                  { ct: 'ProcessRunning', Icon: Cpu, label: 'If Process Running…' },
+                  { ct: 'FileExists', Icon: FileCheck, label: 'If File Exists…' },
+                  { ct: 'TimeWindow', Icon: Clock, label: 'If Time…' },
+                ] as const).map(({ ct, Icon, label }) => (
+                  <button
+                    key={ct}
+                    className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
+                    onClick={() => {
+                      const sel = selectionRef.current;
+                      const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
+                      send({ type: 'actions:insertConditional', payload: { conditionType: ct, insertIndex } });
+                      setShowConditionalMenu(false);
+                    }}
+                  >
+                    <Icon size={12} style={{ color: 'var(--color-action-if-fg)' }} />
+                    {label}
+                  </button>
+                ))}
               </div>
             )}
           </div>

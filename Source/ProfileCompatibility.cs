@@ -58,6 +58,22 @@ namespace TrueReplayer.Services
                 string.Equals(a.ActionType, "EndIf", StringComparison.OrdinalIgnoreCase))),
                 new Version(2, 3, 0), "Conditional logic (If/Else/EndIf)"),
 
+            // New If-condition families — an older build hits the unknown-ConditionType
+            // else-branch in InstantProbe → treats the probe as false → always takes the
+            // Else branch, a silent semantic divergence. Pin to the build that introduces
+            // them (2.7.5); BUMP in lockstep at release (expected 2.8.0), same as the
+            // ActivateWindow / cycle pins. One row per family so import diagnostics name it.
+            (p => p.Actions.Any(a => string.Equals(a.ConditionType, "Random", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 7, 5), "If Random condition"),
+            (p => p.Actions.Any(a => string.Equals(a.ConditionType, "Variable", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 7, 5), "If Variable condition"),
+            (p => p.Actions.Any(a => string.Equals(a.ConditionType, "ProcessRunning", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 7, 5), "If Process Running condition"),
+            (p => p.Actions.Any(a => string.Equals(a.ConditionType, "FileExists", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 7, 5), "If File Exists condition"),
+            (p => p.Actions.Any(a => string.Equals(a.ConditionType, "TimeWindow", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 7, 5), "If Time condition"),
+
             // Browser actions (BrowserClick/Type/Navigate/WaitElement/SelectOption) all rely on the
             // Chrome extension + native host bridge added in 2.1.0.
             (p => p.Actions.Any(a => !string.IsNullOrEmpty(a.ActionType) &&

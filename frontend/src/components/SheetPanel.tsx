@@ -199,6 +199,14 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   // If Clipboard (ClipboardMatch) probe fields
   const [clipboardPatternType, setClipboardPatternType] = useState<'contains' | 'equals' | 'regex'>('contains');
   const [clipboardPattern, setClipboardPattern] = useState('');
+  // If Random / Variable / File / Time probe fields
+  const [randomPercent, setRandomPercent] = useState('50');
+  const [conditionOperator, setConditionOperator] = useState<'eq' | 'neq' | 'contains' | 'gt' | 'lt'>('eq');
+  const [conditionOperand, setConditionOperand] = useState('');
+  const [filePath, setFilePath] = useState('');
+  const [timeStart, setTimeStart] = useState('');
+  const [timeEnd, setTimeEnd] = useState('');
+  const [daysOfWeek, setDaysOfWeek] = useState(0); // bitmask Sun=1<<0 … Sat=1<<6
   // ActivateWindow — launch fields + failure policy. The window MATCHER reuses the
   // If-Window state trio above (windowProcessName / windowTitle / windowTitleMatchMode).
   const [launchPath, setLaunchPath] = useState('');
@@ -496,6 +504,20 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
           : 'contains'
       );
       setClipboardPattern(action.clipboardPattern ?? '');
+      // If Random / Variable / File / Time seeding.
+      setRandomPercent(String(action.randomPercent ?? 50));
+      setConditionOperator(
+        action.conditionOperator === 'neq' ? 'neq'
+          : action.conditionOperator === 'contains' ? 'contains'
+          : action.conditionOperator === 'gt' ? 'gt'
+          : action.conditionOperator === 'lt' ? 'lt'
+          : 'eq'
+      );
+      setConditionOperand(action.conditionOperand ?? '');
+      setFilePath(action.filePath ?? '');
+      setTimeStart(action.timeStart ?? '');
+      setTimeEnd(action.timeEnd ?? '');
+      setDaysOfWeek(action.daysOfWeek ?? 0);
       // ActivateWindow seeding — the matcher trio is seeded by the If-Window block above.
       setLaunchPath(action.launchPath ?? '');
       setLaunchArgs(action.launchArgs ?? '');
@@ -719,6 +741,54 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
           send({ type: 'actions:edit', payload: { index: actionIndex, field: 'clipboardPattern', value: clipboardPattern } });
         }
       }
+
+      // If Random — a single percent.
+      if (action.conditionType === 'Random') {
+        const pct = Math.max(0, Math.min(100, parseInt(randomPercent, 10) || 0));
+        if (pct !== (action.randomPercent ?? 0)) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'randomPercent', value: String(pct) } });
+        }
+      }
+
+      // If Variable — the variable NAME is in `key` (saved by the generic effectiveKey block
+      // above); here the operator + operand.
+      if (action.conditionType === 'Variable') {
+        const currentOp = action.conditionOperator ?? 'eq';
+        if (conditionOperator !== currentOp) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'conditionOperator', value: conditionOperator } });
+        }
+        if (conditionOperand !== (action.conditionOperand ?? '')) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'conditionOperand', value: conditionOperand } });
+        }
+      }
+
+      // If Process — the process name reuses windowProcessName (saved by the If-Window block
+      // above, which is gated on WindowOpen). Save it here for the ProcessRunning family too.
+      if (action.conditionType === 'ProcessRunning') {
+        if (windowProcessName !== (action.windowProcessName ?? '')) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'windowProcessName', value: windowProcessName } });
+        }
+      }
+
+      // If File — the path.
+      if (action.conditionType === 'FileExists') {
+        if (filePath !== (action.filePath ?? '')) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'filePath', value: filePath } });
+        }
+      }
+
+      // If Time — window + day bitmask.
+      if (action.conditionType === 'TimeWindow') {
+        if (timeStart !== (action.timeStart ?? '')) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeStart', value: timeStart } });
+        }
+        if (timeEnd !== (action.timeEnd ?? '')) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeEnd', value: timeEnd } });
+        }
+        if (daysOfWeek !== (action.daysOfWeek ?? 0)) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'daysOfWeek', value: String(daysOfWeek) } });
+        }
+      }
     }
 
     // Pause-specific fields: timeout in milliseconds. Hotkey shares the `key` field with other
@@ -849,7 +919,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // from actionType + action.conditionType which are already in the array, so the
     // callback rebinds whenever those change. Listing the derived flags would also
     // be a forward-reference error (they're declared further down the component body).
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, launchPath, launchArgs, activateOnTimeout, alternatives, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, alternatives, send, onClose]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
@@ -1263,6 +1333,11 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const isIfWindow = isIf && action?.conditionType === 'WindowOpen';
   const isIfClipboard = isIf && action?.conditionType === 'ClipboardMatch';
   const isIfBrowser = isIf && action?.conditionType === 'BrowserElementState';
+  const isIfRandom = isIf && action?.conditionType === 'Random';
+  const isIfVariable = isIf && action?.conditionType === 'Variable';
+  const isIfProcess = isIf && action?.conditionType === 'ProcessRunning';
+  const isIfFile = isIf && action?.conditionType === 'FileExists';
+  const isIfTime = isIf && action?.conditionType === 'TimeWindow';
   const isConditional = isIf || isElse || isEndIf;
   const isBrowserType = actionType === 'BrowserType';
   const isBrowserNavigate = actionType === 'BrowserNavigate';
@@ -1311,6 +1386,11 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     : isIfWindow ? 'If Window Open'
     : isIfClipboard ? 'If Clipboard'
     : isIfBrowser ? 'If Browser Element'
+    : isIfRandom ? 'If Random'
+    : isIfVariable ? 'If Variable'
+    : isIfProcess ? 'If Process Running'
+    : isIfFile ? 'If File Exists'
+    : isIfTime ? 'If Time'
     : isIf ? 'If'
     : isElse ? 'Else'
     : isEndIf ? 'End If'
@@ -1462,7 +1542,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
 
             {/* Wait for condition sits next to the Condition toggle — the core branch
                 decision and its timing modifier read as one pair; the flaky-probe fallback
-                (On Probe Error) reads last as the edge case. */}
+                (On Probe Error) reads last as the edge case. Hidden for Random (re-rolling
+                every poll until it hits is meaningless) and Time (polling a clock window
+                is surprising) — those are instant-only conditions. */}
+            {!isIfRandom && !isIfTime && (
             <Field
               label="Wait for condition"
               hint={tt('How long to keep re-checking before giving up. 0 = check once.', 'Por quanto tempo continuar checando antes de desistir. 0 = checa uma vez.')}
@@ -1479,6 +1562,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 ariaLabel="Wait for condition in milliseconds"
               />
             </Field>
+            )}
 
             <Field
               label="On Probe Error"
@@ -1588,6 +1672,161 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 spellCheck={false}
                 className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
               />
+            </Field>
+          </>
+          )}
+
+          {/* If Random — probabilistic branch. TRUE with probability percent/100. */}
+          {isIfRandom && (
+            <Field
+              label="Chance"
+              className="w-[124px]"
+              hint={tt('TRUE this often. 100% always takes the main branch, 0% never does.', 'TRUE nesta frequência. 100% sempre pega o ramo principal, 0% nunca.')}
+            >
+              <NumberInput
+                value={parseInt(randomPercent, 10) || 0}
+                onChange={(n) => setRandomPercent(String(Math.max(0, Math.min(100, n))))}
+                min={0}
+                max={100}
+                suffix="%" suffixInside
+                inputWidth="w-full"
+                inputHeight="h-8"
+                className="w-full"
+                ariaLabel="Random chance percent"
+              />
+            </Field>
+          )}
+
+          {/* If Variable — compares the runtime variable (name) against the operand. */}
+          {isIfVariable && (
+          <>
+            <Field
+              label="Variable Name"
+              hint={tt('The variable set earlier with Set Variable. Case-insensitive.', 'A variável definida antes com Set Variable. Sem diferenciar maiúsculas.')}
+            >
+              <input
+                type="text"
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+                placeholder="name"
+                spellCheck={false}
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              />
+            </Field>
+            <Field label="Operator">
+              <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
+                {([
+                  { v: 'eq', l: '=', tip: tt('Equal (case-insensitive text)', 'Igual (texto, sem diferenciar maiúsculas)') },
+                  { v: 'neq', l: '≠', tip: tt('Not equal', 'Diferente') },
+                  { v: 'contains', l: 'has', tip: tt('Variable contains the operand', 'A variável contém o operando') },
+                  { v: 'gt', l: '>', tip: tt('Greater than (numeric when both are numbers)', 'Maior que (numérico quando ambos são números)') },
+                  { v: 'lt', l: '<', tip: tt('Less than (numeric when both are numbers)', 'Menor que (numérico quando ambos são números)') },
+                ] as const).map((o) => (
+                  <button
+                    key={o.v}
+                    type="button"
+                    onClick={() => setConditionOperator(o.v)}
+                    data-tip={o.tip}
+                    className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
+                      conditionOperator === o.v
+                        ? 'bg-bg-elevated text-text-primary'
+                        : 'text-text-tertiary hover:text-text-secondary'
+                    }`}
+                  >
+                    {o.l}
+                  </button>
+                ))}
+              </div>
+            </Field>
+            <Field
+              label="Value"
+              hint={tt('Tokens like {var:other}, {counter} or {clipboard} resolve here. In Test the variable is empty — run the profile to evaluate.', 'Tokens como {var:other}, {counter} ou {clipboard} resolvem aqui. No Test a variável está vazia — execute o perfil para avaliar.')}
+            >
+              <input
+                type="text"
+                value={conditionOperand}
+                onChange={(e) => setConditionOperand(e.target.value)}
+                spellCheck={false}
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              />
+            </Field>
+          </>
+          )}
+
+          {/* If Process running — matches a process by image name, window or not. */}
+          {isIfProcess && (
+            <Field
+              label="Process Name"
+              hint={tt('e.g. chrome.exe — ".exe" optional. TRUE when the process is running (with or without a window).', 'ex.: chrome.exe — ".exe" opcional. TRUE quando o processo está em execução (com ou sem janela).')}
+            >
+              <input
+                type="text"
+                value={windowProcessName}
+                onChange={(e) => setWindowProcessName(e.target.value)}
+                placeholder="chrome.exe"
+                spellCheck={false}
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              />
+            </Field>
+          )}
+
+          {/* If File exists — TRUE when the resolved path exists (file or folder). */}
+          {isIfFile && (
+            <Field
+              label="Path"
+              hint={tt('File or folder path. Tokens like {var:x} or {date} resolve at run time. Pairs with a flag file to control the macro from outside.', 'Caminho de arquivo ou pasta. Tokens como {var:x} ou {date} resolvem na execução. Combina com um arquivo-bandeira para controlar a macro de fora.')}
+            >
+              <input
+                type="text"
+                value={filePath}
+                onChange={(e) => setFilePath(e.target.value)}
+                placeholder="C:\\flags\\go.txt"
+                spellCheck={false}
+                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              />
+            </Field>
+          )}
+
+          {/* If Time / day-of-week — TRUE inside the time window AND on a selected day. */}
+          {isIfTime && (
+          <>
+            <div className="flex gap-2.5">
+              <Field label="From" className="flex-1" hint={tt('Local time HH:mm', 'Hora local HH:mm')}>
+                <input
+                  type="time"
+                  value={timeStart}
+                  onChange={(e) => setTimeStart(e.target.value)}
+                  className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                />
+              </Field>
+              <Field label="To" className="flex-1" hint={tt('Overnight OK (e.g. 22:00–02:00)', 'Pode virar a noite (ex.: 22:00–02:00)')}>
+                <input
+                  type="time"
+                  value={timeEnd}
+                  onChange={(e) => setTimeEnd(e.target.value)}
+                  className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                />
+              </Field>
+            </div>
+            <Field label="Days" hint={tt('None selected = every day. Leave times empty for a day-only condition.', 'Nenhum marcado = todo dia. Deixe as horas vazias para condição só por dia.')}>
+              <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
+                {(['S', 'M', 'T', 'W', 'T', 'F', 'S'] as const).map((lbl, bit) => {
+                  const on = (daysOfWeek & (1 << bit)) !== 0;
+                  return (
+                    <button
+                      key={bit}
+                      type="button"
+                      onClick={() => setDaysOfWeek(daysOfWeek ^ (1 << bit))}
+                      className={`w-7 py-1 rounded text-[11px] font-medium transition-colors ${
+                        on ? 'bg-bg-elevated text-text-primary' : 'text-text-tertiary hover:text-text-secondary'
+                      }`}
+                      data-tip={['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][bit]}
+                    >
+                      {lbl}
+                    </button>
+                  );
+                })}
+              </div>
             </Field>
           </>
           )}

@@ -168,6 +168,43 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? ClipboardPattern { get; set; }
 
+        // ── If Random (ConditionType == "Random") ──
+        // TRUE with probability RandomPercent/100 (0 = never, 100 = always). Stateless —
+        // rolls fresh on every probe. For varied / anti-detection behaviour in games.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public int RandomPercent { get; set; }
+
+        // ── If Variable (ConditionType == "Variable") ──
+        // Compares the runtime variable named in Key (SetVariable convention) against
+        // ConditionOperand under ConditionOperator. Operand resolves the full token
+        // pipeline ({var}/{counter}/{row}/{clipboard}/{date}/{random}). gt/lt coerce to
+        // numeric when both sides parse; eq/neq/contains are case-insensitive string.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? ConditionOperator { get; set; } // "eq"|"neq"|"contains"|"gt"|"lt"
+
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? ConditionOperand { get; set; }
+
+        // ── If File exists (ConditionType == "FileExists") ──
+        // TRUE when the resolved path exists as a file OR directory. Accepts tokens
+        // ({var}/{date}/{clipboard}). Empty path = false. Pairs with flag-file control.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? FilePath { get; set; }
+
+        // ── If Time / day-of-week (ConditionType == "TimeWindow") ──
+        // TRUE when local time (DateTime.Now) is inside [TimeStart, TimeEnd] AND the
+        // current day is selected in DaysOfWeek. TimeStart/TimeEnd = "HH:mm"; empty
+        // times = day-only mode (time check passes). start > end = overnight window
+        // (e.g. 22:00–02:00). DaysOfWeek = bitmask Sun=1<<0 … Sat=1<<6; 0 = every day.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? TimeStart { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? TimeEnd { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public int DaysOfWeek { get; set; }
+
         // Browser action properties
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? BrowserText { get; set; }
@@ -376,6 +413,22 @@ namespace TrueReplayer.Models
 
         private bool HideCoordinates => NoCoordinateActionTypes.Contains(ActionType ?? "");
 
+        // Compact day-of-week label for the If-Time grid display. Bitmask Sun=1<<0 … Sat=1<<6.
+        // 0 or all-7 → "" (every day, no need to show). Collapses Mon–Fri to a range where it
+        // reads cleaner; otherwise lists the 2-letter abbreviations.
+        private static readonly string[] DayAbbr = { "Su", "Mo", "Tu", "We", "Th", "Fr", "Sa" };
+        internal static string FormatDaysOfWeek(int mask)
+        {
+            mask &= 0x7F;
+            if (mask == 0 || mask == 0x7F) return "";
+            if (mask == 0b0111110) return "Mon–Fri";      // Mon..Fri
+            if (mask == 0b1000001) return "Sat–Sun";      // Sat + Sun
+            var parts = new List<string>();
+            for (int d = 0; d < 7; d++)
+                if ((mask & (1 << d)) != 0) parts.Add(DayAbbr[d]);
+            return string.Join(",", parts);
+        }
+
         // IF rows with a PixelColorMatch condition should display the pixel's X/Y in
         // the coordinate columns even though "If" is in NoCoordinateActionTypes — the
         // user needs to see WHERE the pixel is being sampled at a glance, same as a
@@ -455,6 +508,35 @@ namespace TrueReplayer.Models
                         // Same truncation as the browser actions' selector display below.
                         if (string.IsNullOrEmpty(Key)) return "";
                         return Key.Length > 40 ? Key[..37] + "..." : Key;
+                    }
+                    if (string.Equals(ConditionType, "Random", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return $"{RandomPercent}%";
+                    }
+                    if (string.Equals(ConditionType, "Variable", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (string.IsNullOrWhiteSpace(Key)) return "";
+                        var opSym = (ConditionOperator ?? "eq") switch
+                        {
+                            "neq" => "≠", "contains" => "⊃", "gt" => ">", "lt" => "<", _ => "=",
+                        };
+                        return $"{Key} {opSym} {ConditionOperand ?? ""}";
+                    }
+                    if (string.Equals(ConditionType, "ProcessRunning", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return WindowProcessName ?? "";
+                    }
+                    if (string.Equals(ConditionType, "FileExists", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (string.IsNullOrEmpty(FilePath)) return "";
+                        return FilePath.Length > 40 ? "…" + FilePath[^37..] : FilePath;
+                    }
+                    if (string.Equals(ConditionType, "TimeWindow", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var hasTime = !string.IsNullOrWhiteSpace(TimeStart) && !string.IsNullOrWhiteSpace(TimeEnd);
+                        var days = FormatDaysOfWeek(DaysOfWeek);
+                        var time = hasTime ? $"{TimeStart}–{TimeEnd}" : "";
+                        return string.Join(" ", new[] { days, time }.Where(s => s.Length > 0));
                     }
                     return "";
                 }
@@ -548,6 +630,13 @@ namespace TrueReplayer.Models
             WindowMatchForegroundOnly = WindowMatchForegroundOnly,
             ClipboardPatternType = ClipboardPatternType,
             ClipboardPattern = ClipboardPattern,
+            RandomPercent = RandomPercent,
+            ConditionOperator = ConditionOperator,
+            ConditionOperand = ConditionOperand,
+            FilePath = FilePath,
+            TimeStart = TimeStart,
+            TimeEnd = TimeEnd,
+            DaysOfWeek = DaysOfWeek,
             BrowserText = BrowserText,
             NewTab = NewTab,
             WaitMode = WaitMode,
