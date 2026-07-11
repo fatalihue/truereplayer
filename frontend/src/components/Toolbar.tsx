@@ -839,6 +839,7 @@ export function Toolbar(_props: ToolbarProps) {
                   { type: 'BrowserType', label: 'Type Text' },
                   { type: 'BrowserSelectOption', label: 'Select Option' },
                   { type: 'BrowserWaitElement', label: 'Wait Element' },
+                  { type: 'BrowserAssert', label: 'Assert Element' },
                   { type: 'BrowserNavigate', label: 'Open URL' },
                 ] as const).map((item) => (
                   <button

@@ -227,7 +227,7 @@ namespace TrueReplayer
                 "WaitImage", "WaitPixelColor", "Pause", "RunProfile",
                 "If", "Else", "EndIf",
                 "BrowserClick", "BrowserRightClick", "BrowserType",
-                "BrowserWaitElement", "BrowserNavigate", "BrowserSelectOption",
+                "BrowserWaitElement", "BrowserNavigate", "BrowserSelectOption", "BrowserAssert",
             };
 
         private void EndSelectInteraction()
@@ -970,7 +970,8 @@ namespace TrueReplayer
                 // shared window* trio above).
                 launchPath = a.LaunchPath,
                 launchArgs = a.LaunchArgs,
-                activateOnTimeout = a.ActivateOnTimeout
+                activateOnTimeout = a.ActivateOnTimeout,
+                assertOnFail = a.AssertOnFail
             }).ToArray();
         }
 
@@ -2225,6 +2226,10 @@ namespace TrueReplayer
                     // Same convention as waitImageOnTimeout — only "Continue" is persisted;
                     // the default "Halt" stays null on disk so saved profiles read clean.
                     action.ActivateOnTimeout = value == "Continue" ? "Continue" : null;
+                    break;
+                case "assertOnFail":
+                    // BrowserAssert — only "Continue" persisted; default "Halt" stays null.
+                    action.AssertOnFail = value == "Continue" ? "Continue" : null;
                     break;
                 case "clipboardPatternType":
                     // Default "contains" stays null on disk; only "equals"/"regex" persist.
@@ -4162,7 +4167,7 @@ namespace TrueReplayer
             // so it's already complete and is excluded.
             if (actionType == "BrowserClick" || actionType == "BrowserRightClick"
                 || actionType == "BrowserType" || actionType == "BrowserSelectOption"
-                || actionType == "BrowserWaitElement")
+                || actionType == "BrowserWaitElement" || actionType == "BrowserAssert")
             {
                 SendMessage("sheet:openIndex", new { index = insertIndex });
             }

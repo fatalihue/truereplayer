@@ -80,6 +80,13 @@ namespace TrueReplayer.Services
             (p => p.Data != null,
                 new Version(2, 7, 5), "Data-loop table"),
 
+            // BrowserAssert — a DEDICATED row (the Browser* predicate below auto-pins 2.1.0,
+            // but that is INSUFFICIENT: an older build has no dispatch case for the unknown
+            // type, silently SKIPS the assertion → a broken page passes unnoticed. Pin to
+            // 2.7.5; BUMP at release with the other pending pins.
+            (p => p.Actions.Any(a => string.Equals(a.ActionType, "BrowserAssert", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 7, 5), "Browser assert"),
+
             // Browser actions (BrowserClick/Type/Navigate/WaitElement/SelectOption) all rely on the
             // Chrome extension + native host bridge added in 2.1.0.
             (p => p.Actions.Any(a => !string.IsNullOrEmpty(a.ActionType) &&

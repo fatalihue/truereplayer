@@ -295,6 +295,17 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? ActivateOnTimeout { get; set; }
 
+        // ── BrowserAssert (ActionType == "BrowserAssert") ──
+        // Verify a page element is in the expected state (reuses the BrowserWaitElement
+        // probe: Key=selector, WaitMode appears|disappears|enabled|text-match, BrowserText
+        // =text pattern, Timeout=wait budget, SelectorAlternatives=fallback) and FAIL the
+        // replay LOUDLY if it isn't — unlike an If, which branches. "Assert NOT present" =
+        // WaitMode "disappears" (no Negate needed). null = "Halt" (default): report + stop;
+        // "Continue" logs and moves on. Only "Continue" is persisted (WaitImageOnTimeout
+        // convention).
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? AssertOnFail { get; set; }
+
         // When true, the action is retained in the list but skipped during replay.
         // Persisted so users can load a profile with actions pre-disabled.
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
@@ -403,7 +414,7 @@ namespace TrueReplayer.Models
         {
             "KeyDown", "KeyUp", "Keystroke", "HoldKey", "ScrollUp", "ScrollDown", "SendText", "WaitImage",
             "BrowserClick", "BrowserRightClick", "BrowserType", "BrowserWaitElement", "BrowserNavigate",
-            "BrowserSelectOption",
+            "BrowserSelectOption", "BrowserAssert",
             "RunProfile", "Pause", "SetVariable", "ActivateWindow",
             // Conditional structural rows never carry their OWN coordinates — the IF row
             // borrows X/Y from its underlying probe data (handled below in DisplayX/Y);
@@ -573,7 +584,7 @@ namespace TrueReplayer.Models
                 if (ActionType == "WaitImage") return $"{Timeout / 1000.0:0.##}s";
                 if (ActionType == "BrowserNavigate") return Key;
                 if (ActionType == "RunProfile") return RepeatCount > 1 ? $"{Key} ×{RepeatCount}" : Key;
-                if (ActionType == "BrowserClick" || ActionType == "BrowserRightClick" || ActionType == "BrowserType" || ActionType == "BrowserWaitElement")
+                if (ActionType == "BrowserClick" || ActionType == "BrowserRightClick" || ActionType == "BrowserType" || ActionType == "BrowserWaitElement" || ActionType == "BrowserAssert")
                 {
                     var selector = Key.Length > 40 ? Key[..37] + "..." : Key;
                     return selector;
@@ -657,6 +668,7 @@ namespace TrueReplayer.Models
             LaunchPath = LaunchPath,
             LaunchArgs = LaunchArgs,
             ActivateOnTimeout = ActivateOnTimeout,
+            AssertOnFail = AssertOnFail,
             IsSkipped = IsSkipped,
             IsFocusClick = IsFocusClick,
             RepeatCount = RepeatCount,

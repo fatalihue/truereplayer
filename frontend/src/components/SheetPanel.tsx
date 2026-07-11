@@ -49,7 +49,7 @@ const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
   ],
 };
 
-const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'Pause', 'If', 'Else', 'EndIf']);
+const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'Pause', 'If', 'Else', 'EndIf']);
 
 // Semantic result-card colouring via theme tokens — success = replay green, failure/error =
 // recording red. Matches the inline-style pattern the foot-gun cards already use, so no
@@ -212,6 +212,9 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const [launchPath, setLaunchPath] = useState('');
   const [launchArgs, setLaunchArgs] = useState('');
   const [activateOnTimeout, setActivateOnTimeout] = useState<'Halt' | 'Continue'>('Halt');
+  // BrowserAssert failure policy (selector/waitMode/browserText/timeout reuse the shared
+  // browser state above).
+  const [assertOnFail, setAssertOnFail] = useState<'Halt' | 'Continue'>('Halt');
   // Exists-anywhere Test probe tracking — same requestId-gating pattern as the browser
   // Test Action (the reply is gated on the id so a stale reply can't land elsewhere).
   const [windowProbeRequestId, setWindowProbeRequestId] = useState<string | null>(null);
@@ -522,6 +525,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       setLaunchPath(action.launchPath ?? '');
       setLaunchArgs(action.launchArgs ?? '');
       setActivateOnTimeout(action.activateOnTimeout === 'Continue' ? 'Continue' : 'Halt');
+      setAssertOnFail(action.assertOnFail === 'Continue' ? 'Continue' : 'Halt');
       setWindowProbeResult(null);
       setWindowProbeRequestId(null);
     }
@@ -556,6 +560,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // invalidates any stored list (it may point at a different element) — clear it.
     const isBrowserElementAction = actionType === 'BrowserClick' || actionType === 'BrowserRightClick'
       || actionType === 'BrowserType' || actionType === 'BrowserWaitElement' || actionType === 'BrowserSelectOption'
+      || actionType === 'BrowserAssert'
       || (actionType === 'If' && action.conditionType === 'BrowserElementState');
     if (isBrowserElementAction) {
       if (alternatives.length > 1) {
@@ -827,6 +832,21 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       }
     }
 
+    // BrowserAssert — mirrors WaitElement: selector saved by the generic effectiveKey block
+    // above (text-match packs the pattern into a text= selector via textMatch), waitMode
+    // here, plus the fail policy.
+    if (actionType === 'BrowserAssert') {
+      const persistedMode = (waitMode === 'appears') ? '' : waitMode;
+      if ((persistedMode || '') !== (action.waitMode || '')) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'waitMode', value: persistedMode } });
+      }
+      const persistedPolicy = assertOnFail === 'Continue' ? 'Continue' : '';
+      const currentPolicy = action.assertOnFail === 'Continue' ? 'Continue' : '';
+      if (persistedPolicy !== currentPolicy) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'assertOnFail', value: persistedPolicy } });
+      }
+    }
+
     // #7 — Navigate post-checks
     if (actionType === 'BrowserNavigate') {
       if ((urlWaitPattern || '') !== (action.urlWaitPattern || '')) {
@@ -919,7 +939,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // from actionType + action.conditionType which are already in the array, so the
     // callback rebinds whenever those change. Listing the derived flags would also
     // be a forward-reference error (they're declared further down the component body).
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, alternatives, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, assertOnFail, alternatives, send, onClose]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
@@ -1343,6 +1363,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const isBrowserNavigate = actionType === 'BrowserNavigate';
   const isBrowserWait = actionType === 'BrowserWaitElement';
   const isBrowserSelect = actionType === 'BrowserSelectOption';
+  const isBrowserAssert = actionType === 'BrowserAssert';
   const showKey = isKeyAction || isSendText;
   const showCoords = !noCoordTypes.has(actionType);
 
@@ -1398,6 +1419,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     : actionType === 'BrowserRightClick' ? 'Right Click Element'
     : actionType === 'BrowserType' ? 'Type Text'
     : actionType === 'BrowserWaitElement' ? 'Wait Element'
+    : actionType === 'BrowserAssert' ? 'Assert Element'
     : actionType === 'BrowserNavigate' ? 'Open URL'
     : actionType === 'BrowserSelectOption' ? 'Select Option'
     : actionType === 'DoubleClick' ? 'Double Click'
@@ -2699,17 +2721,17 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             </>
             )}
 
-            {/* #6 — WaitElement mode */}
-            {isBrowserWait && (
-            <Field label="Wait Condition">
+            {/* #6 — WaitElement / Assert state mode (shared) */}
+            {(isBrowserWait || isBrowserAssert) && (
+            <Field label={isBrowserAssert ? 'Assert Condition' : 'Wait Condition'}>
               <select
                 value={waitMode}
                 onChange={(e) => setWaitMode(e.target.value)}
                 className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
               >
-                <option value="appears">Appears (default)</option>
-                <option value="disappears">Disappears</option>
-                <option value="enabled">Enabled</option>
+                <option value="appears">{isBrowserAssert ? 'Is present (default)' : 'Appears (default)'}</option>
+                <option value="disappears">{isBrowserAssert ? 'Is NOT present' : 'Disappears'}</option>
+                <option value="enabled">{isBrowserAssert ? 'Is enabled' : 'Enabled'}</option>
                 <option value="text-match">Text matches (uses Text Match field)</option>
               </select>
               {/* Foot-gun warning: text-match mode needs an actual Text Match string.
@@ -2730,6 +2752,33 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   <span>{tt('Text-match mode needs a value in the Text Match field. Otherwise this Wait will time out.', 'O modo Text Match precisa de um valor no campo Text Match. Caso contrário, este Wait vai expirar.')}</span>
                 </div>
               )}
+            </Field>
+            )}
+
+            {/* BrowserAssert — what to do when the condition isn't met within the timeout.
+                Halt stops the replay LOUDLY (the point of an assertion); Continue logs and
+                moves on. "Wait Condition" above uses "Is NOT present" instead of a Negate. */}
+            {isBrowserAssert && (
+            <Field label="On Fail">
+              <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
+                {(['Halt', 'Continue'] as const).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setAssertOnFail(p)}
+                    className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
+                      assertOnFail === p
+                        ? 'bg-bg-elevated text-text-primary'
+                        : 'text-text-tertiary hover:text-text-secondary'
+                    }`}
+                    data-tip={p === 'Halt'
+                      ? tt('Stop the replay and report when the assertion is not met.', 'Para o replay e reporta quando a asserção não é satisfeita.')
+                      : tt('Log and continue to the next action even if the assertion fails.', 'Registra e segue para a próxima ação mesmo se a asserção falhar.')}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
             </Field>
             )}
 

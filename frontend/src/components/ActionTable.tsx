@@ -6,7 +6,7 @@ import type { CollisionDetection, DragStartEvent, DragEndEvent } from '@dnd-kit/
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { snapCenterToCursor } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
-import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Braces, AppWindow, Clipboard, Play, Pause, EyeOff, RotateCcw, Dice5, Cpu, FileCheck, Clock } from 'lucide-react';
+import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Braces, AppWindow, Clipboard, Play, Pause, EyeOff, RotateCcw, Dice5, Cpu, FileCheck, Clock, ShieldCheck } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -50,6 +50,8 @@ const blockColor = (level: number): string =>
   BLOCK_LEVEL_COLORS[((level % BLOCK_LEVEL_COLORS.length) + BLOCK_LEVEL_COLORS.length) % BLOCK_LEVEL_COLORS.length];
 
 export function ActionIcon({ actionType, size = 12 }: { actionType: string; size?: number }) {
+  // ShieldCheck (verify-or-fail) before the generic Browser→Globe so Assert reads distinctly.
+  if (actionType === 'BrowserAssert') return <ShieldCheck size={size} />;
   if (actionType.startsWith('Browser')) return <Globe size={size} />;
   if (actionType.includes('Click')) return <Mouse size={size} />;
   if (actionType === 'ScrollUp') return <ArrowUp size={size} />;
@@ -141,6 +143,7 @@ function actionPillLabel(action: ActionItem): string {
     case 'BrowserRightClick': return 'Right Click Element';
     case 'BrowserType': return 'Type Text';
     case 'BrowserSelectOption': return 'Select Option';
+    case 'BrowserAssert': return 'Assert Element';
     case 'BrowserWaitElement': return 'Wait Element';
     case 'BrowserNavigate': return 'Open URL';
     case 'RunProfile': return 'Run Profile';

@@ -129,6 +129,10 @@ export interface ActionItem {
   launchPath?: string | null;
   launchArgs?: string | null;
   activateOnTimeout?: string | null;
+  // BrowserAssert — verify a page element (reuses key=selector, waitMode, browserText,
+  // timeout, selectorAlternatives) and FAIL the replay if it's not in the expected state.
+  // null = 'Halt' (default — stop loudly) | 'Continue' (log and move on).
+  assertOnFail?: string | null;
 }
 
 // #2 — Selector alternative returned by the picker

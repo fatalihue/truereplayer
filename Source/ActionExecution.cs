@@ -1769,6 +1769,7 @@ namespace TrueReplayer.Services
                         case "WaitPixelColor": await ExecuteWaitPixelColor(action, token); break;
                         case "RunProfile": await HandleRunProfile(action, token); break;
                         case "Pause": await ExecutePause(action, token); break;
+                        case "BrowserAssert": await ExecuteBrowserAssert(action, token); break;
                         case "BrowserClick":
                         case "BrowserRightClick":
                         case "BrowserType":
@@ -2322,6 +2323,69 @@ namespace TrueReplayer.Services
                 return;
             }
             await Task.Delay(300, token); // settle — same wait the replay-start focus uses
+        }
+
+        // ── BrowserAssert ──
+        // Verify a page element is in the expected state (reusing the BrowserWaitElement
+        // probe + selector fallback) and FAIL the replay LOUDLY when it isn't — the
+        // difference from an If, which branches. The extension polls up to Timeout and
+        // walks the ranked alternatives; success returns with no side effect. A timeout /
+        // failure surfaces as a BrowserActionException which we convert into the friendly
+        // Halt/Continue policy. Bridge not connected = we can't verify ⇒ that's a FAILURE
+        // (contrast If-Browser, which reads "not found" and branches).
+        private async Task ExecuteBrowserAssert(ActionItem action, CancellationToken token)
+        {
+            if (_browserBridge == null || !_browserBridge.IsConnected)
+            {
+                HandleAssertFailure(action, "browser bridge not connected");
+                return;
+            }
+            int timeout = action.Timeout > 0 ? action.Timeout : 5000;
+            try
+            {
+                // A text-match assert needs its text pattern resolved for tokens, same as
+                // BrowserType/SelectOption. Other modes ignore the text.
+                string? resolvedText = string.IsNullOrEmpty(action.BrowserText)
+                    ? null
+                    : await ResolveBrowserTextPlaceholders(action.BrowserText);
+                await _browserBridge.ExecuteBrowserCommandAsync(action, token, timeout, resolvedText);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                throw; // genuine user stop always propagates
+            }
+            catch (OperationCanceledException)
+            {
+                // A SPURIOUS OCE (token.None) — the extension pipe dropped mid-probe, whose
+                // cleanup cancels every in-flight TCS with no token. We couldn't verify, so
+                // it's a FAILURE routed through the policy (same rule as the pre-probe
+                // disconnect above) — NOT a silent stop. The If-Browser probe documents the
+                // same pipe-disconnect mechanism.
+                HandleAssertFailure(action, "browser bridge disconnected");
+            }
+            catch (BrowserActionException ex)
+            {
+                HandleAssertFailure(action, ex.Message);
+            }
+        }
+
+        // BrowserAssert failure policy — mirrors HandleActivateWindowFailure. Default (null)
+        // = Halt: report LOUDLY (OnReplayError — the whole point of an assertion) and stop.
+        // "Continue" logs and lets the run proceed.
+        private void HandleAssertFailure(ActionItem action, string reason)
+        {
+            string label = !string.IsNullOrWhiteSpace(action.Comment) ? action.Comment
+                : !string.IsNullOrWhiteSpace(action.Key) ? action.Key
+                : "element";
+
+            if (string.Equals(action.AssertOnFail, "Continue", StringComparison.OrdinalIgnoreCase))
+            {
+                DiagnosticLog.Warn($"Assert '{label}': {reason} — Continue policy, moving on");
+                return;
+            }
+            DiagnosticLog.Warn($"Replay aborted: Assert '{label}' — {reason}");
+            OnReplayError?.Invoke($"Assert failed: '{label}' — {reason}");
+            try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
         }
 
         // One failure policy for all three modes (launch threw / window never appeared /

@@ -430,6 +430,10 @@ namespace TrueReplayer.Services
                     command = "type";
                     break;
                 case "BrowserWaitElement":
+                case "BrowserAssert":
+                    // BrowserAssert reuses the extension's waitElement evaluator (appears/
+                    // disappears/enabled/text-match). A timeout throws BrowserActionException,
+                    // which ExecuteBrowserAssert converts into the friendly Halt/Continue policy.
                     command = "waitElement";
                     break;
                 case "BrowserNavigate":
@@ -443,7 +447,7 @@ namespace TrueReplayer.Services
                     throw new ArgumentException($"Unknown browser action type: {action.ActionType}");
             }
 
-            var timeout = (action.ActionType == "BrowserWaitElement" || action.ActionType == "BrowserClick" || action.ActionType == "BrowserRightClick" || action.ActionType == "BrowserSelectOption") && action.Timeout > 0
+            var timeout = (action.ActionType == "BrowserWaitElement" || action.ActionType == "BrowserAssert" || action.ActionType == "BrowserClick" || action.ActionType == "BrowserRightClick" || action.ActionType == "BrowserSelectOption") && action.Timeout > 0
                 ? action.Timeout
                 : timeoutMs;
 
