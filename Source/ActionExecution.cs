@@ -247,12 +247,36 @@ namespace TrueReplayer.Services
 
         private void StartReplay(bool loopEnabled, string loopCountText, bool intervalEnabled, string intervalText, bool useDelayVariation, int delayVariationPercent, bool useRelativeCoords, Models.WindowTarget? windowTarget, bool bringToFocus, int lockWidth, int lockHeight, int lockX, int lockY, bool restorePosition, bool restoreSize, bool forceInfiniteLoop)
         {
+            // Data-loop (Model A): the active profile's table. Read BEFORE flipping IsReplaying
+            // so the empty-table guard can bail cleanly without a state to unwind. Data is
+            // per-profile only (no folder inheritance), so UserProfile.Current is the source.
+            var dataTable = Models.UserProfile.Current?.Data;
+            bool loopOverData = dataTable != null && dataTable.LoopOverData;
+            if (loopOverData && dataTable!.Rows.Count == 0)
+            {
+                // Empty table + loop-over-data would set loopCount=0 → the loop reads that as
+                // INFINITE. Refuse with a friendly message instead of spinning forever.
+                DiagnosticLog.Warn("Replay refused: 'loop over data' is on but the data table has no rows.");
+                onStatusChanged?.Invoke("error:The data table has no rows — add data or turn off \"loop over data\".");
+                return;
+            }
+
             IsReplaying = true;
             _userStopped = false;
             onButtonStateChanged?.Invoke("Stop", true);
 
             int loopCount = loopEnabled && int.TryParse(loopCountText, out int count) && count >= 0 ? count : 1;
             int loopInterval = intervalEnabled && int.TryParse(intervalText, out int interval) && interval >= 0 ? interval : 0;
+            // Loop-over-data OVERRIDES the normal loop count: one iteration per data row.
+            // It also wins over forceInfiniteLoop (WhilePressed/Toggle hotkeys) — the feature's
+            // contract is "run once per row", so a bounded run must not become infinite (which
+            // would also stamp empty {row:col} for every iteration past the last row).
+            if (loopOverData)
+            {
+                loopCount = dataTable!.Rows.Count;
+                forceInfiniteLoop = false;
+            }
+            replayer.SetDataTable(dataTable, loopOverData);
             replayer.SetLoopOptions(loopCount, loopInterval);
             replayer.SetDelayVariation(useDelayVariation, delayVariationPercent);
             replayer.SetRelativeCoordinates(useRelativeCoords, windowTarget, lockWidth, lockHeight, lockX, lockY, restorePosition, restoreSize);
@@ -1131,6 +1155,14 @@ namespace TrueReplayer.Services
         // the caller's next iteration re-stamps it before any of its own tokens resolve, so no
         // save/restore is needed around the recursion.
         private int _currentActionRow;
+        // Data-loop state. _dataTable is the profile's table (set once per run in StartReplay);
+        // _dataLoopOver drives the "one iteration per row" loop override; _currentRowData is the
+        // current iteration's column→cell dict that {row:column} resolves from. Like _currentIteration,
+        // this is instance state so a RunProfile sub-call sees the CALLER's current row (the sub has
+        // no data loop of its own to re-stamp it) — same AHK-shared-scope model as {counter}/{var}.
+        private Models.ProfileDataTable? _dataTable;
+        private bool _dataLoopOver;
+        private IReadOnlyDictionary<string, string>? _currentRowData;
         // Hard cap on how deep RunProfile chains can recurse. Prevents accidental infinite loops
         // even if cycle detection were somehow bypassed.
         private const int MaxCallDepth = 5;
@@ -1201,6 +1233,39 @@ namespace TrueReplayer.Services
         {
             _loopCount = loopCount >= 0 ? loopCount : 0;
             _loopInterval = loopInterval >= 0 ? loopInterval : 0;
+        }
+
+        // Data-loop: hand the replayer the active profile's table + whether to loop over it.
+        // Both null/false when the feature is off (byte-identical behaviour). Called once per
+        // run in ReplayService.StartReplay, before StartAsync.
+        public void SetDataTable(Models.ProfileDataTable? dataTable, bool loopOverData)
+        {
+            // Normalize null Headers/Rows — a hand-edited / corrupt imported .trprofile can
+            // deserialize {"rows":null} to a null list, and the loop/BuildRowDict paths
+            // dereference these without further guards. Import is a trust boundary.
+            if (dataTable != null)
+            {
+                dataTable.Headers ??= new System.Collections.Generic.List<string>();
+                dataTable.Rows ??= new System.Collections.Generic.List<System.Collections.Generic.List<string>>();
+            }
+            _dataTable = dataTable;
+            _dataLoopOver = loopOverData && dataTable != null;
+        }
+
+        // Builds the column→cell dict for one data row: lowercased header → cell value.
+        // Short rows are tolerated (missing trailing cells resolve empty); duplicate headers
+        // keep the LAST occurrence (last-writer-wins, same as a plain dictionary assign).
+        private static IReadOnlyDictionary<string, string> BuildRowDict(Models.ProfileDataTable table, int rowIndex)
+        {
+            var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var row = table.Rows[rowIndex];
+            for (int c = 0; c < table.Headers.Count; c++)
+            {
+                var header = table.Headers[c]?.Trim();
+                if (string.IsNullOrEmpty(header)) continue;
+                dict[header] = c < row.Count ? (row[c] ?? string.Empty) : string.Empty;
+            }
+            return dict;
         }
 
         private bool _useRelativeCoordinates = false;
@@ -1356,6 +1421,7 @@ namespace TrueReplayer.Services
                 _pendingTokenKeyDowns.Clear();
                 _currentIteration = 0;
                 _currentActionRow = 0;
+                _currentRowData = null;
 
                 // Run replay on a dedicated thread to avoid blocking the thread pool
                 await Task.Factory.StartNew(async () =>
@@ -1364,6 +1430,12 @@ namespace TrueReplayer.Services
                     {
                         iteration++;
                         _currentIteration = iteration; // {counter} token source (1-based)
+                        // Data-loop: stamp the current row so {row:column} resolves to it.
+                        // 1-based iteration → 0-based row index. Guarded so a corrupt count
+                        // can't index past the table (also blank when not looping over data).
+                        _currentRowData = (_dataLoopOver && _dataTable != null && iteration - 1 < _dataTable.Rows.Count)
+                            ? BuildRowDict(_dataTable, iteration - 1)
+                            : null;
 
                         // Throttled status-bar update. First iteration is always pushed so the
                         // counter appears immediately; subsequent iterations are coalesced to
@@ -2669,6 +2741,9 @@ namespace TrueReplayer.Services
             public IReadOnlyDictionary<string, string>? Variables { get; init; }
             public int Iteration { get; init; }
             public int Row { get; init; }
+            // Data-loop current row: column name (lowercased) → cell value. Non-null only
+            // while a "loop over data" run is stamping rows. {row:column} resolves from here.
+            public IReadOnlyDictionary<string, string>? RowData { get; init; }
             public static RunCtx Empty => default;
         }
 
@@ -2679,6 +2754,7 @@ namespace TrueReplayer.Services
             Variables = _runtimeVariables,
             Iteration = _currentIteration,
             Row = _currentActionRow,
+            RowData = _currentRowData,
         };
 
         // Variable names: letters/digits/underscore, matched case-insensitively (stored keys are
@@ -2869,6 +2945,13 @@ namespace TrueReplayer.Services
             @"\{var:([A-Za-z0-9_]+)\}",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        // Data-loop column token {row:column}. Disjoint from the bare {row} replace below —
+        // "{row}" is not a substring of "{row:column}" (the ':' breaks the literal match),
+        // and this regex requires the ':name}' tail so it never matches bare {row}.
+        private static readonly Regex RowDataTokenRegex = new(
+            @"\{row:([A-Za-z0-9_]+)\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         /// <summary>
         /// Resolves the run-state tokens {var:name} / {counter} / {row} from
         /// <paramref name="runCtx"/>. With RunCtx.Empty (the Test Action path) every {var}
@@ -2889,6 +2972,22 @@ namespace TrueReplayer.Services
                     var name = m.Groups[1].Value.ToLowerInvariant();
                     string value = string.Empty;
                     runCtx.Variables?.TryGetValue(name, out value!);
+                    value ??= string.Empty;
+                    return escapeBracesInSubstitution ? EscapeBracesForParser(value) : value;
+                });
+            }
+
+            // Data-loop {row:column} — resolves to the current loop row's cell. Runs BEFORE
+            // the bare {row} replace below (defensive isolation). Missing column / no data
+            // loop → empty (consume-always), and the cell is brace-escaped like {var} since
+            // data cells can contain arbitrary text.
+            if (RowDataTokenRegex.IsMatch(text))
+            {
+                text = RowDataTokenRegex.Replace(text, m =>
+                {
+                    var col = m.Groups[1].Value.ToLowerInvariant();
+                    string value = string.Empty;
+                    runCtx.RowData?.TryGetValue(col, out value!);
                     value ??= string.Empty;
                     return escapeBracesInSubstitution ? EscapeBracesForParser(value) : value;
                 });

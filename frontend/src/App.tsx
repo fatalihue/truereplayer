@@ -23,6 +23,7 @@ import { ClickerDashboard } from './components/ClickerDashboard';
 import { CommandPalette } from './components/CommandPalette';
 import { SheetPanel } from './components/SheetPanel';
 import { ThemeEditor } from './components/ThemeEditor';
+import { DataPanel } from './components/DataPanel';
 
 // AppShell is rendered inside AppStateProvider so it can read settings to drive
 // mode-dependent visuals (Clicker mode glow, ActionTable replacement).
@@ -68,6 +69,15 @@ function AppShell() {
     const handler = () => setShowThemeEditor(prev => !prev);
     window.addEventListener('cmd:themeeditor', handler);
     return () => window.removeEventListener('cmd:themeeditor', handler);
+  }, []);
+
+  // Data Loop panel — App-level like the Theme Editor, opened via the shared
+  // cmd:dataeditor event (Toolbar button + Command Palette).
+  const [showDataEditor, setShowDataEditor] = useState(false);
+  useEffect(() => {
+    const handler = () => setShowDataEditor(prev => !prev);
+    window.addEventListener('cmd:dataeditor', handler);
+    return () => window.removeEventListener('cmd:dataeditor', handler);
   }, []);
 
   // Global keyboard handler: Ctrl+K for command palette, Ctrl+S to save profile,
@@ -304,6 +314,7 @@ function AppShell() {
         }}
       />
       {showThemeEditor && <ThemeEditor onClose={() => setShowThemeEditor(false)} />}
+      {showDataEditor && <DataPanel onClose={() => setShowDataEditor(false)} />}
       <UpdateOverlay />
 
       {/* One global tooltip renderer driving every [data-tip] in the app */}

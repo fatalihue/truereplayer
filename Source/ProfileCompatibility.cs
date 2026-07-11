@@ -74,6 +74,12 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(a => string.Equals(a.ConditionType, "TimeWindow", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 7, 5), "If Time condition"),
 
+            // Data-loop table (Model A) — older builds leave {row:column} tokens literal and
+            // don't loop over the rows, a silent divergence. Pin to the introducing build
+            // (2.7.5); BUMP at release (2.8.0) with the other pending pins.
+            (p => p.Data != null,
+                new Version(2, 7, 5), "Data-loop table"),
+
             // Browser actions (BrowserClick/Type/Navigate/WaitElement/SelectOption) all rely on the
             // Chrome extension + native host bridge added in 2.1.0.
             (p => p.Actions.Any(a => !string.IsNullOrEmpty(a.ActionType) &&

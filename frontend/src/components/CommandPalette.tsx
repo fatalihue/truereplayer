@@ -378,6 +378,12 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:themeeditor')); },
           },
           {
+            id: 'dataeditor', label: 'Open Data Loop',
+            keywords: ['csv', 'table', 'row', 'column', 'excel', 'loop over data'],
+            icon: <Table2 size={14} className="text-text-secondary" />,
+            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:dataeditor')); },
+          },
+          {
             id: 'togglesidebar', label: 'Toggle Sidebar',
             icon: <PanelLeft size={14} className="text-text-secondary" />,
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:togglesidebar')); },

@@ -66,6 +66,7 @@ const defaultSettings = {
 const initialState: AppState = {
   status: 'ready',
   actions: [],
+  dataTable: { headers: [], rows: [], loopOverData: false },
   highlightedActionIndex: null,
   profiles: [],
   activeProfile: null,
@@ -140,6 +141,8 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
       };
     case 'actions:updated':
       return { ...state, actions: message.payload.actions, highlightedActionIndex: null };
+    case 'data:table':
+      return { ...state, dataTable: message.payload };
     case 'actions:highlight':
       return { ...state, highlightedActionIndex: message.payload.index };
     case 'profiles:updated':

@@ -362,6 +362,8 @@ export interface ButtonStates {
 export interface AppState {
   status: 'ready' | 'recording' | 'replaying';
   actions: ActionItem[];
+  // Active profile's data-loop table (empty when unused). Kept in sync via data:table.
+  dataTable: ProfileDataTable;
   highlightedActionIndex: number | null;
   profiles: ProfileEntry[];
   activeProfile: string | null;
@@ -427,10 +429,20 @@ export interface AppState {
 
 // ── Messages C# → JS ──
 
+// Data-loop table (Model A). Headers name the columns ({row:header}); rows are the
+// data (each an ordered cell list aligned to headers by index). loopOverData drives the
+// "run the profile once per row" behaviour.
+export interface ProfileDataTable {
+  headers: string[];
+  rows: string[][];
+  loopOverData: boolean;
+}
+
 export type IncomingMessage =
   | { type: 'state:init'; payload: AppState }
   | { type: 'status:changed'; payload: { status: AppState['status'] } }
   | { type: 'actions:updated'; payload: { actions: ActionItem[] } }
+  | { type: 'data:table'; payload: ProfileDataTable }
   | { type: 'actions:highlight'; payload: { index: number } }
   | { type: 'profiles:updated'; payload: { profiles: ProfileEntry[]; activeProfile: string | null; profileOrder: ProfileOrderData } }
   | { type: 'settings:loaded'; payload: { settings: SettingsState } }
@@ -512,6 +524,8 @@ export type IncomingMessage =
 
 export type OutgoingMessage =
   | { type: 'ui:ready'; payload: Record<string, never> }
+  | { type: 'data:request'; payload: Record<string, never> }
+  | { type: 'data:save'; payload: ProfileDataTable }
   | { type: 'recording:toggle'; payload: { insertIndex?: number } }
   | { type: 'replay:toggle'; payload: { loopEnabled: boolean; loopCount: string; intervalEnabled: boolean; intervalText: string } }
   | { type: 'replay:resume'; payload: Record<string, never> }

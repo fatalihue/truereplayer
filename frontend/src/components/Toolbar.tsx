@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Braces, AppWindow, Clipboard, ChevronDown, Dice5, Cpu, FileCheck, Clock } from 'lucide-react';
+import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Braces, AppWindow, Clipboard, ChevronDown, Dice5, Cpu, FileCheck, Clock, Table2 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -891,6 +891,18 @@ export function Toolbar(_props: ToolbarProps) {
             data-tip={clickerTip('Activate Window', 'Ativar janela')}
           >
             <AppWindow size={14} />
+          </button>
+
+          {/* Data Loop — open the data-table panel ({row:column} tokens + loop-over-data).
+              A profile-level surface (App-level, opened via the shared cmd:dataeditor
+              event), not an inserted row — so it's enabled regardless of clicker mode. */}
+          <button
+            tabIndex={-1}
+            onClick={() => window.dispatchEvent(new CustomEvent('cmd:dataeditor'))}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+            data-tip={tt('Data Loop (table + {row:column})', 'Data Loop (tabela + {row:coluna})')}
+          >
+            <Table2 size={14} />
           </button>
 
           <div className="w-px h-4 bg-border-subtle mx-0.5" />

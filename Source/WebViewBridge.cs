@@ -645,6 +645,8 @@ namespace TrueReplayer
                     case "actions:toggleSkip": HandleActionsToggleSkip(payload); break;
                     case "actions:toggleFocusClick": HandleActionsToggleFocusClick(payload); break;
                     case "actions:resetCycle": HandleActionsResetCycle(payload); break;
+                    case "data:request": HandleDataRequest(); break;
+                    case "data:save": HandleDataSave(payload); break;
                     case "actions:reorder": HandleActionsReorder(payload); break;
                     case "actions:convertMode": HandleConvertActionMode(payload); break;
                     case "actions:insertAction": HandleInsertAction(payload); break;
@@ -978,6 +980,74 @@ namespace TrueReplayer
             SendMessage("actions:updated", new { actions = actionsList });
             PushToolbarUpdate();
             PushStatusBarUpdate();
+            PushDataTable();
+        }
+
+        // Pushes the active profile's data-loop table to the frontend (empty when none). Rides
+        // on every actions:updated so a profile switch / load refreshes the Data panel too;
+        // also sent on explicit data:request (panel open) and after data:save (confirm).
+        public void PushDataTable()
+        {
+            var d = UserProfile.Current?.Data;
+            SendMessage("data:table", new
+            {
+                headers = d?.Headers ?? new System.Collections.Generic.List<string>(),
+                rows = d?.Rows ?? new System.Collections.Generic.List<System.Collections.Generic.List<string>>(),
+                loopOverData = d?.LoopOverData ?? false,
+            });
+        }
+
+        private void HandleDataRequest() => PushDataTable();
+
+        // Persists the active profile's data-loop table. Mirrors the profile-setting
+        // convention (BringToFocus etc.): mutate UserProfile.Current so it is live for the
+        // next replay + preserved by any Save, and persist to disk immediately when the
+        // profile has a file. A table with no headers AND no rows clears the feature (null).
+        private async void HandleDataSave(JsonElement payload)
+        {
+            var headers = new System.Collections.Generic.List<string>();
+            if (payload.TryGetProperty("headers", out var hEl) && hEl.ValueKind == JsonValueKind.Array)
+                foreach (var h in hEl.EnumerateArray())
+                    headers.Add(h.GetString() ?? "");
+
+            var rows = new System.Collections.Generic.List<System.Collections.Generic.List<string>>();
+            if (payload.TryGetProperty("rows", out var rEl) && rEl.ValueKind == JsonValueKind.Array)
+                foreach (var r in rEl.EnumerateArray())
+                {
+                    var cells = new System.Collections.Generic.List<string>();
+                    if (r.ValueKind == JsonValueKind.Array)
+                        foreach (var c in r.EnumerateArray())
+                            cells.Add(c.GetString() ?? "");
+                    rows.Add(cells);
+                }
+
+            bool loopOverData = payload.TryGetProperty("loopOverData", out var lEl) && lEl.ValueKind == JsonValueKind.True;
+
+            ProfileDataTable? table = (headers.Count == 0 && rows.Count == 0)
+                ? null
+                : new ProfileDataTable { Headers = headers, Rows = rows, LoopOverData = loopOverData };
+
+            UserProfile.Current.Data = table;
+
+            // Persist immediately when the profile exists on disk (same pattern as the other
+            // profile-level settings). A brand-new unsaved profile ("No Profile" / no path)
+            // keeps the table in memory + marks unsaved so the first Save writes it.
+            var name = CurrentProfileName;
+            if (name != "No Profile")
+            {
+                var profile = await profileController.LoadProfileByNameAsync(name);
+                if (profile != null)
+                {
+                    profile.Data = table;
+                    await profileController.SaveProfileByNameAsync(name, profile);
+                }
+            }
+            else
+            {
+                HasUnsavedChanges = true;
+            }
+
+            PushDataTable();
         }
 
         private void PushUndoState()
@@ -1407,6 +1477,9 @@ namespace TrueReplayer
                 BringToFocus = UserProfile.Current.BringToFocus,
                 TriggerMode = UserProfile.Current.TriggerMode,
                 IsDisabled = UserProfile.Current.IsDisabled,
+                // Data-loop table travels with the profile so a normal Save preserves it
+                // (data:save also persists immediately, but the main Save must not null it).
+                Data = UserProfile.Current.Data,
             };
         }
 

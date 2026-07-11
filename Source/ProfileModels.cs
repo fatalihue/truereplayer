@@ -123,6 +123,13 @@ namespace TrueReplayer.Models
         // on the frontend; backend accepts any string and trims to first grapheme on save.
         public string? IconEmoji { get; set; }
 
+        // Data-loop table (Model A): a small CSV-like table embedded in the profile JSON.
+        // When LoopOverData is on, the whole profile re-runs once per row and {row:column}
+        // tokens resolve to the current row's cells. null = feature not used (byte-identical
+        // for old profiles). Embedded (not a sidecar) since it reuses the profile save/export
+        // pipelines for free; large sets would want a sidecar but that's a later increment.
+        public ProfileDataTable? Data { get; set; }
+
         [JsonIgnore]
         public bool ProfileKeyEnabled { get; set; } = true;
 
@@ -154,6 +161,17 @@ namespace TrueReplayer.Models
         public string? ProcessName { get; set; }
         public string? WindowTitle { get; set; }
         public string TitleMatchMode { get; set; } = "contains";  // "contains" | "regex"
+    }
+
+    // Data-loop table. Headers name the columns ({row:header}); Rows are the data (each an
+    // ordered list of cell strings, aligned to Headers by index; short rows tolerated =
+    // missing cells resolve empty). LoopOverData drives the "run the profile once per row"
+    // behaviour. Stored inside the profile JSON.
+    public class ProfileDataTable
+    {
+        public List<string> Headers { get; set; } = new();
+        public List<List<string>> Rows { get; set; } = new();
+        public bool LoopOverData { get; set; }
     }
 
     public class HotstringConfig
@@ -282,6 +300,9 @@ namespace TrueReplayer.Models
         // matches the feature set actually present in the actions.
         public string? AppMinVersion { get; set; }
         public string? IconEmoji { get; set; }
+        // Data-loop table — round-tripped to the .trprofile envelope like the other
+        // per-profile fields; null omitted, old apps ignore the unknown key.
+        public ProfileDataTable? Data { get; set; }
     }
 
     public class ProfileExportOrganization

@@ -175,6 +175,9 @@ namespace TrueReplayer.Controllers
                     BringToFocus = UserProfile.Current.BringToFocus,
                     TriggerMode = UserProfile.Current.TriggerMode,
                     IsDisabled = UserProfile.Current.IsDisabled,
+                    // Data-loop table — mirror CreateProfileFromState so a "Save As New" /
+                    // first-save doesn't silently drop the table.
+                    Data = UserProfile.Current.Data,
                 };
 
                 try
@@ -1086,6 +1089,7 @@ namespace TrueReplayer.Controllers
                     BatchDelay = profile.BatchDelay,
                     Actions = profile.Actions,
                     Images = images,
+                    Data = profile.Data,
                     // Sharing metadata — copy verbatim from the source profile so the .trprofile
                     // carries description/tags/etc for the receiver's Import Preview.
                     Description = profile.Description,
@@ -1358,7 +1362,8 @@ namespace TrueReplayer.Controllers
                     // field in the JSON deserializes to 1 anyway. Keep that behaviour explicit here.
                     ProfileVersion = entry.ProfileVersion > 0 ? entry.ProfileVersion : 1,
                     AppMinVersion = entry.AppMinVersion,
-                    IconEmoji = entry.IconEmoji
+                    IconEmoji = entry.IconEmoji,
+                    Data = entry.Data
                 };
                 SettingsManager.MigrateRestoreSize(profile);
 
