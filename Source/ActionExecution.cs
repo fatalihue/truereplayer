@@ -252,10 +252,12 @@ namespace TrueReplayer.Services
             // per-profile only (no folder inheritance), so UserProfile.Current is the source.
             var dataTable = Models.UserProfile.Current?.Data;
             bool loopOverData = dataTable != null && dataTable.LoopOverData;
-            if (loopOverData && dataTable!.Rows.Count == 0)
+            if (loopOverData && (dataTable!.Rows?.Count ?? 0) == 0)
             {
                 // Empty table + loop-over-data would set loopCount=0 → the loop reads that as
                 // INFINITE. Refuse with a friendly message instead of spinning forever.
+                // Null-safe: a hand-edited/corrupt profile can carry {"rows":null}, and this guard
+                // runs BEFORE SetDataTable normalizes Rows — treat null as empty, not a crash.
                 DiagnosticLog.Warn("Replay refused: 'loop over data' is on but the data table has no rows.");
                 onStatusChanged?.Invoke("error:The data table has no rows — add data or turn off \"loop over data\".");
                 return;
@@ -273,7 +275,7 @@ namespace TrueReplayer.Services
             // would also stamp empty {row:col} for every iteration past the last row).
             if (loopOverData)
             {
-                loopCount = dataTable!.Rows.Count;
+                loopCount = dataTable!.Rows?.Count ?? 0;
                 forceInfiniteLoop = false;
             }
             replayer.SetDataTable(dataTable, loopOverData);

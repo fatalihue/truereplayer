@@ -1501,6 +1501,15 @@ namespace TrueReplayer
                 // the cold-start state and subsequent pushes can never drift.
                 actions = ProjectActionsForFrontend(),
                 highlightedActionIndex = (int?)null,
+                // Cold-start data-loop table — MUST mirror PushDataTable's shape. Without it the
+                // store keeps the empty default at mount, DataPanel seeds empty (seededRef then
+                // blocks the later data:table re-seed), and a Save wipes the on-disk table.
+                dataTable = new
+                {
+                    headers = UserProfile.Current?.Data?.Headers ?? new System.Collections.Generic.List<string>(),
+                    rows = UserProfile.Current?.Data?.Rows ?? new System.Collections.Generic.List<System.Collections.Generic.List<string>>(),
+                    loopOverData = UserProfile.Current?.Data?.LoopOverData ?? false,
+                },
                 profiles = profileController.ProfileEntries.Select(p => new
                 {
                     name = p.Name,
