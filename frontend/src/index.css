@@ -563,6 +563,11 @@ html[data-animations="true"] .drop-gap-slot {
   box-shadow: inset 0 0 0 1px var(--color-accent-solid);
 }
 
+/* Data Loop paste surface — same inset focus hairline as the Insert Text editor. */
+.dataloop-editor:focus-within {
+  box-shadow: inset 0 0 0 1px var(--color-accent-solid);
+}
+
 /* Kbd tag utilities */
 @utility kbd {
   display: inline-flex;
