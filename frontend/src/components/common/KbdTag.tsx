@@ -8,6 +8,18 @@ interface KbdTagProps {
 }
 
 /**
+ * Split a combo on '+' as the separator, keeping a literal '+' KEY intact: it
+ * shows up as a trailing empty segment (e.g. "Ctrl++" → ['Ctrl','','']) which
+ * maps back to '+'. "+" alone is the lone plus key. Shared with the capture
+ * dialogs' hero key-caps (KeyCaps) so both render literal-plus combos right.
+ */
+export function splitCombo(combo: string): string[] {
+  return combo === '+'
+    ? ['+']
+    : combo.split('+').map((p, i, arr) => (p === '' && i === arr.length - 1 ? '+' : p)).filter(p => p !== '');
+}
+
+/**
  * Renders a keyboard shortcut combo.
  *  default  → one chip per key:  "Ctrl+PageDown" → [Ctrl] [PageDown]
  *  unified  → one chip total:    "Ctrl+PageDown" → [Ctrl+PageDown]
@@ -16,12 +28,7 @@ export function KbdTag({ combo, accent = false, unified = false }: KbdTagProps) 
   if (!combo) return null;
   const cls = accent ? 'kbd kbd-accent' : 'kbd';
 
-  // Split on '+' as the separator, but keep a literal '+' KEY intact: it shows up as a trailing
-  // empty segment (e.g. "Ctrl++" → ['Ctrl','','']) which we map back to '+'. "+" alone is the
-  // lone plus key.
-  const parts = combo === '+'
-    ? ['+']
-    : combo.split('+').map((p, i, arr) => (p === '' && i === arr.length - 1 ? '+' : p)).filter(p => p !== '');
+  const parts = splitCombo(combo);
 
   if (unified) {
     // One chip, keys joined with a spaced separator ("Alt + A", not "Alt+A").

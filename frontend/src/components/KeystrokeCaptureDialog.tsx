@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Keyboard, AlertCircle } from 'lucide-react';
+import { Keyboard } from 'lucide-react';
 import { NumberInput } from './common/NumberInput';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
+import { SegmentedControl } from './common/SegmentedControl';
+import { KeyCaps } from './common/KeyCaps';
+import { DurationChips } from './common/DurationChips';
 import { useBridge } from '../bridge/BridgeContext';
-import { useLanguage } from '../state/LanguageContext';
-import { formatMs } from '../utils/displayUtils';
+import { useLanguage, useTt } from '../state/LanguageContext';
 
 /**
  * Unified "Send Keystroke" dialog. One capture pad + a Press/Hold mode toggle covers
@@ -92,6 +94,7 @@ export function KeystrokeCaptureDialog({
   onClose,
 }: KeystrokeCaptureDialogProps) {
   const { language } = useLanguage();
+  const tt = useTt();
 
   // `isEditing` flips Esc behaviour and the button label. Decoupled from mode so
   // we can edit a Keystroke row, switch to Hold, and save — converting the row's
@@ -255,10 +258,6 @@ export function KeystrokeCaptureDialog({
     }
   };
 
-  // Duration readout — always milliseconds, matching the grid badge and every other
-  // action duration (was seconds for clean multiples of 1000).
-  const durationLabel = `${formatMs(holdMs, language)} ms`;
-
   // Title flips by intent: edit vs insert, then by mode.
   const title = isEditing
     ? (mode === 'hold' ? 'Edit Hold Key' : 'Edit Keystroke')
@@ -266,17 +265,20 @@ export function KeystrokeCaptureDialog({
 
   return (
     <DialogShell
-      icon={<Keyboard size={14} className="text-accent-light" />}
+      icon={<Keyboard size={14} style={{ color: 'var(--color-action-key-fg)' }} />}
       title={title}
       onClose={onClose}
       // Capture dialog: a stray click outside must not discard a captured combo
       // (or the Times/Gap/Hold tuning) — dismissal is Esc or Cancel only.
       closeOnBackdrop={false}
-      // Hint qualifies Enter — outside of input focus the backend hook captures
-      // Enter as the bound key, so the user gets no confirm-via-Enter from the
-      // capture pad. The numeric fields (Times / Gap / Hold duration) pause
-      // capture on focus, which is when Enter actually confirms.
-      footerHint=""
+      // Truthful per state — NEVER advertises Enter while the hook is armed
+      // (outside input focus, Enter would be CAPTURED as the combo, not confirm).
+      // Manual mode owns the keyboard, so there Enter/Esc read as usual.
+      footerHint={manualEntry
+        ? tt('Enter confirms · Esc cancels', 'Enter confirma · Esc cancela')
+        : captured
+          ? tt('Press another combo to replace', 'Pressione outra combinação para substituir')
+          : ''}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -305,9 +307,17 @@ export function KeystrokeCaptureDialog({
         <div className="px-5 py-5 flex flex-col gap-4">
           {/* Capture pad — universal for both modes. Single press detects whatever
               modifiers the user is holding; Hold mode silently uses only the last
-              key, with a warning chip when modifiers got dropped. */}
+              key, with a warning chip when modifiers got dropped. The border style
+              reports the hook state truthfully: dashed = low-level capture armed,
+              solid = manual mode (hook off, the keyboard is yours). */}
           <div
-            className="bg-bg-input border border-dashed border-warning/40 rounded-md py-5 px-4 text-center min-h-[156px] flex flex-col justify-center"
+            className={`bg-bg-input border rounded-md py-5 px-4 text-center min-h-[140px] flex flex-col justify-center transition-colors ${
+              manualEntry ? 'border-border-default' : 'border-dashed'
+            }`}
+            style={manualEntry ? undefined : {
+              borderColor: 'color-mix(in srgb, var(--color-action-key-fg) 40%, transparent)',
+              ...(captured ? { background: 'color-mix(in srgb, var(--color-action-key-fg) 4%, var(--color-bg-input))' } : null),
+            }}
           >
             {manualEntry ? (
               <>
@@ -318,60 +328,37 @@ export function KeystrokeCaptureDialog({
                   onChange={(e) => setCaptured(e.target.value || null)}
                   placeholder="F5 · Ctrl+S · {var:name}"
                   spellCheck={false}
-                  className="w-full h-9 px-2 text-[13px] font-mono bg-bg-elevated border border-border-default rounded text-warning text-center outline-none focus:border-accent-solid"
+                  className="w-full h-9 px-2 text-[13px] font-mono bg-bg-elevated border border-border-default rounded text-[color:var(--color-action-key-fg)] text-center outline-none focus:border-accent-solid"
                 />
                 <div className="mt-2.5 text-[10px] text-text-tertiary leading-relaxed">
                   {mode === 'hold' ? (
                     // Hold goes through SimulateKey (single virtual-key) — a token
                     // resolving to a combo would silently no-op, so don't teach it here.
-                    <>Tokens like <code className="text-accent-light">{'{var:name}'}</code> resolve
-                    when the action runs — for Hold, the token must resolve to a{' '}
-                    <span className="text-text-secondary">single key</span> (F5, W, Space…).</>
+                    language === 'pt-BR'
+                      ? <>Para Hold, um token <code className="text-accent-light">{'{var:name}'}</code> precisa
+                        resolver para uma <span className="text-text-secondary">única tecla</span> (F5, W, Space…).</>
+                      : <>For Hold, a <code className="text-accent-light">{'{var:name}'}</code> token must
+                        resolve to a <span className="text-text-secondary">single key</span> (F5, W, Space…).</>
                   ) : (
-                    <>Tokens like <code className="text-accent-light">{'{var:name}'}</code> or{' '}
-                    <code className="text-accent-light">{'{clipboard}'}</code> resolve when the
-                    action runs — even into a full combo like Ctrl+V.</>
+                    language === 'pt-BR'
+                      ? <>Tokens como <code className="text-accent-light">{'{var:name}'}</code> ou{' '}
+                        <code className="text-accent-light">{'{clipboard}'}</code> são resolvidos no replay —
+                        até em uma combinação completa como Ctrl+V.</>
+                      : <>Tokens like <code className="text-accent-light">{'{var:name}'}</code> or{' '}
+                        <code className="text-accent-light">{'{clipboard}'}</code> resolve at replay —
+                        even into a full combo like Ctrl+V.</>
                   )}
                 </div>
               </>
             ) : captured === null ? (
               <>
-                <div className="text-[12px] text-text-tertiary mb-1">Press any key or combo</div>
-                <div className="text-[10px] text-text-tertiary">
-                  Single keys, or Win/Ctrl/Shift/Alt + key. E.g. A · F5 · Ctrl+S · Win+A
+                <div className="text-[12px] text-text-secondary mb-1">
+                  {tt('Press any key or combo', 'Pressione qualquer tecla ou combinação')}
                 </div>
-                <div className="text-[10px] text-text-tertiary mt-1">Click Cancel to abort</div>
+                <div className="text-[10px] font-mono text-text-tertiary">A · F5 · Ctrl+S · Win+A</div>
               </>
             ) : (
-              <>
-                <div className="inline-flex items-center justify-center self-center gap-1 flex-wrap">
-                  {keystrokeDisplay(captured).split('+').map((part, idx, arr) => (
-                    <span key={`${part}-${idx}`} className="inline-flex items-center gap-1">
-                      <kbd
-                        className="inline-block px-2.5 py-1 bg-bg-elevated border border-border-default rounded font-mono text-[13px] font-semibold text-warning"
-                        style={{ boxShadow: '0 2px 0 rgba(0,0,0,0.3)' }}
-                      >
-                        {part}
-                      </kbd>
-                      {idx < arr.length - 1 && <span className="text-text-tertiary text-[12px]">+</span>}
-                    </span>
-                  ))}
-                </div>
-                <div className="mt-3 text-[10px] text-text-tertiary">
-                  {mode === 'hold'
-                    ? (isEditing
-                        ? <>Updates row to <span className="text-text-secondary font-semibold">{durationLabel} hold</span></>
-                        : <>Inserts <span className="text-text-secondary font-semibold">1 row · {durationLabel} hold</span></>)
-                    : (repeat > 1
-                        ? (isEditing
-                            ? <>Updates row to <span className="text-text-secondary font-semibold">{repeat} press cycles</span></>
-                            : <>Inserts <span className="text-text-secondary font-semibold">1 row · {repeat} press cycles</span></>)
-                        : (isEditing
-                            ? <>Updates row to <span className="text-text-secondary font-semibold">single press</span></>
-                            : <>Inserts <span className="text-text-secondary font-semibold">1 Keystroke row</span></>))}
-                </div>
-                <div className="mt-1 text-[10px] text-text-tertiary">Press another combo to replace</div>
-              </>
+              <KeyCaps combo={captured} fg="var(--color-action-key-fg)" />
             )}
           </div>
 
@@ -383,31 +370,22 @@ export function KeystrokeCaptureDialog({
             onClick={() => setManualEntry(v => !v)}
             className="self-center -mt-2 text-[10px] text-text-tertiary hover:text-text-secondary underline decoration-dotted transition-colors"
           >
-            {manualEntry ? 'Back to key capture' : 'Type manually ({var} tokens allowed)'}
+            {manualEntry ? 'Back to key capture' : 'Type manually · {var} tokens'}
           </button>
 
-          {/* Mode toggle — switches the body below between Press and Hold settings.
-              Two equal-width buttons read as a segmented control without needing a
-              dedicated component. Active state uses the accent colour to mirror
-              the dialog's primary action. */}
+          {/* Mode toggle — switches the body below between Press and Hold settings. */}
           <div className="flex flex-col gap-1.5">
-            <span className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wider">Mode</span>
-            <div className="grid grid-cols-2 gap-1 p-1 bg-bg-input border border-border-default rounded">
-              {(['press', 'hold'] as const).map(m => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMode(m)}
-                  className={`px-3 py-1.5 rounded text-[12px] font-medium transition-colors ${
-                    mode === m
-                      ? 'bg-accent-solid text-white'
-                      : 'text-text-secondary hover:bg-bg-card hover:text-text-primary'
-                  }`}
-                >
-                  {m === 'press' ? 'Press' : 'Hold'}
-                </button>
-              ))}
-            </div>
+            <span className="label-micro text-text-tertiary">Mode</span>
+            <SegmentedControl<Mode>
+              ariaLabel="Keystroke mode"
+              grow
+              value={mode}
+              onChange={setMode}
+              options={[
+                { value: 'press', label: 'Press' },
+                { value: 'hold', label: 'Hold' },
+              ]}
+            />
           </div>
 
           {/* ── PRESS mode body ── */}
@@ -422,7 +400,7 @@ export function KeystrokeCaptureDialog({
                   onChange={(n) => setRepeat(clampRepeat(n))}
                   min={1}
                   max={MAX_REPEAT}
-                  inputWidth="w-20"
+                  inputWidth="w-24"
                   ghostSuffix="ms"
                   ariaLabel="Repeat count"
                 />
@@ -445,7 +423,7 @@ export function KeystrokeCaptureDialog({
                   disabled={repeat <= 1}
                   thousands
                   suffix="ms" suffixInside
-                  inputWidth="w-20"
+                  inputWidth="w-24"
                   ariaLabel="Gap between presses (ms)"
                 />
               </div>
@@ -468,50 +446,38 @@ export function KeystrokeCaptureDialog({
                   min={MIN_HOLD_MS}
                   max={MAX_HOLD_MS}
                   step={stepFor(holdMs)}
-                  inputWidth="w-20"
+                  inputWidth="w-24"
                   thousands
                   suffix="ms" suffixInside
                   ariaLabel="Hold duration (ms)"
                 />
               </div>
 
-              {/* Preset chips. Click writes the value directly into both the state
-                  and the ref (so an immediately-following Insert click reads the
-                  fresh value). User can still fine-tune via the spinner / typed
-                  entry afterwards — presets are shortcuts, not locks. */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {HOLD_PRESETS.map(ms => (
-                  <button
-                    key={ms}
-                    type="button"
-                    onClick={() => setHoldMs(ms)}
-                    className={`px-2 py-0.5 rounded text-[10px] font-mono tabular-nums transition-colors ${
-                      holdMs === ms
-                        ? 'bg-accent-solid/20 text-accent-light border border-accent-solid/40'
-                        : 'bg-bg-card hover:bg-bg-input border border-border-subtle text-text-tertiary hover:text-text-secondary'
-                    }`}
-                  >
-                    {formatMs(ms, language)} ms
-                  </button>
-                ))}
-              </div>
+              {/* Preset chips. onSelect goes through setHoldMs (the two-track
+                  state+ref setter) so a preset click followed by an immediate Add
+                  still commits the fresh value — presets are shortcuts, not locks. */}
+              <DurationChips presets={HOLD_PRESETS} value={holdMs} onSelect={setHoldMs} />
 
               {/* Modifier-strip warning. Captured combo like "Ctrl+S" can't be held
                   by the backend (SimulateKey takes a single virtual-key code), so
-                  Save will use only the last token. Surfaced as an explicit chip
-                  rather than a silent strip so the user can choose to drop Hold
-                  mode or recapture without modifiers. */}
+                  Save will use only the last token. Surfaced explicitly rather than
+                  silently stripped — left-rail card, warning tone. */}
               {hasModifiers && (
-                <div className="flex items-start gap-2 px-2.5 py-2 rounded bg-warning/10 border border-warning/30">
-                  <AlertCircle size={12} className="text-warning mt-[1px] shrink-0" />
-                  <div className="text-[10px] text-text-secondary leading-relaxed">
-                    Hold mode supports single keys only. Saving will hold{' '}
-                    <kbd className="px-1 py-px bg-bg-elevated border border-border-default rounded font-mono text-[10px] text-warning">
-                      {keystrokeDisplay(heldKey)}
-                    </kbd>{' '}
-                    and ignore the modifiers. To hold a combo, insert two rows: a
-                    Hold for the modifier, plus the action under it.
-                  </div>
+                <div
+                  className="border-l-2 rounded px-2.5 py-2 text-[10px] leading-relaxed text-text-secondary"
+                  style={{
+                    background: 'color-mix(in srgb, var(--color-warning) 8%, transparent)',
+                    borderColor: 'var(--color-warning)',
+                  }}
+                >
+                  {tt('Hold mode supports single keys only. Saving will hold', 'O modo Hold aceita apenas teclas únicas. Salvar vai segurar')}{' '}
+                  <kbd className="px-1 py-px bg-bg-elevated border border-border-default rounded font-mono text-[10px] text-warning">
+                    {keystrokeDisplay(heldKey)}
+                  </kbd>{' '}
+                  {tt(
+                    'and ignore the modifiers. To hold a combo, insert two rows: a Hold for the modifier, plus the action under it.',
+                    'e ignorar os modificadores. Para segurar uma combinação, insira duas linhas: um Hold para o modificador e a ação abaixo.',
+                  )}
                 </div>
               )}
             </div>

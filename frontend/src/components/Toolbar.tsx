@@ -686,7 +686,7 @@ export function Toolbar(_props: ToolbarProps) {
                   }}
                 >
                   <ScanSearch size={12} className="text-accent-light" />
-                  Wait for Image…
+                  Wait for Image
                 </button>
                 <button
                   className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
@@ -698,7 +698,7 @@ export function Toolbar(_props: ToolbarProps) {
                   }}
                 >
                   <Pipette size={12} className="text-accent-light" />
-                  Wait for Pixel Color…
+                  Wait for Pixel Color
                 </button>
               </div>
             )}
@@ -734,7 +734,7 @@ export function Toolbar(_props: ToolbarProps) {
                   }}
                 >
                   <ScanSearch size={12} style={{ color: 'var(--color-action-if-fg)' }} />
-                  If Image Found…
+                  Image Found
                 </button>
                 <button
                   className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
@@ -746,7 +746,7 @@ export function Toolbar(_props: ToolbarProps) {
                   }}
                 >
                   <Pipette size={12} style={{ color: 'var(--color-action-if-fg)' }} />
-                  If Pixel Color Match…
+                  Pixel Color Match
                 </button>
                 {/* Capture-less conditions — insert the If/EndIf pair immediately and
                     auto-open the Sheet (backend sends sheet:openIndex); no screen overlay. */}
@@ -760,7 +760,7 @@ export function Toolbar(_props: ToolbarProps) {
                   }}
                 >
                   <AppWindow size={12} style={{ color: 'var(--color-action-if-fg)' }} />
-                  If Window Open…
+                  Window Open
                 </button>
                 <button
                   className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
@@ -772,7 +772,7 @@ export function Toolbar(_props: ToolbarProps) {
                   }}
                 >
                   <Clipboard size={12} style={{ color: 'var(--color-action-if-fg)' }} />
-                  If Clipboard…
+                  Clipboard
                 </button>
                 <button
                   className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
@@ -784,14 +784,14 @@ export function Toolbar(_props: ToolbarProps) {
                   }}
                 >
                   <Globe size={12} style={{ color: 'var(--color-action-if-fg)' }} />
-                  If Browser Element…
+                  Browser Element
                 </button>
                 {([
-                  { ct: 'Random', Icon: Dice5, label: 'If Random…' },
-                  { ct: 'Variable', Icon: Braces, label: 'If Variable…' },
-                  { ct: 'ProcessRunning', Icon: Cpu, label: 'If Process Running…' },
-                  { ct: 'FileExists', Icon: FileCheck, label: 'If File Exists…' },
-                  { ct: 'TimeWindow', Icon: Clock, label: 'If Time…' },
+                  { ct: 'Random', Icon: Dice5, label: 'Random' },
+                  { ct: 'Variable', Icon: Braces, label: 'Variable' },
+                  { ct: 'ProcessRunning', Icon: Cpu, label: 'Process Running' },
+                  { ct: 'FileExists', Icon: FileCheck, label: 'File Exists' },
+                  { ct: 'TimeWindow', Icon: Clock, label: 'Time' },
                 ] as const).map(({ ct, Icon, label }) => (
                   <button
                     key={ct}

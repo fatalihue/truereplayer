@@ -3,6 +3,8 @@ import { Hourglass } from 'lucide-react';
 import { NumberInput } from './common/NumberInput';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
+import { KeyCaps } from './common/KeyCaps';
+import { DurationChips } from './common/DurationChips';
 import { useBridge } from '../bridge/BridgeContext';
 import { useTt, useLanguage } from '../state/LanguageContext';
 import { formatMs } from '../utils/displayUtils';
@@ -140,7 +142,11 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
       // Capture dialog: a stray click outside must not discard a configured
       // hotkey/timeout — dismissal is Esc or Cancel only.
       closeOnBackdrop={false}
-      footerHint=""
+      // Truthful per state — never advertises Enter while the hook is armed
+      // (outside input focus, Enter would be CAPTURED as the resume key).
+      footerHint={captured
+        ? tt('Press another key to replace', 'Pressione outra tecla para substituir')
+        : ''}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -166,54 +172,45 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
       }}
     >
         <div className="px-5 py-5 flex flex-col gap-4">
-          {/* Capture pad — press any key/combo to set the resume hotkey directly.
-              Optional: leaving it empty makes a timeout-only Pause. */}
-          <div className="bg-bg-input border border-dashed rounded-md py-5 px-4 text-center min-h-[140px] flex flex-col justify-center"
-               style={{ borderColor: 'color-mix(in srgb, var(--color-action-pause-fg) 40%, transparent)' }}>
-            {captured === null ? (
-              <>
-                <div className="text-[12px] text-text-tertiary mb-1">Press any key to set a resume hotkey</div>
-                <div className="text-[10px] text-text-tertiary">
-                  Single keys, or Win/Ctrl/Shift/Alt + key. E.g. F8 · Esc · Ctrl+R
-                </div>
-                <div className="text-[10px] text-text-tertiary mt-1">Optional — or just set a timeout below</div>
-              </>
-            ) : (
-              <>
-                <div className="inline-flex items-center justify-center self-center gap-1 flex-wrap">
-                  {captured.split('+').map((part, idx, arr) => (
-                    <span key={`${part}-${idx}`} className="inline-flex items-center gap-1">
-                      <kbd
-                        className="inline-block px-2.5 py-1 bg-bg-elevated border border-border-default rounded font-mono text-[13px] font-semibold"
-                        style={{ color: 'var(--color-action-pause-fg)', boxShadow: '0 2px 0 rgba(0,0,0,0.3)' }}
-                      >
-                        {part}
-                      </kbd>
-                      {idx < arr.length - 1 && <span className="text-text-tertiary text-[12px]">+</span>}
-                    </span>
-                  ))}
-                </div>
-                <div className="mt-3 text-[10px] text-text-tertiary">Resumes when this key is pressed</div>
-                <div className="mt-1 flex items-center justify-center gap-2 text-[10px] text-text-tertiary">
-                  <span>Press another to replace</span>
-                  <span aria-hidden>·</span>
+          {/* Resume hotkey — press any key/combo to set it directly. Optional:
+              leaving it empty makes a timeout-only Pause (the strip below says so). */}
+          <div className="flex flex-col gap-1.5">
+            <span className="label-micro text-text-tertiary">Resume hotkey</span>
+            <div
+              className="bg-bg-input border border-dashed rounded-md py-5 px-4 text-center min-h-[140px] flex flex-col justify-center transition-colors"
+              style={{
+                borderColor: 'color-mix(in srgb, var(--color-action-pause-fg) 40%, transparent)',
+                ...(captured ? { background: 'color-mix(in srgb, var(--color-action-pause-fg) 4%, var(--color-bg-input))' } : null),
+              }}
+            >
+              {captured === null ? (
+                <>
+                  <div className="text-[12px] text-text-secondary mb-1">
+                    {tt('Press any key — optional', 'Pressione qualquer tecla — opcional')}
+                  </div>
+                  <div className="text-[10px] font-mono text-text-tertiary">F8 · Esc · Ctrl+R</div>
+                </>
+              ) : (
+                <>
+                  <KeyCaps combo={captured} fg="var(--color-action-pause-fg)" />
                   <button
                     type="button"
                     onClick={() => setCaptured(null)}
-                    className="text-text-tertiary hover:text-text-secondary underline underline-offset-2"
+                    className="self-center mt-2.5 text-[10px] text-text-tertiary hover:text-text-secondary underline underline-offset-2"
                   >
                     Clear
                   </button>
-                </div>
-              </>
-            )}
+                </>
+              )}
+            </div>
           </div>
 
-          {/* Timeout — milliseconds. 0 (the ∞ preset) means "no timeout"; the Pause
-              then resumes only via the captured hotkey above. */}
-          <div className="flex flex-col gap-2">
-            <label className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wider">Timeout</label>
-            <div className="flex items-center gap-2">
+          {/* Timeout — label + field on ONE row (Send Keystroke's row style),
+              presets below. 0 (the ∞ preset) means "no timeout"; the Pause then
+              resumes only via the captured hotkey above. */}
+          <div className="flex flex-col gap-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <label className="text-[12px] font-medium text-text-secondary">Timeout</label>
               <NumberInput
                 value={timeoutMs}
                 onChange={setTimeoutMs}
@@ -226,41 +223,39 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
                 ariaLabel="Pause timeout in milliseconds"
               />
             </div>
-            <div className="flex flex-wrap gap-1">
-              {TIMEOUT_PRESETS.map((ms) => {
-                const isActive = timeoutMs === ms;
-                const label = ms === 0 ? '∞' : `${formatMs(ms, language)} ms`;
-                return (
-                  <button
-                    key={ms}
-                    type="button"
-                    onClick={() => setTimeoutMs(ms)}
-                    className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
-                      isActive
-                        ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
-                        : 'text-text-tertiary border-border-default bg-bg-elevated hover:text-text-secondary hover:bg-bg-card'
-                    }`}
-                    data-tip={ms === 0 ? tt('No timeout — resume by hotkey only', 'Sem tempo limite — retoma apenas pela tecla de atalho') : undefined}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
+            <DurationChips
+              presets={TIMEOUT_PRESETS}
+              value={timeoutMs}
+              onSelect={setTimeoutMs}
+              infinityTip={tt('No timeout — resume by hotkey only', 'Sem tempo limite — retoma apenas pela tecla de atalho')}
+            />
           </div>
 
-          {/* Mode hint — explains the active combination. The no-hotkey-no-timeout
-              case is a config error (the engine skips such a Pause), so the hint
-              tells the user to set at least one — and Add/Save stays disabled. */}
-          <p className="text-[11px] text-text-tertiary leading-relaxed">
-            {captured && timeoutMs > 0
-              ? 'Resumes on the hotkey or timeout — whichever fires first.'
-              : captured
-                ? 'Waits until the hotkey is pressed.'
-                : timeoutMs > 0
-                  ? `Waits ${timeoutLabel} then continues.`
-                  : 'Set a hotkey or timeout — without either, the Pause is skipped at replay.'}
-          </p>
+          {/* Live-semantics strip — merges the two orthogonal inputs into one
+              sentence (the DataPanel RUN-card recipe). The no-hotkey-no-timeout
+              case is a config error (the engine skips such a Pause) → recording
+              tone, and Add/Save stays disabled. */}
+          {(() => {
+            const tone = canConfirm ? 'var(--color-action-pause-fg)' : 'var(--color-recording)';
+            return (
+              <div
+                className="border-l-2 rounded px-2.5 py-2 text-[11px] leading-relaxed"
+                style={{
+                  background: `color-mix(in srgb, ${tone} 8%, transparent)`,
+                  borderColor: tone,
+                  color: tone,
+                }}
+              >
+                {captured && timeoutMs > 0
+                  ? tt('Resumes on the hotkey or after the timeout — whichever comes first.', 'Retoma pelo atalho ou após o tempo limite — o que vier primeiro.')
+                  : captured
+                    ? tt('Waits until the hotkey is pressed.', 'Aguarda até o atalho ser pressionado.')
+                    : timeoutMs > 0
+                      ? tt(`Waits ${timeoutLabel} then continues.`, `Aguarda ${timeoutLabel} e continua.`)
+                      : tt('Set a hotkey or a timeout — with neither, this Pause is skipped at replay.', 'Defina um atalho ou um tempo limite — sem nenhum dos dois, esta Pausa é pulada no replay.')}
+              </div>
+            );
+          })()}
         </div>
     </DialogShell>
   );
