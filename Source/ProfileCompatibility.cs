@@ -61,31 +61,31 @@ namespace TrueReplayer.Services
             // New If-condition families — an older build hits the unknown-ConditionType
             // else-branch in InstantProbe → treats the probe as false → always takes the
             // Else branch, a silent semantic divergence. Pin to the build that introduces
-            // them (2.7.5); BUMP in lockstep at release (expected 2.8.0), same as the
+            // them (2.8.0, the introducing build), same as the
             // ActivateWindow / cycle pins. One row per family so import diagnostics name it.
             (p => p.Actions.Any(a => string.Equals(a.ConditionType, "Random", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 7, 5), "If Random condition"),
+                new Version(2, 8, 0), "If Random condition"),
             (p => p.Actions.Any(a => string.Equals(a.ConditionType, "Variable", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 7, 5), "If Variable condition"),
+                new Version(2, 8, 0), "If Variable condition"),
             (p => p.Actions.Any(a => string.Equals(a.ConditionType, "ProcessRunning", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 7, 5), "If Process Running condition"),
+                new Version(2, 8, 0), "If Process Running condition"),
             (p => p.Actions.Any(a => string.Equals(a.ConditionType, "FileExists", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 7, 5), "If File Exists condition"),
+                new Version(2, 8, 0), "If File Exists condition"),
             (p => p.Actions.Any(a => string.Equals(a.ConditionType, "TimeWindow", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 7, 5), "If Time condition"),
+                new Version(2, 8, 0), "If Time condition"),
 
             // Data-loop table (Model A) — older builds leave {row:column} tokens literal and
             // don't loop over the rows, a silent divergence. Pin to the introducing build
-            // (2.7.5); BUMP at release (2.8.0) with the other pending pins.
+            // (2.8.0).
             (p => p.Data != null,
-                new Version(2, 7, 5), "Data-loop table"),
+                new Version(2, 8, 0), "Data-loop table"),
 
             // BrowserAssert — a DEDICATED row (the Browser* predicate below auto-pins 2.1.0,
             // but that is INSUFFICIENT: an older build has no dispatch case for the unknown
             // type, silently SKIPS the assertion → a broken page passes unnoticed. Pin to
-            // 2.7.5; BUMP at release with the other pending pins.
+            // 2.8.0 (the introducing build).
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "BrowserAssert", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 7, 5), "Browser assert"),
+                new Version(2, 8, 0), "Browser assert"),
 
             // Browser actions (BrowserClick/Type/Navigate/WaitElement/SelectOption) all rely on the
             // Chrome extension + native host bridge added in 2.1.0.
@@ -116,20 +116,19 @@ namespace TrueReplayer.Services
             // ActivateWindow (launch/wait/focus a window mid-run) — older builds have no
             // replay switch case and would silently skip the row, leaving the following
             // actions to fire against whatever window happens to be focused. Pinned to
-            // the build that introduces it (2.7.5) so an own-build export → import
+            // the build that introduces it (2.8.0) so an own-build export → import
             // round-trips cleanly — IsCompatible would reject a pin above the running
-            // version. BUMP this in lockstep with the app version when the feature is
-            // released under a higher number (expected 2.8.0).
+            // version.
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "ActivateWindow", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 7, 5), "Activate Window"),
+                new Version(2, 8, 0), "Activate Window"),
 
             // SetVariable Cycle mode — older builds drop the unknown VariableMode property
             // and run the row in SET mode, storing the ENTIRE multi-line list instead of
             // one item per execution (silent semantic change, exactly what this matrix
-            // gates). Pinned to the build that introduces it (2.7.5) — BUMP in lockstep
-            // with the app version at release (expected 2.8.0), same as Activate Window.
+            // gates). Pinned to the build that introduces it (2.8.0), same as Activate
+            // Window.
             (p => p.Actions.Any(a => string.Equals(a.VariableMode, "cycle", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 7, 5), "Set Variable cycle mode"),
+                new Version(2, 8, 0), "Set Variable cycle mode"),
 
             // Restore Size split from Restore Position in 2.0.5; older builds only honour Position.
             (p => p.RestoreSize,
