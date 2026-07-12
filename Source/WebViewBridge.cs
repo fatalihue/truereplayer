@@ -645,6 +645,7 @@ namespace TrueReplayer
                     case "actions:toggleSkip": HandleActionsToggleSkip(payload); break;
                     case "actions:toggleFocusClick": HandleActionsToggleFocusClick(payload); break;
                     case "actions:resetCycle": HandleActionsResetCycle(payload); break;
+                    case "actions:resetRow": HandleActionsResetRow(); break;
                     case "data:request": HandleDataRequest(); break;
                     case "data:save": HandleDataSave(payload); break;
                     case "actions:reorder": HandleActionsReorder(payload); break;
@@ -2515,6 +2516,18 @@ namespace TrueReplayer
                 return;
             replayService.ResetCycleCursor(action.Id);
             SendMessage("alert:show", new { message = $"Cycle '{action.Key}' reset to the first item", type = "success" });
+        }
+
+        // Reset the data-loop row cursor (Model B) to the first row. Per-profile runtime
+        // state — no profile edit, no save. Only meaningful when the active profile has a
+        // data table (the context-menu entry is gated to cursor mode), but harmless
+        // otherwise, so it just no-ops when there are no rows to cursor through.
+        private void HandleActionsResetRow()
+        {
+            var data = UserProfile.Current?.Data;
+            if (data == null || (data.Rows?.Count ?? 0) == 0) return;
+            replayService.ResetRowCursor();
+            SendMessage("alert:show", new { message = "Data-loop row position reset to the first row", type = "success" });
         }
 
         private void HandleActionsReorder(JsonElement payload)

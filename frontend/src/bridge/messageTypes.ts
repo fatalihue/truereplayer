@@ -602,6 +602,8 @@ export type OutgoingMessage =
   | { type: 'actions:toggleFocusClick'; payload: { indices: number[] } }
   // Reset a SetVariable cycle row to its first item (clears the in-memory cursor).
   | { type: 'actions:resetCycle'; payload: { index: number } }
+  // Reset the data-loop row cursor (Model B) to the first row. Profile-level.
+  | { type: 'actions:resetRow'; payload: Record<string, never> }
   | { type: 'actions:reorder'; payload: { indices: number[]; targetIndex: number } }
   | { type: 'actions:insertAction'; payload: { actionType: string; insertIndex: number } }
   // Pause insert (Pattern B normalization) — replaces the old "insertAction with

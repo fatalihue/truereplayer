@@ -728,7 +728,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
     if (escArmed) return <span className={`${cls} text-warning`}>{tt('Unsaved changes — press Esc again to discard.', 'Alterações não salvas — pressione Esc de novo para descartar.')}</span>;
     if (readOnly) return <span className={`${cls} text-warning`}>{tt('Large table — grid is read-only; edit via Paste / bulk edit.', 'Tabela grande — grade somente leitura; edite via Paste / bulk edit.')}</span>;
     if (grid.rows.length >= LARGE_TABLE_WARN) return <span className={`${cls} text-text-tertiary`}>{tt('Large table — the profile file grows with it.', 'Tabela grande — o arquivo do perfil cresce junto.')}</span>;
-    if (!loopOverData && !emptyGrid) return <span className={`${cls} text-text-tertiary`}>{tt('Tokens stay empty while Loop over data is off.', 'Tokens ficam vazios com o Loop over data desligado.')}</span>;
+    if (!loopOverData && !emptyGrid) return <span className={`${cls} text-text-tertiary`}>{tt('Loop off: each run uses the next row. Right-click → Reset row position.', 'Loop desligado: cada execução usa a próxima linha. Botão direito → Reset row position.')}</span>;
     return <span className={`${cls} text-text-tertiary`}>{tt('Click a cell to edit · Ctrl+Enter saves', 'Clique numa célula para editar · Ctrl+Enter salva')}</span>;
   })();
 
@@ -736,7 +736,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
   const footerHint = pasteOpen ? (
     <>{tt('Tabs, quotes and line breaks survive the paste', 'Tabs, aspas e quebras de linha sobrevivem à colagem')}</>
   ) : (
-    <>{tt('{row:column} fills from the current row only while Loop over data is on', '{row:coluna} preenche da linha atual só com Loop over data ligado')}</>
+    <>{tt('Loop on: one run per row. Loop off: each run advances one row (the cursor).', 'Loop ligado: uma execução por linha. Loop desligado: cada execução avança uma linha (o cursor).')}</>
   );
 
   const applyLabel = pasteMode === 'replace'
@@ -972,8 +972,8 @@ export function DataPanel({ onClose }: DataPanelProps) {
             ) : (
               <div className="border-l-2 border-border-subtle rounded px-2.5 py-2 text-[11px] leading-relaxed text-text-tertiary">
                 {tt(
-                  'While off, {row:column} tokens resolve to EMPTY text — the table alone does not feed them.',
-                  'Desligado, os tokens {row:coluna} viram texto VAZIO — a tabela sozinha não os alimenta.',
+                  'Cursor mode: each run uses the next row and advances (wrapping). Right-click a row → Reset row position to start over.',
+                  'Modo cursor: cada execução usa a próxima linha e avança (dá a volta). Botão direito numa linha → Reset row position para recomeçar.',
                 )}
               </div>
             )}

@@ -361,7 +361,7 @@ interface ActionTableProps {
 }
 
 export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps) {
-  const { actions, highlightedActionIndex, buttonStates, activeProfile, pauseState } = useAppState();
+  const { actions, highlightedActionIndex, buttonStates, activeProfile, pauseState, dataTable } = useAppState();
   const { send } = useBridge();
   const tt = useTt();
   const { language } = useLanguage();
@@ -2536,6 +2536,25 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
               </button>
             );
           })()}
+
+          {/* Reset row position — data-loop CURSOR (Model B). Profile-level, not
+              row-specific: shown on any row's menu, but only while the cursor is
+              actually in play (a data table with rows AND "loop over data" OFF, so
+              each run advances one row). Mirrors Reset cycle position — clears the
+              session cursor so the next run starts at the first row again. */}
+          {dataTable.rows.length > 0 && !dataTable.loopOverData && (
+            <button
+              onMouseEnter={() => setActiveSubmenu(null)}
+              onClick={() => {
+                send({ type: 'actions:resetRow', payload: {} });
+                closeContextMenu();
+              }}
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+            >
+              <RotateCcw size={13} className="text-text-tertiary" />
+              Reset row position
+            </button>
+          )}
 
           {/* Type-specific quick action — only ONE of these renders, based on the
               right-clicked row's actionType. Keeps the menu height predictable

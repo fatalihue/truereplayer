@@ -222,6 +222,12 @@ namespace TrueReplayer.Services
             replayer.ResetCycleCursor(actionId);
         }
 
+        // Reset the data-loop row cursor to the first row (see ActionReplayer.ResetRowCursor).
+        public void ResetRowCursor()
+        {
+            replayer.ResetRowCursor();
+        }
+
         public void SetProfileLookup(Func<string, Task<Models.UserProfile?>> lookup)
         {
             replayer.SetProfileLookup(lookup);
@@ -1165,6 +1171,13 @@ namespace TrueReplayer.Services
         private Models.ProfileDataTable? _dataTable;
         private bool _dataLoopOver;
         private IReadOnlyDictionary<string, string>? _currentRowData;
+        // Data-loop CURSOR (Model B). When a table exists but "loop over data" is OFF,
+        // each RUN uses ONE row — this per-profile cursor's current row — and advances
+        // (wrapping) for the next run, exactly like a SetVariable cycle but for a whole
+        // row. Session-lifetime, keyed by the executing (root) profile name; the table is
+        // per-profile. DELIBERATELY not in the fresh-run reset block (same as _cycleCursors)
+        // so the position survives across runs — that IS the feature.
+        private readonly Dictionary<string, int> _rowCursors = new(StringComparer.Ordinal);
         // Hard cap on how deep RunProfile chains can recurse. Prevents accidental infinite loops
         // even if cycle detection were somehow bypassed.
         private const int MaxCallDepth = 5;
@@ -1197,6 +1210,15 @@ namespace TrueReplayer.Services
             if (string.IsNullOrEmpty(actionId)) return;
             var profile = _getProfileName?.Invoke() ?? "default";
             _cycleCursors.Remove(profile + "|" + actionId);
+        }
+
+        // Reset the data-loop row cursor (Model B) to the first row for the active UI
+        // profile — the "start over" the table can't trigger itself. Session-only, keyed
+        // the same way StartAsync reads it. No-op when the profile never cursored.
+        public void ResetRowCursor()
+        {
+            var profile = _getProfileName?.Invoke() ?? "default";
+            _rowCursors.Remove(profile);
         }
 
         public void SetProfileNameProvider(Func<string> getProfileName)
@@ -1425,6 +1447,21 @@ namespace TrueReplayer.Services
                 _currentActionRow = 0;
                 _currentRowData = null;
 
+                // Data-loop CURSOR (Model B): table present but "loop over data" OFF → this
+                // whole run uses ONE row (the per-profile cursor's current row); the cursor
+                // then advances (wrapping) for the next run. Resolved ONCE here (not per
+                // iteration) so an inner loop repeats the SAME row — "each run = one row".
+                // Batch mode (_dataLoopOver) leaves this null and stamps per-iteration below.
+                IReadOnlyDictionary<string, string>? cursorRowData = null;
+                if (!_dataLoopOver && _dataTable != null && (_dataTable.Rows?.Count ?? 0) > 0)
+                {
+                    string rowKey = _getProfileName?.Invoke() ?? "default";
+                    int rowN = _dataTable.Rows!.Count;
+                    int cur = _rowCursors.TryGetValue(rowKey, out var cv) ? ((cv % rowN) + rowN) % rowN : 0;
+                    cursorRowData = BuildRowDict(_dataTable, cur);
+                    _rowCursors[rowKey] = (cur + 1) % rowN; // advance for the next run
+                }
+
                 // Run replay on a dedicated thread to avoid blocking the thread pool
                 await Task.Factory.StartNew(async () =>
                 {
@@ -1433,11 +1470,12 @@ namespace TrueReplayer.Services
                         iteration++;
                         _currentIteration = iteration; // {counter} token source (1-based)
                         // Data-loop: stamp the current row so {row:column} resolves to it.
-                        // 1-based iteration → 0-based row index. Guarded so a corrupt count
-                        // can't index past the table (also blank when not looping over data).
-                        _currentRowData = (_dataLoopOver && _dataTable != null && iteration - 1 < _dataTable.Rows.Count)
+                        // Batch (loop-over-data): 1-based iteration → 0-based row index, guarded
+                        // against a corrupt count. Cursor mode (Model B): the fixed cursor row
+                        // for every iteration. Neither: null → {row:column} resolves empty.
+                        _currentRowData = (_dataLoopOver && _dataTable != null && iteration - 1 < (_dataTable.Rows?.Count ?? 0))
                             ? BuildRowDict(_dataTable, iteration - 1)
-                            : null;
+                            : cursorRowData;
 
                         // Throttled status-bar update. First iteration is always pushed so the
                         // counter appears immediately; subsequent iterations are coalesced to
