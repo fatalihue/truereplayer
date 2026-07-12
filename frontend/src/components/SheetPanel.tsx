@@ -4,13 +4,15 @@ import { ArrowLeft, RefreshCw, Crosshair, Copy, ClipboardPaste, ShieldCheck, Shi
 import { ActionIcon } from './ActionTable';
 import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
-import { useTt, useLanguage } from '../state/LanguageContext';
+import { useTt } from '../state/LanguageContext';
 import type { SelectorAlternative, BrowserTestResult } from '../bridge/messageTypes';
 import { Checkbox } from './Checkbox';
 import { NumberInput } from './common/NumberInput';
+import { SegmentedControl } from './common/SegmentedControl';
+import { DurationChips } from './common/DurationChips';
 import { ImageCropper } from './ImageCropper';
 import { LexicalTokenEditor, type LexicalEditorHandle } from './lexical/LexicalTokenEditor';
-import { getDisplayKey, formatMs } from '../utils/displayUtils';
+import { getDisplayKey } from '../utils/displayUtils';
 import { Field } from './sheet/Field';
 import { Slider } from './sheet/Slider';
 
@@ -37,7 +39,7 @@ const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
     { value: 'LeftClick', label: 'Left Click' },
     { value: 'DoubleClick', label: 'Double Click' },
     { value: 'RightClick', label: 'Right Click' },
-    { value: 'MiddleClick', label: 'Mid Click' },
+    { value: 'MiddleClick', label: 'Middle Click' },
   ],
   key: [
     { value: 'KeyDown', label: 'KeyDown' },
@@ -49,7 +51,7 @@ const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
   ],
 };
 
-const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'Pause', 'If', 'Else', 'EndIf']);
+const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'RunProfile', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'Pause', 'If', 'Else', 'EndIf']);
 
 // Semantic result-card colouring via theme tokens — success = replay green, failure/error =
 // recording red. Matches the inline-style pattern the foot-gun cards already use, so no
@@ -105,11 +107,13 @@ function estimateTier(selector: string): 'S' | 'A' | 'B' | 'C' {
   return 'C';
 }
 
-const TIER_META: Record<'S' | 'A' | 'B' | 'C', { color: string; label: string; Icon: typeof ShieldCheck }> = {
-  S: { color: '#0E7A0D', label: 'Stable',    Icon: ShieldCheck },
-  A: { color: '#60CDFF', label: 'Strong',    Icon: ShieldCheck },
-  B: { color: 'var(--color-warning)', label: 'Decent',    Icon: ShieldQuestion },
-  C: { color: '#C42B1C', label: 'Fragile',   Icon: ShieldAlert },
+// Theme tokens only (S=replay green, A=accent, B=warning, C=recording red) — the old
+// hardcoded hexes broke on light themes. labelPtBr feeds the bilingual shield tip.
+const TIER_META: Record<'S' | 'A' | 'B' | 'C', { color: string; label: string; labelPtBr: string; Icon: typeof ShieldCheck }> = {
+  S: { color: 'var(--color-replay)', label: 'Stable', labelPtBr: 'Estável', Icon: ShieldCheck },
+  A: { color: 'var(--color-accent)', label: 'Strong', labelPtBr: 'Forte', Icon: ShieldCheck },
+  B: { color: 'var(--color-warning)', label: 'Decent', labelPtBr: 'Razoável', Icon: ShieldQuestion },
+  C: { color: 'var(--color-recording)', label: 'Fragile', labelPtBr: 'Frágil', Icon: ShieldAlert },
 };
 
 
@@ -117,7 +121,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const { actions, profiles, activeProfile } = useAppState();
   const { send, subscribe } = useBridge();
   const tt = useTt();
-  const { language } = useLanguage();
 
   // Exit fallback — mirrors DialogShell: if the slide-out's animationend never
   // fires (occluded window pauses CSS animations), unstick the unmount.
@@ -1656,8 +1659,23 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     : actionType === 'BrowserNavigate' ? 'Open URL'
     : actionType === 'BrowserSelectOption' ? 'Select Option'
     : actionType === 'DoubleClick' ? 'Double Click'
+    // Backend sheet:openIndex can land on these (no insert path opens them here);
+    // without a case they leaked the raw type name into the header.
+    : actionType === 'HoldKey' ? 'Hold Key'
+    : actionType === 'RunProfile' ? 'Run Profile'
+    : actionType === 'Keystroke' ? 'Keystroke'
     : isClickHalf ? `${(clickHalfBase ?? '').replace('Click', '')} Click`
     : actionType;
+
+  // Header swatch family tint — the drawer's ENTIRE per-action-color budget (matches the
+  // dialogs: Keystroke=key-fg, Pause=pause-fg, etc.). Render-only lookup; unknown types
+  // fall back to the neutral secondary the swatch always had.
+  const headerIconColor =
+    actionType === 'SendText' ? 'var(--color-action-sendtext-fg)'
+    : actionType === 'Pause' ? 'var(--color-action-pause-fg)'
+    : (actionType === 'Keystroke' || actionType === 'KeyDown' || actionType === 'KeyUp' || actionType === 'HoldKey') ? 'var(--color-action-key-fg)'
+    : (isIf || isElse || isEndIf) ? 'var(--color-action-if-fg)'
+    : undefined;
 
   return createPortal(
     <>
@@ -1692,7 +1710,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
           </button>
           {/* Action icon — reuses the grid's canonical ActionIcon so the drawer reads the
               same as the row the user clicked (covers even the icon-less Else/EndIf). */}
-          <div className="flex items-center justify-center w-8 h-8 rounded-md bg-bg-elevated text-text-secondary shrink-0">
+          <div
+            className="flex items-center justify-center w-8 h-8 rounded-md bg-bg-elevated text-text-secondary shrink-0"
+            style={headerIconColor ? { color: headerIconColor } : undefined}
+          >
             <ActionIcon actionType={actionType} size={15} />
           </div>
           <div className="min-w-0">
@@ -1769,30 +1790,23 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
           {isIf && (
           <>
             <Field label="Condition">
-              <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setConditionNegate(false)}
-                  className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
-                    !conditionNegate
-                      ? 'bg-bg-elevated text-text-primary'
-                      : 'text-text-tertiary hover:text-text-secondary'
-                  }`}
-                >
-                  Found
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConditionNegate(true)}
-                  className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
-                    conditionNegate
-                      ? 'bg-bg-elevated text-text-primary'
-                      : 'text-text-tertiary hover:text-text-secondary'
-                  }`}
-                >
-                  NOT Found
-                </button>
-              </div>
+              {/* 2-bucket label map (pure render): object probes read Found/NOT Found;
+                  state checks (Clipboard/Variable/Random/Time) read Met/NOT Met. Same
+                  conditionNegate boolean write either way. */}
+              {(() => {
+                const met = isIfClipboard || isIfVariable || isIfRandom || isIfTime;
+                return (
+                  <SegmentedControl<'found' | 'not'>
+                    ariaLabel="Condition polarity"
+                    value={conditionNegate ? 'not' : 'found'}
+                    onChange={(v) => setConditionNegate(v === 'not')}
+                    options={[
+                      { value: 'found', label: met ? 'Met' : 'Found' },
+                      { value: 'not', label: met ? 'NOT Met' : 'NOT Found' },
+                    ]}
+                  />
+                );
+              })()}
             </Field>
 
             {/* Wait for condition sits next to the Condition toggle — the core branch
@@ -1812,7 +1826,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 step={500}
                 thousands
                 suffix="ms" suffixInside
-                inputWidth="w-24"
+                inputWidth="w-[124px]"
                 inputHeight="h-8"
                 ariaLabel="Wait for condition in milliseconds"
               />
@@ -1823,15 +1837,20 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               label="On Probe Error"
               hint={tt('What to do if the check itself errors.', 'O que fazer se a própria checagem der erro.')}
             >
-              <select
-                value={ifOnProbeError}
-                onChange={(e) => setIfOnProbeError(e.target.value === 'Halt' ? 'Halt' : 'TreatAsFalse')}
-                className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-              >
-                <option value="TreatAsFalse">Treat as false (default)</option>
-                <option value="Halt">Halt replay</option>
-              </select>
+              <SegmentedControl<'TreatAsFalse' | 'Halt'>
+                ariaLabel="On probe error"
+                value={ifOnProbeError === 'Halt' ? 'Halt' : 'TreatAsFalse'}
+                onChange={(v) => setIfOnProbeError(v)}
+                options={[
+                  { value: 'TreatAsFalse', label: 'Treat as false', tip: tt('Probe errors count as NOT found (default)', 'Erros de sondagem contam como NÃO encontrado (padrão)') },
+                  { value: 'Halt', label: 'Halt', tip: tt('Stop the replay', 'Interrompe a reprodução') },
+                ]}
+              />
             </Field>
+
+            {/* Hairline between the shared If chrome and the family-specific fields —
+                the family's first Field label is header enough; no text needed. */}
+            <div className="border-t border-border-subtle" />
           </>
           )}
 
@@ -1866,25 +1885,15 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               />
             </Field>
             <Field label="Title Match">
-              <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
-                {(['contains', 'regex'] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setWindowTitleMatchMode(m)}
-                    className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
-                      windowTitleMatchMode === m
-                        ? 'bg-bg-elevated text-text-primary'
-                        : 'text-text-tertiary hover:text-text-secondary'
-                    }`}
-                    data-tip={m === 'regex'
-                      ? tt('Title is a .NET regular expression (case-insensitive)', 'Título é uma expressão regular .NET (sem diferenciar maiúsculas)')
-                      : tt('Title must contain this text (case-insensitive)', 'Título deve conter este texto (sem diferenciar maiúsculas)')}
-                  >
-                    {m === 'contains' ? 'Contains' : 'Regex'}
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl<'contains' | 'regex'>
+                ariaLabel="Title match mode"
+                value={windowTitleMatchMode}
+                onChange={setWindowTitleMatchMode}
+                options={[
+                  { value: 'contains', label: 'Contains', tip: tt('Title must contain this text (case-insensitive)', 'Título deve conter este texto (sem diferenciar maiúsculas)') },
+                  { value: 'regex', label: 'Regex', tip: tt('Title is a .NET regular expression (case-insensitive)', 'Título é uma expressão regular .NET (sem diferenciar maiúsculas)') },
+                ]}
+              />
             </Field>
             <Checkbox
               checked={windowMatchForegroundOnly}
@@ -1899,22 +1908,16 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
           {isIfClipboard && (
           <>
             <Field label="Match Type">
-              <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
-                {(['contains', 'equals', 'regex'] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setClipboardPatternType(m)}
-                    className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
-                      clipboardPatternType === m
-                        ? 'bg-bg-elevated text-text-primary'
-                        : 'text-text-tertiary hover:text-text-secondary'
-                    }`}
-                  >
-                    {m === 'contains' ? 'Contains' : m === 'equals' ? 'Equals' : 'Regex'}
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl<'contains' | 'equals' | 'regex'>
+                ariaLabel="Clipboard match type"
+                value={clipboardPatternType}
+                onChange={setClipboardPatternType}
+                options={[
+                  { value: 'contains', label: 'Contains' },
+                  { value: 'equals', label: 'Equals' },
+                  { value: 'regex', label: 'Regex' },
+                ]}
+              />
             </Field>
             <Field
               label="Pattern"
@@ -1969,29 +1972,19 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               />
             </Field>
             <Field label="Operator">
-              <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
-                {([
-                  { v: 'eq', l: '=', tip: tt('Equal (case-insensitive text)', 'Igual (texto, sem diferenciar maiúsculas)') },
-                  { v: 'neq', l: '≠', tip: tt('Not equal', 'Diferente') },
-                  { v: 'contains', l: 'has', tip: tt('Variable contains the operand', 'A variável contém o operando') },
-                  { v: 'gt', l: '>', tip: tt('Greater than (numeric when both are numbers)', 'Maior que (numérico quando ambos são números)') },
-                  { v: 'lt', l: '<', tip: tt('Less than (numeric when both are numbers)', 'Menor que (numérico quando ambos são números)') },
-                ] as const).map((o) => (
-                  <button
-                    key={o.v}
-                    type="button"
-                    onClick={() => setConditionOperator(o.v)}
-                    data-tip={o.tip}
-                    className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
-                      conditionOperator === o.v
-                        ? 'bg-bg-elevated text-text-primary'
-                        : 'text-text-tertiary hover:text-text-secondary'
-                    }`}
-                  >
-                    {o.l}
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl<'eq' | 'neq' | 'contains' | 'gt' | 'lt'>
+                ariaLabel="Comparison operator"
+                grow
+                value={conditionOperator}
+                onChange={setConditionOperator}
+                options={[
+                  { value: 'eq', label: '=', tip: tt('Equal (case-insensitive text)', 'Igual (texto, sem diferenciar maiúsculas)') },
+                  { value: 'neq', label: '≠', tip: tt('Not equal', 'Diferente') },
+                  { value: 'contains', label: 'has', tip: tt('Variable contains the operand', 'A variável contém o operando') },
+                  { value: 'gt', label: '>', tip: tt('Greater than (numeric when both are numbers)', 'Maior que (numérico quando ambos são números)') },
+                  { value: 'lt', label: '<', tip: tt('Less than (numeric when both are numbers)', 'Menor que (numérico quando ambos são números)') },
+                ]}
+              />
             </Field>
             <Field
               label="Value"
@@ -2064,7 +2057,9 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               </Field>
             </div>
             <Field label="Days" hint={tt('None selected = every day. Leave times empty for a day-only condition.', 'Nenhum marcado = todo dia. Deixe as horas vazias para condição só por dia.')}>
-              <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
+              {/* Independent toggle chips, NOT a segmented track — multi-select must not
+                  look like an exclusive choice. Same XOR bitmask write as before. */}
+              <div className="flex gap-1">
                 {(['S', 'M', 'T', 'W', 'T', 'F', 'S'] as const).map((lbl, bit) => {
                   const on = (daysOfWeek & (1 << bit)) !== 0;
                   return (
@@ -2072,8 +2067,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                       key={bit}
                       type="button"
                       onClick={() => setDaysOfWeek(daysOfWeek ^ (1 << bit))}
-                      className={`w-7 py-1 rounded text-[11px] font-medium transition-colors ${
-                        on ? 'bg-bg-elevated text-text-primary' : 'text-text-tertiary hover:text-text-secondary'
+                      className={`w-7 h-6 rounded text-[10px] font-medium border transition-colors ${
+                        on
+                          ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
+                          : 'text-text-tertiary border-border-subtle bg-bg-card hover:text-text-secondary'
                       }`}
                       data-tip={['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][bit]}
                     >
@@ -2094,6 +2091,17 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
           <>
             <Field
               label="CSS Selector"
+              labelAdornment={selectorForTier ? (
+                // Same tier shield as the browser six-pack — pure display (the tier memo
+                // is computed unconditionally from the same key/textMatch/textMode state).
+                <span
+                  style={{ color: tierMeta.color, display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                  data-tip={tt(`${tier} · ${tierMeta.label}`, `${tier} · ${tierMeta.labelPtBr}`)}
+                >
+                  <tierMeta.Icon size={12} />
+                  <span className="text-[10px] font-semibold normal-case">{tier}</span>
+                </span>
+              ) : undefined}
               hint={tt('Requires the browser extension connected; when it is not, the condition reads as NOT found instead of stopping the replay.', 'Requer a extensão do navegador conectada; sem ela, a condição lê como NÃO encontrado em vez de parar a reprodução.')}
             >
               <div className="flex gap-1.5">
@@ -2153,10 +2161,17 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
           </>
           )}
 
-          {/* Else / EndIf are pure block markers with nothing to configure — a short
-              orientation note keeps the otherwise-empty panel from reading as broken. */}
+          {/* Else / EndIf are pure block markers with nothing to configure — the
+              orientation note rides the quiet left-rail card in the If family's teal
+              so the otherwise-empty panel reads as intentional, not broken. */}
           {(isElse || isEndIf) && (
-            <div className="text-[11px] text-text-tertiary leading-snug px-1">
+            <div
+              className="border-l-2 rounded px-2.5 py-2 text-[11px] leading-relaxed text-text-secondary"
+              style={{
+                borderColor: 'var(--color-action-if-fg)',
+                backgroundColor: 'color-mix(in srgb, var(--color-action-if-fg) 8%, transparent)',
+              }}
+            >
               {isElse
                 ? tt('Else marks the FALSE branch of its If block. Configure the condition on the opening If row — nothing to set here.', 'Else marca o ramo FALSE do bloco If. Configure a condição na linha If de abertura — nada a definir aqui.')
                 : tt('End If closes the conditional block. Configure the condition on the opening If row — nothing to set here.', 'End If fecha o bloco condicional. Configure a condição na linha If de abertura — nada a definir aqui.')}
@@ -2183,7 +2198,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   <img
                     src={`data:image/png;base64,${action.imageBase64}`}
                     alt="Reference"
-                    className="w-full max-h-[140px] object-contain bg-black/20"
+                    className="w-full max-h-[140px] object-contain bg-bg-input"
                   />
                 ) : (
                   <div className="flex items-center justify-center h-[80px] text-xs text-text-disabled">
@@ -2214,33 +2229,41 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 <button
                   onClick={handleTestMatch}
                   disabled={!action?.imagePath || testMatchRequestId != null}
-                  className="flex-1 flex items-center justify-center gap-1.5 h-8 px-2.5 rounded text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 flex items-center justify-center gap-1.5 h-8 px-2.5 rounded text-xs font-medium border border-accent-solid/40 bg-accent-solid/10 hover:bg-accent-solid/20 text-accent-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <PlayCircle size={12} />
+                  <PlayCircle size={13} />
                   {testMatchRequestId != null ? 'Testing…' : 'Test match'}
                 </button>
               </div>
-              {/* Test match result — colour-coded by whether the score clears the
-                  tolerance threshold. Success also auto-sets the Search Region (see
-                  handler above); the inline note here confirms that side-effect so
-                  the user knows where to fine-tune it (Configure button below). */}
+              {/* Test match result — icon headline + mono only on the value spans (the
+                  browser Test card dialect). Success also auto-sets the Search Region
+                  (see handler above); the note confirms that side-effect. */}
               {testMatchResult && !testMatchRequestId && (
                 <div
-                  className="mt-2 px-2 py-1.5 rounded text-[11px] font-mono border"
+                  className="mt-2 px-2 py-1.5 rounded text-[11px] border"
                   style={resultCardStyle(!!testMatchResult.found && !testMatchResult.error)}
                 >
                   {testMatchResult.error ? (
-                    testMatchResult.error
+                    <div className="flex items-center gap-1.5 font-medium">
+                      <X size={11} className="shrink-0" />
+                      <span>{testMatchResult.error}</span>
+                    </div>
                   ) : (
                     <>
-                      <div>
-                        Best match: {Math.round(testMatchResult.score * 100)}% at ({testMatchResult.x}, {testMatchResult.y})
-                        {testMatchResult.found ? ' ✓' : ' — below tolerance'}
+                      <div className="flex items-center gap-1.5 font-medium">
+                        {testMatchResult.found ? <Check size={11} className="shrink-0" /> : <X size={11} className="shrink-0" />}
+                        <span>
+                          Best match{' '}
+                          <span className="font-mono">{Math.round(testMatchResult.score * 100)}% at ({testMatchResult.x}, {testMatchResult.y})</span>
+                          {testMatchResult.found ? '' : ' — below tolerance'}
+                        </span>
                       </div>
                       {testMatchResult.found && (
                         <div className="mt-1 text-[10px] opacity-80">
-                          Search region set to a ±80 px rect around this match. Use the
-                          Search Region field below to fine-tune.
+                          {tt(
+                            'Search region set to a ±80 px rect around this match. Use the Search Region field below to fine-tune.',
+                            'Região de busca definida como um retângulo de ±80 px ao redor deste match. Ajuste fino no campo Search Region abaixo.',
+                          )}
                         </div>
                       )}
                     </>
@@ -2255,7 +2278,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 on hover. */}
             <Field label="Search Region">
               <div className="flex items-center gap-2.5">
-                <div className="flex-1 px-2 py-1.5 text-[11px] font-mono bg-bg-input border border-border-default rounded text-text-secondary">
+                <div className="flex-1 h-8 px-2 flex items-center text-[11px] font-mono bg-bg-input border border-border-default rounded text-text-secondary">
                   {waitImageSearchRegion
                     ? `${waitImageSearchRegion.x}, ${waitImageSearchRegion.y}  ·  ${waitImageSearchRegion.w} × ${waitImageSearchRegion.h}`
                     : <span className="text-text-disabled italic">Full screen (default)</span>}
@@ -2301,14 +2324,15 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 CONDITION section's Found / NOT Found toggle. */}
             {!isIf && (
             <Field label="Wait Until">
-              <select
+              <SegmentedControl<'appears' | 'disappears'>
+                ariaLabel="Wait until"
                 value={waitImageInvert ? 'disappears' : 'appears'}
-                onChange={(e) => setWaitImageInvert(e.target.value === 'disappears')}
-                className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-              >
-                <option value="appears">Image appears</option>
-                <option value="disappears">Image disappears</option>
-              </select>
+                onChange={(v) => setWaitImageInvert(v === 'disappears')}
+                options={[
+                  { value: 'appears', label: 'Appears' },
+                  { value: 'disappears', label: 'Disappears' },
+                ]}
+              />
             </Field>
             )}
 
@@ -2333,33 +2357,30 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 />
               </Field>
               <Field label="On Timeout" className="flex-1">
-                <select
-                  value={waitImageOnTimeout}
-                  onChange={(e) => setWaitImageOnTimeout(e.target.value)}
-                  className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-                >
-                  <option value="StopReplay">Stop replay</option>
-                  <option value="Continue">Continue to next</option>
-                </select>
+                <SegmentedControl<'StopReplay' | 'Continue'>
+                  ariaLabel="On timeout"
+                  grow
+                  value={waitImageOnTimeout === 'Continue' ? 'Continue' : 'StopReplay'}
+                  onChange={(v) => setWaitImageOnTimeout(v)}
+                  options={[
+                    { value: 'StopReplay', label: 'Halt', tip: tt('Stop the replay', 'Interrompe a reprodução') },
+                    { value: 'Continue', label: 'Continue', tip: tt('Continue to the next action', 'Continua para a próxima ação') },
+                  ]}
+                />
               </Field>
             </div>
             )}
 
-            {/* After Match — Checkbox component matches the Pixel editor's after-match
-                row. Suppressed on IF rows (the user routes click via a regular LeftClick
-                in the TRUE branch) and when waiting for disappearance (no found-location
-                to click on). The label text is passed through Checkbox's `label` prop
-                (not a wrapping <label> element) so clicking the text correctly toggles
-                the checkbox — <label>'s for-control activation only works for native
-                form controls, not for the <button>-based Checkbox component. */}
+            {/* After Match — bare Checkbox (no Field wrapper; the label carries the
+                meaning). Suppressed on IF rows (the user routes click via a regular
+                LeftClick in the TRUE branch) and when waiting for disappearance (no
+                found-location to click on). */}
             {!isIf && !waitImageInvert && (
-              <Field label="After Match">
-                <Checkbox
-                  checked={waitImageClickOnMatch}
-                  onChange={setWaitImageClickOnMatch}
-                  label="Click on found location"
-                />
-              </Field>
+              <Checkbox
+                checked={waitImageClickOnMatch}
+                onChange={setWaitImageClickOnMatch}
+                label="Click on found location"
+              />
             )}
 
           </>
@@ -2372,15 +2393,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               !isIf below — IF rows do an instant single-shot probe with no timeout. */}
           {(isWaitPixelColor || isIfPixel) && (
           <>
-            {/* PIXEL TO WATCH — coords + Pick + Test match. Pick and Test match
-                are sibling operations on the same coords (one captures them, the
-                other reads the live pixel and reports whether it matches the
-                target colour). Keeping them in the same block — Pick inline with
-                the X/Y inputs, Test match on the row below — clusters the
-                "configure the probe" and "validate the probe" actions visually. */}
-            <Field label="Pixel to Watch">
-              {/* X / Y as NumberInput (steppers + clamp + h-8), parallel to the Click editor's
-                  coordinate row. */}
+            {/* Coords + Pick + Test match — the canonical sibling X/Y row (Click-editor
+                parity; the old "Pixel to Watch" wrapper double-labelled the block). Pick
+                captures the coords/colour, Test validates them, so they pair below. */}
+            <div>
               <div className="flex gap-2.5">
                 <Field label="X" className="flex-1">
                   <NumberInput
@@ -2407,40 +2423,52 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               </div>
               {/* Test match + Pick share one row — Test validates the current pixel, Pick
                   (re)captures X/Y + colour. Both h-8, flex-1, so neither clips or wraps. */}
-              <div className="mt-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleTestPixelMatch}
-                  className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded whitespace-nowrap transition-colors"
-                >
-                  <PlayCircle size={13} />
-                  Test match
-                </button>
+              {/* Pair order = config → validate: Pick captures the coords/colour, Test
+                  validates them against the live screen. Test carries the accent (the
+                  one validate-against-world rank). */}
+              <div className="mt-2 flex gap-2.5">
                 <button
                   type="button"
                   onClick={handlePickPixelColor}
                   disabled={pickColorRequestId != null}
-                  className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Pipette size={13} />
                   {pickColorRequestId != null ? 'Picking…' : 'Pick'}
                 </button>
+                <button
+                  type="button"
+                  onClick={handleTestPixelMatch}
+                  className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-xs font-medium border border-accent-solid/40 bg-accent-solid/10 hover:bg-accent-solid/20 text-accent-light rounded whitespace-nowrap transition-colors"
+                >
+                  <PlayCircle size={13} />
+                  Test match
+                </button>
               </div>
               {testPixelResult && (
                 <div
-                  className="mt-2 px-2 py-1.5 rounded text-[11px] font-mono border"
+                  className="mt-2 px-2 py-1.5 rounded text-[11px] border"
                   style={resultCardStyle(!!testPixelResult.matches && !testPixelResult.error)}
                 >
-                  {testPixelResult.error ? (
-                    testPixelResult.error
-                  ) : testPixelResult.matches ? (
-                    <>Sampled {testPixelResult.sampledHex}  ·  Target {pixelColor} ± {pixelTolerance} ✓</>
-                  ) : (
-                    <>Sampled {testPixelResult.sampledHex ?? 'no read'}  ·  Target {pixelColor} ± {pixelTolerance} — out of tolerance</>
-                  )}
+                  <div className="flex items-center gap-1.5 font-medium">
+                    {(!!testPixelResult.matches && !testPixelResult.error)
+                      ? <Check size={11} className="shrink-0" />
+                      : <X size={11} className="shrink-0" />}
+                    <span>
+                      {testPixelResult.error ? (
+                        testPixelResult.error
+                      ) : (
+                        <>
+                          Sampled <span className="font-mono">{testPixelResult.sampledHex ?? 'no read'}</span>
+                          {' · '}Target <span className="font-mono">{pixelColor} ± {pixelTolerance}</span>
+                          {testPixelResult.matches ? '' : ' — out of tolerance'}
+                        </>
+                      )}
+                    </span>
+                  </div>
                 </div>
               )}
-            </Field>
+            </div>
 
             {/* TARGET COLOUR — swatch + hex input. The eyedropper above writes both, but
                 the user can also type or paste a hex code directly. Normalisation
@@ -2448,11 +2476,16 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 input stays predictable while editing. */}
             <Field label="Target Colour">
               <div className="flex items-center gap-2.5">
-                <span
-                  className="w-8 h-8 rounded border border-border-default shrink-0"
-                  style={{ background: /^#?(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(pixelColor.trim()) ? (pixelColor.trim().startsWith('#') ? pixelColor.trim() : '#' + pixelColor.trim()) : 'transparent' }}
-                  data-tip={pixelColor || tt('No colour set', 'Nenhuma cor definida')}
-                />
+                {(() => {
+                  const validHex = /^#?(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(pixelColor.trim());
+                  return (
+                    <span
+                      className={`w-8 h-8 rounded border shrink-0 ${validHex ? 'border-border-default' : 'border-dashed border-border-default'}`}
+                      style={{ background: validHex ? (pixelColor.trim().startsWith('#') ? pixelColor.trim() : '#' + pixelColor.trim()) : 'transparent' }}
+                      data-tip={pixelColor || tt('No colour set', 'Nenhuma cor definida')}
+                    />
+                  );
+                })()}
                 <input
                   type="text"
                   value={pixelColor}
@@ -2485,14 +2518,15 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 concept via the CONDITION section's Found / NOT Found toggle. */}
             {!isIf && (
             <Field label="Wait Until">
-              <select
+              <SegmentedControl<'matches' | 'stopsMatching'>
+                ariaLabel="Wait until"
                 value={pixelInvert ? 'stopsMatching' : 'matches'}
-                onChange={(e) => setPixelInvert(e.target.value === 'stopsMatching')}
-                className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-              >
-                <option value="matches">Colour matches</option>
-                <option value="stopsMatching">Colour stops matching</option>
-              </select>
+                onChange={(v) => setPixelInvert(v === 'stopsMatching')}
+                options={[
+                  { value: 'matches', label: 'Matches' },
+                  { value: 'stopsMatching', label: 'Stops matching' },
+                ]}
+              />
             </Field>
             )}
 
@@ -2516,31 +2550,28 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 />
               </Field>
               <Field label="On Timeout" className="flex-1">
-                <select
-                  value={pixelOnTimeout}
-                  onChange={(e) => setPixelOnTimeout(e.target.value)}
-                  className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-                >
-                  <option value="StopReplay">Stop replay</option>
-                  <option value="Continue">Continue to next</option>
-                </select>
+                <SegmentedControl<'StopReplay' | 'Continue'>
+                  ariaLabel="On timeout"
+                  grow
+                  value={pixelOnTimeout === 'Continue' ? 'Continue' : 'StopReplay'}
+                  onChange={(v) => setPixelOnTimeout(v)}
+                  options={[
+                    { value: 'StopReplay', label: 'Halt', tip: tt('Stop the replay', 'Interrompe a reprodução') },
+                    { value: 'Continue', label: 'Continue', tip: tt('Continue to the next action', 'Continua para a próxima ação') },
+                  ]}
+                />
               </Field>
             </div>
             )}
 
-            {/* After Match — WaitPixelColor only. Uses the Checkbox component's `label`
-                prop directly so clicking the text correctly toggles the checkbox — the
-                previous wrapping <label> element only activates native form controls,
-                not the <button>-based Checkbox. IF rows route click via a regular
-                LeftClick in the TRUE branch. */}
+            {/* After Match — bare Checkbox (no Field wrapper). IF rows route click via
+                a regular LeftClick in the TRUE branch. */}
             {!isIf && !pixelInvert && (
-              <Field label="After Match">
-                <Checkbox
-                  checked={pixelClickOnMatch}
-                  onChange={setPixelClickOnMatch}
-                  label="Click on found location"
-                />
-              </Field>
+              <Checkbox
+                checked={pixelClickOnMatch}
+                onChange={setPixelClickOnMatch}
+                label="Click on found location"
+              />
             )}
 
           </>
@@ -2602,38 +2633,22 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 inputHeight="h-8"
                 ariaLabel="Timeout in milliseconds"
               />
-              {/* Quick presets — covers the 90% of real-world pauses (a second, a few seconds,
-                  a minute, a few minutes, indefinite wait). Labels stay human-readable while
-                  the values they set are milliseconds. The Manual input above still works for
-                  anything in between. Active preset is highlighted to show what's set. */}
-              <div className="flex flex-wrap gap-1 mt-1.5">
-                {([100, 500, 1000, 5000, 30000, 0] as const).map(ms => {
-                  const parsed = parseFloat(timeout);
-                  const currentMs = isNaN(parsed) ? 0 : parsed;
-                  const isActive = currentMs === ms;
-                  const label = ms === 0 ? '∞' : `${formatMs(ms, language)} ms`;
-                  return (
-                    <button
-                      key={ms}
-                      type="button"
-                      onClick={() => setTimeout_(String(ms))}
-                      className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors ${
-                        isActive
-                          ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
-                          : 'text-text-tertiary border-border-default bg-bg-elevated hover:text-text-secondary hover:bg-bg-card'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
+              {/* Quick presets — the shared DurationChips recipe (Send Keystroke / Insert
+                  Pause dialog parity). ∞ (0 ms) = no timeout, resume by hotkey only.
+                  String-backed state preserved: onSelect writes String(ms). */}
+              <div className="mt-1.5">
+                <DurationChips
+                  presets={[100, 500, 1000, 5000, 30000, 0]}
+                  value={(() => { const p = parseFloat(timeout); return isNaN(p) ? 0 : p; })()}
+                  onSelect={(ms) => setTimeout_(String(ms))}
+                  infinityTip={tt('Wait forever for the resume hotkey', 'Espera para sempre pela tecla de retomada')}
+                />
               </div>
             </Field>
 
             {/* Foot-gun warning — if neither a resume hotkey nor a timeout is set, the
-                Pause is silently skipped at replay time (ExecutePause early-returns). Save
-                still works (legacy actions may rely on this), but the user gets a heads-up
-                that the action will be a no-op. */}
+                Pause is silently skipped at replay time (ExecutePause early-returns).
+                Left-rail card, delay (amber) tone. */}
             {(() => {
               const parsedSecs = parseFloat(timeout);
               const effectiveSecs = isNaN(parsedSecs) ? 0 : parsedSecs;
@@ -2641,11 +2656,11 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               if (!hasNoTrigger) return null;
               return (
                 <div
-                  className="flex items-start gap-2 px-3 py-2 rounded border text-[11px]"
+                  className="flex items-start gap-2 border-l-2 rounded px-2.5 py-2 text-[11px] leading-relaxed"
                   style={{
                     color: 'var(--color-delay)',
-                    borderColor: 'color-mix(in srgb, var(--color-delay) 35%, transparent)',
-                    backgroundColor: 'color-mix(in srgb, var(--color-delay) 10%, transparent)',
+                    borderColor: 'var(--color-delay)',
+                    backgroundColor: 'color-mix(in srgb, var(--color-delay) 8%, transparent)',
                   }}
                 >
                   <ShieldAlert size={13} className="shrink-0 mt-px" />
@@ -2663,13 +2678,16 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
           <>
             {/* Selector / URL */}
             <div>
-              <label className="flex items-center gap-1.5 text-[11px] font-semibold text-text-tertiary uppercase tracking-wide mb-1.5">
+              <label className="label-micro text-text-tertiary mb-1.5 flex items-center gap-1.5">
                 {isBrowserNavigate ? 'URL' : 'CSS Selector'}
                 {/* #2 — Tier shield indicator (only for non-Navigate selectors) */}
                 {!isBrowserNavigate && selectorForTier && (
-                  <span style={{ color: tierMeta.color, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                  <span
+                    style={{ color: tierMeta.color, display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                    data-tip={tt(`${tier} · ${tierMeta.label}`, `${tier} · ${tierMeta.labelPtBr}`)}
+                  >
                     <tierMeta.Icon size={12} />
-                    <span style={{ fontSize: 9, fontWeight: 600 }}>{tier}</span>
+                    <span className="text-[10px] font-semibold normal-case">{tier}</span>
                   </span>
                 )}
               </label>
@@ -2706,7 +2724,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               {showAlternatives && alternatives.length > 0 && (
                 <div className="mt-1.5 rounded border border-border-default bg-bg-elevated p-1.5 space-y-1">
                   <div className="flex items-center justify-between px-1">
-                    <span className="text-[10px] font-semibold text-text-tertiary">ALTERNATIVES</span>
+                    <span className="label-micro text-text-tertiary">Alternatives</span>
                     <button
                       onClick={() => setShowAlternatives(false)}
                       className="flex items-center text-text-tertiary hover:text-text-primary"
@@ -2725,7 +2743,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                       >
                         <span style={{ color: m.color, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
                           <m.Icon size={10} />
-                          <span style={{ fontSize: 9, fontWeight: 700 }}>{alt.tier}</span>
+                          <span className="text-[10px] font-bold">{alt.tier}</span>
                         </span>
                         <span className="font-mono text-text-secondary truncate">{alt.selector}</span>
                       </button>
@@ -2741,10 +2759,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             {!isBrowserNavigate && !isBrowserType && !isBrowserSelect && (
             <div>
               <label
-                className="block text-[11px] font-semibold text-text-tertiary uppercase tracking-wide mb-1.5"
+                className="label-micro text-text-tertiary mb-1.5 block"
                 data-tip={tt('Takes priority over CSS selector when filled', 'Tem prioridade sobre o seletor CSS quando preenchido')}
               >
-                TEXT MATCH
+                Text Match
               </label>
               <div className="flex gap-1.5">
                 <select
@@ -2765,7 +2783,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 />
               </div>
               {regexError && (
-                <p className="text-[10px] text-red-400 mt-1 font-mono">Invalid regex: {regexError}</p>
+                <p className="text-[10px] mt-1 font-mono" style={{ color: 'var(--color-recording)' }}>Invalid regex: {regexError}</p>
               )}
             </div>
             )}
@@ -2779,9 +2797,12 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               />
             )}
 
-            {/* #7 — Navigate post-checks */}
+            {/* #7 — Navigate post-checks, grouped under one section header. "Ready
+                Element" (was "Wait Element") kills the name collision with the
+                Wait Element ACTION type. */}
             {isBrowserNavigate && (
             <>
+              <div className="label-micro text-text-tertiary">After Navigation</div>
               <Field label="URL Pattern" hint={tt('Optional. Wait until URL matches glob (*) or /regex/. Useful for redirects.', 'Opcional. Espera até a URL corresponder a glob (*) ou /regex/. Útil para redirecionamentos.')}>
                 <input
                   type="text"
@@ -2791,7 +2812,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   placeholder="*/dashboard*"
                 />
               </Field>
-              <Field label="Wait Element" hint={tt('Optional. Wait for element to appear after page load.', 'Opcional. Espera o elemento aparecer após o carregamento da página.')}>
+              <Field label="Ready Element" hint={tt('Optional. Wait for element to appear after page load.', 'Opcional. Espera o elemento aparecer após o carregamento da página.')}>
                 <input
                   type="text"
                   value={postNavigateSelector}
@@ -2835,7 +2856,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                     key={item.var}
                     type="button"
                     onClick={() => browserTextEditorRef.current?.insertText(item.var)}
-                    className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-accent hover:border-accent-solid/40 transition-colors"
+                    className="h-6 px-2 inline-flex items-center text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-warning hover:border-warning/40 transition-colors"
                   >
                     {item.label}
                   </button>
@@ -2845,10 +2866,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 <button
                   type="button"
                   onClick={() => setShowMoreTypeChips(v => !v)}
-                  className={`px-2 py-0.5 text-[11px] font-mono border rounded transition-colors ${
+                  className={`h-6 px-2 inline-flex items-center text-[11px] font-mono border rounded transition-colors ${
                     showMoreTypeChips
                       ? 'text-accent-light bg-accent-solid/15 border-accent-solid/50'
-                      : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-accent hover:border-accent-solid/40'
+                      : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-warning hover:border-warning/40'
                   }`}
                   data-tip={showMoreTypeChips ? tt('Hide extra tokens', 'Ocultar tokens extras') : tt('More tokens (Tab, Date, Time, Random, Escape, Backspace, Delete, arrows)', 'Mais tokens (Tab, Date, Time, Random, Escape, Backspace, Delete, setas)')}
                 >
@@ -2875,7 +2896,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                       key={item.var}
                       type="button"
                       onClick={() => browserTextEditorRef.current?.insertText(item.var)}
-                      className="px-2 py-0.5 text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-accent hover:border-accent-solid/40 transition-colors"
+                      className="h-6 px-2 inline-flex items-center text-[11px] font-mono bg-bg-surface border border-border-subtle rounded text-text-secondary hover:text-warning hover:border-warning/40 transition-colors"
                     >
                       {item.label}
                     </button>
@@ -2885,9 +2906,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             </Field>
             )}
 
-            {/* #5 — Type options */}
+            {/* #5 — Type options, grouped under one section header. */}
             {isBrowserType && (
             <div className="space-y-1.5">
+              <div className="label-micro text-text-tertiary">Typing</div>
               <Checkbox
                 checked={typeAppend}
                 onChange={setTypeAppend}
@@ -2901,7 +2923,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 title={tt('Use clipboard paste (instant) instead of typing char-by-char', 'Usa colagem da área de transferência (instantâneo) em vez de digitar caractere por caractere')}
               />
               <div className="flex items-center gap-2">
-                <label className="text-[11px] text-text-tertiary" data-tip={tt('Delay between characters in ms (typing only). 0 = instant, blank = auto.', 'Atraso entre caracteres em ms (apenas digitação). 0 = instantâneo, vazio = automático.')}>Char delay</label>
+                <label className="text-xs text-text-secondary" data-tip={tt('Delay between characters in ms (typing only). 0 = instant, blank = auto.', 'Atraso entre caracteres em ms (apenas digitação). 0 = instantâneo, vazio = automático.')}>Char delay</label>
                 <NumberInput
                   // typeDelay '' = "auto" (engine picks a default per text length). Pass
                   // null so the placeholder shows; user clearing the field via onClear
@@ -2928,6 +2950,24 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 option inside the <select>. */}
             {isBrowserSelect && (
             <>
+              {/* Match By FIRST (choose how, then type what — the mode-aware Option
+                  placeholder below then teaches the expected format). */}
+              <Field
+                label="Match By"
+                hint={tt('Only works on native <select> elements. For React-Select / Select2 use Click Element.', 'Só funciona em elementos <select> nativos. Para React-Select / Select2 use Click Element.')}
+              >
+                <SegmentedControl<'text' | 'value' | 'index'>
+                  ariaLabel="Option match mode"
+                  grow
+                  value={selectMatchMode}
+                  onChange={setSelectMatchMode}
+                  options={[
+                    { value: 'text', label: 'Text', tip: tt('Match the visible label (default)', 'Casa pelo rótulo visível (padrão)') },
+                    { value: 'value', label: 'Value', tip: tt("Match the option's value attribute", 'Casa pelo atributo value da opção') },
+                    { value: 'index', label: 'Index', tip: tt('Match by 0-based position', 'Casa pela posição (base 0)') },
+                  ]}
+                />
+              </Field>
               <Field label="Option">
                 <input
                   type="text"
@@ -2936,20 +2976,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
                   placeholder={selectMatchMode === 'index' ? '0' : selectMatchMode === 'value' ? 'option-value' : 'Option label'}
                 />
-              </Field>
-              <Field
-                label="Match By"
-                hint={tt('Only works on native <select> elements. For React-Select / Select2 use Click Element.', 'Só funciona em elementos <select> nativos. Para React-Select / Select2 use Click Element.')}
-              >
-                <select
-                  value={selectMatchMode}
-                  onChange={(e) => setSelectMatchMode(e.target.value as 'text' | 'value' | 'index')}
-                  className="w-full h-8 px-2 text-ui bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-                >
-                  <option value="text">Text (visible label, default)</option>
-                  <option value="value">Value (option's value attribute)</option>
-                  <option value="index">Index (0-based)</option>
-                </select>
               </Field>
             </>
             )}
@@ -2974,11 +3000,11 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   on a plain selector and the action times out silently. */}
               {waitMode === 'text-match' && !textMatch.trim() && (
                 <div
-                  className="mt-1.5 flex items-start gap-2 px-3 py-2 rounded border text-[11px]"
+                  className="mt-1.5 flex items-start gap-2 border-l-2 rounded px-2.5 py-2 text-[11px] leading-relaxed"
                   style={{
                     color: 'var(--color-delay)',
-                    borderColor: 'color-mix(in srgb, var(--color-delay) 35%, transparent)',
-                    backgroundColor: 'color-mix(in srgb, var(--color-delay) 10%, transparent)',
+                    borderColor: 'var(--color-delay)',
+                    backgroundColor: 'color-mix(in srgb, var(--color-delay) 8%, transparent)',
                   }}
                 >
                   <ShieldAlert size={13} className="shrink-0 mt-px" />
@@ -2993,25 +3019,15 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 moves on. "Wait Condition" above uses "Is NOT present" instead of a Negate. */}
             {isBrowserAssert && (
             <Field label="On Fail">
-              <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
-                {(['Halt', 'Continue'] as const).map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setAssertOnFail(p)}
-                    className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
-                      assertOnFail === p
-                        ? 'bg-bg-elevated text-text-primary'
-                        : 'text-text-tertiary hover:text-text-secondary'
-                    }`}
-                    data-tip={p === 'Halt'
-                      ? tt('Stop the replay and report when the assertion is not met.', 'Para o replay e reporta quando a asserção não é satisfeita.')
-                      : tt('Log and continue to the next action even if the assertion fails.', 'Registra e segue para a próxima ação mesmo se a asserção falhar.')}
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl<'Halt' | 'Continue'>
+                ariaLabel="On assertion fail"
+                value={assertOnFail}
+                onChange={setAssertOnFail}
+                options={[
+                  { value: 'Halt', label: 'Halt', tip: tt('Stop the replay and report when the assertion is not met.', 'Para o replay e reporta quando a asserção não é satisfeita.') },
+                  { value: 'Continue', label: 'Continue', tip: tt('Log and continue to the next action even if the assertion fails.', 'Registra e segue para a próxima ação mesmo se a asserção falhar.') },
+                ]}
+              />
             </Field>
             )}
 
@@ -3051,43 +3067,40 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               )}
             </div>
 
-            {/* Timeout — shown for every browser action (renders unconditionally inside the
-                isBrowser block, matching its paired Delay below). The engine reads action.Timeout
-                for all six command types (ActionExecution.cs Browser switch arm). Compact w-[124px]
-                field matches the WaitImage/WaitPixel Timeout token; the only divergence is browser
-                has no side-by-side "On Timeout" select, so it stands alone on its row. */}
-            <Field label="Timeout" className="w-[124px]">
-              <NumberInput
-                value={parseInt(timeout, 10) || 5000}
-                onChange={(n) => setTimeout_(String(n))}
-                min={1000}
-                step={1000}
-                thousands
-                suffix="ms" suffixInside
-                inputWidth="w-full"
-                inputHeight="h-8"
-                className="w-full"
-                ariaLabel="Timeout in milliseconds"
-              />
-            </Field>
-
-            {/* Delay — browser-local copy of the shared Delay field so it sits directly under
-                Timeout as the last row of the cluster (Test -> Timeout -> Delay). Bound to the
-                same delay/setDelay state, so handleSave persistence is unchanged; the shared
-                trailing Delay is suppressed for isBrowser to avoid a duplicate. */}
-            <Field label="Delay" className="w-[124px]">
-              <NumberInput
-                value={parseInt(delay, 10) || 0}
-                onChange={(n) => setDelay(String(n))}
-                min={0}
-                thousands
-                suffix="ms" suffixInside
-                inputWidth="w-full"
-                inputHeight="h-8"
-                className="w-full"
-                ariaLabel="Delay in milliseconds"
-              />
-            </Field>
+            {/* Timeout + Delay — ONE row (both w-[124px]). Cluster order Test → Timeout →
+                Delay preserved (2.7.5). The engine reads action.Timeout for all six command
+                types; Delay is the browser-local copy of the shared field (same delay/
+                setDelay state, so handleSave persistence is unchanged; the shared trailing
+                Delay is suppressed for isBrowser to avoid a duplicate). */}
+            <div className="flex gap-2.5">
+              <Field label="Timeout" className="w-[124px] shrink-0">
+                <NumberInput
+                  value={parseInt(timeout, 10) || 5000}
+                  onChange={(n) => setTimeout_(String(n))}
+                  min={1000}
+                  step={1000}
+                  thousands
+                  suffix="ms" suffixInside
+                  inputWidth="w-full"
+                  inputHeight="h-8"
+                  className="w-full"
+                  ariaLabel="Timeout in milliseconds"
+                />
+              </Field>
+              <Field label="Delay" className="w-[124px] shrink-0">
+                <NumberInput
+                  value={parseInt(delay, 10) || 0}
+                  onChange={(n) => setDelay(String(n))}
+                  min={0}
+                  thousands
+                  suffix="ms" suffixInside
+                  inputWidth="w-full"
+                  inputHeight="h-8"
+                  className="w-full"
+                  ariaLabel="Delay in milliseconds"
+                />
+              </Field>
+            </div>
           </>
           )}
 
@@ -3152,25 +3165,15 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 />
               </Field>
               <Field label="Mode">
-                <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
-                  {(['set', 'cycle'] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setVariableMode(m)}
-                      className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
-                        variableMode === m
-                          ? 'bg-bg-elevated text-text-primary'
-                          : 'text-text-tertiary hover:text-text-secondary'
-                      }`}
-                      data-tip={m === 'cycle'
-                        ? tt('Value is a LIST (one item per line): each execution stores the NEXT line, wrapping around. The position survives between runs — pressing the hotkey repeatedly walks the list. Resets when the app restarts.', 'O valor é uma LISTA (um item por linha): cada execução grava a PRÓXIMA linha, voltando ao início no fim. A posição sobrevive entre execuções — apertar o hotkey repetidamente percorre a lista. Zera ao reiniciar o app.')
-                        : tt('Store the resolved value as-is on every execution.', 'Grava o valor resolvido como está, em toda execução.')}
-                    >
-                      {m === 'set' ? 'Set' : 'Cycle'}
-                    </button>
-                  ))}
-                </div>
+                <SegmentedControl<'set' | 'cycle'>
+                  ariaLabel="Variable mode"
+                  value={variableMode}
+                  onChange={setVariableMode}
+                  options={[
+                    { value: 'set', label: 'Set', tip: tt('Store the resolved value as-is on every execution.', 'Grava o valor resolvido como está, em toda execução.') },
+                    { value: 'cycle', label: 'Cycle', tip: tt('Value is a LIST (one item per line): each execution stores the NEXT line, wrapping around. The position survives between runs — pressing the hotkey repeatedly walks the list. Resets when the app restarts.', 'O valor é uma LISTA (um item por linha): cada execução grava a PRÓXIMA linha, voltando ao início no fim. A posição sobrevive entre execuções — apertar o hotkey repetidamente percorre a lista. Zera ao reiniciar o app.') },
+                  ]}
+                />
               </Field>
               <Field
                 label={variableMode === 'cycle' ? 'List (one item per line)' : 'Value'}
@@ -3201,6 +3204,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               the Test → Timeout → policy timing cluster (browser-editor convention). */}
           {isActivateWindow && (
           <>
+            {/* Section header — the matcher trio reads as one "which window" block. */}
+            <div className="label-micro text-text-tertiary">Match Window</div>
             <Field
               label="Process Name"
               hint={tt('e.g. notepad.exe — ".exe" is assumed when omitted. Leave empty to match by title only.', 'ex.: notepad.exe — ".exe" é assumido se omitido. Deixe vazio para casar só pelo título.')}
@@ -3228,26 +3233,18 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               />
             </Field>
             <Field label="Title Match">
-              <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
-                {(['contains', 'regex'] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setWindowTitleMatchMode(m)}
-                    className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
-                      windowTitleMatchMode === m
-                        ? 'bg-bg-elevated text-text-primary'
-                        : 'text-text-tertiary hover:text-text-secondary'
-                    }`}
-                    data-tip={m === 'regex'
-                      ? tt('Title is a .NET regular expression (case-insensitive)', 'Título é uma expressão regular .NET (sem diferenciar maiúsculas)')
-                      : tt('Title must contain this text (case-insensitive)', 'Título deve conter este texto (sem diferenciar maiúsculas)')}
-                  >
-                    {m === 'contains' ? 'Contains' : 'Regex'}
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl<'contains' | 'regex'>
+                ariaLabel="Title match mode"
+                value={windowTitleMatchMode}
+                onChange={setWindowTitleMatchMode}
+                options={[
+                  { value: 'contains', label: 'Contains', tip: tt('Title must contain this text (case-insensitive)', 'Título deve conter este texto (sem diferenciar maiúsculas)') },
+                  { value: 'regex', label: 'Regex', tip: tt('Title is a .NET regular expression (case-insensitive)', 'Título é uma expressão regular .NET (sem diferenciar maiúsculas)') },
+                ]}
+              />
             </Field>
+            {/* Section header — the optional launch pair. */}
+            <div className="label-micro text-text-tertiary">Launch</div>
             <Field
               label="Launch if not found"
               hint={tt('Program path, URL, document or shortcut — opened only when no window matches. Empty = just wait & focus. Leave the window fields above empty too for a plain run.', 'Caminho de programa, URL, documento ou atalho — aberto só quando nenhuma janela casa. Vazio = apenas esperar e focar. Deixe os campos de janela acima vazios também para um run puro.')}
@@ -3314,33 +3311,28 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   ariaLabel="Wait-for-window timeout in milliseconds"
                 />
               </Field>
-              <Field label="On Timeout">
-                <div className="inline-flex gap-0.5 bg-bg-input border border-border-default rounded p-0.5">
-                  {(['Halt', 'Continue'] as const).map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => setActivateOnTimeout(p)}
-                      className={`px-3 py-1 rounded text-[11px] font-medium transition-colors ${
-                        activateOnTimeout === p
-                          ? 'bg-bg-elevated text-text-primary'
-                          : 'text-text-tertiary hover:text-text-secondary'
-                      }`}
-                      data-tip={p === 'Halt'
-                        ? tt('Stop the replay when the window cannot be found or focused — keyboard actions follow the focused window, so continuing would type into the wrong app.', 'Para o replay quando a janela não é encontrada ou focada — ações de teclado seguem a janela em foco, então continuar digitaria no app errado.')
-                        : tt('Log and move on to the next action even if the window was not found or focused.', 'Registra e segue para a próxima ação mesmo se a janela não foi encontrada ou focada.')}
-                    >
-                      {p}
-                    </button>
-                  ))}
-                </div>
+              <Field label="On Timeout" className="flex-1">
+                <SegmentedControl<'Halt' | 'Continue'>
+                  ariaLabel="On timeout"
+                  grow
+                  value={activateOnTimeout}
+                  onChange={setActivateOnTimeout}
+                  options={[
+                    { value: 'Halt', label: 'Halt', tip: tt('Stop the replay when the window cannot be found or focused — keyboard actions follow the focused window, so continuing would type into the wrong app.', 'Para o replay quando a janela não é encontrada ou focada — ações de teclado seguem a janela em foco, então continuar digitaria no app errado.') },
+                    { value: 'Continue', label: 'Continue', tip: tt('Log and move on to the next action even if the window was not found or focused.', 'Registra e segue para a próxima ação mesmo se a janela não foi encontrada ou focada.') },
+                  ]}
+                />
               </Field>
             </div>
 
             {/* Passive guidance when the profile has a Window Target — coordinates keep
-                translating against the PROFILE target regardless of this action. */}
+                translating against the PROFILE target regardless of this action. Neutral
+                left-rail card (no tint) — informational, not a warning. */}
             {profiles.find(p => p.name === activeProfile)?.hasEffectiveTarget && (
-              <div className="text-[10px] leading-relaxed text-text-tertiary">
+              <div
+                className="border-l-2 rounded px-2.5 py-2 text-[11px] leading-relaxed text-text-tertiary"
+                style={{ borderColor: 'var(--color-border-subtle)' }}
+              >
                 {tt(
                   "Coordinates keep following the profile's Window Target — for multi-window macros leave the profile target empty, or split per-window steps into sub-profiles with their own targets (Run Profile).",
                   'As coordenadas continuam seguindo o Window Target do perfil — para macros multi-janela, deixe o target do perfil vazio ou divida os passos por janela em sub-perfis com seus próprios targets (Run Profile).'
@@ -3391,7 +3383,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                     type="button"
                     onClick={handlePickPosition}
                     disabled={pickPositionRequestId != null}
-                    className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 h-8 flex items-center justify-center gap-1.5 px-2.5 text-xs font-medium border border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary rounded whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Crosshair size={13} />
                     {pickPositionRequestId != null ? 'Picking…' : 'Pick from screen'}
@@ -3400,25 +3392,25 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                     type="button"
                     onClick={handleCopyCoords}
                     style={coordCopyFlash ? { borderColor: 'var(--color-replay)', color: 'var(--color-replay)', backgroundColor: 'var(--color-replay-bg)' } : undefined}
-                    className={`h-8 shrink-0 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border rounded transition-colors ${
+                    className={`h-8 shrink-0 flex items-center justify-center gap-1.5 px-2.5 text-xs font-medium border rounded transition-colors ${
                       coordCopyFlash
                         ? ''
                         : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
                     }`}
                   >
-                    {coordCopyFlash ? <Check size={12} /> : <Copy size={12} />} {coordCopyFlash ? 'Copied' : 'Copy'}
+                    {coordCopyFlash ? <Check size={13} /> : <Copy size={13} />} {coordCopyFlash ? 'Copied' : 'Copy'}
                   </button>
                   <button
                     type="button"
                     onClick={handlePasteCoords}
                     style={coordPasteError ? { borderColor: 'var(--color-recording)', color: 'var(--color-recording)', backgroundColor: 'var(--color-recording-bg)' } : undefined}
-                    className={`h-8 shrink-0 flex items-center justify-center gap-1.5 px-2.5 text-[11px] font-medium border rounded transition-colors ${
+                    className={`h-8 shrink-0 flex items-center justify-center gap-1.5 px-2.5 text-xs font-medium border rounded transition-colors ${
                       coordPasteError
                         ? ''
                         : 'border-border-default bg-bg-elevated hover:bg-bg-card text-text-secondary hover:text-text-primary'
                     }`}
                   >
-                    {coordPasteError ? <X size={12} /> : <ClipboardPaste size={12} />} Paste
+                    {coordPasteError ? <X size={13} /> : <ClipboardPaste size={13} />} Paste
                   </button>
                 </div>
               )}
@@ -3454,25 +3446,26 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               className="w-full h-16 px-2 py-1.5 text-xs bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid resize-y"
-              placeholder="Add a note..."
+              placeholder="Add a note…"
             />
           </Field>
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border-subtle shrink-0">
-          {/* Dirty-Esc warning — opacity toggle (never reflows the footer). Shown for ~2.5s
-              after the first Esc on a panel with unsaved edits; a second Esc discards. */}
+          {/* Dirty-Esc warning — opacity toggle (never reflows the footer). min-w-0 + truncate
+              so it yields all the space the buttons need; the buttons stay shrink-0 / nowrap
+              so "Save Changes" never wraps to two lines in the 340px panel. */}
           <span
-            className="text-[11px] text-warning transition-opacity duration-150 pointer-events-none"
+            className="flex-1 min-w-0 truncate text-[11px] text-warning transition-opacity duration-150 pointer-events-none"
             style={{ opacity: escArmed ? 1 : 0 }}
           >
             {tt('Unsaved changes — press Esc again to discard', 'Alterações não salvas — pressione Esc de novo para descartar')}
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={onClose}
-              className="h-8 px-3 inline-flex items-center gap-1.5 rounded text-xs text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+              className="h-8 px-3 inline-flex items-center gap-1.5 rounded text-xs whitespace-nowrap text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
             >
               <X size={14} />
               Cancel
@@ -3480,7 +3473,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             <button
               onClick={handleSave}
               disabled={!!regexError}
-              className="h-8 px-3.5 inline-flex items-center gap-1.5 rounded text-xs font-medium bg-accent-solid text-white hover:bg-accent-solid/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="h-8 px-3.5 inline-flex items-center gap-1.5 rounded text-xs font-medium whitespace-nowrap bg-accent-solid text-[color:var(--color-accent-ink)] hover:bg-accent-solid/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Check size={14} />
               Save Changes
