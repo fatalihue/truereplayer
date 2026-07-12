@@ -1798,6 +1798,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 return (
                   <SegmentedControl<'found' | 'not'>
                     ariaLabel="Condition polarity"
+                    grow
                     value={conditionNegate ? 'not' : 'found'}
                     onChange={(v) => setConditionNegate(v === 'not')}
                     options={[
@@ -1839,6 +1840,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             >
               <SegmentedControl<'TreatAsFalse' | 'Halt'>
                 ariaLabel="On probe error"
+                grow
                 value={ifOnProbeError === 'Halt' ? 'Halt' : 'TreatAsFalse'}
                 onChange={(v) => setIfOnProbeError(v)}
                 options={[
@@ -1887,6 +1889,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             <Field label="Title Match">
               <SegmentedControl<'contains' | 'regex'>
                 ariaLabel="Title match mode"
+                grow
                 value={windowTitleMatchMode}
                 onChange={setWindowTitleMatchMode}
                 options={[
@@ -1910,6 +1913,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             <Field label="Match Type">
               <SegmentedControl<'contains' | 'equals' | 'regex'>
                 ariaLabel="Clipboard match type"
+                grow
                 value={clipboardPatternType}
                 onChange={setClipboardPatternType}
                 options={[
@@ -2326,6 +2330,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             <Field label="Wait Until">
               <SegmentedControl<'appears' | 'disappears'>
                 ariaLabel="Wait until"
+                grow
                 value={waitImageInvert ? 'disappears' : 'appears'}
                 onChange={(v) => setWaitImageInvert(v === 'disappears')}
                 options={[
@@ -2520,6 +2525,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             <Field label="Wait Until">
               <SegmentedControl<'matches' | 'stopsMatching'>
                 ariaLabel="Wait until"
+                grow
                 value={pixelInvert ? 'stopsMatching' : 'matches'}
                 onChange={(v) => setPixelInvert(v === 'stopsMatching')}
                 options={[
@@ -3021,6 +3027,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             <Field label="On Fail">
               <SegmentedControl<'Halt' | 'Continue'>
                 ariaLabel="On assertion fail"
+                grow
                 value={assertOnFail}
                 onChange={setAssertOnFail}
                 options={[
@@ -3167,6 +3174,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               <Field label="Mode">
                 <SegmentedControl<'set' | 'cycle'>
                   ariaLabel="Variable mode"
+                  grow
                   value={variableMode}
                   onChange={setVariableMode}
                   options={[
@@ -3235,6 +3243,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             <Field label="Title Match">
               <SegmentedControl<'contains' | 'regex'>
                 ariaLabel="Title match mode"
+                grow
                 value={windowTitleMatchMode}
                 onChange={setWindowTitleMatchMode}
                 options={[
