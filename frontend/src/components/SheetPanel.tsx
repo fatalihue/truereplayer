@@ -941,6 +941,210 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // be a forward-reference error (they're declared further down the component body).
   }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, assertOnFail, alternatives, send, onClose]);
 
+  // Are there edits the Save-Changes button would persist? MIRRORS handleSave's diffs
+  // exactly (same guards/normalisation), returning true on the first field that differs —
+  // so it is defined as "handleSave would send at least one actions:edit". Kept additive
+  // (handleSave untouched) to keep the save path zero-risk; if a NEW field is ever added
+  // to handleSave, mirror it HERE too or a stray Esc will silently drop that field's edit.
+  // Powers the dirty-aware Esc guard (a reflexive Esc arms a warning instead of discarding).
+  const hasUnsavedChanges = useMemo<boolean>(() => {
+    if (actionIndex == null || !action) return false;
+    const _isIf = actionType === 'If';
+    const _isIfImage = _isIf && action.conditionType === 'ImageFound';
+    const _isIfPixel = _isIf && action.conditionType === 'PixelColorMatch';
+
+    if (actionType !== action.actionType) return true;
+    const effectiveKey = textMatch.trim() ? buildTextSelector(textMode, textMatch.trim()) : key;
+    if (effectiveKey !== action.key) return true;
+
+    const isBrowserElementAction = actionType === 'BrowserClick' || actionType === 'BrowserRightClick'
+      || actionType === 'BrowserType' || actionType === 'BrowserWaitElement' || actionType === 'BrowserSelectOption'
+      || actionType === 'BrowserAssert'
+      || (actionType === 'If' && action.conditionType === 'BrowserElementState');
+    if (isBrowserElementAction) {
+      if (alternatives.length > 1) {
+        if (JSON.stringify(alternatives) !== JSON.stringify(action.selectorAlternatives ?? null)) return true;
+      } else if (effectiveKey !== action.key && (action.selectorAlternatives?.length ?? 0) > 0) {
+        return true;
+      }
+    }
+    const newX = parseInt(x, 10);
+    if (!isNaN(newX) && newX !== action.x) return true;
+    const newY = parseInt(y, 10);
+    if (!isNaN(newY) && newY !== action.y) return true;
+    const newDelay = parseInt(delay, 10);
+    if (!isNaN(newDelay) && newDelay !== action.delay) return true;
+    if (comment !== (action.comment || '')) return true;
+
+    if (actionType === 'WaitImage' || _isIfImage) {
+      if (actionType === 'WaitImage') {
+        const newTimeoutMs = Math.max(1000, parseFloat(timeout) || 5000);
+        if (newTimeoutMs !== (action.timeout || 5000)) return true;
+      }
+      const newConfidence = Math.min(100, Math.max(10, parseInt(confidence, 10) || 80)) / 100;
+      if (Math.abs(newConfidence - (action.confidence || 0.8)) > 0.005) return true;
+      if (actionType === 'WaitImage') {
+        const persistedTimeoutMode = waitImageOnTimeout === 'Continue' ? 'Continue' : '';
+        const currentTimeoutMode = action.waitImageOnTimeout === 'Continue' ? 'Continue' : '';
+        if (persistedTimeoutMode !== currentTimeoutMode) return true;
+        if (!!waitImageInvert !== !!(action.waitImageInvert)) return true;
+        if (!!waitImageClickOnMatch !== !!(action.waitImageClickOnMatch)) return true;
+      }
+      const currentRect = (action.waitImageSearchW && action.waitImageSearchH)
+        ? `${action.waitImageSearchX || 0},${action.waitImageSearchY || 0},${action.waitImageSearchW},${action.waitImageSearchH}`
+        : '';
+      const newRect = waitImageSearchRegion
+        ? `${waitImageSearchRegion.x},${waitImageSearchRegion.y},${waitImageSearchRegion.w},${waitImageSearchRegion.h}`
+        : '';
+      if (newRect !== currentRect) return true;
+    }
+
+    if (actionType === 'WaitPixelColor' || _isIfPixel) {
+      if (actionType === 'WaitPixelColor') {
+        const newTimeoutMs = Math.max(1000, parseFloat(timeout) || 5000);
+        if (newTimeoutMs !== (action.timeout || 5000)) return true;
+      }
+      const trimmedX = pixelX.trim();
+      const trimmedY = pixelY.trim();
+      const parsedX = trimmedX === '' ? null : parseInt(trimmedX, 10);
+      const parsedY = trimmedY === '' ? null : parseInt(trimmedY, 10);
+      if ((parsedX ?? null) !== (action.pixelX ?? null)) return true;
+      if ((parsedY ?? null) !== (action.pixelY ?? null)) return true;
+      const rawColor = pixelColor.trim();
+      const normalisedColor = rawColor === ''
+        ? ''
+        : (rawColor.startsWith('#') ? rawColor.toUpperCase() : '#' + rawColor.toUpperCase());
+      if (normalisedColor !== (action.pixelColor ?? '')) return true;
+      const newTol = Math.max(0, Math.min(255, parseInt(pixelTolerance, 10) || 0));
+      if (newTol !== (action.pixelTolerance ?? 0)) return true;
+      if (actionType === 'WaitPixelColor') {
+        const persistedPxTimeout = pixelOnTimeout === 'Continue' ? 'Continue' : '';
+        const currentPxTimeout = action.pixelOnTimeout === 'Continue' ? 'Continue' : '';
+        if (persistedPxTimeout !== currentPxTimeout) return true;
+        if (!!pixelInvert !== !!(action.pixelInvert)) return true;
+        if (!!pixelClickOnMatch !== !!(action.pixelClickOnMatch)) return true;
+      }
+    }
+
+    if (_isIf) {
+      if (!!conditionNegate !== !!(action.conditionNegate)) return true;
+      const ctVal = Math.max(0, parseInt(conditionTimeout, 10) || 0);
+      if (ctVal !== (action.conditionTimeout ?? 0)) return true;
+      const persistedErr = ifOnProbeError === 'Halt' ? 'Halt' : '';
+      const currentErr = action.ifOnProbeError === 'Halt' ? 'Halt' : '';
+      if (persistedErr !== currentErr) return true;
+      if (action.conditionType === 'WindowOpen') {
+        if (windowProcessName !== (action.windowProcessName ?? '')) return true;
+        if (windowTitle !== (action.windowTitle ?? '')) return true;
+        const currentTitleMode = action.windowTitleMatchMode === 'regex' ? 'regex' : 'contains';
+        if (windowTitleMatchMode !== currentTitleMode) return true;
+        if (!!windowMatchForegroundOnly !== !!(action.windowMatchForegroundOnly)) return true;
+      }
+      if (action.conditionType === 'BrowserElementState') {
+        const persistedIfMode = (waitMode === 'appears') ? '' : waitMode;
+        if ((persistedIfMode || '') !== (action.waitMode || '')) return true;
+        if (browserText !== (action.browserText || '')) return true;
+      }
+      if (action.conditionType === 'ClipboardMatch') {
+        const currentPatternType = action.clipboardPatternType === 'equals' ? 'equals'
+          : action.clipboardPatternType === 'regex' ? 'regex'
+          : 'contains';
+        if (clipboardPatternType !== currentPatternType) return true;
+        if (clipboardPattern !== (action.clipboardPattern ?? '')) return true;
+      }
+      if (action.conditionType === 'Random') {
+        const pct = Math.max(0, Math.min(100, parseInt(randomPercent, 10) || 0));
+        if (pct !== (action.randomPercent ?? 0)) return true;
+      }
+      if (action.conditionType === 'Variable') {
+        const currentOp = action.conditionOperator ?? 'eq';
+        if (conditionOperator !== currentOp) return true;
+        if (conditionOperand !== (action.conditionOperand ?? '')) return true;
+      }
+      if (action.conditionType === 'ProcessRunning') {
+        if (windowProcessName !== (action.windowProcessName ?? '')) return true;
+      }
+      if (action.conditionType === 'FileExists') {
+        if (filePath !== (action.filePath ?? '')) return true;
+      }
+      if (action.conditionType === 'TimeWindow') {
+        if (timeStart !== (action.timeStart ?? '')) return true;
+        if (timeEnd !== (action.timeEnd ?? '')) return true;
+        if (daysOfWeek !== (action.daysOfWeek ?? 0)) return true;
+      }
+    }
+
+    if (actionType === 'Pause') {
+      const parsedMs = parseFloat(timeout);
+      const newTimeoutMs = isNaN(parsedMs) || parsedMs < 0 ? 0 : Math.round(parsedMs);
+      if (newTimeoutMs !== (action.timeout || 0)) return true;
+    }
+
+    if (actionType === 'BrowserType' && browserText !== (action.browserText || '')) return true;
+    if (actionType.startsWith('Browser')) {
+      const newTimeoutMs = Math.max(1000, parseFloat(timeout) || 5000);
+      if (newTimeoutMs !== (action.timeout || 5000)) return true;
+    }
+    if (actionType === 'BrowserNavigate' && newTab !== (action.newTab || false)) return true;
+
+    if (actionType === 'BrowserWaitElement') {
+      const persistedMode = (waitMode === 'appears') ? '' : waitMode;
+      if ((persistedMode || '') !== (action.waitMode || '')) return true;
+    }
+
+    if (actionType === 'BrowserAssert') {
+      const persistedMode = (waitMode === 'appears') ? '' : waitMode;
+      if ((persistedMode || '') !== (action.waitMode || '')) return true;
+      const persistedPolicy = assertOnFail === 'Continue' ? 'Continue' : '';
+      const currentPolicy = action.assertOnFail === 'Continue' ? 'Continue' : '';
+      if (persistedPolicy !== currentPolicy) return true;
+    }
+
+    if (actionType === 'BrowserNavigate') {
+      if ((urlWaitPattern || '') !== (action.urlWaitPattern || '')) return true;
+      if ((postNavigateSelector || '') !== (action.postNavigateSelector || '')) return true;
+    }
+
+    if (actionType === 'BrowserType') {
+      if (!!typeAppend !== !!(action.typeAppend)) return true;
+      if (!!typePaste !== !!(action.typePaste)) return true;
+      const tdParsed = typeDelay.trim() === '' ? null : parseInt(typeDelay, 10);
+      const currentTd = action.typeDelay ?? null;
+      const normalized = (tdParsed != null && !isNaN(tdParsed)) ? tdParsed : null;
+      if (normalized !== currentTd) return true;
+    }
+
+    if (actionType === 'SetVariable') {
+      if (variableValue !== (action.variableValue ?? '')) return true;
+      const currentVarMode = action.variableMode === 'cycle' ? 'cycle' : 'set';
+      if (variableMode !== currentVarMode) return true;
+    }
+
+    if (actionType === 'ActivateWindow') {
+      if (windowProcessName !== (action.windowProcessName ?? '')) return true;
+      if (windowTitle !== (action.windowTitle ?? '')) return true;
+      const currentAwTitleMode = action.windowTitleMatchMode === 'regex' ? 'regex' : 'contains';
+      if (windowTitleMatchMode !== currentAwTitleMode) return true;
+      if (launchPath !== (action.launchPath ?? '')) return true;
+      if (launchArgs !== (action.launchArgs ?? '')) return true;
+      const persistedPolicy = activateOnTimeout === 'Continue' ? 'Continue' : '';
+      const currentPolicy = action.activateOnTimeout === 'Continue' ? 'Continue' : '';
+      if (persistedPolicy !== currentPolicy) return true;
+      const newAwTimeout = Math.max(1000, Math.round(parseFloat(timeout) || 10000));
+      if (newAwTimeout !== (action.timeout || 5000)) return true;
+    }
+
+    if (actionType === 'BrowserSelectOption') {
+      if (browserText !== (action.browserText || '')) return true;
+      const currentMode = action.selectMatchMode === 'value' ? 'value'
+        : action.selectMatchMode === 'index' ? 'index'
+        : 'text';
+      if (selectMatchMode !== currentMode) return true;
+    }
+
+    return false;
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, assertOnFail, alternatives]);
+
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
   // the user sees the resolved value immediately. Esc is intentionally NOT a cancel key
@@ -1024,6 +1228,16 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     (e.target as HTMLInputElement).blur();
   }, [armKeyCaptureTimer, disarmKeyCaptureTimer]);
 
+  // Dirty-aware Esc: a reflexive Esc must not silently discard unsaved edits (the panel
+  // batches edits into local state and only persists them on Save Changes). escArmed drives
+  // a footer warning; the refs let the document listener read the latest values without
+  // re-attaching on every keystroke. Cancel stays the EXPLICIT discard (no arm).
+  const [escArmed, setEscArmed] = useState(false);
+  const escArmedRef = useRef(false);
+  const escArmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasUnsavedRef = useRef(false);
+  hasUnsavedRef.current = hasUnsavedChanges;
+
   // Esc-to-close — global listener that closes the panel when the user presses Escape
   // outside of any capture mode. Key capture handlers (KeyDown/KeyUp Key field, Pause
   // Resume Hotkey, the grid Key column edit, Settings global hotkeys) all call
@@ -1044,6 +1258,20 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
         send({ type: 'browser:cancelPick', payload: {} });
         setPickElementRequestId(null);
         setIsPicking(false);
+        return;
+      }
+      // Dirty guard rung (below capture/pick, above close): the FIRST Esc on a panel with
+      // unsaved edits arms a 2.5s footer warning instead of closing; a SECOND Esc within the
+      // window discards + closes. A clean panel closes on the first Esc, as before.
+      if (hasUnsavedRef.current && !escArmedRef.current) {
+        e.preventDefault();
+        escArmedRef.current = true;
+        setEscArmed(true);
+        if (escArmTimerRef.current) clearTimeout(escArmTimerRef.current);
+        escArmTimerRef.current = setTimeout(() => {
+          escArmedRef.current = false;
+          setEscArmed(false);
+        }, 2500);
         return;
       }
       onClose();
@@ -1067,6 +1295,11 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     setKeyFieldFocused(false);
     setPauseHotkeyFocused(false);
     disarmKeyCaptureTimer();
+    // Disarm the dirty-Esc warning when switching action (a fresh row starts clean, and a
+    // stale "press Esc again" armed against the previous row must not carry over).
+    escArmedRef.current = false;
+    setEscArmed(false);
+    if (escArmTimerRef.current) { clearTimeout(escArmTimerRef.current); escArmTimerRef.current = null; }
     setPickPositionRequestId(null);
     clearTestTimeout();
     setTestRequestId(null);
@@ -3227,22 +3460,32 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border-subtle shrink-0">
-          <button
-            onClick={onClose}
-            className="h-8 px-3 inline-flex items-center gap-1.5 rounded text-xs text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border-subtle shrink-0">
+          {/* Dirty-Esc warning — opacity toggle (never reflows the footer). Shown for ~2.5s
+              after the first Esc on a panel with unsaved edits; a second Esc discards. */}
+          <span
+            className="text-[11px] text-warning transition-opacity duration-150 pointer-events-none"
+            style={{ opacity: escArmed ? 1 : 0 }}
           >
-            <X size={14} />
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={!!regexError}
-            className="h-8 px-3.5 inline-flex items-center gap-1.5 rounded text-xs font-medium bg-accent-solid text-white hover:bg-accent-solid/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Check size={14} />
-            Save Changes
-          </button>
+            {tt('Unsaved changes — press Esc again to discard', 'Alterações não salvas — pressione Esc de novo para descartar')}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="h-8 px-3 inline-flex items-center gap-1.5 rounded text-xs text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+            >
+              <X size={14} />
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!!regexError}
+              className="h-8 px-3.5 inline-flex items-center gap-1.5 rounded text-xs font-medium bg-accent-solid text-white hover:bg-accent-solid/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Check size={14} />
+              Save Changes
+            </button>
+          </div>
         </div>
       </div>
 
