@@ -3453,14 +3453,15 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
 
         {/* Footer */}
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border-subtle shrink-0">
-          {/* Dirty-Esc warning — opacity toggle (never reflows the footer). min-w-0 + truncate
-              so it yields all the space the buttons need; the buttons stay shrink-0 / nowrap
-              so "Save Changes" never wraps to two lines in the 340px panel. */}
+          {/* Dirty-Esc warning — opacity toggle (never reflows the footer). Kept SHORT so it
+              shows in full beside the fixed-width buttons; the context (a first Esc on a dirty
+              panel just fired) makes the terse "Esc again to discard" clear. min-w-0 is the
+              safety net; the buttons stay shrink-0 / nowrap so "Save Changes" never wraps. */}
           <span
             className="flex-1 min-w-0 truncate text-[11px] text-warning transition-opacity duration-150 pointer-events-none"
             style={{ opacity: escArmed ? 1 : 0 }}
           >
-            {tt('Unsaved changes — press Esc again to discard', 'Alterações não salvas — pressione Esc de novo para descartar')}
+            {tt('Esc discards', 'Esc descarta')}
           </span>
           <div className="flex items-center gap-2 shrink-0">
             <button
