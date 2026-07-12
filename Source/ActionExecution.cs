@@ -385,6 +385,14 @@ namespace TrueReplayer.Services
             int areaY = config.Area?.Y ?? 0;
             int areaW = config.Area?.W ?? 0;
             int areaH = config.Area?.H ?? 0;
+            // Fixed-point mode. A picked point clicks exactly there every tick; a null point
+            // with UseFixed on = "lock on start" — capture the cursor on the first click and
+            // reuse it. fixedCaptured is pre-set when a point was picked so the loop skips the
+            // one-time GetCursorPos. No position jitter is applied in fixed mode (exact point).
+            bool useFixed = config.UseFixed;
+            int fixedX = config.FixedPoint?.X ?? 0;
+            int fixedY = config.FixedPoint?.Y ?? 0;
+            bool fixedCaptured = config.FixedPoint is not null;
 
             if (IsReplaying)
             {
@@ -477,6 +485,21 @@ namespace TrueReplayer.Services
                             // areaX covers [areaX, areaX+areaW-1] — the full rect interior.
                             jitteredX = areaX + Random.Shared.Next(0, areaW);
                             jitteredY = areaY + Random.Shared.Next(0, areaH);
+                        }
+                        else if (useFixed)
+                        {
+                            // Lock on start: capture the cursor at the FIRST click, reuse it for
+                            // the whole run. A picked point pre-sets fixedCaptured so this is a
+                            // no-op and (fixedX, fixedY) is used verbatim. No jitter — exact point.
+                            if (!fixedCaptured)
+                            {
+                                NativeMethods.GetCursorPos(out var fp);
+                                fixedX = fp.x;
+                                fixedY = fp.y;
+                                fixedCaptured = true;
+                            }
+                            jitteredX = fixedX;
+                            jitteredY = fixedY;
                         }
                         else
                         {

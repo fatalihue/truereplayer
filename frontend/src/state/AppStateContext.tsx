@@ -37,6 +37,10 @@ const defaultSettings = {
   // null = no rect saved. useArea is the on/off toggle (preserves the rect when temporarily off).
   cursorClickUseArea: false,
   cursorClickArea: null as { x: number; y: number; w: number; h: number } | null,
+  // Fixed-point mode. useFixed toggles it on; a null point = "lock on start" (capture the
+  // cursor at the first click), a set point = click exactly there.
+  cursorClickUseFixed: false,
+  cursorClickFixedPoint: null as { x: number; y: number } | null,
   cursorClickLoops: '0',
   cursorClickUseLoops: false,
   cursorClickInterval: '200',

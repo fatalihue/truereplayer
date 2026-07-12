@@ -336,7 +336,7 @@ function ComboInput({ value, onCommit, options, width = CTRL_W, editable = true 
 // configuring Clicker, not the macro profile".
 function ClickerSection({
   button, rate, rateJitter, useRateJitter, positionJitter, usePositionJitter,
-  useArea, area,
+  useArea, area, useFixed, fixedPoint,
   loops, useLoops, interval, useInterval, onChange,
 }: {
   button: string;
@@ -348,6 +348,8 @@ function ClickerSection({
   usePositionJitter: boolean;
   useArea: boolean;
   area: { x: number; y: number; w: number; h: number } | null;
+  useFixed: boolean;
+  fixedPoint: { x: number; y: number } | null;
   loops: string;
   useLoops: boolean;
   interval: string;
@@ -403,15 +405,12 @@ function ClickerSection({
     if (!currentlyOn) onChange(settingKey, true);
   };
 
-  // Activate `self`, force `other` off — for mutually-exclusive Position/Area toggles where
-  // both write to the same axis (where a click lands).
-  const setExclusive = (
-    self: { key: string; on: boolean },
-    other: { key: string; on: boolean },
-    enable: boolean,
-  ) => {
-    onChange(self.key, enable);
-    if (enable && other.on) onChange(other.key, false);
+  // The three mutually-exclusive "where the click lands" modes. Enabling one turns the
+  // other two off; they all write the same axis so only one may be active.
+  const CLICK_MODE_KEYS = ['cursorClickUsePositionJitter', 'cursorClickUseArea', 'cursorClickUseFixed'];
+  const setClickMode = (key: string, enable: boolean) => {
+    onChange(key, enable);
+    if (enable) CLICK_MODE_KEYS.forEach((k) => { if (k !== key) onChange(k, false); });
   };
 
   return (
@@ -495,44 +494,32 @@ function ClickerSection({
               onEnterActivate={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
             />
           </SettingRow>
-          <SettingRow label="Position" tooltip={tt('Random ±px around the cursor. Exclusive with Area.', 'Variação ±px aleatória ao redor do cursor. Exclusivo com Area.')}>
+          <SettingRow label="Position" tooltip={tt('Random ±px around the cursor. Exclusive with Area / Fixed.', 'Variação ±px aleatória ao redor do cursor. Exclusivo com Area / Fixed.')}>
             <EnableChip
               value={positionJitter}
               isOn={usePositionJitter}
               max={MAX_POSITION_PX}
               width={CLICKER_W}
               onCommitValue={(v) => onChange('cursorClickPositionJitter', v)}
-              onToggle={(v) => setExclusive(
-                { key: 'cursorClickUsePositionJitter', on: usePositionJitter },
-                { key: 'cursorClickUseArea', on: useArea },
-                v,
-              )}
-              onEnterActivate={() => setExclusive(
-                { key: 'cursorClickUsePositionJitter', on: usePositionJitter },
-                { key: 'cursorClickUseArea', on: useArea },
-                true,
-              )}
+              onToggle={(v) => setClickMode('cursorClickUsePositionJitter', v)}
+              onEnterActivate={() => setClickMode('cursorClickUsePositionJitter', true)}
             />
           </SettingRow>
           {/* Click area — chip-shaped: the dot toggles useArea (mutually exclusive with
               Position); the body opens the region picker; ✕ (hover) clears. Backend also
               auto-enables useArea + disables Position jitter on a successful draw. */}
-          <SettingRow label="Area" tooltip={tt('Clicks a random point in a screen box. Exclusive with Position.', 'Clica em um ponto aleatório em uma caixa na tela. Exclusivo com Position.')}>
+          <SettingRow label="Area" tooltip={tt('Clicks a random point in a screen box. Exclusive with Position / Fixed.', 'Clica em um ponto aleatório em uma caixa na tela. Exclusivo com Position / Fixed.')}>
             <div
-              className={`${CLICKER_W} h-7 flex items-center rounded border overflow-hidden relative group`}
+              className={`${CLICKER_W} h-7 flex items-center rounded border overflow-hidden group`}
               style={useArea
                 ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
                 : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
             >
               <button
                 type="button"
-                onClick={() => setExclusive(
-                  { key: 'cursorClickUseArea', on: useArea },
-                  { key: 'cursorClickUsePositionJitter', on: usePositionJitter },
-                  !useArea,
-                )}
+                onClick={() => setClickMode('cursorClickUseArea', !useArea)}
                 aria-label={useArea ? 'Disable area' : 'Enable area'}
-                className="h-full pl-2 pr-1.5 flex items-center shrink-0 cursor-pointer transition-colors hover:bg-[rgba(127,127,127,0.18)]"
+                className="h-full pl-2 pr-1 flex items-center shrink-0 cursor-pointer transition-colors hover:bg-[rgba(127,127,127,0.18)]"
               >
                 <span
                   className="w-2 h-2 rounded-full block shrink-0"
@@ -543,7 +530,7 @@ function ClickerSection({
               </button>
               <button
                 onClick={() => send({ type: 'clicker:configureArea', payload: { requestId: `clicker-area-${Date.now()}` } })}
-                className="flex-1 min-w-0 h-full flex items-center justify-end pr-2 font-mono cursor-pointer hover:underline"
+                className={`flex-1 min-w-0 h-full flex items-center justify-end font-mono cursor-pointer hover:underline ${area ? 'pr-1' : 'pr-2'}`}
                 data-tip={area
                   ? tt(`Current: ${area.w}×${area.h} at (${area.x}, ${area.y}). Click to redraw.`, `Atual: ${area.w}×${area.h} em (${area.x}, ${area.y}). Clique para redesenhar.`)
                   : tt('Drag a rectangle on screen', 'Arraste um retângulo na tela')}
@@ -553,14 +540,68 @@ function ClickerSection({
                   : <span className={`text-[11px] ${useArea ? 'text-text-secondary' : 'text-text-tertiary'}`}>Set…</span>}
               </button>
               {area && (
+                // In-flow (not absolute) so it never overlaps the value text — it takes
+                // its own slot at the right edge; muted by default, solid on hover.
                 <button
                   onClick={(e) => {
-                    // stopPropagation so the click doesn't bubble to the picker button.
                     e.stopPropagation();
                     onChange('cursorClickUseArea', false);
                     onChange('cursorClickArea', null);
                   }}
-                  className="absolute right-0.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus:opacity-100 text-text-tertiary hover:text-text-primary text-[12px] leading-none px-0.5 transition-opacity"
+                  aria-label="Clear area"
+                  className="shrink-0 h-full px-1 flex items-center text-text-tertiary hover:text-text-primary text-[11px] leading-none transition-colors"
+                  tabIndex={-1}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </SettingRow>
+          {/* Fixed point — chip-shaped like Area. Dot toggles useFixed (mutex with
+              Position/Area); the body opens the single-click point picker. With a point
+              set → clicks exactly there; with NONE set → "At start" (locks to the cursor
+              when clicking begins). ✕ clears the point back to lock-on-start. Backend also
+              auto-enables useFixed + disables the other two on a successful pick. */}
+          <SettingRow label="Fixed" tooltip={tt('Always clicks one point. No point set = locks to the cursor when clicking starts. Exclusive with Position / Area.', 'Sempre clica em um ponto. Sem ponto = trava na posição do cursor quando começa a clicar. Exclusivo com Position / Area.')}>
+            <div
+              className={`${CLICKER_W} h-7 flex items-center rounded border overflow-hidden group`}
+              style={useFixed
+                ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
+                : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
+            >
+              <button
+                type="button"
+                onClick={() => setClickMode('cursorClickUseFixed', !useFixed)}
+                aria-label={useFixed ? 'Disable fixed point' : 'Enable fixed point'}
+                className="h-full pl-2 pr-1 flex items-center shrink-0 cursor-pointer transition-colors hover:bg-[rgba(127,127,127,0.18)]"
+              >
+                <span
+                  className="w-2 h-2 rounded-full block shrink-0"
+                  style={useFixed
+                    ? { background: 'var(--color-accent-solid)' }
+                    : { background: 'transparent', border: '1.5px solid var(--color-text-tertiary)' }}
+                />
+              </button>
+              <button
+                onClick={() => send({ type: 'clicker:configurePoint', payload: { requestId: `clicker-point-${Date.now()}` } })}
+                className={`flex-1 min-w-0 h-full flex items-center justify-end font-mono cursor-pointer hover:underline ${fixedPoint ? 'pr-1' : 'pr-2'}`}
+                data-tip={fixedPoint
+                  ? tt(`Fixed at (${fixedPoint.x}, ${fixedPoint.y}). Click to re-pick.`, `Fixo em (${fixedPoint.x}, ${fixedPoint.y}). Clique para escolher de novo.`)
+                  : tt('Locks to the cursor when clicking starts. Click to pick an exact point.', 'Trava na posição do cursor ao começar a clicar. Clique para escolher um ponto exato.')}
+              >
+                {fixedPoint
+                  ? <span className={`text-[10px] truncate ${useFixed ? 'text-text-primary' : 'text-text-tertiary'}`}>{fixedPoint.x}, {fixedPoint.y}</span>
+                  : <span className={`text-[11px] ${useFixed ? 'text-text-secondary' : 'text-text-tertiary'}`}>At start</span>}
+              </button>
+              {fixedPoint && (
+                <button
+                  onClick={(e) => {
+                    // Clear the point only — keep useFixed on, reverting to lock-on-start.
+                    e.stopPropagation();
+                    onChange('cursorClickFixedPoint', null);
+                  }}
+                  aria-label="Clear fixed point"
+                  className="shrink-0 h-full px-1 flex items-center text-text-tertiary hover:text-text-primary text-[11px] leading-none transition-colors"
                   tabIndex={-1}
                 >
                   ✕
@@ -929,6 +970,8 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 usePositionJitter={settings.cursorClickUsePositionJitter}
                 useArea={settings.cursorClickUseArea}
                 area={settings.cursorClickArea}
+                useFixed={settings.cursorClickUseFixed}
+                fixedPoint={settings.cursorClickFixedPoint}
                 loops={settings.cursorClickLoops}
                 useLoops={settings.cursorClickUseLoops}
                 interval={settings.cursorClickInterval}

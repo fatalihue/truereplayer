@@ -323,6 +323,8 @@ export interface SettingsState {
   // Effective area mode = useArea && area !== null.
   cursorClickUseArea: boolean;
   cursorClickArea: { x: number; y: number; w: number; h: number } | null;
+  cursorClickUseFixed: boolean;
+  cursorClickFixedPoint: { x: number; y: number } | null;
   cursorClickLoops: string;
   cursorClickUseLoops: boolean;
   cursorClickInterval: string;
@@ -493,6 +495,7 @@ export type IncomingMessage =
   | { type: 'image:testMatchResult'; payload: { requestId: string; found: boolean; score: number; x: number; y: number; w: number; h: number; error?: string } }
   | { type: 'waitimage:searchRegionSet'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; w?: number; h?: number } }
   | { type: 'clicker:areaSet'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; w?: number; h?: number } }
+  | { type: 'clicker:pointSet'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number } }
   | { type: 'mouse:positionPicked'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number } }
   | { type: 'pixel:colorPicked'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; hex?: string } }
   | { type: 'pixel:testMatchResult'; payload: { requestId: string; matches: boolean; sampledHex?: string | null; error?: string } }
@@ -664,6 +667,7 @@ export type OutgoingMessage =
   | { type: 'waitimage:recapture'; payload: { index: number } }
   | { type: 'waitimage:configureSearchRegion'; payload: { requestId: string; x?: number; y?: number; w?: number; h?: number } }
   | { type: 'clicker:configureArea'; payload: { requestId: string } }
+  | { type: 'clicker:configurePoint'; payload: { requestId: string } }
   | { type: 'waitimage:cropReference'; payload: { index: number; x: number; y: number; w: number; h: number } }
   | { type: 'image:testMatch'; payload: { requestId: string; imagePath: string; confidence: number; searchRegion?: { x: number; y: number; w: number; h: number } } }
   | { type: 'mouse:pickPosition'; payload: { requestId: string } }

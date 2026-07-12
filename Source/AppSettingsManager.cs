@@ -61,6 +61,14 @@ namespace TrueReplayer.Services
             public int CursorClickAreaY { get; set; } = 0;
             public int CursorClickAreaW { get; set; } = 0;
             public int CursorClickAreaH { get; set; } = 0;
+            // Fixed-point click mode. UseFixed is the on/off toggle; PointSet distinguishes a
+            // picked coordinate (click exactly at X,Y) from "lock on start" (PointSet=false →
+            // capture the cursor at the first click). Both preserved independently so toggling
+            // off / clearing the point don't lose the other.
+            public bool CursorClickUseFixed { get; set; } = false;
+            public bool CursorClickFixedPointSet { get; set; } = false;
+            public int CursorClickFixedX { get; set; } = 0;
+            public int CursorClickFixedY { get; set; } = 0;
             public int CursorClickLoops { get; set; } = 0;
             public bool CursorClickUseLoops { get; set; } = false;
             public int CursorClickIntervalMs { get; set; } = 200;

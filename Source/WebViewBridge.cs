@@ -108,6 +108,10 @@ namespace TrueReplayer
         // separately so a user can toggle off without losing the saved rect.
         public bool CursorClickUseArea { get; set; } = false;
         public ClickArea? CursorClickArea { get; set; }
+        // Fixed-point mode. UseFixed toggles it on (mutually exclusive with Area / Position);
+        // FixedPoint null while on = "lock on start" (capture cursor at the first click).
+        public bool CursorClickUseFixed { get; set; } = false;
+        public ClickPoint? CursorClickFixedPoint { get; set; }
         public string CursorClickLoops { get; set; } = "0";
         public bool CursorClickUseLoops { get; set; } = false;
         public string CursorClickInterval { get; set; } = "0";
@@ -562,6 +566,10 @@ namespace TrueReplayer
             CursorClickArea = (saved.CursorClickAreaW > 0 && saved.CursorClickAreaH > 0)
                 ? new ClickArea(saved.CursorClickAreaX, saved.CursorClickAreaY, saved.CursorClickAreaW, saved.CursorClickAreaH)
                 : null;
+            CursorClickUseFixed = saved.CursorClickUseFixed;
+            CursorClickFixedPoint = saved.CursorClickFixedPointSet
+                ? new ClickPoint(saved.CursorClickFixedX, saved.CursorClickFixedY)
+                : null;
             CursorClickLoops = saved.CursorClickLoops.ToString();
             CursorClickUseLoops = saved.CursorClickUseLoops;
             CursorClickInterval = saved.CursorClickIntervalMs.ToString();
@@ -664,6 +672,7 @@ namespace TrueReplayer
                     case "actions:insertWaitPixelColor": HandleInsertWaitPixelColor(payload); break;
                     case "waitimage:configureSearchRegion": _ = HandleConfigureSearchRegionAsync(payload); break;
                     case "clicker:configureArea": _ = HandleConfigureClickAreaAsync(payload); break;
+                    case "clicker:configurePoint": _ = HandleConfigureClickPointAsync(payload); break;
                     case "waitimage:cropReference": HandleCropReference(payload); break;
                     case "image:testMatch": _ = HandleTestMatchAsync(payload); break;
                     case "mouse:pickPosition": _ = HandleMousePickPositionAsync(payload); break;
@@ -1288,8 +1297,12 @@ namespace TrueReplayer
             int loops = CursorClickUseLoops && int.TryParse(CursorClickLoops, out var lc) && lc >= 0 ? lc : 1;
             int interval = CursorClickUseInterval && int.TryParse(CursorClickInterval, out var li) ? li : 0;
             ClickArea? area = CursorClickUseArea ? CursorClickArea : null;
+            // Area takes precedence over Fixed if both are somehow on (UI enforces mutex, but
+            // be defensive). FixedPoint may be null while UseFixed is on = lock-on-start.
+            bool useFixed = CursorClickUseFixed && !CursorClickUseArea;
+            ClickPoint? fixedPoint = useFixed ? CursorClickFixedPoint : null;
             return new ClickerRunConfig(delay, CursorClickUseJitter, jitterPercent, loops, interval,
-                CursorClickButton, holdMs, positionJitter, area);
+                CursorClickButton, holdMs, positionJitter, area, useFixed, fixedPoint);
         }
 
         public void PushSettingsLoaded()
@@ -1326,6 +1339,10 @@ namespace TrueReplayer
                     cursorClickUseArea = CursorClickUseArea,
                     cursorClickArea = CursorClickArea is { } a
                         ? (object)new { x = a.X, y = a.Y, w = a.W, h = a.H }
+                        : null,
+                    cursorClickUseFixed = CursorClickUseFixed,
+                    cursorClickFixedPoint = CursorClickFixedPoint is { } fp
+                        ? (object)new { x = fp.X, y = fp.Y }
                         : null,
                     cursorClickLoops = CursorClickLoops,
                     cursorClickUseLoops = CursorClickUseLoops,
@@ -1596,6 +1613,10 @@ namespace TrueReplayer
                     cursorClickUseArea = CursorClickUseArea,
                     cursorClickArea = CursorClickArea is { } a
                         ? (object)new { x = a.X, y = a.Y, w = a.W, h = a.H }
+                        : null,
+                    cursorClickUseFixed = CursorClickUseFixed,
+                    cursorClickFixedPoint = CursorClickFixedPoint is { } fp
+                        ? (object)new { x = fp.X, y = fp.Y }
                         : null,
                     cursorClickLoops = CursorClickLoops,
                     cursorClickUseLoops = CursorClickUseLoops,
@@ -3950,7 +3971,8 @@ namespace TrueReplayer
         // selection (or null if cancelled / screenshot failed). The bitmap is disposed
         // here so neither caller leaks a multi-MB GDI handle.
         private async Task<RegionSelectionResult?> RunRegionPickerAsync(
-            System.Drawing.Rectangle? initialRect, string hintWhenSet, string hintWhenEmpty, string logPrefix)
+            System.Drawing.Rectangle? initialRect, string hintWhenSet, string hintWhenEmpty, string logPrefix,
+            bool pointPick = false)
         {
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
@@ -3975,8 +3997,10 @@ namespace TrueReplayer
                 var thread = new Thread(() =>
                 {
                     System.Windows.Forms.Application.EnableVisualStyles();
+                    // pointPick: a single click returns a zero-size region at the click point
+                    // (ScreenX/ScreenY) — no rect drag. regionOnly stays true (no cropped image).
                     using var overlay = new ScreenOverlayForm(
-                        screenshot, regionOnly: true, hintText: hint, initialRect: initialRect);
+                        screenshot, regionOnly: true, pointPick: pointPick, hintText: hint, initialRect: initialRect);
                     overlay.ShowDialog();
                     selection = overlay.GetSelectionAsync().Result;
                 });
@@ -4084,10 +4108,12 @@ namespace TrueReplayer
                 return;
             }
 
-            // Persist + auto-enable useArea + disable Position jitter (mutual exclusion).
+            // Persist + auto-enable useArea + disable the other two "where" modes (Position
+            // jitter AND Fixed) — the three are mutually exclusive, same as the Fixed picker does.
             CursorClickArea = new ClickArea(selection.ScreenX, selection.ScreenY, selection.Width, selection.Height);
             CursorClickUseArea = true;
             CursorClickUsePositionJitter = false;
+            CursorClickUseFixed = false;
             SaveGlobalSettings();
             PushSettingsLoaded();
 
@@ -4099,6 +4125,42 @@ namespace TrueReplayer
                 y = selection.ScreenY,
                 w = selection.Width,
                 h = selection.Height
+            });
+        }
+
+        // Lets the user pick the single Fixed click point via a one-click screen overlay
+        // (mirrors HandleConfigureClickAreaAsync). On success: store the point, auto-enable
+        // Fixed and disable Area + Position jitter (the three "where" modes are exclusive).
+        private async Task HandleConfigureClickPointAsync(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
+
+            var selection = await RunRegionPickerAsync(
+                null,
+                hintWhenSet: "Click to set the fixed click point  •  ESC to cancel",
+                hintWhenEmpty: "Click to set the fixed click point  •  ESC to cancel",
+                logPrefix: "Clicker",
+                pointPick: true);
+
+            if (selection == null)
+            {
+                SendMessage("clicker:pointSet", new { requestId, cancelled = true });
+                return;
+            }
+
+            CursorClickFixedPoint = new ClickPoint(selection.ScreenX, selection.ScreenY);
+            CursorClickUseFixed = true;
+            CursorClickUseArea = false;
+            CursorClickUsePositionJitter = false;
+            SaveGlobalSettings();
+            PushSettingsLoaded();
+
+            SendMessage("clicker:pointSet", new
+            {
+                requestId,
+                cancelled = false,
+                x = selection.ScreenX,
+                y = selection.ScreenY
             });
         }
 
@@ -6819,6 +6881,10 @@ namespace TrueReplayer
                 CursorClickAreaY = CursorClickArea?.Y ?? 0,
                 CursorClickAreaW = CursorClickArea?.W ?? 0,
                 CursorClickAreaH = CursorClickArea?.H ?? 0,
+                CursorClickUseFixed = CursorClickUseFixed,
+                CursorClickFixedPointSet = CursorClickFixedPoint is not null,
+                CursorClickFixedX = CursorClickFixedPoint?.X ?? 0,
+                CursorClickFixedY = CursorClickFixedPoint?.Y ?? 0,
                 CursorClickLoops = int.TryParse(CursorClickLoops, out var ccl) ? ccl : 0,
                 CursorClickUseLoops = CursorClickUseLoops,
                 CursorClickIntervalMs = int.TryParse(CursorClickInterval, out var cci) ? cci : 0,
@@ -7050,6 +7116,24 @@ namespace TrueReplayer
                         CursorClickArea = new ClickArea(caXEl.GetInt32(), caYEl.GetInt32(), caWEl.GetInt32(), caHEl.GetInt32());
                     }
                     // Else: ignore malformed payload — leave CursorClickArea unchanged.
+                    break;
+                case "cursorClickUseFixed":
+                    CursorClickUseFixed = valueElement.GetBoolean();
+                    break;
+                case "cursorClickFixedPoint":
+                    // Null → clear the picked point (revert to lock-on-start). Object → { x, y }.
+                    // Defensive TryGet like cursorClickArea so a partial payload is ignored, not
+                    // thrown through the outer catch into an inconsistent state.
+                    if (valueElement.ValueKind == JsonValueKind.Null)
+                    {
+                        CursorClickFixedPoint = null;
+                    }
+                    else if (valueElement.ValueKind == JsonValueKind.Object
+                        && valueElement.TryGetProperty("x", out var fpXEl) && fpXEl.ValueKind == JsonValueKind.Number
+                        && valueElement.TryGetProperty("y", out var fpYEl) && fpYEl.ValueKind == JsonValueKind.Number)
+                    {
+                        CursorClickFixedPoint = new ClickPoint(fpXEl.GetInt32(), fpYEl.GetInt32());
+                    }
                     break;
                 case "cursorClickLoops":
                     CursorClickLoops = valueElement.GetString() ?? "0";

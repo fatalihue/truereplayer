@@ -41,10 +41,15 @@ export function ClickerDashboard() {
     ? Math.max(0, Math.ceil((pauseState.timeoutMs - (Date.now() - pauseState.startedAt)) / 1000))
     : 0;
 
-  // Compact recall — only enabled bits. Area takes precedence over Position (mutex enforced upstream).
+  // Compact recall — only enabled bits. The three "where" modes are mutually exclusive
+  // (enforced upstream); surface them in the engine's precedence order Area > Fixed > Position.
   const configBits: string[] = [settings.cursorClickButton];
   if (settings.cursorClickUseArea && settings.cursorClickArea) {
     configBits.push(`Area ${settings.cursorClickArea.w}×${settings.cursorClickArea.h}`);
+  } else if (settings.cursorClickUseFixed) {
+    configBits.push(settings.cursorClickFixedPoint
+      ? `Fixed ${settings.cursorClickFixedPoint.x},${settings.cursorClickFixedPoint.y}`
+      : 'Fixed at start');
   } else if (settings.cursorClickUsePositionJitter && parseInt(settings.cursorClickPositionJitter, 10) > 0) {
     configBits.push(`±${settings.cursorClickPositionJitter} px`);
   }
