@@ -127,6 +127,28 @@ namespace TrueReplayer.Services
             return Convert.ToBase64String(File.ReadAllBytes(fullPath));
         }
 
+        // PNG 8-byte signature. Imported reference images must be real PNGs within sane size
+        // bounds — rejects an empty/oversized blob or a non-image payload smuggled in a hostile
+        // .trprofile before it ever lands on disk.
+        private static readonly byte[] PngSignature = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+        private static bool IsValidPng(byte[] bytes)
+        {
+            // Upper bound covers a full-screen / multi-monitor PNG (the 50 MB base64 envelope cap
+            // decodes to ~37 MB); reject only genuinely absurd/oversized blobs.
+            if (bytes.Length < 8 || bytes.Length > 40 * 1024 * 1024) return false;
+            for (int i = 0; i < PngSignature.Length; i++)
+                if (bytes[i] != PngSignature[i]) return false;
+            return true;
+        }
+
+        /// <summary>
+        /// True when a reference image already exists on disk for the profile. Used by import to
+        /// avoid falsely flagging a WaitImage / If-ImageFound row as broken when an Overwrite
+        /// re-import omits an image the receiver already has.
+        /// </summary>
+        public static bool ReferenceImageExists(string profileName, string untrustedName)
+            => TryResolveImageFile(profileName, untrustedName, out var fullPath) && File.Exists(fullPath);
+
         /// <summary>
         /// Saves a base64-encoded image to the profile directory (for import).
         /// </summary>
@@ -140,7 +162,12 @@ namespace TrueReplayer.Services
             // base64Data is untrusted import data: a malformed string throws FormatException
             // out of Convert.FromBase64String. Swallow it (returning null) so a single bad
             // payload can't crash the caller.
-            try { File.WriteAllBytes(fullPath, Convert.FromBase64String(base64Data)); }
+            try
+            {
+                var bytes = Convert.FromBase64String(base64Data);
+                if (!IsValidPng(bytes)) { try { DiagnosticLog.Info("[Images] Rejected image: not a valid PNG or out of size bounds."); } catch { } return null; }
+                File.WriteAllBytes(fullPath, bytes);
+            }
             catch (Exception ex)
             {
                 try { DiagnosticLog.Info($"[Images] Skipped image with invalid base64 data: {ex.Message}"); } catch { }
@@ -170,7 +197,13 @@ namespace TrueReplayer.Services
             // ConfirmImportAsync's loop. Swallow a malformed payload (log + skip this one
             // image) so one bad entry doesn't abort the rest of the import — but report it
             // via the return value so the import can surface a warning.
-            try { File.WriteAllBytes(fullPath, Convert.FromBase64String(base64Data)); return true; }
+            try
+            {
+                var bytes = Convert.FromBase64String(base64Data);
+                if (!IsValidPng(bytes)) { try { DiagnosticLog.Info($"[Images] Rejected '{filename}': not a valid PNG or out of size bounds."); } catch { } return false; }
+                File.WriteAllBytes(fullPath, bytes);
+                return true;
+            }
             catch (Exception ex)
             {
                 try { DiagnosticLog.Info($"[Images] Skipped '{filename}' with invalid base64 data: {ex.Message}"); } catch { }

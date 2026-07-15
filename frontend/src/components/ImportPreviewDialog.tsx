@@ -213,11 +213,11 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
 
         {/* Profile list */}
         <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1.5">
-          {preview.profiles.map(p => {
+          {preview.profiles.map((p, i) => {
             const isChecked = !!selected[p.name];
             return (
               <div
-                key={p.name}
+                key={i}
                 className={`flex items-start gap-3 px-3 py-2.5 rounded border ${
                   p.compatible
                     ? 'border-border-subtle bg-bg-card hover:bg-bg-surface'

@@ -4445,18 +4445,11 @@ namespace TrueReplayer
             }
         }
 
-        // Guards against a malicious/buggy WebView payload smuggling path separators or
-        // traversal into a profile name that later feeds Path.Combine / File.Move. The
-        // persisted name must be a bare file name (no directory components, no invalid chars).
-        private static bool IsSafeProfileName(string name)
-        {
-            if (string.IsNullOrWhiteSpace(name)) return false;
-            if (name == "." || name == "..") return false;
-            string baseName = name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ? name[..^5] : name;
-            if (string.IsNullOrWhiteSpace(baseName)) return false;
-            if (baseName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return false;
-            return true;
-        }
+        // Delegates to the shared validator (single owner for this security/data-loss check —
+        // was duplicated here + in ProfileController). Guards against a malicious/buggy WebView
+        // payload smuggling path separators/traversal, a trailing dot/space, or a reserved device
+        // name into a profile name that later feeds Path.Combine / File.Move.
+        private static bool IsSafeProfileName(string name) => Services.ProfileNameValidator.IsSafe(name);
 
         private async void HandleProfileCreate(JsonElement payload)
         {
@@ -6243,13 +6236,35 @@ namespace TrueReplayer
                 .ToList();
 
             if (names.Count == 0) return;
+            if (replayService.IsReplaying || recordingService.IsRecording) { SendMessage("alert:show", new { message = "Finish the current recording/replay before exporting." }); return; }
+
+            // Export reads each profile from disk (ExportProfilesAsync → LoadProfileByNameAsync), so
+            // unsaved grid edits held only in the in-memory `actions` collection would be silently
+            // omitted from the .trprofile. When the ACTIVE profile is among the selected names and is
+            // dirty, prompt Save/Discard/Cancel first (Save refreshes the disk copy, Discard exports
+            // the on-disk version knowingly, Cancel aborts).
+            if (HasUnsavedChanges
+                && CurrentProfileName != "No Profile"
+                && names.Any(n => string.Equals(n, CurrentProfileName, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (!await CheckUnsavedChangesAsync()) return;
+            }
 
             try
             {
                 bool includeOrganization = payload.TryGetProperty("includeOrganization", out var orgProp) && orgProp.GetBoolean();
-                bool success = await profileController.ExportProfilesAsync(names, includeOrganization);
-                if (success)
-                    SendMessage("alert:show", new { message = $"Exported {names.Count} profile(s) successfully." });
+                var (exported, missingImages) = await profileController.ExportProfilesAsync(names, includeOrganization);
+                if (exported > 0)
+                {
+                    var msg = exported == names.Count
+                        ? $"Exported {exported} profile(s) successfully."
+                        : $"Exported {exported} of {names.Count} profile(s); {names.Count - exported} could not be loaded.";
+                    if (missingImages > 0) msg += $" {missingImages} reference image(s) were missing and not included.";
+                    SendMessage("alert:show", new { message = msg });
+                }
+                else if (exported == 0)
+                    SendMessage("alert:show", new { message = "Export failed: none of the selected profiles could be loaded." });
+                // exported < 0 => user cancelled the Save dialog: stay silent.
             }
             catch (Exception ex)
             {
@@ -6264,6 +6279,10 @@ namespace TrueReplayer
         // preview starts (slot is overwritten).
         private ProfileExportEnvelope? _pendingImportEnvelope;
         private string? _pendingImportFileName;
+        // Reentrancy guard: the import file picker is non-modal (ShowFileDialogAsync spawns a
+        // detached STA thread and calls ShowDialog() with no owner), so a double-click could open
+        // two pickers and race the single _pendingImportEnvelope slot. Only one import flow at a time.
+        private bool _importPickerOpen;
 
         /// <summary>
         /// Two-step import: opens the file picker, parses the envelope, and ships a
@@ -6274,6 +6293,9 @@ namespace TrueReplayer
         /// </summary>
         private async void HandleProfileImport()
         {
+            if (_importPickerOpen) return;   // a second click while the picker is open is a no-op
+            if (replayService.IsReplaying || recordingService.IsRecording) { SendMessage("alert:show", new { message = "Finish the current recording/replay before importing." }); return; }
+            _importPickerOpen = true;
             try
             {
                 var (envelope, filePath) = await profileController.PrepareImportPreviewAsync();
@@ -6292,6 +6314,10 @@ namespace TrueReplayer
                 SendMessage("alert:show", new { message = $"Import failed: {ex.Message}" });
                 _pendingImportEnvelope = null;
                 _pendingImportFileName = null;
+            }
+            finally
+            {
+                _importPickerOpen = false;
             }
         }
 
@@ -6360,6 +6386,13 @@ namespace TrueReplayer
             {
                 // Stale confirm — most likely the bridge was reloaded between preview and confirm.
                 SendMessage("alert:show", new { message = "Import session expired — please try again." });
+                return;
+            }
+            if (replayService.IsReplaying || recordingService.IsRecording)
+            {
+                SendMessage("alert:show", new { message = "Finish the current recording/replay before importing." });
+                _pendingImportEnvelope = null;
+                _pendingImportFileName = null;
                 return;
             }
 

@@ -282,6 +282,7 @@ namespace TrueReplayer.Models
         public bool BringToFocus { get; set; } = false;
         public TriggerMode TriggerMode { get; set; } = TriggerMode.OnPress;
         public string BatchDelay { get; set; } = "Delay (ms)";
+        public bool IsDisabled { get; set; }
         public ObservableCollection<ActionItem> Actions { get; set; } = new();
         /// <summary>
         /// Embedded WaitImage reference images: filename → base64 PNG data.

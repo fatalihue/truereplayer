@@ -369,6 +369,7 @@ namespace TrueReplayer.Models
         }
 
         private bool _isInsertionPoint;
+        [System.Text.Json.Serialization.JsonIgnore]
         public bool IsInsertionPoint
         {
             get => _isInsertionPoint;
@@ -381,6 +382,7 @@ namespace TrueReplayer.Models
         }
 
         private bool _isVisuallyDeselected;
+        [System.Text.Json.Serialization.JsonIgnore]
         public bool IsVisuallyDeselected
         {
             get => _isVisuallyDeselected;
@@ -392,6 +394,7 @@ namespace TrueReplayer.Models
             }
         }
 
+        [System.Text.Json.Serialization.JsonIgnore]
         public bool ShouldHighlight => IsInsertionPoint && !IsVisuallyDeselected;
 
         private static readonly Dictionary<string, string> DisplayKeyMap = new(StringComparer.OrdinalIgnoreCase)
@@ -446,6 +449,7 @@ namespace TrueReplayer.Models
         // regular WaitPixelColor row would after the column is enabled. ImageFound
         // conditions still render blank (the IF row doesn't have a single XY — the
         // matched-rect is dynamic per probe).
+        [System.Text.Json.Serialization.JsonIgnore]
         public string DisplayX
         {
             get
@@ -457,6 +461,7 @@ namespace TrueReplayer.Models
             }
         }
 
+        [System.Text.Json.Serialization.JsonIgnore]
         public string DisplayY
         {
             get
@@ -468,6 +473,7 @@ namespace TrueReplayer.Models
             }
         }
 
+        [System.Text.Json.Serialization.JsonIgnore]
         public string DisplayKey
         {
             get

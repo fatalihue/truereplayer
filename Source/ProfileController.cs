@@ -1037,9 +1037,13 @@ namespace TrueReplayer.Controllers
 
         #region Profile Export/Import
 
-        public async Task<bool> ExportProfilesAsync(List<string> profileNames, bool includeOrganization = false)
+        public async Task<(int exported, int missingImages)> ExportProfilesAsync(List<string> profileNames, bool includeOrganization = false)
         {
             var envelope = new ProfileExportEnvelope();
+            // Distinct (profile, imagePath) refs whose PNG was gone on disk at export time, so the
+            // export toast can warn the sender that some rows will arrive broken. Keyed profile+path
+            // to mirror the per-profile-per-path dedup the `images` dict does below.
+            var missingImagePaths = new HashSet<string>();
 
             foreach (var name in profileNames)
             {
@@ -1062,6 +1066,12 @@ namespace TrueReplayer.Controllers
                         {
                             images ??= new Dictionary<string, string>();
                             images[action.ImagePath] = base64;
+                        }
+                        else
+                        {
+                            // PNG missing/unresolvable on disk → this row will export broken.
+                            // Record it (deduped) so the export toast can warn the sender.
+                            missingImagePaths.Add(name + "\0" + action.ImagePath);
                         }
                     }
                 }
@@ -1087,6 +1097,7 @@ namespace TrueReplayer.Controllers
                     BringToFocus = profile.BringToFocus,
                     TriggerMode = profile.TriggerMode,
                     BatchDelay = profile.BatchDelay,
+                    IsDisabled = profile.IsDisabled,
                     Actions = profile.Actions,
                     Images = images,
                     Data = profile.Data,
@@ -1102,7 +1113,7 @@ namespace TrueReplayer.Controllers
                 });
             }
 
-            if (envelope.Profiles.Count == 0) return false;
+            if (envelope.Profiles.Count == 0) return (0, 0);   // none of the requested names loaded — distinct from cancel
 
             if (includeOrganization)
             {
@@ -1143,7 +1154,7 @@ namespace TrueReplayer.Controllers
                 DefaultExt = "trprofile"
             });
 
-            if (fileName == null) return false;
+            if (fileName == null) return (-1, 0);   // user cancelled the Save dialog
 
             var options = new JsonSerializerOptions
             {
@@ -1153,8 +1164,9 @@ namespace TrueReplayer.Controllers
             };
 
             var json = JsonSerializer.Serialize(envelope, options);
-            await File.WriteAllTextAsync(fileName, json);
-            return true;
+            // Atomic temp+move so a mid-write crash can't truncate an existing export (item-d).
+            await Services.FileHelper.WriteAllTextAtomicAsync(fileName, json);
+            return (envelope.Profiles.Count, missingImagePaths.Count);
         }
 
         /// <summary>
@@ -1178,8 +1190,11 @@ namespace TrueReplayer.Controllers
 
             try
             {
-                var json = await File.ReadAllTextAsync(fileName);
-                var envelope = ParseImportEnvelope(json);
+                // Reject an oversized/hostile .trprofile before reading it into memory (OOM guard).
+                var info = new FileInfo(fileName);
+                if (info.Length > 50L * 1024 * 1024) { System.Diagnostics.Debug.WriteLine("[ProfileController] Import file exceeds 50 MB — refused."); return (null, null); }
+                // Read + migrate + deserialize off the UI thread — MigrateProfileJson + JsonSerializer.Deserialize are synchronous CPU work that would otherwise block WinUI.
+                var envelope = await Task.Run(() => ParseImportEnvelope(File.ReadAllText(fileName)));
                 return envelope == null ? (null, null) : (envelope, fileName);
             }
             catch (Exception ex)
@@ -1204,6 +1219,7 @@ namespace TrueReplayer.Controllers
                 var options = new JsonSerializerOptions
                 {
                     PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    PropertyNameCaseInsensitive = true,   // tolerate a hand-edited/foreign .trprofile with PascalCase or mixed keys
                     TypeInfoResolver = new DefaultJsonTypeInfoResolver()
                 };
                 var envelope = JsonSerializer.Deserialize<ProfileExportEnvelope>(json, options);
@@ -1273,6 +1289,12 @@ namespace TrueReplayer.Controllers
 
             foreach (var entry in toImport)
             {
+                // Per-entry isolation (minimal-diff wrap): a single throwing entry (bad
+                // SaveProfileAsync, malformed data) is logged, counted as skipped, and the batch
+                // continues — instead of unwinding out of the whole import and losing the entries
+                // already written. Body indentation left as-is to keep the diff reviewable.
+                try
+                {
                 // Hard compatibility gate — refuse to write a profile the running app can't run.
                 // Frontend already filters but a stale preview or hand-crafted message could slip
                 // through. Counted as skipped so the user sees the number.
@@ -1351,6 +1373,7 @@ namespace TrueReplayer.Controllers
                     BringToFocus = entry.BringToFocus,
                     TriggerMode = entry.TriggerMode,
                     BatchDelay = entry.BatchDelay ?? "Delay (ms)",
+                    IsDisabled = entry.IsDisabled,
                     // Round-trip sharing metadata. Pre-metadata .trprofile files leave these null
                     // (System.Text.Json default-inits when the property is missing in the JSON),
                     // which is exactly what we want — the Info tab will render "Unknown" / empty.
@@ -1376,22 +1399,40 @@ namespace TrueReplayer.Controllers
                     continue;
                 }
 
-                // Claim this name for the batch BEFORE writing so subsequent entries see it even
-                // though the write below is what makes it visible to File.Exists.
+                await SettingsManager.SaveProfileAsync(targetPath, profile);
+                // Claim this name for the batch only AFTER a successful write, so a throwing save
+                // (caught per-entry below) doesn't leave the name claimed and needlessly bump a
+                // later same-named entry to "name (2)".
                 allocatedNames.Add(finalName);
 
-                await SettingsManager.SaveProfileAsync(targetPath, profile);
-
-                // Restore embedded WaitImage reference images. Count any that fail to restore
-                // (rejected name / malformed base64) so the bridge can warn the user — a
-                // silently-missing PNG turns WaitImage / If-ImageFound into a no-op.
+                // Restore embedded WaitImage / If-ImageFound reference images, tracking which keys
+                // actually landed on disk. A silently-missing PNG turns WaitImage / If-ImageFound
+                // into a replay-halting no-op for the receiver, so we then count every image-
+                // referencing row whose PNG never got written — covering BOTH the present-but-
+                // unwritable case AND the missing-in-envelope case (dropped at export, BUG-3).
+                var restoredKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (entry.Images != null && entry.Images.Count > 0)
                 {
                     foreach (var kvp in entry.Images)
                     {
-                        if (!ImageStorageService.SaveFromBase64(kvp.Value, finalName, kvp.Key))
-                            imageFailures++;
+                        if (ImageStorageService.SaveFromBase64(kvp.Value, finalName, kvp.Key))
+                            restoredKeys.Add(kvp.Key);
                     }
+                }
+                // Same refsImage predicate as the export collector so both sides agree on which
+                // rows need a PNG. Counts per dead row (two rows sharing a missing path count 2).
+                foreach (var imgAction in profile.Actions)
+                {
+                    if (string.IsNullOrEmpty(imgAction.ImagePath)) continue;
+                    bool refsImage = imgAction.ActionType == "WaitImage"
+                        || (imgAction.ActionType == "If" && string.Equals(imgAction.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
+                    // Count only genuinely-absent PNGs: not restored from this envelope AND not
+                    // already present on disk (an Overwrite re-import may legitimately omit images
+                    // the receiver already has — those rows still resolve at replay).
+                    if (refsImage
+                        && !restoredKeys.Contains(imgAction.ImagePath)
+                        && !ImageStorageService.ReferenceImageExists(finalName, imgAction.ImagePath))
+                        imageFailures++;
                 }
 
                 imported++;
@@ -1401,6 +1442,13 @@ namespace TrueReplayer.Controllers
                 // write, so Skipped/incompatible/unsafe entries are never added — exactly the gate the
                 // merge needs (no dangling refs, never touches the pre-existing same-named profile).
                 importedRenames[entry.Name] = finalName;
+                }
+                catch (Exception ex)
+                {
+                    try { DiagnosticLog.Info($"[Import] Skipped '{entry.Name}': {ex.Message}"); } catch { }
+                    skipped++;
+                    continue;
+                }
             }
 
             if (imported > 0)
@@ -1417,19 +1465,11 @@ namespace TrueReplayer.Controllers
             return (imported, skipped, hasOrganization, imageFailures, importedRenames.Values.ToList());
         }
 
-        // Guards against a malicious/buggy .trprofile envelope smuggling path separators or
-        // traversal into a profile name that later feeds Path.Combine. The persisted name must be
-        // a bare file name (no directory components, no invalid chars). Mirrors
-        // WebViewBridge.IsSafeProfileName (kept local — different class, no shared owner for it).
-        private static bool IsSafeProfileName(string name)
-        {
-            if (string.IsNullOrWhiteSpace(name)) return false;
-            if (name == "." || name == "..") return false;
-            string baseName = name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ? name[..^5] : name;
-            if (string.IsNullOrWhiteSpace(baseName)) return false;
-            if (baseName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return false;
-            return true;
-        }
+        // Delegates to the shared validator (single owner for this security/data-loss check —
+        // was duplicated here + in WebViewBridge). Guards against a malicious/buggy .trprofile
+        // envelope smuggling path separators/traversal, a trailing dot/space, or a reserved
+        // device name into a profile name that later feeds Path.Combine.
+        private static bool IsSafeProfileName(string name) => Services.ProfileNameValidator.IsSafe(name);
 
         private async Task MergeImportedOrganizationAsync(
             ProfileExportOrganization org,
@@ -1446,19 +1486,19 @@ namespace TrueReplayer.Controllers
             // RefreshProfileListAsync(true) ran in the caller, so the remapped names exist on disk.
 
             // Merge pinned: add new pinned items that aren't already pinned, remapped to final names.
-            foreach (var name in org.Pinned)
+            foreach (var name in org.Pinned ?? Enumerable.Empty<string>())  // null-guard: explicit JSON "pinned":null overrides the =new() initializer
             {
                 if (importedRenames.TryGetValue(name, out var finalName) && !_profileOrder.Pinned.Contains(finalName))
                     _profileOrder.Pinned.Add(finalName);
             }
 
             // Merge folders: add new folders, merge items into existing folders
-            foreach (var importedFolder in org.Folders)
+            foreach (var importedFolder in org.Folders ?? Enumerable.Empty<ProfileFolder>())
             {
                 // Copy into a fresh list (don't alias the deserialized, untrusted collection into
                 // the long-lived _profileOrder) and remap each item through importedRenames — keeping
                 // only items this import wrote, under their final ("name (N)") name.
-                var folderItems = importedFolder.Items
+                var folderItems = (importedFolder.Items ?? new List<string>())  // Items can be null via explicit JSON null
                     .Where(importedRenames.ContainsKey)
                     .Select(n => importedRenames[n])
                     .ToList();

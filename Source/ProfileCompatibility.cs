@@ -58,6 +58,14 @@ namespace TrueReplayer.Services
                 string.Equals(a.ActionType, "EndIf", StringComparison.OrdinalIgnoreCase))),
                 new Version(2, 3, 0), "Conditional logic (If/Else/EndIf)"),
 
+            // IF poll-timeout (ConditionTimeout > 0) shipped 2.6.9. A 2.3.0-2.6.8 build
+            // understands IF but ignores this field → does an instant single probe instead of
+            // polling up to N ms → can read the condition false before it becomes true and take
+            // the Else branch (silent divergence). The field is JsonIgnore-when-default so it is
+            // only present when > 0; predicate is exact.
+            (p => p.Actions.Any(a => a.ConditionTimeout > 0),
+                new Version(2, 6, 9), "IF condition poll timeout"),
+
             // New If-condition families — an older build hits the unknown-ConditionType
             // else-branch in InstantProbe → treats the probe as false → always takes the
             // Else branch, a silent semantic divergence. Pin to the build that introduces
@@ -73,6 +81,17 @@ namespace TrueReplayer.Services
                 new Version(2, 8, 0), "If File Exists condition"),
             (p => p.Actions.Any(a => string.Equals(a.ConditionType, "TimeWindow", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 8, 0), "If Time condition"),
+
+            // The 2.6.12 If-condition families have the SAME unknown-ConditionType failure
+            // mode as the 2.8.0 block above, but were never pinned. A 2.3.0-2.6.11 build
+            // understands If/Else/EndIf yet hits InstantProbe's unknown-condition else-branch
+            // → treats the probe as false → always takes the Else branch (silent divergence).
+            (p => p.Actions.Any(a => string.Equals(a.ConditionType, "WindowOpen", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 6, 12), "If Window condition"),
+            (p => p.Actions.Any(a => string.Equals(a.ConditionType, "ClipboardMatch", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 6, 12), "If Clipboard condition"),
+            (p => p.Actions.Any(a => string.Equals(a.ConditionType, "BrowserElementState", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 6, 12), "If Browser element condition"),
 
             // Data-loop table (Model A) — older builds leave {row:column} tokens literal and
             // don't loop over the rows, a silent divergence. Pin to the introducing build
@@ -97,6 +116,13 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "HoldKey", StringComparison.OrdinalIgnoreCase) ||
                                       string.Equals(a.ActionType, "Keystroke", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 0, 0), "HoldKey/Keystroke"),
+
+            // RunProfile (profile chaining) shipped in the 2.0.0 line, same era as WaitImage /
+            // HoldKey / Keystroke which ARE pinned here — but it was missed. A pre-2.0.0 build
+            // has no "RunProfile" switch case (no default) → silently skips the sub-profile
+            // call. Pinned to 2.0.0 for consistency.
+            (p => p.Actions.Any(a => string.Equals(a.ActionType, "RunProfile", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 0, 0), "RunProfile (profile chaining)"),
 
             // Combined-mode single clicks (LeftClick/RightClick/MiddleClick — press+release in one
             // row) shipped in 2.4.0. Builds without the replay switch cases silently skip the click,
@@ -129,6 +155,14 @@ namespace TrueReplayer.Services
             // Window.
             (p => p.Actions.Any(a => string.Equals(a.VariableMode, "cycle", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 8, 0), "Set Variable cycle mode"),
+
+            // SetVariable base action ('set' mode, VariableMode null) shipped in 2.6.12.
+            // Builds < 2.6.12 have no "SetVariable" case in the replay switch (which has NO
+            // default) → silently skip the row → the variable is never written → downstream
+            // {var} tokens resolve empty. Only the CYCLE sub-mode above is otherwise pinned,
+            // leaving the base action unpinned.
+            (p => p.Actions.Any(a => string.Equals(a.ActionType, "SetVariable", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 6, 12), "Set Variable"),
 
             // Restore Size split from Restore Position in 2.0.5; older builds only honour Position.
             (p => p.RestoreSize,

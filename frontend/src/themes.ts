@@ -1772,6 +1772,7 @@ export function validateExportedTheme(data: unknown): data is ExportedTheme {
     'recordingColor', 'replayColor', 'clickerColor', 'actionMouseColor', 'actionKeyColor',
     'actionScrollColor', 'actionSendTextColor', 'actionWaitImageColor', 'actionPixelColorColor',
     'actionBrowserColor', 'actionRunProfileColor', 'actionPauseColor', 'actionIfColor',
+    'actionSetVariableColor',
   ];
   for (const f of UI_COLOR_FIELDS) {
     if (ui[f] !== undefined && !isSafeCssColor(ui[f])) return false;
