@@ -152,12 +152,12 @@ namespace TrueReplayer.Services
             // Height on the action) shipped AFTER 2.8.0. A 2.8.0 build has the ActivateWindow
             // replay case, so the row itself runs — but it drops the unknown placement properties
             // and activates the window WITHOUT moving/resizing it, leaving any following absolute
-            // clicks to land against a wrong-placed window (silent divergence). Pinned to the
-            // CURRENT build (2.8.0) so an own-build export → import round-trips cleanly; BUMP to
-            // the release version in lockstep at release (see [[workflow-release-procedure]]).
+            // clicks to land against a wrong-placed window (silent divergence). Introduced in
+            // 2.8.1; bumped from the 2.8.0 dev placeholder at release, in lockstep with the
+            // version files (see [[workflow-release-procedure]]).
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "ActivateWindow", StringComparison.OrdinalIgnoreCase)
                 && (a.RestorePosition || a.RestoreSize)),
-                new Version(2, 8, 0), "Activate Window placement"),
+                new Version(2, 8, 1), "Activate Window placement"),
 
             // SetVariable Cycle mode — older builds drop the unknown VariableMode property
             // and run the row in SET mode, storing the ENTIRE multi-line list instead of
@@ -172,11 +172,11 @@ namespace TrueReplayer.Services
             // lost. That is a mild divergence (never literal markup), but formatting can be
             // load-bearing (a bolded warning, a numbered procedure), so gate it like the other
             // property-level pins. Predicate is on the FIELD, not the ActionType, so existing
-            // plain SendText profiles keep their old floor. Pinned to the CURRENT build (2.8.0)
-            // so an own-build export → import round-trips; BUMP to the release version in
-            // lockstep at release (with the ActivateWindow placement pin).
+            // plain SendText profiles keep their old floor. Introduced in 2.8.1; bumped from the
+            // 2.8.0 dev placeholder at release, in lockstep with the ActivateWindow placement pin
+            // and the version files.
             (p => p.Actions.Any(a => !string.IsNullOrEmpty(a.KeyHtml) || !string.IsNullOrEmpty(a.KeyMarkdown)),
-                new Version(2, 8, 0), "Rich text (SendText)"),
+                new Version(2, 8, 1), "Rich text (SendText)"),
 
             // SetVariable base action ('set' mode, VariableMode null) shipped in 2.6.12.
             // Builds < 2.6.12 have no "SetVariable" case in the replay switch (which has NO
