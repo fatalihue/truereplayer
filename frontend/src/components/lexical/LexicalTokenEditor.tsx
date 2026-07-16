@@ -13,12 +13,14 @@ import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext
 import {
   $getRoot,
   $getSelection,
+  $setSelection,
   $insertNodes,
   $isRangeSelection,
   $isTextNode,
   $isElementNode,
   $createTextNode,
   $createParagraphNode,
+  type BaseSelection,
   COMMAND_PRIORITY_LOW,
   FORMAT_TEXT_COMMAND,
   PASTE_COMMAND,
@@ -36,7 +38,7 @@ import {
   INSERT_UNORDERED_LIST_COMMAND,
   REMOVE_LIST_COMMAND,
 } from '@lexical/list';
-import { LinkNode, AutoLinkNode, $isLinkNode, $isAutoLinkNode, TOGGLE_LINK_COMMAND } from '@lexical/link';
+import { LinkNode, AutoLinkNode, $isLinkNode, $isAutoLinkNode, $createLinkNode, $toggleLink, TOGGLE_LINK_COMMAND } from '@lexical/link';
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from '@lexical/html';
 import { $dfs } from '@lexical/utils';
 import {
@@ -489,6 +491,18 @@ function RichToolbarPlugin() {
   });
   const [linkInputOpen, setLinkInputOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
+  // The editor loses its DOM selection the moment focus moves into the URL <input>,
+  // so snapshot the RangeSelection when the input opens and restore it on apply —
+  // otherwise TOGGLE_LINK_COMMAND has nothing to wrap and inserts nothing.
+  const savedSelection = useRef<BaseSelection | null>(null);
+
+  const openLinkInput = () => {
+    editor.getEditorState().read(() => {
+      const sel = $getSelection();
+      savedSelection.current = sel ? sel.clone() : null;
+    });
+    setLinkInputOpen(true);
+  };
 
   useEffect(() => {
     return editor.registerUpdateListener(({ editorState }) => {
@@ -516,7 +530,24 @@ function RichToolbarPlugin() {
     const url = linkUrl.trim();
     if (!url || url.includes('{')) return;   // tokens in URLs are unsupported
     const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url) ? url : `https://${url}`;
-    editor.dispatchCommand(TOGGLE_LINK_COMMAND, withScheme);
+    editor.update(() => {
+      // Restore the selection the editor had before focus went to the URL input.
+      const saved = savedSelection.current;
+      if (saved) $setSelection(saved.clone());
+      const sel = $getSelection();
+      if ($isRangeSelection(sel) && !sel.isCollapsed()) {
+        // Text is selected → wrap it in a link (the plain TOGGLE_LINK_COMMAND case).
+        $toggleLink(withScheme);
+      } else {
+        // No selection → insert a NEW link whose visible text is the URL itself, so
+        // the button always produces something (the reported "inserts nothing" bug).
+        const linkNode = $createLinkNode(withScheme);
+        linkNode.append($createTextNode(url));
+        if ($isRangeSelection(sel)) sel.insertNodes([linkNode]);
+        else $insertNodes([linkNode]);
+      }
+    });
+    savedSelection.current = null;
     setLinkInputOpen(false);
     setLinkUrl('');
     editor.focus();
@@ -574,8 +605,10 @@ function RichToolbarPlugin() {
         onClick={() => {
           if (formats.link) {
             editor.dispatchCommand(TOGGLE_LINK_COMMAND, null);   // unlink
+          } else if (linkInputOpen) {
+            setLinkInputOpen(false);
           } else {
-            setLinkInputOpen((v) => !v);
+            openLinkInput();   // snapshots the selection BEFORE the input steals focus
           }
         }}
         className={btnClass(formats.link || linkInputOpen)}
