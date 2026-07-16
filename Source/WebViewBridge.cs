@@ -879,7 +879,8 @@ namespace TrueReplayer
                 actionType = a.ActionType,
                 key = a.Key ?? "",
                 keyHtml = a.KeyHtml,
-                sendPlainOnly = a.SendPlainOnly,
+                keyMarkdown = a.KeyMarkdown,
+                sendMode = a.SendMode,
                 x = a.X,
                 y = a.Y,
                 delay = a.Delay,
@@ -2101,7 +2102,7 @@ namespace TrueReplayer
                     // payload without fresh HTML must drop the stale rich flavor, or replay would
                     // paste the OLD formatted content over the new text. Rich edits go through
                     // actions:editSendText, which supplies both flavors together.
-                    if (action.ActionType == "SendText") action.KeyHtml = null;
+                    if (action.ActionType == "SendText") { action.KeyHtml = null; action.KeyMarkdown = null; action.SendMode = null; }
                     break;
                 case "x": if (int.TryParse(value, out int x)) action.X = x; break;
                 case "y": if (int.TryParse(value, out int y)) action.Y = y; break;
@@ -2647,11 +2648,19 @@ namespace TrueReplayer
             PushUndoState();
 
             int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
-            // Optional rich flavor + force-plain toggle from the Insert Text dialog. html is the
-            // Lexical-exported fragment; null/absent = plain action (byte-identical to pre-rich).
+            // Optional rich flavors + delivery mode from the Insert Text dialog. html/markdown are
+            // Lexical-derived (null when the doc has no formatting); mode = rich|markdown|plain
+            // (null = rich = byte-identical to pre-rich when html is also null).
             string? html = payload.TryGetProperty("html", out var hEl) && hEl.ValueKind == JsonValueKind.String ? hEl.GetString() : null;
-            bool plainOnly = payload.TryGetProperty("plainOnly", out var poEl) && poEl.ValueKind == JsonValueKind.True;
-            var action = new ActionItem { ActionType = "SendText", Key = text, KeyHtml = string.IsNullOrEmpty(html) ? null : html, SendPlainOnly = plainOnly, Delay = delay };
+            string? markdown = payload.TryGetProperty("markdown", out var mdEl) && mdEl.ValueKind == JsonValueKind.String ? mdEl.GetString() : null;
+            string? mode = payload.TryGetProperty("mode", out var mEl) && mEl.ValueKind == JsonValueKind.String ? mEl.GetString() : null;
+            var action = new ActionItem
+            {
+                ActionType = "SendText", Key = text, Delay = delay,
+                KeyHtml = string.IsNullOrEmpty(html) ? null : html,
+                KeyMarkdown = string.IsNullOrEmpty(markdown) ? null : markdown,
+                SendMode = NormalizeSendMode(mode),
+            };
 
             if (payload.TryGetProperty("insertIndex", out var idxEl) && idxEl.ValueKind == JsonValueKind.Number)
             {
@@ -2682,16 +2691,25 @@ namespace TrueReplayer
             PushUndoState();
 
             actions[index].Key = text;
-            // The dialog always sends the CURRENT html alongside the text (null when the doc has
-            // no formatting) — so assigning unconditionally doubles as the invalidation: stale
-            // KeyHtml can never survive a text-only rewrite.
+            // The dialog always sends the CURRENT html + markdown alongside the text (null when the
+            // doc has no formatting) — so assigning unconditionally doubles as the invalidation:
+            // stale rich flavors can never survive a text-only rewrite.
             string? editHtml = payload.TryGetProperty("html", out var hEl) && hEl.ValueKind == JsonValueKind.String ? hEl.GetString() : null;
+            string? editMarkdown = payload.TryGetProperty("markdown", out var mdEl) && mdEl.ValueKind == JsonValueKind.String ? mdEl.GetString() : null;
             actions[index].KeyHtml = string.IsNullOrEmpty(editHtml) ? null : editHtml;
-            if (payload.TryGetProperty("plainOnly", out var poEl) && (poEl.ValueKind == JsonValueKind.True || poEl.ValueKind == JsonValueKind.False))
-                actions[index].SendPlainOnly = poEl.ValueKind == JsonValueKind.True;
+            actions[index].KeyMarkdown = string.IsNullOrEmpty(editMarkdown) ? null : editMarkdown;
+            if (payload.TryGetProperty("mode", out var mEl) && mEl.ValueKind == JsonValueKind.String)
+                actions[index].SendMode = NormalizeSendMode(mEl.GetString());
             HasUnsavedChanges = true;
             PushActionsUpdate();
         }
+
+        // Only the three known modes persist; anything else (or "rich") collapses to null so the
+        // default stays out of the JSON and older builds see no unknown value.
+        private static string? NormalizeSendMode(string? mode)
+            => string.Equals(mode, "markdown", StringComparison.OrdinalIgnoreCase) ? "markdown"
+             : string.Equals(mode, "plain", StringComparison.OrdinalIgnoreCase) ? "plain"
+             : null;
 
         // ── Profile chaining: insert / edit a RunProfile action ──
 

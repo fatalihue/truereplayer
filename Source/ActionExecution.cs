@@ -1825,7 +1825,19 @@ namespace TrueReplayer.Services
                             break;
                         case "ScrollUp": SimulateScroll(120); break;
                         case "ScrollDown": SimulateScroll(-120); break;
-                        case "SendText": await SimulateClipboardPaste(action.Key, action.SendPlainOnly ? null : action.KeyHtml, token); break;
+                        case "SendText":
+                        {
+                            // Delivery mode picks the flavor: "plain" → clean Key only; "markdown"
+                            // → the WhatsApp-style KeyMarkdown pasted as plain text (no HTML);
+                            // default/"rich" → Key + KeyHtml dual-format (target negotiates).
+                            var mode = action.SendMode;
+                            string sendText = string.Equals(mode, "markdown", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(action.KeyMarkdown)
+                                ? action.KeyMarkdown : action.Key;
+                            string? sendHtml = string.IsNullOrEmpty(mode) || string.Equals(mode, "rich", StringComparison.OrdinalIgnoreCase)
+                                ? action.KeyHtml : null;
+                            await SimulateClipboardPaste(sendText, sendHtml, token);
+                            break;
+                        }
                         case "SetVariable": await ExecuteSetVariable(action); break;
                         case "ActivateWindow": await ExecuteActivateWindow(action, token); break;
                         case "WaitImage": await ExecuteWaitImage(action, token); break;

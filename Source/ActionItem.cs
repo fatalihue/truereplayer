@@ -281,10 +281,29 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? KeyHtml { get; set; }
 
-        // "Send as plain text": keep the authored formatting in the editor but deliver only
-        // the plain flavor — the escape valve for targets that mangle pasted HTML.
-        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
-        public bool SendPlainOnly { get; set; }
+        // WhatsApp/chat-style markdown flavor of the payload (*bold* _italic_ ~strike~), derived
+        // from the same rich document. Used only when SendMode == "markdown": the paste puts
+        // this as PLAIN text (no CF_HTML) so a target that renders inline markdown but rejects
+        // HTML (WhatsApp Web, Discord-ish) formats it itself. null = no formatting to render.
+        // Invalidated together with KeyHtml on any plain Key write.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? KeyMarkdown { get; set; }
+
+        // Delivery mode for a formatted SendText: null/"rich" = HTML-where-accepted + plain
+        // fallback (default); "markdown" = paste KeyMarkdown as plain text; "plain" = paste the
+        // clean Key. Replaces the old SendPlainOnly bool (a "plain" value now); LegacySendPlainOnly
+        // below migrates profiles saved by the pre-mode build.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? SendMode { get; set; }
+
+        // Write-only migration shim: an older (unreleased) build persisted `sendPlainOnly: true`.
+        // Map it to SendMode == "plain" on load; never serialized (no getter) so it disappears on
+        // the next save. Guarded so an explicit sendMode already read from JSON wins.
+        [System.Text.Json.Serialization.JsonPropertyName("sendPlainOnly")]
+        public bool LegacySendPlainOnly
+        {
+            set { if (value && string.IsNullOrEmpty(SendMode)) SendMode = "plain"; }
+        }
 
         // ── ActivateWindow (ActionType == "ActivateWindow") ──
         // Combined find → launch-if-missing → wait → focus action. The window MATCHER
@@ -664,7 +683,8 @@ namespace TrueReplayer.Models
             ActionType = ActionType,
             Key = Key,
             KeyHtml = KeyHtml,
-            SendPlainOnly = SendPlainOnly,
+            KeyMarkdown = KeyMarkdown,
+            SendMode = SendMode,
             X = X,
             Y = Y,
             Delay = Delay,

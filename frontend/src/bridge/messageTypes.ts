@@ -11,10 +11,12 @@ export interface ActionItem {
   id?: string;
   actionType: string;
   key: string;
-  // SendText rich flavor: HTML fragment authored in the Insert Text dialog (null/absent =
-  // plain action); sendPlainOnly delivers only the plain flavor while keeping the formatting.
+  // SendText rich flavors (Insert Text dialog): keyHtml = HTML fragment, keyMarkdown =
+  // WhatsApp-style markdown; both null when the doc has no formatting. sendMode picks delivery:
+  // undefined/'rich' = HTML+plain, 'markdown' = markdown-as-plain, 'plain' = clean text.
   keyHtml?: string | null;
-  sendPlainOnly?: boolean;
+  keyMarkdown?: string | null;
+  sendMode?: 'rich' | 'markdown' | 'plain' | null;
   x: number;
   y: number;
   delay: number;
@@ -613,8 +615,8 @@ export type OutgoingMessage =
   | { type: 'profile:reset'; payload: Record<string, never> }
   | { type: 'settings:change'; payload: { key: string; value: string | boolean | number | object | null } }
   | { type: 'actions:convertMode'; payload: { direction: 'toCombined' | 'toPaired' } }
-  | { type: 'actions:addSendText'; payload: { text: string; html?: string; plainOnly?: boolean; insertIndex?: number } }
-  | { type: 'actions:editSendText'; payload: { index: number; text: string; html?: string; plainOnly?: boolean } }
+  | { type: 'actions:addSendText'; payload: { text: string; html?: string; markdown?: string; mode?: string; insertIndex?: number } }
+  | { type: 'actions:editSendText'; payload: { index: number; text: string; html?: string; markdown?: string; mode?: string } }
   | { type: 'actions:bulkUpdateDelay'; payload: { indices: number[]; delay: number } }
   | { type: 'actions:bulkUpdateCoord'; payload: { indices: number[]; axis: 'x' | 'y'; value: string } }
   | { type: 'actions:bulkUpdateComment'; payload: { indices: number[]; comment: string } }

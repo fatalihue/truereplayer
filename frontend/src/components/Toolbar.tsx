@@ -962,10 +962,10 @@ export function Toolbar(_props: ToolbarProps) {
       {showSendTextDialog && (
         <SendTextDialog
           mode="add"
-          onConfirm={(text, html, plainOnly) => {
+          onConfirm={(text, html, markdown, mode) => {
             const sel = selectionRef.current;
             const insertIndex = sel.size > 0 ? Math.min(...sel) : undefined;
-            send({ type: 'actions:addSendText', payload: { text, html: html ?? undefined, plainOnly, insertIndex } });
+            send({ type: 'actions:addSendText', payload: { text, html: html ?? undefined, markdown: markdown ?? undefined, mode, insertIndex } });
             setShowSendTextDialog(false);
           }}
           onClose={() => setShowSendTextDialog(false)}

@@ -157,6 +157,10 @@ namespace TrueReplayer.Services
 
             var options = new JsonSerializerOptions
             {
+                // The main store writes PascalCase; case-insensitive load lets the camelCase
+                // migration shims (e.g. ActionItem.sendPlainOnly → SendMode) bind, matches the
+                // import path, and tolerates a hand-edited profile with off-case keys.
+                PropertyNameCaseInsensitive = true,
                 TypeInfoResolver = new DefaultJsonTypeInfoResolver()
             };
 

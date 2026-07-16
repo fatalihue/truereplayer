@@ -21,6 +21,7 @@ import {
   $createTextNode,
   $createParagraphNode,
   type BaseSelection,
+  type ElementNode,
   COMMAND_PRIORITY_LOW,
   FORMAT_TEXT_COMMAND,
   PASTE_COMMAND,
@@ -123,6 +124,12 @@ export interface LexicalEditorHandle {
    * export as `<span data-token>{token}</span>` (resolved at send time).
    */
   getHtml: () => string | null;
+  /**
+   * Rich mode: the document as WhatsApp/chat-style markdown (*bold* _italic_
+   * ~strike~ `code`, "- "/"N. " lists), or null when unformatted. Delivered as
+   * PLAIN text so a markdown-rendering target (WhatsApp Web) formats it itself.
+   */
+  getMarkdown: () => string | null;
 }
 
 interface LexicalTokenEditorProps {
@@ -185,6 +192,79 @@ function $serializePlainForSend(): string {
         // A nested list inside an item re-introduces '\n\n' via getTextContent — collapse.
         lines.push((ordered ? `${i + 1}. ` : '- ') + item.getTextContent().replace(/\n\n/g, '\n'));
       });
+    } else {
+      lines.push(block.getTextContent());
+    }
+  }
+  return lines.join('\n');
+}
+
+// WhatsApp/chat-style markdown serializer for the "Markdown" delivery mode. WhatsApp Web
+// (and Discord-ish targets) render *bold* / _italic_ / ~strike~ / `code` typed as PLAIN text
+// and auto-link bare URLs, so this produces those markers from the rich document. Markers
+// are one config object → a Discord/standard variant later is a swap. Whitespace stays
+// OUTSIDE the markers ("*hi* " not "*hi *") so WhatsApp still recognises the run; token chips
+// pass through raw (resolved at send); a labelled link becomes "text (url)" since WhatsApp
+// can't attach a URL to arbitrary text.
+const WA_MARKS = { bold: '*', italic: '_', strikethrough: '~', code: '`' } as const;
+
+function $wrapMarkdown(node: TextNode): string {
+  const value = node.getTextContent();
+  if (value.trim() === '') return value;
+  const lead = value.match(/^\s*/)![0];
+  const trail = value.match(/\s*$/)![0];
+  let core = value.slice(lead.length, value.length - trail.length);
+  if (node.hasFormat('code')) core = WA_MARKS.code + core + WA_MARKS.code;
+  if (node.hasFormat('strikethrough')) core = WA_MARKS.strikethrough + core + WA_MARKS.strikethrough;
+  if (node.hasFormat('italic')) core = WA_MARKS.italic + core + WA_MARKS.italic;
+  if (node.hasFormat('bold')) core = WA_MARKS.bold + core + WA_MARKS.bold;
+  return lead + core + trail;
+}
+
+function $inlineMarkdown(parent: ElementNode): string {
+  let out = '';
+  for (const child of parent.getChildren()) {
+    if ($isTokenNode(child)) {
+      out += child.getTextContent();
+    } else if ($isLinkNode(child) && !$isAutoLinkNode(child)) {
+      // Deliberate (toolbar) link only. WhatsApp can't attach a URL to arbitrary text, so a
+      // labelled link becomes "text (url)". AutoLinks (bare typed URLs) fall through to plain
+      // text below — emitting the URL once — so WhatsApp doesn't double-link them.
+      const linkText = child.getTextContent();
+      const url = child.getURL();
+      out += url && linkText !== url && !linkText.includes(url) ? `${linkText} (${url})` : linkText;
+    } else if ($isTextNode(child)) {
+      out += $wrapMarkdown(child);
+    } else {
+      // Any other node (incl. an AutoLinkNode or a Tab-nested list) — collapse Lexical's
+      // double block separators so nested content doesn't inject stray blank lines.
+      out += child.getTextContent().replace(/\n\n/g, '\n');
+    }
+  }
+  return out;
+}
+
+// True when the doc carries DELIBERATE formatting (format bits, lists, or an explicit
+// toolbar link) — AutoLinkNodes are excluded so merely typing a URL never turns the action
+// rich (badge + compat pin + rich delivery). Shared by getHtml and getMarkdown; must run
+// inside an editorState.read().
+function $hasDeliberateFormatting(): boolean {
+  return $dfs().some(({ node }) =>
+    ($isTextNode(node) && node.getFormat() !== 0)
+    || $isListNode(node)
+    || ($isLinkNode(node) && !$isAutoLinkNode(node)));
+}
+
+function $serializeMarkdownForSend(): string {
+  const lines: string[] = [];
+  for (const block of $getRoot().getChildren()) {
+    if ($isListNode(block)) {
+      const ordered = block.getListType() === 'number';
+      block.getChildren().forEach((item, i) => {
+        if ($isElementNode(item)) lines.push((ordered ? `${i + 1}. ` : '- ') + $inlineMarkdown(item));
+      });
+    } else if ($isElementNode(block)) {
+      lines.push($inlineMarkdown(block));
     } else {
       lines.push(block.getTextContent());
     }
@@ -275,16 +355,18 @@ function ImperativeAPIPlugin({
       getHtml: () => {
         let html: string | null = null;
         editor.getEditorState().read(() => {
-          // AutoLinkNodes are EXCLUDED from the gate: merely typing a URL must not
-          // silently turn the action rich (badge + compat pin + CF_HTML paste) — only
-          // deliberate formatting (format bits, lists, explicit toolbar links) does.
-          const hasFormatting = $dfs().some(({ node }) =>
-            ($isTextNode(node) && node.getFormat() !== 0)
-            || $isListNode(node)
-            || ($isLinkNode(node) && !$isAutoLinkNode(node)));
-          if (hasFormatting) html = $generateHtmlFromNodes(editor, null);
+          if ($hasDeliberateFormatting()) html = $generateHtmlFromNodes(editor, null);
         });
         return html;
+      },
+      getMarkdown: () => {
+        let md: string | null = null;
+        editor.getEditorState().read(() => {
+          // Same gate as getHtml — an unformatted doc's markdown equals its plain text,
+          // so return null and let the action stay plain.
+          if ($hasDeliberateFormatting()) md = $serializeMarkdownForSend();
+        });
+        return md;
       },
     };
     return () => {

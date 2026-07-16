@@ -8,9 +8,9 @@
 
 interface SendTextPreviewProps {
   text: string;
-  /** Action carries a rich (KeyHtml) flavor — renders a tiny "rich" badge so the
-   *  grid signals which SendText rows paste formatted content. */
-  rich?: boolean;
+  /** Tiny delivery badge ("rich" / "md") shown before the text so the grid signals
+   *  which SendText rows paste formatted content. Omit for plain rows. */
+  badge?: string | null;
 }
 
 interface Segment {
@@ -39,14 +39,14 @@ function parseSegments(text: string): Segment[] {
   return segments;
 }
 
-export function SendTextPreview({ text, rich = false }: SendTextPreviewProps) {
+export function SendTextPreview({ text, badge = null }: SendTextPreviewProps) {
   if (!text) return null;
   const segments = parseSegments(text);
   return (
     <>
-      {rich && (
+      {badge && (
         <span className="inline-flex items-center px-1 py-[1px] mr-1 text-[9px] font-semibold uppercase tracking-wide rounded text-accent bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] border border-accent/30 select-none align-middle">
-          rich
+          {badge}
         </span>
       )}
       {segments.map((segment, idx) =>

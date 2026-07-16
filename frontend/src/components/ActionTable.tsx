@@ -397,7 +397,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const prevActionsLength = useRef(actions.length);
   const prevProfileRef = useRef(activeProfile);
   const wasRecording = useRef(false);
-  const [sendTextEdit, setSendTextEdit] = useState<{ index: number; text: string; html?: string | null; plainOnly?: boolean } | null>(null);
+  const [sendTextEdit, setSendTextEdit] = useState<{ index: number; text: string; html?: string | null; mode?: 'rich' | 'markdown' | 'plain' } | null>(null);
   const [runProfileEdit, setRunProfileEdit] = useState<{ index: number; profileName: string; repeatCount: number } | null>(null);
   // Editing a Keystroke OR HoldKey row reopens the unified KeystrokeCaptureDialog —
   // these two ActionTypes share the same edit surface now that Press/Hold is a mode
@@ -731,7 +731,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     const rowAction = actions[idx];
     if (!rowAction) return;
     if (rowAction.actionType === 'SendText') {
-      setSendTextEdit({ index: idx, text: rowAction.key, html: rowAction.keyHtml, plainOnly: rowAction.sendPlainOnly });
+      setSendTextEdit({ index: idx, text: rowAction.key, html: rowAction.keyHtml, mode: rowAction.sendMode ?? 'rich' });
     } else if (rowAction.actionType === 'RunProfile') {
       setRunProfileEdit({
         index: idx,
@@ -2083,7 +2083,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             what the editor shows. Other action types keep the plain
                             displayKey text — they don't have token syntax. */}
                         {action.actionType === 'SendText'
-                          ? <SendTextPreview text={action.key} rich={!!action.keyHtml && !action.sendPlainOnly} />
+                          ? <SendTextPreview text={action.key} badge={action.keyHtml && action.sendMode !== 'plain' ? (action.sendMode === 'markdown' ? 'md' : 'rich') : undefined} />
                           // Pause / HoldKey embed a "<n> ms" duration in displayKey;
                           // render it in the Delay column's format (thousands-separated
                           // number + quiet "ms" suffix). All other types stay plain.
@@ -2292,9 +2292,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
           mode="edit"
           initialText={sendTextEdit.text}
           initialHtml={sendTextEdit.html}
-          initialPlainOnly={sendTextEdit.plainOnly}
-          onConfirm={(text, html, plainOnly) => {
-            send({ type: 'actions:editSendText', payload: { index: sendTextEdit.index, text, html: html ?? undefined, plainOnly } });
+          initialMode={sendTextEdit.mode}
+          onConfirm={(text, html, markdown, mode) => {
+            send({ type: 'actions:editSendText', payload: { index: sendTextEdit.index, text, html: html ?? undefined, markdown: markdown ?? undefined, mode } });
             setSendTextEdit(null);
           }}
           onClose={() => setSendTextEdit(null)}

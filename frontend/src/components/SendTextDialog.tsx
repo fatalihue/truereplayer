@@ -28,12 +28,14 @@ interface SendTextDialogProps {
   initialText?: string;
   /** Saved rich flavor (KeyHtml) — rebuilds the formatted doc on reopen. */
   initialHtml?: string | null;
-  /** Saved "Send as plain text" toggle (SendPlainOnly). */
-  initialPlainOnly?: boolean;
-  /** html is null when the doc carries no formatting → the action stays plain. */
-  onConfirm: (text: string, html: string | null, plainOnly: boolean) => void;
+  /** Saved delivery mode (SendMode); 'rich' default. */
+  initialMode?: SendMode;
+  /** html/markdown are null when the doc carries no formatting → the action stays plain. */
+  onConfirm: (text: string, html: string | null, markdown: string | null, mode: SendMode) => void;
   onClose: () => void;
 }
+
+type SendMode = 'rich' | 'markdown' | 'plain';
 
 interface Snippet {
   id: string;
@@ -320,12 +322,12 @@ type SurfaceSession =
   | { mode: 'insert' }
   | { mode: 'edit'; token: string; commit: (next: string) => void; remove: () => void };
 
-export function SendTextDialog({ mode, initialText = '', initialHtml = null, initialPlainOnly = false, onConfirm, onClose }: SendTextDialogProps) {
+export function SendTextDialog({ mode, initialText = '', initialHtml = null, initialMode = 'rich', onConfirm, onClose }: SendTextDialogProps) {
   const tt = useTt();
   const [text, setText] = useState(initialText);
-  // "Send as plain text": formatting stays authored in the editor, but delivery
-  // skips the HTML flavor — the escape valve for targets that mangle pasted HTML.
-  const [plainOnly, setPlainOnly] = useState(initialPlainOnly);
+  // Delivery mode: Rich (HTML where accepted) · Markdown (*bold* as plain text, for
+  // WhatsApp/chat) · Plain. Formatting stays authored regardless; the mode picks the flavor.
+  const [sendMode, setSendMode] = useState<SendMode>(initialMode);
   // Rail: Insert (palette + snippets) is the default tab; Emoji is the other.
   const [railTab, setRailTab] = useState<'insert' | 'emoji'>('insert');
   const [snippets, setSnippets] = useState<Snippet[]>(loadSnippets);
@@ -473,9 +475,9 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
     // Don't trim — leading/trailing spaces are intentional ("oi " ≠ "oi"). Only
     // block submit when the field is entirely whitespace (trim used as emptiness check).
     if (!text.trim()) return;
-    // HTML exported on demand at confirm (not per keystroke); null = no formatting
+    // Flavors exported on demand at confirm (not per keystroke); null = no formatting
     // in the doc → the action persists as a plain SendText, exactly as pre-rich.
-    onConfirm(text, lexicalApiRef.current?.getHtml() ?? null, plainOnly);
+    onConfirm(text, lexicalApiRef.current?.getHtml() ?? null, lexicalApiRef.current?.getMarkdown() ?? null, sendMode);
   };
 
   // Status strip counts. Lines: 0 for an empty payload, else newline count + 1.
@@ -572,18 +574,22 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
           </>
         ) : (
           <>
-            <label
-              className="flex items-center gap-1.5 mr-auto text-[11px] text-text-tertiary cursor-pointer select-none"
-              data-tip={tt('Keeps the formatting in the editor but delivers only plain text — for targets that mangle pasted HTML.', 'Mantém a formatação no editor mas entrega só texto puro — para alvos que estragam HTML colado.')}
+            <div
+              className="mr-auto flex items-center gap-1.5"
+              data-tip={tt('Delivery: Rich pastes formatting where the target accepts it (Gmail, Crisp, Word) and plain text elsewhere. Markdown pastes *bold*/_italic_ as plain text for chat apps (WhatsApp). Plain sends the raw text.', 'Entrega: Rich cola formatação onde o alvo aceita (Gmail, Crisp, Word) e texto puro no resto. Markdown cola *negrito*/_itálico_ como texto puro para apps de chat (WhatsApp). Plain envia o texto cru.')}
             >
-              <input
-                type="checkbox"
-                checked={plainOnly}
-                onChange={(e) => setPlainOnly(e.target.checked)}
-                className="accent-[var(--color-accent-solid)]"
+              <span className="text-[10px] uppercase tracking-wide text-text-tertiary">Delivery</span>
+              <SegmentedControl<SendMode>
+                ariaLabel="Delivery mode"
+                value={sendMode}
+                onChange={setSendMode}
+                options={[
+                  { value: 'rich', label: 'Rich' },
+                  { value: 'markdown', label: 'Markdown' },
+                  { value: 'plain', label: 'Plain' },
+                ]}
               />
-              Send as plain text
-            </label>
+            </div>
             <Button variant="secondary" onClick={onClose}>Cancel</Button>
             <Button variant="primary" onClick={handleConfirm} disabled={!text.trim()}>
               {mode === 'add' ? 'Add' : 'Save'}

@@ -175,7 +175,7 @@ namespace TrueReplayer.Services
             // plain SendText profiles keep their old floor. Pinned to the CURRENT build (2.8.0)
             // so an own-build export → import round-trips; BUMP to the release version in
             // lockstep at release (with the ActivateWindow placement pin).
-            (p => p.Actions.Any(a => !string.IsNullOrEmpty(a.KeyHtml)),
+            (p => p.Actions.Any(a => !string.IsNullOrEmpty(a.KeyHtml) || !string.IsNullOrEmpty(a.KeyMarkdown)),
                 new Version(2, 8, 0), "Rich text (SendText)"),
 
             // SetVariable base action ('set' mode, VariableMode null) shipped in 2.6.12.
