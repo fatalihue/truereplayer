@@ -3326,8 +3326,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             {/* Section header — the matcher trio reads as one "which window" block. */}
             <div className="label-micro text-text-tertiary">Match Window</div>
             <Field
-              label="Process Name"
-              hint={tt('e.g. notepad.exe — ".exe" is assumed when omitted. Leave empty to match by title only.', 'ex.: notepad.exe — ".exe" é assumido se omitido. Deixe vazio para casar só pelo título.')}
+              label="Process"
+              hint={tt('".exe" assumed when omitted. Empty = match by title only.', '".exe" assumido se omitido. Vazio = casar só pelo título.')}
             >
               <input
                 type="text"
@@ -3338,9 +3338,24 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
               />
             </Field>
+            {/* Title + its match mode on one row — the Contains/Regex toggle is a right-
+                aligned label adornment (it modifies THIS title), saving a whole Field row. */}
             <Field
-              label="Window Title"
-              hint={tt('Case-insensitive. UWP/Store apps: match by title — their process is ApplicationFrameHost.exe.', 'Sem diferenciar maiúsculas. Apps UWP/Store: case pelo título — o processo deles é ApplicationFrameHost.exe.')}
+              label="Title"
+              labelAdornment={
+                <div className="ml-auto">
+                  <SegmentedControl<'contains' | 'regex'>
+                    ariaLabel="Title match mode"
+                    value={windowTitleMatchMode}
+                    onChange={setWindowTitleMatchMode}
+                    options={[
+                      { value: 'contains', label: 'Contains', tip: tt('Title must contain this text (case-insensitive)', 'Título deve conter este texto (sem diferenciar maiúsculas)') },
+                      { value: 'regex', label: 'Regex', tip: tt('Title is a .NET regular expression (case-insensitive)', 'Título é uma expressão regular .NET (sem diferenciar maiúsculas)') },
+                    ]}
+                  />
+                </div>
+              }
+              hint={tt('Case-insensitive. UWP apps: match by title (process is ApplicationFrameHost.exe).', 'Sem diferenciar maiúsculas. Apps UWP: case pelo título (processo é ApplicationFrameHost.exe).')}
             >
               <input
                 type="text"
@@ -3351,23 +3366,11 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
               />
             </Field>
-            <Field label="Title Match">
-              <SegmentedControl<'contains' | 'regex'>
-                ariaLabel="Title match mode"
-                grow
-                value={windowTitleMatchMode}
-                onChange={setWindowTitleMatchMode}
-                options={[
-                  { value: 'contains', label: 'Contains', tip: tt('Title must contain this text (case-insensitive)', 'Título deve conter este texto (sem diferenciar maiúsculas)') },
-                  { value: 'regex', label: 'Regex', tip: tt('Title is a .NET regular expression (case-insensitive)', 'Título é uma expressão regular .NET (sem diferenciar maiúsculas)') },
-                ]}
-              />
-            </Field>
             {/* Section header — the optional launch pair. */}
             <div className="label-micro text-text-tertiary">Launch</div>
             <Field
-              label="Launch if not found"
-              hint={tt('Program path, URL, document or shortcut — opened only when no window matches. Empty = just wait & focus. Leave the window fields above empty too for a plain run.', 'Caminho de programa, URL, documento ou atalho — aberto só quando nenhuma janela casa. Vazio = apenas esperar e focar. Deixe os campos de janela acima vazios também para um run puro.')}
+              label="Path"
+              hint={tt('Program, URL, document or shortcut — opened only when no window matches. Empty = just wait & focus.', 'Programa, URL, documento ou atalho — aberto só quando nenhuma janela casa. Vazio = só esperar e focar.')}
             >
               <div className="flex items-center gap-1.5">
                 <input
@@ -3390,7 +3393,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 </button>
               </div>
             </Field>
-            <Field label="Arguments">
+            <Field label="Args">
               <input
                 type="text"
                 value={launchArgs}
@@ -3401,14 +3404,17 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               />
             </Field>
 
-            {/* Section header — optional placement of the window once it's activated. */}
-            <div className="label-micro text-text-tertiary">Placement</div>
-            <Field
-              label="Restore"
-              hint={tt('Move and/or resize the window after activating it. Purely positional — clicks still resolve against the profile target; for clicks relative to THIS window, use a sub-profile + Run Profile.', 'Move e/ou redimensiona a janela depois de ativá-la. Só posicional — os cliques continuam resolvendo contra o target do perfil; para cliques relativos a ESTA janela, use um sub-perfil + Run Profile.')}
-            >
-              {/* Independent toggle chips, NOT a segmented track — Position and Size are not an
-                  exclusive choice (same recipe as the If-Time day pills). */}
+            {/* Placement — section label + the two independent toggle chips on ONE compact
+                row (Position and Size aren't an exclusive choice, so plain chips, not a
+                track). Full positional caveat lives on the label tooltip + the bottom card. */}
+            <div className="flex items-center justify-between">
+              <span
+                className="label-micro text-text-tertiary cursor-help"
+                data-tip={tt('Move and/or resize the window after activating it. Positional only — clicks still resolve against the profile target; for clicks relative to THIS window, use a sub-profile + Run Profile.', 'Move e/ou redimensiona a janela depois de ativá-la. Só posicional — cliques ainda resolvem contra o target do perfil; para cliques relativos a ESTA janela, use um sub-perfil + Run Profile.')}
+                data-tip-pos="left"
+              >
+                Placement
+              </span>
               <div className="flex gap-1">
                 <button
                   type="button"
@@ -3433,7 +3439,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   Size
                 </button>
               </div>
-            </Field>
+            </div>
             {restorePosition && (
               <div className="flex gap-1.5">
                 <Field label="X" className="flex-1 min-w-0">

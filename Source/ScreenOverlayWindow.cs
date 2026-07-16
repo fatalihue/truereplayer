@@ -311,18 +311,20 @@ namespace TrueReplayer.Services
         // Magnifier zoom — PowerToys-style mouse-wheel zoom. Each level is (source-pixel count
         // across the disc, on-screen px per pixel); counts are ODD so the centre pixel sits exactly
         // under the cursor. Scrolling up steps toward fewer/larger pixels (more magnification).
-        // Index 2 (11 × 13 = 143 px disc) is the original fixed magnifier. The disc size varies a
+        // Index 2 (11 × 13 = 143 px disc) was the original fixed magnifier. The disc size varies a
         // little per level; ComputeCursorLabelRect / DrawMagnifier read these as LIVE values so the
         // layout + flip-on-edge logic always tracks the current zoom.
         private static readonly (int count, int size)[] ZoomLevels =
         {
             (7, 24),   // 168 px disc — most zoomed in
             (9, 18),   // 162 px
-            (11, 13),  // 143 px — default
+            (11, 13),  // 143 px — original fixed magnifier
             (15, 11),  // 165 px
-            (21, 9),   // 189 px — most zoomed out
+            (21, 9),   // 189 px — most zoomed out (start)
         };
-        private int _zoomIndex = 2;
+        // Start at the widest view (most zoomed out) per user request — shows the most
+        // surrounding context; scroll up to zoom in on a single pixel.
+        private int _zoomIndex = ZoomLevels.Length - 1;
         private int MagPixelCount => ZoomLevels[_zoomIndex].count;
         private int MagPixelSize => ZoomLevels[_zoomIndex].size;
         private int MagDiameter => MagPixelCount * MagPixelSize;
@@ -332,6 +334,15 @@ namespace TrueReplayer.Services
         private const int MagLabelHeight = 56;
         private const int MagOffset = 20;
         private int MagTotalHeight => MagDiameter + MagLabelGap + MagLabelHeight;
+
+        // Fake drop shadow — GDI+ has no blur, so several low-alpha rings stacked at
+        // growing radii accumulate into a soft falloff. Kept subtle so the disc/chip
+        // read as lifted, not boxed. MagShadowMargin pads the invalidate rects so the
+        // shadow clears cleanly as the cursor moves (no smear trails).
+        private const int MagShadowSpread = 6;
+        private const int MagShadowAlpha = 15;
+        private const int MagShadowDy = 2;
+        private const int MagShadowMargin = MagShadowSpread + MagShadowDy;
 
         // Approximates the magnifier's bounding box for OnMouseMove's invalidate. The
         // actual paint rect is captured back into _lastCursorLabelRect inside DrawMagnifier
@@ -345,7 +356,9 @@ namespace TrueReplayer.Services
             if (ly + MagTotalHeight > ClientRectangle.Height) ly = _cursorPoint.Y - MagOffset - MagTotalHeight;
             if (lx < 0) lx = 0;
             if (ly < 0) ly = 0;
-            return new Rectangle(lx, ly, MagDiameter, MagTotalHeight);
+            // Pad by the drop-shadow spread so the move-invalidate clears the shadow too.
+            return Rectangle.Inflate(new Rectangle(lx, ly, MagDiameter, MagTotalHeight),
+                                     MagShadowMargin, MagShadowMargin);
         }
 
         // ShareX-style zoom magnifier. Renders an 11×11 patch of the in-memory
@@ -377,6 +390,21 @@ namespace TrueReplayer.Services
 
             var circleRect = new Rectangle(magX, magY, MagDiameter, MagDiameter);
 
+            // Anti-alias every vector pass (shadow, disc, crosshair, centre cell, chip) and
+            // ClearType the chip text — the jagged 1.5 px border / 2 px crosshair were the
+            // main thing that read as "unfinished". The blit + pixel grid flip back to None
+            // below so zoomed pixels stay hard-edged. DrawMagnifier is the last thing
+            // OnPaint draws, so these modes don't need restoring.
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            // Soft drop shadow — lifts the disc off busy backgrounds so it reads as a
+            // deliberate instrument rather than a screenshot artifact.
+            using (var sh = new SolidBrush(Color.FromArgb(MagShadowAlpha, 0, 0, 0)))
+                for (int s = MagShadowSpread; s >= 1; s--)
+                    g.FillEllipse(sh, circleRect.X - s, circleRect.Y - s + MagShadowDy,
+                                  circleRect.Width + 2 * s, circleRect.Height + 2 * s);
+
             // Dark backdrop so out-of-bounds source pixels (near screen edges) read
             // as "void" instead of garbage. Sub-pixel circle border softens the
             // clipped edge.
@@ -389,6 +417,10 @@ namespace TrueReplayer.Services
             {
                 clip.AddEllipse(circleRect);
                 g.SetClip(clip);
+
+                // Blit + pixel grid must stay hard-edged — AA here would shimmer the grid
+                // lines and soften the crisp pixel squares.
+                g.SmoothingMode = SmoothingMode.None;
 
                 int halfGrid = MagPixelCount / 2;
                 var srcRect = new Rectangle(
@@ -422,6 +454,9 @@ namespace TrueReplayer.Services
                     g.DrawLine(gridPen, magX, gy, magX + MagDiameter, gy);
                 }
 
+                // Back to anti-aliased for the crosshair + centre cell (smooth vectors).
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+
                 // Crosshair — accent-coloured lines through the centre, broken
                 // around the centre pixel so the target colour stays visible.
                 using var crossPen = new Pen(Color.FromArgb(200, 96, 205, 255), 2f);
@@ -437,8 +472,13 @@ namespace TrueReplayer.Services
                 // centre cell so the user can see which pixel the click will sample,
                 // even when the underlying colour is white-ish.
                 int halfPx = (MagPixelCount / 2) * MagPixelSize;
-                using var centerPen = new Pen(Color.White, 1.5f);
-                g.DrawRectangle(centerPen, magX + halfPx, magY + halfPx, MagPixelSize, MagPixelSize);
+                // Dual stroke — a dark 3 px underlay then white 1.5 px on top — so the
+                // target cell stays legible on both light and dark pixels (a lone white
+                // outline used to vanish on white-ish colours).
+                using (var centerDark = new Pen(Color.FromArgb(170, 0, 0, 0), 3f))
+                    g.DrawRectangle(centerDark, magX + halfPx, magY + halfPx, MagPixelSize, MagPixelSize);
+                using (var centerLight = new Pen(Color.White, 1.5f))
+                    g.DrawRectangle(centerLight, magX + halfPx, magY + halfPx, MagPixelSize, MagPixelSize);
 
                 g.ResetClip();
             }
@@ -469,18 +509,33 @@ namespace TrueReplayer.Services
                 ? $"RGB  {sampled.Value.R}, {sampled.Value.G}, {sampled.Value.B}"
                 : "";
 
-            using var coordFont = new Font("Segoe UI", 10f, FontStyle.Regular);
+            // Monospace coords so the chip width stops jumping per-digit as the cursor moves.
+            using var coordFont = new Font("Consolas", 10f, FontStyle.Regular);
             using var hexFont = new Font("Consolas", 10.5f, FontStyle.Bold);
             using var rgbFont = new Font("Consolas", 9f, FontStyle.Regular);
             var coordSize = g.MeasureString(coordText, coordFont);
             var hexSize = showHex ? g.MeasureString(hexText, hexFont) : SizeF.Empty;
             var rgbSize = (showHex && rgbText.Length > 0) ? g.MeasureString(rgbText, rgbFont) : SizeF.Empty;
 
-            // Chip sized per content — full (3-line) height when picking colour, compact otherwise.
-            float chipW = Math.Max(coordSize.Width, Math.Max(hexSize.Width, rgbSize.Width)) + 16;
+            // Colour swatch to the left of the HEX line — the signature "real eyedropper"
+            // element (ShareX/PowerToys both show it). pointPick only, so gated on showHex.
+            const float swatch = 12f, swGap = 6f;
+            bool showSwatch = showHex && sampled.HasValue;
+            float hexGroupW = showSwatch ? swatch + swGap + hexSize.Width : hexSize.Width;
+
+            // Chip sized per content — full (3-line) height when picking colour, compact
+            // otherwise. The HEX row width now includes the swatch group.
+            float chipW = Math.Max(coordSize.Width, Math.Max(hexGroupW, rgbSize.Width)) + 16;
             float chipH = showHex ? MagLabelHeight : (coordSize.Height + 6);
             float chipX = magX + (MagDiameter - chipW) / 2;
             float chipY = magY + MagDiameter + MagLabelGap;
+
+            // Match the disc — a soft shadow lifts the chip too (radius grows with the ring).
+            using (var chipShadow = new SolidBrush(Color.FromArgb(MagShadowAlpha, 0, 0, 0)))
+                for (int s = MagShadowSpread; s >= 1; s--)
+                    g.FillRoundedRectangle(chipShadow, chipX - s, chipY - s + MagShadowDy,
+                                           chipW + 2 * s, chipH + 2 * s, 5 + s);
+
             using (var chipBg = new SolidBrush(Color.FromArgb(225, 0, 0, 0)))
                 g.FillRoundedRectangle(chipBg, chipX, chipY, chipW, chipH, 5);
             using (var chipFg = new SolidBrush(Color.FromArgb(255, 96, 205, 255)))
@@ -490,8 +545,18 @@ namespace TrueReplayer.Services
                 g.DrawString(coordText, coordFont, chipFg, coordX, chipY + 3);
                 if (showHex)
                 {
-                    float hexX = chipX + (chipW - hexSize.Width) / 2;
                     float hexY = chipY + 3 + coordSize.Height + 1;
+                    float groupX = chipX + (chipW - hexGroupW) / 2;
+                    float hexX = groupX;
+                    if (showSwatch)
+                    {
+                        float swY = hexY + (hexSize.Height - swatch) / 2f;
+                        using (var swBrush = new SolidBrush(Color.FromArgb(255, sampled!.Value.R, sampled.Value.G, sampled.Value.B)))
+                            g.FillRectangle(swBrush, groupX, swY, swatch, swatch);
+                        using (var swBorder = new Pen(Color.FromArgb(170, 255, 255, 255), 1f))
+                            g.DrawRectangle(swBorder, groupX, swY, swatch, swatch);
+                        hexX = groupX + swatch + swGap;
+                    }
                     g.DrawString(hexText, hexFont, chipFg, hexX, hexY);
                     if (rgbText.Length > 0)
                     {
@@ -501,9 +566,11 @@ namespace TrueReplayer.Services
                 }
             }
 
-            // Tracked rect = whole magnifier + label. Used by OnMouseMove to
+            // Tracked rect = whole magnifier + label, padded by the drop-shadow spread so
+            // the next move invalidates the shadow pixels too. Used by OnMouseMove to
             // invalidate the previous frame; without it the disc would smear.
-            _lastCursorLabelRect = new Rectangle(magX, magY, MagDiameter, MagTotalHeight);
+            _lastCursorLabelRect = Rectangle.Inflate(
+                new Rectangle(magX, magY, MagDiameter, MagTotalHeight), MagShadowMargin, MagShadowMargin);
         }
 
         private void OnMouseUp(object? sender, MouseEventArgs e)

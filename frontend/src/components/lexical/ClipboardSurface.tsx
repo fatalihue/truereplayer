@@ -205,18 +205,23 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset }: Clip
           </Step>
 
           <Step n={5} title="Case" active={state.case !== 'none'}>
-            <SegmentedControl<CaseTransform>
-              ariaLabel="Case"
-              options={[
-                { value: 'none', label: 'None' },
-                { value: 'upper', label: 'UPPER' },
-                { value: 'lower', label: 'lower' },
-                { value: 'sentence', label: 'Sentence' },
-                { value: 'title', label: 'Title' },
-              ]}
-              value={state.case}
-              onChange={(v) => set({ case: v })}
-            />
+            {/* Wrap like Steps 2-4 so the block-level SegmentedControl track hugs its
+                buttons instead of stretching to the full config-column width (which left
+                a wide empty pill after the last "Title" segment). */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <SegmentedControl<CaseTransform>
+                ariaLabel="Case"
+                options={[
+                  { value: 'none', label: 'None' },
+                  { value: 'upper', label: 'UPPER' },
+                  { value: 'lower', label: 'lower' },
+                  { value: 'sentence', label: 'Sentence' },
+                  { value: 'title', label: 'Title' },
+                ]}
+                value={state.case}
+                onChange={(v) => set({ case: v })}
+              />
+            </div>
           </Step>
         </div>
 
