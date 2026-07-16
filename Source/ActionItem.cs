@@ -295,6 +295,35 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? ActivateOnTimeout { get; set; }
 
+        // Optional window PLACEMENT, applied to the matched window right after a successful
+        // activation: move to WindowX/WindowY (RestorePosition) and/or resize to
+        // WindowWidth/WindowHeight (RestoreSize; ignored when either is <= 0).
+        //
+        // Purely positional — this does NOT change the replay's coordinate context. Clicks keep
+        // resolving against the profile/folder target; for "clicks relative to THIS window" use a
+        // sub-profile + RunProfile, which already scopes the whole window context per call.
+        //
+        // Defaults are off/0, so JsonIgnore-WhenWritingDefault keeps all six out of every row
+        // that doesn't place a window. WindowX/Y == 0 is a legitimate position and round-trips
+        // correctly (not written → reads back 0).
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool RestorePosition { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool RestoreSize { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public int WindowX { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public int WindowY { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public int WindowWidth { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public int WindowHeight { get; set; }
+
         // ── BrowserAssert (ActionType == "BrowserAssert") ──
         // Verify a page element is in the expected state (reuses the BrowserWaitElement
         // probe: Key=selector, WaitMode appears|disappears|enabled|text-match, BrowserText
@@ -674,6 +703,12 @@ namespace TrueReplayer.Models
             LaunchPath = LaunchPath,
             LaunchArgs = LaunchArgs,
             ActivateOnTimeout = ActivateOnTimeout,
+            RestorePosition = RestorePosition,
+            RestoreSize = RestoreSize,
+            WindowX = WindowX,
+            WindowY = WindowY,
+            WindowWidth = WindowWidth,
+            WindowHeight = WindowHeight,
             AssertOnFail = AssertOnFail,
             IsSkipped = IsSkipped,
             IsFocusClick = IsFocusClick,

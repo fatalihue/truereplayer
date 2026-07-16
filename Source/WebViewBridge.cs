@@ -705,6 +705,7 @@ namespace TrueReplayer
                     case "profile:detectWindow": HandleProfileDetectWindow(); break;
                     case "profile:testWindowMatch": HandleTestWindowMatch(payload); break;
                     case "window:testProbe": HandleWindowTestProbe(payload); break;
+                    case "window:captureGeometry": HandleWindowCaptureGeometry(payload); break;
                     case "dialog:pickFile": HandleDialogPickFile(payload); break;
                     case "process:list": HandleProcessList(); break;
                     case "profile:openFolder": HandleProfileOpenFolder(payload); break;
@@ -982,6 +983,12 @@ namespace TrueReplayer
                 launchPath = a.LaunchPath,
                 launchArgs = a.LaunchArgs,
                 activateOnTimeout = a.ActivateOnTimeout,
+                restorePosition = a.RestorePosition,
+                restoreSize = a.RestoreSize,
+                windowX = a.WindowX,
+                windowY = a.WindowY,
+                windowWidth = a.WindowWidth,
+                windowHeight = a.WindowHeight,
                 assertOnFail = a.AssertOnFail
             }).ToArray();
         }
@@ -2258,6 +2265,26 @@ namespace TrueReplayer
                     // Same convention as waitImageOnTimeout — only "Continue" is persisted;
                     // the default "Halt" stays null on disk so saved profiles read clean.
                     action.ActivateOnTimeout = value == "Continue" ? "Continue" : null;
+                    break;
+                // ActivateWindow placement — move/resize the activated window. Position may be
+                // negative (a secondary monitor left of the primary), so only size is clamped.
+                case "restorePosition":
+                    action.RestorePosition = value == "true";
+                    break;
+                case "restoreSize":
+                    action.RestoreSize = value == "true";
+                    break;
+                case "windowX":
+                    if (int.TryParse(value, out int winX)) action.WindowX = winX;
+                    break;
+                case "windowY":
+                    if (int.TryParse(value, out int winY)) action.WindowY = winY;
+                    break;
+                case "windowWidth":
+                    if (int.TryParse(value, out int winW)) action.WindowWidth = Math.Max(0, winW);
+                    break;
+                case "windowHeight":
+                    if (int.TryParse(value, out int winH)) action.WindowHeight = Math.Max(0, winH);
                     break;
                 case "assertOnFail":
                     // BrowserAssert — only "Continue" persisted; default "Halt" stays null.
@@ -5843,6 +5870,50 @@ namespace TrueReplayer
             try { path = await profileController.PickExecutableFileAsync(); }
             catch (Exception ex) { DiagnosticLog.Info($"[dialog:pickFile] {ex.Message}"); path = null; }
             SendMessage("dialog:pickFileResult", new { requestId, path });
+        }
+
+        // Reads the CURRENT on-screen rect of the window matching the action's matcher, so the
+        // ActivateWindow editor can seed its placement fields from a window the user already
+        // positioned by hand. Mirrors HandleWindowTestProbe's matcher resolution; unlike the
+        // profile-level geometry capture this writes nothing — the frontend persists the values
+        // through the normal actions:edit path.
+        private void HandleWindowCaptureGeometry(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var rq) ? rq.GetString() ?? "" : "";
+            string processName = payload.TryGetProperty("processName", out var pn) ? pn.GetString() ?? "" : "";
+            string windowTitle = payload.TryGetProperty("windowTitle", out var wt) ? wt.GetString() ?? "" : "";
+            string titleMatchMode = payload.TryGetProperty("titleMatchMode", out var tm) ? tm.GetString() ?? "contains" : "contains";
+
+            void Fail(string error) => SendMessage("window:captureGeometryResult",
+                new { requestId, found = false, error, x = 0, y = 0, width = 0, height = 0 });
+
+            if (string.IsNullOrWhiteSpace(processName) && string.IsNullOrWhiteSpace(windowTitle))
+            {
+                Fail("Fill Process Name or Window Title first.");
+                return;
+            }
+
+            var (target, regex) = TrueReplayer.Services.ActionReplayer.BuildWindowTarget(processName, windowTitle, titleMatchMode);
+            if (string.Equals(target.TitleMatchMode, "regex", StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(windowTitle) && regex == null)
+            {
+                Fail("Invalid regex pattern.");
+                return;
+            }
+
+            IntPtr hwnd = TrueReplayer.Services.ActionReplayer.FindWindowExcludingSelf(target, regex);
+            if (hwnd == IntPtr.Zero) { Fail("No window matches — open and position it first."); return; }
+            if (!NativeMethods.GetWindowRect(hwnd, out var rect)) { Fail("Could not read the window rect."); return; }
+
+            SendMessage("window:captureGeometryResult", new
+            {
+                requestId,
+                found = true,
+                x = rect.Left,
+                y = rect.Top,
+                width = rect.Right - rect.Left,
+                height = rect.Bottom - rect.Top,
+            });
         }
 
         private void HandleWindowTestProbe(JsonElement payload)

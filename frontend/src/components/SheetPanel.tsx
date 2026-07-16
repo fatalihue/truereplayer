@@ -215,6 +215,17 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const [launchPath, setLaunchPath] = useState('');
   const [launchArgs, setLaunchArgs] = useState('');
   const [activateOnTimeout, setActivateOnTimeout] = useState<'Halt' | 'Continue'>('Halt');
+  // ActivateWindow placement: move/resize the activated window to a saved rect. Purely
+  // positional — coordinate context is untouched (sub-profile + RunProfile covers that).
+  // String-backed like the other numeric fields so an input can be cleared while typing.
+  const [restorePosition, setRestorePosition] = useState(false);
+  const [restoreSize, setRestoreSize] = useState(false);
+  const [windowX, setWindowX] = useState('0');
+  const [windowY, setWindowY] = useState('0');
+  const [windowWidth, setWindowWidth] = useState('0');
+  const [windowHeight, setWindowHeight] = useState('0');
+  const [captureGeoRequestId, setCaptureGeoRequestId] = useState<string | null>(null);
+  const [captureGeoError, setCaptureGeoError] = useState<string | null>(null);
   // BrowserAssert failure policy (selector/waitMode/browserText/timeout reuse the shared
   // browser state above).
   const [assertOnFail, setAssertOnFail] = useState<'Halt' | 'Continue'>('Halt');
@@ -293,6 +304,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const windowProbeRequestIdRef = useRef(windowProbeRequestId);
   // Correlates a dialog:pickFile round-trip (ActivateWindow Launch "Browse…") to its result.
   const browseLaunchReqRef = useRef<string | null>(null);
+  // Correlates a window:captureGeometry round-trip (ActivateWindow "Capture") to its result.
+  const captureGeoReqRef = useRef<string | null>(null);
   // Configure-region is fire-and-forget (no UI state), so a plain ref tracks the in-flight
   // request and guards waitimage:searchRegionSet against a stale reply landing on a different
   // action after the user switched (the panel doesn't remount on action change).
@@ -419,6 +432,21 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
           browseLaunchReqRef.current = null;
           if (r.path) setLaunchPath(r.path);
         }
+      } else if (msg.type === 'window:captureGeometryResult') {
+        const r = msg.payload as { requestId: string; found: boolean; x: number; y: number; width: number; height: number; error?: string };
+        if (captureGeoReqRef.current && r.requestId === captureGeoReqRef.current) {
+          captureGeoReqRef.current = null;
+          setCaptureGeoRequestId(null);
+          if (r.found) {
+            setWindowX(String(r.x));
+            setWindowY(String(r.y));
+            setWindowWidth(String(r.width));
+            setWindowHeight(String(r.height));
+            setCaptureGeoError(null);
+          } else {
+            setCaptureGeoError(r.error || 'Could not read the window.');
+          }
+        }
       }
     });
   }, [subscribe, clearTestTimeout, clearTestMatchTimeout]);
@@ -536,6 +564,14 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       setLaunchPath(action.launchPath ?? '');
       setLaunchArgs(action.launchArgs ?? '');
       setActivateOnTimeout(action.activateOnTimeout === 'Continue' ? 'Continue' : 'Halt');
+      setRestorePosition(!!action.restorePosition);
+      setRestoreSize(!!action.restoreSize);
+      setWindowX(String(action.windowX ?? 0));
+      setWindowY(String(action.windowY ?? 0));
+      setWindowWidth(String(action.windowWidth ?? 0));
+      setWindowHeight(String(action.windowHeight ?? 0));
+      setCaptureGeoError(null);
+      setCaptureGeoRequestId(null);
       setAssertOnFail(action.assertOnFail === 'Continue' ? 'Continue' : 'Halt');
       setWindowProbeResult(null);
       setWindowProbeRequestId(null);
@@ -921,6 +957,24 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       if (persistedPolicy !== currentPolicy) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'activateOnTimeout', value: persistedPolicy } });
       }
+      // Placement. Any normalization here MUST be mirrored in hasUnsavedChanges (parity).
+      if (restorePosition !== !!action.restorePosition) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'restorePosition', value: String(restorePosition) } });
+      }
+      if (restoreSize !== !!action.restoreSize) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'restoreSize', value: String(restoreSize) } });
+      }
+      const geoEdits: Array<[string, number, number]> = [
+        ['windowX', parseInt(windowX, 10) || 0, action.windowX ?? 0],
+        ['windowY', parseInt(windowY, 10) || 0, action.windowY ?? 0],
+        ['windowWidth', Math.max(0, parseInt(windowWidth, 10) || 0), action.windowWidth ?? 0],
+        ['windowHeight', Math.max(0, parseInt(windowHeight, 10) || 0), action.windowHeight ?? 0],
+      ];
+      for (const [geoField, next, current] of geoEdits) {
+        if (next !== current) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: geoField, value: String(next) } });
+        }
+      }
       const newAwTimeout = Math.max(1000, Math.round(parseFloat(timeout) || 10000));
       if (newAwTimeout !== (action.timeout || 5000)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(newAwTimeout) } });
@@ -950,7 +1004,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // from actionType + action.conditionType which are already in the array, so the
     // callback rebinds whenever those change. Listing the derived flags would also
     // be a forward-reference error (they're declared further down the component body).
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, assertOnFail, alternatives, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, assertOnFail, alternatives, send, onClose]);
 
   // Are there edits the Save-Changes button would persist? MIRRORS handleSave's diffs
   // exactly (same guards/normalisation), returning true on the first field that differs —
@@ -1141,6 +1195,14 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       const persistedPolicy = activateOnTimeout === 'Continue' ? 'Continue' : '';
       const currentPolicy = action.activateOnTimeout === 'Continue' ? 'Continue' : '';
       if (persistedPolicy !== currentPolicy) return true;
+      // Placement — mirrors handleSave's diffs + normalization byte-for-byte (PARITY OBLIGATION:
+      // a field in handleSave but not here means a stray Esc silently drops that edit).
+      if (restorePosition !== !!action.restorePosition) return true;
+      if (restoreSize !== !!action.restoreSize) return true;
+      if ((parseInt(windowX, 10) || 0) !== (action.windowX ?? 0)) return true;
+      if ((parseInt(windowY, 10) || 0) !== (action.windowY ?? 0)) return true;
+      if (Math.max(0, parseInt(windowWidth, 10) || 0) !== (action.windowWidth ?? 0)) return true;
+      if (Math.max(0, parseInt(windowHeight, 10) || 0) !== (action.windowHeight ?? 0)) return true;
       const newAwTimeout = Math.max(1000, Math.round(parseFloat(timeout) || 10000));
       if (newAwTimeout !== (action.timeout || 5000)) return true;
     }
@@ -1154,7 +1216,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     }
 
     return false;
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, assertOnFail, alternatives]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, assertOnFail, alternatives]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
@@ -1429,6 +1491,19 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     browseLaunchReqRef.current = requestId;
     send({ type: 'dialog:pickFile', payload: { requestId, kind: 'executable' } });
   }, [send]);
+
+  // ActivateWindow placement "Capture" — reads the matched window's CURRENT rect and seeds the
+  // X/Y/W/H fields, so the user positions the window by hand once and saves it.
+  const handleCaptureGeometry = useCallback(() => {
+    const requestId = Math.random().toString(36).slice(2, 10);
+    captureGeoReqRef.current = requestId;
+    setCaptureGeoRequestId(requestId);
+    setCaptureGeoError(null);
+    send({
+      type: 'window:captureGeometry',
+      payload: { requestId, processName: windowProcessName, windowTitle, titleMatchMode: windowTitleMatchMode },
+    });
+  }, [windowProcessName, windowTitle, windowTitleMatchMode, send]);
 
   // WaitImage: capture screen now and report best confidence + matched rect against the reference
   // image. Doesn't run the replay — pure calibration helper.
@@ -3305,6 +3380,101 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid disabled:opacity-50"
               />
             </Field>
+
+            {/* Section header — optional placement of the window once it's activated. */}
+            <div className="label-micro text-text-tertiary">Placement</div>
+            <Field
+              label="Restore"
+              hint={tt('Move and/or resize the window after activating it. Purely positional — clicks still resolve against the profile target; for clicks relative to THIS window, use a sub-profile + Run Profile.', 'Move e/ou redimensiona a janela depois de ativá-la. Só posicional — os cliques continuam resolvendo contra o target do perfil; para cliques relativos a ESTA janela, use um sub-perfil + Run Profile.')}
+            >
+              {/* Independent toggle chips, NOT a segmented track — Position and Size are not an
+                  exclusive choice (same recipe as the If-Time day pills). */}
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => setRestorePosition(!restorePosition)}
+                  className={`h-6 px-2.5 rounded text-[10px] font-medium border transition-colors ${
+                    restorePosition
+                      ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
+                      : 'text-text-tertiary border-border-subtle bg-bg-card hover:text-text-secondary'
+                  }`}
+                >
+                  Position
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRestoreSize(!restoreSize)}
+                  className={`h-6 px-2.5 rounded text-[10px] font-medium border transition-colors ${
+                    restoreSize
+                      ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
+                      : 'text-text-tertiary border-border-subtle bg-bg-card hover:text-text-secondary'
+                  }`}
+                >
+                  Size
+                </button>
+              </div>
+            </Field>
+            {restorePosition && (
+              <div className="flex gap-1.5">
+                <Field label="X" className="flex-1 min-w-0">
+                  <NumberInput
+                    value={parseInt(windowX, 10) || 0}
+                    onChange={(n) => setWindowX(String(n))}
+                    inputWidth="w-full" inputHeight="h-8" className="w-full"
+                  />
+                </Field>
+                <Field label="Y" className="flex-1 min-w-0">
+                  <NumberInput
+                    value={parseInt(windowY, 10) || 0}
+                    onChange={(n) => setWindowY(String(n))}
+                    inputWidth="w-full" inputHeight="h-8" className="w-full"
+                  />
+                </Field>
+              </div>
+            )}
+            {restoreSize && (
+              <div className="flex gap-1.5">
+                <Field label="Width" className="flex-1 min-w-0">
+                  <NumberInput
+                    value={parseInt(windowWidth, 10) || 0}
+                    onChange={(n) => setWindowWidth(String(Math.max(0, n)))}
+                    min={0}
+                    inputWidth="w-full" inputHeight="h-8" className="w-full"
+                  />
+                </Field>
+                <Field label="Height" className="flex-1 min-w-0">
+                  <NumberInput
+                    value={parseInt(windowHeight, 10) || 0}
+                    onChange={(n) => setWindowHeight(String(Math.max(0, n)))}
+                    min={0}
+                    inputWidth="w-full" inputHeight="h-8" className="w-full"
+                  />
+                </Field>
+              </div>
+            )}
+            {(restorePosition || restoreSize) && (
+              <div>
+                <button
+                  type="button"
+                  onClick={handleCaptureGeometry}
+                  disabled={captureGeoRequestId !== null || (!windowProcessName.trim() && !windowTitle.trim())}
+                  data-tip={tt('Reads the current position and size of the matched window — place it by hand first, then capture.', 'Lê a posição e o tamanho atuais da janela casada — posicione-a à mão primeiro, depois capture.')}
+                  data-tip-pos="left"
+                  className="w-full h-8 flex items-center justify-center gap-1.5 px-2.5 rounded text-xs font-medium border border-border-default bg-bg-input hover:bg-[rgba(127,127,127,0.14)] text-text-secondary transition-colors disabled:opacity-60"
+                >
+                  <Frame size={13} />
+                  {captureGeoRequestId ? 'Capturing…' : 'Capture from window'}
+                </button>
+                {captureGeoError && (
+                  <div className="mt-1.5 px-2 py-1.5 rounded text-[11px] border" style={resultCardStyle(false)}>
+                    <div className="flex items-center gap-1.5">
+                      <X size={11} />
+                      <span>{captureGeoError}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Test (exists-anywhere probe) + result card, then Timeout + On Timeout. */}
             <div>

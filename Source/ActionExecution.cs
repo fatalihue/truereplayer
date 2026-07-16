@@ -1924,26 +1924,33 @@ namespace TrueReplayer.Services
             bool applySize = _restoreSize && hasSize;
             bool applyPos = _restorePosition;
             if (_windowTarget != null && (applySize || applyPos))
+                await ApplyWindowGeometryAsync(FindTargetWindow(), _lockX, _lockY, _lockWidth, _lockHeight, applyPos, applySize, token);
+        }
+
+        /// <summary>
+        /// Moves and/or resizes a window to a saved rect. Shared by the profile/folder
+        /// "restore position/size" pass and the per-action ActivateWindow placement, so the
+        /// un-maximize workaround (a zoomed window ignores SetWindowPos sizing — the Chrome
+        /// case) and the minimized guard live in ONE place instead of being copied per call site.
+        /// </summary>
+        private static async Task ApplyWindowGeometryAsync(
+            IntPtr hwnd, int x, int y, int width, int height,
+            bool applyPos, bool applySize, CancellationToken token)
+        {
+            if (hwnd == IntPtr.Zero || (!applyPos && !applySize)) return;
+            if (NativeMethods.IsIconic(hwnd)) return;
+            if (applySize && NativeMethods.IsZoomed(hwnd))
             {
-                var sizeHwnd = FindTargetWindow();
-                if (sizeHwnd != IntPtr.Zero && !NativeMethods.IsIconic(sizeHwnd))
-                {
-                    if (applySize && NativeMethods.IsZoomed(sizeHwnd))
-                    {
-                        NativeMethods.ShowWindow(sizeHwnd, NativeMethods.SW_RESTORE);
-                        await Task.Delay(80, token);
-                    }
-                    uint flags = NativeMethods.SWP_NOZORDER;
-                    if (!applyPos) flags |= NativeMethods.SWP_NOMOVE;
-                    if (!applySize) flags |= NativeMethods.SWP_NOSIZE;
-                    int posX = applyPos ? _lockX : 0;
-                    int posY = applyPos ? _lockY : 0;
-                    int sizeW = applySize ? _lockWidth : 0;
-                    int sizeH = applySize ? _lockHeight : 0;
-                    NativeMethods.SetWindowPos(sizeHwnd, IntPtr.Zero, posX, posY, sizeW, sizeH, flags);
-                    await Task.Delay(80, token);
-                }
+                NativeMethods.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
+                await Task.Delay(80, token);
             }
+            uint flags = NativeMethods.SWP_NOZORDER;
+            if (!applyPos) flags |= NativeMethods.SWP_NOMOVE;
+            if (!applySize) flags |= NativeMethods.SWP_NOSIZE;
+            NativeMethods.SetWindowPos(hwnd, IntPtr.Zero,
+                applyPos ? x : 0, applyPos ? y : 0,
+                applySize ? width : 0, applySize ? height : 0, flags);
+            await Task.Delay(80, token);
         }
 
         /// <summary>
@@ -2386,6 +2393,17 @@ namespace TrueReplayer.Services
                 return;
             }
             await Task.Delay(300, token); // settle — same wait the replay-start focus uses
+
+            // Optional placement: move/resize the window we just activated. Deliberately uses the
+            // hwnd we actually focused rather than a fresh matcher lookup, so with two windows of
+            // the same process the placement can never land on a different one. Purely positional
+            // — the replay's coordinate context is untouched (clicks still resolve against the
+            // profile/folder target; use a sub-profile + RunProfile for per-window relative coords).
+            bool placeSize = action.RestoreSize && action.WindowWidth > 0 && action.WindowHeight > 0;
+            bool placePos = action.RestorePosition;
+            if (placePos || placeSize)
+                await ApplyWindowGeometryAsync(hwnd, action.WindowX, action.WindowY,
+                    action.WindowWidth, action.WindowHeight, placePos, placeSize, token);
         }
 
         // ── BrowserAssert ──

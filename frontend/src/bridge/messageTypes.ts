@@ -129,6 +129,15 @@ export interface ActionItem {
   launchPath?: string | null;
   launchArgs?: string | null;
   activateOnTimeout?: string | null;
+  // ActivateWindow placement — move/resize the activated window to a saved rect. Purely
+  // positional: does NOT change the replay's coordinate context (use a sub-profile +
+  // RunProfile for per-window relative coords). Size is ignored when width/height <= 0.
+  restorePosition?: boolean;
+  restoreSize?: boolean;
+  windowX?: number;
+  windowY?: number;
+  windowWidth?: number;
+  windowHeight?: number;
   // BrowserAssert — verify a page element (reuses key=selector, waitMode, browserText,
   // timeout, selectorAlternatives) and FAIL the replay if it's not in the expected state.
   // null = 'Halt' (default — stop loudly) | 'Continue' (log and move on).
@@ -464,6 +473,7 @@ export type IncomingMessage =
   // windowTarget:testResult pair, which relies on the Target dialog being sole consumer).
   | { type: 'window:testProbeResult'; payload: { requestId: string; found: boolean; matchProcess: string; matchTitle: string; error?: string } }
   | { type: 'dialog:pickFileResult'; payload: { requestId: string; path?: string | null } }
+  | { type: 'window:captureGeometryResult'; payload: { requestId: string; found: boolean; x: number; y: number; width: number; height: number; error?: string } }
   // Backend signal that the combined "Apply target & convert" path on profile:setWindowTarget
   // completed successfully (target saved AND coords migrated). The dialog listens to dismiss
   // the migration hint and reset its `edited` flag so a second click can't re-trigger the
@@ -578,6 +588,7 @@ export type OutgoingMessage =
   // action uses at replay (".exe" auto-append, self-excluded), NOT foreground-only.
   | { type: 'window:testProbe'; payload: { requestId: string; processName: string; windowTitle: string; titleMatchMode: string } }
   | { type: 'dialog:pickFile'; payload: { requestId: string; kind: string } }
+  | { type: 'window:captureGeometry'; payload: { requestId: string; processName: string; windowTitle: string; titleMatchMode: string } }
   | { type: 'process:list'; payload: Record<string, never> }
   | { type: 'profile:openFolder'; payload: { name?: string } }
   | { type: 'profile:pin'; payload: { name: string } }
