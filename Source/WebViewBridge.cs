@@ -705,6 +705,7 @@ namespace TrueReplayer
                     case "profile:detectWindow": HandleProfileDetectWindow(); break;
                     case "profile:testWindowMatch": HandleTestWindowMatch(payload); break;
                     case "window:testProbe": HandleWindowTestProbe(payload); break;
+                    case "dialog:pickFile": HandleDialogPickFile(payload); break;
                     case "process:list": HandleProcessList(); break;
                     case "profile:openFolder": HandleProfileOpenFolder(payload); break;
                     case "profile:pin": HandleProfilePin(payload); break;
@@ -5832,6 +5833,18 @@ namespace TrueReplayer
         /// and carries a requestId so a Sheet-hosted consumer can pair replies (the legacy
         /// pair relies on being the dialog's sole consumer).
         /// </summary>
+        // Opens a native file picker for the ActivateWindow "Launch" field and hands the chosen
+        // path back to the frontend (null path = cancelled). Lets the user pick a program instead
+        // of typing a bare exe name that ShellExecute can't resolve.
+        private async void HandleDialogPickFile(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var rp) ? rp.GetString() ?? "" : "";
+            string? path;
+            try { path = await profileController.PickExecutableFileAsync(); }
+            catch (Exception ex) { DiagnosticLog.Info($"[dialog:pickFile] {ex.Message}"); path = null; }
+            SendMessage("dialog:pickFileResult", new { requestId, path });
+        }
+
         private void HandleWindowTestProbe(JsonElement payload)
         {
             string requestId = payload.TryGetProperty("requestId", out var rProp) ? rProp.GetString() ?? "" : "";

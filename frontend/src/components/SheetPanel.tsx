@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, RefreshCw, Crosshair, Copy, ClipboardPaste, ShieldCheck, ShieldAlert, ShieldQuestion, PlayCircle, Pipette, Check, X, Frame } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Crosshair, Copy, ClipboardPaste, ShieldCheck, ShieldAlert, ShieldQuestion, PlayCircle, Pipette, Check, X, Frame, FolderOpen } from 'lucide-react';
 import { ActionIcon } from './ActionTable';
 import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
@@ -291,6 +291,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const testPixelRequestIdRef = useRef(testPixelRequestId);
   const pickElementRequestIdRef = useRef(pickElementRequestId);
   const windowProbeRequestIdRef = useRef(windowProbeRequestId);
+  // Correlates a dialog:pickFile round-trip (ActivateWindow Launch "Browse…") to its result.
+  const browseLaunchReqRef = useRef<string | null>(null);
   // Configure-region is fire-and-forget (no UI state), so a plain ref tracks the in-flight
   // request and guards waitimage:searchRegionSet against a stale reply landing on a different
   // action after the user switched (the panel doesn't remount on action change).
@@ -410,6 +412,12 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
         if (windowProbeRequestIdRef.current && r.requestId === windowProbeRequestIdRef.current) {
           setWindowProbeResult({ found: r.found, matchProcess: r.matchProcess, matchTitle: r.matchTitle, error: r.error });
           setWindowProbeRequestId(null);
+        }
+      } else if (msg.type === 'dialog:pickFileResult') {
+        const r = msg.payload as { requestId: string; path?: string | null };
+        if (browseLaunchReqRef.current && r.requestId === browseLaunchReqRef.current) {
+          browseLaunchReqRef.current = null;
+          if (r.path) setLaunchPath(r.path);
         }
       }
     });
@@ -1413,6 +1421,14 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       payload: { requestId, processName: windowProcessName, windowTitle, titleMatchMode: windowTitleMatchMode },
     });
   }, [windowProcessName, windowTitle, windowTitleMatchMode, send]);
+
+  // ActivateWindow Launch "Browse…" — opens a native file picker; the chosen full path lands in
+  // launchPath via the dialog:pickFileResult subscription above.
+  const handleBrowseLaunch = useCallback(() => {
+    const requestId = Math.random().toString(36).slice(2, 10);
+    browseLaunchReqRef.current = requestId;
+    send({ type: 'dialog:pickFile', payload: { requestId, kind: 'executable' } });
+  }, [send]);
 
   // WaitImage: capture screen now and report best confidence + matched rect against the reference
   // image. Doesn't run the replay — pure calibration helper.
@@ -3258,14 +3274,26 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               label="Launch if not found"
               hint={tt('Program path, URL, document or shortcut — opened only when no window matches. Empty = just wait & focus. Leave the window fields above empty too for a plain run.', 'Caminho de programa, URL, documento ou atalho — aberto só quando nenhuma janela casa. Vazio = apenas esperar e focar. Deixe os campos de janela acima vazios também para um run puro.')}
             >
-              <input
-                type="text"
-                value={launchPath}
-                onChange={(e) => setLaunchPath(e.target.value)}
-                placeholder="notepad.exe · https://… · C:\path\app.exe"
-                spellCheck={false}
-                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-              />
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={launchPath}
+                  onChange={(e) => setLaunchPath(e.target.value)}
+                  placeholder="notepad.exe · https://… · C:\path\app.exe"
+                  spellCheck={false}
+                  className="flex-1 min-w-0 h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                />
+                <button
+                  type="button"
+                  onClick={handleBrowseLaunch}
+                  data-tip={tt('Pick a program — fills the full path so Windows can find it (a bare name like app.exe often will not resolve).', 'Escolha um programa — preenche o caminho completo para o Windows encontrar (um nome puro como app.exe geralmente não resolve).')}
+                  data-tip-pos="left"
+                  className="shrink-0 h-8 px-2.5 flex items-center gap-1 rounded text-xs border border-border-default bg-bg-input hover:bg-[rgba(127,127,127,0.14)] text-text-secondary transition-colors"
+                >
+                  <FolderOpen size={13} />
+                  Browse…
+                </button>
+              </div>
             </Field>
             <Field label="Arguments">
               <input

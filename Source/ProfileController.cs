@@ -137,6 +137,19 @@ namespace TrueReplayer.Controllers
             return tcs.Task;
         }
 
+        /// <summary>
+        /// Opens an executable/document picker for the ActivateWindow "Launch" field, so the user
+        /// gets a full, resolvable path instead of a bare exe name that ShellExecute can't find
+        /// (the "voicemeeterpro.exe — file not found" footgun). Returns null on cancel.
+        /// </summary>
+        public Task<string?> PickExecutableFileAsync()
+            => ShowFileDialogAsync(new WinForms.OpenFileDialog
+            {
+                Title = "Select a program to launch",
+                Filter = "Programs (*.exe;*.bat;*.cmd;*.com;*.lnk)|*.exe;*.bat;*.cmd;*.com;*.lnk|All files (*.*)|*.*",
+                CheckFileExists = true,
+            });
+
         #region Profile CRUD Operations
 
         public async Task<bool> SaveProfileAsync()

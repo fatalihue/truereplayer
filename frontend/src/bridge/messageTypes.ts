@@ -463,6 +463,7 @@ export type IncomingMessage =
   // Carries the requestId back so the Sheet can pair replies (unlike the legacy
   // windowTarget:testResult pair, which relies on the Target dialog being sole consumer).
   | { type: 'window:testProbeResult'; payload: { requestId: string; found: boolean; matchProcess: string; matchTitle: string; error?: string } }
+  | { type: 'dialog:pickFileResult'; payload: { requestId: string; path?: string | null } }
   // Backend signal that the combined "Apply target & convert" path on profile:setWindowTarget
   // completed successfully (target saved AND coords migrated). The dialog listens to dismiss
   // the migration hint and reset its `edited` flag so a second click can't re-trigger the
@@ -576,6 +577,7 @@ export type OutgoingMessage =
   // Exists-anywhere probe for the ActivateWindow editor — same matcher semantics the
   // action uses at replay (".exe" auto-append, self-excluded), NOT foreground-only.
   | { type: 'window:testProbe'; payload: { requestId: string; processName: string; windowTitle: string; titleMatchMode: string } }
+  | { type: 'dialog:pickFile'; payload: { requestId: string; kind: string } }
   | { type: 'process:list'; payload: Record<string, never> }
   | { type: 'profile:openFolder'; payload: { name?: string } }
   | { type: 'profile:pin'; payload: { name: string } }
