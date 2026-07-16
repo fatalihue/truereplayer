@@ -268,6 +268,24 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? VariableMode { get; set; }
 
+        // ── SendText rich text (ActionType == "SendText") ──
+        // Optional HTML flavor of the payload, authored in the Insert Text rich editor.
+        // Key remains the CANONICAL plain-text-with-tokens payload (grid display, plain
+        // clipboard flavor, and the full payload an older build sends); when KeyHtml is
+        // present the paste puts BOTH formats on the clipboard and the target picks the
+        // richest one it understands (Gmail/Word take HTML, Notepad takes text). null =
+        // plain action, byte-identical to pre-rich behavior.
+        // INVALIDATION CONTRACT: any path that writes Key without fresh HTML (SheetPanel
+        // textarea, generic actions:edit) MUST null KeyHtml, or replay would paste stale
+        // formatted content over the new plain text.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? KeyHtml { get; set; }
+
+        // "Send as plain text": keep the authored formatting in the editor but deliver only
+        // the plain flavor — the escape valve for targets that mangle pasted HTML.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+        public bool SendPlainOnly { get; set; }
+
         // ── ActivateWindow (ActionType == "ActivateWindow") ──
         // Combined find → launch-if-missing → wait → focus action. The window MATCHER
         // reuses the If-Window fields above (WindowProcessName / WindowTitle /
@@ -645,6 +663,8 @@ namespace TrueReplayer.Models
         {
             ActionType = ActionType,
             Key = Key,
+            KeyHtml = KeyHtml,
+            SendPlainOnly = SendPlainOnly,
             X = X,
             Y = Y,
             Delay = Delay,

@@ -8,6 +8,9 @@
 
 interface SendTextPreviewProps {
   text: string;
+  /** Action carries a rich (KeyHtml) flavor — renders a tiny "rich" badge so the
+   *  grid signals which SendText rows paste formatted content. */
+  rich?: boolean;
 }
 
 interface Segment {
@@ -36,11 +39,16 @@ function parseSegments(text: string): Segment[] {
   return segments;
 }
 
-export function SendTextPreview({ text }: SendTextPreviewProps) {
+export function SendTextPreview({ text, rich = false }: SendTextPreviewProps) {
   if (!text) return null;
   const segments = parseSegments(text);
   return (
     <>
+      {rich && (
+        <span className="inline-flex items-center px-1 py-[1px] mr-1 text-[9px] font-semibold uppercase tracking-wide rounded text-accent bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] border border-accent/30 select-none align-middle">
+          rich
+        </span>
+      )}
       {segments.map((segment, idx) =>
         segment.kind === 'token' ? (
           // Chip style mirrors lexical/TokenChip.tsx but drops the interactive bits:

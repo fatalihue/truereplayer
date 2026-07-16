@@ -878,6 +878,8 @@ namespace TrueReplayer
                 id = a.Id,
                 actionType = a.ActionType,
                 key = a.Key ?? "",
+                keyHtml = a.KeyHtml,
+                sendPlainOnly = a.SendPlainOnly,
                 x = a.X,
                 y = a.Y,
                 delay = a.Delay,
@@ -2093,7 +2095,14 @@ namespace TrueReplayer
             switch (field)
             {
                 case "actionType": action.ActionType = value; break;
-                case "key": action.Key = value; break;
+                case "key":
+                    action.Key = value;
+                    // INVALIDATION CONTRACT (ActionItem.KeyHtml): a plain-text edit of a SendText
+                    // payload without fresh HTML must drop the stale rich flavor, or replay would
+                    // paste the OLD formatted content over the new text. Rich edits go through
+                    // actions:editSendText, which supplies both flavors together.
+                    if (action.ActionType == "SendText") action.KeyHtml = null;
+                    break;
                 case "x": if (int.TryParse(value, out int x)) action.X = x; break;
                 case "y": if (int.TryParse(value, out int y)) action.Y = y; break;
                 case "delay": if (int.TryParse(value, out int delay)) action.Delay = Math.Max(0, delay); break;
@@ -2638,7 +2647,11 @@ namespace TrueReplayer
             PushUndoState();
 
             int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
-            var action = new ActionItem { ActionType = "SendText", Key = text, Delay = delay };
+            // Optional rich flavor + force-plain toggle from the Insert Text dialog. html is the
+            // Lexical-exported fragment; null/absent = plain action (byte-identical to pre-rich).
+            string? html = payload.TryGetProperty("html", out var hEl) && hEl.ValueKind == JsonValueKind.String ? hEl.GetString() : null;
+            bool plainOnly = payload.TryGetProperty("plainOnly", out var poEl) && poEl.ValueKind == JsonValueKind.True;
+            var action = new ActionItem { ActionType = "SendText", Key = text, KeyHtml = string.IsNullOrEmpty(html) ? null : html, SendPlainOnly = plainOnly, Delay = delay };
 
             if (payload.TryGetProperty("insertIndex", out var idxEl) && idxEl.ValueKind == JsonValueKind.Number)
             {
@@ -2669,6 +2682,13 @@ namespace TrueReplayer
             PushUndoState();
 
             actions[index].Key = text;
+            // The dialog always sends the CURRENT html alongside the text (null when the doc has
+            // no formatting) — so assigning unconditionally doubles as the invalidation: stale
+            // KeyHtml can never survive a text-only rewrite.
+            string? editHtml = payload.TryGetProperty("html", out var hEl) && hEl.ValueKind == JsonValueKind.String ? hEl.GetString() : null;
+            actions[index].KeyHtml = string.IsNullOrEmpty(editHtml) ? null : editHtml;
+            if (payload.TryGetProperty("plainOnly", out var poEl) && (poEl.ValueKind == JsonValueKind.True || poEl.ValueKind == JsonValueKind.False))
+                actions[index].SendPlainOnly = poEl.ValueKind == JsonValueKind.True;
             HasUnsavedChanges = true;
             PushActionsUpdate();
         }

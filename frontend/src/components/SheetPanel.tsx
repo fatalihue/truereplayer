@@ -74,6 +74,17 @@ const TEXT_MODES: { value: TextMode; label: string; prefix: string }[] = [
   { value: 'regex',     label: 'Regex',         prefix: 'text/' },
 ];
 
+// The action types whose Key is a browser SELECTOR (and may carry a text= prefix).
+// Everything else — notably SendText, whose payload can legitimately START with
+// "text=..." or "text/..." — must never be parsed/rebuilt as a selector: the regex
+// rebuild is lossy, so an unrelated save would rewrite Key (and null a fresh KeyHtml).
+function isBrowserSelectorAction(actionType: string, conditionType?: string | null): boolean {
+  return actionType === 'BrowserClick' || actionType === 'BrowserRightClick'
+    || actionType === 'BrowserType' || actionType === 'BrowserWaitElement'
+    || actionType === 'BrowserSelectOption' || actionType === 'BrowserAssert'
+    || (actionType === 'If' && conditionType === 'BrowserElementState');
+}
+
 function parseTextSelector(value: string): { mode: TextMode | null; raw: string } {
   if (!value) return { mode: null, raw: '' };
   if (value.startsWith('text/')) {
@@ -459,8 +470,12 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   useEffect(() => {
     if (action) {
       setActionType(action.actionType);
-      // #1 — Detect any text= prefix variant and split into mode + raw value
-      const parsed = parseTextSelector(action.key || '');
+      // #1 — Detect any text= prefix variant and split into mode + raw value.
+      // Gated on selector-carrying types: a SendText payload starting with "text=" is
+      // literal text, not a selector (parsing it would corrupt Key on the next save).
+      const parsed = isBrowserSelectorAction(action.actionType, action.conditionType)
+        ? parseTextSelector(action.key || '')
+        : { mode: null, raw: '' };
       if (parsed.mode) {
         setKey('');
         setTextMatch(parsed.raw);
@@ -605,10 +620,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // session populates `alternatives` — persist the full ranked list so replay can fall
     // back tier B→C when the primary drifts. A manual selector edit with NO fresh pick
     // invalidates any stored list (it may point at a different element) — clear it.
-    const isBrowserElementAction = actionType === 'BrowserClick' || actionType === 'BrowserRightClick'
-      || actionType === 'BrowserType' || actionType === 'BrowserWaitElement' || actionType === 'BrowserSelectOption'
-      || actionType === 'BrowserAssert'
-      || (actionType === 'If' && action.conditionType === 'BrowserElementState');
+    const isBrowserElementAction = isBrowserSelectorAction(actionType, action.conditionType);
     if (isBrowserElementAction) {
       if (alternatives.length > 1) {
         const nextJson = JSON.stringify(alternatives);
@@ -1022,10 +1034,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     const effectiveKey = textMatch.trim() ? buildTextSelector(textMode, textMatch.trim()) : key;
     if (effectiveKey !== action.key) return true;
 
-    const isBrowserElementAction = actionType === 'BrowserClick' || actionType === 'BrowserRightClick'
-      || actionType === 'BrowserType' || actionType === 'BrowserWaitElement' || actionType === 'BrowserSelectOption'
-      || actionType === 'BrowserAssert'
-      || (actionType === 'If' && action.conditionType === 'BrowserElementState');
+    const isBrowserElementAction = isBrowserSelectorAction(actionType, action.conditionType);
     if (isBrowserElementAction) {
       if (alternatives.length > 1) {
         if (JSON.stringify(alternatives) !== JSON.stringify(action.selectorAlternatives ?? null)) return true;
@@ -3232,12 +3241,23 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             ) : (
               // SendText payload — a textarea so long / multi-line text doesn't clip in a
               // single-line box. Only reached when !isKeyAction (showKey ⇒ isSendText here).
-              <textarea
-                rows={2}
-                value={key}
-                onChange={(e) => setKey(e.target.value)}
-                className="w-full min-h-[3.25rem] px-2 py-1.5 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid resize-y"
-              />
+              <>
+                <textarea
+                  rows={2}
+                  value={key}
+                  onChange={(e) => setKey(e.target.value)}
+                  className="w-full min-h-[3.25rem] px-2 py-1.5 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid resize-y"
+                />
+                {action?.keyHtml && (
+                  // Rich payload warning: this textarea edits only the PLAIN flavor, and a
+                  // saved key change drops the formatting (bridge nulls KeyHtml). Point the
+                  // user at the Insert Text dialog for formatted editing.
+                  <div className="mt-1 text-[10px] text-warning leading-snug">
+                    {tt('Formatted text — saving a change here converts it to plain. Use the row’s Insert Text editor to keep formatting.',
+                        'Texto formatado — salvar uma mudança aqui converte para texto puro. Use o editor Insert Text da linha para manter a formatação.')}
+                  </div>
+                )}
+              </>
             )}
           </Field>
           )}

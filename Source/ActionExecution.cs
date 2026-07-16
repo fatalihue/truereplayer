@@ -1825,7 +1825,7 @@ namespace TrueReplayer.Services
                             break;
                         case "ScrollUp": SimulateScroll(120); break;
                         case "ScrollDown": SimulateScroll(-120); break;
-                        case "SendText": await SimulateClipboardPaste(action.Key, token); break;
+                        case "SendText": await SimulateClipboardPaste(action.Key, action.SendPlainOnly ? null : action.KeyHtml, token); break;
                         case "SetVariable": await ExecuteSetVariable(action); break;
                         case "ActivateWindow": await ExecuteActivateWindow(action, token); break;
                         case "WaitImage": await ExecuteWaitImage(action, token); break;
@@ -2964,8 +2964,8 @@ namespace TrueReplayer.Services
 
         // Instance entry to the unified resolver for the SendText/paste path: passes the saved
         // clipboard backup + brace-escaping so ParseSendTextSegments doesn't re-interpret substituted braces.
-        private Task<string> ResolveTokens(string text, string? clipboardOverride = null, bool escapeBracesInSubstitution = false)
-            => ResolveTokensAsync(text, dispatcherQueue, CurrentRunCtx, clipboardOverride, escapeBracesInSubstitution);
+        private Task<string> ResolveTokens(string text, string? clipboardOverride = null, bool escapeBracesInSubstitution = false, TokenFlavorSync? flavorSync = null)
+            => ResolveTokensAsync(text, dispatcherQueue, CurrentRunCtx, clipboardOverride, escapeBracesInSubstitution, htmlEncodeSubstitution: false, flavorSync);
 
         /// <summary>
         /// Replaces every {clipboard[:mods]} token in <paramref name="text"/> with the
@@ -2981,6 +2981,42 @@ namespace TrueReplayer.Services
         /// shutting down. Shared by token resolution, the SendText backup snapshot, and the
         /// If-Clipboard probe so the TCS/TryEnqueue dance lives in exactly one place.
         /// </summary>
+        /// <summary>
+        /// Snapshots the clipboard's text AND HTML flavors for the SendText backup/restore
+        /// round-trip. The HTML string is the raw CF_HTML format payload (header included),
+        /// so restoring it via SetHtmlFormat is byte-symmetric. Either flavor is null when
+        /// absent or unreadable; both null = clipboard held something else entirely (image,
+        /// files) — restore then clears, same as the old text-only behavior.
+        /// </summary>
+        internal static async Task<(string? Text, string? Html)> ReadClipboardSnapshotAsync(DispatcherQueue dispatcherQueue, bool includeHtml = true)
+        {
+            var tcsSnap = new TaskCompletionSource<(string?, string?)>();
+            if (!dispatcherQueue.TryEnqueue(async () =>
+            {
+                string? text = null, htmlFormat = null;
+                try
+                {
+                    var content = Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
+                    if (content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
+                    {
+                        try { text = await content.GetTextAsync(); } catch { }
+                    }
+                    // Materializing CF_HTML forces delayed-render owners (Excel) to produce it —
+                    // skip unless the caller will actually overwrite the HTML flavor.
+                    if (includeHtml && content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Html))
+                    {
+                        try { htmlFormat = await content.GetHtmlFormatAsync(); } catch { }
+                    }
+                }
+                catch { }
+                tcsSnap.TrySetResult((text, htmlFormat));
+            }))
+            {
+                tcsSnap.TrySetResult((null, null));
+            }
+            return await tcsSnap.Task;
+        }
+
         internal static async Task<string?> ReadClipboardTextAsync(DispatcherQueue dispatcherQueue)
         {
             var tcsClip = new TaskCompletionSource<string?>();
@@ -3005,7 +3041,14 @@ namespace TrueReplayer.Services
             return await tcsClip.Task;
         }
 
-        internal static async Task<string> ResolveClipboardTokensAsync(string text, DispatcherQueue dispatcherQueue, string? clipboardOverride = null, bool escapeBracesInSubstitution = false)
+        // HTML-flavor substitution guard: a resolved clipboard/var/row value containing '<' or
+        // '&' must paste as visible TEXT inside the rich payload, never inject markup; newlines
+        // in the value become <br> so multi-line values still render (the CRLF normalization is
+        // plain-flavor-only). Dates/counters resolve to digits/punctuation and skip this.
+        internal static string HtmlEncodeValue(string value)
+            => System.Net.WebUtility.HtmlEncode(value).Replace("\r\n", "\n").Replace("\n", "<br>");
+
+        internal static async Task<string> ResolveClipboardTokensAsync(string text, DispatcherQueue dispatcherQueue, string? clipboardOverride = null, bool escapeBracesInSubstitution = false, bool htmlEncodeSubstitution = false)
         {
             if (string.IsNullOrEmpty(text)) return text;
             if (!ClipboardTokenRegex.IsMatch(text)) return text;
@@ -3019,6 +3062,7 @@ namespace TrueReplayer.Services
             {
                 var mods = m.Groups[1].Success ? m.Groups[1].Value : null;
                 var resolved = ApplyClipboardModifiers(raw, mods);
+                if (htmlEncodeSubstitution) resolved = HtmlEncodeValue(resolved);
                 return escapeBracesInSubstitution ? EscapeBracesForParser(resolved) : resolved;
             });
         }
@@ -3048,13 +3092,14 @@ namespace TrueReplayer.Services
         /// </summary>
         internal static async Task<string> ResolveTokensAsync(
             string text, DispatcherQueue dispatcherQueue, RunCtx runCtx = default,
-            string? clipboardOverride = null, bool escapeBracesInSubstitution = false)
+            string? clipboardOverride = null, bool escapeBracesInSubstitution = false,
+            bool htmlEncodeSubstitution = false, TokenFlavorSync? flavorSync = null)
         {
             if (string.IsNullOrEmpty(text)) return text;
-            text = await ResolveClipboardTokensAsync(text, dispatcherQueue, clipboardOverride, escapeBracesInSubstitution);
-            text = ResolveDateTimeTokens(text);
-            text = ResolveRandomTokens(text);
-            text = ResolveRunStateTokens(text, runCtx, escapeBracesInSubstitution);
+            text = await ResolveClipboardTokensAsync(text, dispatcherQueue, clipboardOverride, escapeBracesInSubstitution, htmlEncodeSubstitution);
+            text = ResolveDateTimeTokens(text, flavorSync);
+            text = ResolveRandomTokens(text, flavorSync);
+            text = ResolveRunStateTokens(text, runCtx, escapeBracesInSubstitution, htmlEncodeSubstitution);
             return text;
         }
 
@@ -3070,17 +3115,37 @@ namespace TrueReplayer.Services
         // two dice. Unparseable/overflowing numbers resolve to empty, the same consume-
         // always forgiveness as an empty clipboard. Output is digits-only, so no brace
         // escaping is needed on the SendText path (same note as {counter}/{row}).
-        private static string ResolveRandomTokens(string text)
+        /// <summary>
+        /// Cross-flavor value sync for one SendText paste: the plain (CF_UNICODETEXT) and rich
+        /// (CF_HTML) flavors of the SAME DataPackage must carry IDENTICAL values for
+        /// non-deterministic tokens, or the pasted content would depend on the target's paste
+        /// mode. The plain pass RECORDS each {random} draw and one DateTime.Now snapshot; the
+        /// html pass REPLAYS them in occurrence order (the two strings are parallel
+        /// serializations of one document, so occurrences align).
+        /// </summary>
+        internal sealed class TokenFlavorSync
+        {
+            public DateTime Now = DateTime.Now;
+            public List<string>? RandomRecord;   // set on the recording (plain) pass
+            public Queue<string>? RandomReplay;  // set on the replay (html) pass
+        }
+
+        private static string ResolveRandomTokens(string text, TokenFlavorSync? sync = null)
         {
             if (text.IndexOf("{random:", StringComparison.OrdinalIgnoreCase) < 0) return text;
             return RandomTokenRegex.Replace(text, m =>
             {
+                // Replay pass: consume the plain pass's draw for this occurrence. Falls
+                // through to a fresh roll only if the occurrence counts diverge (defensive).
+                if (sync?.RandomReplay is { Count: > 0 } replay) return replay.Dequeue();
                 if (!long.TryParse(m.Groups[1].Value, out var a) ||
                     !long.TryParse(m.Groups[2].Value, out var b))
                     return string.Empty; // digits beyond long range — treat as invalid
                 if (a > b) (a, b) = (b, a);
                 if (b == long.MaxValue) b--; // keep the inclusive upper bound addable
-                return Random.Shared.NextInt64(a, b + 1).ToString();
+                var value = Random.Shared.NextInt64(a, b + 1).ToString();
+                sync?.RandomRecord?.Add(value);
+                return value;
             });
         }
 
@@ -3106,7 +3171,7 @@ namespace TrueReplayer.Services
         /// so a value like "{enter}" pastes as text on the SendText path instead of being
         /// re-parsed as a key press.
         /// </summary>
-        private static string ResolveRunStateTokens(string text, RunCtx runCtx, bool escapeBracesInSubstitution)
+        private static string ResolveRunStateTokens(string text, RunCtx runCtx, bool escapeBracesInSubstitution, bool htmlEncodeSubstitution = false)
         {
             if (text.IndexOf('{') < 0) return text;
 
@@ -3118,6 +3183,7 @@ namespace TrueReplayer.Services
                     string value = string.Empty;
                     runCtx.Variables?.TryGetValue(name, out value!);
                     value ??= string.Empty;
+                    if (htmlEncodeSubstitution) value = HtmlEncodeValue(value);
                     return escapeBracesInSubstitution ? EscapeBracesForParser(value) : value;
                 });
             }
@@ -3134,6 +3200,7 @@ namespace TrueReplayer.Services
                     string value = string.Empty;
                     runCtx.RowData?.TryGetValue(col, out value!);
                     value ??= string.Empty;
+                    if (htmlEncodeSubstitution) value = HtmlEncodeValue(value);
                     return escapeBracesInSubstitution ? EscapeBracesForParser(value) : value;
                 });
             }
@@ -3150,10 +3217,10 @@ namespace TrueReplayer.Services
 
         // Resolves {datetime}/{date}/{time} ({datetime} first to avoid partial matches). The
         // substituted values contain no braces, so no brace-escaping is needed here.
-        private static string ResolveDateTimeTokens(string text)
+        private static string ResolveDateTimeTokens(string text, TokenFlavorSync? sync = null)
         {
             if (string.IsNullOrEmpty(text)) return text;
-            var now = DateTime.Now;
+            var now = sync?.Now ?? DateTime.Now;
             if (text.Contains("{datetime}", StringComparison.OrdinalIgnoreCase))
                 text = text.Replace("{datetime}", now.ToString("dd/MM/yyyy - HH:mm:ss"), StringComparison.OrdinalIgnoreCase);
             if (text.Contains("{date}", StringComparison.OrdinalIgnoreCase))
@@ -3163,18 +3230,51 @@ namespace TrueReplayer.Services
             return text;
         }
 
-        private async Task SimulateClipboardPaste(string text, CancellationToken token)
+        // The editor exports every token chip as <span data-token="{token}">{token}</span> so a
+        // saved KeyHtml round-trips back into chips. At SEND time those markers must go: the
+        // wrapper span carries no paste value, key/delay placeholders ({enter}/{tab}/{delay:N})
+        // act at the SEGMENT level (pressed around the paste) and must not surface as literal
+        // text in the rich flavor, and the DOM serializer entity-escapes freeform modifier args
+        // ({clipboard:join:&} → &amp;) which would desync the two flavors' mods. Replacing each
+        // marker with its HtmlDecode'd raw token hands the resolvers the exact same token string
+        // the plain pass sees; the substituted VALUE is then HTML-encoded by the html pass.
+        private static readonly Regex TokenMarkerSpanRegex = new(
+            "<span[^>]*\\bdata-token=\"([^\"]*)\"[^>]*>.*?</span>",
+            RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static string PrepareRichHtmlForSend(string html)
+        {
+            return TokenMarkerSpanRegex.Replace(html, m =>
+            {
+                var tokenText = System.Net.WebUtility.HtmlDecode(m.Groups[1].Value);
+                var inner = tokenText.Trim('{', '}');
+                var name = inner.Split(':')[0];
+                if (string.Equals(name, "delay", StringComparison.OrdinalIgnoreCase)
+                    || SpecialKeyPlaceholders.ContainsKey(name))
+                    return string.Empty;
+                return tokenText;
+            });
+        }
+
+        private async Task SimulateClipboardPaste(string text, string? html, CancellationToken token)
         {
             if (string.IsNullOrEmpty(text)) return;
 
-            // Save original clipboard content so we can restore it after pasting
-            var originalClipboard = await ReadClipboardTextAsync(dispatcherQueue);
+            // Save the original clipboard so we can restore it after pasting. The HTML flavor
+            // is snapshotted only when this paste will WRITE an HTML flavor (materializing
+            // CF_HTML can stall on delayed-render owners like Excel — don't pay that cost for
+            // plain pastes, which never clobber the HTML flavor's source text anyway... they do
+            // replace the package, so when we're about to paste rich we save/restore both).
+            var originalClipboard = await ReadClipboardSnapshotAsync(dispatcherQueue, includeHtml: !string.IsNullOrEmpty(html));
 
             // Resolve {clipboard[:mods]} + {datetime}/{date}/{time} in one pass via the unified
             // resolver, using the saved clipboard content so subsequent clipboard writes (for
             // pasting) don't affect token resolution. Escape '{' / '}' in the substituted clipboard
             // value so content like "{enter}" is pasted as text, not re-interpreted as a key press.
-            text = await ResolveTokens(text, originalClipboard ?? string.Empty, escapeBracesInSubstitution: true);
+            // The flavor sync RECORDS this pass's {random} draws + DateTime.Now snapshot so the
+            // html pass below replays the exact same values (one paste = one set of values).
+            var flavorSync = new TokenFlavorSync { RandomRecord = new List<string>() };
+            text = await ResolveTokens(text, originalClipboard.Text ?? string.Empty, escapeBracesInSubstitution: true, flavorSync);
 
             if (string.IsNullOrEmpty(text) || token.IsCancellationRequested)
             {
@@ -3184,6 +3284,30 @@ namespace TrueReplayer.Services
 
             // Parse text into segments: plain text + special key placeholders
             var segments = ParseSendTextSegments(text);
+
+            // Rich flavor (KeyHtml): resolve the SAME token chain over the HTML with the
+            // substituted values HTML-encoded (a clipboard/var/row value containing '<' must
+            // paste as text, never inject markup) AND brace-sentinel-escaped (a clipboard/var
+            // value containing a literal "{date}" must not be re-expanded by the downstream
+            // resolvers — same guard the plain pass has), un-escaped again before the CF_HTML
+            // is built. V1 rule: the HTML is attached only when the plain resolution produced
+            // EXACTLY ONE text segment ({enter}/{tab}/{delay} before/after still work as their
+            // own segments — their marker spans are stripped from the html by the pre-process);
+            // a key press in the MIDDLE of the text downgrades the whole action to plain —
+            // splitting markup at placeholder boundaries is Phase 2.
+            string? resolvedHtml = null;
+            if (!string.IsNullOrEmpty(html) && segments.Count(s => !string.IsNullOrEmpty(s.Text)) == 1)
+            {
+                var replaySync = new TokenFlavorSync
+                {
+                    Now = flavorSync.Now,
+                    RandomReplay = new Queue<string>(flavorSync.RandomRecord!),
+                };
+                resolvedHtml = await ResolveTokensAsync(PrepareRichHtmlForSend(html), dispatcherQueue, CurrentRunCtx,
+                    originalClipboard.Text ?? string.Empty, escapeBracesInSubstitution: true,
+                    htmlEncodeSubstitution: true, flavorSync: replaySync);
+                resolvedHtml = UnescapeBraceSentinels(resolvedHtml);
+            }
 
             try
             {
@@ -3206,7 +3330,7 @@ namespace TrueReplayer.Services
                     {
                         // Text: paste via clipboard. Restore '{' / '}' that the resolver escaped.
                         var literal = UnescapeBraceSentinels(segment.Text);
-                        await PasteTextViaClipboard(literal, token);
+                        await PasteTextViaClipboard(literal, resolvedHtml, token);
                     }
                 }
             }
@@ -3217,16 +3341,19 @@ namespace TrueReplayer.Services
             }
         }
 
-        private void RestoreOriginalClipboard(string? originalClipboard)
+        private void RestoreOriginalClipboard((string? Text, string? Html) originalClipboard)
         {
             dispatcherQueue.TryEnqueue(() =>
             {
                 try
                 {
-                    if (originalClipboard != null)
+                    if (originalClipboard.Text != null || originalClipboard.Html != null)
                     {
                         var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage();
-                        dataPackage.SetText(originalClipboard);
+                        if (originalClipboard.Text != null) dataPackage.SetText(originalClipboard.Text);
+                        // The snapshot holds the raw CF_HTML payload (header included) exactly as
+                        // GetHtmlFormatAsync returned it — restore it verbatim, no re-wrapping.
+                        if (originalClipboard.Html != null) dataPackage.SetHtmlFormat(originalClipboard.Html);
                         Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
                     }
                     else
@@ -4075,13 +4202,14 @@ namespace TrueReplayer.Services
             NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
         }
 
-        private async Task PasteTextViaClipboard(string text, CancellationToken token)
+        private async Task PasteTextViaClipboard(string text, string? html, CancellationToken token)
         {
             // CF_UNICODETEXT convention is CRLF, and classic Win32 EDIT / WinForms
             // multiline targets do NOT break lines on a lone LF. The list modifiers
             // (sort/range/lines/dedupe/reverse) emit LF-joined text — normalize any
             // bare LF back to CRLF before it hits the clipboard. Browser-path text
             // never routes through here, so LF-tolerant consumers are unaffected.
+            // The HTML flavor is deliberately NOT normalized — markup needs no CRLF.
             text = text.Replace("\r\n", "\n").Replace("\n", "\r\n");
             var tcs = new TaskCompletionSource<bool>();
             if (!dispatcherQueue.TryEnqueue(() =>
@@ -4090,6 +4218,12 @@ namespace TrueReplayer.Services
                 {
                     var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage();
                     dataPackage.SetText(text);
+                    // Rich flavor: both formats ride the same package and the paste TARGET
+                    // negotiates — Gmail/Word/contenteditable take the HTML, Notepad takes the
+                    // text. HtmlFormatHelper writes the CF_HTML header (StartHTML/EndHTML byte
+                    // offsets) for us — same pattern as ClipboardService.CopyActions.
+                    if (!string.IsNullOrEmpty(html))
+                        dataPackage.SetHtmlFormat(Windows.ApplicationModel.DataTransfer.HtmlFormatHelper.CreateHtmlFormat(html));
                     Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
                     tcs.SetResult(true);
                 }

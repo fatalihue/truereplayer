@@ -167,6 +167,17 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(a => string.Equals(a.VariableMode, "cycle", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 8, 0), "Set Variable cycle mode"),
 
+            // SendText rich text (KeyHtml) shipped AFTER 2.8.0. An older build drops the unknown
+            // KeyHtml property and pastes the plain Key — content preserved, formatting silently
+            // lost. That is a mild divergence (never literal markup), but formatting can be
+            // load-bearing (a bolded warning, a numbered procedure), so gate it like the other
+            // property-level pins. Predicate is on the FIELD, not the ActionType, so existing
+            // plain SendText profiles keep their old floor. Pinned to the CURRENT build (2.8.0)
+            // so an own-build export → import round-trips; BUMP to the release version in
+            // lockstep at release (with the ActivateWindow placement pin).
+            (p => p.Actions.Any(a => !string.IsNullOrEmpty(a.KeyHtml)),
+                new Version(2, 8, 0), "Rich text (SendText)"),
+
             // SetVariable base action ('set' mode, VariableMode null) shipped in 2.6.12.
             // Builds < 2.6.12 have no "SetVariable" case in the replay switch (which has NO
             // default) → silently skip the row → the variable is never written → downstream

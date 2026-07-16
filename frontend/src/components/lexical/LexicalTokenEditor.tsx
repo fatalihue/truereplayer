@@ -1,7 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { ContentEditable } from '@lexical/react/LexicalContentEditable';
 import { PlainTextPlugin } from '@lexical/react/LexicalPlainTextPlugin';
+import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
+import { ListPlugin } from '@lexical/react/LexicalListPlugin';
+import { LinkPlugin } from '@lexical/react/LexicalLinkPlugin';
+import { AutoLinkPlugin } from '@lexical/react/LexicalAutoLinkPlugin';
 import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin';
 import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin';
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
@@ -9,18 +13,35 @@ import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext
 import {
   $getRoot,
   $getSelection,
+  $insertNodes,
   $isRangeSelection,
   $isTextNode,
   $isElementNode,
   $createTextNode,
   $createParagraphNode,
   COMMAND_PRIORITY_LOW,
+  FORMAT_TEXT_COMMAND,
   PASTE_COMMAND,
   KEY_BACKSPACE_COMMAND,
   KEY_DELETE_COMMAND,
   TextNode,
   type LexicalNode,
+  type TextFormatType,
 } from 'lexical';
+import {
+  ListNode,
+  ListItemNode,
+  $isListNode,
+  INSERT_ORDERED_LIST_COMMAND,
+  INSERT_UNORDERED_LIST_COMMAND,
+  REMOVE_LIST_COMMAND,
+} from '@lexical/list';
+import { LinkNode, AutoLinkNode, $isLinkNode, $isAutoLinkNode, TOGGLE_LINK_COMMAND } from '@lexical/link';
+import { $generateHtmlFromNodes, $generateNodesFromDOM } from '@lexical/html';
+import { $dfs } from '@lexical/utils';
+import {
+  Bold, Italic, Underline, Strikethrough, Code, List, ListOrdered, Link2, Check, X,
+} from 'lucide-react';
 import { TokenNode, $createTokenNode, $isTokenNode } from './TokenNode';
 import { ClipboardChipEditContext, type ClipboardChipEditRequest } from './TokenChip';
 
@@ -89,7 +110,17 @@ export interface LexicalEditorHandle {
    * would drop those as raw text while visually identical configs became chips.
    */
   insertToken: (token: string) => void;
+  /** Rich mode: insert an HTML fragment (a rich snippet) at the cursor —
+   *  formatting preserved, `<span data-token>` markers re-chip on import. */
+  insertHtml: (html: string) => void;
   focus: () => void;
+  /**
+   * Rich mode only: the document exported as an HTML fragment, or null when it
+   * carries NO formatting (no format bits, lists or links) — a null keeps the
+   * action a plain SendText, byte-identical to pre-rich behavior. Token chips
+   * export as `<span data-token>{token}</span>` (resolved at send time).
+   */
+  getHtml: () => string | null;
 }
 
 interface LexicalTokenEditorProps {
@@ -105,6 +136,12 @@ interface LexicalTokenEditorProps {
   /** When provided, clicking a {clipboard...} chip routes HERE instead of the
    *  built-in 300px popover (see ClipboardChipEditContext). */
   onClipboardChipEdit?: (req: ClipboardChipEditRequest) => void;
+  /** Rich-text authoring (Insert Text dialog only): RichTextPlugin + formatting
+   *  toolbar + list/link nodes. The SheetPanel browserText surface stays plain. */
+  richMode?: boolean;
+  /** Rich mode: rebuild the document from a saved KeyHtml fragment instead of
+   *  the plain initialText (token marker spans re-chip via TokenNode.importDOM). */
+  initialHtml?: string | null;
 }
 
 // Splits `text` into alternating plain TextNodes and TokenNodes. Unknown tokens
@@ -131,8 +168,33 @@ function buildNodesFromText(text: string): LexicalNode[] {
   return nodes;
 }
 
+// Canonical plain payload for RICH mode. root.getTextContent() is WRONG here: Lexical
+// joins non-inline block siblings with a DOUBLE line break, and RichTextPlugin's Enter
+// creates ParagraphNodes (plain mode created LineBreakNodes) — so a zero-formatting
+// multi-line doc would save "line1\n\nline2" and every plain target would paste blank
+// lines. Walk top-level blocks and join with a SINGLE '\n'; list items additionally get
+// "- " / "N. " markers so the plain flavor of a formatted list reads as a list.
+function $serializePlainForSend(): string {
+  const lines: string[] = [];
+  for (const block of $getRoot().getChildren()) {
+    if ($isListNode(block)) {
+      const ordered = block.getListType() === 'number';
+      block.getChildren().forEach((item, i) => {
+        // A nested list inside an item re-introduces '\n\n' via getTextContent — collapse.
+        lines.push((ordered ? `${i + 1}. ` : '- ') + item.getTextContent().replace(/\n\n/g, '\n'));
+      });
+    } else {
+      lines.push(block.getTextContent());
+    }
+  }
+  return lines.join('\n');
+}
+
 // One-shot population of the editor with the initial value (only runs first time).
-function InitialContentPlugin({ initialText }: { initialText: string }) {
+// Rich mode with a saved KeyHtml rebuilds the formatted document from the HTML
+// fragment (lists/links/format bits restored; `<span data-token>` re-chips via
+// TokenNode.importDOM); otherwise the plain text is parsed into text+chip runs.
+function InitialContentPlugin({ initialText, initialHtml }: { initialText: string; initialHtml?: string | null }) {
   const [editor] = useLexicalComposerContext();
   const didInit = useRef(false);
 
@@ -142,12 +204,21 @@ function InitialContentPlugin({ initialText }: { initialText: string }) {
     editor.update(() => {
       const root = $getRoot();
       root.clear();
+      if (initialHtml) {
+        const dom = new DOMParser().parseFromString(initialHtml, 'text/html');
+        const nodes = $generateNodesFromDOM(editor, dom);
+        // $insertNodes (not root.append) — the fragment's top level may hold
+        // inline nodes, which insertNodes wraps in paragraphs as needed.
+        root.select();
+        $insertNodes(nodes);
+        return;
+      }
       const para = $createParagraphNode();
       const nodes = buildNodesFromText(initialText);
       if (nodes.length > 0) para.append(...nodes);
       root.append(para);
     });
-  }, [editor, initialText]);
+  }, [editor, initialText, initialHtml]);
 
   return null;
 }
@@ -192,7 +263,27 @@ function ImperativeAPIPlugin({
       // No regex gate: the caller vouches this is one well-formed token (the
       // Advanced popover builds it via buildClipboardToken).
       insertToken: (token: string) => insertNodesAtCursor(() => [$createTokenNode(token)]),
+      insertHtml: (html: string) => insertNodesAtCursor(() => {
+        const dom = new DOMParser().parseFromString(html, 'text/html');
+        return $generateNodesFromDOM(editor, dom);
+      }),
       focus: () => editor.focus(),
+      // On-demand HTML export (confirm-time, not per-keystroke). null when the doc
+      // has no formatting, so unformatted actions stay plain on disk.
+      getHtml: () => {
+        let html: string | null = null;
+        editor.getEditorState().read(() => {
+          // AutoLinkNodes are EXCLUDED from the gate: merely typing a URL must not
+          // silently turn the action rich (badge + compat pin + CF_HTML paste) — only
+          // deliberate formatting (format bits, lists, explicit toolbar links) does.
+          const hasFormatting = $dfs().some(({ node }) =>
+            ($isTextNode(node) && node.getFormat() !== 0)
+            || $isListNode(node)
+            || ($isLinkNode(node) && !$isAutoLinkNode(node)));
+          if (hasFormatting) html = $generateHtmlFromNodes(editor, null);
+        });
+        return html;
+      },
     };
     return () => {
       apiRef.current = null;
@@ -306,6 +397,12 @@ function TokenAutoTransformPlugin() {
       const after = text.slice(end);
       const chip = $createTokenNode(match[0]);
 
+      // Only steal the caret when it actually lived in the node being split —
+      // re-chipping pasted/imported content must not yank the cursor around.
+      const selection = $getSelection();
+      const anchorWasHere =
+        $isRangeSelection(selection) && selection.anchor.getNode().getKey() === textNode.getKey();
+
       if (before) {
         textNode.setTextContent(before);
         textNode.insertAfter(chip);
@@ -314,9 +411,13 @@ function TokenAutoTransformPlugin() {
       }
       // Always have a trailing TextNode so the caret has a place to land right
       // after the chip — otherwise it would clamp to before the (isolated) chip.
+      // It inherits the split node's format/style, or chipping a token inside a
+      // bold/italic run would silently reset the remainder to unformatted.
       const trailing = $createTextNode(after);
+      trailing.setFormat(textNode.getFormat());
+      trailing.setStyle(textNode.getStyle());
       chip.insertAfter(trailing);
-      trailing.select(0, 0);
+      if (anchorWasHere) trailing.select(0, 0);
     });
   }, [editor]);
 
@@ -324,15 +425,18 @@ function TokenAutoTransformPlugin() {
 }
 
 // Intercepts paste to convert pasted text containing known `{...}` tokens into
-// chips (instead of leaving them as raw text). Plain-text paste only — we don't
-// import HTML/Markdown formatting.
-function TokenPastePlugin() {
+// chips (instead of leaving them as raw text). In rich mode a paste that CARRIES
+// formatting (text/html flavor) is left to Lexical's rich clipboard pipeline —
+// hijacking it here would silently strip the formatting; the TokenAutoTransform
+// node transform re-chips any tokens in the imported text afterwards.
+function TokenPastePlugin({ richMode }: { richMode?: boolean }) {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
     return editor.registerCommand(
       PASTE_COMMAND,
       (event: ClipboardEvent) => {
+        if (richMode && event.clipboardData?.getData('text/html')) return false;
         const text = event.clipboardData?.getData('text/plain');
         if (!text) return false;
         // Skip our handler if the pasted text has no token markers — let the
@@ -349,9 +453,166 @@ function TokenPastePlugin() {
       },
       COMMAND_PRIORITY_LOW,
     );
-  }, [editor]);
+  }, [editor, richMode]);
 
   return null;
+}
+
+// URL matcher for AutoLink — a typed/pasted URL becomes a live link node. The
+// pattern requires a dot-separated host, so it can never collide with the token
+// grammar (tokens contain no dots).
+const URL_MATCHER =
+  /((https?:\/\/(www\.)?)|(www\.))[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)/;
+const AUTO_LINK_MATCHERS = [
+  (text: string) => {
+    const match = URL_MATCHER.exec(text);
+    if (match === null) return null;
+    return {
+      index: match.index,
+      length: match[0].length,
+      text: match[0],
+      url: match[0].startsWith('http') ? match[0] : `https://${match[0]}`,
+    };
+  },
+];
+
+// Formatting toolbar (rich mode only): B/I/U/S, inline code, bullet/numbered
+// list, link. Buttons use onMouseDown preventDefault so clicking them never
+// collapses the editor selection they act on. Active states track the selection
+// via an update listener. The link flow is a tiny inline URL input — apply on
+// Enter, cancel on Esc; '{' is rejected (tokens inside link URLs are unsupported).
+function RichToolbarPlugin() {
+  const [editor] = useLexicalComposerContext();
+  const [formats, setFormats] = useState({
+    bold: false, italic: false, underline: false, strikethrough: false, code: false,
+    link: false, ul: false, ol: false,
+  });
+  const [linkInputOpen, setLinkInputOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+
+  useEffect(() => {
+    return editor.registerUpdateListener(({ editorState }) => {
+      editorState.read(() => {
+        const sel = $getSelection();
+        if (!$isRangeSelection(sel)) return;
+        const anchorNode = sel.anchor.getNode();
+        const parents = anchorNode.getParents();
+        const listParent = parents.find($isListNode);
+        setFormats({
+          bold: sel.hasFormat('bold'),
+          italic: sel.hasFormat('italic'),
+          underline: sel.hasFormat('underline'),
+          strikethrough: sel.hasFormat('strikethrough'),
+          code: sel.hasFormat('code'),
+          link: parents.some($isLinkNode),
+          ul: !!listParent && listParent.getListType() === 'bullet',
+          ol: !!listParent && listParent.getListType() === 'number',
+        });
+      });
+    });
+  }, [editor]);
+
+  const applyLink = () => {
+    const url = linkUrl.trim();
+    if (!url || url.includes('{')) return;   // tokens in URLs are unsupported
+    const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url) ? url : `https://${url}`;
+    editor.dispatchCommand(TOGGLE_LINK_COMMAND, withScheme);
+    setLinkInputOpen(false);
+    setLinkUrl('');
+    editor.focus();
+  };
+
+  const btnClass = (active: boolean) =>
+    `h-6 w-6 flex items-center justify-center rounded transition-colors ${
+      active
+        ? 'text-accent bg-[color-mix(in_srgb,var(--color-accent)_14%,transparent)]'
+        : 'text-text-tertiary hover:text-text-secondary hover:bg-[rgba(127,127,127,0.12)]'
+    }`;
+
+  const fmtBtn = (fmt: TextFormatType, active: boolean, Icon: typeof Bold, tip: string) => (
+    <button
+      type="button"
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, fmt)}
+      className={btnClass(active)}
+      data-tip={tip}
+    >
+      <Icon size={13} />
+    </button>
+  );
+
+  return (
+    <div className="flex items-center gap-0.5 px-1.5 py-1 border-b border-border-subtle shrink-0">
+      {fmtBtn('bold', formats.bold, Bold, 'Bold (Ctrl+B)')}
+      {fmtBtn('italic', formats.italic, Italic, 'Italic (Ctrl+I)')}
+      {fmtBtn('underline', formats.underline, Underline, 'Underline (Ctrl+U)')}
+      {fmtBtn('strikethrough', formats.strikethrough, Strikethrough, 'Strikethrough')}
+      {fmtBtn('code', formats.code, Code, 'Inline code')}
+      <div className="w-px h-4 mx-1 bg-border-subtle" />
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => editor.dispatchCommand(formats.ul ? REMOVE_LIST_COMMAND : INSERT_UNORDERED_LIST_COMMAND, undefined)}
+        className={btnClass(formats.ul)}
+        data-tip="Bullet list"
+      >
+        <List size={13} />
+      </button>
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => editor.dispatchCommand(formats.ol ? REMOVE_LIST_COMMAND : INSERT_ORDERED_LIST_COMMAND, undefined)}
+        className={btnClass(formats.ol)}
+        data-tip="Numbered list"
+      >
+        <ListOrdered size={13} />
+      </button>
+      <div className="w-px h-4 mx-1 bg-border-subtle" />
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          if (formats.link) {
+            editor.dispatchCommand(TOGGLE_LINK_COMMAND, null);   // unlink
+          } else {
+            setLinkInputOpen((v) => !v);
+          }
+        }}
+        className={btnClass(formats.link || linkInputOpen)}
+        data-tip={formats.link ? 'Remove link' : 'Link'}
+      >
+        <Link2 size={13} />
+      </button>
+      {linkInputOpen && (
+        <div className="flex items-center gap-1 ml-1">
+          <input
+            type="text"
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); applyLink(); }
+              if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setLinkInputOpen(false); setLinkUrl(''); editor.focus(); }
+            }}
+            placeholder="https://…"
+            autoFocus
+            spellCheck={false}
+            className="h-6 w-52 px-1.5 text-[11px] font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+          />
+          <button type="button" onClick={applyLink} className={btnClass(false)} data-tip="Apply link">
+            <Check size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={() => { setLinkInputOpen(false); setLinkUrl(''); editor.focus(); }}
+            className={btnClass(false)}
+            data-tip="Cancel"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Ctrl+Enter submit forwarded to parent so the same shortcut behaves the same.
@@ -381,49 +642,88 @@ export function LexicalTokenEditor({
   contentClassName = 'w-full h-full px-3 py-2 text-sm leading-[1.5] outline-none whitespace-pre-wrap break-words text-text-primary overflow-auto',
   placeholderClassName = 'absolute top-2 left-3 text-sm text-text-disabled pointer-events-none select-none',
   onClipboardChipEdit,
+  richMode = false,
+  initialHtml = null,
 }: LexicalTokenEditorProps) {
   const initialConfig = {
     namespace: 'SendText',
-    nodes: [TokenNode],
+    // List/link nodes register only in rich mode, so the plain surfaces
+    // (SheetPanel browserText) can never acquire rich content by accident.
+    nodes: richMode ? [TokenNode, ListNode, ListItemNode, LinkNode, AutoLinkNode] : [TokenNode],
     onError: (error: Error) => {
       console.error('[Lexical]', error);
     },
     theme: {
       paragraph: 'm-0',
+      // Formatting renders through theme tokens (never hardcoded hex — 48 themes).
+      text: {
+        bold: 'font-semibold',
+        italic: 'italic',
+        underline: 'underline',
+        strikethrough: 'line-through',
+        underlineStrikethrough: '[text-decoration:underline_line-through]',
+        code: 'font-mono text-[0.9em] bg-bg-input border border-border-subtle rounded px-1',
+      },
+      list: {
+        ul: 'list-disc ml-5',
+        ol: 'list-decimal ml-5',
+        listitem: 'my-0.5',
+      },
+      link: 'text-accent underline',
     },
   };
+
+  // Shared shape between the plain and rich root plugins.
+  const contentEditable = (
+    <ContentEditable
+      className={contentClassName}
+      aria-label="Text to send"
+      spellCheck={false}
+    />
+  );
+  const placeholder = (
+    <div className={placeholderClassName}>
+      Type the text to send...
+    </div>
+  );
 
   return (
     <LexicalComposer initialConfig={initialConfig}>
       {/* Context flows through Lexical's decorator portals, so TokenChip sees it. */}
       <ClipboardChipEditContext.Provider value={onClipboardChipEdit ?? null}>
-      <div className="relative w-full h-full">
-        <PlainTextPlugin
-          contentEditable={
-            <ContentEditable
-              className={contentClassName}
-              aria-label="Text to send"
-              spellCheck={false}
+      <div className={richMode ? 'w-full h-full flex flex-col' : 'relative w-full h-full'}>
+        {richMode && <RichToolbarPlugin />}
+        <div className="relative flex-1 min-h-0">
+          {richMode ? (
+            <RichTextPlugin
+              contentEditable={contentEditable}
+              placeholder={placeholder}
+              ErrorBoundary={LexicalErrorBoundary}
             />
-          }
-          placeholder={
-            <div className={placeholderClassName}>
-              Type the text to send...
-            </div>
-          }
-          ErrorBoundary={LexicalErrorBoundary}
-        />
+          ) : (
+            <PlainTextPlugin
+              contentEditable={contentEditable}
+              placeholder={placeholder}
+              ErrorBoundary={LexicalErrorBoundary}
+            />
+          )}
+        </div>
         <HistoryPlugin />
+        {richMode && <ListPlugin />}
+        {richMode && <LinkPlugin />}
+        {richMode && <AutoLinkPlugin matchers={AUTO_LINK_MATCHERS} />}
         <OnChangePlugin
           onChange={(state) => {
             state.read(() => {
-              onChange($getRoot().getTextContent());
+              // Rich mode uses the single-newline block serializer (see
+              // $serializePlainForSend); plain mode stays byte-identical to 2.8.0.
+              onChange(richMode ? $serializePlainForSend() : $getRoot().getTextContent());
             });
           }}
         />
-        <InitialContentPlugin initialText={initialText} />
+        <InitialContentPlugin initialText={initialText} initialHtml={richMode ? initialHtml : null} />
         <ImperativeAPIPlugin apiRef={apiRef} />
-        <TokenPastePlugin />
+        <TokenPastePlugin richMode={richMode} />
         <TokenAutoTransformPlugin />
         <ChipKeyboardPlugin />
         <SubmitPlugin onSubmit={onSubmit} />

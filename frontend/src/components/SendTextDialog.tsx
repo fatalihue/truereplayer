@@ -26,7 +26,12 @@ import {
 interface SendTextDialogProps {
   mode: 'add' | 'edit';
   initialText?: string;
-  onConfirm: (text: string) => void;
+  /** Saved rich flavor (KeyHtml) — rebuilds the formatted doc on reopen. */
+  initialHtml?: string | null;
+  /** Saved "Send as plain text" toggle (SendPlainOnly). */
+  initialPlainOnly?: boolean;
+  /** html is null when the doc carries no formatting → the action stays plain. */
+  onConfirm: (text: string, html: string | null, plainOnly: boolean) => void;
   onClose: () => void;
 }
 
@@ -34,6 +39,8 @@ interface Snippet {
   id: string;
   name: string;
   text: string;
+  /** Rich flavor — pre-rich snippets simply lack the field and insert as plain. */
+  html?: string;
 }
 
 const SNIPPETS_KEY = 'trueplayer_snippets';
@@ -313,9 +320,12 @@ type SurfaceSession =
   | { mode: 'insert' }
   | { mode: 'edit'; token: string; commit: (next: string) => void; remove: () => void };
 
-export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: SendTextDialogProps) {
+export function SendTextDialog({ mode, initialText = '', initialHtml = null, initialPlainOnly = false, onConfirm, onClose }: SendTextDialogProps) {
   const tt = useTt();
   const [text, setText] = useState(initialText);
+  // "Send as plain text": formatting stays authored in the editor, but delivery
+  // skips the HTML flavor — the escape valve for targets that mangle pasted HTML.
+  const [plainOnly, setPlainOnly] = useState(initialPlainOnly);
   // Rail: Insert (palette + snippets) is the default tab; Emoji is the other.
   const [railTab, setRailTab] = useState<'insert' | 'emoji'>('insert');
   const [snippets, setSnippets] = useState<Snippet[]>(loadSnippets);
@@ -403,6 +413,9 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
     const trimmedText = text.trim();
     if (!trimmedName || !trimmedText) return;
 
+    // Capture the rich flavor too (undefined when the doc has no formatting) so a
+    // formatted snippet re-inserts formatted. Pre-rich snippets simply lack the field.
+    const snippetHtml = lexicalApiRef.current?.getHtml() ?? undefined;
     const newSnippet: Snippet = {
       // crypto.randomUUID (secure-context, available in WebView2) avoids the
       // same-millisecond collision a bare timestamp had; fall back to timestamp+random.
@@ -411,6 +424,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
         : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name: trimmedName,
       text: trimmedText,
+      ...(snippetHtml ? { html: snippetHtml } : {}),
     };
     const updated = [...snippets, newSnippet];
     setSnippets(updated);
@@ -432,7 +446,9 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
     const trimmedText = newText.trim();
     if (!trimmedName || !trimmedText) return;
     const updated = snippets.map(s =>
-      s.id === id ? { ...s, name: trimmedName, text: trimmedText } : s,
+      // Plain-text edit invalidates the rich flavor (same contract as actions:edit on
+      // key) — keeping stale html would make insert ignore the text change entirely.
+      s.id === id ? { id: s.id, name: trimmedName, text: trimmedText } : s,
     );
     setSnippets(updated);
     saveSnippets(updated);
@@ -447,15 +463,19 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
     );
   }, [snippets, snippetFilter]);
 
-  const handleInsertSnippet = useCallback((snippetText: string) => {
-    insertAtCursor(snippetText);
+  const handleInsertSnippet = useCallback((snippet: Snippet) => {
+    // Rich snippets re-enter as formatted nodes; pre-rich ones as plain text+chips.
+    if (snippet.html && lexicalApiRef.current) lexicalApiRef.current.insertHtml(snippet.html);
+    else insertAtCursor(snippet.text);
   }, [insertAtCursor]);
 
   const handleConfirm = () => {
     // Don't trim — leading/trailing spaces are intentional ("oi " ≠ "oi"). Only
     // block submit when the field is entirely whitespace (trim used as emptiness check).
     if (!text.trim()) return;
-    onConfirm(text);
+    // HTML exported on demand at confirm (not per keystroke); null = no formatting
+    // in the doc → the action persists as a plain SendText, exactly as pre-rich.
+    onConfirm(text, lexicalApiRef.current?.getHtml() ?? null, plainOnly);
   };
 
   // Status strip counts. Lines: 0 for an empty payload, else newline count + 1.
@@ -552,6 +572,18 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
           </>
         ) : (
           <>
+            <label
+              className="flex items-center gap-1.5 mr-auto text-[11px] text-text-tertiary cursor-pointer select-none"
+              data-tip={tt('Keeps the formatting in the editor but delivers only plain text — for targets that mangle pasted HTML.', 'Mantém a formatação no editor mas entrega só texto puro — para alvos que estragam HTML colado.')}
+            >
+              <input
+                type="checkbox"
+                checked={plainOnly}
+                onChange={(e) => setPlainOnly(e.target.checked)}
+                className="accent-[var(--color-accent-solid)]"
+              />
+              Send as plain text
+            </label>
             <Button variant="secondary" onClick={onClose}>Cancel</Button>
             <Button variant="primary" onClick={handleConfirm} disabled={!text.trim()}>
               {mode === 'add' ? 'Add' : 'Save'}
@@ -580,6 +612,8 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
           <div className="relative flex-1 min-h-0 bg-bg-input sendtext-editor">
             <LexicalTokenEditor
               initialText={initialText}
+              initialHtml={initialHtml}
+              richMode
               onChange={setText}
               onSubmit={handleConfirm}
               apiRef={lexicalApiRef}
@@ -773,7 +807,7 @@ export function SendTextDialog({ mode, initialText = '', onConfirm, onClose }: S
                         >
                           <button
                             type="button"
-                            onClick={() => handleInsertSnippet(s.text)}
+                            onClick={() => handleInsertSnippet(s)}
                             disabled={deletingSnippetId === s.id}
                             className="flex-1 text-left min-w-0 disabled:cursor-default"
                           >

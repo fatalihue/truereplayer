@@ -1,6 +1,9 @@
 import { createElement, type ReactNode } from 'react';
 import {
   DecoratorNode,
+  type DOMConversionMap,
+  type DOMConversionOutput,
+  type DOMExportOutput,
   type LexicalNode,
   type NodeKey,
   type SerializedLexicalNode,
@@ -52,6 +55,32 @@ export class TokenNode extends DecoratorNode<ReactNode> {
     span.style.display = 'inline-block';
     span.style.verticalAlign = 'middle';
     return span;
+  }
+
+  // HTML round-trip for the rich-text payload (KeyHtml). Export: the raw token as
+  // TEXT wrapped in a marker span — a paste target that renders the HTML shows the
+  // literal "{var:name}" (the backend resolves tokens in the HTML flavor at send
+  // time, so what actually pastes is the resolved value). Import: the marker span
+  // re-chips when the dialog rebuilds the rich doc from a saved KeyHtml.
+  exportDOM(): DOMExportOutput {
+    const span = document.createElement('span');
+    span.setAttribute('data-token', this.__token);
+    span.textContent = this.__token;
+    return { element: span };
+  }
+
+  static importDOM(): DOMConversionMap | null {
+    return {
+      span: (domNode: HTMLElement) => {
+        if (!domNode.hasAttribute('data-token')) return null;
+        return {
+          conversion: (el: HTMLElement): DOMConversionOutput => ({
+            node: $createTokenNode(el.getAttribute('data-token') || ''),
+          }),
+          priority: 2,
+        };
+      },
+    };
   }
 
   updateDOM(): boolean {
