@@ -189,14 +189,37 @@ function $serializePlainForSend(): string {
     if ($isListNode(block)) {
       const ordered = block.getListType() === 'number';
       block.getChildren().forEach((item, i) => {
-        // A nested list inside an item re-introduces '\n\n' via getTextContent — collapse.
-        lines.push((ordered ? `${i + 1}. ` : '- ') + item.getTextContent().replace(/\n\n/g, '\n'));
+        if ($isElementNode(item)) lines.push((ordered ? `${i + 1}. ` : '- ') + $inlinePlain(item));
       });
+    } else if ($isElementNode(block)) {
+      lines.push($inlinePlain(block));
     } else {
       lines.push(block.getTextContent());
     }
   }
   return lines.join('\n');
+}
+
+// Plain-flavor inline walk — mirrors $inlineMarkdown but WITHOUT the *_~` markers: raw text,
+// token chips pass through (resolved at send), and a deliberate (toolbar) link degrades to
+// "text (url)" so the plain flavor keeps the destination instead of a bare getTextContent()
+// dropping it to label-only (a Rich-mode link pasted into a plain-only target would otherwise
+// lose its URL silently). AutoLinks fall through as their bare URL text (no duplication).
+// A nested list inside an item re-introduces '\n\n' via getTextContent — collapse it.
+function $inlinePlain(parent: ElementNode): string {
+  let out = '';
+  for (const child of parent.getChildren()) {
+    if ($isTokenNode(child)) {
+      out += child.getTextContent();
+    } else if ($isLinkNode(child) && !$isAutoLinkNode(child)) {
+      const linkText = child.getTextContent();
+      const url = child.getURL();
+      out += url && linkText !== url && !linkText.includes(url) ? `${linkText} (${url})` : linkText;
+    } else {
+      out += child.getTextContent().replace(/\n\n/g, '\n');
+    }
+  }
+  return out;
 }
 
 // WhatsApp/chat-style markdown serializer for the "Markdown" delivery mode. WhatsApp Web
