@@ -35,6 +35,7 @@ import {
   ListNode,
   ListItemNode,
   $isListNode,
+  $isListItemNode,
   INSERT_ORDERED_LIST_COMMAND,
   INSERT_UNORDERED_LIST_COMMAND,
   REMOVE_LIST_COMMAND,
@@ -125,11 +126,11 @@ export interface LexicalEditorHandle {
    */
   getHtml: () => string | null;
   /**
-   * Rich mode: the document as WhatsApp/chat-style markdown (*bold* _italic_
-   * ~strike~ `code`, "- "/"N. " lists), or null when unformatted. Delivered as
-   * PLAIN text so a markdown-rendering target (WhatsApp Web) formats it itself.
+   * Rich mode: the document as chat-style markdown, or null when unformatted. Delivered as PLAIN
+   * text so a markdown-rendering target formats it itself. `variant` picks the marks: 'whatsapp'
+   * (default: *bold* _italic_ ~strike~ `code`) or 'discord' (**bold** _italic_ ~~strike~~ `code`).
    */
-  getMarkdown: () => string | null;
+  getMarkdown: (variant?: 'whatsapp' | 'discord') => string | null;
 }
 
 interface LexicalTokenEditorProps {
@@ -177,6 +178,34 @@ function buildNodesFromText(text: string): LexicalNode[] {
   return nodes;
 }
 
+// Recursively emit one text line per list item, handling NESTED lists (a list Tab-indented inside
+// an item is modelled by Lexical as a ListItemNode whose only child is a ListNode). Each level is
+// indented 3 spaces and ordered numbering restarts per level; `inline` renders an item's own inline
+// content (with or without markdown markers). Without this, a nested list fell through to
+// getTextContent and lost its markers + indentation entirely.
+function $serializeListLines(list: ListNode, inline: (p: ElementNode) => string, depth: number): string[] {
+  const out: string[] = [];
+  const ordered = list.getListType() === 'number';
+  const indent = '   '.repeat(depth);
+  // Honor a custom ordered-list start (e.g. an <ol start="5"> pasted/imported from external HTML)
+  // so the plain/markdown flavors number 5. 6. 7. like the Rich flavor does, instead of 1. 2. 3.
+  let n = ordered ? list.getStart() - 1 : 0;
+  for (const item of list.getChildren()) {
+    if (!$isListItemNode(item)) continue;
+    const children = item.getChildren();
+    const nested = children.find($isListNode) as ListNode | undefined;
+    // A pure wrapper (only child is a nested list) carries no bullet of its own — just recurse.
+    if (nested && children.length === 1) {
+      out.push(...$serializeListLines(nested, inline, depth + 1));
+      continue;
+    }
+    n++;
+    out.push(indent + (ordered ? `${n}. ` : '- ') + inline(item));
+    if (nested) out.push(...$serializeListLines(nested, inline, depth + 1));
+  }
+  return out;
+}
+
 // Canonical plain payload for RICH mode. root.getTextContent() is WRONG here: Lexical
 // joins non-inline block siblings with a DOUBLE line break, and RichTextPlugin's Enter
 // creates ParagraphNodes (plain mode created LineBreakNodes) — so a zero-formatting
@@ -187,10 +216,7 @@ function $serializePlainForSend(): string {
   const lines: string[] = [];
   for (const block of $getRoot().getChildren()) {
     if ($isListNode(block)) {
-      const ordered = block.getListType() === 'number';
-      block.getChildren().forEach((item, i) => {
-        if ($isElementNode(item)) lines.push((ordered ? `${i + 1}. ` : '- ') + $inlinePlain(item));
-      });
+      lines.push(...$serializeListLines(block, $inlinePlain, 0));
     } else if ($isElementNode(block)) {
       lines.push($inlinePlain(block));
     } else {
@@ -205,11 +231,13 @@ function $serializePlainForSend(): string {
 // "text (url)" so the plain flavor keeps the destination instead of a bare getTextContent()
 // dropping it to label-only (a Rich-mode link pasted into a plain-only target would otherwise
 // lose its URL silently). AutoLinks fall through as their bare URL text (no duplication).
-// A nested list inside an item re-introduces '\n\n' via getTextContent — collapse it.
+// Nested lists are skipped here — $serializeListLines' recursion owns them.
 function $inlinePlain(parent: ElementNode): string {
   let out = '';
   for (const child of parent.getChildren()) {
-    if ($isTokenNode(child)) {
+    if ($isListNode(child)) {
+      continue; // a nested list is emitted by $serializeListLines' recursion, not inlined here
+    } else if ($isTokenNode(child)) {
       out += child.getTextContent();
     } else if ($isLinkNode(child) && !$isAutoLinkNode(child)) {
       const linkText = child.getTextContent();
@@ -229,25 +257,31 @@ function $inlinePlain(parent: ElementNode): string {
 // OUTSIDE the markers ("*hi* " not "*hi *") so WhatsApp still recognises the run; token chips
 // pass through raw (resolved at send); a labelled link becomes "text (url)" since WhatsApp
 // can't attach a URL to arbitrary text.
-const WA_MARKS = { bold: '*', italic: '_', strikethrough: '~', code: '`' } as const;
+type MdMarks = { bold: string; italic: string; strikethrough: string; code: string };
+// WhatsApp (default 'markdown' delivery) vs Discord: bold **, strikethrough ~~ (doubled) — the
+// only structural differences; italic _ and code ` are shared. Marks may be multi-char.
+const WA_MARKS: MdMarks = { bold: '*', italic: '_', strikethrough: '~', code: '`' };
+const DISCORD_MARKS: MdMarks = { bold: '**', italic: '_', strikethrough: '~~', code: '`' };
 
-function $wrapMarkdown(node: TextNode): string {
+function $wrapMarkdown(node: TextNode, marks: MdMarks): string {
   const value = node.getTextContent();
   if (value.trim() === '') return value;
   const lead = value.match(/^\s*/)![0];
   const trail = value.match(/\s*$/)![0];
   let core = value.slice(lead.length, value.length - trail.length);
-  if (node.hasFormat('code')) core = WA_MARKS.code + core + WA_MARKS.code;
-  if (node.hasFormat('strikethrough')) core = WA_MARKS.strikethrough + core + WA_MARKS.strikethrough;
-  if (node.hasFormat('italic')) core = WA_MARKS.italic + core + WA_MARKS.italic;
-  if (node.hasFormat('bold')) core = WA_MARKS.bold + core + WA_MARKS.bold;
+  if (node.hasFormat('code')) core = marks.code + core + marks.code;
+  if (node.hasFormat('strikethrough')) core = marks.strikethrough + core + marks.strikethrough;
+  if (node.hasFormat('italic')) core = marks.italic + core + marks.italic;
+  if (node.hasFormat('bold')) core = marks.bold + core + marks.bold;
   return lead + core + trail;
 }
 
-function $inlineMarkdown(parent: ElementNode): string {
+function $inlineMarkdown(parent: ElementNode, marks: MdMarks): string {
   let out = '';
   for (const child of parent.getChildren()) {
-    if ($isTokenNode(child)) {
+    if ($isListNode(child)) {
+      continue; // nested list handled by $serializeListLines' recursion
+    } else if ($isTokenNode(child)) {
       out += child.getTextContent();
     } else if ($isLinkNode(child) && !$isAutoLinkNode(child)) {
       // Deliberate (toolbar) link only. WhatsApp can't attach a URL to arbitrary text, so a
@@ -257,10 +291,11 @@ function $inlineMarkdown(parent: ElementNode): string {
       const url = child.getURL();
       out += url && linkText !== url && !linkText.includes(url) ? `${linkText} (${url})` : linkText;
     } else if ($isTextNode(child)) {
-      out += $wrapMarkdown(child);
+      out += $wrapMarkdown(child, marks);
     } else {
-      // Any other node (incl. an AutoLinkNode or a Tab-nested list) — collapse Lexical's
-      // double block separators so nested content doesn't inject stray blank lines.
+      // Any other node (e.g. an AutoLinkNode) — collapse Lexical's double block
+      // separators so nested content doesn't inject stray blank lines. (Nested lists
+      // never reach here; they're skipped above and owned by $serializeListLines.)
       out += child.getTextContent().replace(/\n\n/g, '\n');
     }
   }
@@ -278,16 +313,14 @@ function $hasDeliberateFormatting(): boolean {
     || ($isLinkNode(node) && !$isAutoLinkNode(node)));
 }
 
-function $serializeMarkdownForSend(): string {
+function $serializeMarkdownForSend(marks: MdMarks): string {
+  const inline = (p: ElementNode) => $inlineMarkdown(p, marks);
   const lines: string[] = [];
   for (const block of $getRoot().getChildren()) {
     if ($isListNode(block)) {
-      const ordered = block.getListType() === 'number';
-      block.getChildren().forEach((item, i) => {
-        if ($isElementNode(item)) lines.push((ordered ? `${i + 1}. ` : '- ') + $inlineMarkdown(item));
-      });
+      lines.push(...$serializeListLines(block, inline, 0));
     } else if ($isElementNode(block)) {
-      lines.push($inlineMarkdown(block));
+      lines.push(inline(block));
     } else {
       lines.push(block.getTextContent());
     }
@@ -382,12 +415,12 @@ function ImperativeAPIPlugin({
         });
         return html;
       },
-      getMarkdown: () => {
+      getMarkdown: (variant) => {
         let md: string | null = null;
         editor.getEditorState().read(() => {
           // Same gate as getHtml — an unformatted doc's markdown equals its plain text,
           // so return null and let the action stay plain.
-          if ($hasDeliberateFormatting()) md = $serializeMarkdownForSend();
+          if ($hasDeliberateFormatting()) md = $serializeMarkdownForSend(variant === 'discord' ? DISCORD_MARKS : WA_MARKS);
         });
         return md;
       },

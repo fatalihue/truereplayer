@@ -1828,10 +1828,13 @@ namespace TrueReplayer.Services
                         case "SendText":
                         {
                             // Delivery mode picks the flavor: "plain" → clean Key only; "markdown"
-                            // → the WhatsApp-style KeyMarkdown pasted as plain text (no HTML);
+                            // (WhatsApp) / "discord" → the pre-serialized KeyMarkdown pasted as plain
+                            // text (no HTML) — the flavor's marks are already baked in frontend-side;
                             // default/"rich" → Key + KeyHtml dual-format (target negotiates).
                             var mode = action.SendMode;
-                            string sendText = string.Equals(mode, "markdown", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(action.KeyMarkdown)
+                            bool markdownMode = string.Equals(mode, "markdown", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(mode, "discord", StringComparison.OrdinalIgnoreCase);
+                            string sendText = markdownMode && !string.IsNullOrEmpty(action.KeyMarkdown)
                                 ? action.KeyMarkdown : action.Key;
                             string? sendHtml = string.IsNullOrEmpty(mode) || string.Equals(mode, "rich", StringComparison.OrdinalIgnoreCase)
                                 ? action.KeyHtml : null;

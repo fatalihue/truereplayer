@@ -2718,10 +2718,12 @@ namespace TrueReplayer
             PushActionsUpdate();
         }
 
-        // Only the three known modes persist; anything else (or "rich") collapses to null so the
-        // default stays out of the JSON and older builds see no unknown value.
+        // Only the known non-default modes persist; anything else (or "rich") collapses to null so
+        // the default stays out of the JSON and older builds see no unknown value (they degrade to a
+        // plain paste of Key, a safe fallback). "discord" is a markdown flavor with Discord marks.
         private static string? NormalizeSendMode(string? mode)
             => string.Equals(mode, "markdown", StringComparison.OrdinalIgnoreCase) ? "markdown"
+             : string.Equals(mode, "discord", StringComparison.OrdinalIgnoreCase) ? "discord"
              : string.Equals(mode, "plain", StringComparison.OrdinalIgnoreCase) ? "plain"
              : null;
 

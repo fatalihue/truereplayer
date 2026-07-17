@@ -12,11 +12,12 @@ export interface ActionItem {
   actionType: string;
   key: string;
   // SendText rich flavors (Insert Text dialog): keyHtml = HTML fragment, keyMarkdown =
-  // WhatsApp-style markdown; both null when the doc has no formatting. sendMode picks delivery:
-  // undefined/'rich' = HTML+plain, 'markdown' = markdown-as-plain, 'plain' = clean text.
+  // chat-style markdown (WhatsApp or Discord marks per sendMode); both null when the doc has no
+  // formatting. sendMode picks delivery: undefined/'rich' = HTML+plain, 'markdown' (WhatsApp) /
+  // 'discord' = markdown-as-plain, 'plain' = clean text.
   keyHtml?: string | null;
   keyMarkdown?: string | null;
-  sendMode?: 'rich' | 'markdown' | 'plain' | null;
+  sendMode?: 'rich' | 'markdown' | 'plain' | 'discord' | null;
   x: number;
   y: number;
   delay: number;
