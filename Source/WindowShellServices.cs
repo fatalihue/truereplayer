@@ -159,10 +159,28 @@ namespace TrueReplayer.Services
             return Path.Combine(AppContext.BaseDirectory, fileName);
         }
 
-        // Tooltip mirrors the icon-resolution priority so the hover label always matches the color.
-        // Capped at 127 chars + null terminator to fit the szTip buffer used by the shell.
+        // Live run-state ("recording" | "replaying" | anything-else = idle), fed from
+        // WebViewBridge.PushStatusChange. While a run is active it's the tooltip HEADLINE — the icon
+        // colour already conveys the mode (clicker/paused/idle), so the tooltip surfaces what the
+        // icon can't: whether a macro is actually running right now.
+        private static string _runState = "ready";
+
+        public static void SetRunState(string status)
+        {
+            if (_runState == status) return;
+            _runState = status;
+            if (isInitialized) UpdateTrayIcon();
+        }
+
+        // Tooltip: run-state takes priority while active, else it mirrors the icon-resolution
+        // priority so the hover label matches the colour. Capped at 127 chars + null terminator
+        // to fit the szTip buffer used by the shell.
         private static string ResolveTooltip(AppSettingsManager.AppSettings settings)
         {
+            if (_runState == "replaying")
+                return "TrueReplayer — Replaying…";
+            if (_runState == "recording")
+                return "TrueReplayer — Recording…";
             if (settings.UseCursorClick)
                 return "TrueReplayer — Clicker mode";
             if (!UserProfile.Current.ProfileKeyEnabled)
