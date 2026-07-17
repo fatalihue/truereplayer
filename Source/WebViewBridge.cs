@@ -1931,14 +1931,27 @@ namespace TrueReplayer
                 }
             }
 
+            // A profile whose steps LAUNCH their own target (an ActivateWindow row with a
+            // LaunchPath) legitimately starts with the target window not yet open — refusing it
+            // below would block exactly the self-launch workflow ActivateWindow exists for. Presence
+            // of any enabled launcher row is the whole predicate: a launcher signals "this profile
+            // spawns windows" regardless of WHICH window, and a non-launching ActivateWindow (pure
+            // wait/focus) correctly still gets refused. IsSkipped is the real (inverted) field.
+            bool hasSelfLauncher = actions.Any(a =>
+                !a.IsSkipped
+                && string.Equals(a.ActionType, "ActivateWindow", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(a.LaunchPath));
+
             // Mirror the hotkey gate — but adapted for the button: TR is always foreground
             // when the user clicks Replay, so a literal IsForegroundWindowMatch would block
             // the button entirely. Instead, refuse to start when the configured target isn't
             // running anywhere — covers both regular and BringToFocus profiles, since neither
             // can do anything useful when their target process isn't running. Stop is always
             // allowed (clicking while replaying = abort). Skipped when no target is
-            // configured (preserves the "no profile" / "no target" workflows).
+            // configured (preserves the "no profile" / "no target" workflows) or when the
+            // profile launches its own target.
             if (!mainController.IsReplayInProgress()
+                && !hasSelfLauncher
                 && effTarget != null
                 && (!string.IsNullOrEmpty(effTarget.ProcessName) || !string.IsNullOrEmpty(effTarget.WindowTitle)))
             {
