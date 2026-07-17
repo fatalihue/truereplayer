@@ -19,6 +19,7 @@ A referência completa de tudo o que o TrueReplayer pode fazer. Primeira vez por
 - [Perfis e pastas](#perfis-e-pastas)
 - [Hotkeys e hotstrings](#hotkeys-e-hotstrings)
 - [Alvo de janela e coordenadas relativas](#alvo-de-janela-e-coordenadas-relativas)
+- [Automação multi-janela (Activate Window)](#automação-multi-janela-activate-window)
 - [Clicker mode (auto-clicker)](#clicker-mode-auto-clicker)
 - [Game mode](#game-mode)
 - [Send Text](#send-text)
@@ -112,10 +113,11 @@ A tabela central lista todas as ações do perfil. Colunas: **caixa de seleção
 | **Wait Image** | Bloqueia até que uma imagem de referência apareça na tela (opcionalmente dentro de uma região de busca recortada; confiança padrão ≈ 85%). |
 | **Wait Pixel Color** | Bloqueia até que o pixel em `(x, y)` corresponda a uma cor hex alvo (dentro da tolerância). |
 | **Run Profile** | Executa outro perfil como um subpasso — opcionalmente um número definido de vezes. Ciclos e cadeias com mais de 5 níveis de profundidade são bloqueados automaticamente. |
+| **Activate Window** | Traz a janela de outro app para primeiro plano no meio da execução — abre o app antes se não estiver aberto, espera por ele, opcionalmente restaura a posição/tamanho salvos. Muda só o alvo de foco do SO, nunca o contexto de coordenadas. Veja [Automação multi-janela](#automação-multi-janela-activate-window). |
 | **If / Else / EndIf** | Ramificação condicional — veja [Blocos condicionais](#blocos-condicionais-if--else--endif). |
 | **Browser actions** | Click / Type / Navigate / Wait element / Select option no Chrome — veja [Automação de navegador](#automação-de-navegador). |
 
-Insira ações pela **barra de ferramentas** (Send Keystroke, Send Text, Pause, Wait, Conditional, Browser, Run Profile) ou pela **paleta de comandos** (`Ctrl+K`). A maioria das ações abre um pequeno diálogo para configurá-las; clique na célula Details de uma ação depois para editá-la.
+Insira ações pela **barra de ferramentas** (Send Keystroke, Send Text, Pause, Wait, Conditional, Browser, Run Profile, Activate Window) ou pela **paleta de comandos** (`Ctrl+K`). A maioria das ações abre um pequeno diálogo para configurá-las; clique na célula Details de uma ação depois para editá-la.
 
 > **Dica — diferencie por cor, não por confiança.** O match de imagem compara a referência inteira, ótimo para forma/texto, mas é grosseiro para distinguir dois estados que diferem só na **cor** (ex.: um botão habilitado *verde* vs desabilitado *cinza*). Para isso use **Wait Pixel Color** (ou um **If** em *Pixel Color Match*): amostre um ponto no preenchimento sólido e case a cor dentro de uma tolerância. E não use **confiança em 100%** — uma tela viva nunca reproduz a referência pixel a pixel, então um match de 100% dá timeout (internamente é limitado logo abaixo de 100%).
 
@@ -197,6 +199,20 @@ Vincule um perfil (ou uma pasta inteira) a uma janela de aplicativo específica.
 - **Restore position / size** — encaixa a janela de volta numa geometria salva primeiro (use **Update window** para capturar a atual).
 
 > Se um perfil usa coordenadas relativas e sua janela alvo não é encontrada no momento da reprodução, a reprodução para com um erro (em vez de clicar no lugar errado).
+
+---
+
+## Automação multi-janela (Activate Window)
+
+A ação **Activate Window** troca qual app está em primeiro plano *no meio da execução*, então uma macro pode dirigir várias janelas em sequência. É diferente do [Alvo de janela](#alvo-de-janela-e-coordenadas-relativas) no nível do perfil acima: aquele prende um *perfil inteiro* a uma janela (e condiciona a hotkey dele); esta é uma única **ação** que você coloca na grade a cada troca de app.
+
+**Ela muda só o primeiro plano do SO — nunca o seu contexto de coordenadas.** Os cliques continuam resolvendo contra o alvo do perfil (ou a tela, quando não há nenhum), então o padrão que você escolhe depende de os passos após uma troca precisarem de cliques *relativos àquela nova janela*:
+
+- **Multi-janela simples (cliques absolutos).** Deixe o perfil **sem alvo**, grave os cliques em coordenadas absolutas de tela, e coloque uma linha **Activate Window** antes dos passos de cada app. Preencha **Path** para que ele abra o app se ainda não estiver aberto; deixe Path vazio para só esperar-e-focar uma janela já em execução.
+- **Multi-janela de precisão (cliques relativos por janela).** Faça um perfil **orquestrador** sem alvo que alterna **Activate Window X (launch)** → **Run Profile "passos-de-X"**, onde cada sub-perfil tem *seu próprio* alvo de janela + coordenadas relativas. Ativar X primeiro garante que o alvo do sub-perfil exista antes do primeiro clique relativo dele.
+- **Voltar para a sua janela.** Um **Activate Window** apontando para o próprio alvo do perfil é um passo "volte pra cá" no meio da execução, depois de um desvio para outro app.
+
+**Campos.** Case a janela por **Process** e/ou **Title** (Contains ou Regex) — use o **seletor** para escolher um processo em execução, ou **Detect window** para clicar no alvo. **Path / Args** abrem o app quando nenhuma janela casa (um caminho completo é o mais seguro; um `app.exe` puro só resolve se estiver no `PATH`). **Placement** opcionalmente move/redimensiona a janela ativada — só posicional; não muda onde os cliques caem. **Timeout / On timeout** decidem quanto esperar e se deve **Halt** (padrão — seguro, já que as teclas seguem a janela em foco) ou **Continue** se a janela não for encontrada ou focada. **Test** verifica se existe agora uma janela correspondente.
 
 ---
 
