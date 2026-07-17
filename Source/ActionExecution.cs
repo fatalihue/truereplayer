@@ -156,6 +156,8 @@ namespace TrueReplayer.Services
             {
                 OnReplayResumed?.Invoke();
             };
+            replayer.OnInputRequested += (id, label, menu) => OnInputRequested?.Invoke(id, label, menu);
+            replayer.OnInputDismissed += id => OnInputDismissed?.Invoke(id);
             // Loop counter — defined on the inner replayer (it's the one running the loop),
             // re-exposed here so MainWindow can wire the bridge callback alongside the other
             // ReplayService events. Same pass-through pattern as OnReplayPaused/Resumed above.
@@ -168,6 +170,13 @@ namespace TrueReplayer.Services
         // Re-exposed events from the inner replayer so MainWindow/WebViewBridge can wire UI feedback.
         public event Action<string, int>? OnReplayPaused;
         public event Action? OnReplayResumed;
+        // {input:Label} Ask-Input modal: request a value from the host, and dismiss a stale prompt.
+        public event Action<string, string, string[]?>? OnInputRequested;   // (requestId, label, menu?)
+        public event Action<string>? OnInputDismissed;                       // (requestId)
+
+        // Host → replay: the Ask-Input modal was submitted (cancelled=false) or cancelled.
+        public void CompleteInput(string requestId, string? value, bool cancelled)
+            => replayer.CompleteInput(requestId, value, cancelled);
 
         // Manual resume from a UI button (status-bar Resume, or the Clicker dashboard).
         // Resumes whichever is paused: a Clicker run (no-op if not paused) and/or a macro
@@ -1215,6 +1224,13 @@ namespace TrueReplayer.Services
         // relative coords but the target window isn't running). ReplayService wires this to
         // its onStatusChanged with the "error:" prefix so the bridge alerts the user.
         public Action<string>? OnReplayError;
+
+        // {input:Label} Ask-Input modal round-trip, raised from the token resolver. OnInputRequested
+        // asks the host to show the prompt; the host later calls CompleteInput with the answer.
+        // OnInputDismissed tells the host to close a still-open prompt (on cancel / Stop).
+        public event Action<string, string, string[]?>? OnInputRequested;   // (requestId, label, menu?)
+        public event Action<string>? OnInputDismissed;                       // (requestId)
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<string?>> _pendingInputs = new();
 
         public ActionReplayer(ObservableCollection<ActionItem> actions, DispatcherQueue dispatcherQueue, BrowserBridgeService? browserBridge = null)
         {
@@ -2922,6 +2938,10 @@ namespace TrueReplayer.Services
             // Data-loop current row: column name (lowercased) → cell value. Non-null only
             // while a "loop over data" run is stamping rows. {row:column} resolves from here.
             public IReadOnlyDictionary<string, string>? RowData { get; init; }
+            // {input:Label} provider: (label, menu-options-or-null) → the value to substitute.
+            // Null on the static Test-Action path (RunCtx.Empty) — there {input} resolves empty.
+            // On the live path it pauses replay and prompts the user (ProvideInputAsync).
+            public Func<string, string[]?, Task<string>>? InputProvider { get; init; }
             public static RunCtx Empty => default;
         }
 
@@ -2933,6 +2953,7 @@ namespace TrueReplayer.Services
             Iteration = _currentIteration,
             Row = _currentActionRow,
             RowData = _currentRowData,
+            InputProvider = ProvideInputAsync,
         };
 
         // Variable names: letters/digits/underscore, matched case-insensitively (stored keys are
@@ -2993,6 +3014,59 @@ namespace TrueReplayer.Services
                 _runtimeVariables.Remove(key);   // empty value = delete (documented contract)
             else
                 _runtimeVariables[key] = value;
+        }
+
+        // {input:Label} provider handed to the resolver via RunCtx. Ask-once-per-Label-per-run:
+        // the answer is stored in _runtimeVariables (so a later {var:Label} reuses it, and the rich
+        // SendText's double resolve — plain pass then html pass — prompts only once). Cancelling the
+        // prompt (or a Stop mid-prompt) aborts the run, mirroring the Stop hotkey.
+        private async Task<string> ProvideInputAsync(string label, string[]? menu)
+        {
+            var trimmed = (label ?? string.Empty).Trim();
+            var key = trimmed.ToLowerInvariant();
+            if (key.Length > 0 && _runtimeVariables.TryGetValue(key, out var cached))
+                return cached; // already answered (or pre-set by a same-named SetVariable) — reuse
+            var token = _cts?.Token ?? CancellationToken.None;
+            var answer = await RequestInputAsync(trimmed, menu, token);
+            if (answer == null)
+            {
+                // User cancelled the prompt → abort the run, same clean stop as the Stop hotkey.
+                try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
+                token.ThrowIfCancellationRequested();
+                throw new OperationCanceledException();
+            }
+            if (key.Length > 0) _runtimeVariables[key] = answer;
+            return answer;
+        }
+
+        // Pauses replay, raises the Ask-Input modal on the host, and awaits the answer. Returns the
+        // entered/selected string, or null if the user cancelled (or replay was stopped mid-prompt).
+        // Mirrors ExecutePause's TCS-park-on-dispatcher shape but returns a value.
+        private async Task<string?> RequestInputAsync(string label, string[]? menu, CancellationToken token)
+        {
+            var requestId = Guid.NewGuid().ToString("N")[..8];
+            var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingInputs[requestId] = tcs;
+            dispatcherQueue.TryEnqueue(() => OnInputRequested?.Invoke(requestId, label, menu));
+            try
+            {
+                // A Stop mid-prompt cancels the token → resolve as cancel (null) so the caller aborts.
+                using (token.Register(() => tcs.TrySetResult(null)))
+                    return await tcs.Task;
+            }
+            finally
+            {
+                _pendingInputs.TryRemove(requestId, out _);
+                dispatcherQueue.TryEnqueue(() => OnInputDismissed?.Invoke(requestId));
+            }
+        }
+
+        // Called by the host when the Ask-Input modal is submitted or cancelled. Completes the
+        // pending await: a cancel resolves to null (→ the run aborts); a submit resolves the value.
+        public void CompleteInput(string requestId, string? value, bool cancelled)
+        {
+            if (_pendingInputs.TryRemove(requestId, out var tcs))
+                tcs.TrySetResult(cancelled ? null : (value ?? string.Empty));
         }
 
         // Instance entry to the unified resolver for the SendText/paste path: passes the saved
@@ -3132,8 +3206,60 @@ namespace TrueReplayer.Services
             text = await ResolveClipboardTokensAsync(text, dispatcherQueue, clipboardOverride, escapeBracesInSubstitution, htmlEncodeSubstitution);
             text = ResolveDateTimeTokens(text, flavorSync);
             text = ResolveRandomTokens(text, flavorSync);
+            // {input:Label} runs BEFORE run-state so a {var:Label} in the same text sees the answer
+            // the prompt just stored. On the static Test-Action path runCtx.InputProvider is null →
+            // resolves empty (consume-always), keeping that path byte-identical.
+            text = await ResolveInputTokensAsync(text, runCtx, escapeBracesInSubstitution, htmlEncodeSubstitution);
             text = ResolveRunStateTokens(text, runCtx, escapeBracesInSubstitution, htmlEncodeSubstitution);
             return text;
+        }
+
+        // Matches {input:Label} and {input:Label|menu:a,b,c}. The label allows any char except '}'
+        // and '|' (so it can contain spaces); the optional menu carries a comma-separated option
+        // list. IgnoreCase like the other token regexes (the FE chip normalizer title-cases names).
+        // menu group is [^}]* (not +) so a present-but-empty "|menu:" still matches and falls
+        // through to the plain-field branch below, instead of failing the whole match and leaking
+        // the literal token. A stray '|' that isn't "|menu:" (a typo) still stays literal, like any
+        // other malformed token.
+        private static readonly Regex InputTokenRegex = new(
+            @"\{input:([^}|]+)(?:\|menu:([^}]*))?\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // Resolves {input:Label} / {input:Label|menu:a,b,c} by asking the user at replay time and
+        // substituting the answer. Awaits a UI round-trip, so it can't live in the sync run-state
+        // step. On the static Test-Action path (RunCtx.Empty) InputProvider is null → each token
+        // resolves to empty. The provider caches by Label (ask-once-per-run), so multiple
+        // occurrences and the rich SendText double-resolve prompt only once. The substituted value
+        // gets the same html-encode / brace-escape treatment as {var} for its target context.
+        private static async Task<string> ResolveInputTokensAsync(
+            string text, RunCtx runCtx, bool escapeBracesInSubstitution, bool htmlEncodeSubstitution)
+        {
+            if (string.IsNullOrEmpty(text) || !InputTokenRegex.IsMatch(text)) return text;
+            var sb = new System.Text.StringBuilder();
+            int last = 0;
+            foreach (Match m in InputTokenRegex.Matches(text))
+            {
+                sb.Append(text, last, m.Index - last);
+                last = m.Index + m.Length;
+                string value = string.Empty;
+                if (runCtx.InputProvider != null)
+                {
+                    var label = m.Groups[1].Value.Trim();
+                    string[]? menu = null;
+                    if (m.Groups[2].Success)
+                    {
+                        menu = m.Groups[2].Value.Split(',')
+                            .Select(o => o.Trim()).Where(o => o.Length > 0).ToArray();
+                        if (menu.Length == 0) menu = null; // "|menu:" with no real options → plain field
+                    }
+                    value = await runCtx.InputProvider(label, menu);
+                }
+                if (htmlEncodeSubstitution) value = HtmlEncodeValue(value);
+                if (escapeBracesInSubstitution) value = EscapeBracesForParser(value);
+                sb.Append(value);
+            }
+            sb.Append(text, last, text.Length - last);
+            return sb.ToString();
         }
 
         // Matches {random:a-b} — two non-negative integers separated by a hyphen.

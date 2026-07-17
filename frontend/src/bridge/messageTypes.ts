@@ -501,6 +501,10 @@ export type IncomingMessage =
   | { type: 'replay:chain'; payload: { stack: string[] } }
   | { type: 'replay:paused'; payload: { hotkey: string; timeoutMs: number } }
   | { type: 'replay:resumed'; payload: Record<string, never> }
+  // {input:Label} Ask-Input modal: the resolver paused replay to ask the user. `options` non-null
+  // → render a dropdown; null → a text field. inputDismiss closes a still-open prompt (Stop/cancel).
+  | { type: 'replay:inputRequest'; payload: { requestId: string; label: string; options: string[] | null } }
+  | { type: 'replay:inputDismiss'; payload: { requestId: string } }
   | { type: 'clicker:stats'; payload: { count: number; elapsedMs: number } }
   | { type: 'macro:loopProgress'; payload: { current: number; total: number } }
   | { type: 'settings:reset'; payload: Record<string, never> }
@@ -563,6 +567,8 @@ export type OutgoingMessage =
   | { type: 'recording:toggle'; payload: { insertIndex?: number } }
   | { type: 'replay:toggle'; payload: { loopEnabled: boolean; loopCount: string; intervalEnabled: boolean; intervalText: string } }
   | { type: 'replay:resume'; payload: Record<string, never> }
+  // Answer to a replay:inputRequest. cancelled=true aborts the run; else `value` is substituted.
+  | { type: 'replay:inputResult'; payload: { requestId: string; value: string; cancelled: boolean } }
   | { type: 'clicker:pause'; payload: Record<string, never> }
   | { type: 'actions:clear'; payload: Record<string, never> }
   | { type: 'actions:undo'; payload: Record<string, never> }

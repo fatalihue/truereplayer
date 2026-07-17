@@ -18,6 +18,7 @@ import { Toast } from './components/Toast';
 import { TooltipLayer } from './components/common/TooltipLayer';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { UpdateOverlay } from './components/UpdateOverlay';
+import { AskInputHost } from './components/AskInputDialog';
 import { ExtensionUpdateBanner } from './components/ExtensionUpdateBanner';
 import { ClickerDashboard } from './components/ClickerDashboard';
 import { CommandPalette } from './components/CommandPalette';
@@ -316,6 +317,7 @@ function AppShell() {
       {showThemeEditor && <ThemeEditor onClose={() => setShowThemeEditor(false)} />}
       {showDataEditor && <DataPanel onClose={() => setShowDataEditor(false)} />}
       <UpdateOverlay />
+      <AskInputHost />
 
       {/* One global tooltip renderer driving every [data-tip] in the app */}
       <TooltipLayer />

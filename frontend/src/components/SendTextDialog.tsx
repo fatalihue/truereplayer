@@ -154,9 +154,9 @@ function SnippetEditForm({
 
 interface PaletteChip {
   label: string;
-  insert?: string;             // direct-insert seed (byte-identical to 2.7.x)
-  prompt?: 'var' | 'row';      // opens the name prompt instead
-  tip: [string, string];       // tt(en, ptBr)
+  insert?: string;                     // direct-insert seed (byte-identical to 2.7.x)
+  prompt?: 'var' | 'row' | 'input';    // opens the name/label prompt instead
+  tip: [string, string];               // tt(en, ptBr)
 }
 
 const VALUE_CHIPS: PaletteChip[] = [
@@ -192,6 +192,7 @@ const RUN_STATE_CHIPS: PaletteChip[] = [
   { label: 'Counter', insert: '{counter}', tip: ['Current loop iteration (1, 2, 3…)', 'Iteração atual do loop (1, 2, 3…)'] },
   { label: 'Row #', insert: '{row}', tip: ["Current action's grid row number", 'Número da linha atual da action na grade'] },
   { label: 'Row column…', prompt: 'row', tip: ["Data table column of the current row (loop over data)", 'Coluna da tabela de dados na linha atual (loop over data)'] },
+  { label: 'Ask input…', prompt: 'input', tip: ['Prompt for a value at replay time (pauses the run)', 'Pergunta um valor durante a execução (pausa o replay)'] },
 ];
 
 // One chip recipe everywhere (SheetPanel parity): neutral surface, gold hover.
@@ -209,7 +210,7 @@ function NamePromptPopover({
   onInsert,
   onClose,
 }: {
-  kind: 'var' | 'row';
+  kind: 'var' | 'row' | 'input';
   anchor: HTMLElement;
   onInsert: (token: string) => void;
   onClose: () => void;
@@ -261,8 +262,11 @@ function NamePromptPopover({
   }, [anchor, onClose]);
 
   const commit = () => {
-    if (!name) return;
-    onInsert(`{${kind}:${name}}`);
+    // Trim so an input label of only spaces never emits a blank {input:   } (var/row names
+    // can't contain spaces, so trim is a no-op for them) — matches InputEditor's guard.
+    const n = name.trim();
+    if (!n) return;
+    onInsert(`{${kind}:${n}}`);
     onClose();
   };
 
@@ -287,28 +291,32 @@ function NamePromptPopover({
     >
       <div className="px-3 pt-2.5 pb-2">
         <div className="label-micro text-text-tertiary mb-1.5">
-          {kind === 'var' ? 'Variable name' : 'Data column'}
+          {kind === 'var' ? 'Variable name' : kind === 'input' ? 'Prompt label' : 'Data column'}
         </div>
         <input
           ref={inputRef}
           type="text"
           value={name}
-          onChange={(e) => setName(e.target.value.replace(/[^A-Za-z0-9_]/g, ''))}
+          // Input labels allow spaces (only the token-breaking { } | are stripped); var/row
+          // names are the tight [A-Za-z0-9_] the typing grammar chips.
+          onChange={(e) => setName(e.target.value.replace(kind === 'input' ? /[{}|]/g : /[^A-Za-z0-9_]/g, ''))}
           onKeyDown={(e) => {
             if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); commit(); }
           }}
           spellCheck={false}
-          placeholder={kind === 'var' ? 'name' : 'column'}
-          className="h-8 w-full px-2 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid placeholder:text-text-disabled"
+          placeholder={kind === 'var' ? 'name' : kind === 'input' ? 'What to ask' : 'column'}
+          className={`h-8 w-full px-2 text-xs bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid placeholder:text-text-disabled ${kind === 'input' ? '' : 'font-mono'}`}
         />
         <div className="text-[10px] text-text-tertiary mt-1.5 leading-relaxed">
           {kind === 'var'
             ? tt('Set by a Set Variable action while replaying.', 'Definida por uma action Set Variable durante a execução.')
+            : kind === 'input'
+            ? tt('Replay pauses and asks you for this value. Click the chip to add dropdown options.', 'A execução pausa e pede este valor. Clique no chip para adicionar opções de dropdown.')
             : tt("Column header from the profile's Data table.", 'Cabeçalho de coluna da tabela Data do profile.')}
         </div>
       </div>
       <div className="flex justify-end px-3 py-2 bg-bg-card border-t border-border-subtle">
-        <Button variant="primary" size="sm" onClick={commit} disabled={!name}>
+        <Button variant="primary" size="sm" onClick={commit} disabled={!name.trim()}>
           Insert
         </Button>
       </div>
@@ -346,7 +354,7 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
   // byte-identical for hand-typed edge cases, so open+Apply must not rewrite.
   const [clipDirty, setClipDirty] = useState(false);
   // {Variable…}/{Row column…} name prompt.
-  const [namePrompt, setNamePrompt] = useState<{ kind: 'var' | 'row'; anchor: HTMLElement } | null>(null);
+  const [namePrompt, setNamePrompt] = useState<{ kind: 'var' | 'row' | 'input'; anchor: HTMLElement } | null>(null);
   const lexicalApiRef = useRef<LexicalEditorHandle | null>(null);
 
   // Pick the emoji picker's built-in LIGHT/DARK variant from the ACTIVE theme's

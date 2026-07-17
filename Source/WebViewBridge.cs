@@ -635,6 +635,7 @@ namespace TrueReplayer
                     case "recording:toggle": HandleRecordingToggle(payload); break;
                     case "replay:toggle": HandleReplayToggle(payload); break;
                     case "replay:resume": HandleReplayResume(payload); break;
+                    case "replay:inputResult": HandleInputResult(payload); break;
                     case "clicker:pause": replayService.PauseClicker(); break;
                     case "actions:clear": HandleActionsClear(); break;
                     case "actions:undo": HandleUndo(); break;
@@ -2814,6 +2815,29 @@ namespace TrueReplayer
         public void PushReplayResumed()
         {
             SendMessage("replay:resumed", new { });
+        }
+
+        // {input:Label} Ask-Input modal: ask React to show the prompt (options != null → dropdown),
+        // and dismiss a still-open prompt when the run is cancelled/stopped mid-prompt.
+        public void PushInputRequest(string requestId, string label, string[]? options)
+        {
+            SendMessage("replay:inputRequest", new { requestId, label, options });
+        }
+
+        public void PushInputDismiss(string requestId)
+        {
+            SendMessage("replay:inputDismiss", new { requestId });
+        }
+
+        // The Ask-Input modal was submitted or cancelled — route the answer back to the paused
+        // resolver (cancelled → the run aborts).
+        private void HandleInputResult(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var r) ? (r.GetString() ?? "") : "";
+            if (string.IsNullOrEmpty(requestId)) return;
+            bool cancelled = payload.TryGetProperty("cancelled", out var c) && c.ValueKind == JsonValueKind.True;
+            string? value = payload.TryGetProperty("value", out var v) ? v.GetString() : null;
+            replayService.CompleteInput(requestId, value, cancelled);
         }
 
         // Clicker v2 — push live click stats to the React StatusBar. Called from ReplayService

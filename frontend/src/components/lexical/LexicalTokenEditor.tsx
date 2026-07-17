@@ -79,6 +79,10 @@ const KNOWN_TOKEN_NAMES: ReadonlySet<string> = new Set([
   'var',
   'counter',
   'row',
+  // Ask-Input (Text Blaze style): {input:Label} / {input:Label|menu:a,b,c} prompts the user at
+  // replay time. A spaced label or the |menu: variant falls outside TOKEN_REGEX, so those chip
+  // only via insertToken (the palette prompt); a bare {input:Name} chips when typed.
+  'input',
 ]);
 
 // Modifier segments allow digits/letters plus ',', '-' and '_' so {Random:1-10},

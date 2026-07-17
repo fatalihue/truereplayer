@@ -154,6 +154,16 @@ namespace TrueReplayer
             {
                 bridge?.PushReplayResumed();
             };
+            // {input:Label} Ask-Input modal — the resolver raises these; the bridge shows / hides the
+            // prompt in React, and replay:inputResult routes the answer back to ReplayService.
+            replayService.OnInputRequested += (requestId, label, menu) =>
+            {
+                bridge?.PushInputRequest(requestId, label, menu);
+            };
+            replayService.OnInputDismissed += (requestId) =>
+            {
+                bridge?.PushInputDismiss(requestId);
+            };
 
             // Clicker v2 — forward click stats (count + elapsedMs) to the React StatusBar so
             // the user sees "Clicked 1,234 · 8.3/s · 02:14" live during Clicker runs. Throttled
