@@ -303,6 +303,11 @@ namespace TrueReplayer.Interop
         [DllImport("user32.dll")]
         public static extern bool BringWindowToTop(IntPtr hWnd);
 
+        // True when the window's thread hasn't pumped its message queue for ~5s (frozen app).
+        // Heuristic — a genuine hang guard, not a general "ready" signal for a slow-but-pumping loader.
+        [DllImport("user32.dll")]
+        public static extern bool IsHungAppWindow(IntPtr hWnd);
+
         // Two overloads: GET writes the value through a ref; SET passes the new value IN the
         // pvParam slot itself (SPI_SETFOREGROUNDLOCKTIMEOUT is a "value-in-pointer" action).
         [DllImport("user32.dll", SetLastError = true)]

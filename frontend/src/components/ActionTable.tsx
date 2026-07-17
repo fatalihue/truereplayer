@@ -397,7 +397,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const prevActionsLength = useRef(actions.length);
   const prevProfileRef = useRef(activeProfile);
   const wasRecording = useRef(false);
-  const [sendTextEdit, setSendTextEdit] = useState<{ index: number; text: string; html?: string | null; mode?: 'rich' | 'markdown' | 'plain' } | null>(null);
+  const [sendTextEdit, setSendTextEdit] = useState<{ index: number; text: string; html?: string | null; mode?: 'rich' | 'markdown' | 'plain' | 'discord' } | null>(null);
   const [runProfileEdit, setRunProfileEdit] = useState<{ index: number; profileName: string; repeatCount: number } | null>(null);
   // Editing a Keystroke OR HoldKey row reopens the unified KeystrokeCaptureDialog —
   // these two ActionTypes share the same edit surface now that Press/Hold is a mode
@@ -2083,7 +2083,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             what the editor shows. Other action types keep the plain
                             displayKey text — they don't have token syntax. */}
                         {action.actionType === 'SendText'
-                          ? <SendTextPreview text={action.key} badge={action.keyHtml && action.sendMode !== 'plain' ? (action.sendMode === 'markdown' ? 'md' : 'rich') : undefined} />
+                          ? <SendTextPreview text={action.key} badge={action.keyHtml && action.sendMode !== 'plain' ? (action.sendMode === 'markdown' || action.sendMode === 'discord' ? 'md' : 'rich') : undefined} />
                           // Pause / HoldKey embed a "<n> ms" duration in displayKey;
                           // render it in the Delay column's format (thousands-separated
                           // number + quiet "ms" suffix). All other types stay plain.

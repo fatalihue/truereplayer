@@ -1828,10 +1828,13 @@ namespace TrueReplayer.Services
                         case "SendText":
                         {
                             // Delivery mode picks the flavor: "plain" → clean Key only; "markdown"
-                            // → the WhatsApp-style KeyMarkdown pasted as plain text (no HTML);
+                            // (WhatsApp) / "discord" → the pre-serialized KeyMarkdown pasted as plain
+                            // text (no HTML) — the flavor's marks are already baked in frontend-side;
                             // default/"rich" → Key + KeyHtml dual-format (target negotiates).
                             var mode = action.SendMode;
-                            string sendText = string.Equals(mode, "markdown", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(action.KeyMarkdown)
+                            bool markdownMode = string.Equals(mode, "markdown", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(mode, "discord", StringComparison.OrdinalIgnoreCase);
+                            string sendText = markdownMode && !string.IsNullOrEmpty(action.KeyMarkdown)
                                 ? action.KeyMarkdown : action.Key;
                             string? sendHtml = string.IsNullOrEmpty(mode) || string.Equals(mode, "rich", StringComparison.OrdinalIgnoreCase)
                                 ? action.KeyHtml : null;
@@ -2404,6 +2407,24 @@ namespace TrueReplayer.Services
                 HandleActivateWindowFailure(action, "could not bring window to foreground");
                 return;
             }
+
+            // Readiness: don't fire the following keystrokes into a FROZEN target. Poll
+            // IsHungAppWindow within the SAME Timeout budget the window-not-found loop above used
+            // (sw is still running). A responsive window returns false on the first check, so this
+            // costs nothing on the normal path — it only waits for a genuinely hung app, then applies
+            // the On-Timeout policy if it never recovers. IsHungAppWindow is heuristic (true only
+            // after ~5s of an unpumped queue), so it's a frozen-app guard, not a "slow loader ready"
+            // signal — the 300ms settle below still covers the ordinary focus-animation wait.
+            while (NativeMethods.IsHungAppWindow(hwnd))
+            {
+                if (sw.ElapsedMilliseconds >= timeoutMs)
+                {
+                    HandleActivateWindowFailure(action, "target window not responding");
+                    return;
+                }
+                await Task.Delay(150, token); // token-aware — the Stop hotkey aborts instantly
+            }
+
             await Task.Delay(300, token); // settle — same wait the replay-start focus uses
 
             // Optional placement: move/resize the window we just activated. Deliberately uses the
@@ -4216,6 +4237,18 @@ namespace TrueReplayer.Services
 
         private async Task PasteTextViaClipboard(string text, string? html, CancellationToken token)
         {
+            // SEC: KeyHtml is untrusted markup (a foreign/hand-edited .trprofile could carry a tracking
+            // beacon, hidden text, or a javascript:/file: link) that the paste TARGET interprets. Scrub
+            // it to the editor-producible allowlist at this single choke point — reader-side covers ALL
+            // provenance (import, hand-edited profile JSON on disk, and profiles imported before the
+            // sanitizer shipped), which an import-only gate would miss. Sanitize returns null on an
+            // empty/hostile result or a parse error, so we fail CLOSED to plain text and never emit raw
+            // markup. Cost is negligible against the two Task.Delay(50) + SendInput already on this path.
+            // NOT done in PrepareRichHtmlForSend: that runs pre-token-resolution, so it wouldn't see the
+            // final bytes (resolution itself can't inject — htmlEncodeSubstitution is on — but the sink
+            // is where the truly-final CF_HTML string exists).
+            if (!string.IsNullOrEmpty(html))
+                html = HtmlSanitizer.Sanitize(html);
             // CF_UNICODETEXT convention is CRLF, and classic Win32 EDIT / WinForms
             // multiline targets do NOT break lines on a lone LF. The list modifiers
             // (sort/range/lines/dedupe/reverse) emit LF-joined text — normalize any

@@ -13,7 +13,7 @@ export interface Grid {
 // tabs and newlines, and "" is a literal quote. Excel/Sheets quote any cell holding a
 // tab, newline, or quote, so without this a multi-line message-body cell would be torn
 // across rows. Unquoted cells pass through verbatim (so values keep spaces).
-export function tokenizeTsvGrid(text: string): string[][] {
+export function tokenizeTsvGrid(text: string, delim: string = '\t'): string[][] {
   const src = text.replace(/\r\n/g, '\n');
   const grid: string[][] = [];
   let row: string[] = [];
@@ -30,7 +30,7 @@ export function tokenizeTsvGrid(text: string): string[][] {
       cell += ch; i++; continue;
     }
     if (ch === '"' && cell === '') { inQuotes = true; i++; continue; } // opening quote (start of cell)
-    if (ch === '\t') { row.push(cell); cell = ''; i++; continue; }
+    if (ch === delim) { row.push(cell); cell = ''; i++; continue; }
     if (ch === '\n') { row.push(cell); grid.push(row); row = []; cell = ''; i++; continue; }
     cell += ch; i++;
   }
@@ -38,6 +38,20 @@ export function tokenizeTsvGrid(text: string): string[][] {
   row.push(cell);
   grid.push(row);
   return grid;
+}
+
+// Guess a CSV/TSV file's delimiter from its first line — tab, semicolon, or comma (Brazilian Excel
+// writes ';'). Whichever is most frequent on line 1 wins; defaults to tab when none appears. The
+// quote-unaware count is fine for a heuristic (a delimiter inside a quoted header is rare).
+export function sniffDelimiter(text: string): string {
+  const firstLine = text.replace(/\r\n/g, '\n').split('\n', 1)[0] ?? '';
+  const counts: [string, number][] = [
+    ['\t', (firstLine.match(/\t/g) || []).length],
+    [';', (firstLine.match(/;/g) || []).length],
+    [',', (firstLine.match(/,/g) || []).length],
+  ];
+  counts.sort((a, b) => b[1] - a[1]);
+  return counts[0][1] > 0 ? counts[0][0] : '\t';
 }
 
 // Parse pasted TSV into a data table. Trailing all-empty rows are dropped. When

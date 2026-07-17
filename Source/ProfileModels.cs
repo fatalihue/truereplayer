@@ -198,6 +198,10 @@ namespace TrueReplayer.Models
         public DateTime? CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
         public string? AppMinVersion { get; set; }
+        // Number of actions in the profile, read at list-load (the profile is already deserialized
+        // + its actions iterated there, so this is free). Lets the Export dialog show per-profile
+        // weight, matching the Import Preview which already renders "N actions".
+        public int ActionCount { get; set; }
         public bool HasWindowTarget { get; set; }
         public string? WindowTargetProcessName { get; set; }
         public string? WindowTargetWindowTitle { get; set; }

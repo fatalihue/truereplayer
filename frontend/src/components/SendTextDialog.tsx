@@ -35,7 +35,7 @@ interface SendTextDialogProps {
   onClose: () => void;
 }
 
-type SendMode = 'rich' | 'markdown' | 'plain';
+type SendMode = 'rich' | 'markdown' | 'plain' | 'discord';
 
 interface Snippet {
   id: string;
@@ -477,7 +477,7 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
     if (!text.trim()) return;
     // Flavors exported on demand at confirm (not per keystroke); null = no formatting
     // in the doc → the action persists as a plain SendText, exactly as pre-rich.
-    onConfirm(text, lexicalApiRef.current?.getHtml() ?? null, lexicalApiRef.current?.getMarkdown() ?? null, sendMode);
+    onConfirm(text, lexicalApiRef.current?.getHtml() ?? null, lexicalApiRef.current?.getMarkdown(sendMode === 'discord' ? 'discord' : 'whatsapp') ?? null, sendMode);
   };
 
   // Status strip counts. Lines: 0 for an empty payload, else newline count + 1.
@@ -576,7 +576,7 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
           <>
             <div
               className="mr-auto flex items-center gap-1.5"
-              data-tip={tt('Delivery: Rich pastes formatting where the target accepts it (Gmail, Crisp, Word) and plain text elsewhere. Markdown pastes *bold*/_italic_ as plain text for chat apps (WhatsApp). Plain sends the raw text.', 'Entrega: Rich cola formatação onde o alvo aceita (Gmail, Crisp, Word) e texto puro no resto. Markdown cola *negrito*/_itálico_ como texto puro para apps de chat (WhatsApp). Plain envia o texto cru.')}
+              data-tip={tt('Delivery: Rich pastes formatting where the target accepts it (Gmail, Crisp, Word) and plain text elsewhere. Markdown pastes *bold*/_italic_ as plain text for WhatsApp; Discord uses **bold**/~~strike~~. Plain sends the raw text.', 'Entrega: Rich cola formatação onde o alvo aceita (Gmail, Crisp, Word) e texto puro no resto. Markdown cola *negrito*/_itálico_ como texto puro para WhatsApp; Discord usa **negrito**/~~tachado~~. Plain envia o texto cru.')}
             >
               <span className="text-[10px] uppercase tracking-wide text-text-tertiary">Delivery</span>
               <SegmentedControl<SendMode>
@@ -586,6 +586,7 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
                 options={[
                   { value: 'rich', label: 'Rich' },
                   { value: 'markdown', label: 'Markdown' },
+                  { value: 'discord', label: 'Discord' },
                   { value: 'plain', label: 'Plain' },
                 ]}
               />

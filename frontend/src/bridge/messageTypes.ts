@@ -12,11 +12,12 @@ export interface ActionItem {
   actionType: string;
   key: string;
   // SendText rich flavors (Insert Text dialog): keyHtml = HTML fragment, keyMarkdown =
-  // WhatsApp-style markdown; both null when the doc has no formatting. sendMode picks delivery:
-  // undefined/'rich' = HTML+plain, 'markdown' = markdown-as-plain, 'plain' = clean text.
+  // chat-style markdown (WhatsApp or Discord marks per sendMode); both null when the doc has no
+  // formatting. sendMode picks delivery: undefined/'rich' = HTML+plain, 'markdown' (WhatsApp) /
+  // 'discord' = markdown-as-plain, 'plain' = clean text.
   keyHtml?: string | null;
   keyMarkdown?: string | null;
-  sendMode?: 'rich' | 'markdown' | 'plain' | null;
+  sendMode?: 'rich' | 'markdown' | 'plain' | 'discord' | null;
   x: number;
   y: number;
   delay: number;
@@ -206,6 +207,7 @@ export interface ProfileEntry {
   createdAt?: string | null;   // ISO 8601 UTC, e.g. "2026-05-24T12:34:56.789Z"
   updatedAt?: string | null;
   appMinVersion?: string | null;
+  actionCount?: number;   // per-profile action count (mirror), for the Export dialog weight column
 }
 
 // ── Sharing metadata payloads ──
@@ -223,12 +225,20 @@ export interface ImportPreviewProfile {
   /** Server-computed: false when this profile's AppMinVersion exceeds the running version. */
   compatible: boolean;
   actionCount: number;
+  /** Number of embedded reference PNGs bundled for this profile. */
+  imageCount?: number;
   hotkey: string | null;
   hotstring: string | null;
   targetProcessName: string | null;
   targetWindowTitle: string | null;
+  /** RunProfile refs this profile calls, each classified: 'inEnvelope' = bundled here;
+   *  'localOnly' = will call YOUR existing profile of that name; 'missing' = nothing to call. */
+  dependencies?: { name: string; status: 'inEnvelope' | 'localOnly' | 'missing' }[];
   /** True when a profile with this exact name already exists locally. */
   nameConflict: boolean;
+  /** On a name conflict, the local profile's version/updated-at, for an incoming-vs-yours diff. */
+  localVersion?: number | null;
+  localUpdatedAt?: string | null;
 }
 
 /** Full Import Preview payload pushed by the bridge after the user picks a .trprofile. */
@@ -700,7 +710,7 @@ export type OutgoingMessage =
   | { type: 'window:runEndFlash'; payload: { enabled: boolean } }
   | { type: 'window:runEndSound'; payload: { enabled: boolean } }
   | { type: 'window:reloadUI'; payload: Record<string, never> }
-  | { type: 'profile:export'; payload: { names: string[]; includeOrganization?: boolean } }
+  | { type: 'profile:export'; payload: { names: string[]; includeOrganization?: boolean; includeDependencies?: boolean } }
   | { type: 'profile:import'; payload: Record<string, never> }
   | { type: 'clipboard:read'; payload: Record<string, never> }
   | { type: 'update:check'; payload: Record<string, never> }

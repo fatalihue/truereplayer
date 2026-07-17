@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { X, ChevronDown, Crosshair } from 'lucide-react';
+import { Crosshair } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { useTt } from '../state/LanguageContext';
 import { Toggle } from './common/Toggle';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
+import { WindowTargetFields, type WindowTargetFieldsHandle } from './WindowTargetFields';
 
 type Scope = 'profile' | 'folder';
 
@@ -103,7 +104,6 @@ export function TargetConfigDialog({
   const [bringToFocus, setBringToFocus] = useState(initial.bringToFocus);
   const [restorePosition, setRestorePosition] = useState(initial.restorePosition ?? false);
   const [restoreSize, setRestoreSize] = useState(initial.restoreSize ?? false);
-  const [isDetecting, setIsDetecting] = useState(false);
 
   // Tracks whether the user explicitly edited target fields (process/title/match mode or detected
   // a new window) since opening. When false on an inherited-target profile, "Set Target" keeps
@@ -146,14 +146,9 @@ export function TargetConfigDialog({
     return () => window.clearTimeout(t);
   }, [testResult]);
 
-  // Process picker — toggled on demand because enumerating windows is non-trivial. The list is
-  // cached for the dialog's lifetime; user can refresh by closing/reopening the picker.
-  type ProcEntry = { name: string; title: string };
-  const [processList, setProcessList] = useState<ProcEntry[] | null>(null);
-  const [showProcessPicker, setShowProcessPicker] = useState(false);
-  const [processFilter, setProcessFilter] = useState('');
-
   const markEdited = () => { setEdited(true); setTestResult(null); setTestInFlight(false); };
+  // Lets handleSubmit cancel an in-flight detection on the keep-open convert path (see below).
+  const wtfRef = useRef<WindowTargetFieldsHandle>(null);
 
   // Inline regex validation. We compile in the browser as a syntax check only — the backend
   // recompiles on its own (with timeout) for actual matching. Mirrors backend behavior: empty
@@ -171,20 +166,10 @@ export function TargetConfigDialog({
     }
   }, [titleMatchMode, windowTitle]);
 
-  // Subscribe to detection events. Self-contained so the parent doesn't need to wire the bridge.
+  // Subscribe to Test + convert events. Detection + the process list are owned by WindowTargetFields.
   useEffect(() => {
     return subscribe((msg) => {
-      if (msg.type === 'windowTarget:detected') {
-        const p = msg.payload as { processName: string; windowTitle: string };
-        setProcessName(p.processName);
-        setWindowTitle(p.windowTitle);
-        markEdited();
-        setIsDetecting(false);
-        setTestResult(null);
-      } else if (msg.type === 'windowTarget:detectState') {
-        const p = msg.payload as { detecting: boolean };
-        setIsDetecting(p.detecting);
-      } else if (msg.type === 'windowTarget:testResult') {
+      if (msg.type === 'windowTarget:testResult') {
         // Enforce a minimum visible duration for the "Testing…" state. When the backend
         // returns in less than MIN_TEST_INFLIGHT_MS, defer the apply so the user perceives
         // a clean state transition (colored → neutral testing → new colored) instead of
@@ -211,56 +196,18 @@ export function TargetConfigDialog({
         setConvertHint(null);
         setConvertHintDismissed(true);
         setEdited(false);
-      } else if (msg.type === 'process:list') {
-        const p = msg.payload as { processes: ProcEntry[] };
-        setProcessList(p.processes);
       }
     });
   }, [subscribe]);
 
-  // Esc priority (most specific → least): close process picker → cancel detection →
-  // close dialog. The transient overlays absorb Esc at window-CAPTURE level — before
-  // React's root listeners — so DialogShell (which owns dialog-close Esc on the card)
-  // can't tear the whole dialog down while there's something more specific to dismiss.
-  // When neither overlay is active the handler leaves the event alone and it falls
-  // through to the shell's card keydown, which closes with the shared exit motion.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (showProcessPicker) {
-        e.stopPropagation();
-        setShowProcessPicker(false);
-      } else if (isDetecting) {
-        e.stopPropagation();
-        // Backend treats a second detectWindow message as toggle-off.
-        send({ type: 'profile:detectWindow', payload: {} });
-        setIsDetecting(false);
-      }
-    };
-    window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
-  }, [isDetecting, showProcessPicker, send]);
-
-  const handleDetect = () => {
-    markEdited();
-    send({ type: 'profile:detectWindow', payload: {} });
-  };
-
-  // Stop detection if the dialog is dismissed while still listening for the click.
-  const stopDetectionIfActive = () => {
-    if (isDetecting) {
-      send({ type: 'profile:detectWindow', payload: {} });
-      setIsDetecting(false);
-    }
-  };
-
+  // Detection lifecycle (the click-capture and its Esc-to-cancel) + the process picker now live
+  // inside WindowTargetFields, which stops any active detection on unmount — so closing the dialog
+  // via Cancel/Remove/Set Target no longer needs an explicit stopDetectionIfActive here.
   const handleCancel = () => {
-    stopDetectionIfActive();
     onCancel();
   };
 
   const handleRemove = () => {
-    stopDetectionIfActive();
     onRemove?.();
   };
 
@@ -269,7 +216,10 @@ export function TargetConfigDialog({
   // message or run against the stale (pre-save) profile target. Default {} keeps every
   // other caller (Set Target button, Enter key) on the existing semantics.
   const handleSubmit = (extras: { convertDirection?: 'toRelative' | 'toAbsolute' } = {}) => {
-    stopDetectionIfActive();
+    // Stop any in-flight window detection on submit. Matters for the keep-open "Apply target &
+    // convert" path, which does NOT unmount the component (so the unmount cleanup can't fire); the
+    // ordinary close paths self-heal via unmount. No-op when nothing is detecting.
+    wtfRef.current?.stopDetection();
     // Defense in depth — submitDisabled already covers this, but a stray Enter press could
     // bypass the click handler's disabled check on some browsers.
     if (regexError !== null) return;
@@ -369,145 +319,19 @@ export function TargetConfigDialog({
         <p className="text-xs text-text-secondary mb-4">{description}</p>
 
         <div className="space-y-3">
-          <div>
-            <label className="block text-xs text-text-tertiary mb-1">Process Name</label>
-            <div className="relative">
-              <input
-                type="text"
-                value={processName}
-                onChange={(e) => { setProcessName(e.target.value); markEdited(); }}
-                placeholder="e.g. chrome.exe"
-                className="w-full h-8 px-3 pr-14 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
-              />
-              <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                {processName && (
-                  <button
-                    onClick={() => { setProcessName(''); markEdited(); }}
-                    className="p-1 text-text-disabled hover:text-text-secondary transition-colors"
-                  >
-                    <X size={12} />
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    const next = !showProcessPicker;
-                    setShowProcessPicker(next);
-                    if (next && processList === null) {
-                      // Lazy fetch — first open triggers enumeration. Re-opens reuse the cache;
-                      // user can refresh by closing+reopening the dialog if processes changed.
-                      send({ type: 'process:list', payload: {} });
-                    }
-                  }}
-                  data-tip={tt('Pick from running processes', 'Escolher de processos em execução')}
-                  className={`p-1 transition-colors ${showProcessPicker ? 'text-accent' : 'text-text-tertiary hover:text-text-secondary'}`}
-                >
-                  <ChevronDown size={14} />
-                </button>
-              </div>
-              {showProcessPicker && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-bg-card border border-border-default rounded shadow-lg z-10 max-h-64 overflow-hidden flex flex-col">
-                  <input
-                    type="text"
-                    value={processFilter}
-                    onChange={(e) => setProcessFilter(e.target.value)}
-                    autoFocus
-                    placeholder="Filter…"
-                    className="w-full h-7 px-2 text-[11px] text-text-primary bg-bg-input border-b border-border-subtle outline-none"
-                  />
-                  <div className="overflow-y-auto flex-1">
-                    {processList === null ? (
-                      <div className="px-2 py-2 text-[11px] text-text-tertiary">Loading…</div>
-                    ) : (() => {
-                      const f = processFilter.trim().toLowerCase();
-                      const items = f.length === 0
-                        ? processList
-                        : processList.filter(p =>
-                            p.name.toLowerCase().includes(f) || p.title.toLowerCase().includes(f));
-                      if (items.length === 0) {
-                        return <div className="px-2 py-2 text-[11px] text-text-tertiary">No processes match.</div>;
-                      }
-                      return items.map((p) => (
-                        <button
-                          key={p.name}
-                          onClick={() => {
-                            setProcessName(p.name);
-                            markEdited();
-                            setShowProcessPicker(false);
-                            setProcessFilter('');
-                          }}
-                          className="w-full text-left px-2 py-1 text-[11px] hover:bg-bg-elevated transition-colors"
-                        >
-                          <span className="font-mono text-text-primary">{p.name}</span>
-                          {p.title && (
-                            <span className="text-text-tertiary"> — {p.title}</span>
-                          )}
-                        </button>
-                      ));
-                    })()}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs text-text-tertiary mb-1">
-              Window Title{titleMatchMode === 'contains' ? ' (partial match)' : ' (regex)'}
-            </label>
-            <div className="relative">
-              <input
-                type="text"
-                value={windowTitle}
-                onChange={(e) => { setWindowTitle(e.target.value); markEdited(); }}
-                placeholder={titleMatchMode === 'contains' ? 'e.g. Notepad' : 'e.g. (Chrome|Firefox)'}
-                className={`w-full h-8 px-3 pr-7 text-xs text-text-primary bg-bg-input border rounded outline-none focus:border-accent-solid ${
-                  regexError ? 'border-recording/60 focus:border-recording' : 'border-border-default'
-                }`}
-              />
-              {windowTitle && (
-                <button onClick={() => { setWindowTitle(''); markEdited(); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-disabled hover:text-text-secondary transition-colors">
-                  <X size={12} />
-                </button>
-              )}
-            </div>
-            {regexError && (
-              <p className="text-[10px] text-recording mt-1 leading-tight">{regexError}</p>
-            )}
-            <div className="flex items-center gap-1.5 mt-1.5">
-              <button
-                onClick={() => { setTitleMatchMode('contains'); markEdited(); }}
-                data-tip={tt('Match windows whose title contains this text (partial, case-insensitive)', 'Corresponde a janelas cujo título contém este texto (parcial, sem diferenciar maiúsculas)')}
-                className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
-                  titleMatchMode === 'contains'
-                    ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
-                    : 'bg-transparent border-border-default text-text-tertiary hover:text-text-secondary'
-                }`}
-              >Contains</button>
-              <button
-                onClick={() => { setTitleMatchMode('regex'); markEdited(); }}
-                data-tip={tt('Match the window title against a regular expression pattern', 'Corresponde o título da janela a um padrão de expressão regular (regex)')}
-                className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
-                  titleMatchMode === 'regex'
-                    ? 'bg-accent-solid/15 border-accent-solid/40 text-accent'
-                    : 'bg-transparent border-border-default text-text-tertiary hover:text-text-secondary'
-                }`}
-              >Regex</button>
-            </div>
-          </div>
+          <WindowTargetFields
+            ref={wtfRef}
+            value={{ processName, windowTitle, titleMatchMode }}
+            onChange={(p) => {
+              if (p.processName !== undefined) setProcessName(p.processName);
+              if (p.windowTitle !== undefined) setWindowTitle(p.windowTitle);
+              if (p.titleMatchMode !== undefined) setTitleMatchMode(p.titleMatchMode);
+            }}
+            onEdit={markEdited}
+            titleError={regexError}
+            processLabel="Process Name"
+          />
         </div>
-
-        <button
-          onClick={handleDetect}
-          className={`mt-3 w-full h-8 text-xs border rounded transition-colors ${
-            isDetecting
-              ? 'text-recording border-recording/40 bg-recording/10 hover:bg-recording/20'
-              : 'text-accent border-accent-solid/40 hover:bg-accent-solid/10'
-          }`}
-        >
-          {isDetecting
-            ? 'Waiting for click... (click target window)'
-            : 'Detect Window (click on target)'}
-        </button>
 
         {/* Test Match — checks current fields against whichever window the user has open behind
             the modal. The TR window itself is excluded server-side so the test reports against

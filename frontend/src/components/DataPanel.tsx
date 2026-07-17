@@ -2,7 +2,7 @@ import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, 
 import ReactDOM from 'react-dom';
 import {
   Table2, TriangleAlert, Repeat, Plus, Trash2, Wand2, Check, Copy,
-  MoreHorizontal, ClipboardPaste,
+  MoreHorizontal, ClipboardPaste, FileUp, Search, X,
 } from 'lucide-react';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
@@ -11,7 +11,7 @@ import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
 import { useTt } from '../state/LanguageContext';
 import { DataPasteSurface, type PasteMode } from './DataPasteSurface';
-import { parseTsv, encodeTsv, deepEqualGrid, type Grid } from '../lib/tsv';
+import { parseTsv, encodeTsv, deepEqualGrid, tokenizeTsvGrid, sniffDelimiter, type Grid } from '../lib/tsv';
 
 interface DataPanelProps {
   onClose: () => void;
@@ -254,6 +254,7 @@ const GridRow = memo(function GridRow({
   editingCol,
   readOnly,
   zebra,
+  find,
   onEdit,
   onCellDone,
   onDuplicate,
@@ -265,6 +266,7 @@ const GridRow = memo(function GridRow({
   editingCol: number | null;
   readOnly: boolean;
   zebra: boolean;
+  find: string;   // lowercased search term; empty = no highlight
   onEdit: (r: number, c: number) => void;
   onCellDone: (r: number, c: number, value: string | null, nav?: 'down' | 'right' | 'left') => void;
   onDuplicate: (r: number) => void;
@@ -272,6 +274,7 @@ const GridRow = memo(function GridRow({
 }) {
   return (
     <tr
+      data-row={r}
       className={`group h-row border-b border-border-subtle transition-colors hover:bg-bg-elevated ${
         zebra ? 'bg-[color-mix(in_srgb,var(--color-text-primary)_1%,transparent)]' : ''
       }`}
@@ -281,13 +284,14 @@ const GridRow = memo(function GridRow({
       </td>
       {Array.from({ length: colCount }, (_, c) => {
         const editing = editingCol === c;
+        const matched = find !== '' && (row[c] ?? '').toLowerCase().includes(find);
         return (
           <td
             key={c}
             onClick={() => { if (!readOnly && !editing) onEdit(r, c); }}
             className={`px-2 text-xs font-mono text-text-secondary whitespace-nowrap truncate align-middle ${
               readOnly ? '' : 'cursor-text'
-            } ${editing ? 'shadow-[inset_0_0_0_1.5px_var(--color-accent-solid)] bg-bg-input' : ''}`}
+            } ${editing ? 'shadow-[inset_0_0_0_1.5px_var(--color-accent-solid)] bg-bg-input' : matched ? 'bg-[color-mix(in_srgb,var(--color-warning)_22%,transparent)]' : ''}`}
           >
             {editing ? (
               <CellEditor
@@ -339,7 +343,15 @@ export function DataPanel({ onClose }: DataPanelProps) {
   // so commit-then-save flows (Ctrl+Enter from the cell editor) read fresh data.
   const gridRef = useRef<Grid>({ headers: [], rows: [] });
   const [grid, setGridState] = useState<Grid>(gridRef.current);
+  // Undo stack: snapshots taken at the single updateGrid choke point, so it covers setCell / addRow /
+  // delete / paste-apply / clear uniformly. Storing the PRE-update reference is enough because every
+  // updater is immutable (returns a fresh {headers, rows} — cells are never mutated in place), so the
+  // old reference stays frozen. Bounded so a long editing session can't grow unbounded.
+  const undoRef = useRef<Grid[]>([]);
+  const UNDO_CAP = 50;
   const updateGrid = useCallback((updater: (g: Grid) => Grid) => {
+    undoRef.current.push(gridRef.current);
+    if (undoRef.current.length > UNDO_CAP) undoRef.current.shift();
     gridRef.current = updater(gridRef.current);
     setGridState(gridRef.current);
   }, []);
@@ -352,10 +364,44 @@ export function DataPanel({ onClose }: DataPanelProps) {
   const editingRef = useRef<Editing>(null);
   useEffect(() => { editingRef.current = editing; }, [editing]);
 
+  // Pop the last snapshot back into the grid. No-op on an empty stack. Cancels any in-flight cell
+  // edit so it can't re-apply over the restored grid.
+  const undo = useCallback(() => {
+    const prev = undoRef.current.pop();
+    if (!prev) return;
+    gridRef.current = prev;
+    setGridState(prev);
+    setEditing(null);
+  }, []);
+
   const [headerMenu, setHeaderMenu] = useState<{ c: number; anchor: HTMLElement } | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copiedTimer = useRef<number | undefined>(undefined);
   const [armedClear, setArmedClear] = useState(false);
+
+  // ── Find + highlight (NOT filter — hiding rows would break the index-keyed grid + the counts that
+  // derive from the full table). Highlights every matching cell; next/prev scrolls each hit into view.
+  const gridScrollRef = useRef<HTMLDivElement>(null);
+  const [find, setFind] = useState('');
+  const findLower = find.trim().toLowerCase();
+  const [findPos, setFindPos] = useState(0);
+  const matchRows = useMemo(() => {
+    if (findLower === '') return [];
+    const out: number[] = [];
+    grid.rows.forEach((row, r) => { if (row.some(cell => cell.toLowerCase().includes(findLower))) out.push(r); });
+    return out;
+  }, [findLower, grid.rows]);
+  const jumpToMatch = (delta: number) => {
+    if (matchRows.length === 0) return;
+    const next = ((findPos + delta) % matchRows.length + matchRows.length) % matchRows.length;
+    setFindPos(next);
+    gridScrollRef.current?.querySelector(`[data-row="${matchRows[next]}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  };
+  // Keep the cursor in range: reset to 0 on a new term, and clamp when the grid mutates under a
+  // live search (a delete can shrink matchRows below findPos) so the "N/M" counter never reads out
+  // of range.
+  useEffect(() => { setFindPos(0); }, [findLower]);
+  useEffect(() => { setFindPos(p => Math.min(p, Math.max(0, matchRows.length - 1))); }, [matchRows.length]);
   const [escArmed, setEscArmed] = useState(false);
   const escArmedRef = useRef(false);
   const escTimer = useRef<number | undefined>(undefined);
@@ -615,6 +661,25 @@ export function DataPanel({ onClose }: DataPanelProps) {
     setPasteFirstRowHeader(true);
     setPasteOpen(true);
   };
+
+  // ── CSV/TSV file import ── routes the file through the SAME paste surface (Replace) so its live
+  // preview + first-row-header toggle apply. Sniffs the delimiter (Brazilian Excel writes ';') and
+  // re-encodes to the TAB-delimited TSV the surface parses; quoting is preserved by tokenizeTsvGrid.
+  const csvInputRef = useRef<HTMLInputElement>(null);
+  const importCsvFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result ?? '');
+      if (text.trim() === '') return;
+      const grid = tokenizeTsvGrid(text, sniffDelimiter(text));
+      prefillRef.current = '';
+      setPasteMode('replace');
+      setPasteFirstRowHeader(true);
+      setPasteText(encodeTsv(grid[0] ?? [], grid.slice(1)));
+      setPasteOpen(true);
+    };
+    reader.readAsText(file);
+  };
   const handlePasteModeChange = (m: PasteMode) => {
     // Switching to Append clears the box IFF it still equals the prefill —
     // otherwise the user would append the table to itself.
@@ -783,6 +848,17 @@ export function DataPanel({ onClose }: DataPanelProps) {
           if (pasteOpen) applyPaste();
           else handleSave();
         }
+        // Ctrl+Z undoes the last grid change — but not while the paste surface is open (its textarea
+        // owns undo), while a cell editor is focused, or while any text input (e.g. the Find box) has
+        // focus (those own their own text undo). Undo-only: there is no redo stack.
+        else if (
+          (e.key === 'z' || e.key === 'Z') && e.ctrlKey && !e.shiftKey
+          && !pasteOpen && !editingRef.current
+          && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)
+        ) {
+          e.preventDefault();
+          undo();
+        }
       }}
     >
       {/* Body — `relative` is load-bearing: the paste surface overlays inside it. */}
@@ -810,6 +886,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
             </div>
           ) : (
             <div
+              ref={gridScrollRef}
               tabIndex={-1}
               className="flex-1 min-h-0 overflow-auto bg-bg-surface outline-none"
             >
@@ -894,6 +971,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
                       editingCol={editing?.kind === 'cell' && editing.r === r ? editing.c : null}
                       readOnly={readOnly}
                       zebra={r % 2 === 1}
+                      find={findLower}
                       onEdit={handleEdit}
                       onCellDone={handleCellDone}
                       onDuplicate={handleDuplicateRow}
@@ -1057,8 +1135,45 @@ export function DataPanel({ onClose }: DataPanelProps) {
             </>
           )}
 
+          {/* FIND — highlights matches in place (never hides rows). */}
+          <div className="px-3 pt-2 pb-1 border-t border-border-subtle mt-auto">
+            <div className="relative flex items-center">
+              <Search size={12} className="absolute left-2 text-text-tertiary pointer-events-none" />
+              <input
+                type="text"
+                value={find}
+                onChange={(e) => setFind(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') jumpToMatch(e.shiftKey ? -1 : 1); }}
+                placeholder={tt('Find in table…', 'Buscar na tabela…')}
+                className="w-full h-7 pl-7 pr-14 text-[11px] bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+              />
+              {find && (
+                <button
+                  type="button"
+                  onClick={() => setFind('')}
+                  className="absolute right-1.5 text-text-disabled hover:text-text-secondary"
+                  data-tip={tt('Clear', 'Limpar')}
+                >
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+            {findLower !== '' && (
+              <div className="flex items-center gap-2 mt-1 px-0.5 text-[10px] text-text-tertiary">
+                <span>{matchRows.length === 0 ? tt('No matches', 'Nenhum resultado') : `${matchRows.length} row${matchRows.length === 1 ? '' : 's'}`}</span>
+                {matchRows.length > 0 && (
+                  <span className="ml-auto flex items-center gap-1">
+                    <button type="button" onClick={() => jumpToMatch(-1)} className="px-1 hover:text-text-primary" data-tip={tt('Previous (Shift+Enter)', 'Anterior (Shift+Enter)')}>↑</button>
+                    <button type="button" onClick={() => jumpToMatch(1)} className="px-1 hover:text-text-primary" data-tip={tt('Next (Enter)', 'Próximo (Enter)')}>↓</button>
+                    <span className="tabular-nums">{findPos + 1}/{matchRows.length}</span>
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* DATA */}
-          <div className="label-micro text-text-tertiary px-3 pt-2 pb-1 border-t border-border-subtle mt-auto">Data</div>
+          <div className="label-micro text-text-tertiary px-3 pt-2 pb-1 border-t border-border-subtle">Data</div>
           <div className="flex flex-col pb-2">
             <button
               type="button"
@@ -1067,6 +1182,26 @@ export function DataPanel({ onClose }: DataPanelProps) {
             >
               <ClipboardPaste size={12} className="shrink-0" />
               {tt('Paste / bulk edit…', 'Colar / edição em massa…')}
+            </button>
+            <input
+              ref={csvInputRef}
+              type="file"
+              accept=".csv,.tsv,.txt"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) importCsvFile(f);
+                e.target.value = ''; // allow re-picking the same file
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => csvInputRef.current?.click()}
+              className="flex items-center gap-2 px-3 h-7 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-card transition-colors"
+              data-tip={tt('Load a .csv/.tsv file — the delimiter is auto-detected (comma, semicolon, or tab).', 'Carrega um arquivo .csv/.tsv — o delimitador é detectado automaticamente (vírgula, ponto e vírgula ou tab).')}
+            >
+              <FileUp size={12} className="shrink-0" />
+              {tt('Import CSV…', 'Importar CSV…')}
             </button>
             <button
               type="button"

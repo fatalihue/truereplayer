@@ -116,6 +116,10 @@
     <ProjectCapability Include="Msix" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Allowlist re-serializer for imported SendText rich text (Source/HtmlSanitizer.cs). A real
+         HTML parser is required — regex cannot safely parse HTML, and the paste targets are
+         Word/Outlook/Gmail's own quirky importers. MIT, netstandard2.0, managed-only. -->
+    <PackageReference Include="AngleSharp" Version="1.1.2" />
     <PackageReference Include="CommunityToolkit.WinUI.UI.Controls.DataGrid" Version="7.1.2" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.1742" />

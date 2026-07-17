@@ -19,6 +19,7 @@ The complete reference for everything TrueReplayer can do. New here? Start with 
 - [Profiles & folders](#profiles--folders)
 - [Hotkeys & hotstrings](#hotkeys--hotstrings)
 - [Window targeting & relative coordinates](#window-targeting--relative-coordinates)
+- [Multi-window automation (Activate Window)](#multi-window-automation-activate-window)
 - [Clicker mode (auto-clicker)](#clicker-mode-auto-clicker)
 - [Game mode](#game-mode)
 - [Send Text](#send-text)
@@ -112,10 +113,11 @@ The central table lists every action in the profile. Columns: **selection checkb
 | **Wait Image** | Block until a reference image appears on screen (optionally within a cropped search region; confidence default ≈ 85%). |
 | **Wait Pixel Color** | Block until the pixel at `(x, y)` matches a target hex color (within tolerance). |
 | **Run Profile** | Run another profile as a sub-step — optionally a set number of times. Cycles and chains deeper than 5 levels are blocked automatically. |
+| **Activate Window** | Bring another app's window to the foreground mid-run — launch it first if it isn't open, wait for it, optionally restore its saved position/size. Changes the OS focus target only, never the coordinate context. See [Multi-window automation](#multi-window-automation-activate-window). |
 | **If / Else / EndIf** | Conditional branch — see [Conditional blocks](#conditional-blocks-if--else--endif). |
 | **Browser actions** | Click / Type / Navigate / Wait element / Select option in Chrome — see [Browser automation](#browser-automation). |
 
-Insert actions from the **toolbar** (Send Keystroke, Send Text, Pause, Wait, Conditional, Browser, Run Profile) or the **command palette** (`Ctrl+K`). Most actions open a small dialog to configure them; click an action's Details cell later to edit it.
+Insert actions from the **toolbar** (Send Keystroke, Send Text, Pause, Wait, Conditional, Browser, Run Profile, Activate Window) or the **command palette** (`Ctrl+K`). Most actions open a small dialog to configure them; click an action's Details cell later to edit it.
 
 > **Tip — match by colour, not confidence.** Image matching compares the whole reference, so it's great for shape/text but a blunt tool for telling apart two states that differ only in **colour** (e.g. an enabled *green* vs a disabled *grey* button). For that, use **Wait Pixel Color** (or an **If** on *Pixel Color Match*): sample a point in the solid fill and match the colour within a tolerance. Also don't set **confidence to 100%** — a live screen never reproduces a reference pixel-for-pixel, so a 100% match times out (it's capped just under 100% internally).
 
@@ -197,6 +199,20 @@ Tie a profile (or a whole folder) to a specific application window.
 - **Restore position / size** — snap the window back to a saved geometry first (use **Update window** to capture the current one).
 
 > If a profile uses relative coordinates and its target window isn't found at replay time, replay stops with an error (rather than clicking the wrong place).
+
+---
+
+## Multi-window automation (Activate Window)
+
+The **Activate Window** action switches which app is in front *mid-run*, so one macro can drive several windows in turn. It's distinct from the profile-level [Window targeting](#window-targeting--relative-coordinates) above: that pins a *whole profile* to one window (and gates its hotkey); this is a single **action** you drop into the grid at each app switch.
+
+**It changes only the OS foreground — never your coordinate context.** Clicks keep resolving against the profile's target (or the screen, when there's none), so the pattern you pick depends on whether the steps after a switch need clicks *relative to that new window*:
+
+- **Simple multi-window (absolute clicks).** Leave the profile with **no target**, record clicks in absolute screen coordinates, and drop an **Activate Window** row before each app's steps. Fill **Path** so it launches the app if it isn't already open; leave Path empty to just wait-and-focus an already-running window.
+- **Precision multi-window (relative clicks per window).** Make a target-less **orchestrator** profile that alternates **Activate Window X (launch)** → **Run Profile "X-steps"**, where each sub-profile owns *its own* window target + relative coordinates. Activating X first guarantees the sub-profile's target exists before its first relative click.
+- **Return to your own window.** An **Activate Window** pointing at the profile's own target is a mid-run "come back here" step after a detour into another app.
+
+**Fields.** Match the window by **Process** and/or **Title** (Contains or Regex) — use the **picker** to choose a running process, or **Detect window** to click the target. **Path / Args** launch the app when no window matches (a full path is safest; a bare `app.exe` only resolves if it's on `PATH`). **Placement** optionally moves/resizes the activated window — positional only; it does *not* change where clicks land. **Timeout / On timeout** decide how long to wait and whether to **Halt** (default — safe, since keystrokes follow whatever window is focused) or **Continue** if the window can't be found or focused. **Test** checks whether a matching window exists right now.
 
 ---
 
