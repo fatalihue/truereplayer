@@ -1300,6 +1300,24 @@ namespace TrueReplayer.Controllers
             // regardless of casing, mirroring allocatedNames / onDisk.
             var importedRenames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+            // Every profile this batch actually wrote, kept for the RunProfile reference remap that
+            // runs after the loop (see below). Held purely to avoid re-reading what we just wrote —
+            // the remap is still a genuine SECOND write pass, since the rename set isn't complete
+            // until the loop ends. Cheap: profile.Actions IS entry.Actions (same collection), so this
+            // holds no more action data than the envelope already does.
+            var writtenProfiles = new List<(string FinalName, string TargetPath, UserProfile Profile)>();
+
+            // original name -> finalName, for entries this batch actually BUMPED. Drives the remap
+            // pass after the loop. Populated inside the loop from the loop-local (entry.Name,
+            // finalName) pair — deliberately NOT rebuilt from importedRenames afterwards, even
+            // though that dictionary holds the same pairs: it is OrdinalIgnoreCase, and .NET's
+            // indexer keeps the FIRST-inserted key when a later comparer-equal name lands in the
+            // same bucket. A hand-crafted envelope carrying both "Farm" and "farm" therefore
+            // collapses to one slot whose key is a name the caller never wrote — which would rewrite
+            // a CORRECT reference onto the wrong profile. Keying off the loop-local name keeps the
+            // two variants in distinct slots. ORDINAL to match replay resolution (see the pass).
+            var renamedTargets = new Dictionary<string, string>(StringComparer.Ordinal);
+
             foreach (var entry in toImport)
             {
                 // Per-entry isolation (minimal-diff wrap): a single throwing entry (bad
@@ -1455,12 +1473,82 @@ namespace TrueReplayer.Controllers
                 // write, so Skipped/incompatible/unsafe entries are never added — exactly the gate the
                 // merge needs (no dangling refs, never touches the pre-existing same-named profile).
                 importedRenames[entry.Name] = finalName;
+                // Same gate as importedRenames (only reached on a real write), so the remap pass
+                // below can never touch a skipped/incompatible entry or a pre-existing profile.
+                writtenProfiles.Add((finalName, targetPath, profile));
+                // Record the rename for the RunProfile remap. Exact-case Ordinal comparison so this
+                // is precisely "did a collision bump this entry?" — a Skip never gets here, so a
+                // "keep mine" ref correctly keeps pointing at the recipient's local copy.
+                if (!string.Equals(entry.Name, finalName, StringComparison.Ordinal))
+                    renamedTargets[entry.Name] = finalName;
                 }
                 catch (Exception ex)
                 {
                     try { DiagnosticLog.Info($"[Import] Skipped '{entry.Name}': {ex.Message}"); } catch { }
                     skipped++;
                     continue;
+                }
+            }
+
+            // ── RunProfile reference remap (second write pass) ──────────────────────────────
+            // A renamed sub-profile leaves its callers' RunProfile rows pointing at the ORIGINAL
+            // name. That name isn't dangling on the receiving machine — it late-binds to the
+            // RECIPIENT's unrelated same-named profile and EXECUTES it. Renaming a profile in-app
+            // already carries this obligation (HandleProfileRename -> ScanRunProfileReferencesAsync,
+            // "otherwise those references become silent no-ops at replay time"); import was the one
+            // path that forgot.
+            //
+            // WHY AFTER THE LOOP: SaveProfileAsync above is per-entry, and renamedTargets is filled
+            // per-entry too, so it is incomplete at every iteration. Rewriting in-loop would fix only
+            // refs to targets processed EARLIER in the envelope — and [A(calls B), B] (caller before
+            // callee) is the common authoring order, i.e. exactly the failing case. (Building the MAP
+            // in-loop is fine and is what we do; only the REWRITE has to wait for the full map.)
+            // Deferring the writes themselves isn't an option either: allocatedNames is claimed only
+            // after a successful write, and the per-entry try/catch counts a throwing save as skipped
+            // and continues the batch. Both need the write to stay inside the iteration.
+            //
+            // WHY ORDINAL (both the renamedTargets comparer and the Trim below): replay resolves a
+            // sub-profile by Ordinal equality on the TRIMMED key — HandleRunProfile does
+            // action.Key?.Trim(), then LoadProfileByNameAsync matches `p.Name == profileName`. The
+            // remap must mirror that EXACTLY. Matching ignore-case would hit a Key of "farm" against
+            // an envelope entry "Farm" and rewrite it to the exact "Farm (2)", which DOES resolve —
+            // turning a reference that is dead-but-harmless today into one that starts firing
+            // synthetic input. If LoadProfileByNameAsync is ever aligned to OrdinalIgnoreCase, this
+            // comparer and that Trim must be revisited in the SAME change.
+            if (renamedTargets.Count > 0)
+            {
+                // Only profiles THIS batch wrote. Deliberately not ScanRunProfileReferencesAsync
+                // despite the exact shape match: that one walks every profile on disk and would
+                // repoint the recipient's pre-existing, untouched profiles at freshly-imported
+                // renames. It's the reference implementation, not a callee.
+                foreach (var (finalName, targetPath, profile) in writtenProfiles)
+                {
+                    bool touched = false;
+                    foreach (var act in profile.Actions)
+                    {
+                        if (act.ActionType != "RunProfile") continue;
+                        var refName = act.Key?.Trim();
+                        if (string.IsNullOrEmpty(refName)) continue;
+                        if (renamedTargets.TryGetValue(refName, out var newName))
+                        {
+                            act.Key = newName;
+                            touched = true;
+                        }
+                    }
+                    if (!touched) continue;
+
+                    // Own isolation, mirroring the per-entry try/catch above: the profile is already
+                    // correctly written and only its refs are stale, so a failed re-save must not
+                    // unwind the batch.
+                    try
+                    {
+                        await SettingsManager.SaveProfileAsync(targetPath, profile);
+                        DiagnosticLog.Info($"[Import] Remapped RunProfile reference(s) in '{finalName}'.");
+                    }
+                    catch (Exception ex)
+                    {
+                        try { DiagnosticLog.Info($"[Import] RunProfile remap re-save failed for '{finalName}': {ex.Message}"); } catch { }
+                    }
                 }
             }
 

@@ -6827,6 +6827,14 @@ namespace TrueReplayer
                     var profile = CreateProfileFromState();
                     profile.CustomHotkey = UserProfile.Current.CustomHotkey;
                     await SettingsManager.SaveProfileAsync(CurrentProfilePath, profile);
+                    // Re-read the list so the in-memory ProfileEntries mirror (and the caches
+                    // LoadProfileListAsync rebuilds from it — window targets, referenced images)
+                    // reflect what we just wrote. PushProfilesUpdate at the end of this handler only
+                    // PROJECTS that mirror, so without this an overwrite-save pushes stale metadata
+                    // (e.g. Profile Info's "Updated" keeps the previous timestamp). Every other save
+                    // path already does this — ProfileController.SaveProfileAsync refreshes right
+                    // after its write, as do the hotkey/hotstring handlers.
+                    await profileController.RefreshProfileListAsync(true);
                     UserProfile.Current = profile;
                     AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
                     HasUnsavedChanges = false;
