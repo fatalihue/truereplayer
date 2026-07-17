@@ -4,6 +4,7 @@ import type { ImportPreviewPayload, ImportConflictResolution } from '../bridge/m
 import { Checkbox } from './Checkbox';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
+import { useTt } from '../state/LanguageContext';
 
 interface ImportPreviewDialogProps {
   preview: ImportPreviewPayload;
@@ -29,6 +30,7 @@ interface ImportPreviewDialogProps {
  * during confirm; this dialog only shows whether a name conflict EXISTS via a chip.
  */
 export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPreviewDialogProps) {
+  const tt = useTt();
   // Default selection: every compatible profile checked. The user opts out per item
   // rather than opting in — matches the "I'm importing this file because I want it all"
   // mental model and matches Stream Deck / VS Code profile import UX.
@@ -251,6 +253,9 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
 
                   <div className="mt-0.5 flex items-center gap-3 text-[11px] text-text-tertiary flex-wrap">
                     <span>{p.actionCount} action{p.actionCount === 1 ? '' : 's'}</span>
+                    {!!p.imageCount && (
+                      <span>{p.imageCount} image{p.imageCount === 1 ? '' : 's'}</span>
+                    )}
                     {p.hotkey && (
                       <span className="flex items-center gap-1">
                         <Keyboard size={10} />
@@ -265,6 +270,35 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
                   {p.targetProcessName && (
                     <div className="mt-0.5 text-[11px] text-text-tertiary truncate">
                       Targets: <span className="font-mono">{p.targetProcessName}</span>
+                    </div>
+                  )}
+
+                  {/* Run Profile dependency chips: green = bundled here, neutral = will call your
+                      existing profile of that name, amber = nothing to call (silent skip at replay). */}
+                  {p.dependencies && p.dependencies.length > 0 && (
+                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                      <span className="text-[10px] text-text-tertiary">Runs:</span>
+                      {p.dependencies.map(d => (
+                        <span
+                          key={d.name}
+                          className="text-[10px] px-1.5 py-0.5 rounded border font-mono"
+                          data-tip={
+                            d.status === 'inEnvelope'
+                              ? tt('Bundled in this file — will be imported alongside.', 'Incluído neste arquivo — será importado junto.')
+                              : d.status === 'localOnly'
+                                ? tt('Not in this file — will call YOUR existing profile of this name.', 'Não está neste arquivo — vai chamar o SEU perfil existente com este nome.')
+                                : tt('Not found here or locally — this Run Profile step will do nothing at replay.', 'Não existe aqui nem localmente — este passo Run Profile não fará nada na reprodução.')
+                          }
+                          style={{
+                            color: d.status === 'inEnvelope' ? 'var(--color-replay)'
+                                 : d.status === 'missing' ? 'var(--color-warning)'
+                                 : 'var(--color-text-tertiary)',
+                            borderColor: 'var(--color-border-subtle)',
+                          }}
+                        >
+                          {d.name}
+                        </span>
+                      ))}
                     </div>
                   )}
 
@@ -301,13 +335,24 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
                       collides with an existing local profile AND the row is selected
                       (no point picking a resolution for a row you've unchecked). */}
                   {p.nameConflict && p.compatible && isChecked && (
-                    <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-400/90">
-                      <span>Name exists:</span>
-                      <ResolutionChips
-                        value={conflictResolutions[p.name] ?? 'rename'}
-                        onChange={(res) => setConflictResolutions(prev => ({ ...prev, [p.name]: res }))}
-                      />
-                    </div>
+                    <>
+                      {/* Incoming-vs-yours diff so Overwrite is an informed choice. Present, don't
+                          editorialize — a newer date doesn't imply better. */}
+                      {p.localVersion != null && (
+                        <div className="mt-1.5 text-[11px] text-text-tertiary">
+                          Incoming v{p.profileVersion}{p.updatedAt ? ` · ${formatRelative(p.updatedAt)}` : ''}
+                          {' → '}
+                          Yours v{p.localVersion}{p.localUpdatedAt ? ` · ${formatRelative(p.localUpdatedAt)}` : ''}
+                        </div>
+                      )}
+                      <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-400/90">
+                        <span>Name exists:</span>
+                        <ResolutionChips
+                          value={conflictResolutions[p.name] ?? 'rename'}
+                          onChange={(res) => setConflictResolutions(prev => ({ ...prev, [p.name]: res }))}
+                        />
+                      </div>
+                    </>
                   )}
                 </div>
               </div>

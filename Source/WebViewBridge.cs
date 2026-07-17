@@ -1247,7 +1247,8 @@ namespace TrueReplayer
                 profileVersion = p.ProfileVersion,
                 createdAt = p.CreatedAt?.ToString("o"),
                 updatedAt = p.UpdatedAt?.ToString("o"),
-                appMinVersion = p.AppMinVersion
+                appMinVersion = p.AppMinVersion,
+                actionCount = p.ActionCount
             }).ToArray();
 
             var order = profileController.GetProfileOrder();
@@ -6388,10 +6389,14 @@ namespace TrueReplayer
             try
             {
                 bool includeOrganization = payload.TryGetProperty("includeOrganization", out var orgProp) && orgProp.GetBoolean();
-                var (exported, missingImages) = await profileController.ExportProfilesAsync(names, includeOrganization);
+                bool includeDependencies = payload.TryGetProperty("includeDependencies", out var depProp) && depProp.GetBoolean();
+                var (exported, missingImages) = await profileController.ExportProfilesAsync(names, includeOrganization, includeDependencies);
                 if (exported > 0)
                 {
-                    var msg = exported == names.Count
+                    // `exported` can EXCEED names.Count when Include-dependencies pulled extra
+                    // sub-profiles in, so ">=" (not "==") is full success — otherwise the else
+                    // branch would render a negative "N could not be loaded".
+                    var msg = exported >= names.Count
                         ? $"Exported {exported} profile(s) successfully."
                         : $"Exported {exported} of {names.Count} profile(s); {names.Count - exported} could not be loaded.";
                     if (missingImages > 0) msg += $" {missingImages} reference image(s) were missing and not included.";
@@ -6486,29 +6491,64 @@ namespace TrueReplayer
             _pendingImportFileName = fileName;
 
             string runningVersion = typeof(WebViewBridge).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
-            var previewProfiles = envelope.Profiles.Select(p => new
+            // Names carried IN this envelope — for classifying each row's RunProfile refs below.
+            // ORDINAL (not ignore-case) so inEnvelope agrees with localOnly and with replay's own
+            // Ordinal ref resolution (LoadProfileByNameAsync): a bundled "Sub" does NOT satisfy a
+            // caller ref "sub", which replay would silently skip — so it must not chip green.
+            var envelopeNames = new HashSet<string>(envelope.Profiles.Select(x => x.Name), StringComparer.Ordinal);
+            var previewProfiles = envelope.Profiles.Select(p =>
             {
-                name = p.Name,
-                description = p.Description,
-                tags = p.Tags,
-                iconEmoji = p.IconEmoji,
-                profileVersion = p.ProfileVersion,
-                createdAt = p.CreatedAt?.ToString("o"),
-                updatedAt = p.UpdatedAt?.ToString("o"),
-                appMinVersion = p.AppMinVersion,
-                compatible = ProfileCompatibility.IsCompatible(p.AppMinVersion, runningVersion),
-                actionCount = p.Actions?.Count ?? 0,
-                hotkey = p.CustomHotkey,
-                hotstring = p.CustomHotstring?.Sequence,
-                targetProcessName = p.TargetWindow?.ProcessName,
-                targetWindowTitle = p.TargetWindow?.WindowTitle,
-                // Conflict detection — the receiver may already have a profile with the same
-                // name. Surface that here so the dialog can show a "will be renamed" / "will
-                // overwrite" hint up-front instead of only learning at confirm time. Case-
-                // INSENSITIVE to match the confirm path (File.Exists on NTFS + the OrdinalIgnoreCase
-                // allocation maps): 'farm' vs local 'Farm' IS a real collision, so the user must
-                // get the Overwrite/Skip choice instead of a silent surprise rename.
-                nameConflict = profileController.ProfileEntries.Any(e => string.Equals(e.Name, p.Name, StringComparison.OrdinalIgnoreCase))
+                var acts = p.Actions ?? new System.Collections.ObjectModel.ObservableCollection<ActionItem>();
+                // The receiver's local profile of the same name, if any — drives the conflict hint
+                // AND the incoming-vs-yours version/date diff line.
+                var local = profileController.ProfileEntries.FirstOrDefault(e => string.Equals(e.Name, p.Name, StringComparison.OrdinalIgnoreCase));
+                // RunProfile refs this profile calls, each classified so the dialog can chip them:
+                // inEnvelope (bundled here) / localOnly (will call YOUR existing one) / missing
+                // (nothing to call → silent skip at replay). Distinct + Ordinal-match a local profile
+                // the same way replay resolves the ref.
+                var dependencies = acts
+                    .Where(a => string.Equals(a.ActionType, "RunProfile", StringComparison.OrdinalIgnoreCase))
+                    .Select(a => a.Key?.Trim())
+                    .Where(k => !string.IsNullOrEmpty(k))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(k => new
+                    {
+                        name = k,
+                        status = envelopeNames.Contains(k!) ? "inEnvelope"
+                               : profileController.ProfileEntries.Any(e => string.Equals(e.Name, k, StringComparison.Ordinal)) ? "localOnly"
+                               : "missing"
+                    })
+                    .ToArray();
+                return new
+                {
+                    name = p.Name,
+                    description = p.Description,
+                    tags = p.Tags,
+                    iconEmoji = p.IconEmoji,
+                    profileVersion = p.ProfileVersion,
+                    createdAt = p.CreatedAt?.ToString("o"),
+                    updatedAt = p.UpdatedAt?.ToString("o"),
+                    appMinVersion = p.AppMinVersion,
+                    compatible = ProfileCompatibility.IsCompatible(p.AppMinVersion, runningVersion),
+                    actionCount = acts.Count,
+                    imageCount = p.Images?.Count ?? 0,
+                    hotkey = p.CustomHotkey,
+                    hotstring = p.CustomHotstring?.Sequence,
+                    targetProcessName = p.TargetWindow?.ProcessName,
+                    targetWindowTitle = p.TargetWindow?.WindowTitle,
+                    dependencies,
+                    // Conflict detection — the receiver may already have a profile with the same
+                    // name. Surface that here so the dialog can show a "will be renamed" / "will
+                    // overwrite" hint up-front instead of only learning at confirm time. Case-
+                    // INSENSITIVE to match the confirm path (File.Exists on NTFS + the OrdinalIgnoreCase
+                    // allocation maps): 'farm' vs local 'Farm' IS a real collision, so the user must
+                    // get the Overwrite/Skip choice instead of a silent surprise rename.
+                    nameConflict = local != null,
+                    // On a conflict, let the dialog show "incoming v5 (2d ago) vs yours v3 (1mo ago)"
+                    // so Overwrite is an informed choice, not a coin flip. Null when no local match.
+                    localVersion = local?.ProfileVersion,
+                    localUpdatedAt = local?.UpdatedAt?.ToString("o")
+                };
             }).ToArray();
 
             SendMessage("profile:importPreview", new

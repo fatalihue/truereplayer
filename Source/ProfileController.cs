@@ -428,7 +428,8 @@ namespace TrueReplayer.Controllers
                             ProfileVersion = profile.ProfileVersion,
                             CreatedAt = profile.CreatedAt,
                             UpdatedAt = profile.UpdatedAt,
-                            AppMinVersion = profile.AppMinVersion
+                            AppMinVersion = profile.AppMinVersion,
+                            ActionCount = profile.Actions.Count
                         });
 
                         if (hasTarget)
@@ -1062,13 +1063,66 @@ namespace TrueReplayer.Controllers
 
         #region Profile Export/Import
 
-        public async Task<(int exported, int missingImages)> ExportProfilesAsync(List<string> profileNames, bool includeOrganization = false)
+        /// <summary>
+        /// Transitive closure of a selection over RunProfile references: for each seed, walk its
+        /// RunProfile rows (Key = the called profile name) and pull in any that resolve to a LOCAL
+        /// profile, recursively. Mirrors replay's lookup (ActionExecution.HandleRunProfile: Key.Trim()
+        /// then LoadProfileByNameAsync's Ordinal name match) so it bundles exactly the sub-profiles
+        /// that would actually be called — a case-differing/dangling ref names nothing to include.
+        /// Returns the seeds plus every newly-pulled dependency, in discovery order.
+        /// </summary>
+        private async Task<List<string>> ExpandWithRunProfileDependenciesAsync(List<string> seeds)
+        {
+            var result = new List<string>(seeds);
+            var seen = new HashSet<string>(seeds, StringComparer.OrdinalIgnoreCase);
+            var queue = new Queue<string>(seeds);
+            while (queue.Count > 0)
+            {
+                var profile = await LoadProfileByNameAsync(queue.Dequeue());
+                if (profile == null) continue;
+                foreach (var act in profile.Actions)
+                {
+                    if (!string.Equals(act.ActionType, "RunProfile", StringComparison.OrdinalIgnoreCase)) continue;
+                    var refName = act.Key?.Trim();
+                    if (string.IsNullOrEmpty(refName)) continue;
+                    // Ordinal match to a local profile — same resolution replay uses, so we never
+                    // bundle a profile a dead (case-differing) ref would not actually reach.
+                    var localName = ProfileEntries.FirstOrDefault(e => string.Equals(e.Name, refName, StringComparison.Ordinal))?.Name;
+                    if (localName != null && seen.Add(localName))
+                    {
+                        result.Add(localName);
+                        queue.Enqueue(localName);
+                    }
+                }
+            }
+            return result;
+        }
+
+        public async Task<(int exported, int missingImages)> ExportProfilesAsync(List<string> profileNames, bool includeOrganization = false, bool includeDependencies = false)
         {
             var envelope = new ProfileExportEnvelope();
             // Distinct (profile, imagePath) refs whose PNG was gone on disk at export time, so the
             // export toast can warn the sender that some rows will arrive broken. Keyed profile+path
             // to mirror the per-profile-per-path dedup the `images` dict does below.
             var missingImagePaths = new HashSet<string>();
+
+            // Show the Save dialog BEFORE building the envelope — the build loop below reads every
+            // reference PNG as base64 (the expensive part), so a cancel here must waste none of it.
+            // defaultName comes from the SELECTED names; dependency expansion (if any) only grows the
+            // count afterwards, so a single selection that pulls deps still names the sensible default.
+            var defaultName = profileNames.Count == 1 ? profileNames[0] : "profiles";
+            var fileName = await ShowFileDialogAsync(new WinForms.SaveFileDialog
+            {
+                Filter = "TrueReplayer Profile (*.trprofile)|*.trprofile",
+                FileName = defaultName,
+                DefaultExt = "trprofile"
+            });
+            if (fileName == null) return (-1, 0);   // user cancelled the Save dialog — nothing built yet
+
+            // Optionally pull in the sub-profiles this selection RunProfile-calls (transitive closure),
+            // so a chain doesn't arrive broken at the receiver. After the dialog so a cancel costs nothing.
+            if (includeDependencies)
+                profileNames = await ExpandWithRunProfileDependenciesAsync(profileNames);
 
             foreach (var name in profileNames)
             {
@@ -1180,19 +1234,6 @@ namespace TrueReplayer.Controllers
                 };
             }
 
-            var defaultName = envelope.Profiles.Count == 1
-                ? envelope.Profiles[0].Name
-                : "profiles";
-
-            var fileName = await ShowFileDialogAsync(new WinForms.SaveFileDialog
-            {
-                Filter = "TrueReplayer Profile (*.trprofile)|*.trprofile",
-                FileName = defaultName,
-                DefaultExt = "trprofile"
-            });
-
-            if (fileName == null) return (-1, 0);   // user cancelled the Save dialog
-
             var options = new JsonSerializerOptions
             {
                 WriteIndented = true,
@@ -1295,6 +1336,25 @@ namespace TrueReplayer.Controllers
         /// The old `ShowImportConflictDialogAsync` is no longer called; the React dialog
         /// surfaces all decisions up-front so the import runs without further prompts.
         /// </summary>
+
+        /// <summary>
+        /// Allocate the next free "baseName (N)" (N from 2) for an import, skipping names already on
+        /// disk OR claimed earlier in this batch. The single source of the Rename + Overwrite-collision
+        /// numbering used in ConfirmImportAsync.
+        /// </summary>
+        private static string AllocateImportName(string baseName, string profileDir, ISet<string> allocated)
+        {
+            int counter = 2;
+            string finalName, path;
+            do
+            {
+                finalName = $"{baseName} ({counter})";
+                path = Path.Combine(profileDir, finalName + ".json");
+                counter++;
+            } while (File.Exists(path) || allocated.Contains(finalName));
+            return finalName;
+        }
+
         public async Task<(int imported, int skipped, bool hasOrganization, List<string> imageFailureNames, List<string> writtenNames)> ConfirmImportAsync(
             ProfileExportEnvelope envelope,
             HashSet<string> selectedNames,
@@ -1416,13 +1476,8 @@ namespace TrueReplayer.Controllers
 
                     if (resolution == ImportConflictResult.Rename)
                     {
-                        int counter = 2;
-                        do
-                        {
-                            finalName = $"{entry.Name} ({counter})";
-                            targetPath = Path.Combine(profileDir, finalName + ".json");
-                            counter++;
-                        } while (File.Exists(targetPath) || allocatedNames.Contains(finalName));
+                        finalName = AllocateImportName(entry.Name, profileDir, allocatedNames);
+                        targetPath = Path.Combine(profileDir, finalName + ".json");
                     }
                     // Overwrite: leave targetPath / finalName as-is — File.WriteAllTextAsync below
                     // replaces the existing file atomically. Guard against a second selected entry
@@ -1430,13 +1485,8 @@ namespace TrueReplayer.Controllers
                     // this name, fall back to a fresh "name (N)" so the later import isn't lost.
                     else if (resolution == ImportConflictResult.Overwrite && allocatedNames.Contains(finalName))
                     {
-                        int counter = 2;
-                        do
-                        {
-                            finalName = $"{entry.Name} ({counter})";
-                            targetPath = Path.Combine(profileDir, finalName + ".json");
-                            counter++;
-                        } while (File.Exists(targetPath) || allocatedNames.Contains(finalName));
+                        finalName = AllocateImportName(entry.Name, profileDir, allocatedNames);
+                        targetPath = Path.Combine(profileDir, finalName + ".json");
                     }
                 }
 

@@ -127,6 +127,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   // Whether the export bundles the folder/pin/grouping layout. Was hardcoded true at every
   // call site; now user-controllable via a checkbox in the export dialog. Defaults on.
   const [includeExportOrg, setIncludeExportOrg] = useState(true);
+  // Whether the export also pulls in the sub-profiles the selection RunProfile-calls (transitive),
+  // so a chain doesn't arrive broken. Off by default — it enlarges what leaves the machine.
+  const [includeExportDeps, setIncludeExportDeps] = useState(false);
   const [dialogValue, setDialogValue] = useState('');
   const [showCreateFolderDialog, setShowCreateFolderDialog] = useState(false);
   const [folderDialogName, setFolderDialogName] = useState('');
@@ -473,7 +476,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     // count so the total is never a surprise.
     const selectedNames = profiles.map(p => p.name).filter(name => exportSelection[name]);
     if (selectedNames.length > 0) {
-      send({ type: 'profile:export', payload: { names: selectedNames, includeOrganization: includeExportOrg } });
+      send({ type: 'profile:export', payload: { names: selectedNames, includeOrganization: includeExportOrg, includeDependencies: includeExportDeps } });
     }
     setShowExportDialog(false);
   };
@@ -2548,6 +2551,13 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       {/* Export Profiles Dialog */}
       {showExportDialog && (() => {
         const matchesExport = (name: string) => !exportSearch || name.toLowerCase().includes(exportSearch.toLowerCase());
+        // Per-profile action count on the right of each row — mirrors the Import Preview's "N actions".
+        const countBadge = (name: string) => {
+          const ac = profiles.find(x => x.name === name)?.actionCount;
+          return ac === undefined ? null : (
+            <span className="ml-auto shrink-0 text-[10px] text-text-disabled">{ac} action{ac === 1 ? '' : 's'}</span>
+          );
+        };
         const folders = (profileOrder?.folders ?? []).filter(f => f.items.some(matchesExport));
         const ungrouped = profiles.filter(p => {
           const inFolder = (profileOrder?.folders ?? []).some(f => f.items.includes(p.name));
@@ -2652,6 +2662,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                     >
                       <CheckboxBox checked={!!exportSelection[name]} />
                       <span className="text-xs text-text-primary truncate">{name}</span>
+                      {countBadge(name)}
                     </button>
                   ))}
                 </div>
@@ -2687,6 +2698,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         >
                           <CheckboxBox checked={!!exportSelection[name]} />
                           <span className="text-xs text-text-primary truncate">{name}</span>
+                          {countBadge(name)}
                         </button>
                       ))}
                     </div>
@@ -2707,6 +2719,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                     >
                       <CheckboxBox checked={!!exportSelection[p.name]} />
                       <span className="text-xs text-text-primary truncate">{p.name}</span>
+                      {countBadge(p.name)}
                     </button>
                   ))}
                 </div>
@@ -2715,7 +2728,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
             {/* Include folder organization — the export bundles pins/folders/grouping so the
                 recipient rebuilds the same layout. Was hardcoded on; now opt-out. */}
-            <div className="px-4 py-2.5 border-t border-border-subtle">
+            <div className="px-4 py-2.5 border-t border-border-subtle space-y-2">
               <button
                 type="button"
                 onClick={() => setIncludeExportOrg(v => !v)}
@@ -2723,6 +2736,17 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               >
                 <CheckboxBox checked={includeExportOrg} />
                 <span className="text-xs text-text-secondary">Include folder organization</span>
+              </button>
+              {/* Bundle sub-profiles the selection calls via Run Profile, so a chain isn't exported
+                  broken. Off by default — it enlarges what leaves the machine. */}
+              <button
+                type="button"
+                onClick={() => setIncludeExportDeps(v => !v)}
+                className="w-full flex items-center gap-2 text-left"
+                data-tip={tt('Also export the profiles this selection runs via Run Profile (and their dependencies), so the chain works on the other machine.', 'Exporta também os perfis que esta seleção executa via Run Profile (e as dependências deles), para a cadeia funcionar na outra máquina.')}
+              >
+                <CheckboxBox checked={includeExportDeps} />
+                <span className="text-xs text-text-secondary">Include referenced sub-profiles</span>
               </button>
             </div>
           </DialogShell>
