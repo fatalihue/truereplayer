@@ -14,6 +14,7 @@ import { ImageCropper } from './ImageCropper';
 import { LexicalTokenEditor, type LexicalEditorHandle } from './lexical/LexicalTokenEditor';
 import { getDisplayKey } from '../utils/displayUtils';
 import { Field } from './sheet/Field';
+import { WindowTargetFields } from './WindowTargetFields';
 import { Slider } from './sheet/Slider';
 
 interface SheetPanelProps {
@@ -1960,50 +1961,51 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               semantics: empty field = wildcard, at least one criterion required. */}
           {isIfWindow && (
           <>
-            <Field
-              label="Process Name"
-              hint={tt('e.g. notepad.exe — ".exe" is assumed when omitted. Leave empty to match by title only.', 'ex.: notepad.exe — ".exe" é assumido se omitido. Deixe vazio para casar só pelo título.')}
-            >
-              <input
-                type="text"
-                value={windowProcessName}
-                onChange={(e) => setWindowProcessName(e.target.value)}
-                placeholder="notepad.exe"
-                spellCheck={false}
-                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-              />
-            </Field>
-            <Field
-              label="Window Title"
-              hint={tt('Case-insensitive. Leave empty to match by process only — but set at least one of the two.', 'Sem diferenciar maiúsculas. Deixe vazio para casar só pelo processo — mas preencha ao menos um dos dois.')}
-            >
-              <input
-                type="text"
-                value={windowTitle}
-                onChange={(e) => setWindowTitle(e.target.value)}
-                placeholder=""
-                spellCheck={false}
-                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-              />
-            </Field>
-            <Field label="Title Match">
-              <SegmentedControl<'contains' | 'regex'>
-                ariaLabel="Title match mode"
-                grow
-                value={windowTitleMatchMode}
-                onChange={setWindowTitleMatchMode}
-                options={[
-                  { value: 'contains', label: 'Contains', tip: tt('Title must contain this text (case-insensitive)', 'Título deve conter este texto (sem diferenciar maiúsculas)') },
-                  { value: 'regex', label: 'Regex', tip: tt('Title is a .NET regular expression (case-insensitive)', 'Título é uma expressão regular .NET (sem diferenciar maiúsculas)') },
-                ]}
-              />
-            </Field>
+            <WindowTargetFields
+              value={{ processName: windowProcessName, windowTitle, titleMatchMode: windowTitleMatchMode }}
+              onChange={(p) => {
+                if (p.processName !== undefined) setWindowProcessName(p.processName);
+                if (p.windowTitle !== undefined) setWindowTitle(p.windowTitle);
+                if (p.titleMatchMode !== undefined) setWindowTitleMatchMode(p.titleMatchMode);
+              }}
+              processLabel="Process Name"
+              processHint={tt('e.g. notepad.exe — ".exe" is assumed when omitted. Leave empty to match by title only.', 'ex.: notepad.exe — ".exe" é assumido se omitido. Deixe vazio para casar só pelo título.')}
+              titleHint={tt('Case-insensitive. Leave empty to match by process only — but set at least one of the two.', 'Sem diferenciar maiúsculas. Deixe vazio para casar só pelo processo — mas preencha ao menos um dos dois.')}
+            />
             <Checkbox
               checked={windowMatchForegroundOnly}
               onChange={setWindowMatchForegroundOnly}
               label="Foreground window only"
               title={tt('TRUE only if the matching window is currently in front — instead of existing anywhere.', 'TRUE somente se a janela correspondente estiver em primeiro plano — em vez de apenas existir.')}
             />
+            {/* Exists-anywhere Test — reuses the ActivateWindow probe (window:testProbe) verbatim;
+                the two editors are mutually exclusive so they share the same probe state. */}
+            <div>
+              <button
+                onClick={handleTestWindowProbe}
+                disabled={windowProbeRequestId !== null || (!windowProcessName.trim() && !windowTitle.trim())}
+                data-tip={tt('Checks whether a matching window EXISTS right now (ignores the foreground-only option above).', 'Verifica se existe AGORA uma janela correspondente (ignora a opção "só em primeiro plano" acima).')}
+                className="w-full h-8 flex items-center justify-center gap-1.5 px-2.5 rounded text-xs font-medium border border-accent-solid/40 bg-accent-solid/10 hover:bg-accent-solid/20 text-accent-light transition-colors disabled:opacity-60"
+              >
+                <PlayCircle size={13} />
+                {windowProbeRequestId ? 'Testing…' : 'Test'}
+              </button>
+              {windowProbeResult && (
+                <div
+                  className="mt-1.5 px-2 py-1.5 rounded text-[11px] border"
+                  style={resultCardStyle(windowProbeResult.found)}
+                >
+                  <div className="flex items-center gap-1.5">
+                    {windowProbeResult.found ? <Check size={11} /> : <X size={11} />}
+                    <span className="font-medium">
+                      {windowProbeResult.found
+                        ? `Found — ${[windowProbeResult.matchProcess, windowProbeResult.matchTitle].filter(Boolean).join(' · ')}`
+                        : (windowProbeResult.error || 'Not found')}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
           </>
           )}
 
@@ -3325,47 +3327,16 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
           <>
             {/* Section header — the matcher trio reads as one "which window" block. */}
             <div className="label-micro text-text-tertiary">Match Window</div>
-            <Field
-              label="Process"
-              hint={tt('".exe" assumed when omitted. Empty = match by title only.', '".exe" assumido se omitido. Vazio = casar só pelo título.')}
-            >
-              <input
-                type="text"
-                value={windowProcessName}
-                onChange={(e) => setWindowProcessName(e.target.value)}
-                placeholder="notepad.exe"
-                spellCheck={false}
-                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-              />
-            </Field>
-            {/* Title + its match mode on one row — the Contains/Regex toggle is a right-
-                aligned label adornment (it modifies THIS title), saving a whole Field row. */}
-            <Field
-              label="Title"
-              labelAdornment={
-                <div className="ml-auto">
-                  <SegmentedControl<'contains' | 'regex'>
-                    ariaLabel="Title match mode"
-                    value={windowTitleMatchMode}
-                    onChange={setWindowTitleMatchMode}
-                    options={[
-                      { value: 'contains', label: 'Contains', tip: tt('Title must contain this text (case-insensitive)', 'Título deve conter este texto (sem diferenciar maiúsculas)') },
-                      { value: 'regex', label: 'Regex', tip: tt('Title is a .NET regular expression (case-insensitive)', 'Título é uma expressão regular .NET (sem diferenciar maiúsculas)') },
-                    ]}
-                  />
-                </div>
-              }
-              hint={tt('Case-insensitive. UWP apps: match by title (process is ApplicationFrameHost.exe).', 'Sem diferenciar maiúsculas. Apps UWP: case pelo título (processo é ApplicationFrameHost.exe).')}
-            >
-              <input
-                type="text"
-                value={windowTitle}
-                onChange={(e) => setWindowTitle(e.target.value)}
-                placeholder=""
-                spellCheck={false}
-                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-              />
-            </Field>
+            <WindowTargetFields
+              value={{ processName: windowProcessName, windowTitle, titleMatchMode: windowTitleMatchMode }}
+              onChange={(p) => {
+                if (p.processName !== undefined) setWindowProcessName(p.processName);
+                if (p.windowTitle !== undefined) setWindowTitle(p.windowTitle);
+                if (p.titleMatchMode !== undefined) setWindowTitleMatchMode(p.titleMatchMode);
+              }}
+              processHint={tt('".exe" assumed when omitted. Empty = match by title only.', '".exe" assumido se omitido. Vazio = casar só pelo título.')}
+              titleHint={tt('Case-insensitive. UWP apps: match by title (process is ApplicationFrameHost.exe).', 'Sem diferenciar maiúsculas. Apps UWP: case pelo título (processo é ApplicationFrameHost.exe).')}
+            />
             {/* Section header — the optional launch pair. */}
             <div className="label-micro text-text-tertiary">Launch</div>
             <Field
