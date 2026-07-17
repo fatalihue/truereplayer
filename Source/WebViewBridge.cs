@@ -6420,16 +6420,34 @@ namespace TrueReplayer
             _importPickerOpen = true;
             try
             {
-                var (envelope, filePath) = await profileController.PrepareImportPreviewAsync();
-                if (envelope == null || filePath == null)
+                var prep = await profileController.PrepareImportPreviewAsync();
+                if (prep.Status == ImportPrepareStatus.Ok)
                 {
-                    // User cancelled the file picker, or the file was malformed/empty. No-op so
-                    // the UI doesn't pop a stale dialog.
+                    SendImportPreview(prep.Envelope!, Path.GetFileName(prep.FilePath!));
+                }
+                else
+                {
+                    // Every non-Ok outcome clears any pending state. Cancelled is the ONE legitimate
+                    // silence (user closed the picker); the rest get an actionable error toast so a
+                    // corrupt / unreadable / empty file is never indistinguishable from a cancel.
+                    // Strings stay ENGLISH — they cross the bridge from C# where tt() doesn't exist,
+                    // matching every other backend alert:show. Pass type explicitly (don't rely on
+                    // the frontend word-sniffing an error out of the message).
                     _pendingImportEnvelope = null;
                     _pendingImportFileName = null;
-                    return;
+                    if (prep.Status != ImportPrepareStatus.Cancelled)
+                    {
+                        string m = prep.Status switch
+                        {
+                            ImportPrepareStatus.TooLarge => "That file is too large to import (over 50 MB).",
+                            ImportPrepareStatus.ParseError => "That file isn't a valid TrueReplayer profile export.",
+                            ImportPrepareStatus.NoProfiles => "That export file contains no profiles to import.",
+                            ImportPrepareStatus.ReadError => $"Couldn't read that file: {prep.Detail}",
+                            _ => "Import failed.",
+                        };
+                        SendMessage("alert:show", new { message = m, type = "error" });
+                    }
                 }
-                SendImportPreview(envelope, Path.GetFileName(filePath));
             }
             catch (Exception ex)
             {
@@ -6444,15 +6462,10 @@ namespace TrueReplayer
         }
 
         /// <summary>
-        /// Drag-and-drop import: the page read the dropped .trprofile's text (WebView2 hands
-        /// the page the file CONTENT, not its path) and posted it here. Parse it through the
-        /// SAME envelope parser as the file-picker path, then render the identical preview.
-        /// </summary>
-        /// <summary>
         /// Stores the parsed envelope as the pending import and pushes the preview payload the
-        /// React Import Preview dialog renders. Shared by the file-picker and drag-and-drop
-        /// import paths so both produce an identical preview. Compatibility is computed
-        /// server-side so the frontend doesn't need the version table.
+        /// React Import Preview dialog renders. Sole caller: HandleProfileImport (there is no
+        /// drag-and-drop import path — the WebView drop handler was never wired). Compatibility
+        /// is computed server-side so the frontend doesn't need the version table.
         /// </summary>
         private void SendImportPreview(ProfileExportEnvelope envelope, string fileName)
         {
@@ -6522,6 +6535,7 @@ namespace TrueReplayer
             // omits incompatible ones (AppMinVersion > running) automatically — we trust
             // it but double-check below as a safety net.
             var selectedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int unsafeDropped = 0;
             if (payload.TryGetProperty("selectedNames", out var namesProp) && namesProp.ValueKind == JsonValueKind.Array)
             {
                 foreach (var el in namesProp.EnumerateArray())
@@ -6532,6 +6546,10 @@ namespace TrueReplayer
                     // Path.Combine. ConfirmImportAsync re-validates entry.Name as the authoritative
                     // backstop (defense in depth). Mirrors the guard on create/rename.
                     if (!string.IsNullOrEmpty(s) && IsSafeProfileName(s)) selectedNames.Add(s);
+                    // A name dropped HERE never reaches ConfirmImportAsync, so its skipped++ is
+                    // unreachable — count it separately and fold it into the reported skipped total,
+                    // else an all-unsafe payload imports "0" with no explanation.
+                    else if (!string.IsNullOrEmpty(s)) unsafeDropped++;
                 }
             }
 
@@ -6560,13 +6578,20 @@ namespace TrueReplayer
             {
                 _pendingImportEnvelope = null;
                 _pendingImportFileName = null;
+                // All selected names were dropped as unsafe (or none were sent). Don't fail silently —
+                // the picker-cancel path is the only legitimate silence.
+                if (unsafeDropped > 0)
+                    SendMessage("alert:show", new { message = $"Import skipped {unsafeDropped} profile(s) with invalid names.", type = "error" });
                 return;
             }
 
             try
             {
-                var (imported, skipped, hasOrganization, imageFailures, writtenNames) = await profileController.ConfirmImportAsync(
+                var (imported, skipped, hasOrganization, imageFailureNames, writtenNames) = await profileController.ConfirmImportAsync(
                     _pendingImportEnvelope, selectedNames, conflictResolutions);
+                // Names dropped at the bridge guard above never entered ConfirmImportAsync, so add
+                // them to the skipped total the user sees.
+                int totalSkipped = skipped + unsafeDropped;
 
                 if (imported > 0)
                 {
@@ -6605,13 +6630,31 @@ namespace TrueReplayer
 
                     PushProfilesUpdate();
                     string msg = $"Imported {imported} profile(s).";
-                    if (skipped > 0) msg += $" {skipped} skipped.";
-                    if (imageFailures > 0) msg += $" {imageFailures} reference image(s) couldn't be restored.";
+                    if (totalSkipped > 0) msg += $" {totalSkipped} skipped.";
+                    if (imageFailureNames.Count > 0)
+                    {
+                        // Name the files that didn't restore (up to 3, each truncated — class-B names
+                        // come straight off the untrusted envelope). The per-file REASON is already in
+                        // the log (ImageStorageService logs it), so point there for the rest. Truncation
+                        // backs off a surrogate boundary so a non-BMP char in a hostile path can't leave
+                        // a lone surrogate in the toast.
+                        static string Trunc(string n)
+                        {
+                            if (n.Length <= 40) return n;
+                            int len = 39;
+                            if (char.IsHighSurrogate(n[len - 1])) len--;
+                            return n.Substring(0, len) + "…";
+                        }
+                        var shown = imageFailureNames.Take(3).Select(Trunc);
+                        msg += $" Reference image(s) not restored: {string.Join(", ", shown)}";
+                        if (imageFailureNames.Count > 3) msg += $", and {imageFailureNames.Count - 3} more";
+                        msg += " — see Logs for details.";
+                    }
                     if (hasOrganization) msg += " Folder organization imported.";
                     // Explicit toast type: a partial success (some images didn't restore) must NOT
                     // render red — the frontend infers an error from words like "couldn't". 'info'
                     // (neutral) for the warning case, 'success' (green) for a clean import.
-                    SendMessage("alert:show", new { message = msg, type = imageFailures > 0 ? "info" : "success" });
+                    SendMessage("alert:show", new { message = msg, type = imageFailureNames.Count > 0 ? "info" : "success" });
 
                     // Surface any hotkey collisions the imported profiles introduced with existing
                     // ones — the hotkeys are already armed (RefreshProfileListAsync re-registered
@@ -6620,14 +6663,21 @@ namespace TrueReplayer
                     foreach (var collisionMsg in hotkeyCollisions)
                         SendMessage("alert:show", new { message = collisionMsg });
                 }
-                else if (skipped > 0)
+                else if (totalSkipped > 0)
                 {
-                    SendMessage("alert:show", new { message = $"All {skipped} profile(s) were skipped." });
+                    SendMessage("alert:show", new { message = $"All {totalSkipped} profile(s) were skipped.", type = "info" });
+                }
+                else
+                {
+                    // imported == 0 && nothing skipped: the selected names matched no envelope entry
+                    // (a stale or hand-crafted confirm payload). Previously fell through both branches
+                    // and showed NOTHING — the user clicked Import and got silence.
+                    SendMessage("alert:show", new { message = "No profiles were imported.", type = "info" });
                 }
             }
             catch (Exception ex)
             {
-                SendMessage("alert:show", new { message = $"Import failed: {ex.Message}" });
+                SendMessage("alert:show", new { message = $"Import failed: {ex.Message}", type = "error" });
             }
             finally
             {

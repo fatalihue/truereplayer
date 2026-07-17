@@ -25,6 +25,18 @@ namespace TrueReplayer.Controllers
     // just stamps the chosen value into every conflicting row's resolution.
     public enum ImportConflictResult { Overwrite, Rename, Skip }
 
+    // Outcome of the import-preview prep step. Distinguishes the one legitimate silent case
+    // (Cancelled = user closed the picker) from every real failure the old code collapsed into
+    // the same silent no-op, so the bridge can surface an actionable message instead of nothing.
+    public enum ImportPrepareStatus { Ok, Cancelled, TooLarge, ReadError, ParseError, NoProfiles }
+    public readonly record struct ImportPrepareResult(
+        ImportPrepareStatus Status, ProfileExportEnvelope? Envelope, string? FilePath, string? Detail);
+
+    // Why ParseImportEnvelope returned null — lets the caller tell a corrupt/unreadable file
+    // (ParseError) from a structurally valid export that simply carries no profiles (NoProfiles),
+    // which deserve different messages.
+    public enum ImportParseError { None, Malformed, NoProfiles }
+
     public class ProfileController : IDisposable
     {
         private readonly MainWindow window;
@@ -1094,6 +1106,18 @@ namespace TrueReplayer.Controllers
                 // edited the profile since the last export and added/removed gating features.
                 var computedMinVersion = ProfileCompatibility.ComputeMinVersion(profile);
 
+                // SEC: scrub each action's KeyHtml before it leaves the machine, so a profile that
+                // imported a poisoned .trprofile can't launder the hostile markup onward on re-export
+                // (the receiver's sink sanitizer protects them, but a pre-sanitizer build would paste
+                // it raw). Runs AFTER ComputeMinVersion so emptying a fully-hostile KeyHtml can't drop
+                // the exported AppMinVersion below the rich-text pin. `profile` is a throwaway loaded
+                // for this export (LoadProfileByNameAsync returns a fresh instance), so mutating its
+                // actions in place is safe. KeyMarkdown is pasted as PLAIN text (never CF_HTML), so it
+                // is not a markup vector and is left untouched.
+                foreach (var a in profile.Actions)
+                    if (!string.IsNullOrEmpty(a.KeyHtml))
+                        a.KeyHtml = HtmlSanitizer.Sanitize(a.KeyHtml);
+
                 envelope.Profiles.Add(new ProfileExportEntry
                 {
                     Name = name,
@@ -1188,10 +1212,12 @@ namespace TrueReplayer.Controllers
         /// holds the parsed envelope server-side and ships preview metadata to the frontend so
         /// the user can review + select before any disk write happens.
         ///
-        /// Returns (null, null) when the user cancels the picker or the file is invalid — the
-        /// bridge layer maps both to a no-op (no preview dialog opens).
+        /// Returns a discriminated <see cref="ImportPrepareResult"/>: Cancelled is the ONE
+        /// legitimate silent case (user closed the picker); TooLarge / ReadError / ParseError /
+        /// NoProfiles are real failures the bridge surfaces as an error toast so a corrupt import
+        /// is never indistinguishable from a cancel.
         /// </summary>
-        public async Task<(ProfileExportEnvelope? envelope, string? filePath)> PrepareImportPreviewAsync()
+        public async Task<ImportPrepareResult> PrepareImportPreviewAsync()
         {
             var fileName = await ShowFileDialogAsync(new WinForms.OpenFileDialog
             {
@@ -1199,32 +1225,41 @@ namespace TrueReplayer.Controllers
                 DefaultExt = "trprofile"
             });
 
-            if (fileName == null) return (null, null);
+            if (fileName == null) return new ImportPrepareResult(ImportPrepareStatus.Cancelled, null, null, null);
 
             try
             {
                 // Reject an oversized/hostile .trprofile before reading it into memory (OOM guard).
                 var info = new FileInfo(fileName);
-                if (info.Length > 50L * 1024 * 1024) { System.Diagnostics.Debug.WriteLine("[ProfileController] Import file exceeds 50 MB — refused."); return (null, null); }
+                if (info.Length > 50L * 1024 * 1024)
+                {
+                    try { DiagnosticLog.Info("[Import] File exceeds 50 MB — refused."); } catch { }
+                    return new ImportPrepareResult(ImportPrepareStatus.TooLarge, null, fileName, null);
+                }
                 // Read + migrate + deserialize off the UI thread — MigrateProfileJson + JsonSerializer.Deserialize are synchronous CPU work that would otherwise block WinUI.
-                var envelope = await Task.Run(() => ParseImportEnvelope(File.ReadAllText(fileName)));
-                return envelope == null ? (null, null) : (envelope, fileName);
+                // ParseImportEnvelope returns a TUPLE (not an out param) so it composes inside Task.Run.
+                var (envelope, parseError) = await Task.Run(() => ParseImportEnvelope(File.ReadAllText(fileName)));
+                return parseError switch
+                {
+                    ImportParseError.None => new ImportPrepareResult(ImportPrepareStatus.Ok, envelope, fileName, null),
+                    ImportParseError.NoProfiles => new ImportPrepareResult(ImportPrepareStatus.NoProfiles, null, fileName, null),
+                    _ => new ImportPrepareResult(ImportPrepareStatus.ParseError, null, fileName, null),
+                };
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[ProfileController] PrepareImportPreview read error: {ex.Message}");
-                return (null, null);
+                try { DiagnosticLog.Info($"[Import] Read error: {ex.Message}"); } catch { }
+                return new ImportPrepareResult(ImportPrepareStatus.ReadError, null, fileName, ex.Message);
             }
         }
 
         /// <summary>
-        /// Migrate + deserialize + validate a .trprofile JSON string into an envelope, or
-        /// null if it's malformed or carries no profiles. Shared by the file-picker import
-        /// (PrepareImportPreviewAsync) and the drag-and-drop import — which hands the dropped
-        /// file's CONTENT straight here, because WebView2 exposes the bytes to the page but
-        /// not the path — so both paths run the identical parse + validation.
+        /// Migrate + deserialize + validate a .trprofile JSON string into an envelope. Returns the
+        /// envelope with <see cref="ImportParseError.None"/>, or (null, Malformed) when the JSON is
+        /// corrupt/unreadable, or (null, NoProfiles) when it parses but carries no profiles — the
+        /// caller maps those to distinct user-facing messages. Sole caller: PrepareImportPreviewAsync.
         /// </summary>
-        public static ProfileExportEnvelope? ParseImportEnvelope(string json)
+        public static (ProfileExportEnvelope? envelope, ImportParseError error) ParseImportEnvelope(string json)
         {
             try
             {
@@ -1236,13 +1271,15 @@ namespace TrueReplayer.Controllers
                     TypeInfoResolver = new DefaultJsonTypeInfoResolver()
                 };
                 var envelope = JsonSerializer.Deserialize<ProfileExportEnvelope>(json, options);
-                if (envelope?.Profiles == null || envelope.Profiles.Count == 0) return null;
-                return envelope;
+                if (envelope?.Profiles == null || envelope.Profiles.Count == 0) return (null, ImportParseError.NoProfiles);
+                return (envelope, ImportParseError.None);
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[ProfileController] ParseImportEnvelope error: {ex.Message}");
-                return null;
+                // DiagnosticLog (not Debug.WriteLine): the latter is compiled out of Release, which is
+                // exactly why a corrupt import produced no trace for the user to report.
+                try { DiagnosticLog.Info($"[Import] ParseImportEnvelope error: {ex.Message}"); } catch { }
+                return (null, ImportParseError.Malformed);
             }
         }
 
@@ -1258,7 +1295,7 @@ namespace TrueReplayer.Controllers
         /// The old `ShowImportConflictDialogAsync` is no longer called; the React dialog
         /// surfaces all decisions up-front so the import runs without further prompts.
         /// </summary>
-        public async Task<(int imported, int skipped, bool hasOrganization, int imageFailures, List<string> writtenNames)> ConfirmImportAsync(
+        public async Task<(int imported, int skipped, bool hasOrganization, List<string> imageFailureNames, List<string> writtenNames)> ConfirmImportAsync(
             ProfileExportEnvelope envelope,
             HashSet<string> selectedNames,
             Dictionary<string, ImportConflictResult> conflictResolutions)
@@ -1273,16 +1310,31 @@ namespace TrueReplayer.Controllers
 
             int imported = 0;
             int skipped = 0;
-            int imageFailures = 0;
+
+            // Only iterate the entries the user actually selected. Maintains source order so
+            // multi-profile imports feel deterministic. Declared up here because RecordImageFailure
+            // (below) reads its Count to decide whether to profile-label a failure.
+            var toImport = envelope.Profiles.Where(p => selectedNames.Contains(p.Name)).ToList();
+
+            // Names of reference PNGs that didn't restore (present-but-rejected OR absent-from-envelope),
+            // deduped so two rows sharing one missing path count once. The bridge names them in the
+            // warning toast — the old int count said "N couldn't be restored" without saying WHICH.
+            var imageFailureNames = new List<string>();
+            var imageFailureSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // Record one failed reference image. Labels with the profile name only when the batch
+            // imports more than one profile (so a single-profile import stays terse); dedups on the
+            // labelled string so two rows sharing a path count once within a profile but the same
+            // filename in two profiles stays distinct.
+            void RecordImageFailure(string imageName, string profileFinalName)
+            {
+                var label = toImport.Count > 1 ? $"{profileFinalName}: {imageName}" : imageName;
+                if (imageFailureSeen.Add(label)) imageFailureNames.Add(label);
+            }
 
             // Canonical Profiles dir (with trailing separator) for the containment check below.
             string canonicalProfileDir = Path.GetFullPath(profileDir);
             if (!canonicalProfileDir.EndsWith(Path.DirectorySeparatorChar))
                 canonicalProfileDir += Path.DirectorySeparatorChar;
-
-            // Only iterate the entries the user actually selected. Maintains source order so
-            // multi-profile imports feel deterministic.
-            var toImport = envelope.Profiles.Where(p => selectedNames.Contains(p.Name)).ToList();
 
             // Names already claimed by earlier entries in THIS batch. The rename loop below only
             // consulted File.Exists, which misses collisions against an earlier selected entry that
@@ -1448,6 +1500,8 @@ namespace TrueReplayer.Controllers
                     {
                         if (ImageStorageService.SaveFromBase64(kvp.Value, finalName, kvp.Key))
                             restoredKeys.Add(kvp.Key);
+                        else
+                            RecordImageFailure(kvp.Key, finalName); // present-but-rejected (bad name / not a PNG / corrupt base64) — SaveFromBase64 logged the reason
                     }
                 }
                 // Same refsImage predicate as the export collector so both sides agree on which
@@ -1463,7 +1517,7 @@ namespace TrueReplayer.Controllers
                     if (refsImage
                         && !restoredKeys.Contains(imgAction.ImagePath)
                         && !ImageStorageService.ReferenceImageExists(finalName, imgAction.ImagePath))
-                        imageFailures++;
+                        RecordImageFailure(imgAction.ImagePath!, finalName); // absent-from-envelope (dropped at export, BUG-3)
                 }
 
                 imported++;
@@ -1563,7 +1617,7 @@ namespace TrueReplayer.Controllers
             // bumped it to "name (N)"). The bridge uses this to detect whether the profile
             // currently loaded in the grid was overwritten, so it can reload it instead of
             // leaving a stale in-memory copy that a later Save would clobber the import with.
-            return (imported, skipped, hasOrganization, imageFailures, importedRenames.Values.ToList());
+            return (imported, skipped, hasOrganization, imageFailureNames, importedRenames.Values.ToList());
         }
 
         // Delegates to the shared validator (single owner for this security/data-loss check —

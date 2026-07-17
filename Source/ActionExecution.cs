@@ -4216,6 +4216,18 @@ namespace TrueReplayer.Services
 
         private async Task PasteTextViaClipboard(string text, string? html, CancellationToken token)
         {
+            // SEC: KeyHtml is untrusted markup (a foreign/hand-edited .trprofile could carry a tracking
+            // beacon, hidden text, or a javascript:/file: link) that the paste TARGET interprets. Scrub
+            // it to the editor-producible allowlist at this single choke point — reader-side covers ALL
+            // provenance (import, hand-edited profile JSON on disk, and profiles imported before the
+            // sanitizer shipped), which an import-only gate would miss. Sanitize returns null on an
+            // empty/hostile result or a parse error, so we fail CLOSED to plain text and never emit raw
+            // markup. Cost is negligible against the two Task.Delay(50) + SendInput already on this path.
+            // NOT done in PrepareRichHtmlForSend: that runs pre-token-resolution, so it wouldn't see the
+            // final bytes (resolution itself can't inject — htmlEncodeSubstitution is on — but the sink
+            // is where the truly-final CF_HTML string exists).
+            if (!string.IsNullOrEmpty(html))
+                html = HtmlSanitizer.Sanitize(html);
             // CF_UNICODETEXT convention is CRLF, and classic Win32 EDIT / WinForms
             // multiline targets do NOT break lines on a lone LF. The list modifiers
             // (sort/range/lines/dedupe/reverse) emit LF-joined text — normalize any

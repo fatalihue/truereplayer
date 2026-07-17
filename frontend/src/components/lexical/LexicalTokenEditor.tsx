@@ -787,6 +787,10 @@ export function LexicalTokenEditor({
     namespace: 'SendText',
     // List/link nodes register only in rich mode, so the plain surfaces
     // (SheetPanel browserText) can never acquire rich content by accident.
+    // ⚠ SECURITY LOCKSTEP: this node set + the `theme` below define exactly the markup getHtml()
+    // can emit, and Source/HtmlSanitizer.cs whitelists precisely that set. Add a node here
+    // (HeadingNode/QuoteNode/ImageNode/a new mark) and its output is SILENTLY STRIPPED at paste
+    // until you add the matching element/attr to HtmlSanitizer — update both together.
     nodes: richMode ? [TokenNode, ListNode, ListItemNode, LinkNode, AutoLinkNode] : [TokenNode],
     onError: (error: Error) => {
       console.error('[Lexical]', error);
