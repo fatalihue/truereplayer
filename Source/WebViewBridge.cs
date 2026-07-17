@@ -828,6 +828,10 @@ namespace TrueReplayer
                 NotifyRunEnded(wasError);
             _lastRunStatus = status;
 
+            // Reflect the live run-state in the tray hover tooltip (Replaying…/Recording…/idle).
+            // Cheap: SetRunState no-ops when the state is unchanged.
+            TrayIconService.SetRunState(status);
+
             SendMessage("status:changed", new { status });
             PushButtonStates();
 
