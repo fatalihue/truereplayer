@@ -2404,6 +2404,24 @@ namespace TrueReplayer.Services
                 HandleActivateWindowFailure(action, "could not bring window to foreground");
                 return;
             }
+
+            // Readiness: don't fire the following keystrokes into a FROZEN target. Poll
+            // IsHungAppWindow within the SAME Timeout budget the window-not-found loop above used
+            // (sw is still running). A responsive window returns false on the first check, so this
+            // costs nothing on the normal path — it only waits for a genuinely hung app, then applies
+            // the On-Timeout policy if it never recovers. IsHungAppWindow is heuristic (true only
+            // after ~5s of an unpumped queue), so it's a frozen-app guard, not a "slow loader ready"
+            // signal — the 300ms settle below still covers the ordinary focus-animation wait.
+            while (NativeMethods.IsHungAppWindow(hwnd))
+            {
+                if (sw.ElapsedMilliseconds >= timeoutMs)
+                {
+                    HandleActivateWindowFailure(action, "target window not responding");
+                    return;
+                }
+                await Task.Delay(150, token); // token-aware — the Stop hotkey aborts instantly
+            }
+
             await Task.Delay(300, token); // settle — same wait the replay-start focus uses
 
             // Optional placement: move/resize the window we just activated. Deliberately uses the
