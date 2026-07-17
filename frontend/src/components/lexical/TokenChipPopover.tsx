@@ -29,7 +29,7 @@ const REPEATABLE_TOKEN_NAMES = new Set([
   'right',
 ]);
 
-type TokenKind = 'clipboard' | 'delay' | 'repeatable' | 'random' | 'var' | 'rowcol' | 'static';
+type TokenKind = 'clipboard' | 'delay' | 'repeatable' | 'random' | 'var' | 'rowcol' | 'input' | 'static';
 
 function getTokenKind(token: string): TokenKind {
   const inner = token.slice(1, -1);
@@ -41,6 +41,7 @@ function getTokenKind(token: string): TokenKind {
   // {row:column} edits its data-table column name.
   if (name === 'var') return 'var';
   if (name === 'row' && inner.includes(':')) return 'rowcol';
+  if (name === 'input') return 'input';
   if (REPEATABLE_TOKEN_NAMES.has(name)) return 'repeatable';
   return 'static';
 }
@@ -202,6 +203,7 @@ export function TokenChipPopover({
         {kind === 'random' && <RandomEditor token={token} onChange={updateLive} />}
         {kind === 'var' && <NameEditor token={token} tokenName="var" onChange={updateLive} />}
         {kind === 'rowcol' && <NameEditor token={token} tokenName="row" onChange={updateLive} />}
+        {kind === 'input' && <InputEditor token={token} onChange={updateLive} />}
         {kind === 'static' && <StaticInfo token={token} />}
       </div>
 
@@ -411,6 +413,78 @@ function NameEditor({
           : "Replaced with this column's cell of the current data row (loop over data)."}
       </div>
     </Section>
+  );
+}
+
+// Splits an {input:Label|menu:a,b,c} token into its label and (raw) menu CSV. The label may
+// itself contain ':' — everything up to the FIRST "|menu:" is the label (the backend's regex
+// and normalizeToken agree: label = [^}|]+, menu after |menu:).
+function parseInputArg(token: string): { label: string; menu: string } {
+  const arg = parseNameArg(token); // everything after the first ':'
+  const mi = arg.indexOf('|menu:');
+  return mi >= 0 ? { label: arg.slice(0, mi), menu: arg.slice(mi + 6) } : { label: arg, menu: '' };
+}
+
+// Editor for {input:Label} / {input:Label|menu:a,b,c} — the Ask-Input token. The label allows
+// spaces (unlike variable/column names); a non-empty menu CSV turns the runtime prompt into a
+// dropdown. '{', '}' and '|' are stripped from both fields since they'd break the token grammar.
+// An empty label never emits (would produce a broken {input:}).
+function InputEditor({ token, onChange }: { token: string; onChange: (t: string) => void }) {
+  const parsed = parseInputArg(token);
+  const [label, setLabel] = useState(parsed.label);
+  const [menu, setMenu] = useState(parsed.menu);
+
+  const emit = (l: string, m: string) => {
+    const lc = l.trim();
+    if (lc.length === 0) return;
+    const mc = m.trim();
+    onChange(mc.length > 0 ? `{input:${lc}|menu:${mc}}` : `{input:${lc}}`);
+  };
+  const onLabel = (raw: string) => {
+    const clean = raw.replace(/[{}|]/g, '');
+    setLabel(clean);
+    emit(clean, menu);
+  };
+  const onMenu = (raw: string) => {
+    const clean = raw.replace(/[{}|]/g, '');
+    setMenu(clean);
+    emit(label, clean);
+  };
+
+  return (
+    <>
+      <Section label="Prompt label">
+        <div className="py-1">
+          <input
+            type="text"
+            value={label}
+            onChange={(e) => onLabel(e.target.value)}
+            autoFocus
+            spellCheck={false}
+            placeholder="What to ask"
+            className="h-7 w-full px-2 text-xs bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid placeholder:text-text-disabled"
+          />
+        </div>
+        <div className="text-[10px] text-text-tertiary mt-1">
+          Replay pauses and shows this prompt; your answer is substituted (and reusable as {'{var:label}'}).
+        </div>
+      </Section>
+      <Section label="Menu options (optional)">
+        <div className="py-1">
+          <input
+            type="text"
+            value={menu}
+            onChange={(e) => onMenu(e.target.value)}
+            spellCheck={false}
+            placeholder="Yes,No,Maybe"
+            className="h-7 w-full px-2 text-xs bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid placeholder:text-text-disabled"
+          />
+        </div>
+        <div className="text-[10px] text-text-tertiary mt-1">
+          Comma-separated → the prompt becomes a dropdown instead of a text field.
+        </div>
+      </Section>
+    </>
   );
 }
 

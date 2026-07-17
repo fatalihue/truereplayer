@@ -20,11 +20,14 @@ const COMPOUND_NAMES: Record<string, string> = {
   pagedown: 'PageDown',
 };
 
-// Tokens whose args are user-chosen NAMES (variable / data-table column), not
-// modifiers — case-folding {var:MyVar} to {var:myvar} would still run (backend
-// lookups are case-insensitive) but would rewrite the user's text on every
-// open/close. Keep every arg verbatim, same rationale as join's separator.
-const VERBATIM_ARG_NAMES = new Set(['var', 'row']);
+// Tokens whose args are user-chosen NAMES (variable / data-table column) or free
+// text (the Ask-Input label + menu options), not modifiers — case-folding
+// {var:MyVar} to {var:myvar} would still run (backend lookups are case-insensitive)
+// but would rewrite the user's text on every open/close. Keep every arg verbatim,
+// same rationale as join's separator. A label with ':' survives via the split+rejoin
+// on ':' below (the parts are re-joined with ':'), so {input:Label|menu:a,b,c} and
+// {input:Enter time (HH:MM)} both round-trip unchanged.
+const VERBATIM_ARG_NAMES = new Set(['var', 'row', 'input']);
 
 export function normalizeToken(token: string): string {
   if (token.length < 2 || token[0] !== '{' || token[token.length - 1] !== '}') {
