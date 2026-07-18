@@ -997,6 +997,8 @@ namespace TrueReplayer
                 windowY = a.WindowY,
                 windowWidth = a.WindowWidth,
                 windowHeight = a.WindowHeight,
+                windowVerb = a.WindowVerb,
+                windowMatchIndex = a.WindowMatchIndex,
                 assertOnFail = a.AssertOnFail
             }).ToArray();
         }
@@ -2314,6 +2316,15 @@ namespace TrueReplayer
                     break;
                 case "windowHeight":
                     if (int.TryParse(value, out int winH)) action.WindowHeight = Math.Max(0, winH);
+                    break;
+                // ActivateWindow Phase 3 — verb + nth-match. Only the non-default verb persists (the
+                // default "activate" collapses to null, like activateOnTimeout's "Halt"); match index
+                // is 1-based, and 1 (the first match) collapses to null so ordinary rows stay clean.
+                case "windowVerb":
+                    action.WindowVerb = (value == "maximize" || value == "minimize" || value == "close") ? value : null;
+                    break;
+                case "windowMatchIndex":
+                    action.WindowMatchIndex = int.TryParse(value, out int wmi) && wmi > 1 ? wmi : (int?)null;
                     break;
                 case "assertOnFail":
                     // BrowserAssert — only "Continue" persisted; default "Halt" stays null.

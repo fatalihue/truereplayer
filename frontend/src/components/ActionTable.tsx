@@ -1645,10 +1645,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                             : `${action.key} = ${action.variableValue ?? ''}`)
                       : action.actionType === 'ActivateWindow'
                         // Matcher summary "proc · title" (— launch marks launch-capable
-                        // rows); pure-run rows read "run: <path>". Mirrors C# DisplayKey.
+                        // rows); pure-run rows read "run: <path>". Phase-3 verb prefix +
+                        // nth-match suffix. Mirrors C# DisplayKey.
                         ? (() => {
                             const matcher = [action.windowProcessName, action.windowTitle].filter(s => s && s.trim()).join(' · ');
-                            if (matcher) return action.launchPath ? `${matcher} — launch` : matcher;
+                            const verbPrefix = action.windowVerb === 'maximize' ? 'Maximize · '
+                              : action.windowVerb === 'minimize' ? 'Minimize · '
+                              : action.windowVerb === 'close' ? 'Close · ' : '';
+                            const nth = action.windowMatchIndex && action.windowMatchIndex > 1 ? ` #${action.windowMatchIndex}` : '';
+                            if (matcher) return verbPrefix ? `${verbPrefix}${matcher}${nth}` : (action.launchPath ? `${matcher}${nth} — launch` : `${matcher}${nth}`);
                             return action.launchPath ? `run: ${action.launchPath}` : '';
                           })()
                       : action.actionType === 'Keystroke'

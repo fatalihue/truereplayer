@@ -145,6 +145,10 @@ export interface ActionItem {
   windowY?: number;
   windowWidth?: number;
   windowHeight?: number;
+  // ActivateWindow Phase 3 — verb (null/'activate' focus | 'maximize' | 'minimize' | 'close') and
+  // nth-match (1-based Z-order; null/1 = first match).
+  windowVerb?: string | null;
+  windowMatchIndex?: number | null;
   // BrowserAssert — verify a page element (reuses key=selector, waitMode, browserText,
   // timeout, selectorAlternatives) and FAIL the replay if it's not in the expected state.
   // null = 'Halt' (default — stop loudly) | 'Continue' (log and move on).

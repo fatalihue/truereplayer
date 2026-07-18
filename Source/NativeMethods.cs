@@ -293,9 +293,17 @@ namespace TrueReplayer.Interop
         // Window management
         public const int SW_MINIMIZE = 6;
         public const int SW_RESTORE = 9;
+        public const int SW_MAXIMIZE = 3; // == SW_SHOWMAXIMIZED
+
+        // WM_CLOSE requests a graceful window close (the app can prompt to save) — used by the
+        // ActivateWindow "Close" verb. PostMessage (not SendMessage) so a hung target can't block us.
+        public const int WM_CLOSE = 0x0010;
 
         [DllImport("user32.dll")]
         public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        public static extern bool PostMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll")]
         public static extern bool SetForegroundWindow(IntPtr hWnd);
