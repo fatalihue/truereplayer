@@ -1226,6 +1226,12 @@ namespace TrueReplayer.Services
         // and must survive into later runs, exactly like _cycleCursors. Session-lifetime; keys
         // are lowercased like _runtimeVariables so {clip:Name} and {clip:name} agree.
         private readonly Dictionary<string, string> _clipSlots = new();
+        // Guards _clipSlots and _runtimeVariables where they cross threads: the capture
+        // hotkey writes _clipSlots on the UI dispatcher while the replay thread reads it
+        // (token resolution) and both threads copy both dicts for the live-variables pane
+        // (a Dictionary enumerated concurrently with a resizing write throws). Writes and
+        // copies are rare and tiny, so one coarse lock is plenty.
+        private readonly object _runStateLock = new();
         // Sequential slot the capture hotkey writes to next: 1..9, wrapping. Session-lifetime.
         private int _nextHotkeySlot = 1;
         // Per-row skip-on-error (data loop). When the table opts in (OnRowError == "skip"),
@@ -1524,7 +1530,7 @@ namespace TrueReplayer.Services
 
                 // Fresh run = fresh run state: variables from a previous run must not leak in,
                 // and the counter/row read as "not started" until the loop below stamps them.
-                _runtimeVariables.Clear();
+                lock (_runStateLock) _runtimeVariables.Clear();
                 _pendingTokenKeyDowns.Clear();
                 _currentIteration = 0;
                 _currentActionRow = 0;
@@ -1588,9 +1594,11 @@ namespace TrueReplayer.Services
                             await ExecuteActionsAsync(snapshot, token);
                         }
                         // Skip mode also absorbs the FAULTING error paths (browser action
-                        // exceptions, If-probe Halt rethrows) — an OCE is never a row error,
-                        // it is Stop/cancel and must keep unwinding the whole run.
-                        catch (OperationCanceledException) { throw; }
+                        // exceptions, If-probe Halt rethrows). A genuine Stop/cancel (token
+                        // cancelled) must keep unwinding the whole run — but a SPURIOUS OCE
+                        // (e.g. a pipe drop resolving an in-flight TCS with no token behind
+                        // it) is just another row error, so only the token-backed one rethrows.
+                        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
                         catch (Exception ex) when (SkipRowOnErrorActive)
                         {
                             FaultRow(ex.Message);
@@ -1598,6 +1606,14 @@ namespace TrueReplayer.Services
 
                         if (_rowFaulted)
                         {
+                            // Release anything the faulted row left pressed BEFORE moving on —
+                            // the engine's stuck-input recovery (StartAsync's finally) is gated
+                            // on cancellation, which skip mode deliberately avoids. A KeyDown
+                            // whose matching KeyUp was skipped would otherwise stay stuck for
+                            // every remaining row and past the end of the run. Both resets are
+                            // lock-guarded no-ops when nothing is down.
+                            ResetMouseState();
+                            ResetKeyState();
                             skippedRows++;
                             var reason = _rowFaultReason ?? "error";
                             firstSkipNote ??= $"row {iteration}: {reason}";
@@ -3099,9 +3115,18 @@ namespace TrueReplayer.Services
             Iteration = _currentIteration,
             Row = _currentActionRow,
             RowData = _currentRowData,
-            ClipSlots = _clipSlots,
+            // Snapshot, not the live dict — the capture hotkey mutates _clipSlots on the UI
+            // thread and a TryGetValue racing a resize is undefined. Slots are tiny (≤ a few
+            // entries), so a copy per resolution is noise. _runtimeVariables needs no copy:
+            // it is only ever written on the replay thread that is also doing the resolving.
+            ClipSlots = SnapshotClipSlots(),
             InputProvider = ProvideInputAsync,
         };
+
+        private IReadOnlyDictionary<string, string> SnapshotClipSlots()
+        {
+            lock (_runStateLock) return new Dictionary<string, string>(_clipSlots);
+        }
 
         // Variable names: letters/digits/underscore, matched case-insensitively (stored keys are
         // lowercased). Same shape as the {var:name} token regex below — keep the two in sync.
@@ -3146,23 +3171,23 @@ namespace TrueReplayer.Services
                     .ToArray();
                 if (items.Length == 0)
                 {
-                    _runtimeVariables.Remove(key); // empty list = delete (same contract as set mode)
+                    lock (_runStateLock) _runtimeVariables.Remove(key); // empty list = delete (same contract as set mode)
                     PushVariablesSnapshot(force: true);
                     return;
                 }
                 var idPart = string.IsNullOrEmpty(action.Id) ? key : action.Id; // Id always set in practice
                 var cursorKey = CurrentExecutingProfileName + "|" + idPart;
                 _cycleCursors.TryGetValue(cursorKey, out int cursor);
-                _runtimeVariables[key] = items[((cursor % items.Length) + items.Length) % items.Length];
+                lock (_runStateLock) _runtimeVariables[key] = items[((cursor % items.Length) + items.Length) % items.Length];
                 _cycleCursors[cursorKey] = (cursor + 1) % items.Length;
                 PushVariablesSnapshot(force: true);
                 return;
             }
 
             if (string.IsNullOrEmpty(value))
-                _runtimeVariables.Remove(key);   // empty value = delete (documented contract)
+                lock (_runStateLock) _runtimeVariables.Remove(key);   // empty value = delete (documented contract)
             else
-                _runtimeVariables[key] = value;
+                lock (_runStateLock) _runtimeVariables[key] = value;
             PushVariablesSnapshot(force: true);
         }
 
@@ -3187,7 +3212,7 @@ namespace TrueReplayer.Services
             }
             if (key.Length > 0)
             {
-                _runtimeVariables[key] = answer;
+                lock (_runStateLock) _runtimeVariables[key] = answer;
                 PushVariablesSnapshot(force: true);
             }
             return answer;
@@ -3240,9 +3265,15 @@ namespace TrueReplayer.Services
                 Services.DiagnosticLog.Info($"Copy to Slot '{name}': nothing copied (empty selection?) — slot left unchanged");
                 return;
             }
-            _clipSlots[key] = captured;
+            lock (_runStateLock) _clipSlots[key] = captured;
             PushVariablesSnapshot(force: true);
         }
+
+        // 1 while a selection capture is in flight — a second capture (double-tapped hotkey,
+        // or hotkey overlapping a CopyToSlot action) interleaving its snapshot/clear/restore
+        // with the first would store the OLD clipboard as the "selection" and then wipe the
+        // clipboard. Overlappers bail out with null instead.
+        private int _captureBusy;
 
         // The selection-capture primitive shared by the Copy to Slot action and the global
         // capture hotkey: snapshot the real clipboard → clear it (the "did a copy happen"
@@ -3251,11 +3282,26 @@ namespace TrueReplayer.Services
         // null when nothing arrived (empty selection, or a target that doesn't copy text).
         private async Task<string?> CaptureSelectionTextAsync(CancellationToken token)
         {
+            if (System.Threading.Interlocked.CompareExchange(ref _captureBusy, 1, 0) != 0)
+            {
+                Services.DiagnosticLog.Info("Capture to Slot: a capture is already in flight — ignored");
+                return null;
+            }
             var original = await ReadClipboardSnapshotAsync(dispatcherQueue, includeHtml: true);
+            // Text-bearing clipboards get the clear-then-poll change detector (and a faithful
+            // restore at the end). A NON-text clipboard (files, image — the snapshot can't
+            // carry those) is left untouched instead: any text APPEARING is the copy, and
+            // skipping the pre-clear means a no-op copy (empty selection) can't destroy the
+            // files/image the user had copied. A successful capture still replaces the
+            // clipboard system-wide — that's Ctrl+C itself, not something we can restore.
+            bool hadTextual = original.Text != null || original.Html != null;
             try
             {
-                RestoreOriginalClipboard((null, null)); // (null, null) = Clipboard.Clear()
-                await Task.Delay(30, token);
+                if (hadTextual)
+                {
+                    RestoreOriginalClipboard((null, null)); // (null, null) = Clipboard.Clear()
+                    await Task.Delay(30, token);
+                }
                 // A physically held hotkey modifier (e.g. the Shift of Ctrl+Shift+9) would turn
                 // the injected Ctrl+C into Ctrl+Shift+C for the target — release first, same as
                 // replay start does before its first synthetic input.
@@ -3271,7 +3317,8 @@ namespace TrueReplayer.Services
             }
             finally
             {
-                RestoreOriginalClipboard(original);
+                if (hadTextual) RestoreOriginalClipboard(original);
+                System.Threading.Interlocked.Exchange(ref _captureBusy, 0);
             }
         }
 
@@ -3284,7 +3331,7 @@ namespace TrueReplayer.Services
             var captured = await CaptureSelectionTextAsync(CancellationToken.None);
             if (captured != null)
             {
-                _clipSlots[slot] = captured;
+                lock (_runStateLock) _clipSlots[slot] = captured;
                 _nextHotkeySlot = _nextHotkeySlot >= 9 ? 1 : _nextHotkeySlot + 1;
                 PushVariablesSnapshot(force: true);
             }
@@ -3301,8 +3348,12 @@ namespace TrueReplayer.Services
             var now = Environment.TickCount64;
             if (!force && now - _lastVariablesPushTick < 250) return;
             _lastVariablesPushTick = now;
-            var vars = new Dictionary<string, string>(_runtimeVariables);
-            var slots = new Dictionary<string, string>(_clipSlots);
+            Dictionary<string, string> vars, slots;
+            lock (_runStateLock)
+            {
+                vars = new Dictionary<string, string>(_runtimeVariables);
+                slots = new Dictionary<string, string>(_clipSlots);
+            }
             var row = _currentRowData != null ? new Dictionary<string, string>(_currentRowData) : null;
             dispatcherQueue.TryEnqueue(() => OnVariablesChanged?.Invoke(vars, slots, row));
         }
@@ -4032,6 +4083,9 @@ namespace TrueReplayer.Services
             {
                 token.ThrowIfCancellationRequested();
                 if (await InstantProbeAsync(action, token)) return true; // condition satisfied within the window
+                // Skip mode: a probe that faulted the row (e.g. missing rel-coords target
+                // window) must unwind NOW, not keep re-polling a dead probe for the full window.
+                if (_rowFaulted) return false;
                 if (sw.ElapsedMilliseconds >= timeoutMs) return false;   // window elapsed → take the Else/false branch
                 await Task.Delay(pollMs, token);
             }

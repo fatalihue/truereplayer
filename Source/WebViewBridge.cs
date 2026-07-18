@@ -1058,6 +1058,10 @@ namespace TrueReplayer
                 }
 
             bool loopOverData = payload.TryGetProperty("loopOverData", out var lEl) && lEl.ValueKind == JsonValueKind.True;
+            // "skip" is kept even when the loop is currently off — it remembers the user's
+            // choice for when the loop comes back, is runtime-inert meanwhile (the engine
+            // gates on LoopOverData), and the compatibility pin is gated the same way so
+            // the dormant value can't over-pin the profile's min version.
             string? onRowError = payload.TryGetProperty("onRowError", out var oEl) && oEl.ValueKind == JsonValueKind.String
                 ? NormalizeOnRowError(oEl.GetString())
                 : null;

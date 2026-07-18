@@ -638,6 +638,7 @@ function HotkeyInput({ value, settingKey, onChange, width = CTRL_W, allowClear =
   const { send, subscribe } = useBridge();
   const [localValue, setLocalValue] = useState(value);
   const [isFocused, setIsFocused] = useState(false);
+  const tt = useTt();
   // Idle-cancel timer — without an explicit Esc-to-cancel rule (so users can capture
   // Escape as a hotkey if they want), the only way out of capture mode is to click away
   // or wait this many ms. Resets on every captured combo so an actively engaged user is
@@ -734,7 +735,7 @@ function HotkeyInput({ value, settingKey, onChange, width = CTRL_W, allowClear =
         }
       }}
       onBlur={() => { setIsFocused(false); setLocalValue(value); send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } }); disarmCaptureTimer(); }}
-      className={`${width} h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
+      className={`${allowClear ? 'w-full' : width} h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
         isFocused
           ? 'text-accent-light border-accent-solid animate-pulse'
           : 'text-accent border-border-default'
@@ -743,15 +744,18 @@ function HotkeyInput({ value, settingKey, onChange, width = CTRL_W, allowClear =
     />
   );
   if (!allowClear) return input;
+  // The clear affordance OVERLAYS the input's right edge inside a wrapper of the same
+  // fixed width, so the field stays column-aligned with the plain hotkey inputs above
+  // and nothing reflows when the button mounts/unmounts.
   return (
-    <div className="flex items-center gap-1">
+    <div className={`relative ${width}`}>
       {input}
       {value !== '' && !isFocused && (
         <button
           type="button"
           onClick={() => onChange(settingKey, '')}
-          className="p-0.5 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
-          data-tip="Clear (disables this hotkey)"
+          className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+          data-tip={tt('Clear (disables this hotkey)', 'Limpar (desativa este hotkey)')}
         >
           <X size={11} />
         </button>

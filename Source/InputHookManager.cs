@@ -1032,10 +1032,14 @@ namespace TrueReplayer
                         }
 
                         // Capture-selection → slot. Empty = disabled (the setting's default);
-                        // the guard also keeps an unset value from ever matching.
+                        // the guard also keeps an unset value from ever matching. An Alt/Win
+                        // combo needs the phantom-F15 pulse (same as profile hotkeys) or the
+                        // swallowed key leaves the modifier reading as "pressed alone" → the
+                        // target's Alt menu / Start menu pops mid-capture.
                         if (!string.IsNullOrEmpty(UserProfile.Current.CaptureSlotHotkey)
                             && key == UserProfile.Current.CaptureSlotHotkey)
                         {
+                            if (ShouldCancelMenuFor(key)) InjectMenuCancelKey();
                             OnHotkeyPressed?.Invoke(key);
                             return (IntPtr)1;
                         }
