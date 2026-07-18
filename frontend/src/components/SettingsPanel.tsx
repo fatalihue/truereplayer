@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useContext, createContext } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle, Power, BellRing } from 'lucide-react';
+import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle, Power, BellRing, X } from 'lucide-react';
 import { useLanguage, useTt } from '../state/LanguageContext';
 // `Search` import removed with the disabled Settings filter — re-add it to revive the filter.
 import { useAppState } from '../state/AppStateContext';
@@ -626,11 +626,14 @@ function ClickerSection({
   );
 }
 
-function HotkeyInput({ value, settingKey, onChange, width = CTRL_W }: {
+function HotkeyInput({ value, settingKey, onChange, width = CTRL_W, allowClear = false }: {
   value: string;
   settingKey: string;
   onChange: (key: string, hotkey: string) => void;
   width?: string;
+  // Opt-in hotkeys (empty = feature off) get a clear affordance; the always-set
+  // five keep the plain input — clearing them would leave a dead core hotkey.
+  allowClear?: boolean;
 }) {
   const { send, subscribe } = useBridge();
   const [localValue, setLocalValue] = useState(value);
@@ -717,7 +720,7 @@ function HotkeyInput({ value, settingKey, onChange, width = CTRL_W }: {
     send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } });
     armCaptureTimer();
   };
-  return (
+  const input = (
     <input
       ref={inputRef}
       type="text"
@@ -738,6 +741,22 @@ function HotkeyInput({ value, settingKey, onChange, width = CTRL_W }: {
       }`}
       placeholder="New key..."
     />
+  );
+  if (!allowClear) return input;
+  return (
+    <div className="flex items-center gap-1">
+      {input}
+      {value !== '' && !isFocused && (
+        <button
+          type="button"
+          onClick={() => onChange(settingKey, '')}
+          className="p-0.5 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+          data-tip="Clear (disables this hotkey)"
+        >
+          <X size={11} />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -1136,6 +1155,20 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   value={settings.modeToggleHotkey}
                   settingKey="modeToggleHotkey"
                   onChange={changeHotkey}
+                />
+              </SettingRow>
+              <SettingRow
+                label="Capture Slot"
+                tooltip={tt(
+                  'Copies the current selection (Ctrl+C) into the next clipboard slot — {clip:1}…{clip:9}, wrapping. Empty = disabled.',
+                  'Copia a seleção atual (Ctrl+C) para o próximo slot — {clip:1}…{clip:9}, dando a volta. Vazio = desativado.',
+                )}
+              >
+                <HotkeyInput
+                  value={settings.captureSlotHotkey}
+                  settingKey="captureSlotHotkey"
+                  onChange={changeHotkey}
+                  allowClear
                 />
               </SettingRow>
             </Section>

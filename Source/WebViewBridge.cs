@@ -227,7 +227,7 @@ namespace TrueReplayer
                 "MiddleClickDown", "MiddleClickUp",
                 "ScrollUp", "ScrollDown",
                 "KeyDown", "KeyUp", "HoldKey", "Keystroke",
-                "SendText", "SetVariable", "ActivateWindow",
+                "SendText", "SetVariable", "CopyToSlot", "ActivateWindow",
                 "WaitImage", "WaitPixelColor", "Pause", "RunProfile",
                 "If", "Else", "EndIf",
                 "BrowserClick", "BrowserRightClick", "BrowserType",
@@ -636,6 +636,7 @@ namespace TrueReplayer
                     case "replay:toggle": HandleReplayToggle(payload); break;
                     case "replay:resume": HandleReplayResume(payload); break;
                     case "replay:inputResult": HandleInputResult(payload); break;
+                    case "replay:variablesRequest": replayService.RequestVariablesSnapshot(); break;
                     case "clicker:pause": replayService.PauseClicker(); break;
                     case "actions:clear": HandleActionsClear(); break;
                     case "actions:undo": HandleUndo(); break;
@@ -1023,8 +1024,14 @@ namespace TrueReplayer
                 headers = d?.Headers ?? new System.Collections.Generic.List<string>(),
                 rows = d?.Rows ?? new System.Collections.Generic.List<System.Collections.Generic.List<string>>(),
                 loopOverData = d?.LoopOverData ?? false,
+                onRowError = NormalizeOnRowError(d?.OnRowError) ?? "halt",
             });
         }
+
+        // Per-row error policy: only "skip" is meaningful; anything else normalizes to null
+        // (= halt, the default) so old profiles stay byte-identical on disk.
+        private static string? NormalizeOnRowError(string? value) =>
+            string.Equals(value, "skip", StringComparison.OrdinalIgnoreCase) ? "skip" : null;
 
         private void HandleDataRequest() => PushDataTable();
 
@@ -1051,10 +1058,13 @@ namespace TrueReplayer
                 }
 
             bool loopOverData = payload.TryGetProperty("loopOverData", out var lEl) && lEl.ValueKind == JsonValueKind.True;
+            string? onRowError = payload.TryGetProperty("onRowError", out var oEl) && oEl.ValueKind == JsonValueKind.String
+                ? NormalizeOnRowError(oEl.GetString())
+                : null;
 
             ProfileDataTable? table = (headers.Count == 0 && rows.Count == 0)
                 ? null
-                : new ProfileDataTable { Headers = headers, Rows = rows, LoopOverData = loopOverData };
+                : new ProfileDataTable { Headers = headers, Rows = rows, LoopOverData = loopOverData, OnRowError = onRowError };
 
             UserProfile.Current.Data = table;
 
@@ -1378,6 +1388,7 @@ namespace TrueReplayer
                     profileKeyToggleHotkey = profile.ProfileKeyToggleHotkey,
                     foregroundHotkey = profile.ForegroundHotkey,
                     modeToggleHotkey = profile.ModeToggleHotkey,
+                    captureSlotHotkey = profile.CaptureSlotHotkey,
                     alwaysOnTop = profile.AlwaysOnTop,
                     minimizeToTray = profile.MinimizeToTray,
                     runOnStartup = AppSettingsManager.Load().RunOnStartup,
@@ -1546,6 +1557,7 @@ namespace TrueReplayer
                     headers = UserProfile.Current?.Data?.Headers ?? new System.Collections.Generic.List<string>(),
                     rows = UserProfile.Current?.Data?.Rows ?? new System.Collections.Generic.List<System.Collections.Generic.List<string>>(),
                     loopOverData = UserProfile.Current?.Data?.LoopOverData ?? false,
+                    onRowError = NormalizeOnRowError(UserProfile.Current?.Data?.OnRowError) ?? "halt",
                 },
                 profiles = profileController.ProfileEntries.Select(p => new
                 {
@@ -1652,6 +1664,7 @@ namespace TrueReplayer
                     profileKeyToggleHotkey = profile.ProfileKeyToggleHotkey,
                     foregroundHotkey = profile.ForegroundHotkey,
                     modeToggleHotkey = profile.ModeToggleHotkey,
+                    captureSlotHotkey = profile.CaptureSlotHotkey,
                     alwaysOnTop = profile.AlwaysOnTop,
                     minimizeToTray = profile.MinimizeToTray,
                     runOnStartup = AppSettingsManager.Load().RunOnStartup,
@@ -2840,6 +2853,17 @@ namespace TrueReplayer
             SendMessage("replay:inputDismiss", new { requestId });
         }
 
+        // Live-variables pane feed: the current run-state snapshot (variables + clip slots +
+        // the data-loop row being executed, or null). Dictionaries are already copies made on
+        // the replay side, so serializing here can't race the live run.
+        public void PushVariablesUpdate(
+            System.Collections.Generic.Dictionary<string, string> variables,
+            System.Collections.Generic.Dictionary<string, string> slots,
+            System.Collections.Generic.Dictionary<string, string>? rowData)
+        {
+            SendMessage("replay:variables", new { variables, slots, rowData });
+        }
+
         // The Ask-Input modal was submitted or cancelled — route the answer back to the paused
         // resolver (cancelled → the run aborts).
         private void HandleInputResult(JsonElement payload)
@@ -2951,6 +2975,26 @@ namespace TrueReplayer
                 actions.Insert(insertIndex, new ActionItem
                 {
                     ActionType = "SetVariable",
+                    Key = "",
+                    Delay = delay
+                });
+                for (int i = 0; i < actions.Count; i++)
+                    actions[i].RowNumber = i + 1;
+                HasUnsavedChanges = true;
+                PushActionsUpdate();
+                mainController.UpdateButtonStates();
+                SendMessage("sheet:openIndex", new { index = insertIndex });
+                return;
+            }
+
+            // CopyToSlot: same Pattern-A flow as SetVariable — insert empty, open the Sheet
+            // so the user names the slot (Key holds the slot name, no other fields).
+            if (actionType == "CopyToSlot")
+            {
+                int delay = int.TryParse(CustomDelay, out var cd) ? cd : 100;
+                actions.Insert(insertIndex, new ActionItem
+                {
+                    ActionType = "CopyToSlot",
                     Key = "",
                     Delay = delay
                 });
@@ -7205,6 +7249,7 @@ namespace TrueReplayer
                 ProfileKeyToggleHotkey = UserProfile.Current.ProfileKeyToggleHotkey,
                 ForegroundHotkey = UserProfile.Current.ForegroundHotkey,
                 ModeToggleHotkey = UserProfile.Current.ModeToggleHotkey,
+                CaptureSlotHotkey = UserProfile.Current.CaptureSlotHotkey,
                 ProfileKeyEnabled = ProfileKeyEnabled,
                 BrowserSelectorEnabled = BrowserSelectorEnabled,
                 RunAsAdmin = AppSettingsManager.Load().RunAsAdmin,
@@ -7214,7 +7259,7 @@ namespace TrueReplayer
 
         private static readonly HashSet<string> HotkeySettingKeys = new()
         {
-            "recordingHotkey", "replayHotkey", "profileKeyToggleHotkey", "foregroundHotkey", "modeToggleHotkey"
+            "recordingHotkey", "replayHotkey", "profileKeyToggleHotkey", "foregroundHotkey", "modeToggleHotkey", "captureSlotHotkey"
         };
 
         private static readonly Dictionary<string, string> HotkeyDisplayNames = new()
@@ -7224,6 +7269,7 @@ namespace TrueReplayer
             ["profileKeyToggleHotkey"] = "Profile Key Toggle",
             ["foregroundHotkey"] = "Foreground",
             ["modeToggleHotkey"] = "Mode Toggle",
+            ["captureSlotHotkey"] = "Capture to Slot",
         };
 
         /// <summary>
@@ -7276,6 +7322,7 @@ namespace TrueReplayer
                 ["profileKeyToggleHotkey"] = UserProfile.Current.ProfileKeyToggleHotkey,
                 ["foregroundHotkey"] = UserProfile.Current.ForegroundHotkey,
                 ["modeToggleHotkey"] = UserProfile.Current.ModeToggleHotkey,
+                ["captureSlotHotkey"] = UserProfile.Current.CaptureSlotHotkey,
             };
 
             foreach (var kv in globalHotkeys)
@@ -7491,6 +7538,10 @@ namespace TrueReplayer
                     break;
                 case "modeToggleHotkey":
                     UserProfile.Current.ModeToggleHotkey = valueElement.GetString() ?? "ScrollLock";
+                    break;
+                case "captureSlotHotkey":
+                    // Empty = disabled (the default) — clearing the input turns the feature off.
+                    UserProfile.Current.CaptureSlotHotkey = valueElement.GetString() ?? "";
                     break;
                 case "runAsAdmin":
                     {

@@ -52,7 +52,7 @@ const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
   ],
 };
 
-const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'RunProfile', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'Pause', 'If', 'Else', 'EndIf']);
+const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'RunProfile', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'CopyToSlot', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'Pause', 'If', 'Else', 'EndIf']);
 
 // Semantic result-card colouring via theme tokens — success = replay green, failure/error =
 // recording red. Matches the inline-style pattern the foot-gun cards already use, so no
@@ -1704,6 +1704,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const isKeyAction = actionType === 'KeyDown' || actionType === 'KeyUp';
   const isSendText = actionType === 'SendText';
   const isSetVariable = actionType === 'SetVariable';
+  const isCopyToSlot = actionType === 'CopyToSlot';
   const isActivateWindow = actionType === 'ActivateWindow';
   const isWaitImage = actionType === 'WaitImage';
   const isWaitPixelColor = actionType === 'WaitPixelColor';
@@ -1768,6 +1769,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   // for tooltips). Replaces the inline 17-branch ternary that used to live in the header.
   const actionLabel = isWaitImage ? 'Wait Image'
     : isSetVariable ? 'Set Variable'
+    : isCopyToSlot ? 'Copy to Slot'
     : isActivateWindow ? 'Activate Window'
     : isWaitPixelColor ? 'Wait Pixel Color'
     : isIfImage ? 'If Image Found'
@@ -3023,6 +3025,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                     { var: '{Date}', label: 'Date' },
                     { var: '{Time}', label: 'Time' },
                     { var: '{Random:1-10}', label: 'Random' },
+                    { var: '{Clip:1}', label: 'Clip slot' },
                     { var: '{Escape}', label: 'Escape' },
                     { var: '{Backspace}', label: 'Backspace' },
                     { var: '{Delete}', label: 'Delete' },
@@ -3348,6 +3351,39 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   className="w-full min-h-[3.25rem] px-2 py-1.5 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid resize-y"
                 />
               </Field>
+            </>
+          )}
+
+          {/* Copy to Slot — captures the focused app's current selection (synthetic Ctrl+C)
+              into a named clipboard slot; only field is the slot name (saved via the generic
+              key block). The card explains the read-back token — the panel is tiny otherwise. */}
+          {isCopyToSlot && (
+            <>
+              <Field
+                label="Slot"
+                hint={tt(
+                  'Letters, digits and underscore. Read the capture back anywhere with {clip:slot} — matching is case-insensitive.',
+                  'Letras, dígitos e underscore. Leia a captura com {clip:slot} em qualquer texto — sem diferenciar maiúsculas.'
+                )}
+              >
+                <input
+                  type="text"
+                  value={key}
+                  onChange={(e) => setKey(e.target.value)}
+                  placeholder="1"
+                  spellCheck={false}
+                  className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
+                />
+              </Field>
+              <div
+                className="border-l-2 rounded px-2.5 py-2 text-[11px] leading-relaxed text-text-tertiary"
+                style={{ borderColor: 'var(--color-border-subtle)' }}
+              >
+                {tt(
+                  'Copies the CURRENT SELECTION of the focused app (sends Ctrl+C) into this slot, then restores your clipboard. Slots survive between runs — capture several, paste them with {clip:…} tokens.',
+                  'Copia a SELEÇÃO ATUAL do app em foco (envia Ctrl+C) para este slot e restaura sua área de transferência. Slots sobrevivem entre execuções — capture vários e cole com tokens {clip:…}.'
+                )}
+              </div>
             </>
           )}
 

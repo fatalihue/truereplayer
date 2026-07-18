@@ -27,7 +27,7 @@ const COMPOUND_NAMES: Record<string, string> = {
 // same rationale as join's separator. A label with ':' survives via the split+rejoin
 // on ':' below (the parts are re-joined with ':'), so {input:Label|menu:a,b,c} and
 // {input:Enter time (HH:MM)} both round-trip unchanged.
-const VERBATIM_ARG_NAMES = new Set(['var', 'row', 'input']);
+const VERBATIM_ARG_NAMES = new Set(['var', 'row', 'clip', 'input']);
 
 export function normalizeToken(token: string): string {
   if (token.length < 2 || token[0] !== '{' || token[token.length - 1] !== '}') {

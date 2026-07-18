@@ -6,7 +6,7 @@ import type { CollisionDetection, DragStartEvent, DragEndEvent } from '@dnd-kit/
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { snapCenterToCursor } from '@dnd-kit/modifiers';
 import { CSS } from '@dnd-kit/utilities';
-import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Braces, AppWindow, Clipboard, Play, Pause, EyeOff, RotateCcw, Dice5, Cpu, FileCheck, Clock, ShieldCheck } from 'lucide-react';
+import { Mouse, MousePointerClick, Keyboard, ArrowUp, ArrowDown, Zap, Type, Trash2, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Plus, Pencil, ScanSearch, Pipette, Globe, CheckCheck, Check, Code2, Files, Hourglass, Repeat2, ExternalLink, Crosshair, Link, GripVertical, Timer, GitBranch, ArrowRightLeft, Combine, Split, MoreHorizontal, Focus, Braces, AppWindow, Clipboard, ClipboardCopy, Play, Pause, EyeOff, RotateCcw, Dice5, Cpu, FileCheck, Clock, ShieldCheck } from 'lucide-react';
 import { canCollapse, canExpand, expandKeystroke } from '../utils/keyRepeat';
 import type { ActionItem } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -64,6 +64,9 @@ export function ActionIcon({ actionType, size = 12 }: { actionType: string; size
   // Braces {} — reads as "variable / interpolation", matching the {var:name}
   // token syntax used to read the value back. Clearer than the old Variable glyph.
   if (actionType === 'SetVariable') return <Braces size={size} />;
+  // ClipboardCopy — "copy into a clipboard slot"; pairs visually with SetVariable's
+  // Braces (both are run-state writers read back via {…} tokens).
+  if (actionType === 'CopyToSlot') return <ClipboardCopy size={size} />;
   if (actionType === 'WaitImage') return <ScanSearch size={size} />;
   if (actionType === 'WaitPixelColor') return <Pipette size={size} />;
   // Match the toolbar's redesigned icons so the chip in the table reads the same
@@ -150,6 +153,7 @@ function actionPillLabel(action: ActionItem): string {
     case 'Pause': return 'Pause';
     case 'HoldKey': return 'Hold Key';
     case 'SetVariable': return 'Set Variable';
+    case 'CopyToSlot': return 'Copy to Slot';
     case 'ActivateWindow': return 'Activate Window';
     case 'DoubleClick': return 'Double Click';
     // Conditional labels are intentionally lowercase to read as "code keywords".
@@ -1643,6 +1647,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                                 return `${action.key} ⟳ ${n} item${n === 1 ? '' : 's'}`;
                               })()
                             : `${action.key} = ${action.variableValue ?? ''}`)
+                      : action.actionType === 'CopyToSlot'
+                        // Show the read-back token — the one thing the user needs to reuse
+                        // the capture. Fresh row (no slot yet) stays blank like SetVariable.
+                        ? (!action.key ? '' : `selection → {clip:${action.key.toLowerCase()}}`)
                       : action.actionType === 'ActivateWindow'
                         // Matcher summary "proc · title" (— launch marks launch-capable
                         // rows); pure-run rows read "run: <path>". Phase-3 verb prefix +

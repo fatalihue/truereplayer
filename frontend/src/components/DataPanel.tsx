@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
+import { SegmentedControl } from './common/SegmentedControl';
 import { CheckboxBox } from './Checkbox';
 import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
@@ -360,6 +361,12 @@ export function DataPanel({ onClose }: DataPanelProps) {
   const [loopOverData, setLoopState] = useState(false);
   const setLoop = useCallback((v: boolean) => { loopRef.current = v; setLoopState(v); }, []);
 
+  // Per-row error policy (only meaningful while loop-over-data). Same ref+state pair as
+  // loopOverData — dirtyNow()/handleSave read the ref synchronously.
+  const onRowErrorRef = useRef<'halt' | 'skip'>('halt');
+  const [onRowError, setOnRowErrorState] = useState<'halt' | 'skip'>('halt');
+  const setOnRowError = useCallback((v: 'halt' | 'skip') => { onRowErrorRef.current = v; setOnRowErrorState(v); }, []);
+
   const [editing, setEditing] = useState<Editing>(null);
   const editingRef = useRef<Editing>(null);
   useEffect(() => { editingRef.current = editing; }, [editing]);
@@ -419,7 +426,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
   // save confirm), which would otherwise stomp the user's unsaved edits while
   // the panel is open. Treat any later dataTable dependency as a review defect.
   const seededRef = useRef(false);
-  const seedRef = useRef<{ grid: Grid; loopOverData: boolean; wasNonEmpty: boolean } | null>(null);
+  const seedRef = useRef<{ grid: Grid; loopOverData: boolean; onRowError: 'halt' | 'skip'; wasNonEmpty: boolean } | null>(null);
   useEffect(() => {
     if (seededRef.current) return;
     seededRef.current = true;
@@ -434,9 +441,13 @@ export function DataPanel({ onClose }: DataPanelProps) {
     setGridState(gridRef.current);
     loopRef.current = dataTable.loopOverData;
     setLoopState(dataTable.loopOverData);
+    const seedOnRowError = dataTable.onRowError === 'skip' ? 'skip' : 'halt';
+    onRowErrorRef.current = seedOnRowError;
+    setOnRowErrorState(seedOnRowError);
     seedRef.current = {
       grid: { headers: [...headers], rows: rows.map((r) => [...r]) },
       loopOverData: dataTable.loopOverData,
+      onRowError: seedOnRowError,
       wasNonEmpty: headers.length > 0 || rows.length > 0,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -453,13 +464,13 @@ export function DataPanel({ onClose }: DataPanelProps) {
   const dirty = useMemo(() => {
     const seed = seedRef.current;
     if (!seed) return false;
-    return !deepEqualGrid(grid, seed.grid) || loopOverData !== seed.loopOverData;
+    return !deepEqualGrid(grid, seed.grid) || loopOverData !== seed.loopOverData || onRowError !== seed.onRowError;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [grid, loopOverData]);
+  }, [grid, loopOverData, onRowError]);
   const dirtyNow = () => {
     const seed = seedRef.current;
     if (!seed) return false;
-    return !deepEqualGrid(gridRef.current, seed.grid) || loopRef.current !== seed.loopOverData;
+    return !deepEqualGrid(gridRef.current, seed.grid) || loopRef.current !== seed.loopOverData || onRowErrorRef.current !== seed.onRowError;
   };
 
   const emptyGrid = grid.headers.length === 0 && grid.rows.length === 0;
@@ -730,7 +741,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
       while (row.length < g.headers.length) row.push('');
       return row.slice(0, Math.max(g.headers.length, row.length));
     });
-    send({ type: 'data:save', payload: { headers: g.headers, rows: padded, loopOverData: loopRef.current } });
+    send({ type: 'data:save', payload: { headers: g.headers, rows: padded, loopOverData: loopRef.current, onRowError: onRowErrorRef.current } });
     onClose();
   };
 
@@ -1053,6 +1064,23 @@ export function DataPanel({ onClose }: DataPanelProps) {
                   'Cursor mode: each run uses the next row and advances (wrapping). Right-click a row → Reset row position to start over.',
                   'Modo cursor: cada execução usa a próxima linha e avança (dá a volta). Botão direito numa linha → Reset row position para recomeçar.',
                 )}
+              </div>
+            )}
+            {/* Per-row error policy — only meaningful while looping over data, so it only
+                renders then (no dead control in cursor mode). */}
+            {loopOverData && (
+              <div className="pt-2">
+                <div className="label-micro text-text-tertiary pb-1">{tt('On row error', 'Em erro na linha')}</div>
+                <SegmentedControl<'halt' | 'skip'>
+                  ariaLabel="On row error"
+                  grow
+                  value={onRowError}
+                  onChange={setOnRowError}
+                  options={[
+                    { value: 'halt', label: 'Halt', tip: tt('Stop the replay on the first failed row (default).', 'Para o replay na primeira linha com erro (padrão).') },
+                    { value: 'skip', label: 'Skip row', tip: tt('Log the failed row and continue with the next one. A summary shows at the end.', 'Registra a linha com erro e continua na próxima. Um resumo aparece no final.') },
+                  ]}
+                />
               </div>
             )}
           </div>

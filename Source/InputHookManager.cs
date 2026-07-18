@@ -1030,6 +1030,15 @@ namespace TrueReplayer
                             OnHotkeyPressed?.Invoke(key);
                             return (IntPtr)1;
                         }
+
+                        // Capture-selection → slot. Empty = disabled (the setting's default);
+                        // the guard also keeps an unset value from ever matching.
+                        if (!string.IsNullOrEmpty(UserProfile.Current.CaptureSlotHotkey)
+                            && key == UserProfile.Current.CaptureSlotHotkey)
+                        {
+                            OnHotkeyPressed?.Invoke(key);
+                            return (IntPtr)1;
+                        }
                     }
                     else
                     {
@@ -1058,7 +1067,9 @@ namespace TrueReplayer
                         }
                         if (key == UserProfile.Current.ProfileKeyToggleHotkey
                             || key == UserProfile.Current.ForegroundHotkey
-                            || key == UserProfile.Current.ModeToggleHotkey)
+                            || key == UserProfile.Current.ModeToggleHotkey
+                            || (!string.IsNullOrEmpty(UserProfile.Current.CaptureSlotHotkey)
+                                && key == UserProfile.Current.CaptureSlotHotkey))
                         {
                             return (IntPtr)1;
                         }

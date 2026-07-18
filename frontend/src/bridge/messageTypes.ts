@@ -369,6 +369,8 @@ export interface SettingsState {
   profileKeyToggleHotkey: string;
   foregroundHotkey: string;
   modeToggleHotkey: string;
+  // Capture-selection → clipboard slot ({clip:1}…{clip:9}). Empty = disabled (the default).
+  captureSlotHotkey: string;
   alwaysOnTop: boolean;
   minimizeToTray: boolean;
   runOnStartup: boolean;
@@ -471,6 +473,9 @@ export interface ProfileDataTable {
   headers: string[];
   rows: string[][];
   loopOverData: boolean;
+  // Per-row error policy while looping over data: 'halt' (default) stops the run on the
+  // first failed row; 'skip' logs the row and continues with the next one.
+  onRowError: 'halt' | 'skip';
 }
 
 export type IncomingMessage =
@@ -509,6 +514,10 @@ export type IncomingMessage =
   // → render a dropdown; null → a text field. inputDismiss closes a still-open prompt (Stop/cancel).
   | { type: 'replay:inputRequest'; payload: { requestId: string; label: string; options: string[] | null } }
   | { type: 'replay:inputDismiss'; payload: { requestId: string } }
+  // Live-variables pane feed: the current run-state snapshot. Pushed on SetVariable/input/
+  // slot writes (+ run start/end, and a throttled per-iteration bump). rowData is the
+  // data-loop row currently executing (null outside a data run).
+  | { type: 'replay:variables'; payload: { variables: Record<string, string>; slots: Record<string, string>; rowData: Record<string, string> | null } }
   | { type: 'clicker:stats'; payload: { count: number; elapsedMs: number } }
   | { type: 'macro:loopProgress'; payload: { current: number; total: number } }
   | { type: 'settings:reset'; payload: Record<string, never> }
@@ -573,6 +582,8 @@ export type OutgoingMessage =
   | { type: 'replay:resume'; payload: Record<string, never> }
   // Answer to a replay:inputRequest. cancelled=true aborts the run; else `value` is substituted.
   | { type: 'replay:inputResult'; payload: { requestId: string; value: string; cancelled: boolean } }
+  // Live-variables pane opened — ask the backend for the current snapshot on demand.
+  | { type: 'replay:variablesRequest'; payload: Record<string, never> }
   | { type: 'clicker:pause'; payload: Record<string, never> }
   | { type: 'actions:clear'; payload: Record<string, never> }
   | { type: 'actions:undo'; payload: Record<string, never> }

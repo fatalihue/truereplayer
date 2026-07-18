@@ -158,6 +158,7 @@ namespace TrueReplayer.Services
             };
             replayer.OnInputRequested += (id, label, menu) => OnInputRequested?.Invoke(id, label, menu);
             replayer.OnInputDismissed += id => OnInputDismissed?.Invoke(id);
+            replayer.OnVariablesChanged += (vars, slots, row) => OnVariablesChanged?.Invoke(vars, slots, row);
             // Loop counter — defined on the inner replayer (it's the one running the loop),
             // re-exposed here so MainWindow can wire the bridge callback alongside the other
             // ReplayService events. Same pass-through pattern as OnReplayPaused/Resumed above.
@@ -173,6 +174,15 @@ namespace TrueReplayer.Services
         // {input:Label} Ask-Input modal: request a value from the host, and dismiss a stale prompt.
         public event Action<string, string, string[]?>? OnInputRequested;   // (requestId, label, menu?)
         public event Action<string>? OnInputDismissed;                       // (requestId)
+        // Live-variables pane feed: (variables, clip slots, current data row or null).
+        public event Action<Dictionary<string, string>, Dictionary<string, string>, Dictionary<string, string>?>? OnVariablesChanged;
+
+        // Live pane opened / re-subscribed — push the current snapshot on demand.
+        public void RequestVariablesSnapshot() => replayer.PushVariablesSnapshot(force: true);
+
+        // Global capture hotkey: capture the current selection into the next sequential slot.
+        public Task<(string Slot, string? Value)> CaptureSelectionToNextSlotAsync()
+            => replayer.CaptureSelectionToNextSlotAsync();
 
         // Host → replay: the Ask-Input modal was submitted (cancelled=false) or cancelled.
         public void CompleteInput(string requestId, string? value, bool cancelled)
@@ -1210,6 +1220,33 @@ namespace TrueReplayer.Services
         // per-profile. DELIBERATELY not in the fresh-run reset block (same as _cycleCursors)
         // so the position survives across runs — that IS the feature.
         private readonly Dictionary<string, int> _rowCursors = new(StringComparer.Ordinal);
+        // Clipboard SLOTS behind Copy to Slot / {clip:name}. "Multiple clipboards": each slot
+        // holds one captured selection, read back via {clip:1}…{clip:name}. DELIBERATELY not in
+        // the fresh-run reset block — slots are captured ad hoc (capture hotkey, earlier runs)
+        // and must survive into later runs, exactly like _cycleCursors. Session-lifetime; keys
+        // are lowercased like _runtimeVariables so {clip:Name} and {clip:name} agree.
+        private readonly Dictionary<string, string> _clipSlots = new();
+        // Sequential slot the capture hotkey writes to next: 1..9, wrapping. Session-lifetime.
+        private int _nextHotkeySlot = 1;
+        // Per-row skip-on-error (data loop). When the table opts in (OnRowError == "skip"),
+        // an action-level failure marks the CURRENT ROW faulted instead of cancelling the
+        // run: the action loop (and any RunProfile recursion) unwinds at its next boundary
+        // check, StartAsync logs the row and continues with the next one. Replay-thread-only
+        // state, reset per iteration.
+        private bool _rowFaulted;
+        private string? _rowFaultReason;
+        // Skip mode gates on the BATCH data loop only — cursor mode and plain runs keep the
+        // exact halt semantics they had (skip-on-error is a data-loop robustness knob).
+        private bool SkipRowOnErrorActive =>
+            _dataLoopOver && string.Equals(_dataTable?.OnRowError, "skip", StringComparison.OrdinalIgnoreCase);
+
+        // Route an action-level failure while skip mode is active: mark the row faulted and
+        // let the loops unwind. Keeps the FIRST reason (later failures are knock-on noise).
+        private void FaultRow(string reason)
+        {
+            _rowFaulted = true;
+            _rowFaultReason ??= reason;
+        }
         // Hard cap on how deep RunProfile chains can recurse. Prevents accidental infinite loops
         // even if cycle detection were somehow bypassed.
         private const int MaxCallDepth = 5;
@@ -1231,6 +1268,13 @@ namespace TrueReplayer.Services
         public event Action<string, string, string[]?>? OnInputRequested;   // (requestId, label, menu?)
         public event Action<string>? OnInputDismissed;                       // (requestId)
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<string?>> _pendingInputs = new();
+
+        // Live-variables snapshot for the frontend debug pane: (variables, clip slots, current
+        // data row or null). Raised on the dispatcher with COPIES of the dictionaries (the live
+        // ones mutate on the replay thread). Forced on user-meaningful writes (SetVariable, input
+        // answer, slot capture) and run start; per-iteration bumps ride a small throttle.
+        public event Action<Dictionary<string, string>, Dictionary<string, string>, Dictionary<string, string>?>? OnVariablesChanged;
+        private long _lastVariablesPushTick;
 
         public ActionReplayer(ObservableCollection<ActionItem> actions, DispatcherQueue dispatcherQueue, BrowserBridgeService? browserBridge = null)
         {
@@ -1485,6 +1529,9 @@ namespace TrueReplayer.Services
                 _currentIteration = 0;
                 _currentActionRow = 0;
                 _currentRowData = null;
+                _rowFaulted = false;
+                _rowFaultReason = null;
+                PushVariablesSnapshot(force: true); // live pane: run started, variables cleared
 
                 // Data-loop CURSOR (Model B): table present but "loop over data" OFF → this
                 // whole run uses ONE row (the per-profile cursor's current row); the cursor
@@ -1502,6 +1549,8 @@ namespace TrueReplayer.Services
                 }
 
                 // Run replay on a dedicated thread to avoid blocking the thread pool
+                int skippedRows = 0;
+                string? firstSkipNote = null;
                 await Task.Factory.StartNew(async () =>
                 {
                     while (!token.IsCancellationRequested && (isInfinite || iteration < _loopCount))
@@ -1515,6 +1564,8 @@ namespace TrueReplayer.Services
                         _currentRowData = (_dataLoopOver && _dataTable != null && iteration - 1 < (_dataTable.Rows?.Count ?? 0))
                             ? BuildRowDict(_dataTable, iteration - 1)
                             : cursorRowData;
+                        _rowFaulted = false;
+                        _rowFaultReason = null;
 
                         // Throttled status-bar update. First iteration is always pushed so the
                         // counter appears immediately; subsequent iterations are coalesced to
@@ -1530,13 +1581,40 @@ namespace TrueReplayer.Services
                                 dispatcherQueue.TryEnqueue(() => OnLoopProgress?.Invoke(capturedIteration, loopProgressTotal));
                             }
                         }
+                        PushVariablesSnapshot(); // live pane: counter/{row:col} moved (throttled)
 
-                        await ExecuteActionsAsync(snapshot, token);
+                        try
+                        {
+                            await ExecuteActionsAsync(snapshot, token);
+                        }
+                        // Skip mode also absorbs the FAULTING error paths (browser action
+                        // exceptions, If-probe Halt rethrows) — an OCE is never a row error,
+                        // it is Stop/cancel and must keep unwinding the whole run.
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception ex) when (SkipRowOnErrorActive)
+                        {
+                            FaultRow(ex.Message);
+                        }
+
+                        if (_rowFaulted)
+                        {
+                            skippedRows++;
+                            var reason = _rowFaultReason ?? "error";
+                            firstSkipNote ??= $"row {iteration}: {reason}";
+                            Services.DiagnosticLog.Warn($"Data loop: row {iteration} skipped — {reason}");
+                            _rowFaulted = false;
+                            _rowFaultReason = null;
+                        }
 
                         if (!token.IsCancellationRequested && (isInfinite || iteration < _loopCount) && _loopInterval > 0)
                             await Task.Delay(_loopInterval, token);
                     }
                 }, token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+
+                // One honest end-of-run summary instead of a toast per skipped row. Rides the
+                // error channel on purpose: rows DID fail; the log has the per-row reasons.
+                if (skippedRows > 0 && !token.IsCancellationRequested)
+                    OnReplayError?.Invoke($"Data loop finished — {skippedRows} of {_loopCount} row(s) skipped after errors (first: {firstSkipNote})");
             }
             // OperationCanceledException is the BASE type (TaskCanceledException derives from it),
             // so this catches both. A plain Stop during a Pause or an instant probe surfaces a bare
@@ -1568,6 +1646,7 @@ namespace TrueReplayer.Services
 
                 _callStack.Clear();
                 NotifyChainChanged();
+                PushVariablesSnapshot(force: true); // live pane: land on the final state
             }
         }
 
@@ -1624,7 +1703,9 @@ namespace TrueReplayer.Services
 
             for (int i = 0; i < actions.Count; i++)
             {
-                if (token.IsCancellationRequested) break;
+                // _rowFaulted: a skip-mode action failure unwinds the rest of the row's
+                // actions (and any RunProfile recursion level) without cancelling the run.
+                if (token.IsCancellationRequested || _rowFaulted) break;
                 var action = actions[i];
 
                 // ── Conditional logic — handled before the regular Delay / Highlight /
@@ -1858,6 +1939,7 @@ namespace TrueReplayer.Services
                             break;
                         }
                         case "SetVariable": await ExecuteSetVariable(action); break;
+                        case "CopyToSlot": await ExecuteCopyToSlot(action, token); break;
                         case "ActivateWindow": await ExecuteActivateWindow(action, token); break;
                         case "WaitImage": await ExecuteWaitImage(action, token); break;
                         case "WaitPixelColor": await ExecuteWaitPixelColor(action, token); break;
@@ -2109,7 +2191,7 @@ namespace TrueReplayer.Services
                 // unbounded number of times before the Stop hotkey gets a turn between iterations.
                 int repeats = Math.Max(1, Math.Min(999, action.RepeatCount));
                 var subActions = subProfile.Actions.ToList();
-                for (int r = 0; r < repeats && !token.IsCancellationRequested; r++)
+                for (int r = 0; r < repeats && !token.IsCancellationRequested && !_rowFaulted; r++)
                 {
                     await ExecuteActionsAsync(subActions, token);
                 }
@@ -2356,6 +2438,11 @@ namespace TrueReplayer.Services
         private void ReportMissingTargetWindow()
         {
             var name = _windowTarget?.ProcessName ?? "target";
+            if (SkipRowOnErrorActive)
+            {
+                FaultRow($"target window '{name}' not found");
+                return;
+            }
             DiagnosticLog.Warn($"Replay aborted: relative-coords target window not found [{name} {_windowTarget?.WindowTitle}]".TrimEnd());
             OnReplayError?.Invoke($"Target window '{name}' not found — open it and retry");
             try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
@@ -2553,6 +2640,11 @@ namespace TrueReplayer.Services
                 DiagnosticLog.Warn($"Assert '{label}': {reason} — Continue policy, moving on");
                 return;
             }
+            if (SkipRowOnErrorActive)
+            {
+                FaultRow($"Assert failed: '{label}' — {reason}");
+                return;
+            }
             DiagnosticLog.Warn($"Replay aborted: Assert '{label}' — {reason}");
             OnReplayError?.Invoke($"Assert failed: '{label}' — {reason}");
             try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
@@ -2574,6 +2666,11 @@ namespace TrueReplayer.Services
             if (string.Equals(action.ActivateOnTimeout, "Continue", StringComparison.OrdinalIgnoreCase))
             {
                 DiagnosticLog.Warn($"Activate Window '{label}': {reason} — Continue policy, moving on");
+                return;
+            }
+            if (SkipRowOnErrorActive)
+            {
+                FaultRow($"Activate Window: '{label}' — {reason}");
                 return;
             }
             DiagnosticLog.Warn($"Replay aborted: Activate Window '{label}' — {reason}");
@@ -2984,6 +3081,9 @@ namespace TrueReplayer.Services
             // Data-loop current row: column name (lowercased) → cell value. Non-null only
             // while a "loop over data" run is stamping rows. {row:column} resolves from here.
             public IReadOnlyDictionary<string, string>? RowData { get; init; }
+            // Clipboard slots (Copy to Slot / capture hotkey): slot name (lowercased) → captured
+            // text. {clip:name} resolves from here. Null on the static Test-Action path → empty.
+            public IReadOnlyDictionary<string, string>? ClipSlots { get; init; }
             // {input:Label} provider: (label, menu-options-or-null) → the value to substitute.
             // Null on the static Test-Action path (RunCtx.Empty) — there {input} resolves empty.
             // On the live path it pauses replay and prompts the user (ProvideInputAsync).
@@ -2999,6 +3099,7 @@ namespace TrueReplayer.Services
             Iteration = _currentIteration,
             Row = _currentActionRow,
             RowData = _currentRowData,
+            ClipSlots = _clipSlots,
             InputProvider = ProvideInputAsync,
         };
 
@@ -3046,6 +3147,7 @@ namespace TrueReplayer.Services
                 if (items.Length == 0)
                 {
                     _runtimeVariables.Remove(key); // empty list = delete (same contract as set mode)
+                    PushVariablesSnapshot(force: true);
                     return;
                 }
                 var idPart = string.IsNullOrEmpty(action.Id) ? key : action.Id; // Id always set in practice
@@ -3053,6 +3155,7 @@ namespace TrueReplayer.Services
                 _cycleCursors.TryGetValue(cursorKey, out int cursor);
                 _runtimeVariables[key] = items[((cursor % items.Length) + items.Length) % items.Length];
                 _cycleCursors[cursorKey] = (cursor + 1) % items.Length;
+                PushVariablesSnapshot(force: true);
                 return;
             }
 
@@ -3060,6 +3163,7 @@ namespace TrueReplayer.Services
                 _runtimeVariables.Remove(key);   // empty value = delete (documented contract)
             else
                 _runtimeVariables[key] = value;
+            PushVariablesSnapshot(force: true);
         }
 
         // {input:Label} provider handed to the resolver via RunCtx. Ask-once-per-Label-per-run:
@@ -3081,7 +3185,11 @@ namespace TrueReplayer.Services
                 token.ThrowIfCancellationRequested();
                 throw new OperationCanceledException();
             }
-            if (key.Length > 0) _runtimeVariables[key] = answer;
+            if (key.Length > 0)
+            {
+                _runtimeVariables[key] = answer;
+                PushVariablesSnapshot(force: true);
+            }
             return answer;
         }
 
@@ -3113,6 +3221,90 @@ namespace TrueReplayer.Services
         {
             if (_pendingInputs.TryRemove(requestId, out var tcs))
                 tcs.TrySetResult(cancelled ? null : (value ?? string.Empty));
+        }
+
+        // Copy to Slot action: capture the CURRENT SELECTION of the focused app (synthetic
+        // Ctrl+C) into the named clipboard slot, then restore the user's real clipboard.
+        // Slot name lives in Key (SetVariable's Key-reuse convention); read back via
+        // {clip:name}. A failed capture (no selection / slow target) leaves the slot
+        // UNCHANGED — a transient focus hiccup must not wipe a good capture.
+        private async Task ExecuteCopyToSlot(ActionItem action, CancellationToken token)
+        {
+            var name = action.Key?.Trim();
+            if (string.IsNullOrEmpty(name) || !VariableNameRegex.IsMatch(name))
+                return; // unusable slot name — no-op, same forgiveness as SetVariable
+            var key = name.ToLowerInvariant();
+            var captured = await CaptureSelectionTextAsync(token);
+            if (captured == null)
+            {
+                Services.DiagnosticLog.Info($"Copy to Slot '{name}': nothing copied (empty selection?) — slot left unchanged");
+                return;
+            }
+            _clipSlots[key] = captured;
+            PushVariablesSnapshot(force: true);
+        }
+
+        // The selection-capture primitive shared by the Copy to Slot action and the global
+        // capture hotkey: snapshot the real clipboard → clear it (the "did a copy happen"
+        // detector) → synthetic Ctrl+C → poll for the copied text → restore the snapshot.
+        // Injected keys carry LLKHF_INJECTED so the hook can't re-trigger anything. Returns
+        // null when nothing arrived (empty selection, or a target that doesn't copy text).
+        private async Task<string?> CaptureSelectionTextAsync(CancellationToken token)
+        {
+            var original = await ReadClipboardSnapshotAsync(dispatcherQueue, includeHtml: true);
+            try
+            {
+                RestoreOriginalClipboard((null, null)); // (null, null) = Clipboard.Clear()
+                await Task.Delay(30, token);
+                // A physically held hotkey modifier (e.g. the Shift of Ctrl+Shift+9) would turn
+                // the injected Ctrl+C into Ctrl+Shift+C for the target — release first, same as
+                // replay start does before its first synthetic input.
+                ReleasePhysicallyHeldModifiers();
+                SimulateKeystroke("Ctrl+C", token);
+                for (int i = 0; i < 15; i++) // up to ~750 ms — slow targets render the copy late
+                {
+                    await Task.Delay(50, token);
+                    var text = await ReadClipboardTextAsync(dispatcherQueue);
+                    if (!string.IsNullOrEmpty(text)) return text;
+                }
+                return null;
+            }
+            finally
+            {
+                RestoreOriginalClipboard(original);
+            }
+        }
+
+        // Capture the current selection into the NEXT sequential slot (1..9, wrapping) — the
+        // global capture hotkey's entry, called by the host on its dispatcher. Returns the slot
+        // name and the captured text (null = nothing copied; the cursor does not advance then).
+        public async Task<(string Slot, string? Value)> CaptureSelectionToNextSlotAsync()
+        {
+            var slot = _nextHotkeySlot.ToString();
+            var captured = await CaptureSelectionTextAsync(CancellationToken.None);
+            if (captured != null)
+            {
+                _clipSlots[slot] = captured;
+                _nextHotkeySlot = _nextHotkeySlot >= 9 ? 1 : _nextHotkeySlot + 1;
+                PushVariablesSnapshot(force: true);
+            }
+            return (slot, captured);
+        }
+
+        // Live-variables pane feed: copy the mutable dictionaries (they change on the replay
+        // thread) and raise OnVariablesChanged on the dispatcher. Forced pushes are for rare,
+        // user-meaningful writes; unforced (per-iteration) pushes ride a ~4 Hz throttle so a
+        // tight infinite loop doesn't flood the bridge.
+        public void PushVariablesSnapshot(bool force = false)
+        {
+            if (OnVariablesChanged == null) return;
+            var now = Environment.TickCount64;
+            if (!force && now - _lastVariablesPushTick < 250) return;
+            _lastVariablesPushTick = now;
+            var vars = new Dictionary<string, string>(_runtimeVariables);
+            var slots = new Dictionary<string, string>(_clipSlots);
+            var row = _currentRowData != null ? new Dictionary<string, string>(_currentRowData) : null;
+            dispatcherQueue.TryEnqueue(() => OnVariablesChanged?.Invoke(vars, slots, row));
         }
 
         // Instance entry to the unified resolver for the SendText/paste path: passes the saved
@@ -3367,6 +3559,13 @@ namespace TrueReplayer.Services
             @"\{row:([A-Za-z0-9_]+)\}",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        // Clipboard-slot token {clip:name}. Disjoint from {clipboard...}: this regex requires
+        // ':' immediately after "clip", which "{clipboard}" / "{clipboard:mods}" never has
+        // (their 5th char is 'b'). Lookup lowercases the captured name, same as {var}.
+        private static readonly Regex ClipSlotTokenRegex = new(
+            @"\{clip:([A-Za-z0-9_]+)\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
         /// <summary>
         /// Resolves the run-state tokens {var:name} / {counter} / {row} from
         /// <paramref name="runCtx"/>. With RunCtx.Empty (the Test Action path) every {var}
@@ -3404,6 +3603,22 @@ namespace TrueReplayer.Services
                     var col = m.Groups[1].Value.ToLowerInvariant();
                     string value = string.Empty;
                     runCtx.RowData?.TryGetValue(col, out value!);
+                    value ??= string.Empty;
+                    if (htmlEncodeSubstitution) value = HtmlEncodeValue(value);
+                    return escapeBracesInSubstitution ? EscapeBracesForParser(value) : value;
+                });
+            }
+
+            // Clipboard slots {clip:name} — captured selections (Copy to Slot / capture
+            // hotkey). Missing slot → empty (consume-always); slot text is brace-escaped
+            // like {var} since captured selections can contain arbitrary text.
+            if (ClipSlotTokenRegex.IsMatch(text))
+            {
+                text = ClipSlotTokenRegex.Replace(text, m =>
+                {
+                    var name = m.Groups[1].Value.ToLowerInvariant();
+                    string value = string.Empty;
+                    runCtx.ClipSlots?.TryGetValue(name, out value!);
                     value ??= string.Empty;
                     if (htmlEncodeSubstitution) value = HtmlEncodeValue(value);
                     return escapeBracesInSubstitution ? EscapeBracesForParser(value) : value;
@@ -3676,6 +3891,11 @@ namespace TrueReplayer.Services
             {
                 return;
             }
+            if (SkipRowOnErrorActive)
+            {
+                FaultRow($"Wait Image timed out ({action.DisplayKey})");
+                return;
+            }
             // ObjectDisposedException possible if a new StartAsync swapped _cts out
             // from under us; swallow because this run was already over anyway.
             try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
@@ -3783,6 +4003,11 @@ namespace TrueReplayer.Services
         private void HandleWaitPixelColorTimeout(ActionItem action)
         {
             if (action.PixelOnTimeout == "Continue") return;
+            if (SkipRowOnErrorActive)
+            {
+                FaultRow($"Wait Pixel timed out ({action.PixelColor ?? "?"})");
+                return;
+            }
             // Same swallow as HandleWaitImageTimeout — race with a fresh StartAsync.
             try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
         }

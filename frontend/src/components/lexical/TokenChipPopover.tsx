@@ -29,7 +29,7 @@ const REPEATABLE_TOKEN_NAMES = new Set([
   'right',
 ]);
 
-type TokenKind = 'clipboard' | 'delay' | 'repeatable' | 'random' | 'var' | 'rowcol' | 'input' | 'static';
+type TokenKind = 'clipboard' | 'delay' | 'repeatable' | 'random' | 'var' | 'rowcol' | 'clip' | 'input' | 'static';
 
 function getTokenKind(token: string): TokenKind {
   const inner = token.slice(1, -1);
@@ -41,6 +41,8 @@ function getTokenKind(token: string): TokenKind {
   // {row:column} edits its data-table column name.
   if (name === 'var') return 'var';
   if (name === 'row' && inner.includes(':')) return 'rowcol';
+  // {clip:name} — a captured clipboard slot (Copy to Slot / capture hotkey).
+  if (name === 'clip') return 'clip';
   if (name === 'input') return 'input';
   if (REPEATABLE_TOKEN_NAMES.has(name)) return 'repeatable';
   return 'static';
@@ -203,6 +205,7 @@ export function TokenChipPopover({
         {kind === 'random' && <RandomEditor token={token} onChange={updateLive} />}
         {kind === 'var' && <NameEditor token={token} tokenName="var" onChange={updateLive} />}
         {kind === 'rowcol' && <NameEditor token={token} tokenName="row" onChange={updateLive} />}
+        {kind === 'clip' && <NameEditor token={token} tokenName="clip" onChange={updateLive} />}
         {kind === 'input' && <InputEditor token={token} onChange={updateLive} />}
         {kind === 'static' && <StaticInfo token={token} />}
       </div>
@@ -380,11 +383,11 @@ function NameEditor({
   onChange,
 }: {
   token: string;
-  tokenName: 'var' | 'row';
+  tokenName: 'var' | 'row' | 'clip';
   onChange: (t: string) => void;
 }) {
   const [name, setName] = useState(() => parseNameArg(token));
-  const label = tokenName === 'var' ? 'Variable name' : 'Data column';
+  const label = tokenName === 'var' ? 'Variable name' : tokenName === 'clip' ? 'Slot name' : 'Data column';
 
   const update = (raw: string) => {
     // Same charset the typing grammar chips ([A-Za-z0-9_]) — anything else
@@ -403,14 +406,16 @@ function NameEditor({
           onChange={(e) => update(e.target.value)}
           autoFocus
           spellCheck={false}
-          placeholder={tokenName === 'var' ? 'name' : 'column'}
+          placeholder={tokenName === 'var' ? 'name' : tokenName === 'clip' ? '1' : 'column'}
           className="h-7 w-full px-2 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid placeholder:text-text-disabled"
         />
       </div>
       <div className="text-[10px] text-text-tertiary mt-1">
         {tokenName === 'var'
           ? 'Replaced with the value a Set Variable action stored under this name.'
-          : "Replaced with this column's cell of the current data row (loop over data)."}
+          : tokenName === 'clip'
+            ? 'Replaced with the selection a Copy to Slot action (or the capture hotkey) stored in this slot.'
+            : "Replaced with this column's cell of the current data row (loop over data)."}
       </div>
     </Section>
   );

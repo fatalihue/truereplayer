@@ -496,7 +496,7 @@ namespace TrueReplayer.Models
             "KeyDown", "KeyUp", "Keystroke", "HoldKey", "ScrollUp", "ScrollDown", "SendText", "WaitImage",
             "BrowserClick", "BrowserRightClick", "BrowserType", "BrowserWaitElement", "BrowserNavigate",
             "BrowserSelectOption", "BrowserAssert",
-            "RunProfile", "Pause", "SetVariable", "ActivateWindow",
+            "RunProfile", "Pause", "SetVariable", "CopyToSlot", "ActivateWindow",
             // Conditional structural rows never carry their OWN coordinates — the IF row
             // borrows X/Y from its underlying probe data (handled below in DisplayX/Y);
             // Else/EndIf are pure markers with no coordinate semantics at all.
@@ -565,6 +565,11 @@ namespace TrueReplayer.Models
                     if (hasTimeout) return $"{Timeout / 1000.0:0.##}s";
                     return "—";
                 }
+
+                // Copy to Slot — show the token the capture is read back with, so the grid
+                // tells the user exactly what to type elsewhere ({clip:name}).
+                if (string.Equals(ActionType, "CopyToSlot", StringComparison.OrdinalIgnoreCase))
+                    return string.IsNullOrWhiteSpace(Key) ? "" : $"{{clip:{Key.Trim().ToLowerInvariant()}}}";
 
                 // IF row — show the condition's primary identifier so the user can read
                 // the block intent without opening the Sheet. The frontend renders the

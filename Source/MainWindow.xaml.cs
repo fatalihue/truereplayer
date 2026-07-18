@@ -164,6 +164,12 @@ namespace TrueReplayer
             {
                 bridge?.PushInputDismiss(requestId);
             };
+            // Live-variables pane — the replayer raises snapshots (already dispatcher-marshalled
+            // with copied dictionaries); the bridge forwards them as replay:variables.
+            replayService.OnVariablesChanged += (vars, slots, rowData) =>
+            {
+                bridge?.PushVariablesUpdate(vars, slots, rowData);
+            };
 
             // Clicker v2 — forward click stats (count + elapsedMs) to the React StatusBar so
             // the user sees "Clicked 1,234 · 8.3/s · 02:14" live during Clicker runs. Throttled
@@ -697,6 +703,25 @@ namespace TrueReplayer
                     if (key == UserProfile.Current.ForegroundHotkey)
                     {
                         windowEventManager?.BringToForeground();
+                        return;
+                    }
+
+                    // Capture-selection → slot: synthetic Ctrl+C on the FOREGROUND app, store
+                    // into the next sequential slot (1..9, wrapping), restore the clipboard.
+                    // The injected keys are LLKHF_INJECTED so the hook can't re-enter here.
+                    if (!string.IsNullOrEmpty(UserProfile.Current.CaptureSlotHotkey)
+                        && key == UserProfile.Current.CaptureSlotHotkey)
+                    {
+                        var (slot, value) = await replayService.CaptureSelectionToNextSlotAsync();
+                        if (value != null)
+                        {
+                            Services.DiagnosticLog.Info($"Capture to Slot: {value.Length} char(s) → {{clip:{slot}}}");
+                            bridge?.SendMessage("alert:show", new { message = $"Selection captured → {{clip:{slot}}}" });
+                        }
+                        else
+                        {
+                            Services.DiagnosticLog.Info("Capture to Slot: nothing copied (empty selection?)");
+                        }
                         return;
                     }
 
