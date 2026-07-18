@@ -50,11 +50,30 @@ namespace TrueReplayer.Services
         // real width, leaving a smeared trail of label pixels along the cursor path. Tracking
         // the truth from OnPaint avoids the divergence.
         private Rectangle _lastCursorLabelRect = Rectangle.Empty;
+
+        // Precision mode — hold Shift to damp cursor movement so a single screen pixel is
+        // reachable even on a high-DPI/high-sensitivity mouse. Physical movement is scaled by
+        // PrecisionFactor and the cursor is warped back to the damped point, so the pointer
+        // (and therefore the sampled pixel) crawls while the hand moves normally.
+        //
+        // _precisionPos keeps FLOAT precision: at 0.2 a 4-px physical flick is 0.8 px, which
+        // would round to zero and be lost every time if the accumulator were integer — the
+        // cursor would feel stuck rather than slow. The fractional remainder carries over so
+        // slow movement still advances, one pixel at a time.
+        private const float PrecisionFactor = 0.2f;   // 5× slower
+        private bool _precisionActive;
+        private PointF _precisionPos;                 // damped position, client coords, sub-pixel
+        private Point _precisionWarp;                 // last point we warped the cursor to
         // Cached virtual-screen origin so the cursor label can show absolute screen coords
         // (matching the values the action will end up storing). The form already uses these
         // to compute its size; reading them once in the ctor avoids re-querying on every paint.
         private readonly int _virtualOriginX;
         private readonly int _virtualOriginY;
+        // Monitor the instruction banner is centred on, in form-local coords. The form spans
+        // the whole virtual desktop, so centring the banner in ClientRectangle puts it on the
+        // SEAM between monitors on a multi-screen setup — the text is split down the middle
+        // across two panels and can't be read. Confining it to one screen fixes that.
+        private readonly Rectangle _hintBounds;
 
         // <paramref name="regionOnly"/>: when true, the overlay returns just the rect coords
         // without producing a cropped Bitmap. Used to configure the search ROI of an existing
@@ -82,6 +101,10 @@ namespace TrueReplayer.Services
             _virtualOriginX = vx;
             _virtualOriginY = vy;
 
+            // Resolved BEFORE any Form property is touched, so the handle can't have been
+            // created yet and MainWindowHandle can only resolve to the app's own window.
+            _hintBounds = ResolveHintMonitor(vx, vy, vw, vh);
+
             // Seed the selection from a previously-saved rect so the user sees what's already
             // there. Same minimum size as OnMouseUp (10x10) — anything smaller is treated as
             // "no usable seed" and the overlay opens blank. Converts screen-absolute to
@@ -99,11 +122,16 @@ namespace TrueReplayer.Services
                 }
             }
 
-            _hintText = hintText ?? (pointPick
+            // Appended to EVERY variant, including the caller-supplied hints in WebViewBridge
+            // (each flow writes its own wording, so baking it into the defaults alone would
+            // hide the modifier from most pickers). Kept to three words — the magnifier itself
+            // shows the live "SLOW" state once Shift is actually held.
+            _hintText = (hintText ?? (pointPick
                 ? "Click to pick  •  Scroll to zoom  •  ESC to cancel"
                 : seeded
                     ? "Drag to redraw the region  •  ESC to keep current"
-                    : "Click and drag to select a region  •  ESC to cancel");
+                    : "Click and drag to select a region  •  ESC to cancel"))
+                + "  •  Shift = slow";
 
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
@@ -116,10 +144,52 @@ namespace TrueReplayer.Services
 
             KeyPreview = true;
             KeyDown += OnKeyDown;
+            KeyUp += OnKeyUp;
             MouseDown += OnMouseDown;
             MouseMove += OnMouseMove;
             MouseUp += OnMouseUp;
             MouseWheel += OnMouseWheel;
+        }
+
+        // Which screen the instruction banner belongs to, in form-local coords.
+        //
+        // Reads the app window's RESTORED placement rather than its current rect: every picker
+        // minimises the main window before opening this overlay, and a minimised window parks
+        // at (-32000,-32000), so MonitorFromWindow/GetWindowRect would answer with whichever
+        // screen happens to be nearest that off-screen point. rcNormalPosition survives the
+        // minimise and still names the monitor the user is actually working on.
+        //
+        // Falls back to the monitor under the cursor — where the user just clicked to open the
+        // picker — so the banner is always confined to a real screen, never straddling two.
+        private static Rectangle ResolveHintMonitor(int vx, int vy, int vw, int vh)
+        {
+            Rectangle? bounds = null;
+            try
+            {
+                var hwnd = System.Diagnostics.Process.GetCurrentProcess().MainWindowHandle;
+                if (hwnd != IntPtr.Zero)
+                {
+                    var wp = new NativeMethods.WINDOWPLACEMENT();
+                    wp.length = System.Runtime.InteropServices.Marshal.SizeOf<NativeMethods.WINDOWPLACEMENT>();
+                    if (NativeMethods.GetWindowPlacement(hwnd, ref wp))
+                    {
+                        var r = wp.rcNormalPosition;
+                        var restored = Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom);
+                        if (restored.Width > 0 && restored.Height > 0)
+                            bounds = Screen.FromRectangle(restored).Bounds;
+                    }
+                }
+            }
+            catch { /* any interop hiccup just falls through to the cursor's screen */ }
+
+            bounds ??= Screen.FromPoint(Cursor.Position).Bounds;
+
+            // Screen coords -> form-local, then clipped to the form: a monitor only partly
+            // covered by the captured virtual screen must not push the banner off-canvas.
+            var local = new Rectangle(bounds.Value.X - vx, bounds.Value.Y - vy,
+                                      bounds.Value.Width, bounds.Value.Height);
+            local.Intersect(new Rectangle(0, 0, vw, vh));
+            return local.IsEmpty ? new Rectangle(0, 0, vw, vh) : local;
         }
 
         public Task<RegionSelectionResult?> GetSelectionAsync() => _tcs.Task;
@@ -184,8 +254,11 @@ namespace TrueReplayer.Services
                 string hint = _hintText;
                 using var font = new Font("Segoe UI", 13f, FontStyle.Regular);
                 var size = g.MeasureString(hint, font);
-                float hx = (ClientRectangle.Width - size.Width) / 2;
-                float hy = 40;
+                // Centred on ONE monitor (see _hintBounds), not the virtual desktop. The
+                // vertical offset is measured from that monitor's top too, so a screen sitting
+                // lower or taller than its neighbour still gets the banner near ITS top edge.
+                float hx = _hintBounds.X + (_hintBounds.Width - size.Width) / 2;
+                float hy = _hintBounds.Y + 40;
 
                 using var bgBrush = new SolidBrush(Color.FromArgb(180, 0, 0, 0));
                 g.FillRoundedRectangle(bgBrush, hx - 12, hy - 6, size.Width + 24, size.Height + 12, 8);
@@ -224,10 +297,61 @@ namespace TrueReplayer.Services
                 _tcs.TrySetResult(null);
                 Close();
             }
+            // Shift press/release only drives the badge repaint promptly — OnMouseMove reads
+            // the live modifier state itself, so a missed key event can't strand the mode.
+            // KeyDown auto-repeats while held; SetPrecision no-ops when already active.
+            else if (e.KeyCode == Keys.ShiftKey)
+            {
+                SetPrecision(true, PrecisionAnchor());
+            }
+        }
+
+        private void OnKeyUp(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.ShiftKey)
+            {
+                SetPrecision(false, PrecisionAnchor());
+            }
+        }
+
+        // Anchor for a keyboard-initiated mode change. Prefers the last point OnMouseMove
+        // actually processed so the baseline shares that method's clock: e.Location is the
+        // position at message-GENERATION time, while a live Cursor.Position read here is
+        // message-HANDLING time. Mixing the two makes the first damped delta include whatever
+        // travel happened in between, which shows up as a backward twitch on Shift-press.
+        private Point PrecisionAnchor() => _hasCursor ? _cursorPoint : CurrentClientCursor();
+
+        // Live cursor in form-local coords. The form is borderless and positioned exactly at the
+        // virtual-screen origin, so this is the inverse of DrawMagnifier's absX/absY conversion.
+        private Point CurrentClientCursor()
+        {
+            var p = Cursor.Position;
+            return new Point(p.X - _virtualOriginX, p.Y - _virtualOriginY);
+        }
+
+        // Enter/leave precision mode. Anchoring BOTH the float accumulator and the warp
+        // reference at the cursor's current pixel is what keeps the transition jump-free:
+        // the first damped delta is then measured from where the pointer already is.
+        private void SetPrecision(bool on, Point at)
+        {
+            if (on == _precisionActive) return;
+            _precisionActive = on;
+            if (on)
+            {
+                _precisionPos = at;
+                _precisionWarp = at;
+            }
+            InvalidateMagnifier();
         }
 
         private void OnMouseDown(object? sender, MouseEventArgs e)
         {
+            // In precision mode the pointer is pinned to the damped point, so commit THAT
+            // pixel rather than the raw event location: pressing the button can physically
+            // nudge the mouse a pixel or two, which is the very error this mode exists to
+            // remove. Outside precision mode the two are identical.
+            var loc = _precisionActive && _hasCursor ? _cursorPoint : e.Location;
+
             if (e.Button == MouseButtons.Left)
             {
                 if (_pointPick)
@@ -240,18 +364,18 @@ namespace TrueReplayer.Services
                     // Guarded against out-of-form coordinates so a fast click on the edge
                     // can't throw.
                     Color? pickedColor = null;
-                    if (e.Location.X >= 0 && e.Location.Y >= 0
-                        && e.Location.X < _screenshot.Width && e.Location.Y < _screenshot.Height)
+                    if (loc.X >= 0 && loc.Y >= 0
+                        && loc.X < _screenshot.Width && loc.Y < _screenshot.Height)
                     {
-                        try { pickedColor = _screenshot.GetPixel(e.Location.X, e.Location.Y); }
+                        try { pickedColor = _screenshot.GetPixel(loc.X, loc.Y); }
                         catch { /* defensive — bitmap access can race with Dispose on cancel */ }
                     }
 
                     _tcs.TrySetResult(new RegionSelectionResult
                     {
                         CroppedImage = null,
-                        ScreenX = e.Location.X + _virtualOriginX,
-                        ScreenY = e.Location.Y + _virtualOriginY,
+                        ScreenX = loc.X + _virtualOriginX,
+                        ScreenY = loc.Y + _virtualOriginY,
                         Width = 0,
                         Height = 0,
                         PickedColor = pickedColor,
@@ -259,8 +383,8 @@ namespace TrueReplayer.Services
                     Close();
                     return;
                 }
-                _startPoint = e.Location;
-                _currentPoint = e.Location;
+                _startPoint = loc;
+                _currentPoint = loc;
                 _isDragging = true;
                 _hasSelection = false;
             }
@@ -268,31 +392,98 @@ namespace TrueReplayer.Services
 
         private void OnMouseMove(object? sender, MouseEventArgs e)
         {
+            var loc = e.Location;
+
+            // Resync off the live modifier state rather than trusting the key events alone: if
+            // the overlay ever misses a KeyUp (focus stolen while Shift is down) the next move
+            // leaves precision mode instead of damping the cursor forever. Verified by probe —
+            // GetKeyState (what Control.ModifierKeys reads) is refreshed as this thread pumps
+            // the mouse messages, so it reports Shift-up on the first move back over the
+            // overlay even though the WM_KEYUP itself was never delivered here.
+            bool shift = (Control.ModifierKeys & Keys.Shift) != 0;
+            if (shift != _precisionActive) SetPrecision(shift, loc);
+
+            if (_precisionActive)
+            {
+                // Delta is measured from the point we last warped to — which is where the
+                // pointer physically sits — so it is exactly the movement the user just made.
+                int dx = loc.X - _precisionWarp.X;
+                int dy = loc.Y - _precisionWarp.Y;
+
+                // Our own warp raises a MouseMove at precisely _precisionWarp. That yields a
+                // zero delta, so the echo cancels itself here — no suppression flag needed.
+                if (dx == 0 && dy == 0) return;
+
+                _precisionPos = new PointF(
+                    Math.Clamp(_precisionPos.X + dx * PrecisionFactor, 0, ClientRectangle.Width - 1),
+                    Math.Clamp(_precisionPos.Y + dy * PrecisionFactor, 0, ClientRectangle.Height - 1));
+                loc = Point.Round(_precisionPos);
+
+                // Re-pin the pointer even when the damped target rounded to the SAME pixel:
+                // the physical cursor is out at e.Location, and leaving it there would let it
+                // drift away from the magnified pixel while the disc stayed put.
+                //
+                // PointToScreen/PointToClient are used as a matched pair so the round-trip is
+                // self-consistent, and the position is READ BACK because the OS confines the
+                // cursor to the union of the monitors while this form spans their bounding
+                // BOX — on a staggered layout the box contains dead zones the cursor can never
+                // enter, and SetCursorPos silently relocates instead of failing. Adopting the
+                // requested-but-unreached point as the next baseline would inject a constant
+                // phantom delta into every later move and make the cursor creep.
+                Cursor.Position = PointToScreen(loc);
+                var actual = PointToClient(Cursor.Position);
+                if (actual != loc)
+                {
+                    // The OS refused the target — follow the cursor rather than the request so
+                    // the disc keeps showing the pixel actually under the pointer. Re-seat the
+                    // accumulator PER AXIS: a refusal is usually one-dimensional (a vertical
+                    // edge blocks X while Y is free), and clearing the untouched axis's residue
+                    // too would freeze it while the user slid along the edge. Re-seating at all
+                    // is correct only here — doing it every frame is what makes damping feel dead.
+                    if (actual.X != loc.X) _precisionPos.X = actual.X;
+                    if (actual.Y != loc.Y) _precisionPos.Y = actual.Y;
+                    loc = actual;
+                }
+                _precisionWarp = actual;
+            }
+
             // Track cursor for the live "(x, y)" label even when not dragging. Without this
             // the user has no idea where on screen they're about to click in pointPick mode,
             // and in rect mode they can't preview the start point before pressing.
-            if (e.Location == _cursorPoint && _hasCursor && !_isDragging) return;  // no-op move
-            _cursorPoint = e.Location;
+            if (loc == _cursorPoint && _hasCursor && !_isDragging) return;  // no-op move
+            _cursorPoint = loc;
             _hasCursor = true;
 
             if (_isDragging)
             {
-                _currentPoint = e.Location;
+                _currentPoint = loc;
                 // Drag is already a full-form gesture (rect + dim label changes); a full
                 // invalidate is the simplest correct option here.
                 Invalidate();
                 return;
             }
 
-            // Not dragging — only the cursor coord HUD changed. Invalidate the union of the
-            // PREVIOUSLY-PAINTED label rect (captured at the end of OnPaint, so it reflects
-            // the real MeasureString width and any edge-flip that happened) and a generous
-            // approximation of where the new label will land. Inflated by 8 px on each axis
-            // to absorb font-metric drift between the estimate and the actual paint result —
-            // the earlier 1-px inflate left a smeared trail when the cursor moved fast across
-            // wide-digit coordinate strings.
+            // Not dragging — only the cursor coord HUD changed.
+            InvalidateMagnifier();
+        }
+
+        // Invalidate the union of the PREVIOUSLY-PAINTED label rect (captured at the end of
+        // OnPaint, so it reflects the real MeasureString width and any edge-flip that happened)
+        // and a generous approximation of where the new label will land. Inflated by 8 px on
+        // each axis to absorb font-metric drift between the estimate and the actual paint
+        // result — the earlier 1-px inflate left a smeared trail when the cursor moved fast
+        // across wide-digit coordinate strings. Also used when only the precision badge
+        // changed, which repaints in place with no cursor movement at all.
+        private void InvalidateMagnifier()
+        {
             var newRect = ComputeCursorLabelRect();
-            var dirty = _lastCursorLabelRect.IsEmpty ? newRect : Rectangle.Union(_lastCursorLabelRect, newRect);
+            // Union with an empty rect would stretch the dirty region back to the origin, so
+            // each side only joins in when it actually covers something.
+            Rectangle dirty;
+            if (_lastCursorLabelRect.IsEmpty) dirty = newRect;
+            else if (newRect.IsEmpty) dirty = _lastCursorLabelRect;
+            else dirty = Rectangle.Union(_lastCursorLabelRect, newRect);
+            if (dirty.IsEmpty) return;   // nothing painted yet — no cursor seen
             dirty.Inflate(8, 8);
             Invalidate(dirty);
         }
@@ -454,24 +645,37 @@ namespace TrueReplayer.Services
                     g.DrawLine(gridPen, magX, gy, magX + MagDiameter, gy);
                 }
 
-                // Back to anti-aliased for the crosshair + centre cell (smooth vectors).
-                g.SmoothingMode = SmoothingMode.AntiAlias;
+                int halfPx = (MagPixelCount / 2) * MagPixelSize;
 
-                // Crosshair — accent-coloured lines through the centre, broken
-                // around the centre pixel so the target colour stays visible.
-                using var crossPen = new Pen(Color.FromArgb(200, 96, 205, 255), 2f);
-                int pxCenterX = magX + MagDiameter / 2;
-                int pxCenterY = magY + MagDiameter / 2;
-                int gap = MagPixelSize / 2 + 2;
-                g.DrawLine(crossPen, magX + 4, pxCenterY, pxCenterX - gap, pxCenterY);
-                g.DrawLine(crossPen, pxCenterX + gap, pxCenterY, magX + MagDiameter - 4, pxCenterY);
-                g.DrawLine(crossPen, pxCenterX, magY + 4, pxCenterX, pxCenterY - gap);
-                g.DrawLine(crossPen, pxCenterX, pxCenterY + gap, pxCenterX, magY + MagDiameter - 4);
+                // Crosshair — ShareX-style: a translucent band exactly ONE magnified pixel
+                // wide, snapped to the target cell's row and column. Two deliberate changes
+                // from the old 2 px near-opaque line: the band now corresponds to a real
+                // screen pixel instead of floating mid-cell, and the low alpha lets the
+                // magnified content read straight THROUGH it, so the crosshair guides the eye
+                // without hiding the very pixels being inspected. It runs uninterrupted across
+                // the disc — the old gap around the centre existed only because the opaque
+                // line would have covered the target, which a soft band no longer does.
+                //
+                // Hard edges: the band has to land exactly on the pixel grid, and AA would
+                // bleed it a fraction into the neighbouring cells.
+                g.SmoothingMode = SmoothingMode.None;
+
+                // Filled as ONE region, not two rectangles — the arms overlap on the centre
+                // cell, and two translucent fills would stack their alpha into a visibly
+                // darker square right where the user is looking.
+                using (var crossArea = new Region(new Rectangle(magX + halfPx, magY, MagPixelSize, MagDiameter)))
+                {
+                    crossArea.Union(new Rectangle(magX, magY + halfPx, MagDiameter, MagPixelSize));
+                    using var crossBrush = new SolidBrush(Color.FromArgb(64, 96, 205, 255));
+                    g.FillRegion(crossBrush, crossArea);
+                }
+
+                // Back to anti-aliased for the centre-cell outline (smooth vector).
+                g.SmoothingMode = SmoothingMode.AntiAlias;
 
                 // Highlight the exact target pixel — 1.5 px white outline around the
                 // centre cell so the user can see which pixel the click will sample,
                 // even when the underlying colour is white-ish.
-                int halfPx = (MagPixelCount / 2) * MagPixelSize;
                 // Dual stroke — a dark 3 px underlay then white 1.5 px on top — so the
                 // target cell stays legible on both light and dark pixels (a lone white
                 // outline used to vanish on white-ish colours).
@@ -484,9 +688,31 @@ namespace TrueReplayer.Services
             }
 
             // Disc border — 1.5 px subtle white outside the clip so it doesn't
-            // overlap with the centre highlight.
-            using (var borderPen = new Pen(Color.FromArgb(140, 255, 255, 255), 1.5f))
+            // overlap with the centre highlight. Turns accent while precision mode is on,
+            // so the damped cursor never leaves the user wondering why it feels stuck.
+            using (var borderPen = _precisionActive
+                ? new Pen(Color.FromArgb(220, 96, 205, 255), 2f)
+                : new Pen(Color.FromArgb(140, 255, 255, 255), 1.5f))
                 g.DrawEllipse(borderPen, circleRect);
+
+            // Live "SLOW" badge — state, not instruction: the discoverable hint lives in the
+            // top bar, this only confirms the mode is engaged. Sits inside the lower edge of
+            // the disc (well within the tracked invalidate rect, so it can't smear) and is
+            // narrow enough to fit the chord at that height even on the smallest zoom level.
+            if (_precisionActive)
+            {
+                using var slowFont = new Font("Consolas", 8f, FontStyle.Bold);
+                const string slowText = "SLOW";
+                var slowSize = g.MeasureString(slowText, slowFont);
+                float badgeW = slowSize.Width + 10;
+                float badgeH = slowSize.Height + 2;
+                float badgeX = magX + (MagDiameter - badgeW) / 2;
+                float badgeY = magY + MagDiameter - badgeH - 8;
+                using (var badgeBg = new SolidBrush(Color.FromArgb(220, 0, 0, 0)))
+                    g.FillRoundedRectangle(badgeBg, badgeX, badgeY, badgeW, badgeH, 4);
+                using (var badgeFg = new SolidBrush(Color.FromArgb(255, 96, 205, 255)))
+                    g.DrawString(slowText, slowFont, badgeFg, badgeX + 5, badgeY + 1);
+            }
 
             // Coord chip below the disc — TWO lines:
             //   1. "X: {absX}  Y: {absY}"  — always shown
@@ -577,8 +803,10 @@ namespace TrueReplayer.Services
         {
             if (e.Button == MouseButtons.Left && _isDragging)
             {
+                // Same pinning rationale as OnMouseDown — releasing the button must not shift
+                // the committed edge away from the pixel the magnifier was showing.
                 _isDragging = false;
-                _currentPoint = e.Location;
+                _currentPoint = _precisionActive && _hasCursor ? _cursorPoint : e.Location;
                 _hasSelection = true;
 
                 var rect = GetSelectionRect();
