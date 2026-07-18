@@ -342,6 +342,12 @@ html[data-animations="true"] .bulk-bar-enter {
   animation: slide-up var(--motion-base) var(--ease-enter);
 }
 
+/* Theme Editor left-surface swap (gallery ↔ customize ↔ share) — a 150ms slide-in,
+   gated on the animations toggle. key={surface} remounts the wrapper so it re-fires. */
+html[data-animations="true"] .theme-surface-slide {
+  animation: slide-in-right 150ms var(--ease-enter);
+}
+
 @keyframes command-in {
   from { opacity: 0; transform: scale(0.97) translateY(-8px); }
   to   { opacity: 1; transform: scale(1) translateY(0); }
