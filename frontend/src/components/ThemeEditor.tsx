@@ -311,6 +311,8 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set(INITIAL_COLLAPSED));
   const [openHslKey, setOpenHslKey] = useState<string | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
+  // Click-to-edit: a preview hotspot was clicked → scroll its color row into view once it renders.
+  const [scrollKey, setScrollKey] = useState<string | null>(null);
 
   const [importText, setImportText] = useState('');
   const [importError, setImportError] = useState('');
@@ -476,8 +478,45 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
     } catch { /* clipboard unavailable */ }
   }, [openField, applyColor]);
 
-  const ckHover = (key: string): React.CSSProperties | undefined =>
-    hoverKey === key ? { outline: '1px solid var(--color-accent-solid)', outlineOffset: '-1px' } : undefined;
+  // Preview hotspots are click-to-edit: cursor + pointerEvents:auto make them interactive (the rail
+  // disables pointer-events on mock buttons; the inline style re-enables just these), plus the
+  // accent outline when the matching color row (or this hotspot) is hovered.
+  const ckHover = (key: string): React.CSSProperties => ({
+    cursor: 'pointer',
+    pointerEvents: 'auto',
+    ...(hoverKey === key ? { outline: '1px solid var(--color-accent-solid)', outlineOffset: '-1px' } : {}),
+  });
+
+  // Jump from a clicked preview hotspot to its color row: open Customize→Colors, expand the row's
+  // section, open its HSL editor, and scroll it into view.
+  const jumpToColor = useCallback((key: string) => {
+    const section = COLOR_SECTIONS.find(s => s.fields.some(f => f.key === key));
+    if (!section) return;
+    setSurface('customize');
+    setCustSeg('colors');
+    setCollapsedSections(prev => { const n = new Set(prev); n.delete(section.title); return n; });
+    setOpenHslKey(key);
+    setScrollKey(key);
+  }, []);
+
+  const ckEvents = (key: string) => ({
+    onMouseEnter: () => setHoverKey(key),
+    onMouseLeave: () => setHoverKey(null),
+    onClick: (e: React.MouseEvent) => { e.stopPropagation(); jumpToColor(key); },
+  });
+
+  useEffect(() => {
+    if (!scrollKey) return;
+    const key = scrollKey;
+    // Instant (not smooth): the surface-slide already carries the motion, and a smooth scroll
+    // racing the mount/slide lands unreliably. Two rAFs so the expanded section has laid out.
+    const raf = requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.querySelector(`[data-fieldkey="${CSS.escape(key)}"]`)
+        ?.scrollIntoView({ block: 'center', behavior: 'auto' });
+      setScrollKey(null);
+    }));
+    return () => cancelAnimationFrame(raf);
+  }, [scrollKey]);
 
   // ═══ Footer ═══
   const footerHint = (
@@ -546,9 +585,12 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
       <div className="grid grid-cols-[1fr_300px] h-[560px] min-h-0">
         {/* ── Left column ── */}
         <div className="min-w-0 overflow-y-auto">
-          {surface === 'gallery' && renderGallery()}
-          {surface === 'customize' && renderCustomize()}
-          {surface === 'share' && renderShare()}
+          {/* key={surface} remounts on surface change so the gated slide keyframe re-fires. */}
+          <div key={surface} className="theme-surface-slide">
+            {surface === 'gallery' && renderGallery()}
+            {surface === 'customize' && renderCustomize()}
+            {surface === 'share' && renderShare()}
+          </div>
         </div>
 
         {/* ── Persistent preview rail ── */}
@@ -763,18 +805,19 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
               {!collapsed && (
                 <div className={`px-4 pb-2.5 ${section.grid2 ? 'grid grid-cols-2 gap-x-4' : ''}`}>
                   {section.fields.map(f => (
-                    <ColorRow
-                      key={f.key}
-                      label={f.label}
-                      value={fieldValue(f)}
-                      overridden={fieldOverridden(f)}
-                      wcagBg={section.wcag ? resolvedColors['bg-surface'] : undefined}
-                      hslOpen={openHslKey === f.key}
-                      onChange={(hex) => applyColor(f, hex)}
-                      onReset={() => resetColor(f)}
-                      onToggleHsl={() => setOpenHslKey(prev => (prev === f.key ? null : f.key))}
-                      onHover={(h) => setHoverKey(h ? f.key : null)}
-                    />
+                    <div key={f.key} data-fieldkey={f.key}>
+                      <ColorRow
+                        label={f.label}
+                        value={fieldValue(f)}
+                        overridden={fieldOverridden(f)}
+                        wcagBg={section.wcag ? resolvedColors['bg-surface'] : undefined}
+                        hslOpen={openHslKey === f.key}
+                        onChange={(hex) => applyColor(f, hex)}
+                        onReset={() => resetColor(f)}
+                        onToggleHsl={() => setOpenHslKey(prev => (prev === f.key ? null : f.key))}
+                        onHover={(h) => setHoverKey(h ? f.key : null)}
+                      />
+                    </div>
                   ))}
                   {section.accent && (
                     <button onClick={() => setAccentColor(currentAccentHex)} className="mt-1 inline-flex items-center gap-1.5 h-6 px-2 rounded text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-card transition-colors">
@@ -953,8 +996,8 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
         <div className="label-micro text-text-tertiary mb-2">Live Preview</div>
         <div className="flex flex-col border border-border-default overflow-hidden shadow-lg" style={{ borderRadius: 'calc(var(--ui-border-radius) + 4px)' }}>
           {/* Title bar */}
-          <div className="flex items-center gap-1.5 px-2 h-8 bg-bg-surface border-b border-border-subtle shrink-0" style={ckHover('bg-surface')}>
-            <span className="w-4 h-4 rounded bg-accent-solid shrink-0" style={ckHover('accent-solid')} />
+          <div className="flex items-center gap-1.5 px-2 h-8 bg-bg-surface border-b border-border-subtle shrink-0" style={ckHover('bg-surface')} {...ckEvents('bg-surface')}>
+            <span className="w-4 h-4 rounded bg-accent-solid shrink-0" style={ckHover('accent-solid')} {...ckEvents('accent-solid')} />
             <span className="text-[10px] text-text-secondary">TrueReplayer</span>
             <span className="flex-1" />
             <span className="inline-flex items-center gap-1 px-1.5 py-px rounded-full text-[9px]" style={{ background: 'var(--color-replay-bg)', color: 'var(--color-replay)' }}>
@@ -963,8 +1006,8 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
             <span className="px-1 py-px rounded font-mono text-[8px] border" style={{ background: 'var(--color-hotkey-bg)', color: 'var(--color-hotkey-fg)', borderColor: 'var(--color-hotkey-border)' }}>F8</span>
           </div>
           {/* Toolbar */}
-          <div className="flex items-center gap-1.5 px-2 h-8 bg-bg-surface border-b border-border-subtle shrink-0" style={ckHover('bg-surface')}>
-            <button className="px-2 py-0.5 text-[9px] text-white bg-accent-solid" style={{ borderRadius: 'var(--ui-border-radius)', ...ckHover('accent-solid') }}>Save</button>
+          <div className="flex items-center gap-1.5 px-2 h-8 bg-bg-surface border-b border-border-subtle shrink-0" style={ckHover('bg-surface')} {...ckEvents('bg-surface')}>
+            <button className="px-2 py-0.5 text-[9px] text-white bg-accent-solid" style={{ borderRadius: 'var(--ui-border-radius)', ...ckHover('accent-solid') }} {...ckEvents('accent-solid')}>Save</button>
             <button className="px-2 py-0.5 text-[9px] text-text-secondary bg-bg-elevated border border-border-default" style={{ borderRadius: 'var(--ui-border-radius)' }}>Load</button>
           </div>
           {/* Grid header */}
@@ -999,7 +1042,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
               ))}
             </div>
             {/* Mock SheetPanel pane — folds the old text/input sample cards inside the window */}
-            <div className="bg-bg-card border-l border-border-subtle p-2 flex flex-col gap-1" style={ckHover('bg-card')}>
+            <div className="bg-bg-card border-l border-border-subtle p-2 flex flex-col gap-1" style={ckHover('bg-card')} {...ckEvents('bg-card')}>
               <div className="text-[10px] text-text-primary">Primary</div>
               <div className="text-[10px] text-text-secondary">Secondary</div>
               <div className="text-[10px] text-text-tertiary">Tertiary</div>
@@ -1013,10 +1056,10 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
           </div>
           {/* Action bar */}
           <div className="flex items-center gap-1.5 px-2 h-9 bg-bg-surface border-t border-border-subtle shrink-0">
-            <button className="px-2 py-0.5 text-[9px] border" style={{ borderRadius: 'var(--ui-border-radius)', background: 'var(--color-recording-bg)', color: 'var(--color-recording)', borderColor: 'color-mix(in srgb, var(--color-recording) 30%, transparent)', ...ckHover('recordingColor') }}>● Recording</button>
-            <button className="px-2 py-0.5 text-[9px] border" style={{ borderRadius: 'var(--ui-border-radius)', background: 'var(--color-replay-bg)', color: 'var(--color-replay)', borderColor: 'color-mix(in srgb, var(--color-replay) 30%, transparent)', ...ckHover('replayColor') }}>▶ Replay</button>
+            <button className="px-2 py-0.5 text-[9px] border" style={{ borderRadius: 'var(--ui-border-radius)', background: 'var(--color-recording-bg)', color: 'var(--color-recording)', borderColor: 'color-mix(in srgb, var(--color-recording) 30%, transparent)', ...ckHover('recordingColor') }} {...ckEvents('recordingColor')}>● Recording</button>
+            <button className="px-2 py-0.5 text-[9px] border" style={{ borderRadius: 'var(--ui-border-radius)', background: 'var(--color-replay-bg)', color: 'var(--color-replay)', borderColor: 'color-mix(in srgb, var(--color-replay) 30%, transparent)', ...ckHover('replayColor') }} {...ckEvents('replayColor')}>▶ Replay</button>
             <span className="flex-1" />
-            <button className="px-2 py-0.5 text-[9px] border" style={{ borderRadius: 'var(--ui-border-radius)', background: 'var(--color-clicker-bg)', color: 'var(--color-clicker)', borderColor: 'var(--color-clicker-border)', ...ckHover('clickerColor') }}>Clicker</button>
+            <button className="px-2 py-0.5 text-[9px] border" style={{ borderRadius: 'var(--ui-border-radius)', background: 'var(--color-clicker-bg)', color: 'var(--color-clicker)', borderColor: 'var(--color-clicker-border)', ...ckHover('clickerColor') }} {...ckEvents('clickerColor')}>Clicker</button>
           </div>
           {/* Status bar */}
           <div className="flex items-center gap-1 px-2 h-6 bg-bg-base border-t border-border-subtle text-[9px] text-text-tertiary shrink-0">
