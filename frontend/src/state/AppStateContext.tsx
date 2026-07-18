@@ -56,6 +56,7 @@ const defaultSettings = {
   profileKeyToggleHotkey: 'Pause',
   foregroundHotkey: 'Insert',
   modeToggleHotkey: 'ScrollLock',
+  captureSlotHotkey: '',
   alwaysOnTop: false,
   minimizeToTray: true,
   runOnStartup: true,
@@ -70,7 +71,7 @@ const defaultSettings = {
 const initialState: AppState = {
   status: 'ready',
   actions: [],
-  dataTable: { headers: [], rows: [], loopOverData: false },
+  dataTable: { headers: [], rows: [], loopOverData: false, onRowError: 'halt' },
   highlightedActionIndex: null,
   profiles: [],
   activeProfile: null,

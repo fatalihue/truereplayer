@@ -92,6 +92,7 @@ namespace TrueReplayer.Services
                 "BrowserAssert" => "Assert Element",
                 "BrowserNavigate" => "Open URL",
                 "RunProfile" => "Run Profile",
+                "CopyToSlot" => "Copy to Slot",
                 _ => SplitCamelCase(type)
             };
         }

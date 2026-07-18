@@ -79,6 +79,9 @@ const KNOWN_TOKEN_NAMES: ReadonlySet<string> = new Set([
   'var',
   'counter',
   'row',
+  // Clipboard slots: {clip:name} reads a selection captured by Copy to Slot /
+  // the capture hotkey. Disjoint from {clipboard} (different name).
+  'clip',
   // Ask-Input (Text Blaze style): {input:Label} / {input:Label|menu:a,b,c} prompts the user at
   // replay time. A spaced label or the |menu: variant falls outside TOKEN_REGEX, so those chip
   // only via insertToken (the palette prompt); a bare {input:Name} chips when typed.

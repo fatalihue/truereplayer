@@ -46,6 +46,11 @@ namespace TrueReplayer.Models
         [JsonIgnore]
         public string ModeToggleHotkey { get; set; } = "ScrollLock";
 
+        // Capture-selection → clipboard slot ({clip:1}…{clip:9}, sequential). Empty = disabled
+        // (deliberate default — see AppSettings.CaptureSlotHotkey).
+        [JsonIgnore]
+        public string CaptureSlotHotkey { get; set; } = "";
+
         [JsonIgnore]
         public bool RecordMouse { get; set; } = true;
         [JsonIgnore]
@@ -172,6 +177,12 @@ namespace TrueReplayer.Models
         public List<string> Headers { get; set; } = new();
         public List<List<string>> Rows { get; set; } = new();
         public bool LoopOverData { get; set; }
+        // Per-row error policy while looping over data: null/"halt" = stop the run on the
+        // first failed row (classic behaviour); "skip" = log the row and continue with the
+        // next one. Only meaningful when LoopOverData is on. Ignored-when-null so plain
+        // tables stay byte-identical on disk (and in exports) to pre-feature builds.
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? OnRowError { get; set; }
     }
 
     public class HotstringConfig

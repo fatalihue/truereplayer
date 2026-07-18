@@ -17,7 +17,7 @@ const DISPLAY_KEY_MAP: Record<string, string> = {
   'Next': 'Page Down', 'Prior': 'Page Up',
 };
 
-const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'RunProfile', 'Pause', 'If', 'Else', 'EndIf']);
+const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'CopyToSlot', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'RunProfile', 'Pause', 'If', 'Else', 'EndIf']);
 
 export function getDisplayKey(key: string): string {
   if (!key) return '';
@@ -106,7 +106,9 @@ function computeActionTypeColors(actionType: string): { bg: string; fg: string }
     return { bg: 'var(--color-action-sendtext-bg)', fg: 'var(--color-action-sendtext-fg)' };
   // SetVariable has its own magenta token now (it used to share SendText's gold, which
   // made the two "text/data" actions look identical in the grid).
-  if (actionType === 'SetVariable')
+  // CopyToSlot shares it — both are run-state writers read back via {…} tokens,
+  // and a dedicated theme token for a niche action would bloat all 40+ themes.
+  if (actionType === 'SetVariable' || actionType === 'CopyToSlot')
     return { bg: 'var(--color-action-setvariable-bg)', fg: 'var(--color-action-setvariable-fg)' };
   if (actionType === 'WaitImage')
     return { bg: 'var(--color-action-waitimage-bg)', fg: 'var(--color-action-waitimage-fg)' };
@@ -143,6 +145,7 @@ export function getActionTypeIcon(actionType: string): string {
   if (actionType === 'HoldKey') return 'Timer';
   if (actionType === 'SendText') return 'Type';
   if (actionType === 'SetVariable') return 'Braces';
+  if (actionType === 'CopyToSlot') return 'ClipboardCopy';
   if (actionType === 'WaitImage') return 'ScanSearch';
   if (actionType === 'WaitPixelColor') return 'Pipette';
   if (actionType === 'RunProfile') return 'Repeat2';

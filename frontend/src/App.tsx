@@ -19,6 +19,7 @@ import { TooltipLayer } from './components/common/TooltipLayer';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { UpdateOverlay } from './components/UpdateOverlay';
 import { AskInputHost } from './components/AskInputDialog';
+import { LiveVariablesHost } from './components/LiveVariablesPanel';
 import { ExtensionUpdateBanner } from './components/ExtensionUpdateBanner';
 import { ClickerDashboard } from './components/ClickerDashboard';
 import { CommandPalette } from './components/CommandPalette';
@@ -318,6 +319,7 @@ function AppShell() {
       {showDataEditor && <DataPanel onClose={() => setShowDataEditor(false)} />}
       <UpdateOverlay />
       <AskInputHost />
+      <LiveVariablesHost />
 
       {/* One global tooltip renderer driving every [data-tip] in the app */}
       <TooltipLayer />

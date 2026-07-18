@@ -99,6 +99,20 @@ namespace TrueReplayer.Services
             (p => p.Data != null,
                 new Version(2, 8, 0), "Data-loop table"),
 
+            // Per-row skip-on-error (OnRowError == "skip") — an older build ignores the unknown
+            // JSON property and HALTS the whole run on the first failed row instead of skipping,
+            // a silent behavioural divergence. Property-level pin so plain tables keep the
+            // 2.8.0 floor; gated on LoopOverData because skip is runtime-inert without the
+            // batch loop (matches SkipRowOnErrorActive). Introduced after 2.8.1 — bump at release.
+            (p => p.Data is { LoopOverData: true } d && string.Equals(d.OnRowError, "skip", StringComparison.OrdinalIgnoreCase),
+                new Version(2, 8, 1), "Data-loop skip-on-error"),
+
+            // Copy to Slot ({clip:name} capture) — an older build has no dispatch case for the
+            // unknown ActionType → silently skips the capture and every {clip:} token resolves
+            // empty. Introduced after 2.8.1 — bump at release.
+            (p => p.Actions.Any(a => string.Equals(a.ActionType, "CopyToSlot", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 8, 1), "Copy to Slot"),
+
             // BrowserAssert — a DEDICATED row (the Browser* predicate below auto-pins 2.1.0,
             // but that is INSUFFICIENT: an older build has no dispatch case for the unknown
             // type, silently SKIPS the assertion → a broken page passes unnoticed. Pin to

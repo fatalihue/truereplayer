@@ -164,6 +164,12 @@ namespace TrueReplayer
             {
                 bridge?.PushInputDismiss(requestId);
             };
+            // Live-variables pane — the replayer raises snapshots (already dispatcher-marshalled
+            // with copied dictionaries); the bridge forwards them as replay:variables.
+            replayService.OnVariablesChanged += (vars, slots, rowData) =>
+            {
+                bridge?.PushVariablesUpdate(vars, slots, rowData);
+            };
 
             // Clicker v2 — forward click stats (count + elapsedMs) to the React StatusBar so
             // the user sees "Clicked 1,234 · 8.3/s · 02:14" live during Clicker runs. Throttled
@@ -697,6 +703,44 @@ namespace TrueReplayer
                     if (key == UserProfile.Current.ForegroundHotkey)
                     {
                         windowEventManager?.BringToForeground();
+                        return;
+                    }
+
+                    // Capture-selection → slot: synthetic Ctrl+C on the FOREGROUND app, store
+                    // into the next sequential slot (1..9, wrapping), restore the clipboard.
+                    // The injected keys are LLKHF_INJECTED so the hook can't re-enter here.
+                    if (!string.IsNullOrEmpty(UserProfile.Current.CaptureSlotHotkey)
+                        && key == UserProfile.Current.CaptureSlotHotkey)
+                    {
+                        // Not during a replay: the capture releases physically held modifiers
+                        // (breaking WhilePressed holds / HoldKey presses), injects Ctrl+C into
+                        // whatever the run is driving, and races the run's own clipboard pastes.
+                        // Use the Copy to Slot ACTION to capture as part of a macro.
+                        if (mainController.IsReplayInProgress())
+                        {
+                            Services.DiagnosticLog.Info("Capture to Slot: ignored — a replay is running (use the Copy to Slot action instead)");
+                            return;
+                        }
+                        try
+                        {
+                            var (slot, value) = await replayService.CaptureSelectionToNextSlotAsync();
+                            if (value != null)
+                            {
+                                Services.DiagnosticLog.Info($"Capture to Slot: {value.Length} char(s) → {{clip:{slot}}}");
+                                bridge?.SendMessage("alert:show", new { message = $"Selection captured → {{clip:{slot}}}" });
+                            }
+                            else
+                            {
+                                Services.DiagnosticLog.Info("Capture to Slot: nothing copied (empty selection?)");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            // async-void dispatcher lambda — an escaped exception here would
+                            // crash the app, and clipboard COM is exactly the kind of thing
+                            // that throws transiently.
+                            Services.DiagnosticLog.Error("Capture to Slot failed", ex);
+                        }
                         return;
                     }
 

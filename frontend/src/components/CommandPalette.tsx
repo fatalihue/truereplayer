@@ -6,7 +6,7 @@ import {
   Hourglass, ScanSearch, Repeat2, ClipboardPaste, Files, Replace,
   FolderPlus, Palette, PanelLeft, Table2, Keyboard,
   MousePointerClick, Pipette, Crosshair, Combine, Split, GitBranch, ScrollText,
-  Braces, AppWindow,
+  Braces, AppWindow, ClipboardCopy, Activity,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -149,6 +149,14 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             disabled: isClicker, disabledHint: clickerHint,
             icon: <Braces size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'SetVariable', insertIndex: computeInsertIndex() } }); onClose(); },
+          },
+          {
+            // Copy to Slot — same Pattern-A insert; captures the focused app's selection
+            // into a clipboard slot, read back with {clip:name} tokens.
+            id: 'copytoslot', label: 'Insert Copy to Slot',
+            disabled: isClicker, disabledHint: clickerHint,
+            icon: <ClipboardCopy size={14} className="text-text-secondary" />,
+            onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'CopyToSlot', insertIndex: computeInsertIndex() } }); onClose(); },
           },
           {
             id: 'waitimage', label: 'Insert Wait for Image',
@@ -382,6 +390,13 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             keywords: ['csv', 'table', 'row', 'column', 'excel', 'loop over data'],
             icon: <Table2 size={14} className="text-text-secondary" />,
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:dataeditor')); },
+          },
+          {
+            // Live-variables debug pane — floating card mirroring {var:}/{clip:}/row state.
+            id: 'livevars', label: 'Toggle Live Variables',
+            keywords: ['debug', 'variables', 'slots', 'clip', 'watch'],
+            icon: <Activity size={14} className="text-text-secondary" />,
+            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:livevars')); },
           },
           {
             id: 'togglesidebar', label: 'Toggle Sidebar',

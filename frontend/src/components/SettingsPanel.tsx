@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useContext, createContext } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle, Power, BellRing } from 'lucide-react';
+import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle, Power, BellRing, X } from 'lucide-react';
 import { useLanguage, useTt } from '../state/LanguageContext';
 // `Search` import removed with the disabled Settings filter — re-add it to revive the filter.
 import { useAppState } from '../state/AppStateContext';
@@ -626,15 +626,19 @@ function ClickerSection({
   );
 }
 
-function HotkeyInput({ value, settingKey, onChange, width = CTRL_W }: {
+function HotkeyInput({ value, settingKey, onChange, width = CTRL_W, allowClear = false }: {
   value: string;
   settingKey: string;
   onChange: (key: string, hotkey: string) => void;
   width?: string;
+  // Opt-in hotkeys (empty = feature off) get a clear affordance; the always-set
+  // five keep the plain input — clearing them would leave a dead core hotkey.
+  allowClear?: boolean;
 }) {
   const { send, subscribe } = useBridge();
   const [localValue, setLocalValue] = useState(value);
   const [isFocused, setIsFocused] = useState(false);
+  const tt = useTt();
   // Idle-cancel timer — without an explicit Esc-to-cancel rule (so users can capture
   // Escape as a hotkey if they want), the only way out of capture mode is to click away
   // or wait this many ms. Resets on every captured combo so an actively engaged user is
@@ -717,7 +721,7 @@ function HotkeyInput({ value, settingKey, onChange, width = CTRL_W }: {
     send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } });
     armCaptureTimer();
   };
-  return (
+  const input = (
     <input
       ref={inputRef}
       type="text"
@@ -731,13 +735,32 @@ function HotkeyInput({ value, settingKey, onChange, width = CTRL_W }: {
         }
       }}
       onBlur={() => { setIsFocused(false); setLocalValue(value); send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } }); disarmCaptureTimer(); }}
-      className={`${width} h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
+      className={`${allowClear ? 'w-full' : width} h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
         isFocused
           ? 'text-accent-light border-accent-solid animate-pulse'
           : 'text-accent border-border-default'
       }`}
       placeholder="New key..."
     />
+  );
+  if (!allowClear) return input;
+  // The clear affordance OVERLAYS the input's right edge inside a wrapper of the same
+  // fixed width, so the field stays column-aligned with the plain hotkey inputs above
+  // and nothing reflows when the button mounts/unmounts.
+  return (
+    <div className={`relative ${width}`}>
+      {input}
+      {value !== '' && !isFocused && (
+        <button
+          type="button"
+          onClick={() => onChange(settingKey, '')}
+          className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+          data-tip={tt('Clear (disables this hotkey)', 'Limpar (desativa este hotkey)')}
+        >
+          <X size={11} />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -1136,6 +1159,20 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   value={settings.modeToggleHotkey}
                   settingKey="modeToggleHotkey"
                   onChange={changeHotkey}
+                />
+              </SettingRow>
+              <SettingRow
+                label="Capture Slot"
+                tooltip={tt(
+                  'Copies the current selection (Ctrl+C) into the next clipboard slot — {clip:1}…{clip:9}, wrapping. Empty = disabled.',
+                  'Copia a seleção atual (Ctrl+C) para o próximo slot — {clip:1}…{clip:9}, dando a volta. Vazio = desativado.',
+                )}
+              >
+                <HotkeyInput
+                  value={settings.captureSlotHotkey}
+                  settingKey="captureSlotHotkey"
+                  onChange={changeHotkey}
+                  allowClear
                 />
               </SettingRow>
             </Section>

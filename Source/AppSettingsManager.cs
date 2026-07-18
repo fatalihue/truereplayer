@@ -93,6 +93,10 @@ namespace TrueReplayer.Services
             public string ProfileKeyToggleHotkey { get; set; } = "Pause";
             public string ForegroundHotkey { get; set; } = "Insert";
             public string ModeToggleHotkey { get; set; } = "ScrollLock";
+            // Capture-selection → clipboard slot. Default EMPTY = disabled: unlike the trio
+            // above, a fresh default here would silently swallow a key system-wide for a
+            // feature the user hasn't opted into. Assigned in Settings → Global → Hotkeys.
+            public string CaptureSlotHotkey { get; set; } = "";
             public bool ProfileKeyEnabled { get; set; } = true;
             public bool BrowserSelectorEnabled { get; set; } = true;
             public bool RunAsAdmin { get; set; } = false;
@@ -168,6 +172,7 @@ namespace TrueReplayer.Services
             profile.ProfileKeyToggleHotkey = s.ProfileKeyToggleHotkey;
             profile.ForegroundHotkey = s.ForegroundHotkey;
             profile.ModeToggleHotkey = s.ModeToggleHotkey;
+            profile.CaptureSlotHotkey = s.CaptureSlotHotkey;
             profile.ProfileKeyEnabled = s.ProfileKeyEnabled;
 
             // Sync the Run on Startup registry key with the saved setting on every launch. Uses a

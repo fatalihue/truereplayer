@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Braces, AppWindow, Clipboard, ChevronDown, Dice5, Cpu, FileCheck, Clock, Table2 } from 'lucide-react';
+import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Braces, AppWindow, Clipboard, ClipboardCopy, ChevronDown, Dice5, Cpu, FileCheck, Clock, Table2 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -627,6 +627,23 @@ export function Toolbar(_props: ToolbarProps) {
             data-tip={clickerTip('Set Variable', 'Definir variável')}
           >
             <Braces size={14} />
+          </button>
+
+          {/* Copy to Slot — captures the focused app's selection (synthetic Ctrl+C) into a
+              named clipboard slot, read back with {clip:name}. Same Pattern-A flow as
+              Set Variable — they're sibling run-state writers, hence adjacent. */}
+          <button
+            tabIndex={-1}
+            onClick={() => {
+              const sel = selectionRef.current;
+              const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
+              send({ type: 'actions:insertAction', payload: { actionType: 'CopyToSlot', insertIndex } });
+            }}
+            disabled={insertsDisabled}
+            className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:text-text-disabled"
+            data-tip={clickerTip('Copy to Slot', 'Copiar para slot')}
+          >
+            <ClipboardCopy size={14} />
           </button>
 
           {/* Pause — wait for a hotkey or a timeout before continuing replay. Now
