@@ -361,6 +361,18 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
         public int WindowHeight { get; set; }
 
+        // ActivateWindow verb (Phase 3): null/"activate" = bring to foreground (default); "maximize"
+        // (focus then maximize), "minimize" / "close" (act on the existing window — no launch, no
+        // focus). Only the non-default verb is persisted (WhenWritingNull), like ActivateOnTimeout.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? WindowVerb { get; set; }
+
+        // ActivateWindow nth-match (Phase 3): which of several matching windows to act on, 1-based in
+        // Z-order (front→back). null = the first match (default) — kept out of the JSON via
+        // WhenWritingNull so ordinary single-window rows stay clean.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? WindowMatchIndex { get; set; }
+
         // ── BrowserAssert (ActionType == "BrowserAssert") ──
         // Verify a page element is in the expected state (reuses the BrowserWaitElement
         // probe: Key=selector, WaitMode appears|disappears|enabled|text-match, BrowserText
@@ -641,7 +653,18 @@ namespace TrueReplayer.Models
                         hasProc && hasTitle ? $"{WindowProcessName} · {WindowTitle}" :
                         hasProc ? WindowProcessName! :
                         hasTitle ? WindowTitle! : "";
-                    if (matcher.Length > 0) return hasLaunch ? $"{matcher} — launch" : matcher;
+                    // Phase-3: verb prefix (non-activate) + nth-match suffix.
+                    string verbPrefix = (WindowVerb?.ToLowerInvariant()) switch
+                    {
+                        "maximize" => "Maximize · ",
+                        "minimize" => "Minimize · ",
+                        "close" => "Close · ",
+                        _ => "",
+                    };
+                    string nth = (WindowMatchIndex is int mi && mi > 1) ? $" #{mi}" : "";
+                    if (matcher.Length > 0)
+                        return verbPrefix.Length > 0 ? $"{verbPrefix}{matcher}{nth}"
+                             : hasLaunch ? $"{matcher}{nth} — launch" : $"{matcher}{nth}";
                     if (hasLaunch)
                     {
                         var path = LaunchPath!.Trim();
@@ -749,6 +772,8 @@ namespace TrueReplayer.Models
             WindowY = WindowY,
             WindowWidth = WindowWidth,
             WindowHeight = WindowHeight,
+            WindowVerb = WindowVerb,
+            WindowMatchIndex = WindowMatchIndex,
             AssertOnFail = AssertOnFail,
             IsSkipped = IsSkipped,
             IsFocusClick = IsFocusClick,

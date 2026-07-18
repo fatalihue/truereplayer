@@ -159,6 +159,16 @@ namespace TrueReplayer.Services
                 && (a.RestorePosition || a.RestoreSize)),
                 new Version(2, 8, 1), "Activate Window placement"),
 
+            // ActivateWindow Phase 3 — VERB (maximize/minimize/close) + NTH-MATCH shipped after 2.8.1.
+            // An older build has the ActivateWindow replay case, so the row runs — but it drops the
+            // unknown WindowVerb/WindowMatchIndex and does the DEFAULT (activate the FIRST match),
+            // e.g. focuses a window the user meant to CLOSE (silent divergence). Property-level Detect
+            // so a plain ActivateWindow keeps the 2.8.0 floor. Pinned at 2.8.1 (≤ the running dev
+            // version) so own-export→import round-trips; bump at release with the other pins.
+            (p => p.Actions.Any(a => string.Equals(a.ActionType, "ActivateWindow", StringComparison.OrdinalIgnoreCase)
+                && (!string.IsNullOrEmpty(a.WindowVerb) || (a.WindowMatchIndex is int mi && mi > 1))),
+                new Version(2, 8, 1), "Activate Window verb/nth-match"),
+
             // SetVariable Cycle mode — older builds drop the unknown VariableMode property
             // and run the row in SET mode, storing the ENTIRE multi-line list instead of
             // one item per execution (silent semantic change, exactly what this matrix

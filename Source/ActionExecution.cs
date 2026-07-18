@@ -2372,27 +2372,59 @@ namespace TrueReplayer.Services
             var (target, regex) = BuildWindowTargetFromAction(action);
             bool hasMatcher = target.ProcessName != null || target.WindowTitle != null;
 
+            // Phase-3 verb + nth-match. Verb null/unknown = "activate" (bring to foreground). matchN
+            // is 1-based in Z-order (front→back); null/≤1 = first match.
+            string verb = (action.WindowVerb ?? "activate").ToLowerInvariant();
+            if (verb != "maximize" && verb != "minimize" && verb != "close") verb = "activate";
+            int matchN = action.WindowMatchIndex is int mi && mi > 1 ? mi : 1;
+
             // LaunchPath/LaunchArgs accept the same tokens as SendText ({var:}, {clipboard}, …).
-            string? path = string.IsNullOrWhiteSpace(action.LaunchPath)
-                ? null
-                : (await ResolveTokens(action.LaunchPath)).Trim();
-            if (string.IsNullOrEmpty(path)) path = null;
-            string? args = path != null && !string.IsNullOrWhiteSpace(action.LaunchArgs)
-                ? await ResolveTokens(action.LaunchArgs)
-                : null;
+            // Only activate/maximize can launch — resolving for minimize/close would fire a token's
+            // side effects (e.g. an {input:} prompt / clipboard-cursor advance) whose result is then
+            // discarded, since those verbs never launch.
+            string? path = null;
+            string? args = null;
+            if (verb == "activate" || verb == "maximize")
+            {
+                path = string.IsNullOrWhiteSpace(action.LaunchPath)
+                    ? null
+                    : (await ResolveTokens(action.LaunchPath)).Trim();
+                if (string.IsNullOrEmpty(path)) path = null;
+                args = path != null && !string.IsNullOrWhiteSpace(action.LaunchArgs)
+                    ? await ResolveTokens(action.LaunchArgs)
+                    : null;
+            }
 
             if (!hasMatcher)
             {
-                // Pure-run row: no matcher → fire-and-forget shell run (URL, document,
-                // .lnk, exe). A row with neither matcher nor launch no-ops, same
-                // forgiveness as a SetVariable without a name.
-                if (path == null) return;
+                // Pure-run row: no matcher → fire-and-forget shell run (URL, document, .lnk, exe).
+                // Only the "activate" intent launches; minimize/close have no window to act on → no-op.
+                // A row with neither matcher nor launch no-ops (SetVariable-without-a-name forgiveness).
+                if (path == null || verb == "minimize" || verb == "close") return;
                 if (!TryLaunch(path, args, out var runError))
                     HandleActivateWindowFailure(action, $"launch failed: {runError}");
                 return;
             }
 
-            IntPtr hwnd = FindWindowExcludingSelf(target, regex);
+            // Minimize / Close act on the EXISTING window only — no launch, no focus, no wait. If it's
+            // not there, nothing to do and the goal (window minimized / gone) is already met — benign
+            // no-op success (owner decision).
+            if (verb == "minimize" || verb == "close")
+            {
+                IntPtr existing = FindWindowExcludingSelf(target, regex, matchN);
+                if (existing == IntPtr.Zero)
+                {
+                    DiagnosticLog.Info($"ActivateWindow {verb}: no matching window — nothing to do");
+                    return;
+                }
+                if (verb == "minimize")
+                    NativeMethods.ShowWindow(existing, NativeMethods.SW_MINIMIZE);
+                else
+                    NativeMethods.PostMessage(existing, NativeMethods.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                return;
+            }
+
+            IntPtr hwnd = FindWindowExcludingSelf(target, regex, matchN);
 
             // Launch AT MOST once, and only when no window matched first — re-running
             // the program on every poll would spawn N copies of a slow-starting app.
@@ -2415,7 +2447,7 @@ namespace TrueReplayer.Services
                     return;
                 }
                 await Task.Delay(200, token); // token-aware — the Stop hotkey aborts instantly
-                hwnd = FindWindowExcludingSelf(target, regex);
+                hwnd = FindWindowExcludingSelf(target, regex, matchN);
             }
 
             if (!await TrueReplayer.Helpers.WindowActivation.ActivateAsync(hwnd, target, regex, token))
@@ -2443,8 +2475,16 @@ namespace TrueReplayer.Services
 
             await Task.Delay(300, token); // settle — same wait the replay-start focus uses
 
-            // Optional placement: move/resize the window we just activated. Deliberately uses the
-            // hwnd we actually focused rather than a fresh matcher lookup, so with two windows of
+            if (verb == "maximize")
+            {
+                // Maximize is its own placement — SetWindowPos is ignored on a zoomed window, so the
+                // Placement fields are mutually exclusive with this verb (the editor hides them).
+                NativeMethods.ShowWindow(hwnd, NativeMethods.SW_MAXIMIZE);
+                return;
+            }
+
+            // Optional placement (activate verb): move/resize the window we just activated. Deliberately
+            // uses the hwnd we actually focused rather than a fresh matcher lookup, so with two windows of
             // the same process the placement can never land on a different one. Purely positional
             // — the replay's coordinate context is untouched (clicks still resolve against the
             // profile/folder target; use a sub-profile + RunProfile for per-window relative coords).
@@ -2569,21 +2609,27 @@ namespace TrueReplayer.Services
         // WindowMatcher.FindWindow with TrueReplayer's own windows excluded — a target
         // like title-contains "True" must never match (and then activate) ourselves.
         // Same self-skip rule the window picker applies.
-        internal static IntPtr FindWindowExcludingSelf(Models.WindowTarget target, Regex? regex)
+        // <paramref name="matchN"/> = nth-match (1-based, EnumWindows Z-order front→back), counted
+        // AFTER the visible + self-PID filters so it stays consistent with the first-match default.
+        // matchN≤1 keeps the original first-match fast path; if fewer than N windows match, returns
+        // Zero (the caller's poll loop then keeps waiting / times out).
+        internal static IntPtr FindWindowExcludingSelf(Models.WindowTarget target, Regex? regex, int matchN = 1)
         {
             uint ownPid = (uint)Environment.ProcessId;
             var titleBuffer = new System.Text.StringBuilder(512);
             var procBuffer = new System.Text.StringBuilder(512);
             IntPtr result = IntPtr.Zero;
+            int seen = 0;
             NativeMethods.EnumWindows((hwnd, lParam) =>
             {
                 if (!NativeMethods.IsWindowVisible(hwnd)) return true;
                 NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
                 if (pid == ownPid) return true;
-                if (TrueReplayer.Helpers.WindowMatcher.Matches(hwnd, target, regex, titleBuffer, procBuffer))
+                if (TrueReplayer.Helpers.WindowMatcher.Matches(hwnd, target, regex, titleBuffer, procBuffer)
+                    && ++seen >= matchN)
                 {
                     result = hwnd;
-                    return false; // stop enumeration
+                    return false; // stop enumeration at the Nth match
                 }
                 return true;
             }, IntPtr.Zero);

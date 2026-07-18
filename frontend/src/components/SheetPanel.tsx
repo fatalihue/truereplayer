@@ -227,6 +227,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const [launchPath, setLaunchPath] = useState('');
   const [launchArgs, setLaunchArgs] = useState('');
   const [activateOnTimeout, setActivateOnTimeout] = useState<'Halt' | 'Continue'>('Halt');
+  // ActivateWindow Phase 3 — verb (what to do with the matched window) + nth-match (which one).
+  // matchIndex is string-backed (1-based) like the other numeric fields.
+  const [windowVerb, setWindowVerb] = useState<'Activate' | 'Maximize' | 'Minimize' | 'Close'>('Activate');
+  const [matchIndex, setMatchIndex] = useState('1');
   // ActivateWindow placement: move/resize the activated window to a saved rect. Purely
   // positional — coordinate context is untouched (sub-profile + RunProfile covers that).
   // String-backed like the other numeric fields so an input can be cleared while typing.
@@ -586,6 +590,12 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       setWindowY(String(action.windowY ?? 0));
       setWindowWidth(String(action.windowWidth ?? 0));
       setWindowHeight(String(action.windowHeight ?? 0));
+      setWindowVerb(
+        action.windowVerb === 'maximize' ? 'Maximize'
+        : action.windowVerb === 'minimize' ? 'Minimize'
+        : action.windowVerb === 'close' ? 'Close'
+        : 'Activate');
+      setMatchIndex(String(action.windowMatchIndex && action.windowMatchIndex > 1 ? action.windowMatchIndex : 1));
       setCaptureGeoError(null);
       setCaptureGeoRequestId(null);
       setAssertOnFail(action.assertOnFail === 'Continue' ? 'Continue' : 'Halt');
@@ -992,6 +1002,20 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       if (newAwTimeout !== (action.timeout || 5000)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'timeout', value: String(newAwTimeout) } });
       }
+      // Phase 3 verb + nth-match (parity-mirrored in hasUnsavedChanges). Default 'Activate' persists
+      // as '' (like Halt); match #1 persists as '1' (the bridge collapses it to null). A stored literal
+      // 'activate' (only from hand-edited JSON — the app writes null) is treated as the '' default so
+      // the editor doesn't open pre-dirtied.
+      const persistedVerb = windowVerb === 'Activate' ? '' : windowVerb.toLowerCase();
+      const currentVerb = (action.windowVerb ?? '').toLowerCase() === 'activate' ? '' : (action.windowVerb ?? '').toLowerCase();
+      if (persistedVerb !== currentVerb) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'windowVerb', value: persistedVerb } });
+      }
+      const nextMatch = Math.max(1, parseInt(matchIndex, 10) || 1);
+      const currentMatch = action.windowMatchIndex && action.windowMatchIndex > 1 ? action.windowMatchIndex : 1;
+      if (nextMatch !== currentMatch) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'windowMatchIndex', value: String(nextMatch) } });
+      }
     }
 
     // BrowserSelectOption — match mode + browserText hold the option label/value/index.
@@ -1215,6 +1239,13 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       if (Math.max(0, parseInt(windowHeight, 10) || 0) !== (action.windowHeight ?? 0)) return true;
       const newAwTimeout = Math.max(1000, Math.round(parseFloat(timeout) || 10000));
       if (newAwTimeout !== (action.timeout || 5000)) return true;
+      // Verb + nth-match — parity with handleSave (incl. the 'activate'-literal normalization).
+      const persistedVerb = windowVerb === 'Activate' ? '' : windowVerb.toLowerCase();
+      const currentVerb = (action.windowVerb ?? '').toLowerCase() === 'activate' ? '' : (action.windowVerb ?? '').toLowerCase();
+      if (persistedVerb !== currentVerb) return true;
+      const nextMatch = Math.max(1, parseInt(matchIndex, 10) || 1);
+      const currentMatch = action.windowMatchIndex && action.windowMatchIndex > 1 ? action.windowMatchIndex : 1;
+      if (nextMatch !== currentMatch) return true;
     }
 
     if (actionType === 'BrowserSelectOption') {
@@ -1226,7 +1257,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     }
 
     return false;
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, assertOnFail, alternatives]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, windowVerb, matchIndex, assertOnFail, alternatives]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
@@ -3325,6 +3356,25 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               the Test → Timeout → policy timing cluster (browser-editor convention). */}
           {isActivateWindow && (
           <>
+            {/* Verb — what to do with the matched window. Maximize focuses then maximizes;
+                Minimize / Close act on the existing window (no launch, no focus). */}
+            <Field
+              label="Action"
+              hint={tt('Activate = bring to front. Maximize/Minimize/Close act on the matched window (Close asks the app to close).', 'Activate = trazer para frente. Maximize/Minimize/Close agem na janela casada (Close pede pro app fechar).')}
+            >
+              <SegmentedControl<'Activate' | 'Maximize' | 'Minimize' | 'Close'>
+                ariaLabel="Window action"
+                grow
+                value={windowVerb}
+                onChange={setWindowVerb}
+                options={[
+                  { value: 'Activate', label: 'Activate' },
+                  { value: 'Maximize', label: 'Maximize' },
+                  { value: 'Minimize', label: 'Minimize' },
+                  { value: 'Close', label: 'Close' },
+                ]}
+              />
+            </Field>
             {/* Section header — the matcher trio reads as one "which window" block. */}
             <div className="label-micro text-text-tertiary">Match Window</div>
             <WindowTargetFields
@@ -3337,7 +3387,21 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               processHint={tt('".exe" assumed when omitted. Empty = match by title only.', '".exe" assumido se omitido. Vazio = casar só pelo título.')}
               titleHint={tt('Case-insensitive. UWP apps: match by title (process is ApplicationFrameHost.exe).', 'Sem diferenciar maiúsculas. Apps UWP: case pelo título (processo é ApplicationFrameHost.exe).')}
             />
-            {/* Section header — the optional launch pair. */}
+            {/* nth-match — pick the Nth matching window (1-based, Z-order front→back). */}
+            <Field
+              label="Match #"
+              hint={tt('When several windows match, act on the Nth (1 = frontmost).', 'Quando várias janelas casam, age na N-ésima (1 = a da frente).')}
+            >
+              <NumberInput
+                value={parseInt(matchIndex, 10) || 1}
+                onChange={(n) => setMatchIndex(String(Math.max(1, n)))}
+                min={1}
+                inputWidth="w-20" inputHeight="h-8"
+              />
+            </Field>
+            {/* Section header — the optional launch pair (Activate/Maximize only). */}
+            {(windowVerb === 'Activate' || windowVerb === 'Maximize') && (
+            <>
             <div className="label-micro text-text-tertiary">Launch</div>
             <Field
               label="Path"
@@ -3374,10 +3438,15 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid disabled:opacity-50"
               />
             </Field>
+            </>
+            )}
 
             {/* Placement — section label + the two independent toggle chips on ONE compact
                 row (Position and Size aren't an exclusive choice, so plain chips, not a
-                track). Full positional caveat lives on the label tooltip + the bottom card. */}
+                track). Full positional caveat lives on the label tooltip + the bottom card.
+                Activate verb only — Maximize is its own placement; Minimize/Close don't place. */}
+            {windowVerb === 'Activate' && (
+            <>
             <div className="flex items-center justify-between">
               <span
                 className="label-micro text-text-tertiary cursor-help"
@@ -3472,6 +3541,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 )}
               </div>
             )}
+            </>
+            )}
 
             {/* Test (exists-anywhere probe) + result card, then Timeout + On Timeout. */}
             <div>
@@ -3500,6 +3571,9 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               )}
             </div>
 
+            {/* Timeout + failure policy apply to the find/wait — Activate/Maximize only.
+                Minimize/Close act on the existing window with no wait. */}
+            {(windowVerb === 'Activate' || windowVerb === 'Maximize') && (
             <div className="flex gap-2.5">
               <Field label="Timeout" className="w-[124px]">
                 <NumberInput
@@ -3528,6 +3602,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 />
               </Field>
             </div>
+            )}
 
             {/* Passive guidance when the profile has a Window Target — coordinates keep
                 translating against the PROFILE target regardless of this action. Neutral
