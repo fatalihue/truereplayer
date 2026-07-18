@@ -23,6 +23,7 @@ The complete reference for everything TrueReplayer can do. New here? Start with 
 - [Clicker mode (auto-clicker)](#clicker-mode-auto-clicker)
 - [Game mode](#game-mode)
 - [Send Text](#send-text)
+- [Data Loop](#data-loop)
 - [Browser automation](#browser-automation)
 - [Themes & appearance](#themes--appearance)
 - [Settings reference](#settings-reference)
@@ -117,7 +118,7 @@ The central table lists every action in the profile. Columns: **selection checkb
 | **If / Else / EndIf** | Conditional branch — see [Conditional blocks](#conditional-blocks-if--else--endif). |
 | **Browser actions** | Click / Type / Navigate / Wait element / Select option in Chrome — see [Browser automation](#browser-automation). |
 
-Insert actions from the **toolbar** (Send Keystroke, Send Text, Pause, Wait, Conditional, Browser, Run Profile, Activate Window) or the **command palette** (`Ctrl+K`). Most actions open a small dialog to configure them; click an action's Details cell later to edit it.
+Insert actions from the **toolbar** (Send Keystroke, Send Text, Pause, Wait, Conditional, Browser, Run Profile, Activate Window). Most actions open a small dialog to configure them; click an action's Details cell later to edit it.
 
 > **Tip — match by colour, not confidence.** Image matching compares the whole reference, so it's great for shape/text but a blunt tool for telling apart two states that differ only in **colour** (e.g. an enabled *green* vs a disabled *grey* button). For that, use **Wait Pixel Color** (or an **If** on *Pixel Color Match*): sample a point in the solid fill and match the colour within a tolerance. Also don't set **confidence to 100%** — a live screen never reproduces a reference pixel-for-pixel, so a 100% match times out (it's capped just under 100% internally).
 
@@ -149,7 +150,7 @@ Make a macro react to what's on screen.
 
 ## Profiles & folders
 
-- **New / Save / Rename / Duplicate / Delete** from the Profiles panel (left) or the command palette.
+- **New / Save / Rename / Duplicate / Delete** from the Profiles panel (left). *Duplicate*, *Reset*, *Import* and *Export all* are also in the command palette (`Ctrl+K`).
 - **Pin** a profile to keep it at the top; **drag** it into a **folder** to group it.
 - **Folders** — create, rename, recolor, collapse. A folder can hold a default **window target** that its profiles inherit.
 - **Profile info** — give a profile an **emoji icon**, **description** and **tags** (right-click → Info). Tags are searchable.
@@ -266,6 +267,58 @@ The **Insert Text** editor composes text that's injected via clipboard paste (so
 
 ---
 
+## Data Loop
+
+Run the whole profile once for **each row** of a table — mail-merge style. Paste rows from Excel or a CSV, and every column header becomes a `{row:column}` token you drop into text, keystrokes or browser fields.
+
+Open it from the **toolbar** (the table icon → *Data Loop*). The table is saved **inside the profile**, so it travels with export/import — a large table grows the profile file.
+
+### Getting data in
+
+- **Paste from Excel / Sheets** — **Paste / bulk edit…**, drop a copied range into the box, and pick **Replace table** or **Append rows**. Tabs, quotes and multi-line cells survive the paste. **First row is the header** turns the top line into column names (off → columns become `col1…colN` and every line is data).
+- **Import CSV** — **Import CSV…** loads a `.csv` / `.tsv` / `.txt` file; the delimiter is auto-detected (comma, semicolon — as Brazilian Excel writes — or tab).
+- **Edit in place** — click any cell to edit it; **Add row** / **Add column**, duplicate or delete rows, and the header **⋯** menu inserts / moves / renames / deletes columns. `Ctrl+Z` undoes the last grid change.
+- **Copy back out** — **Copy table (TSV)** puts the whole grid on the clipboard to paste straight into Excel/Sheets. **Clear table…** empties it (saving an empty grid removes the table from the profile).
+
+### Headers → tokens
+
+Every column header becomes a token you can paste into **Insert Text**, a **Keystroke** key, or **Browser Type**:
+
+| Token | Resolves to |
+| --- | --- |
+| `{row:column}` | The current row's value in that **column** (lookup is case-insensitive). |
+| `{row}` | The current **row number** (1-based). |
+
+- Copy a token from the **Columns · tokens** rail (click the chip) or the header **⋯** menu. The rail also shows how many actions use each column (`×N` / *unused*), and flags **orphans** — a `{row:…}` an action references but the table has no such column (it types empty text).
+- Headers must be **letters, digits or `_`** to work as tokens. An invalid header is flagged ⚠; click the **wand** to auto-fix it (it still saves either way).
+- A missing cell — or a `{row:column}` with no matching header — resolves to **empty text**, never an error. With duplicate columns, the **last** one wins.
+
+### Running over the data
+
+The **Loop over data** toggle decides how the table drives replay:
+
+| Mode | Behavior |
+| --- | --- |
+| **Loop over data ON** | One **full run per row** — an N-row table = N iterations. **Overrides** the profile's Loop count *and* a While-Pressed / Toggle infinite replay. Replay **refuses to start** if the table has no rows. |
+| **Loop over data OFF** (*cursor*) | Each replay uses the **next row** and advances, **wrapping** back to the top at the end — good for "process one record per hotkey press". Right-click any row → **Reset row position** to start over at row 1. **Notify on list complete** (rail checkbox, on by default) chimes when a run uses the **last** row, so the wrap isn't silent. |
+
+> The row is chosen **once per run**, so a profile with its own inner Loop count repeats the *same* row that many times before moving to the next.
+
+### Skip on error (loop-over-data only)
+
+When looping over data, **On row error** decides what a failed row does:
+
+| Policy | Behavior |
+| --- | --- |
+| **Halt** *(default)* | Stop the replay on the first row that errors. |
+| **Skip row** | Log the failed row, release anything it left held, and continue with the next row. A one-line summary at the end reports how many rows were skipped (and the first reason). |
+
+### Cell transforms — `{row:column:mods}`
+
+A `{row:column}` token accepts the **same modifier chain as `{clipboard}`** (see [Send Text](#send-text)) — append the modifiers after the column name, e.g. `{row:name:trim:upper}`. Click a `{row:…}` chip inside a text editor to configure them in a popover with a live preview of the first row's value, or type the chain by hand. The pipeline runs in a fixed order: **trim → list ops (range / lines / sort / dedupe / reverse / join) → extract (line / word) → limit (first / last) → case (upper / lower / sentence / title)**.
+
+---
+
 ## Browser automation
 
 Drive Google Chrome by **CSS selector** instead of screen coordinates — robust against layout shifts. Requires the **TrueReplayer Chrome extension** to be connected (browser menu items are disabled until it is). See the **[extension setup guide](https://github.com/fatalihue/TrueReplayer-releases/blob/main/docs/extension-setup/README.md)** to install it.
@@ -284,7 +337,7 @@ A **selector quality** badge (S → C) hints how stable each captured selector i
 
 ## Themes & appearance
 
-Open the **Theme Editor** from Settings → Global → Appearance → *Customise* (or `Ctrl+K` → Theme editor).
+Open the **Theme Editor** from Settings → Global → Appearance → *Customise*.
 
 <p align="center">
   <img src="img/theme.png" width="820" alt="The Theme Editor presets tab with a live preview" /><br>

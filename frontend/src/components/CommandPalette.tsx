@@ -1,18 +1,14 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Search, Circle, Play, Square, Type, Save, FolderOpen, RotateCcw, FilePlus,
-  Trash2, Download, Upload, RefreshCw,
-  Hourglass, ScanSearch, Repeat2, ClipboardPaste, Files, Replace,
-  FolderPlus, Palette, PanelLeft, Table2, Keyboard,
-  MousePointerClick, Pipette, Crosshair, Combine, Split, GitBranch, ScrollText,
-  Braces, AppWindow, ClipboardCopy, Activity,
+  Search, RotateCcw, Download, Upload, RefreshCw,
+  ClipboardPaste, Files, Replace, Table2,
+  Combine, Split, ScrollText, Activity,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { useTt } from '../state/LanguageContext';
-import { KbdTag } from './common/KbdTag';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -23,8 +19,6 @@ interface CommandItem {
   id: string;
   label: string;
   icon: React.ReactNode;
-  shortcut?: string;
-  badge?: string;
   // When true, the row renders greyed-out and clicks no-op. Used for commands that
   // exist conceptually but can't run in the current state (e.g. Duplicate Profile
   // with no active profile — better to show the command + hint than to vanish it,
@@ -32,7 +26,7 @@ interface CommandItem {
   disabled?: boolean;
   disabledHint?: string;
   // Extra search terms (not displayed) so an entry is findable by what users call
-  // it, not just its canonical label — e.g. "Activate Window" matches "focus"/"launch".
+  // it, not just its canonical label — e.g. "Copy as Table" matches "tsv"/"export".
   keywords?: string[];
   onAction: () => void;
 }
@@ -43,8 +37,18 @@ interface CommandGroup {
   items: CommandItem[];
 }
 
+// SCOPE — this palette is deliberately small. An entry earns its place only when the
+// capability is buried in a nested right-click menu, keyboard-only, or has no UI control
+// at all. Anything reachable from a persistent labelled control (the Toolbar insert row,
+// the ActionBar, the ProfilePanel header, a Settings row) is intentionally ABSENT: a
+// second door to a visible button is pure noise, and it pushes the genuinely
+// hard-to-find commands down the list. The WINDOW and UPDATES groups went first for this
+// reason; the ACTIONS insert block (every type has a Toolbar button), the ActionBar trio
+// (Record/Replay/Mode), the profile CRUD entries and the view-chrome toggles followed for
+// the same one. Before adding a command, find its UI control — if it has a discoverable
+// one, it does not belong here.
 export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
-  const { profiles, activeProfile, settings, buttonStates, actions } = useAppState();
+  const { profiles, activeProfile, settings, actions } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
   const tt = useTt();
@@ -69,8 +73,6 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
 
   // Build command groups
   const groups: CommandGroup[] = useMemo(() => {
-    const isRecording = buttonStates.recordingActive;
-    const isReplaying = buttonStates.replayActive;
     // Clicker-mode gate — mirrors the Toolbar's insertsDisabled story: these
     // entries mutate the macro list, which is invisible in Clicker mode.
     const isClicker = settings.useCursorClick;
@@ -78,198 +80,21 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
 
     return [
       {
+        // What survives here are whole-list operations with no toolbar button: the
+        // clipboard bridge and the four bulk coordinate/pairing rewrites, each of which
+        // otherwise lives three clicks deep in a right-click "More" submenu.
         id: 'actions',
         title: 'ACTIONS',
         items: [
           {
-            id: 'record',
-            disabled: isClicker, disabledHint: clickerHint,
-            label: isRecording ? 'Stop Recording' : 'Start Recording',
-            icon: isRecording
-              ? <Square size={14} className="text-recording" />
-              : <Circle size={14} className="text-recording" />,
-            shortcut: settings.recordingHotkey,
-            onAction: () => {
-              // Match the toolbar/ActionBar — when toggling Recording ON, hint the backend
-              // where new actions should land. The hint is ignored when toggling Recording OFF.
-              send({ type: 'recording:toggle', payload: { insertIndex: computeInsertIndex() } });
-              onClose();
-            },
-          },
-          {
-            id: 'replay',
-            label: isReplaying ? 'Stop Replay' : 'Start Replay',
-            icon: isReplaying
-              ? <Square size={14} className="text-replay" />
-              : <Play size={14} className="text-replay" />,
-            shortcut: settings.replayHotkey,
-            onAction: () => {
-              send({
-                type: 'replay:toggle',
-                payload: {
-                  loopEnabled: settings.enableLoop,
-                  loopCount: settings.loopCount,
-                  intervalEnabled: settings.loopIntervalEnabled,
-                  intervalText: settings.loopInterval,
-                },
-              });
-              onClose();
-            },
-          },
-          {
-            // Macro ↔ Clicker mode switch. Routes through settings:change so the bridge's
-            // SetCursorClickMode runs the same flip+cancel logic as the UI toggle and the
-            // ModeToggleHotkey (ScrollLock by default).
-            id: 'mode',
-            label: settings.useCursorClick ? 'Switch to Macro Mode' : 'Switch to Clicker Mode',
-            icon: <MousePointerClick size={14} style={{ color: settings.useCursorClick ? 'var(--color-clicker)' : undefined }} className={settings.useCursorClick ? '' : 'text-text-secondary'} />,
-            shortcut: settings.modeToggleHotkey,
-            onAction: () => { send({ type: 'settings:change', payload: { key: 'useCursorClick', value: !settings.useCursorClick } }); onClose(); },
-          },
-          {
-            id: 'sendtext', label: 'Insert Send Text',
-            disabled: isClicker, disabledHint: clickerHint,
-            icon: <Type size={14} className="text-text-secondary" />,
-            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:sendtext')); },
-          },
-          {
-            // Send Keystroke — unified entry that covers single press, press × N, and
-            // hold. The dialog itself exposes the mode toggle. Replaces the legacy
-            // sendkey / presskeyn / holdkey palette entries that all opened slightly
-            // different dialogs for what are now slices of the same action.
-            id: 'sendkeystroke', label: 'Insert Send Keystroke',
-            disabled: isClicker, disabledHint: clickerHint,
-            icon: <Keyboard size={14} className="text-text-secondary" />,
-            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:sendkeystroke')); },
-          },
-          {
-            // Set Variable — Pattern A insert (empty row + auto-open Sheet, handled by
-            // the backend's sheet:openIndex push). Read back with {var:name} tokens.
-            id: 'setvariable', label: 'Insert Set Variable',
-            disabled: isClicker, disabledHint: clickerHint,
-            icon: <Braces size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'SetVariable', insertIndex: computeInsertIndex() } }); onClose(); },
-          },
-          {
-            // Copy to Slot — same Pattern-A insert; captures the focused app's selection
-            // into a clipboard slot, read back with {clip:name} tokens.
-            id: 'copytoslot', label: 'Insert Copy to Slot',
-            disabled: isClicker, disabledHint: clickerHint,
-            icon: <ClipboardCopy size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'CopyToSlot', insertIndex: computeInsertIndex() } }); onClose(); },
-          },
-          {
-            id: 'waitimage', label: 'Insert Wait for Image',
-            disabled: isClicker, disabledHint: clickerHint,
-            icon: <ScanSearch size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'WaitImage', insertIndex: computeInsertIndex() } }); onClose(); },
-          },
-          {
-            // Pairs with Insert Wait for Image — same insert flow, uses the dedicated
-            // actions:insertWaitPixelColor handler so the eyedropper opens immediately
-            // (matches the Toolbar's Pipette button).
-            id: 'waitpixel', label: 'Insert Wait for Pixel Color',
-            disabled: isClicker, disabledHint: clickerHint,
-            icon: <Pipette size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertWaitPixelColor', payload: { insertIndex: computeInsertIndex() } }); onClose(); },
-          },
-          {
-            // Conditional (IF ... ENDIF) blocks — image- and pixel-driven. Mirrors the Toolbar's
-            // Conditional menu; inserts the block, the user configures the probe in the grid.
-            id: 'ifimage', label: 'Insert Conditional: Image Found',
-            disabled: isClicker, disabledHint: clickerHint,
-            icon: <GitBranch size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'ImageFound', insertIndex: computeInsertIndex() } }); onClose(); },
-          },
-          {
-            id: 'ifpixel', label: 'Insert Conditional: Pixel Color',
-            disabled: isClicker, disabledHint: clickerHint,
-            icon: <GitBranch size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'PixelColorMatch', insertIndex: computeInsertIndex() } }); onClose(); },
-          },
-          {
-            id: 'ifwindow', label: 'Insert Conditional: Window Open',
-            disabled: isClicker, disabledHint: clickerHint,
-            icon: <GitBranch size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'WindowOpen', insertIndex: computeInsertIndex() } }); onClose(); },
-          },
-          {
-            id: 'ifclipboard', label: 'Insert Conditional: Clipboard',
-            disabled: isClicker, disabledHint: clickerHint,
-            icon: <GitBranch size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'ClipboardMatch', insertIndex: computeInsertIndex() } }); onClose(); },
-          },
-          {
-            id: 'ifbrowser', label: 'Insert Conditional: Browser Element',
-            disabled: isClicker, disabledHint: clickerHint,
-            icon: <GitBranch size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'BrowserElementState', insertIndex: computeInsertIndex() } }); onClose(); },
-          },
-          {
-            id: 'ifrandom', label: 'Insert Conditional: Random',
-            disabled: isClicker, disabledHint: clickerHint,
-            keywords: ['probability', 'chance', 'percent'],
-            icon: <GitBranch size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'Random', insertIndex: computeInsertIndex() } }); onClose(); },
-          },
-          {
-            id: 'ifvariable', label: 'Insert Conditional: Variable',
-            disabled: isClicker, disabledHint: clickerHint,
-            keywords: ['compare', 'counter', 'value'],
-            icon: <GitBranch size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'Variable', insertIndex: computeInsertIndex() } }); onClose(); },
-          },
-          {
-            id: 'ifprocess', label: 'Insert Conditional: Process Running',
-            disabled: isClicker, disabledHint: clickerHint,
-            keywords: ['exe', 'app running', 'task'],
-            icon: <GitBranch size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'ProcessRunning', insertIndex: computeInsertIndex() } }); onClose(); },
-          },
-          {
-            id: 'iffile', label: 'Insert Conditional: File Exists',
-            disabled: isClicker, disabledHint: clickerHint,
-            keywords: ['path', 'flag file', 'folder'],
-            icon: <GitBranch size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'FileExists', insertIndex: computeInsertIndex() } }); onClose(); },
-          },
-          {
-            id: 'iftime', label: 'Insert Conditional: Time / Day',
-            disabled: isClicker, disabledHint: clickerHint,
-            keywords: ['clock', 'schedule', 'hours', 'day of week'],
-            icon: <GitBranch size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertConditional', payload: { conditionType: 'TimeWindow', insertIndex: computeInsertIndex() } }); onClose(); },
-          },
-          {
-            id: 'pause', label: 'Insert Pause',
-            disabled: isClicker, disabledHint: clickerHint,
-            icon: <Hourglass size={14} className="text-text-secondary" />,
-            // Pattern B normalization — fire the cmd:pause event so the Toolbar
-            // opens the PauseDialog (config-first) instead of inserting an empty
-            // row that the user has to clean up if they Cancel.
-            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:pause')); },
-          },
-          {
-            id: 'runprofile', label: 'Insert Run Profile',
-            disabled: isClicker, disabledHint: clickerHint,
-            icon: <Repeat2 size={14} className="text-text-secondary" />,
-            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:runprofile')); },
-          },
-          {
-            // Activate Window — Pattern A insert (empty row + auto-open Sheet).
-            // Keywords cover the verbs users reach for: focus / open / launch.
-            id: 'activatewindow', label: 'Insert Activate Window',
-            disabled: isClicker, disabledHint: clickerHint,
-            keywords: ['focus window', 'open app', 'launch program', 'bring to front', 'foreground'],
-            icon: <AppWindow size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'actions:insertAction', payload: { actionType: 'ActivateWindow', insertIndex: computeInsertIndex() } }); onClose(); },
-          },
-          {
             id: 'copyactions', label: 'Copy as Table',
+            keywords: ['tsv', 'export', 'clipboard', 'spreadsheet'],
             icon: <Table2 size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:copy', payload: {} }); onClose(); },
           },
           {
+            // Ctrl+V works but has no visible control anywhere, so this is the only
+            // discoverable route.
             id: 'pasteactions', label: 'Paste Actions',
             disabled: isClicker, disabledHint: clickerHint,
             icon: <ClipboardPaste size={14} className="text-text-secondary" />,
@@ -278,12 +103,14 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           {
             id: 'convertrelative', label: 'Convert Coordinates to Relative',
             disabled: isClicker, disabledHint: clickerHint,
+            keywords: ['window relative', 'rebase', 'coordinates'],
             icon: <Replace size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:convertCoordinates', payload: { direction: 'toRelative' } }); onClose(); },
           },
           {
             id: 'convertabsolute', label: 'Convert Coordinates to Absolute',
             disabled: isClicker, disabledHint: clickerHint,
+            keywords: ['screen coordinates', 'rebase'],
             icon: <Replace size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:convertCoordinates', payload: { direction: 'toAbsolute' } }); onClose(); },
           },
@@ -292,146 +119,95 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             // representations — the on-demand counterpart to the Combined Actions toggle.
             id: 'converttocombined', label: 'Convert Actions to Combined',
             disabled: isClicker, disabledHint: clickerHint,
+            keywords: ['merge', 'keystroke', 'click'],
             icon: <Combine size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:convertMode', payload: { direction: 'toCombined' } }); onClose(); },
           },
           {
             id: 'converttopaired', label: 'Convert Actions to Paired',
             disabled: isClicker, disabledHint: clickerHint,
+            keywords: ['split', 'down up', 'separate'],
             icon: <Split size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'actions:convertMode', payload: { direction: 'toPaired' } }); onClose(); },
-          },
-          {
-            // Same gate as the toolbar's Clear All button, and routed through its
-            // confirm popover (cmd:clearactions → Toolbar opens the two-step
-            // confirm) so no path can clear the list in a single ungated click.
-            id: 'clearactions', label: 'Clear All Actions',
-            icon: <Trash2 size={14} className="text-text-secondary" />,
-            disabled: isClicker || isRecording || isReplaying || actions.length === 0,
-            disabledHint: isClicker ? clickerHint : (isRecording || isReplaying)
-              ? tt('Stop recording/replay first', 'Pare a gravação/replay primeiro')
-              : tt('No actions to clear', 'Nenhuma ação para limpar'),
-            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:clearactions')); },
           },
         ],
       },
       {
+        // New / Save / Load / New Folder all have persistent buttons (ActionBar and the
+        // ProfilePanel header), so only the routes with no visible control remain.
         id: 'profiles',
         title: 'PROFILES',
         items: [
           {
-            id: 'newprofile', label: 'New Profile',
-            icon: <FilePlus size={14} className="text-text-secondary" />,
-            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:newprofile')); },
-          },
-          {
-            id: 'newfolder', label: 'New Folder',
-            icon: <FolderPlus size={14} className="text-text-secondary" />,
-            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:newfolder')); },
-          },
-          {
-            id: 'save', label: 'Save Profile', shortcut: 'Ctrl+S',
-            icon: <Save size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'profile:save', payload: {} }); onClose(); },
-          },
-          {
-            id: 'load', label: 'Load Profile',
-            icon: <FolderOpen size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'profile:load', payload: {} }); onClose(); },
-          },
-          {
             id: 'reset', label: 'Reset Profile',
+            keywords: ['clear', 'start over', 'blank'],
             icon: <RotateCcw size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:reset', payload: {} }); onClose(); },
           },
           {
+            // Right-click-menu-only otherwise, so it stays searchable by name.
             id: 'duplicateprofile', label: 'Duplicate Profile',
+            keywords: ['copy profile', 'clone'],
             icon: <Files size={14} className="text-text-secondary" />,
             disabled: !activeProfile,
             disabledHint: tt('Select a profile first', 'Selecione um perfil primeiro'),
             onAction: () => { if (activeProfile) { send({ type: 'profile:duplicate', payload: { name: activeProfile } }); onClose(); } },
           },
           {
+            // The only non-nested way in: the other Import button lives INSIDE the Export
+            // dialog, where nobody looking to import would think to open it.
             id: 'importprofiles', label: 'Import Profiles',
+            keywords: ['restore', 'load file', 'json'],
             icon: <Download size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:import', payload: {} }); onClose(); },
           },
           {
+            // Distinct from the header's Export button, which opens a multi-select dialog:
+            // this is the one-shot "everything, organisation included" export.
             id: 'exportall', label: 'Export All Profiles',
+            keywords: ['backup', 'save all', 'json'],
             icon: <Upload size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'profile:export', payload: { names: profiles.map(p => p.name), includeOrganization: true } }); onClose(); },
           },
         ],
       },
       {
-        // CLICKER section — settings/actions specific to Clicker mode. Currently just the
-        // area configurator; will grow as the Clicker feature surface expands.
-        id: 'clicker',
-        title: 'CLICKER',
-        items: [
-          {
-            id: 'clickerarea', label: 'Configure Click Area',
-            icon: <Crosshair size={14} className="text-text-secondary" />,
-            onAction: () => { send({ type: 'clicker:configureArea', payload: { requestId: `palette-${Date.now()}` } }); onClose(); },
-          },
-        ],
-      },
-      {
+        // Diagnostics — none of these have a UI control anywhere in the app.
         id: 'view',
-        title: 'VIEW',
+        title: 'DIAGNOSTICS',
         items: [
-          {
-            id: 'themeeditor', label: 'Open Theme Editor',
-            icon: <Palette size={14} className="text-text-secondary" />,
-            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:themeeditor')); },
-          },
-          {
-            id: 'dataeditor', label: 'Open Data Loop',
-            keywords: ['csv', 'table', 'row', 'column', 'excel', 'loop over data'],
-            icon: <Table2 size={14} className="text-text-secondary" />,
-            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:dataeditor')); },
-          },
           {
             // Live-variables debug pane — floating card mirroring {var:}/{clip:}/row state.
+            // The palette is its ONLY opener; the pane's own button can only close it.
             id: 'livevars', label: 'Toggle Live Variables',
-            keywords: ['debug', 'variables', 'slots', 'clip', 'watch'],
+            keywords: ['debug', 'variables', 'slots', 'clip', 'watch', 'row'],
             icon: <Activity size={14} className="text-text-secondary" />,
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:livevars')); },
           },
           {
-            id: 'togglesidebar', label: 'Toggle Sidebar',
-            icon: <PanelLeft size={14} className="text-text-secondary" />,
-            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:togglesidebar')); },
-          },
-          {
+            // Recovery hatch for a wedged WebView2 UI.
             id: 'reloadui', label: 'Reload UI',
+            keywords: ['refresh', 'stuck', 'frozen'],
             icon: <RefreshCw size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'window:reloadUI', payload: {} }); onClose(); },
           },
           {
-            // Opens %LocalAppData%\TrueReplayer\Logs in Explorer. Previously reachable only
+            // Opens %LocalAppData%\TrueReplayer\Logs in Explorer. Otherwise reachable only
             // from the tray menu — surfaced here so users/support can grab the session log
             // for diagnosing silent hotkey / replay issues without hunting for the folder.
             id: 'openlogs', label: 'Open Logs Folder',
+            keywords: ['diagnostics', 'session log', 'support', 'troubleshoot'],
             icon: <ScrollText size={14} className="text-text-secondary" />,
             onAction: () => { send({ type: 'logs:openFolder', payload: {} }); onClose(); },
           },
         ],
       },
-      // WINDOW + UPDATES groups removed: every entry there (Always On Top, System Tray,
-      // Run on Startup, Start Minimized, Run as Admin, Check for Updates) is a 1:1 duplicate
-      // of a Settings-panel switch/button with its own feedback, so they only bloated the
-      // palette. The palette now focuses on actions, insertion, transforms, profile management,
-      // and view/diagnostic utilities that aren't one-click in the standard UI.
     ];
-    // Narrow deps to the exact settings fields read above (hotkeys, loop config, mode flags)
-    // so unrelated settings changes (e.g. movement knobs) don't rebuild every command group.
+    // Narrow deps to the exact settings field read above so unrelated settings changes
+    // (hotkeys, loop config, movement knobs) don't rebuild every command group.
   }, [
-    profiles, activeProfile, buttonStates, send, onClose, computeInsertIndex, tt,
-    actions.length,
-    settings.recordingHotkey, settings.replayHotkey, settings.modeToggleHotkey,
-    settings.useCursorClick, settings.enableLoop, settings.loopCount,
-    settings.loopIntervalEnabled, settings.loopInterval,
+    profiles, activeProfile, send, onClose, computeInsertIndex, tt,
+    settings.useCursorClick,
   ]);
 
   // Filter
@@ -545,14 +321,6 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
                     {isDisabled && item.disabledHint && (
                       <span className="text-[10px] text-text-disabled italic">{item.disabledHint}</span>
                     )}
-                    {!isDisabled && item.badge && (
-                      <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded-full text-accent"
-                        style={{ background: 'color-mix(in srgb, var(--color-accent) 10%, transparent)' }}
-                      >
-                        {item.badge}
-                      </span>
-                    )}
-                    {!isDisabled && item.shortcut && <KbdTag combo={item.shortcut} />}
                   </button>
                 );
               })}

@@ -23,6 +23,7 @@ A referência completa de tudo o que o TrueReplayer pode fazer. Primeira vez por
 - [Clicker mode (auto-clicker)](#clicker-mode-auto-clicker)
 - [Game mode](#game-mode)
 - [Send Text](#send-text)
+- [Data Loop](#data-loop)
 - [Automação de navegador](#automação-de-navegador)
 - [Temas e aparência](#temas-e-aparência)
 - [Referência de configurações](#referência-de-configurações)
@@ -117,7 +118,7 @@ A tabela central lista todas as ações do perfil. Colunas: **caixa de seleção
 | **If / Else / EndIf** | Ramificação condicional — veja [Blocos condicionais](#blocos-condicionais-if--else--endif). |
 | **Browser actions** | Click / Type / Navigate / Wait element / Select option no Chrome — veja [Automação de navegador](#automação-de-navegador). |
 
-Insira ações pela **barra de ferramentas** (Send Keystroke, Send Text, Pause, Wait, Conditional, Browser, Run Profile, Activate Window) ou pela **paleta de comandos** (`Ctrl+K`). A maioria das ações abre um pequeno diálogo para configurá-las; clique na célula Details de uma ação depois para editá-la.
+Insira ações pela **barra de ferramentas** (Send Keystroke, Send Text, Pause, Wait, Conditional, Browser, Run Profile, Activate Window). A maioria das ações abre um pequeno diálogo para configurá-las; clique na célula Details de uma ação depois para editá-la.
 
 > **Dica — diferencie por cor, não por confiança.** O match de imagem compara a referência inteira, ótimo para forma/texto, mas é grosseiro para distinguir dois estados que diferem só na **cor** (ex.: um botão habilitado *verde* vs desabilitado *cinza*). Para isso use **Wait Pixel Color** (ou um **If** em *Pixel Color Match*): amostre um ponto no preenchimento sólido e case a cor dentro de uma tolerância. E não use **confiança em 100%** — uma tela viva nunca reproduz a referência pixel a pixel, então um match de 100% dá timeout (internamente é limitado logo abaixo de 100%).
 
@@ -149,7 +150,7 @@ Faça uma macro reagir ao que está na tela.
 
 ## Perfis e pastas
 
-- **New / Save / Rename / Duplicate / Delete** pelo painel Profiles (à esquerda) ou pela paleta de comandos.
+- **New / Save / Rename / Duplicate / Delete** pelo painel Profiles (à esquerda). *Duplicate*, *Reset*, *Import* e *Export all* também estão na paleta de comandos (`Ctrl+K`).
 - **Fixe (Pin)** um perfil para mantê-lo no topo; **arraste-o** para dentro de uma **pasta** para agrupá-lo.
 - **Pastas** — crie, renomeie, recolora, recolha. Uma pasta pode conter um **alvo de janela** padrão que seus perfis herdam.
 - **Informações do perfil** — dê ao perfil um **ícone emoji**, uma **descrição** e **tags** (clique com o botão direito → Info). As tags são pesquisáveis.
@@ -266,6 +267,58 @@ O editor **Insert Text** compõe o texto que é injetado via colagem do clipboar
 
 ---
 
+## Data Loop
+
+Execute o perfil inteiro uma vez para **cada linha** de uma tabela — no estilo mala direta. Cole linhas do Excel ou de um CSV e cada cabeçalho de coluna vira um token `{row:column}` que você solta em campos de texto, teclas ou navegador.
+
+Abra pela **barra de ferramentas** (o ícone de tabela → *Data Loop*). A tabela é salva **dentro do perfil**, então acompanha o export/import — uma tabela grande faz o arquivo do perfil crescer.
+
+### Colocando dados na tabela
+
+- **Colar do Excel / Sheets** — em **Paste / bulk edit…**, jogue um intervalo copiado na caixa e escolha **Replace table** ou **Append rows**. Tabs, aspas e células com várias linhas sobrevivem à colagem. **First row is the header** transforma a primeira linha em nomes de coluna (desligado → as colunas viram `col1…colN` e toda linha é dado).
+- **Importar CSV** — **Import CSV…** carrega um arquivo `.csv` / `.tsv` / `.txt`; o delimitador é detectado automaticamente (vírgula, ponto e vírgula — como o Excel brasileiro escreve — ou tab).
+- **Editar na própria grade** — clique em qualquer célula para editá-la; **Add row** / **Add column**, duplique ou apague linhas, e o menu **⋯** do cabeçalho insere / move / renomeia / apaga colunas. `Ctrl+Z` desfaz a última alteração da grade.
+- **Copiar de volta** — **Copy table (TSV)** coloca a grade inteira no clipboard para colar direto no Excel/Sheets. **Clear table…** a esvazia (salvar uma grade vazia remove a tabela do perfil).
+
+### Cabeçalhos → tokens
+
+Cada cabeçalho de coluna vira um token que você cola em **Insert Text**, na tecla de um **Keystroke** ou em **Browser Type**:
+
+| Token | Resolve para |
+| --- | --- |
+| `{row:column}` | O valor da linha atual naquela **coluna** (a busca ignora maiúsculas/minúsculas). |
+| `{row}` | O **número da linha** atual (base 1). |
+
+- Copie um token no painel **Columns · tokens** (clique no chip) ou no menu **⋯** do cabeçalho. O painel também mostra quantas actions usam cada coluna (`×N` / *unused*) e sinaliza **órfãos** — um `{row:…}` que uma action referencia mas a tabela não tem essa coluna (vai digitar texto vazio).
+- Cabeçalhos precisam ser **letras, dígitos ou `_`** para virar token. Um cabeçalho inválido é marcado com ⚠; clique na **varinha** para corrigir automaticamente (de todo jeito ele é salvo).
+- Uma célula ausente — ou um `{row:column}` sem cabeçalho correspondente — resolve para **texto vazio**, nunca um erro. Com colunas duplicadas, a **última** vence.
+
+### Executando sobre os dados
+
+O botão **Loop over data** decide como a tabela dirige a reprodução:
+
+| Modo | Comportamento |
+| --- | --- |
+| **Loop over data ligado** | Uma **execução completa por linha** — uma tabela de N linhas = N iterações. **Sobrepõe** o Loop count do perfil *e* o replay infinito de While-Pressed / Toggle. A reprodução **se recusa a iniciar** se a tabela não tiver linhas. |
+| **Loop over data desligado** (*cursor*) | Cada reprodução usa a **próxima linha** e avança, **dando a volta** ao chegar no fim — ótimo para "processar um registro por toque de hotkey". Botão direito em qualquer linha → **Reset row position** para recomeçar na linha 1. **Notify on list complete** (checkbox no trilho, ligado por padrão) toca um som quando uma execução usa a **última** linha, para a volta não passar despercebida. |
+
+> A linha é escolhida **uma vez por execução**, então um perfil com seu próprio Loop count interno repete a *mesma* linha esse número de vezes antes de passar para a próxima.
+
+### Pular em erro (só com loop-over-data)
+
+Ao fazer loop sobre os dados, **On row error** decide o que uma linha com falha faz:
+
+| Política | Comportamento |
+| --- | --- |
+| **Halt** *(padrão)* | Para a reprodução na primeira linha que der erro. |
+| **Skip row** | Registra a linha com falha, solta o que ela tiver deixado pressionado e continua na próxima linha. Um resumo de uma linha no fim informa quantas linhas foram puladas (e o primeiro motivo). |
+
+### Transformações de célula — `{row:column:mods}`
+
+Um token `{row:column}` aceita a **mesma cadeia de modificadores do `{clipboard}`** (veja [Send Text](#send-text)) — acrescente os modificadores após o nome da coluna, ex.: `{row:name:trim:upper}`. Clique num chip `{row:…}` dentro de um editor de texto para configurá-los num popover com um preview ao vivo do valor da primeira linha, ou digite a cadeia à mão. O pipeline roda numa ordem fixa: **trim → operações de lista (range / lines / sort / dedupe / reverse / join) → extração (line / word) → limite (first / last) → caixa (upper / lower / sentence / title)**.
+
+---
+
 ## Automação de navegador
 
 Controle o Google Chrome por **seletor CSS** em vez de coordenadas de tela — robusto contra mudanças de layout. Requer que a **extensão TrueReplayer para Chrome** esteja conectada (os itens de menu do navegador ficam desabilitados até que esteja). Veja o **[guia de instalação da extensão](https://github.com/fatalihue/TrueReplayer-releases/blob/main/docs/extension-setup/README.md)** para instalá-la.
@@ -284,7 +337,7 @@ Um selo de **qualidade do seletor** (S → C) indica quão estável cada seletor
 
 ## Temas e aparência
 
-Abra o **Theme Editor** em Settings → Global → Appearance → *Customise* (ou `Ctrl+K` → Theme editor).
+Abra o **Theme Editor** em Settings → Global → Appearance → *Customise*.
 
 <p align="center">
   <img src="img/theme.png" width="820" alt="A aba de presets do Theme Editor com um preview ao vivo" /><br>
