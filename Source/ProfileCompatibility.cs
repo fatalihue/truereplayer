@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using TrueReplayer.Models;
 
 namespace TrueReplayer.Services
@@ -106,6 +107,14 @@ namespace TrueReplayer.Services
             // batch loop (matches SkipRowOnErrorActive). Introduced after 2.8.1 — bump at release.
             (p => p.Data is { LoopOverData: true } d && string.Equals(d.OnRowError, "skip", StringComparison.OrdinalIgnoreCase),
                 new Version(2, 8, 1), "Data-loop skip-on-error"),
+
+            // Data-loop cell modifiers ({row:column:mods}) — an older build's row-token regex
+            // requires '}' right after the column name, so the WHOLE token stays literal and
+            // gets typed into the target verbatim (worse than the clipboard-mods degradation,
+            // where at least the content substitutes). Text-scan over every token-resolved
+            // string field. Introduced after 2.8.1 — bump at release.
+            (p => p.Actions.Any(UsesModifiedRowToken),
+                new Version(2, 8, 1), "Data-loop cell modifiers"),
 
             // Copy to Slot ({clip:name} capture) — an older build has no dispatch case for the
             // unknown ActionType → silently skips the capture and every {clip:} token resolves
@@ -220,6 +229,42 @@ namespace TrueReplayer.Services
             (p => (p.Tags != null && p.Tags.Count > 0) || !string.IsNullOrEmpty(p.Description) || !string.IsNullOrEmpty(p.IconEmoji),
                 new Version(2, 2, 0), "Profile sharing metadata"),
         };
+
+        // {row:column:mods} — a row token carrying at least one modifier segment after the
+        // column name. Mirrors ActionExecution.RowDataTokenRegex's modified form; the plain
+        // {row:column} shape is NOT matched (already covered by the Data-loop table pin).
+        private static readonly Regex ModifiedRowTokenRegex = new(
+            @"\{row:[A-Za-z0-9_]+:[^}]+\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // Key is resolved only on the key-simulation family + SendText; BrowserText only on
+        // BrowserType/BrowserSelectOption (BrowserWaitElement text-match patterns go RAW to
+        // the extension). Gate those two SHARED fields by ActionType so e.g. a browser
+        // selector that merely looks like a modified row token can't over-pin a profile
+        // that behaves identically on the older build.
+        private static readonly HashSet<string> KeyResolvingActionTypes = new(StringComparer.OrdinalIgnoreCase)
+            { "SendText", "Keystroke", "KeyDown", "KeyUp", "HoldKey" };
+        private static readonly HashSet<string> BrowserTextResolvingActionTypes = new(StringComparer.OrdinalIgnoreCase)
+            { "BrowserType", "BrowserSelectOption" };
+
+        // Every string field the runtime token resolver touches — the fields where a
+        // {row:column:mods} token can actually take effect (SendText/Keystroke Key + rich
+        // flavors, browser text, Set Variable value, If-Variable operand, If-File path,
+        // ActivateWindow launch path/args).
+        private static bool UsesModifiedRowToken(ActionItem a) =>
+            (KeyResolvingActionTypes.Contains(a.ActionType) && ContainsModifiedRowToken(a.Key)) ||
+            ContainsModifiedRowToken(a.KeyHtml) ||
+            ContainsModifiedRowToken(a.KeyMarkdown) ||
+            (BrowserTextResolvingActionTypes.Contains(a.ActionType) && ContainsModifiedRowToken(a.BrowserText)) ||
+            ContainsModifiedRowToken(a.VariableValue) ||
+            ContainsModifiedRowToken(a.ConditionOperand) ||
+            ContainsModifiedRowToken(a.FilePath) ||
+            ContainsModifiedRowToken(a.LaunchPath) ||
+            ContainsModifiedRowToken(a.LaunchArgs);
+
+        private static bool ContainsModifiedRowToken(string? text) =>
+            !string.IsNullOrEmpty(text) && text.Contains("{row", StringComparison.OrdinalIgnoreCase)
+                && ModifiedRowTokenRegex.IsMatch(text);
 
         /// <summary>
         /// Walks the feature matrix and returns the highest minimum version among all

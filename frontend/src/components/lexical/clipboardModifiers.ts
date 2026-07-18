@@ -1,5 +1,6 @@
-// Pure logic for the {clipboard[:mods]} token format. Shared between the side-panel
-// "Advanced Clipboard" insert popover and the chip click-to-edit popover.
+// Pure logic for the {clipboard[:mods]} and {row:column[:mods]} token formats. Shared
+// between the side-panel "Advanced Clipboard" insert popover and the chip click-to-edit
+// popovers (clipboard + data-row cell — both run the SAME backend modifier pipeline).
 //
 // Modifier order in the emitted chain MUST match the backend ApplyClipboardModifiers
 // pipeline: trim → range/lines → sort → dedupe → reverse → join → line/word →
@@ -49,7 +50,18 @@ export const DEFAULT_TRANSFORM: TransformState = {
 };
 
 export function buildClipboardToken(s: TransformState): string {
-  const parts = ['clipboard'];
+  return '{' + ['clipboard', ...buildModifierParts(s)].join(':') + '}';
+}
+
+// {row:column[:mods]} — the data-loop cell token with the same modifier chain.
+// No mods → plain {row:column}, byte-identical to what NamePromptPopover inserts.
+export function buildRowToken(column: string, s: TransformState): string {
+  return '{' + ['row', column, ...buildModifierParts(s)].join(':') + '}';
+}
+
+// The modifier tail shared by every token head that supports transforms.
+function buildModifierParts(s: TransformState): string[] {
+  const parts: string[] = [];
   if (s.trim) parts.push('trim');
   if (s.listPick === 'range') parts.push('range', `${s.rangeFrom}-${s.rangeTo}`);
   else if (s.listPick === 'lines' && /\d/.test(s.linesSpec)) parts.push('lines', s.linesSpec);
@@ -67,7 +79,7 @@ export function buildClipboardToken(s: TransformState): string {
   else if (s.case === 'lower') parts.push('lower');
   else if (s.case === 'sentence') parts.push('sentence');
   else if (s.case === 'title') parts.push('title');
-  return '{' + parts.join(':') + '}';
+  return parts;
 }
 
 // Same CRLF normalization the backend's SplitContentLines / line:N use.
@@ -140,12 +152,25 @@ export function applyTransformPreview(raw: string, s: TransformState): string {
 // Reverse of buildClipboardToken — hydrates state from an existing chip's token
 // so the edit popover starts with the user's prior choices.
 export function parseClipboardToken(token: string): TransformState {
+  if (!/^\{clipboard(?::|\})/i.test(token)) return { ...DEFAULT_TRANSFORM };
+  // parts[0] === 'clipboard'; the modifier tail starts at 1.
+  return parseModifierParts(token.slice(1, -1).split(':'), 1);
+}
+
+// Reverse of buildRowToken — column name (verbatim) + hydrated modifier state.
+// parts[0] === 'row', parts[1] === column, mods from 2 on.
+export function parseRowToken(token: string): { column: string; state: TransformState } {
+  if (!/^\{row:/i.test(token)) return { column: '', state: { ...DEFAULT_TRANSFORM } };
+  const parts = token.slice(1, -1).split(':');
+  return { column: parts[1] ?? '', state: parseModifierParts(parts, 2) };
+}
+
+// The shared modifier-tail parser — same forgiving grammar as the backend
+// ApplyClipboardModifiers (unknown segments skipped, arg-taking modifiers
+// validate their arg before consuming it).
+function parseModifierParts(parts: string[], from: number): TransformState {
   const state: TransformState = { ...DEFAULT_TRANSFORM };
-  if (!/^\{clipboard(?::|\})/i.test(token)) return state;
-  const inner = token.slice(1, -1);
-  const parts = inner.split(':');
-  // parts[0] === 'clipboard'; iterate the modifier tail.
-  for (let i = 1; i < parts.length; i++) {
+  for (let i = from; i < parts.length; i++) {
     const p = parts[i].toLowerCase();
     switch (p) {
       case 'trim':

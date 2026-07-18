@@ -828,6 +828,12 @@ namespace TrueReplayer
             // foreground.
             if (status == "ready" && (wasError || (_lastRunStatus == "replaying" && !userStopped)))
                 NotifyRunEnded(wasError);
+            else if (status == "ready")
+                // Run ended down a path that raises no end-of-run cue (notably a user Stop, or
+                // a profile so short the status never registered "replaying"). The lap notice
+                // has already fired on its own by then; just clear the chime-suppression flag
+                // so it can't mute the NEXT run's ordinary cue.
+                _lapNoticeJustFired = false;
             _lastRunStatus = status;
 
             // Reflect the live run-state in the tray hover tooltip (Replaying…/Recording…/idle).
@@ -1025,6 +1031,10 @@ namespace TrueReplayer
                 rows = d?.Rows ?? new System.Collections.Generic.List<System.Collections.Generic.List<string>>(),
                 loopOverData = d?.LoopOverData ?? false,
                 onRowError = NormalizeOnRowError(d?.OnRowError) ?? "halt",
+                // Stored as null-means-default, surfaced to the UI as a plain bool: the panel
+                // renders a checkbox, and leaving it undefined would seed it unchecked-looking
+                // on a table that has never opted out.
+                notifyOnLapComplete = d?.NotifyOnLapComplete != false,
             });
         }
 
@@ -1066,9 +1076,24 @@ namespace TrueReplayer
                 ? NormalizeOnRowError(oEl.GetString())
                 : null;
 
+            // Lap notice is ON by default, so ONLY an explicit opt-out is persisted — an
+            // untouched table serialises byte-for-byte as before (same null-means-default
+            // shape as OnRowError above).
+            bool? notifyOnLapComplete =
+                payload.TryGetProperty("notifyOnLapComplete", out var nEl) && nEl.ValueKind == JsonValueKind.False
+                    ? false
+                    : null;
+
             ProfileDataTable? table = (headers.Count == 0 && rows.Count == 0)
                 ? null
-                : new ProfileDataTable { Headers = headers, Rows = rows, LoopOverData = loopOverData, OnRowError = onRowError };
+                : new ProfileDataTable
+                {
+                    Headers = headers,
+                    Rows = rows,
+                    LoopOverData = loopOverData,
+                    OnRowError = onRowError,
+                    NotifyOnLapComplete = notifyOnLapComplete,
+                };
 
             UserProfile.Current.Data = table;
 
@@ -1562,6 +1587,7 @@ namespace TrueReplayer
                     rows = UserProfile.Current?.Data?.Rows ?? new System.Collections.Generic.List<System.Collections.Generic.List<string>>(),
                     loopOverData = UserProfile.Current?.Data?.LoopOverData ?? false,
                     onRowError = NormalizeOnRowError(UserProfile.Current?.Data?.OnRowError) ?? "halt",
+                    notifyOnLapComplete = UserProfile.Current?.Data?.NotifyOnLapComplete != false,
                 },
                 profiles = profileController.ProfileEntries.Select(p => new
                 {
@@ -7628,8 +7654,56 @@ namespace TrueReplayer
         // safe. The Win32 calls themselves (FlashWindowEx / MessageBeep /
         // GetForegroundWindow) are thread-agnostic. Never let a notification
         // failure break a status push.
+        // True for the instant between a lap notice firing and the run's own end-of-run cue,
+        // so the two don't stack two chimes on top of each other.
+        private bool _lapNoticeJustFired;
+
+        /// <summary>
+        /// A cursor-mode run just consumed the LAST data row: the list finished a full pass
+        /// and the next run wraps to row 1. Fired IMMEDIATELY rather than deferred to
+        /// NotifyRunEnded — that cue only fires when the status actually passed through
+        /// "replaying", which a 2 ms profile (Ctrl+A + one SendText is the realistic case)
+        /// never does, so deferring silently dropped the notice on exactly the profiles this
+        /// feature exists for. The engine already raises this at the END of the run, so
+        /// firing here is the same moment, minus the dependency.
+        /// </summary>
+        public void ArmDataLapNotice(int rows)
+        {
+            _lapNoticeJustFired = true;
+            try
+            {
+                // The tray balloon is the only surface that reaches the user over a
+                // full-screen game, and unlike the chime it carries the actual numbers.
+                // Deliberately not gated on RunEndFlash/RunEndSound: those govern the
+                // per-run cue, whereas finishing the list is a rare, explicitly opted-in
+                // event (the Data panel toggle already decided it should be announced).
+                Services.TrayIconService.ShowBalloon(
+                    "Data list complete",
+                    $"All {rows} rows used — the next run starts over at row 1.");
+
+                // NOT gated on RunEndSound either, for the same reason as the balloon and it
+                // matters more here: RunEndSound governs the cue that fires after EVERY run,
+                // which is exactly why people switch it off — while finishing the list is a
+                // rare event the user opted into per-table. Riding that setting would leave
+                // the feature silent for the very users who asked for it. MessageBeep still
+                // honours the Windows sound scheme, so "No Sounds" is respected.
+                NativeMethods.MessageBeep(NativeMethods.MB_ICONASTERISK_BEEP);
+
+                DiagnosticLog.Info($"Data list complete — all {rows} row(s) used; cursor wraps to row 1 (chime + tray balloon)");
+            }
+            catch (Exception ex)
+            {
+                // Never let a notification failure disturb the run that triggered it.
+                DiagnosticLog.Warn($"Lap notice failed: {ex.Message}");
+            }
+        }
+
         private void NotifyRunEnded(bool error)
         {
+            // A lap notice for THIS run already chimed; don't chime again on top of it.
+            bool lapJustFired = _lapNoticeJustFired;
+            _lapNoticeJustFired = false;
+
             try
             {
                 if (!UserProfile.Current.RunEndFlash && !UserProfile.Current.RunEndSound)
@@ -7653,7 +7727,10 @@ namespace TrueReplayer
                     };
                     NativeMethods.FlashWindowEx(ref fw);
                 }
-                if (UserProfile.Current.RunEndSound)
+                // Skipped when a lap notice just played its own Asterisk chime for this same
+                // run — two chimes back to back read as a glitch, not as two facts. An error
+                // still wins: a failure must be heard even if the list also finished.
+                if (UserProfile.Current.RunEndSound && (error || !lapJustFired))
                 {
                     // System sound scheme's chime — respects the user's scheme
                     // (including "No Sounds") and needs no bundled asset.

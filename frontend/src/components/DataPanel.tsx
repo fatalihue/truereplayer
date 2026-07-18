@@ -2,7 +2,7 @@ import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, 
 import ReactDOM from 'react-dom';
 import {
   Table2, TriangleAlert, Repeat, Plus, Trash2, Wand2, Check, Copy,
-  MoreHorizontal, ClipboardPaste, FileUp, Search, X,
+  MoreHorizontal, ClipboardPaste, FileUp, Search, X, Bell,
 } from 'lucide-react';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
@@ -366,6 +366,11 @@ export function DataPanel({ onClose }: DataPanelProps) {
   const onRowErrorRef = useRef<'halt' | 'skip'>('halt');
   const [onRowError, setOnRowErrorState] = useState<'halt' | 'skip'>('halt');
   const setOnRowError = useCallback((v: 'halt' | 'skip') => { onRowErrorRef.current = v; setOnRowErrorState(v); }, []);
+  // Lap notice — same ref+state pairing as onRowError so the synchronous dirty check and
+  // handleSave can read it without waiting for a re-render. Defaults ON.
+  const notifyLapRef = useRef(true);
+  const [notifyLap, setNotifyLapState] = useState(true);
+  const setNotifyLap = useCallback((v: boolean) => { notifyLapRef.current = v; setNotifyLapState(v); }, []);
 
   const [editing, setEditing] = useState<Editing>(null);
   const editingRef = useRef<Editing>(null);
@@ -426,7 +431,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
   // save confirm), which would otherwise stomp the user's unsaved edits while
   // the panel is open. Treat any later dataTable dependency as a review defect.
   const seededRef = useRef(false);
-  const seedRef = useRef<{ grid: Grid; loopOverData: boolean; onRowError: 'halt' | 'skip'; wasNonEmpty: boolean } | null>(null);
+  const seedRef = useRef<{ grid: Grid; loopOverData: boolean; onRowError: 'halt' | 'skip'; notifyLap: boolean; wasNonEmpty: boolean } | null>(null);
   useEffect(() => {
     if (seededRef.current) return;
     seededRef.current = true;
@@ -444,10 +449,16 @@ export function DataPanel({ onClose }: DataPanelProps) {
     const seedOnRowError = dataTable.onRowError === 'skip' ? 'skip' : 'halt';
     onRowErrorRef.current = seedOnRowError;
     setOnRowErrorState(seedOnRowError);
+    // Only an explicit false turns it off — a table saved before this feature has no such
+    // field, and undefined must read as ON, not as "unchecked".
+    const seedNotifyLap = dataTable.notifyOnLapComplete !== false;
+    notifyLapRef.current = seedNotifyLap;
+    setNotifyLapState(seedNotifyLap);
     seedRef.current = {
       grid: { headers: [...headers], rows: rows.map((r) => [...r]) },
       loopOverData: dataTable.loopOverData,
       onRowError: seedOnRowError,
+      notifyLap: seedNotifyLap,
       wasNonEmpty: headers.length > 0 || rows.length > 0,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -464,13 +475,15 @@ export function DataPanel({ onClose }: DataPanelProps) {
   const dirty = useMemo(() => {
     const seed = seedRef.current;
     if (!seed) return false;
-    return !deepEqualGrid(grid, seed.grid) || loopOverData !== seed.loopOverData || onRowError !== seed.onRowError;
+    return !deepEqualGrid(grid, seed.grid) || loopOverData !== seed.loopOverData
+      || onRowError !== seed.onRowError || notifyLap !== seed.notifyLap;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [grid, loopOverData, onRowError]);
+  }, [grid, loopOverData, onRowError, notifyLap]);
   const dirtyNow = () => {
     const seed = seedRef.current;
     if (!seed) return false;
-    return !deepEqualGrid(gridRef.current, seed.grid) || loopRef.current !== seed.loopOverData || onRowErrorRef.current !== seed.onRowError;
+    return !deepEqualGrid(gridRef.current, seed.grid) || loopRef.current !== seed.loopOverData
+      || onRowErrorRef.current !== seed.onRowError || notifyLapRef.current !== seed.notifyLap;
   };
 
   const emptyGrid = grid.headers.length === 0 && grid.rows.length === 0;
@@ -491,9 +504,13 @@ export function DataPanel({ onClose }: DataPanelProps) {
 
   // One shared scan: where {row:name} tokens are used across the profile's
   // actions (case-insensitive, trimmed — matching BuildRowDict semantics).
+  // The optional tail matches modifier chains ({row:name:trim:upper}) so a
+  // transformed token still counts as usage of its column. Non-empty tail only
+  // ([^}]+) — a dangling '{row:name:}' stays literal at runtime, so counting it
+  // here would claim usage the backend never resolves.
   const usage = useMemo(() => {
     const counts = new Map<string, number>();
-    const re = /\{row:([A-Za-z0-9_]+)\}/gi;
+    const re = /\{row:([A-Za-z0-9_]+)(?::[^}]+)?\}/gi;
     for (const a of actions) {
       const s = JSON.stringify(a);
       let m: RegExpExecArray | null;
@@ -741,7 +758,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
       while (row.length < g.headers.length) row.push('');
       return row.slice(0, Math.max(g.headers.length, row.length));
     });
-    send({ type: 'data:save', payload: { headers: g.headers, rows: padded, loopOverData: loopRef.current, onRowError: onRowErrorRef.current } });
+    send({ type: 'data:save', payload: { headers: g.headers, rows: padded, loopOverData: loopRef.current, onRowError: onRowErrorRef.current, notifyOnLapComplete: notifyLapRef.current } });
     onClose();
   };
 
@@ -1066,6 +1083,26 @@ export function DataPanel({ onClose }: DataPanelProps) {
                 )}
               </div>
             )}
+            {/* Lap notice — the cursor-mode counterpart of "On row error": it only means
+                anything while the cursor is advancing, and a 1-row table would "finish"
+                on every run, so it renders under exactly the conditions the engine checks
+                (no dead control, no promise the backend won't keep). */}
+            {!loopOverData && grid.rows.length > 1 && (
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={notifyLap}
+                onClick={() => setNotifyLap(!notifyLap)}
+                className="mt-2 flex items-center gap-2 text-[11px] text-text-tertiary hover:text-text-secondary transition-colors"
+                data-tip={tt(
+                  'Chime and tray balloon when a run uses the last row — the list finished and the next run starts over.',
+                  'Som e balão na bandeja quando uma execução usa a última linha — a lista acabou e a próxima recomeça.',
+                )}
+              >
+                <CheckboxBox checked={notifyLap} />
+                <span className="flex items-center gap-1.5"><Bell size={12} /> {tt('Notify on list complete', 'Avisar ao concluir a lista')}</span>
+              </button>
+            )}
             {/* Per-row error policy — only meaningful while looping over data, so it only
                 renders then (no dead control in cursor mode). */}
             {loopOverData && (
@@ -1158,7 +1195,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
                 ))}
               </div>
               <div className="text-[10px] text-text-tertiary px-3 pt-1 pb-2">
-                {tt('Lookup is case-insensitive. {row} = row number.', 'A busca ignora maiúsculas. {row} = número da linha.')}
+                {tt('Lookup is case-insensitive. {row} = row number. Cells accept clipboard-style transforms — click a {row:…} chip in a text editor, or type {row:name:trim:upper}.', 'A busca ignora maiúsculas. {row} = número da linha. Células aceitam transformações estilo clipboard — clique num chip {row:…} num editor de texto, ou digite {row:nome:trim:upper}.')}
               </div>
             </>
           )}

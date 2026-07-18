@@ -152,6 +152,11 @@ namespace TrueReplayer.Services
             // continuation pattern at the bottom of StartReplay (lines 203-213).
             replayer.OnReplayError = msg => dispatcherQueue.TryEnqueue(
                 () => onStatusChanged?.Invoke($"error:{msg}"));
+            // Data-list lap notice — same dispatcher marshalling as OnReplayError (it fires
+            // from the replay task), but its own channel so the host can present it as
+            // information rather than an error.
+            replayer.OnDataLapCompleted = rows => dispatcherQueue.TryEnqueue(
+                () => OnDataLapCompleted?.Invoke(rows));
             replayer.OnReplayResumed += () =>
             {
                 OnReplayResumed?.Invoke();
@@ -386,6 +391,11 @@ namespace TrueReplayer.Services
         // genuine loops (LoopCount > 1 or infinite); single-shot replays never trigger it.
         // total == 0 signals infinite loop. Frontend renders "Loop X/Y" or "Loop X/∞".
         public Action<int, int>? OnLoopProgress;
+
+        // Data-list lap notice — re-exposed from the inner ActionReplayer. Fires only in
+        // cursor mode (data table present, "loop over data" OFF) when a run consumes the
+        // last row. Arg = the table's row count.
+        public Action<int>? OnDataLapCompleted;
 
         public void ToggleCursorClickReplay(ClickerRunConfig config)
         {
@@ -1267,6 +1277,10 @@ namespace TrueReplayer.Services
         // relative coords but the target window isn't running). ReplayService wires this to
         // its onStatusChanged with the "error:" prefix so the bridge alerts the user.
         public Action<string>? OnReplayError;
+        // Cursor mode: the run just consumed the last row of the data table (arg = row count).
+        // Benign/informational — deliberately NOT routed through OnReplayError, which the host
+        // renders as a red error toast.
+        public Action<int>? OnDataLapCompleted;
 
         // {input:Label} Ask-Input modal round-trip, raised from the token resolver. OnInputRequested
         // asks the host to show the prompt; the host later calls CompleteInput with the answer.
@@ -1545,6 +1559,7 @@ namespace TrueReplayer.Services
                 // iteration) so an inner loop repeats the SAME row — "each run = one row".
                 // Batch mode (_dataLoopOver) leaves this null and stamps per-iteration below.
                 IReadOnlyDictionary<string, string>? cursorRowData = null;
+                int lapCompletedRows = 0;
                 if (!_dataLoopOver && _dataTable != null && (_dataTable.Rows?.Count ?? 0) > 0)
                 {
                     string rowKey = _getProfileName?.Invoke() ?? "default";
@@ -1552,6 +1567,12 @@ namespace TrueReplayer.Services
                     int cur = _rowCursors.TryGetValue(rowKey, out var cv) ? ((cv % rowN) + rowN) % rowN : 0;
                     cursorRowData = BuildRowDict(_dataTable, cur);
                     _rowCursors[rowKey] = (cur + 1) % rowN; // advance for the next run
+                    // Lap complete = this run consumed the LAST row, so the next one wraps to
+                    // the top. Detected HERE (not at the wrap) so the notice fires while it is
+                    // still true — "that was the last one" — instead of after row 1 was already
+                    // re-sent. Suppressed for a single-row table, where every run would qualify.
+                    if (rowN > 1 && cur == rowN - 1 && _dataTable.NotifyOnLapComplete != false)
+                        lapCompletedRows = rowN;
                 }
 
                 // Run replay on a dedicated thread to avoid blocking the thread pool
@@ -1631,6 +1652,14 @@ namespace TrueReplayer.Services
                 // error channel on purpose: rows DID fail; the log has the per-row reasons.
                 if (skippedRows > 0 && !token.IsCancellationRequested)
                     OnReplayError?.Invoke($"Data loop finished — {skippedRows} of {_loopCount} row(s) skipped after errors (first: {firstSkipNote})");
+
+                // Cursor-mode lap notice. Armed at the top of the run (the cursor advances
+                // there, so it is already known), announced here so it lands with the run's
+                // own end-of-run cue rather than before the row was actually used. Not raised
+                // on a user Stop: the host's run-end notifier suppresses those too, and being
+                // told "list complete" right after aborting is noise.
+                if (lapCompletedRows > 0 && !token.IsCancellationRequested)
+                    OnDataLapCompleted?.Invoke(lapCompletedRows);
             }
             // OperationCanceledException is the BASE type (TaskCanceledException derives from it),
             // so this catches both. A plain Stop during a Pause or an instant probe surfaces a bare
@@ -3603,11 +3632,13 @@ namespace TrueReplayer.Services
             @"\{var:([A-Za-z0-9_]+)\}",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-        // Data-loop column token {row:column}. Disjoint from the bare {row} replace below —
-        // "{row}" is not a substring of "{row:column}" (the ':' breaks the literal match),
-        // and this regex requires the ':name}' tail so it never matches bare {row}.
+        // Data-loop column token {row:column} / {row:column:mods}. Disjoint from the bare
+        // {row} replace below — "{row}" is not a substring of "{row:column}" (the ':' breaks
+        // the literal match), and this regex requires the ':name' tail so it never matches
+        // bare {row}. Group 2 is the optional clipboard-style modifier chain (same grammar
+        // as {clipboard:mods} — the FIRST segment is always the column, the rest modifiers).
         private static readonly Regex RowDataTokenRegex = new(
-            @"\{row:([A-Za-z0-9_]+)\}",
+            @"\{row:([A-Za-z0-9_]+)(?::([^}]+))?\}",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         // Clipboard-slot token {clip:name}. Disjoint from {clipboard...}: this regex requires
@@ -3646,7 +3677,9 @@ namespace TrueReplayer.Services
             // Data-loop {row:column} — resolves to the current loop row's cell. Runs BEFORE
             // the bare {row} replace below (defensive isolation). Missing column / no data
             // loop → empty (consume-always), and the cell is brace-escaped like {var} since
-            // data cells can contain arbitrary text.
+            // data cells can contain arbitrary text. An optional modifier chain
+            // ({row:name:trim:upper}) reuses the clipboard pipeline VERBATIM — modifiers run
+            // on the raw cell, before the html-encode/brace-escape for the target context.
             if (RowDataTokenRegex.IsMatch(text))
             {
                 text = RowDataTokenRegex.Replace(text, m =>
@@ -3655,6 +3688,8 @@ namespace TrueReplayer.Services
                     string value = string.Empty;
                     runCtx.RowData?.TryGetValue(col, out value!);
                     value ??= string.Empty;
+                    if (m.Groups[2].Success)
+                        value = ApplyClipboardModifiers(value, m.Groups[2].Value);
                     if (htmlEncodeSubstitution) value = HtmlEncodeValue(value);
                     return escapeBracesInSubstitution ? EscapeBracesForParser(value) : value;
                 });
@@ -3706,9 +3741,13 @@ namespace TrueReplayer.Services
         // wrapper span carries no paste value, key/delay placeholders ({enter}/{tab}/{delay:N})
         // act at the SEGMENT level (pressed around the paste) and must not surface as literal
         // text in the rich flavor, and the DOM serializer entity-escapes freeform modifier args
-        // ({clipboard:join:&} → &amp;) which would desync the two flavors' mods. Replacing each
-        // marker with its HtmlDecode'd raw token hands the resolvers the exact same token string
-        // the plain pass sees; the substituted VALUE is then HTML-encoded by the html pass.
+        // ({clipboard:join:&} → &amp;, likewise {row:col:join:&}) which would desync the two
+        // flavors' mods. Replacing each marker with its HtmlDecode'd raw token hands the
+        // resolvers the exact same token string the plain pass sees; the substituted VALUE is
+        // then HTML-encoded by the html pass. KNOWN LIMIT: a HAND-TYPED token whose separator
+        // falls outside the chip grammar (join:&) never becomes a marker span, so its escaped
+        // form reaches the html-pass resolvers and the flavors desync — pre-existing for
+        // {clipboard}, inherited by {row:col:mods}; popover-built chips are immune.
         private static readonly Regex TokenMarkerSpanRegex = new(
             "<span[^>]*\\bdata-token=\"([^\"]*)\"[^>]*>.*?</span>",
             RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);

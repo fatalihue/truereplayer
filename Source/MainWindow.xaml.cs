@@ -187,6 +187,14 @@ namespace TrueReplayer
                 bridge?.PushLoopProgress(current, total);
             };
 
+            // Data-list lap notice (cursor mode) — the bridge arms it here and presents it
+            // when the run's own end-of-run cue fires, so the chime/balloon arrive together
+            // with the "run finished" signal instead of racing it.
+            replayService.OnDataLapCompleted = rows =>
+            {
+                bridge?.ArmDataLapNotice(rows);
+            };
+
             this.Closed += (_, _) =>
             {
                 Services.DiagnosticLog.Info("Window closing — disposing bridge and controllers");

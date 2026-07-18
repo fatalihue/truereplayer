@@ -165,6 +165,23 @@ namespace TrueReplayer.Interop
             public int Left, Top, Right, Bottom;
         }
 
+        // Reports the window's RESTORED placement (rcNormalPosition) even while it is
+        // minimised — GetWindowRect would answer with the off-screen (-32000,-32000) parking
+        // rect instead, which loses the monitor the window actually lives on.
+        [DllImport("user32.dll")]
+        public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct WINDOWPLACEMENT
+        {
+            public int length;
+            public int flags;
+            public int showCmd;
+            public POINT ptMinPosition;
+            public POINT ptMaxPosition;
+            public RECT rcNormalPosition;
+        }
+
         [DllImport("user32.dll")]
         public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
 
@@ -209,6 +226,10 @@ namespace TrueReplayer.Interop
 
         public const uint MB_OK_BEEP = 0x00000000;        // MB_OK — "done" chime
         public const uint MB_ICONERROR_BEEP = 0x00000010; // MB_ICONERROR — "failed" chime
+        // MB_ICONASTERISK — the system "Asterisk"/info sound. Audibly distinct from MB_OK,
+        // which is the point: the run-end chime already plays after EVERY row, so the
+        // list-finished cue has to differ by TIMBRE to be recognisable without looking.
+        public const uint MB_ICONASTERISK_BEEP = 0x00000040;
 
         [DllImport("user32.dll")]
         public static extern bool MessageBeep(uint uType);

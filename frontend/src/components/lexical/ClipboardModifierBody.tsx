@@ -15,9 +15,15 @@ interface ClipboardModifierBodyProps {
   setState: React.Dispatch<React.SetStateAction<TransformState>>;
   clipRaw: string;
   clipReady: boolean;
+  /** Override the displayed token — the row-cell chip passes its {row:col:mods}
+   *  build; clipboard consumers omit it and get the {clipboard:mods} build. */
+  token?: string;
+  /** Label above the raw-source box (default "Clipboard"; the row-cell chip
+   *  passes "Cell (first row)"). */
+  sourceLabel?: string;
 }
 
-// The Transform / Extract / Limit + Clipboard / Token / Preview sections.
+// The Transform / Extract / Limit + Source / Token / Preview sections.
 // Stateless about UI shell (header, footer, positioning) — those are owned by
 // each consumer popover. Keeps the editor markup identical between insert and
 // edit flows so users see the same controls in both contexts.
@@ -26,8 +32,13 @@ export function ClipboardModifierBody({
   setState,
   clipRaw,
   clipReady,
+  token: tokenOverride,
+  sourceLabel = 'Clipboard',
 }: ClipboardModifierBodyProps) {
-  const token = useMemo(() => buildClipboardToken(state), [state]);
+  const token = useMemo(
+    () => tokenOverride ?? buildClipboardToken(state),
+    [tokenOverride, state],
+  );
   const preview = useMemo(() => applyTransformPreview(clipRaw, state), [clipRaw, state]);
 
   const toggleCase = (v: 'upper' | 'lower' | 'sentence' | 'title') =>
@@ -237,7 +248,7 @@ export function ClipboardModifierBody({
       </Section>
 
       <div className="px-3.5 py-1.5 bg-bg-surface border-b border-border-subtle">
-        <div className="text-[9px] uppercase tracking-wide text-text-tertiary mb-0.5">Clipboard</div>
+        <div className="text-[9px] uppercase tracking-wide text-text-tertiary mb-0.5">{sourceLabel}</div>
         <div
           className="font-mono text-[10.5px] text-text-secondary bg-white/[0.03] border-l-2 border-border-subtle px-2 py-0.5 mb-1.5 rounded-r whitespace-pre-wrap break-all max-h-[36px] overflow-auto"
           style={{ lineHeight: 1.35 }}

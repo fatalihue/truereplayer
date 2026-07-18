@@ -191,7 +191,7 @@ const RUN_STATE_CHIPS: PaletteChip[] = [
   { label: 'Variable…', prompt: 'var', tip: ['Value stored by a Set Variable action', 'Valor gravado por uma action Set Variable'] },
   { label: 'Counter', insert: '{counter}', tip: ['Current loop iteration (1, 2, 3…)', 'Iteração atual do loop (1, 2, 3…)'] },
   { label: 'Row #', insert: '{row}', tip: ["Current action's grid row number", 'Número da linha atual da action na grade'] },
-  { label: 'Row column…', prompt: 'row', tip: ["Data table column of the current row (loop over data)", 'Coluna da tabela de dados na linha atual (loop over data)'] },
+  { label: 'Row column…', prompt: 'row', tip: ["Data table column of the current row (loop over data) — click the chip after inserting to add transforms (trim, UPPERCASE…)", 'Coluna da tabela de dados na linha atual (loop over data) — clique no chip depois de inserir para adicionar transformações (trim, MAIÚSCULAS…)'] },
   { label: 'Clip slot…', prompt: 'clip', tip: ['Selection captured by a Copy to Slot action or the capture hotkey', 'Seleção capturada por uma action Copy to Slot ou pelo hotkey de captura'] },
   { label: 'Ask input…', prompt: 'input', tip: ['Prompt for a value at replay time (pauses the run)', 'Pergunta um valor durante a execução (pausa o replay)'] },
 ];

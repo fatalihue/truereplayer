@@ -75,7 +75,8 @@ const KNOWN_TOKEN_NAMES: ReadonlySet<string> = new Set([
   'delay',
   'random',
   // Run-state tokens (2.8.0): first-class chips like everything else the
-  // backend resolves — {var:name}, {counter}, {row}, {row:column}.
+  // backend resolves — {var:name}, {counter}, {row}, {row:column} (which also
+  // takes the clipboard-style modifier chain: {row:column:trim:upper}).
   'var',
   'counter',
   'row',

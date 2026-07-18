@@ -111,16 +111,25 @@ namespace TrueReplayer.Services
             Shell_NotifyIcon(NIM_MODIFY, ref notifyIcon);
         }
 
-        public static void ShowMinimizeBalloon()
+        public static void ShowMinimizeBalloon() => ShowBalloon(
+            "TrueReplayer is running in the background",
+            "Click the tray icon to restore the window.");
+
+        /// <summary>
+        /// Pop a tray balloon. The one notification surface that reaches the user while the
+        /// window is minimised behind a game or browser — which is exactly when a background
+        /// run has something to say.
+        /// </summary>
+        public static void ShowBalloon(string title, string text)
         {
             // Mutate the actual field, not a by-value copy — otherwise NIF_INFO / the balloon
             // text never persist on the static struct.
             notifyIcon.uFlags |= NIF_INFO;
-            notifyIcon.szInfoTitle = "TrueReplayer is running in the background";
-            notifyIcon.szInfo = "Click the tray icon to restore the window.";
+            notifyIcon.szInfoTitle = title;
+            notifyIcon.szInfo = text;
             notifyIcon.dwInfoFlags = NIIF_INFO;
             if (!Shell_NotifyIcon(NIM_MODIFY, ref notifyIcon))
-                DiagnosticLog.Warn($"Shell_NotifyIcon(NIM_MODIFY) for minimize balloon failed (Win32 error {Marshal.GetLastWin32Error()})");
+                DiagnosticLog.Warn($"Shell_NotifyIcon(NIM_MODIFY) for balloon failed (Win32 error {Marshal.GetLastWin32Error()})");
             // Clear NIF_INFO so subsequent UpdateTrayIcon/RemoveTrayIcon NIM_MODIFY calls — which
             // reuse this field and do NOT rewrite uFlags — don't re-pop the balloon on an
             // unrelated tray refresh (mode toggle, profile-key toggle, settings change, etc.).

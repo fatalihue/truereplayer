@@ -476,6 +476,10 @@ export interface ProfileDataTable {
   // Per-row error policy while looping over data: 'halt' (default) stops the run on the
   // first failed row; 'skip' logs the row and continues with the next one.
   onRowError: 'halt' | 'skip';
+  // Cursor mode only (loopOverData off): chime + tray balloon when a run consumes the LAST
+  // row, i.e. the list finished a pass and the next run wraps to row 1. Default true; only
+  // an explicit opt-out is persisted.
+  notifyOnLapComplete: boolean;
 }
 
 export type IncomingMessage =

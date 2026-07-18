@@ -71,7 +71,7 @@ const defaultSettings = {
 const initialState: AppState = {
   status: 'ready',
   actions: [],
-  dataTable: { headers: [], rows: [], loopOverData: false, onRowError: 'halt' },
+  dataTable: { headers: [], rows: [], loopOverData: false, onRowError: 'halt', notifyOnLapComplete: true },
   highlightedActionIndex: null,
   profiles: [],
   activeProfile: null,

@@ -183,6 +183,15 @@ namespace TrueReplayer.Models
         // tables stay byte-identical on disk (and in exports) to pre-feature builds.
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? OnRowError { get; set; }
+        // Cursor mode (LoopOverData OFF) only: announce when a run consumes the LAST row —
+        // the list just finished a full pass and the next run wraps back to row 1. Without
+        // it the wrap is silent and you only notice by seeing item #1 typed again.
+        // null = default ON, so plain tables stay byte-identical on disk and only an
+        // explicit opt-out is ever written. Deliberately NOT pinned in ProfileCompatibility:
+        // an older build simply ignores the field and skips the notice — the macro itself
+        // behaves identically, so there is nothing to warn an importer about.
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? NotifyOnLapComplete { get; set; }
     }
 
     public class HotstringConfig

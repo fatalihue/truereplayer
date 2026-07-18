@@ -5,11 +5,14 @@ import { ClipboardModifierBody } from './ClipboardModifierBody';
 import { useClipboardContent } from './useClipboardContent';
 import {
   buildClipboardToken,
+  buildRowToken,
   parseClipboardToken,
+  parseRowToken,
   type TransformState,
 } from './clipboardModifiers';
 import { NumInput, Section } from './popoverAtoms';
 import { normalizeToken } from './tokenNormalize';
+import { useAppState } from '../../state/AppStateContext';
 
 // Tokens that accept a `:N` repeat count (e.g. {enter:5}).
 const REPEATABLE_TOKEN_NAMES = new Set([
@@ -48,7 +51,7 @@ function getTokenKind(token: string): TokenKind {
   return 'static';
 }
 
-// The name arg of {var:...}/{row:...} — verbatim (normalizeToken never touches it).
+// The name arg of {var:...}/{clip:...} — verbatim (normalizeToken never touches it).
 function parseNameArg(token: string): string {
   const inner = token.slice(1, -1);
   const idx = inner.indexOf(':');
@@ -182,7 +185,7 @@ export function TokenChipPopover({
         position: 'fixed',
         ...visibilityStyle,
         zIndex: 100,
-        width: kind === 'clipboard' ? 300 : 260,
+        width: kind === 'clipboard' || kind === 'rowcol' ? 300 : 260,
         background: 'var(--color-bg-elevated, #2d2d2d)',
         border: '1px solid color-mix(in srgb, var(--color-accent-solid) 35%, transparent)',
         boxShadow: '0 16px 40px rgba(0, 0, 0, 0.55)',
@@ -204,7 +207,7 @@ export function TokenChipPopover({
         {kind === 'repeatable' && <RepeatableEditor token={token} onChange={updateLive} />}
         {kind === 'random' && <RandomEditor token={token} onChange={updateLive} />}
         {kind === 'var' && <NameEditor token={token} tokenName="var" onChange={updateLive} />}
-        {kind === 'rowcol' && <NameEditor token={token} tokenName="row" onChange={updateLive} />}
+        {kind === 'rowcol' && <RowColEditor token={token} onChange={updateLive} />}
         {kind === 'clip' && <NameEditor token={token} tokenName="clip" onChange={updateLive} />}
         {kind === 'input' && <InputEditor token={token} onChange={updateLive} />}
         {kind === 'static' && <StaticInfo token={token} />}
@@ -373,21 +376,22 @@ function RandomEditor({ token, onChange }: { token: string; onChange: (t: string
   );
 }
 
-// Shared editor for the name-bearing tokens: {var:name} (runtime variable) and
-// {row:column} (data-table column). Emits only on real input with a non-empty
+// Shared editor for the simple name-bearing tokens: {var:name} (runtime variable)
+// and {clip:name} (clipboard slot). Emits only on real input with a non-empty
 // name — clearing the field never emits a broken `{var:}`, and merely opening
 // then closing the chip never rewrites it (same guard family as DelayEditor).
+// {row:column} gets its own editor below (column + clipboard-style transforms).
 function NameEditor({
   token,
   tokenName,
   onChange,
 }: {
   token: string;
-  tokenName: 'var' | 'row' | 'clip';
+  tokenName: 'var' | 'clip';
   onChange: (t: string) => void;
 }) {
   const [name, setName] = useState(() => parseNameArg(token));
-  const label = tokenName === 'var' ? 'Variable name' : tokenName === 'clip' ? 'Slot name' : 'Data column';
+  const label = tokenName === 'var' ? 'Variable name' : 'Slot name';
 
   const update = (raw: string) => {
     // Same charset the typing grammar chips ([A-Za-z0-9_]) — anything else
@@ -406,18 +410,103 @@ function NameEditor({
           onChange={(e) => update(e.target.value)}
           autoFocus
           spellCheck={false}
-          placeholder={tokenName === 'var' ? 'name' : tokenName === 'clip' ? '1' : 'column'}
+          placeholder={tokenName === 'var' ? 'name' : '1'}
           className="h-7 w-full px-2 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid placeholder:text-text-disabled"
         />
       </div>
       <div className="text-[10px] text-text-tertiary mt-1">
         {tokenName === 'var'
           ? 'Replaced with the value a Set Variable action stored under this name.'
-          : tokenName === 'clip'
-            ? 'Replaced with the selection a Copy to Slot action (or the capture hotkey) stored in this slot.'
-            : "Replaced with this column's cell of the current data row (loop over data)."}
+          : 'Replaced with the selection a Copy to Slot action (or the capture hotkey) stored in this slot.'}
       </div>
     </Section>
+  );
+}
+
+// Editor for {row:column[:mods]} — the data-loop cell token. Column name on top,
+// then the SAME transform sections as the clipboard chip (one backend pipeline,
+// one UI). The source box previews the FIRST data row's cell for the column so
+// transform effects are visible while editing; header match is case-insensitive
+// + trimmed, mirroring the backend BuildRowDict lookup. Emits only with a
+// non-empty column (clearing the field never emits a broken `{row:}`).
+function RowColEditor({ token, onChange }: { token: string; onChange: (t: string) => void }) {
+  const [column, setColumn] = useState(() => parseRowToken(token).column);
+  const [state, setState] = useState<TransformState>(() => parseRowToken(token).state);
+  // The token box always shows what will actually be committed: the original
+  // (normalized) token until the first real edit, then the latest build. Never
+  // blanks while the column field is cleared mid-edit.
+  const [displayToken, setDisplayToken] = useState(() => normalizeToken(token));
+  const { dataTable } = useAppState();
+
+  const cellRaw = useMemo(() => {
+    const key = column.trim().toLowerCase();
+    // LAST duplicate header wins — BuildRowDict assigns columns in order into a
+    // dictionary, so at runtime a later duplicate overwrites an earlier one.
+    let idx = -1;
+    dataTable.headers.forEach((h, i) => {
+      if (h.trim().toLowerCase() === key) idx = i;
+    });
+    return idx >= 0 ? (dataTable.rows[0]?.[idx] ?? '') : '';
+  }, [dataTable, column]);
+
+  // Emit ONLY on real user input — NOT from a mount-time effect. The builder's
+  // state model always re-emits the canonical pipeline order, so a mount-time
+  // emit would silently rewrite a hand-typed order-sensitive or duplicate mod
+  // chain ({row:a:line:2:trim}, {row:a:first:5:first:3}) on mere open+close,
+  // changing runtime output (same guard family as DelayEditor/NameEditor).
+  // After a real edit the canonical rebuild IS the intent — the token box shows
+  // exactly what will run. Clearing the column never emits a broken `{row:}`.
+  const emit = (col: string, s: TransformState) => {
+    if (!col) return;
+    const t = buildRowToken(col, s);
+    setDisplayToken(t);
+    onChange(t);
+  };
+
+  const updateColumn = (raw: string) => {
+    // Same charset the typing grammar chips ([A-Za-z0-9_]) — anything else
+    // would produce a token the editor immediately un-chips on round-trip.
+    const clean = raw.replace(/[^A-Za-z0-9_]/g, '');
+    setColumn(clean);
+    emit(clean, state);
+  };
+
+  // Wraps setState so every transform interaction from the shared body also
+  // emits. Functional updates compute from the CURRENT render's state, which is
+  // fresh here — each interaction re-renders before the next can happen.
+  const updateState: React.Dispatch<React.SetStateAction<TransformState>> = (action) => {
+    const next = typeof action === 'function' ? action(state) : action;
+    setState(next);
+    emit(column, next);
+  };
+
+  return (
+    <>
+      <Section label="Data column">
+        <div className="py-1">
+          <input
+            type="text"
+            value={column}
+            onChange={(e) => updateColumn(e.target.value)}
+            autoFocus
+            spellCheck={false}
+            placeholder="column"
+            className="h-7 w-full px-2 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid placeholder:text-text-disabled"
+          />
+        </div>
+        <div className="text-[10px] text-text-tertiary mt-1">
+          Replaced with this column&apos;s cell of the current data row (loop over data).
+        </div>
+      </Section>
+      <ClipboardModifierBody
+        state={state}
+        setState={updateState}
+        clipRaw={cellRaw}
+        clipReady
+        token={displayToken}
+        sourceLabel="Cell (first row)"
+      />
+    </>
   );
 }
 
