@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
-import { Search, SearchX, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, ArrowUpFromDot, ExternalLink, Info, MoreHorizontal, Hash, Upload, Check } from 'lucide-react';
-import type { ProfileEntry, ImportPreviewPayload, ImportConflictResolution } from '../bridge/messageTypes';
+import { Search, SearchX, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, Repeat2, Hourglass, ArrowUpFromDot, ExternalLink, Info, MoreHorizontal, Hash, Upload, Check, TimerReset } from 'lucide-react';
+import type { ProfileEntry, ImportPreviewPayload, ImportConflictResolution, TriggerMode } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { KbdTag } from './common/KbdTag';
@@ -114,7 +114,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   } | null>(null);
   const [showHotkeyDialog, setShowHotkeyDialog] = useState<string | null>(null);
   const [hotkeyCapture, setHotkeyCapture] = useState('...');
-  const [hotkeyTriggerMode, setHotkeyTriggerMode] = useState<'onPress' | 'onRelease' | 'whilePressed' | 'toggle'>('onPress');
+  const [hotkeyTriggerMode, setHotkeyTriggerMode] = useState<TriggerMode>('onPress');
   const [showHotstringDialog, setShowHotstringDialog] = useState<string | null>(null);
   const [hotstringValue, setHotstringValue] = useState('');
   const [hotstringInstant, setHotstringInstant] = useState(false);
@@ -1490,6 +1490,16 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           </span>
         )}
 
+        {/* Automation badge — an armed trigger fires this profile by itself (timer /
+            schedule / watched condition). Accent-tinted when armed; a configured-but-
+            disarmed trigger shows nothing (the Automation panel is the status surface). */}
+        {p.triggerArmed && (
+          <span data-tip={tt('Automation armed — fires without a hotkey', 'Automação armada — dispara sem hotkey')}
+            data-tip-pos="end" className="shrink-0 text-accent-light flex">
+            <TimerReset size={10} />
+          </span>
+        )}
+
         {/* Trigger mode indicator — placed before the hotkey so the visual order
             right-to-left is: hotstring → hotkey → trigger icon → target crosshair.
             Tooltip shows only the mode name; the full description lives in the
@@ -1507,6 +1517,16 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         {p.hotkey && p.triggerMode === 'toggle' && (
           <span data-tip={tt('Toggle', 'Alternar')} data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
             <Repeat size={10} />
+          </span>
+        )}
+        {p.hotkey && p.triggerMode === 'doubleTap' && (
+          <span data-tip={tt('Double-tap', 'Toque duplo')} data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
+            <Repeat2 size={10} />
+          </span>
+        )}
+        {p.hotkey && p.triggerMode === 'hold' && (
+          <span data-tip={tt('Hold (long-press)', 'Segurar (pressão longa)')} data-tip-pos="end" className="shrink-0 text-text-tertiary flex">
+            <Hourglass size={10} />
           </span>
         )}
 
@@ -2430,6 +2450,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                   { id: 'onRelease', label: 'On Release', help: tt('Fires once when the key is released.', 'Dispara uma vez quando a tecla é solta.') },
                   { id: 'whilePressed', label: 'While Pressed', help: tt('Runs in infinite loop while held. Stops on release.', 'Executa em loop infinito enquanto pressionada. Para ao soltar.') },
                   { id: 'toggle', label: 'Toggle', help: tt('Press to start an infinite loop, press again to stop.', 'Pressione para iniciar um loop infinito, pressione de novo para parar.') },
+                  { id: 'doubleTap', label: 'Double-tap', help: tt('Fires once when the key is tapped twice quickly. Single taps do nothing.', 'Dispara uma vez com dois toques rápidos na tecla. Toques únicos não fazem nada.') },
+                  { id: 'hold', label: 'Hold (long-press)', help: tt('Fires ONCE after the key is held ~0.6s. A quick tap does nothing. Unlike While Pressed, the run does not stop on release.', 'Dispara UMA vez após segurar ~0,6s. Toque rápido não faz nada. Diferente de While Pressed, a execução não para ao soltar.') },
                 ] as const).map((opt) => (
                   <button
                     key={opt.id}
@@ -2450,6 +2472,8 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 {hotkeyTriggerMode === 'onRelease' && 'Fires once when the key is released.'}
                 {hotkeyTriggerMode === 'whilePressed' && 'Runs in infinite loop while held. Stops on release.'}
                 {hotkeyTriggerMode === 'toggle' && 'Press to start an infinite loop, press again to stop.'}
+                {hotkeyTriggerMode === 'doubleTap' && 'Fires once on two quick taps. Single taps do nothing.'}
+                {hotkeyTriggerMode === 'hold' && 'Fires once after holding ~0.6s. A quick tap does nothing.'}
               </div>
             </div>
 

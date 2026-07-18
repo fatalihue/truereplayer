@@ -203,6 +203,10 @@ namespace TrueReplayer.Controllers
                     // Data-loop table — mirror CreateProfileFromState so a "Save As New" /
                     // first-save doesn't silently drop the table.
                     Data = UserProfile.Current.Data,
+                    // Automation trigger travels too, but Armed is machine-LOCAL intent:
+                    // a Save-As-New copy must not silently start self-firing next to the
+                    // original (both would fire the same schedule).
+                    Triggers = DisarmedTriggerClone(UserProfile.Current.Triggers),
                 };
 
                 try
@@ -418,6 +422,9 @@ namespace TrueReplayer.Controllers
                             RestoreSize = profile.RestoreSize,
                             TriggerMode = profile.TriggerMode,
                             IsDisabled = profile.IsDisabled,
+                            // Automation trigger mirror — TriggerService re-arms from this and the
+                            // Automation panel projects configs from it (no per-profile re-read).
+                            Triggers = profile.Triggers,
                             // Mirror sharing metadata into the sidebar entry so the UI can render
                             // icon/tags/version badges without re-reading the JSON. Null tags stays
                             // null (don't coerce to empty list — the UI distinguishes "no tags set"
@@ -450,6 +457,14 @@ namespace TrueReplayer.Controllers
                                 refs.Add(a.ImagePath);
                             }
                         }
+                        // Automation image-watcher PNG lives OUTSIDE Actions — leaving it out
+                        // of the reference set makes this very cleanup delete it at the next
+                        // startup, silently killing the armed watcher.
+                        if (string.Equals(profile.Triggers?.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)
+                            && !string.IsNullOrEmpty(profile.Triggers?.ImagePath))
+                        {
+                            refs.Add(profile.Triggers!.ImagePath!);
+                        }
                         _referencedImagesByProfile[ImageStorageService.GetSanitizedProfileFolder(name)] = refs;
                     }
                 }
@@ -475,6 +490,11 @@ namespace TrueReplayer.Controllers
             InputHookManager.RegisterProfileWindowTargets(GetProfileWindowTargets(), GetBringToFocusProfiles());
             var hotstringMap = GetProfileHotstrings();
             InputHookManager.RegisterProfileHotstrings(hotstringMap);
+
+            // Automation daemon sync — this is the one place that sees every profile reload
+            // (disk watcher, imports, saves, toggles), so the watcher pool re-arms here.
+            // Reload is diff-based: unchanged triggers keep their running loops and state.
+            TriggerService.Instance?.Reload(GetProfileTriggers());
 
             // Diagnostic snapshot of what's actually ARMED after a (re)load — answers "is my
             // hotkey even registered, and to which target?" without a repro. Fires on profile
@@ -820,6 +840,32 @@ namespace TrueReplayer.Controllers
             return modes;
         }
 
+        // Clone a trigger config with Armed forced off — the shared helper for every path
+        // that materializes a profile on a machine that didn't arm it (import, Save-As-New,
+        // duplicate). null passes through.
+        public static ProfileTriggerConfig? DisarmedTriggerClone(ProfileTriggerConfig? config)
+        {
+            if (config == null) return null;
+            var clone = config.Clone();
+            clone.Armed = false;
+            return clone;
+        }
+
+        // Every profile's automation trigger config (armed or not — TriggerService needs the
+        // disarmed ones too so the panel can list + re-arm them). Disabled profiles are
+        // excluded outright: IsDisabled means "this profile must not fire", same rule the
+        // hotkey map applies above.
+        public List<(string Name, ProfileTriggerConfig Config)> GetProfileTriggers()
+        {
+            var result = new List<(string, ProfileTriggerConfig)>();
+            foreach (var entry in ProfileEntries)
+            {
+                if (entry.Triggers == null || entry.IsDisabled) continue;
+                result.Add((entry.Name, entry.Triggers));
+            }
+            return result;
+        }
+
         public Dictionary<string, HotstringConfig> GetProfileHotstrings()
         {
             var hotstrings = new Dictionary<string, HotstringConfig>();
@@ -1154,6 +1200,23 @@ namespace TrueReplayer.Controllers
                         }
                     }
                 }
+                // Automation image-watcher PNG (profile-level, outside Actions) rides the same
+                // Images dict — without it the receiver's image trigger probes a missing file.
+                if (string.Equals(profile.Triggers?.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrEmpty(profile.Triggers?.ImagePath)
+                    && (images == null || !images.ContainsKey(profile.Triggers!.ImagePath!)))
+                {
+                    var trigBase64 = ImageStorageService.ReadAsBase64(name, profile.Triggers!.ImagePath!);
+                    if (trigBase64 != null)
+                    {
+                        images ??= new Dictionary<string, string>();
+                        images[profile.Triggers!.ImagePath!] = trigBase64;
+                    }
+                    else
+                    {
+                        missingImagePaths.Add(name + "\0" + profile.Triggers!.ImagePath!);
+                    }
+                }
 
                 // Recompute AppMinVersion on every export so the value always reflects the current
                 // action set — never trust the last persisted value, since the user may have
@@ -1192,6 +1255,7 @@ namespace TrueReplayer.Controllers
                     Actions = profile.Actions,
                     Images = images,
                     Data = profile.Data,
+                    Triggers = profile.Triggers,
                     // Sharing metadata — copy verbatim from the source profile so the .trprofile
                     // carries description/tags/etc for the receiver's Import Preview.
                     Description = profile.Description,
@@ -1519,7 +1583,11 @@ namespace TrueReplayer.Controllers
                     ProfileVersion = entry.ProfileVersion > 0 ? entry.ProfileVersion : 1,
                     AppMinVersion = entry.AppMinVersion,
                     IconEmoji = entry.IconEmoji,
-                    Data = entry.Data
+                    Data = entry.Data,
+                    // Armed is FORCED off on import: a shared .trprofile must never start
+                    // self-firing (interval/schedule/condition-driven mouse+keyboard) the
+                    // moment import completes — the receiver re-arms explicitly.
+                    Triggers = DisarmedTriggerClone(entry.Triggers)
                 };
                 SettingsManager.MigrateRestoreSize(profile);
 

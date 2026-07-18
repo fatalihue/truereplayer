@@ -158,6 +158,11 @@ namespace TrueReplayer.Helpers
             ["NumAdd"] = 0x6B, ["NumSubtract"] = 0x6D,
             ["NumDecimal"] = 0x6E,
 
+            // Mouse side buttons — hotkey-trigger names composed by the mouse hook. Included
+            // here so GetAsyncKeyState-based release polling (WaitForHotkeyReleaseAsync on
+            // LastTriggerHotkey) resolves them; they are never simulated as key actions.
+            ["XButton1"] = 0x05, ["XButton2"] = 0x06,
+
             // Named keys
             ["CapsLock"] = 0x14, ["NumLock"] = 0x90, ["ScrollLock"] = 0x91,
             ["PageUp"] = 0x21, ["PageDown"] = 0x22,

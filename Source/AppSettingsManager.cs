@@ -99,6 +99,9 @@ namespace TrueReplayer.Services
             public string CaptureSlotHotkey { get; set; } = "";
             public bool ProfileKeyEnabled { get; set; } = true;
             public bool BrowserSelectorEnabled { get; set; } = true;
+            // Automation master switch — armed per-profile triggers only run while this is on.
+            // Default ON: the per-trigger Armed flag is the real opt-in.
+            public bool AutomationEnabled { get; set; } = true;
             public bool RunAsAdmin { get; set; } = false;
             // Sharing — first-time warning shown before importing any .trprofile so the user
             // knows imported profiles execute arbitrary input. Flips to true permanently once
@@ -174,6 +177,10 @@ namespace TrueReplayer.Services
             profile.ModeToggleHotkey = s.ModeToggleHotkey;
             profile.CaptureSlotHotkey = s.CaptureSlotHotkey;
             profile.ProfileKeyEnabled = s.ProfileKeyEnabled;
+            profile.AutomationEnabled = s.AutomationEnabled;
+            // Keep the daemon's runtime master in lockstep with every settings reload —
+            // there is no change-notification mechanism to deliver it otherwise.
+            TriggerService.Instance?.SetGlobalEnabled(s.AutomationEnabled);
 
             // Sync the Run on Startup registry key with the saved setting on every launch. Uses a
             // value-aware reconcile (not just "does the key exist") so a stale entry — e.g. one

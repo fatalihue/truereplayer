@@ -18,6 +18,8 @@ The complete reference for everything TrueReplayer can do. New here? Start with 
 - [Conditional blocks (If / Else / EndIf)](#conditional-blocks-if--else--endif)
 - [Profiles & folders](#profiles--folders)
 - [Hotkeys & hotstrings](#hotkeys--hotstrings)
+- [Automation (fire without a hotkey)](#automation-fire-without-a-hotkey)
+- [Key remaps](#key-remaps)
 - [Window targeting & relative coordinates](#window-targeting--relative-coordinates)
 - [Multi-window automation (Activate Window)](#multi-window-automation-activate-window)
 - [Clicker mode (auto-clicker)](#clicker-mode-auto-clicker)
@@ -180,8 +182,61 @@ Bind a profile to a trigger so it runs without opening the app.
 | **On Release** | Fires once when the key is released (the press is swallowed while held). |
 | **While Pressed** | Loops the macro continuously while held; stops on release (autofire). |
 | **Toggle** | First press starts (respecting the profile's loops); second press stops. |
+| **Double-tap** | Fires once when the key is tapped twice quickly (~0.4 s). Single taps do nothing. |
+| **Hold (long-press)** | Fires **once** after the key has been held ~0.6 s; a quick tap does nothing. Unlike *While Pressed*, the run does **not** stop on release. |
 
 > Trigger modes apply to **hotkeys** only. **Hotstrings** always fire when typed.
+
+**Mouse side buttons.** The two side buttons (**XButton1** / **XButton2**, alone or with modifiers)
+can be captured as hotkeys just like keys, with every trigger mode above — ideal for click-heavy
+game macros. The wheel (`ScrollUp`/`ScrollDown`) also works but always fires On Press.
+
+---
+
+## Automation (fire without a hotkey)
+
+An **Automation** fires a profile by itself — no hotkey press. Manage them in
+**Settings → Global → Automation → Manage** (or the tray menu → **Automations…**).
+Three trigger kinds per profile (one automation each):
+
+| Kind | Fires |
+| --- | --- |
+| **Interval** | Every N seconds/minutes (first fire one interval after arming). |
+| **Schedule** | At a clock time (`HH:mm`) on the weekdays you pick. |
+| **Condition** | When a watched condition **becomes true**: a window opens (or comes to the foreground), a process starts, a file appears, a pixel matches a color, an image appears on screen, or the clipboard changes. |
+
+How it behaves:
+
+- **Armed** — only armed automations run; they re-arm automatically at startup, so
+  *Run on Startup* + *Start minimized* turns TrueReplayer into a tray daemon. Arming is
+  **local to your machine**: imported, duplicated or copied profiles always arrive disarmed.
+- **One run at a time** — a fire is **skipped** (and counted in the panel) while a replay or
+  recording is running, while you have unsaved edits in the grid, or while a dialog is open.
+  An automation never discards your unsaved work.
+- **Condition fires** are edge-based by default: the condition must turn false again before the
+  next fire (switch to **Continuous** to re-fire every cooldown while it stays true). A
+  **Cooldown** (default 30 s) spaces fires; the clipboard watcher ignores clipboard traffic
+  produced by TrueReplayer itself.
+- **Master switch** — Settings → Global → Automation, mirrored in the tray menu
+  (**Enable Automations**). The tray tooltip shows how many automations are armed.
+- Profiles without a window target act on whatever window is focused when the trigger fires —
+  the editor warns you. Prefer targeted profiles (or *Activate Window* as the first action).
+
+---
+
+## Key remaps
+
+**Settings → Global → Key Remaps** — an always-on 1:1 layer, independent of profiles:
+
+- **Remap a key** — e.g. `CapsLock → Esc`: everywhere, while TrueReplayer runs, pressing
+  CapsLock types Esc. Mouse side buttons (**XButton1/2**) can be sources too (side button → key).
+- **Disable a key** — map it to nothing.
+- Remaps **pause automatically while you record** a macro (recordings capture the physical keys)
+  and can be paused globally from the tray (**Enable Key Remaps**) — the mouse-only escape hatch
+  if a remap ever makes typing awkward.
+- Hotstrings follow the **remapped** keystream (what the apps see), and key combos treat a
+  remapped modifier as the key it became. A key used as a remap **source** can't also be a
+  profile hotkey — the remap wins.
 
 ---
 
@@ -316,6 +371,14 @@ When looping over data, **On row error** decides what a failed row does:
 ### Cell transforms — `{row:column:mods}`
 
 A `{row:column}` token accepts the **same modifier chain as `{clipboard}`** (see [Send Text](#send-text)) — append the modifiers after the column name, e.g. `{row:name:trim:upper}`. Click a `{row:…}` chip inside a text editor to configure them in a popover with a live preview of the first row's value, or type the chain by hand. The pipeline runs in a fixed order: **trim → list ops (range / lines / sort / dedupe / reverse / join) → extract (line / word) → limit (first / last) → case (upper / lower / sentence / title)**.
+
+### Run a sub-profile once per row
+
+A **Run Profile** action can tick **Run once per data row**: the *called* profile runs once per
+row of **its own** Data table, with `{row:column}` resolving from that row — so a parent macro
+can do its setup once, then batch a sub-profile over a list mid-run (Repeat is ignored while
+this is on). If the called profile's table opts into **Skip row**, failed rows are skipped and
+summarized exactly like a top-level data loop; with no table, the sub-profile just runs once.
 
 ---
 

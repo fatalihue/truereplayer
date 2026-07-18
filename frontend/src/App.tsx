@@ -26,6 +26,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { SheetPanel } from './components/SheetPanel';
 import { ThemeEditor } from './components/ThemeEditor';
 import { DataPanel } from './components/DataPanel';
+import { AutomationPanel } from './components/AutomationPanel';
 
 // AppShell is rendered inside AppStateProvider so it can read settings to drive
 // mode-dependent visuals (Clicker mode glow, ActionTable replacement).
@@ -81,6 +82,20 @@ function AppShell() {
     window.addEventListener('cmd:dataeditor', handler);
     return () => window.removeEventListener('cmd:dataeditor', handler);
   }, []);
+
+  // Automation panel — openers: Settings → Global → Automation row (cmd:automation)
+  // and the tray "Automations…" item (backend automation:open push).
+  const [showAutomation, setShowAutomation] = useState(false);
+  useEffect(() => {
+    const handler = () => setShowAutomation(prev => !prev);
+    window.addEventListener('cmd:automation', handler);
+    return () => window.removeEventListener('cmd:automation', handler);
+  }, []);
+  useEffect(() => {
+    return subscribe((msg) => {
+      if (msg.type === 'automation:open') setShowAutomation(true);
+    });
+  }, [subscribe]);
 
   // Global keyboard handler: Ctrl+K for command palette, Ctrl+S to save profile,
   // Ctrl+Z/Y for undo/redo + block UI interaction keys.
@@ -317,6 +332,7 @@ function AppShell() {
       />
       {showThemeEditor && <ThemeEditor onClose={() => setShowThemeEditor(false)} />}
       {showDataEditor && <DataPanel onClose={() => setShowDataEditor(false)} />}
+      {showAutomation && <AutomationPanel onClose={() => setShowAutomation(false)} />}
       <UpdateOverlay />
       <AskInputHost />
       <LiveVariablesHost />

@@ -22,6 +22,11 @@ namespace TrueReplayer
         private ReplayService replayService;
         private RecordingService recordingService;
         private MainController mainController;
+        private TriggerService triggerService = null!;
+        // Last tray-tooltip inputs pushed — the automation state-change handler only
+        // refreshes the (disk-reading) tray icon when these actually moved.
+        private int _lastTrayArmedCount = -1;
+        private bool _lastTrayAutomationEnabled = true;
         private ProfileController profileController;
         private WindowEventManager windowEventManager;
         private WebViewBridge? bridge;
@@ -122,7 +127,40 @@ namespace TrueReplayer
                 () => bridge?.PushButtonStates()
             );
 
+            // ── Automation daemon ──
+            // Constructed BEFORE ProfileController so the first profile-list load can arm
+            // persisted triggers. Loops live on the thread pool; every fire marshals back
+            // here (FireProfileFromTriggerAsync) where the busy gates are re-checked on the
+            // UI thread — the dispatcher serializes them against hotkey dispatch.
+            triggerService = new TriggerService(DispatcherQueue);
+            triggerService.IsReplayActive = () => replayService.IsReplaying;
+            triggerService.FireProfile = FireProfileFromTriggerAsync;
+            triggerService.OnStateChanged = () => DispatcherQueue.TryEnqueue(() =>
+            {
+                bridge?.PushAutomationState();
+                // Tray refresh re-reads appsettings.json + reloads the .ico from disk —
+                // only worth it when the tooltip's armed-count line actually changed
+                // (condition flips and fire-stat updates don't move it).
+                int armed = triggerService.ConfiguredArmedCount;
+                bool enabled = triggerService.GlobalEnabled;
+                if (armed != _lastTrayArmedCount || enabled != _lastTrayAutomationEnabled)
+                {
+                    _lastTrayArmedCount = armed;
+                    _lastTrayAutomationEnabled = enabled;
+                    TrayIconService.UpdateTrayIcon();   // "N automations armed" tooltip line
+                }
+            });
+            // The ctor's ApplyGlobalSettings (line above) ran before this instance existed —
+            // seed the master switch now so a disabled-on-disk setting is honored before the
+            // first profile-list load can arm anything.
+            triggerService.SetGlobalEnabled(AppSettingsManager.Load().AutomationEnabled);
+
             WindowAppearanceService.Configure(this);
+
+            // Key remap layer — loaded BEFORE the hooks start so remaps are live from the
+            // first keystroke, independent of WebView2 (which may never come up in
+            // tray-daemon usage). The bridge only edits + republishes.
+            RemapService.Load();
 
             SetupInputHooks();
 
@@ -341,6 +379,33 @@ namespace TrueReplayer
                 // User-initiated recovery from the tray. Start at level 1 by default, but if
                 // the UI is already in an attempting-recovery state (black screen), escalate.
                 RecoverWebView("tray Reload UI");
+            };
+
+            // ── Automation tray items ──
+            TrayIconService.OnOpenAutomations = () =>
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    windowEventManager?.BringToForeground();
+                    bridge?.SendMessage("automation:open", new { });
+                });
+            };
+            TrayIconService.OnToggleAutomations = () =>
+            {
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    // Persist immediately — ApplyGlobalSettings re-reads appsettings.json on
+                    // every profile-hotkey activation, so a runtime-only flip would silently
+                    // auto-revert (the ProfileKeyToggle hotkey learned this the hard way).
+                    var saved = AppSettingsManager.Load();
+                    saved.AutomationEnabled = !saved.AutomationEnabled;
+                    AppSettingsManager.Save(saved);
+                    UserProfile.Current.AutomationEnabled = saved.AutomationEnabled;
+                    triggerService.SetGlobalEnabled(saved.AutomationEnabled);
+                    bridge?.PushSettingsLoaded();
+                    bridge?.PushAutomationState();
+                    TrayIconService.UpdateTrayIcon();
+                });
             };
 
             TrayIconService.OnOpenDevTools = () =>
@@ -731,6 +796,9 @@ namespace TrueReplayer
                         }
                         try
                         {
+                            // The synthetic Ctrl+C + clipboard restore below bump the clipboard
+                            // sequence number — invisible to ClipboardChanged watchers.
+                            triggerService.NotifyAppClipboardActivity();
                             var (slot, value) = await replayService.CaptureSelectionToNextSlotAsync();
                             if (value != null)
                             {
@@ -936,96 +1004,7 @@ namespace TrueReplayer
                         // always be false and silently swallow every Toggle start.
                         bool isWhilePressedHold = prefix == "PROFILE_HOLD::";
 
-                        var profile = await profileController.LoadProfileByNameAsync(profileName);
-
-                        // Race guard for WhilePressed: user may have already released the key
-                        // before this async handler reached here. In that case the key-up already
-                        // fired a PROFILE_STOP, the hold state was cleared, and we should NOT
-                        // start the replay — otherwise it would loop forever with no keyup to
-                        // stop it.
-                        if (isWhilePressedHold && !InputHookManager.IsHoldActiveForProfile(profileName))
-                        {
-                            return;
-                        }
-
-                        if (profile != null)
-                        {
-                            var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == profileName);
-                            mainController.SetLastHotkeyPressed(key);
-                            UserProfile.Current = profile;
-                            AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
-                            // Apply effective folder-inherited values
-                            UserProfile.Current.UseRelativeCoordinates = profileController.GetEffectiveRelativeCoordinates(profileName);
-                            UserProfile.Current.BringToFocus = profileController.GetEffectiveBringToFocus(profileName);
-                            if (bridge == null) return;
-                            // Set CurrentProfileName BEFORE ApplyProfile: ApplyProfile pushes the action
-                            // grid, which reads each WaitImage/IF-Image thumbnail's base64 keyed by
-                            // CurrentProfileName. With the old order the push ran under the STALE name
-                            // (e.g. a previous profile, or "No Profile" → "default"), so the reference
-                            // PNG resolved to the wrong dir, missed, and showed a placeholder. Setting
-                            // the name first also clears the base64 cache so the push re-reads cleanly.
-                            bridge.CurrentProfileName = profileName;
-                            bridge.ApplyProfile(profile);
-                            bridge.CurrentProfilePath = entry?.FilePath;
-                            bridge.HasUnsavedChanges = false;
-
-                            var effectiveTarget = profileController.GetEffectiveWindowTarget(profileName);
-                            var effectiveRelCoords = profileController.GetEffectiveRelativeCoordinates(profileName);
-                            var effectiveBringToFocus = profileController.GetEffectiveBringToFocus(profileName);
-                            // Effective Restore + geometry — same fallback rule as the global Replay path.
-                            var effectiveRestorePos = profileController.GetEffectiveRestorePosition(profileName);
-                            var effectiveRestoreSz = profileController.GetEffectiveRestoreSize(profileName);
-                            int profW = UserProfile.Current.WindowWidth;
-                            int profH = UserProfile.Current.WindowHeight;
-                            int profGX = UserProfile.Current.WindowX;
-                            int profGY = UserProfile.Current.WindowY;
-                            if (profW == 0 && profH == 0)
-                            {
-                                var folderGeom = profileController.GetFolderInheritedGeometry(profileName);
-                                if (folderGeom.HasValue)
-                                {
-                                    profGX = folderGeom.Value.X;
-                                    profGY = folderGeom.Value.Y;
-                                    profW = folderGeom.Value.Width;
-                                    profH = folderGeom.Value.Height;
-                                }
-                            }
-                            mainController.ToggleReplay(
-                                bridge.EnableLoop,
-                                bridge.LoopCount,
-                                bridge.LoopIntervalEnabled,
-                                bridge.LoopInterval,
-                                bridge.UseDelayVariation,
-                                int.TryParse(bridge.DelayVariation, out var pvp) ? pvp : 20,
-                                effectiveRelCoords,
-                                effectiveTarget,
-                                effectiveBringToFocus,
-                                profW,
-                                profH,
-                                profGX,
-                                profGY,
-                                effectiveRestorePos,
-                                effectiveRestoreSz,
-                                forceInfiniteLoop);
-
-                            // Post-start safety net for WhilePressed: if the user released the
-                            // key between the race guard above and the moment IsReplayInProgress
-                            // became true, the STOP handler would have seen no running replay
-                            // and done nothing — leaving an infinite-loop replay with no way to
-                            // stop it. Re-check hold state right after starting and stop if the
-                            // key is no longer held. Skipped for Toggle: there's no held-key
-                            // state to check (Toggle stops via a second discrete press).
-                            if (isWhilePressedHold && !InputHookManager.IsHoldActiveForProfile(profileName))
-                            {
-                                mainController.StopReplayIfRunning();
-                            }
-
-                            profileController.UpdateProfileColors(profileName);
-                            bridge.PushProfilesUpdate();
-                            bridge.PushToolbarUpdate();
-                            bridge.PushStatusBarUpdate();
-                            TrayIconService.UpdateTrayIcon();
-                        }
+                        await RunProfileTriggerAsync(profileName, forceInfiniteLoop, isWhilePressedHold, key, startOnly: false);
                     }
                 });
             };
@@ -1038,7 +1017,9 @@ namespace TrueReplayer
             {
                 DispatcherQueue.TryEnqueue(() =>
                 {
-                    bridge?.SendMessage("hotkey:captured", new { combo });
+                    // owner = most recent registrant, so a non-modal chip (Settings remaps)
+                    // can stand down when a later-opened dialog is the intended recipient.
+                    bridge?.SendMessage("hotkey:captured", new { combo, owner = InputHookManager.LastCaptureOwner });
                 });
             };
 
@@ -1089,6 +1070,191 @@ namespace TrueReplayer
                 if (!mainController.IsRecording()) return;
                 actionRecorder.RecordKeyboardAction(key, isDown);
             };
+        }
+
+        /// <summary>
+        /// Shared tail of the PROFILE:: hotkey dispatch — "load profile by name, apply
+        /// effective folder context, swap the visible profile, start the replay". Also the
+        /// body of an automation-trigger fire. startOnly gives it start-only semantics:
+        /// re-check the busy state right before ToggleReplay and bail instead of falling
+        /// into its stop-toggle branch (a trigger must never stop a run it didn't start;
+        /// the LoadProfileByNameAsync await yields the dispatcher, so a user hotkey can
+        /// start a replay between our UI-thread gates and this point).
+        /// hotkeyKey is the raw dispatch string for the hotkey path (null for triggers —
+        /// there is no physical key to track for duplicate suppression).
+        /// Returns true when a replay was actually started.
+        /// </summary>
+        private async Task<TriggerFireResult> RunProfileTriggerAsync(
+            string profileName, bool forceInfiniteLoop, bool isWhilePressedHold, string? hotkeyKey, bool startOnly)
+        {
+            var profile = await profileController.LoadProfileByNameAsync(profileName);
+
+            // Race guard for WhilePressed: user may have already released the key
+            // before this async handler reached here. In that case the key-up already
+            // fired a PROFILE_STOP, the hold state was cleared, and we should NOT
+            // start the replay — otherwise it would loop forever with no keyup to
+            // stop it.
+            if (isWhilePressedHold && !InputHookManager.IsHoldActiveForProfile(profileName))
+            {
+                return TriggerFireResult.SkippedBusy;
+            }
+
+            if (profile == null) return TriggerFireResult.Failed;
+
+            // startOnly (trigger path): the LoadProfileByNameAsync await above yields the
+            // dispatcher, so EVERY gate the caller checked can have flipped underneath us —
+            // a replay/recording started, an edit dirtied the grid, a modal opened. Re-check
+            // them ALL here (synchronous UI-thread reads) before mutating any global state;
+            // the profile swap below force-clears the dirty flag, which for an autonomous
+            // fire would be exactly the silent data loss the caller's gate exists to prevent.
+            if (startOnly)
+            {
+                if (mainController.IsReplayInProgress() || mainController.IsRecording())
+                    return TriggerFireResult.SkippedBusy;
+                if (InputHookManager.SuppressAllHotkeys || InputHookManager.CaptureHotkeyMode)
+                    return TriggerFireResult.SkippedModal;
+                if (bridge == null)
+                    return TriggerFireResult.NotReady;
+                if (bridge.HasUnsavedChanges)
+                    return TriggerFireResult.SkippedDirty;
+                if (bridge.UseCursorClick)
+                    return TriggerFireResult.SkippedBusy;
+            }
+
+            var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == profileName);
+            if (hotkeyKey != null)
+                mainController.SetLastHotkeyPressed(hotkeyKey);
+            UserProfile.Current = profile;
+            AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
+            // Apply effective folder-inherited values
+            UserProfile.Current.UseRelativeCoordinates = profileController.GetEffectiveRelativeCoordinates(profileName);
+            UserProfile.Current.BringToFocus = profileController.GetEffectiveBringToFocus(profileName);
+            if (bridge == null) return TriggerFireResult.NotReady;
+            // Set CurrentProfileName BEFORE ApplyProfile: ApplyProfile pushes the action
+            // grid, which reads each WaitImage/IF-Image thumbnail's base64 keyed by
+            // CurrentProfileName. With the old order the push ran under the STALE name
+            // (e.g. a previous profile, or "No Profile" → "default"), so the reference
+            // PNG resolved to the wrong dir, missed, and showed a placeholder. Setting
+            // the name first also clears the base64 cache so the push re-reads cleanly.
+            bridge.CurrentProfileName = profileName;
+            bridge.ApplyProfile(profile);
+            bridge.CurrentProfilePath = entry?.FilePath;
+            bridge.HasUnsavedChanges = false;
+
+            var effectiveTarget = profileController.GetEffectiveWindowTarget(profileName);
+            var effectiveRelCoords = profileController.GetEffectiveRelativeCoordinates(profileName);
+            var effectiveBringToFocus = profileController.GetEffectiveBringToFocus(profileName);
+            // Effective Restore + geometry — same fallback rule as the global Replay path.
+            var effectiveRestorePos = profileController.GetEffectiveRestorePosition(profileName);
+            var effectiveRestoreSz = profileController.GetEffectiveRestoreSize(profileName);
+            int profW = UserProfile.Current.WindowWidth;
+            int profH = UserProfile.Current.WindowHeight;
+            int profGX = UserProfile.Current.WindowX;
+            int profGY = UserProfile.Current.WindowY;
+            if (profW == 0 && profH == 0)
+            {
+                var folderGeom = profileController.GetFolderInheritedGeometry(profileName);
+                if (folderGeom.HasValue)
+                {
+                    profGX = folderGeom.Value.X;
+                    profGY = folderGeom.Value.Y;
+                    profW = folderGeom.Value.Width;
+                    profH = folderGeom.Value.Height;
+                }
+            }
+            mainController.ToggleReplay(
+                bridge.EnableLoop,
+                bridge.LoopCount,
+                bridge.LoopIntervalEnabled,
+                bridge.LoopInterval,
+                bridge.UseDelayVariation,
+                int.TryParse(bridge.DelayVariation, out var pvp) ? pvp : 20,
+                effectiveRelCoords,
+                effectiveTarget,
+                effectiveBringToFocus,
+                profW,
+                profH,
+                profGX,
+                profGY,
+                effectiveRestorePos,
+                effectiveRestoreSz,
+                forceInfiniteLoop);
+
+            // Post-start safety net for WhilePressed: if the user released the
+            // key between the race guard above and the moment IsReplayInProgress
+            // became true, the STOP handler would have seen no running replay
+            // and done nothing — leaving an infinite-loop replay with no way to
+            // stop it. Re-check hold state right after starting and stop if the
+            // key is no longer held. Skipped for Toggle: there's no held-key
+            // state to check (Toggle stops via a second discrete press).
+            if (isWhilePressedHold && !InputHookManager.IsHoldActiveForProfile(profileName))
+            {
+                mainController.StopReplayIfRunning();
+            }
+
+            profileController.UpdateProfileColors(profileName);
+            bridge.PushProfilesUpdate();
+            bridge.PushToolbarUpdate();
+            bridge.PushStatusBarUpdate();
+            TrayIconService.UpdateTrayIcon();
+            return TriggerFireResult.Fired;
+        }
+
+        /// <summary>
+        /// Automation-trigger fire entry (TriggerService.FireProfile). The watcher loop
+        /// awaits the result; the decision happens INSIDE the enqueued lambda so every
+        /// gate reads UI-thread truth — a loop-thread check would race hotkey dispatch.
+        /// </summary>
+        private Task<TriggerFireResult> FireProfileFromTriggerAsync(string profileName)
+        {
+            var tcs = new TaskCompletionSource<TriggerFireResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            bool enqueued = DispatcherQueue.TryEnqueue(async () =>
+            {
+                try
+                {
+                    // The bridge is only up after WebView2 init — at boot this is a RETRIABLE
+                    // "not yet", never a failure (an edge watcher would otherwise drop its
+                    // pending edge and an armed automation would silently never run).
+                    if (bridge == null)
+                    {
+                        tcs.TrySetResult(TriggerFireResult.NotReady);
+                        return;
+                    }
+                    if (mainController.IsReplayInProgress() || mainController.IsRecording() || bridge.UseCursorClick)
+                    {
+                        tcs.TrySetResult(TriggerFireResult.SkippedBusy);
+                        return;
+                    }
+                    if (InputHookManager.SuppressAllHotkeys || InputHookManager.CaptureHotkeyMode)
+                    {
+                        tcs.TrySetResult(TriggerFireResult.SkippedModal);
+                        return;
+                    }
+                    // An autonomous fire must never discard unsaved edits: the shared body
+                    // below force-clears the dirty flag when it swaps profiles (fine for a
+                    // deliberate hotkey press, silent data loss for a timer). Re-checked
+                    // inside RunProfileTriggerAsync too — its profile-load await yields the
+                    // dispatcher, so these gates can flip in the window.
+                    if (bridge.HasUnsavedChanges)
+                    {
+                        tcs.TrySetResult(TriggerFireResult.SkippedDirty);
+                        return;
+                    }
+
+                    Services.DiagnosticLog.Info($"Automation dispatch: '{profileName}'");
+                    var result = await RunProfileTriggerAsync(
+                        profileName, forceInfiniteLoop: false, isWhilePressedHold: false, hotkeyKey: null, startOnly: true);
+                    tcs.TrySetResult(result);
+                }
+                catch (Exception ex)
+                {
+                    // async-void dispatcher lambda — an escaped exception would crash the app.
+                    Services.DiagnosticLog.Error($"Automation dispatch '{profileName}' failed", ex);
+                    tcs.TrySetResult(TriggerFireResult.Failed);
+                }
+            });
+            if (!enqueued) tcs.TrySetResult(TriggerFireResult.Failed);
+            return tcs.Task;
         }
 
         public void CancelUIWatchdog()

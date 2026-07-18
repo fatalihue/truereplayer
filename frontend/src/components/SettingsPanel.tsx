@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useContext, createContext } from 'react';
-import { Timer, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle, Power, BellRing, X } from 'lucide-react';
+import { Timer, TimerReset, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle, Power, BellRing, X, ArrowLeftRight } from 'lucide-react';
+import { RemapSection } from './RemapSection';
 import { useLanguage, useTt } from '../state/LanguageContext';
 // `Search` import removed with the disabled Settings filter — re-add it to revive the filter.
 import { useAppState } from '../state/AppStateContext';
@@ -873,6 +874,8 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
     { tab: 'global', title: 'Window', icon: Monitor, color: '#7a8599' },
     { tab: 'global', title: 'Startup', icon: Power, color: '#b3814e' },
     { tab: 'global', title: 'Notifications', icon: BellRing, color: '#fb923c' },
+    { tab: 'global', title: 'Automation', icon: TimerReset, color: '#a78bfa' },
+    { tab: 'global', title: 'Key Remaps', icon: ArrowLeftRight, color: '#38bdf8' },
     { tab: 'global', title: 'Interface', icon: Palette, color: '#f472b6' },
     { tab: 'global', title: 'Updates', icon: Download, color: '#4dd0a0' },
   ];
@@ -1239,6 +1242,52 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   onChange={(v) => send({ type: 'window:runEndSound', payload: { enabled: v } })}
                 />
               </SettingRow>
+            </Section>
+
+            {/* Automation — the trigger daemon's master switch + the panel opener. The
+                per-profile triggers themselves are configured inside the panel; this is
+                just the always-discoverable settings-surface home (tray mirrors both). */}
+            <Section color="#a78bfa" title="Automation">
+              <SettingRow
+                label="Enable Automations"
+                tooltip={tt('Master switch — armed per-profile triggers (interval / schedule / condition) only fire while this is on. Also in the tray menu.',
+                  'Chave mestra — gatilhos armados por profile (intervalo / horário / condição) só disparam com isto ligado. Também no menu da bandeja.')}
+              >
+                <CompactToggle
+                  isOn={settings.automationEnabled}
+                  onChange={(v) => send({ type: 'automation:setEnabled', payload: { enabled: v } })}
+                />
+              </SettingRow>
+              <SettingRow
+                label="Automations"
+                tooltip={tt('Fire profiles without a hotkey: on a timer, at a clock time, or when something appears on screen.',
+                  'Dispare profiles sem hotkey: por timer, em um horário, ou quando algo aparece na tela.')}
+              >
+                <button
+                  onClick={() => window.dispatchEvent(new CustomEvent('cmd:automation'))}
+                  className="flex items-center gap-1 text-ui text-accent-solid hover:underline"
+                >
+                  Manage <ChevronRight size={12} />
+                </button>
+              </SettingRow>
+            </Section>
+
+            {/* Key Remaps — the always-on 1:1 layer (CapsLock→Esc, side-button→key,
+                disable a key). List body lives in RemapSection; the master switch here.
+                Also toggleable from the tray ("Enable Key Remaps") — the mouse-only
+                escape hatch for a remap that made typing painful. */}
+            <Section color="#38bdf8" title="Key Remaps" collapsible defaultOpen={false} persist>
+              <SettingRow
+                label="Enable Key Remaps"
+                tooltip={tt('Master switch for the remap layer. Also in the tray menu, so a bad remap can be turned off by mouse alone.',
+                  'Chave mestra da camada de remap. Também no menu da bandeja — um remap ruim pode ser desligado só com o mouse.')}
+              >
+                <CompactToggle
+                  isOn={settings.remaps.enabled}
+                  onChange={(v) => send({ type: 'remap:save', payload: { enabled: v, remaps: settings.remaps.entries } })}
+                />
+              </SettingRow>
+              <RemapSection />
             </Section>
 
             {/* Interface — how the UI looks & speaks (the old single-row Appearance and

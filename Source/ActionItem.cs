@@ -403,6 +403,14 @@ namespace TrueReplayer.Models
         // Always serialized so backward-load of old profiles uses the property's default of 1.
         public int RepeatCount { get; set; } = 1;
 
+        // RunProfile action, data-loop Phase C: run the SUB-profile once per row of its own
+        // Data table ({row:col} resolves per row inside the sub). RepeatCount is ignored
+        // while this is on (UI disables it). null/false omitted from the JSON so pre-feature
+        // profiles stay byte-identical; pinned in ProfileCompatibility (an older build drops
+        // the property and runs the sub ONCE — silent divergence).
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public bool? RunOverData { get; set; }
+
         // Keystroke action with RepeatCount > 1: ms gap between consecutive press cycles.
         // null = use the global default (DefaultRepeatDelayMs = 30 ms). Explicit 0 = back-
         // to-back (apps may merge into a single perceived press). 30 ms is tuned as the
@@ -783,6 +791,7 @@ namespace TrueReplayer.Models
             IsSkipped = IsSkipped,
             IsFocusClick = IsFocusClick,
             RepeatCount = RepeatCount,
+            RunOverData = RunOverData,
             RepeatDelayMs = RepeatDelayMs,
             HoldDurationMs = HoldDurationMs,
             RecordedAt = RecordedAt,

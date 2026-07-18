@@ -1253,8 +1253,15 @@ namespace TrueReplayer.Services
         private string? _rowFaultReason;
         // Skip mode gates on the BATCH data loop only — cursor mode and plain runs keep the
         // exact halt semantics they had (skip-on-error is a data-loop robustness knob).
+        // _softFaultOverride: RunProfile-over-data (Phase C) sets it while a HALT-mode sub
+        // table runs UNDER a skip-active parent batch — the fault sites must then FaultRow
+        // (soft) instead of cancelling _cts, or one bad sub row would kill the whole parent
+        // batch that skip-on-error exists to protect. Replay-thread-only, save/restored by
+        // RunSubProfileOverDataAsync.
+        private bool _softFaultOverride;
         private bool SkipRowOnErrorActive =>
-            _dataLoopOver && string.Equals(_dataTable?.OnRowError, "skip", StringComparison.OrdinalIgnoreCase);
+            (_dataLoopOver && string.Equals(_dataTable?.OnRowError, "skip", StringComparison.OrdinalIgnoreCase))
+            || _softFaultOverride;
 
         // Route an action-level failure while skip mode is active: mark the row faulted and
         // let the loops unwind. Keeps the FIRST reason (later failures are knock-on noise).
@@ -1551,6 +1558,7 @@ namespace TrueReplayer.Services
                 _currentRowData = null;
                 _rowFaulted = false;
                 _rowFaultReason = null;
+                _softFaultOverride = false;
                 PushVariablesSnapshot(force: true); // live pane: run started, variables cleared
 
                 // Data-loop CURSOR (Model B): table present but "loop over data" OFF → this
@@ -2236,9 +2244,28 @@ namespace TrueReplayer.Services
                 // unbounded number of times before the Stop hotkey gets a turn between iterations.
                 int repeats = Math.Max(1, Math.Min(999, action.RepeatCount));
                 var subActions = subProfile.Actions.ToList();
-                for (int r = 0; r < repeats && !token.IsCancellationRequested && !_rowFaulted; r++)
+
+                // Data-loop Phase C: "run once per data row" iterates the SUB-profile's own
+                // table, one sub-run per row, {row:col} resolving from that row. RepeatCount
+                // is ignored while over-data (UI disables it). Missing/empty table degrades
+                // to a single normal run with a log line (graceful, never a hard error).
+                if (action.RunOverData == true && (subProfile.Data?.Rows?.Count ?? 0) > 0)
                 {
-                    await ExecuteActionsAsync(subActions, token);
+                    await RunSubProfileOverDataAsync(targetName, subActions, subProfile.Data!, token);
+                }
+                else
+                {
+                    // Over-data with no rows degrades to exactly ONE run — the stored
+                    // RepeatCount belongs to the mode the user turned off.
+                    if (action.RunOverData == true)
+                    {
+                        DiagnosticLog.Warn($"[Chain] '{targetName}' has no data rows — 'run once per data row' fell back to a single run.");
+                        repeats = 1;
+                    }
+                    for (int r = 0; r < repeats && !token.IsCancellationRequested && !_rowFaulted; r++)
+                    {
+                        await ExecuteActionsAsync(subActions, token);
+                    }
                 }
             }
             finally
@@ -2268,6 +2295,107 @@ namespace TrueReplayer.Services
 
                 if (_callStack.Count > 0) _callStack.RemoveAt(_callStack.Count - 1);
                 NotifyChainChanged();
+            }
+        }
+
+        /// <summary>
+        /// Data-loop Phase C body: run the sub-profile once per row of ITS OWN Data table,
+        /// stamping the shared row context so {row:col} resolves per row inside the sub. The
+        /// caller's data context (table / loop flag / current row / soft-fault override) is
+        /// saved and restored — a parent batch loop keeps its own row across the call. The
+        /// Model-B cursor is untouched (batch iteration is not a "run") and the lap notice
+        /// never fires (cursor-mode feature). Fault policy per row:
+        ///   sub table "skip"        → faulted row absorbed HERE: stuck input released,
+        ///                             logged + counted, next row runs (mirrors StartAsync's
+        ///                             per-iteration skip block);
+        ///   sub halt + parent skip  → _softFaultOverride keeps the fault SOFT (FaultRow, not
+        ///                             _cts.Cancel), remaining sub rows abort, and the fault
+        ///                             propagates to the PARENT row (today's granularity: a
+        ///                             failed sub call = one skipped parent row);
+        ///   sub halt, no parent skip→ the fault site cancels _cts exactly like today.
+        /// </summary>
+        private async Task RunSubProfileOverDataAsync(
+            string subName, List<ActionItem> subActions, Models.ProfileDataTable subTable, CancellationToken token)
+        {
+            bool parentSkipActive = SkipRowOnErrorActive;
+            var savedTable = _dataTable;
+            bool savedLoopOver = _dataLoopOver;
+            var savedRowData = _currentRowData;
+            bool savedSoftOverride = _softFaultOverride;
+            bool subSkip = string.Equals(subTable.OnRowError, "skip", StringComparison.OrdinalIgnoreCase);
+            int rowCount = subTable.Rows?.Count ?? 0;
+            int skipped = 0;
+            string? firstReason = null;
+            try
+            {
+                // The sub table comes straight from the profile lookup, which does NOT pass
+                // through SetDataTable's null-normalization trust boundary — a hand-edited
+                // {"Headers":null} sub .trprofile would NRE in BuildRowDict otherwise.
+                subTable.Headers ??= new List<string>();
+                subTable.Rows ??= new List<List<string>>();
+
+                _dataTable = subTable;
+                _dataLoopOver = true;               // fault sites now read the SUB's skip policy…
+                _softFaultOverride = parentSkipActive && !subSkip;   // …or stay soft for the parent's sake
+
+                for (int i = 0; i < rowCount && !token.IsCancellationRequested; i++)
+                {
+                    _currentRowData = BuildRowDict(subTable, i);
+                    PushVariablesSnapshot();   // live pane: show which row {row:col} resolves from (throttled)
+                    _rowFaulted = false;
+                    _rowFaultReason = null;
+                    try
+                    {
+                        await ExecuteActionsAsync(subActions, token);
+                    }
+                    // Same two-catch shape as StartAsync's batch loop: a genuine Stop (token
+                    // cancelled) keeps unwinding; a SPURIOUS OCE (pipe drop resolving an
+                    // in-flight TCS) and any thrown action error (browser exceptions, If-probe
+                    // Halt rethrows) are just row errors while a skip policy is active.
+                    catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                    catch (Exception ex) when (SkipRowOnErrorActive)
+                    {
+                        FaultRow(ex.Message);
+                    }
+
+                    if (!_rowFaulted) continue;
+
+                    if (subSkip)
+                    {
+                        skipped++;
+                        firstReason ??= _rowFaultReason;
+                        // A skipped row may die mid-hold — release anything the faulted row
+                        // left pressed before the next row starts.
+                        ResetMouseState();
+                        ResetKeyState();
+                        DiagnosticLog.Warn($"[Chain] '{subName}' data row {i + 1}/{rowCount} skipped: {_rowFaultReason}");
+                        _rowFaulted = false;
+                        _rowFaultReason = null;
+                        continue;
+                    }
+
+                    // Halt-mode sub under a skip-active parent: abort the remaining sub rows and
+                    // leave _rowFaulted SET — after the finally restores the parent context, the
+                    // parent's boundary checks unwind this as a normal parent-row fault.
+                    break;
+                }
+
+                // Suppressed after a deliberate Stop — a notice right after the user's own
+                // abort is noise (StartAsync's summary applies the same gate).
+                if (skipped > 0 && !token.IsCancellationRequested)
+                {
+                    string msg = $"Sub-profile '{subName}': {skipped} of {rowCount} row(s) skipped" +
+                        (firstReason != null ? $" — first: {firstReason}" : "");
+                    OnReplayError?.Invoke(msg);
+                }
+            }
+            finally
+            {
+                _dataTable = savedTable;
+                _dataLoopOver = savedLoopOver;
+                _currentRowData = savedRowData;
+                _softFaultOverride = savedSoftOverride;
+                PushVariablesSnapshot();   // live pane: back on the parent's row
             }
         }
 

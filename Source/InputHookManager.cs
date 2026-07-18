@@ -136,6 +136,165 @@ namespace TrueReplayer
         private static volatile string? _pendingReleaseProfile = null;
         private static volatile int _pendingReleaseVkCode = 0;
 
+        // ── Key remap layer (RemapService publishes; hook consumes) ──
+        // fromVk → toVk; toVk 0 = disable (swallow with no replacement). Volatile snapshot
+        // swapped whole (ProfileHotkeys pattern). Null/empty = layer inactive.
+        private static volatile Dictionary<int, ushort>? _remapMap;
+        // Pairing: mapping active at DOWN time, consumed at UP — a config change mid-hold
+        // must release the SAME injected key it pressed (else it stays stuck down).
+        // Hook-thread-only (both LL hooks pump on the UI thread).
+        private static readonly Dictionary<int, ushort> _activeRemapDowns = new();
+        // TO vks WE mirrored into _vkCodesCurrentlyDown — so releasing a remap never removes
+        // an entry the user's PHYSICAL key put there (CapsLock→A while A is physically held),
+        // and two FROM keys sharing one TO only remove the mirror when the LAST one lifts.
+        private static readonly HashSet<int> _remapMirroredVks = new();
+
+        // X-button downs we swallowed (trigger dispatch, remap, capture). Their paired UP
+        // must be consumed too: Windows synthesizes WM_APPCOMMAND Back/Forward from a
+        // DELIVERED WM_XBUTTONUP even without its down, so an orphan up would navigate the
+        // foreground app on every swallowed trigger press. Hook-thread-only.
+        private static readonly HashSet<int> _swallowedXDowns = new();
+
+        public static void RegisterRemaps(Dictionary<int, ushort> map)
+        {
+            _remapMap = map.Count == 0 ? null : map;
+        }
+
+        // Extended keys need KEYEVENTF_EXTENDEDKEY on injection or apps/games decode the
+        // NumPad twin instead (arrows, nav cluster, RCtrl/RAlt, NumLock, Ins/Del).
+        private static readonly HashSet<ushort> _extendedVkCodes = new()
+        {
+            0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,   // PgUp PgDn End Home arrows
+            0x2C, 0x2D, 0x2E, 0x90, 0xA3, 0xA5, 0x5B, 0x5C,   // PrtSc Ins Del NumLock RCtrl RAlt Win keys
+            0x6F,                                              // NumDivide
+        };
+
+        private static void InjectRemappedKey(ushort vk, bool down)
+        {
+            uint flags = down ? 0u : NativeMethods.KEYEVENTF_KEYUP;
+            if (_extendedVkCodes.Contains(vk)) flags |= NativeMethods.KEYEVENTF_EXTENDEDKEY;
+            var inputs = new NativeMethods.INPUT[]
+            {
+                new NativeMethods.INPUT
+                {
+                    type = NativeMethods.INPUT_KEYBOARD,
+                    U = new NativeMethods.InputUnion
+                    {
+                        ki = new NativeMethods.KEYBDINPUT
+                        {
+                            wVk = vk,
+                            wScan = (ushort)NativeMethods.MapVirtualKey(vk, 0),
+                            dwFlags = flags,
+                        }
+                    }
+                }
+            };
+            NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<NativeMethods.INPUT>());
+        }
+
+        // App-exit / hook-stop safety: release anything the remap layer is holding down so
+        // no injected key stays stuck after the hook that would have released it is gone.
+        private static void ReleaseActiveRemapDowns()
+        {
+            foreach (var kv in _activeRemapDowns)
+            {
+                if (kv.Value != 0) InjectRemappedKey(kv.Value, down: false);
+            }
+            _activeRemapDowns.Clear();
+            foreach (var vk in _remapMirroredVks) _vkCodesCurrentlyDown.Remove(vk);
+            _remapMirroredVks.Clear();
+        }
+
+        // Closes ONE remap pairing: forget it, drop the mirror (only if WE added it and no
+        // other pairing still holds the same TO), and inject the TO-key up (again only when
+        // this was the last holder). The single release path — every UP site routes here so
+        // the refcount rules can't drift apart.
+        private static void CloseRemapPairing(int fromVk)
+        {
+            if (!_activeRemapDowns.TryGetValue(fromVk, out var toVk)) return;
+            _activeRemapDowns.Remove(fromVk);
+            if (toVk == 0) return;
+            if (_activeRemapDowns.ContainsValue(toVk)) return;   // another FROM still holds this TO
+            if (_remapMirroredVks.Remove(toVk)) _vkCodesCurrentlyDown.Remove(toVk);
+            InjectRemappedKey(toVk, down: false);
+        }
+
+        // DoubleTap: last swallowed tap, keyed by composed key + monotonic tick. A second tap
+        // of the SAME combo within the window fires; anything else restarts the window.
+        // Hook-thread-only state (both hooks pump on the same UI thread).
+        private const int DoubleTapWindowMs = 400;
+        private static string? _lastTapKey = null;
+        private static long _lastTapTicks = 0;
+
+        // Hold (long-press to fire ONCE — distinct from WhilePressed's run-while-held):
+        // mirrors the WhilePressed debounce-timer machinery with its OWN fields/lock so the
+        // two modes can never cross-clear each other's state. Pending state is keyed by
+        // physical vkCode; releasing before the threshold cancels the timer silently.
+        private const int HoldTriggerMs = 600;
+        private static volatile string? _pendingHoldFireProfile = null;
+        private static volatile int _pendingHoldFireVkCode = 0;
+        private static System.Threading.Timer? _holdFireTimer;
+        private static readonly object _holdFireLock = new();
+
+        private static void ClearPendingHoldFire()
+        {
+            lock (_holdFireLock)
+            {
+                _pendingHoldFireProfile = null;
+                _pendingHoldFireVkCode = 0;
+                _holdFireTimer?.Dispose();
+                _holdFireTimer = null;
+            }
+        }
+
+        // Arms the Hold long-press timer for a swallowed down. Shared by the keyboard case
+        // and the X-button mouse dispatch (pseudo-vk 0x05/0x06).
+        private static void ArmHoldFire(string matchedProfile, int vkCode)
+        {
+            var profileCapture = matchedProfile;
+            var vkCapture = vkCode;
+            lock (_holdFireLock)
+            {
+                _pendingHoldFireProfile = matchedProfile;
+                _pendingHoldFireVkCode = vkCode;
+                _holdFireTimer?.Dispose();
+                _holdFireTimer = new System.Threading.Timer(_ =>
+                {
+                    // Confirm-and-clear under the lock so a concurrent key-up cancel can't
+                    // race the fire decision (same discipline as the WhilePressed timer).
+                    bool fire = false;
+                    lock (_holdFireLock)
+                    {
+                        if (_pendingHoldFireVkCode == vkCapture && _pendingHoldFireProfile == profileCapture)
+                        {
+                            _pendingHoldFireProfile = null;
+                            _pendingHoldFireVkCode = 0;
+                            _holdFireTimer?.Dispose();
+                            _holdFireTimer = null;
+                            fire = true;
+                        }
+                    }
+                    if (fire) OnHotkeyPressed?.Invoke($"PROFILE::{profileCapture}");
+                }, null, HoldTriggerMs, System.Threading.Timeout.Infinite);
+            }
+        }
+
+        // DoubleTap window check for a swallowed down; returns true when this down is the
+        // SECOND tap (the caller fires). Shared by keyboard + X-button dispatch.
+        private static bool RegisterTapAndCheckDouble(string composedKey)
+        {
+            long now = Environment.TickCount64;
+            if (_lastTapKey == composedKey && now - _lastTapTicks <= DoubleTapWindowMs)
+            {
+                _lastTapKey = null;
+                _lastTapTicks = 0;
+                return true;
+            }
+            _lastTapKey = composedKey;
+            _lastTapTicks = now;
+            return false;
+        }
+
         /// <summary>
         /// Exposes whether a WhilePressed hold is still active for a given profile. Used by
         /// the MainWindow dispatcher to detect when the user released the key BEFORE the async
@@ -218,10 +377,19 @@ namespace TrueReplayer
 
         /// Adds an owner to the capture refcount. Hook activates on the first owner; no-op
         /// if the owner is already registered (HashSet semantics — idempotent).
+        /// Most recently registered capture owner — forwarded with each hotkey:captured push
+        /// so non-modal consumers (the Settings remap chips) can ignore captures that a
+        /// LATER-opened dialog (which registered after them) is the intended recipient of.
+        public static volatile string? LastCaptureOwner;
+
         public static void RegisterCapture(string ownerId)
         {
             if (string.IsNullOrEmpty(ownerId)) return;
-            lock (_captureOwnersLock) _captureOwners.Add(ownerId);
+            lock (_captureOwnersLock)
+            {
+                _captureOwners.Add(ownerId);
+                LastCaptureOwner = ownerId;
+            }
         }
 
         /// Removes an owner from the capture refcount. Hook deactivates when the last owner
@@ -300,6 +468,11 @@ namespace TrueReplayer
             // WhilePressed/OnRelease hold could fire PROFILE_STOP/PROFILE for a key that was
             // never released. ClearActiveHold also disposes the debounce timer under _holdLock.
             ClearActiveHold();
+            ClearPendingHoldFire();
+            ReleaseActiveRemapDowns();
+            _swallowedXDowns.Clear();
+            _lastTapKey = null;
+            _lastTapTicks = 0;
             _vkCodesCurrentlyDown.Clear();
             _hotstringBufferLen = 0;
             _pendingReleaseProfile = null;
@@ -322,6 +495,43 @@ namespace TrueReplayer
         public static void RegisterProfileTriggerModes(Dictionary<string, TriggerMode> modes)
         {
             ProfileTriggerModes = modes;
+        }
+
+        /// <summary>
+        /// Arms the WhilePressed hold state + debounce timer for a swallowed down. Debounce:
+        /// only fire PROFILE_HOLD after the key has been held long enough to be "intentional"
+        /// — stops accidental brushes from kicking off the infinite-loop replay. Shared by the
+        /// keyboard dispatch and the X-button mouse dispatch (pseudo-vk 0x05/0x06).
+        /// </summary>
+        private static void ArmWhilePressedHold(string matchedProfile, int vkCode)
+        {
+            var profileCapture = matchedProfile;
+            var vkCapture = vkCode;
+            lock (_holdLock)
+            {
+                _activeHoldProfile = matchedProfile;
+                _activeHoldVkCode = vkCode;
+                _holdConfirmed = false;
+                _holdDebounceTimer?.Dispose();
+                _holdDebounceTimer = new System.Threading.Timer(_ =>
+                {
+                    // Confirm-and-fire under the lock so a concurrent
+                    // key-up / ClearActiveHold can't clear the hold between
+                    // the check and the fire decision. The PROFILE_HOLD
+                    // invoke runs outside the lock to avoid holding it
+                    // across an event handler.
+                    bool fire = false;
+                    lock (_holdLock)
+                    {
+                        if (_activeHoldVkCode == vkCapture && _activeHoldProfile == profileCapture)
+                        {
+                            _holdConfirmed = true;
+                            fire = true;
+                        }
+                    }
+                    if (fire) OnHotkeyPressed?.Invoke($"PROFILE_HOLD::{profileCapture}");
+                }, null, WhilePressedDebounceMs, System.Threading.Timeout.Infinite);
+            }
         }
 
         /// <summary>
@@ -634,6 +844,43 @@ namespace TrueReplayer
             if (nCode < 0)
                 return NativeMethods.CallNextHookEx(_mouseHookId, nCode, wParam, lParam);
 
+            // X-button remap pairing release runs BEFORE the capture/suppress gates — same
+            // stuck-injected-key hazard as the keyboard hoist above it. Physical ups only.
+            if ((int)wParam == NativeMethods.WM_XBUTTONUP && _activeRemapDowns.Count > 0)
+            {
+                var xRelStruct = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
+                if ((xRelStruct.flags & 0x1) == 0)
+                {
+                    int xRelVk = XButtonVk(XButtonName(xRelStruct.mouseData));
+                    if (_activeRemapDowns.ContainsKey(xRelVk))
+                    {
+                        CloseRemapPairing(xRelVk);
+                        _swallowedXDowns.Remove(xRelVk);
+                        return (IntPtr)1;
+                    }
+                }
+            }
+
+            // Capture mode: X-buttons (side buttons) are valid hotkey triggers and never
+            // conflict with normal UI interaction inside the dialog (unlike left/right/middle,
+            // which stay excluded) — compose + emit + swallow, mirroring the wheel block below.
+            if (CaptureHotkeyMode && (int)wParam == NativeMethods.WM_XBUTTONDOWN)
+            {
+                var xCapStruct = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
+                string xCapName = XButtonName(xCapStruct.mouseData);
+                _swallowedXDowns.Add(XButtonVk(xCapName));
+                OnHotkeyCaptured?.Invoke(ComposeMouseCombo(xCapName));
+                return (IntPtr)1;
+            }
+            if (CaptureHotkeyMode && (int)wParam == NativeMethods.WM_XBUTTONUP)
+            {
+                // Swallow only the up whose DOWN we captured — an up whose down was
+                // delivered to the app before capture opened must complete normally.
+                var xCapUpStruct = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
+                if (_swallowedXDowns.Remove(XButtonVk(XButtonName(xCapUpStruct.mouseData))))
+                    return (IntPtr)1;
+            }
+
             // Capture mode: scroll is a valid hotkey trigger, so wheel events get composed
             // with modifier state and emitted through OnHotkeyCaptured, then swallowed.
             // Mouse buttons are not capturable as hotkeys (would conflict with normal UI
@@ -666,6 +913,53 @@ namespace TrueReplayer
             if (!SuppressAllHotkeys)
             {
                 var hookStruct = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
+
+                // ── X-buttons as profile hotkeys ──
+                // Side buttons are TRIGGER-ONLY: they are never recorded as macro actions
+                // (OnMouseEvent is not fired for them) and injected X clicks are ignored
+                // (LLMHF_INJECTED, bit 0 of MSLLHOOKSTRUCT.flags — the keyboard hook's
+                // injected-gate equivalent, which this mouse hook historically lacked).
+                if ((int)wParam == NativeMethods.WM_XBUTTONDOWN || (int)wParam == NativeMethods.WM_XBUTTONUP)
+                {
+                    if ((hookStruct.flags & 0x1) != 0)
+                        return NativeMethods.CallNextHookEx(_mouseHookId, nCode, wParam, lParam);
+                    bool xDown = (int)wParam == NativeMethods.WM_XBUTTONDOWN;
+                    string xName = XButtonName(hookStruct.mouseData);
+                    int xVk = XButtonVk(xName);
+
+                    // Remap layer first — "mouse side-button → key" is the classic use. Same
+                    // pairing/mirroring/recording rules as the keyboard branch; the pseudo-vks
+                    // are the real VK_XBUTTON1/2 so the shared _activeRemapDowns just works.
+                    // (UP-side pairing release is hoisted above the capture/suppress gates.)
+                    var xRemaps = _remapMap;
+                    if (xDown && xRemaps != null
+                        && MainController.Instance != null && !MainController.Instance.IsRecording()
+                        && (_activeRemapDowns.ContainsKey(xVk) || xRemaps.ContainsKey(xVk)))
+                    {
+                        if (!_activeRemapDowns.TryGetValue(xVk, out var xToVk))
+                        {
+                            xToVk = xRemaps[xVk];
+                            _activeRemapDowns[xVk] = xToVk;
+                            if (xToVk != 0 && !_vkCodesCurrentlyDown.Contains(xToVk))
+                            {
+                                _vkCodesCurrentlyDown.Add(xToVk);
+                                _remapMirroredVks.Add(xToVk);
+                            }
+                        }
+                        if (xToVk != 0)
+                        {
+                            if (!ProcessHotstringKeyDown(xToVk))
+                                InjectRemappedKey(xToVk, down: true);
+                        }
+                        _swallowedXDowns.Add(xVk);
+                        return (IntPtr)1;
+                    }
+
+                    var handled = HandleXButtonTrigger(xName, xDown);
+                    if (handled) return (IntPtr)1;
+                    return NativeMethods.CallNextHookEx(_mouseHookId, nCode, wParam, lParam);
+                }
+
                 string? button = null;
                 bool isDown = false;
                 int scrollDelta = 0;
@@ -767,6 +1061,298 @@ namespace TrueReplayer
             return NativeMethods.CallNextHookEx(_mouseHookId, nCode, wParam, lParam);
         }
 
+        private static string XButtonName(uint mouseData) =>
+            ((mouseData >> 16) & 0xffff) == 2 ? "XButton2" : "XButton1";
+
+        // Pseudo-vks for the side buttons — the REAL VK_XBUTTON1/2 values, so
+        // GetAsyncKeyState-based release polling (WaitForHotkeyReleaseAsync) works on them.
+        private static int XButtonVk(string name) => name == "XButton2" ? 0x06 : 0x05;
+
+        // Composes "Mods+XButtonN" from tracked modifier state — same rationale and canonical
+        // Win/Ctrl/Alt/Shift order as the wheel path and BuildComposedKey.
+        private static string ComposeMouseCombo(string mainName)
+        {
+            bool winHeld = _vkCodesCurrentlyDown.Contains(0x5B) || _vkCodesCurrentlyDown.Contains(0x5C);
+            bool ctrlHeld = _vkCodesCurrentlyDown.Contains(0xA2) || _vkCodesCurrentlyDown.Contains(0xA3) || _vkCodesCurrentlyDown.Contains(0x11);
+            bool altHeld = _vkCodesCurrentlyDown.Contains(0xA4) || _vkCodesCurrentlyDown.Contains(0xA5) || _vkCodesCurrentlyDown.Contains(0x12);
+            bool shiftHeld = _vkCodesCurrentlyDown.Contains(0xA0) || _vkCodesCurrentlyDown.Contains(0xA1) || _vkCodesCurrentlyDown.Contains(0x10);
+            var sb = new System.Text.StringBuilder();
+            if (winHeld) sb.Append("Win+");
+            if (ctrlHeld) sb.Append("Ctrl+");
+            if (altHeld) sb.Append("Alt+");
+            if (shiftHeld) sb.Append("Shift+");
+            sb.Append(mainName);
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Full trigger dispatch for a physical X-button event — the mouse-side mirror of the
+        /// keyboard hook's hotkey section, sharing ALL its state machines (pendingRelease /
+        /// activeHold / pendingHoldFire / doubleTap) via the 0x05/0x06 pseudo-vks. Returns true
+        /// when the event was consumed (caller swallows). X-buttons are trigger-only: unmatched
+        /// events pass through to the OS untouched and are never recorded as macro actions.
+        /// The wrapper tracks swallowed downs so their paired UP is consumed as well —
+        /// a delivered orphan WM_XBUTTONUP makes Windows synthesize WM_APPCOMMAND
+        /// Back/Forward, navigating the foreground app under every swallowed press.
+        /// </summary>
+        private static bool HandleXButtonTrigger(string xName, bool isDown)
+        {
+            int vk = XButtonVk(xName);
+            if (isDown)
+            {
+                bool handled = HandleXButtonTriggerCore(xName, vk, isDown: true);
+                if (handled) _swallowedXDowns.Add(vk);
+                return handled;
+            }
+            bool consumed = HandleXButtonTriggerCore(xName, vk, isDown: false);
+            if (_swallowedXDowns.Remove(vk)) return true;
+            return consumed;
+        }
+
+        private static bool HandleXButtonTriggerCore(string xName, int vk, bool isDown)
+        {
+            if (!isDown)
+            {
+                // Up-side handlers first, matched by pseudo-vk so a mid-hold config change
+                // still resolves the pending state (keyboard-hook parity).
+                if (_pendingHoldFireProfile != null && _pendingHoldFireVkCode == vk)
+                {
+                    ClearPendingHoldFire();
+                    return true;
+                }
+                if (_pendingReleaseProfile != null && _pendingReleaseVkCode == vk
+                    && MainController.Instance != null && !MainController.Instance.IsRecording()
+                    && !IsReplayingAction)
+                {
+                    var pendingProfile = _pendingReleaseProfile;
+                    _pendingReleaseProfile = null;
+                    _pendingReleaseVkCode = 0;
+                    OnHotkeyPressed?.Invoke($"PROFILE::{pendingProfile}");
+                    return true;
+                }
+                if (_activeHoldVkCode == vk && _activeHoldProfile != null
+                    && MainController.Instance != null && !MainController.Instance.IsRecording())
+                {
+                    string? heldProfile;
+                    bool wasConfirmed;
+                    lock (_holdLock)
+                    {
+                        heldProfile = _activeHoldProfile;
+                        wasConfirmed = _holdConfirmed;
+                        ClearActiveHold();
+                    }
+                    if (wasConfirmed)
+                    {
+                        OnHotkeyPressed?.Invoke($"PROFILE_STOP::{heldProfile}");
+                    }
+                    return true;
+                }
+                return false;
+            }
+
+            // Down: unconditional swallow while a state machine is armed on this button
+            // (the keyboard hook's leak-guards, pseudo-vk keyed).
+            if (_activeHoldProfile != null && _activeHoldVkCode == vk) return true;
+            if (_pendingReleaseProfile != null && _pendingReleaseVkCode == vk) return true;
+            if (_pendingHoldFireProfile != null && _pendingHoldFireVkCode == vk) return true;
+
+            if (IgnoreProfileHotkeys)
+                return false;
+            if (MainController.Instance == null || MainController.Instance.IsRecording())
+                return false;
+
+            string combo = ComposeMouseCombo(xName);
+
+            // Pause-action resume + global hotkeys (mode-aware) — the Settings chips can
+            // capture X-buttons, so they must actually fire from the mouse hook too
+            // (the keyboard hook's global checks never see mouse events).
+            if (_pauseResumeHotkey != null && combo == _pauseResumeHotkey)
+            {
+                _pauseResumeCallback?.Invoke();
+                return true;
+            }
+            if (IsCursorClickMode)
+            {
+                if (combo == CursorClickStartHotkey)
+                {
+                    OnHotkeyPressed?.Invoke("CLICKER_START");
+                    return true;
+                }
+                if (combo == CursorClickPauseHotkey)
+                {
+                    OnHotkeyPressed?.Invoke("CLICKER_PAUSE");
+                    return true;
+                }
+            }
+            else
+            {
+                if (combo == UserProfile.Current.RecordingHotkey)
+                {
+                    OnHotkeyPressed?.Invoke(combo);
+                    return true;
+                }
+                if (combo == UserProfile.Current.ReplayHotkey)
+                {
+                    // Same foreground gate as the keyboard path: pass through when the
+                    // active profile's target isn't in front.
+                    var activeName = ActiveProfileName;
+                    if (!string.IsNullOrEmpty(activeName) && !IsForegroundWindowMatch(activeName))
+                        return false;
+                    LastTriggerHotkey = combo;
+                    OnHotkeyPressed?.Invoke(combo);
+                    return true;
+                }
+            }
+            if (combo == UserProfile.Current.ProfileKeyToggleHotkey
+                || combo == UserProfile.Current.ForegroundHotkey
+                || combo == UserProfile.Current.ModeToggleHotkey
+                || (!string.IsNullOrEmpty(UserProfile.Current.CaptureSlotHotkey)
+                    && combo == UserProfile.Current.CaptureSlotHotkey))
+            {
+                OnHotkeyPressed?.Invoke(combo);
+                return true;
+            }
+
+            if (!UserProfile.Current.ProfileKeyEnabled || ProfileHotkeys.Count == 0)
+                return false;
+
+            string? matchedProfile = null;
+            foreach (var p in ProfileHotkeys)
+            {
+                if (p.Value == combo && IsForegroundWindowMatch(p.Key))
+                {
+                    matchedProfile = p.Key;
+                    break;
+                }
+            }
+            if (matchedProfile == null) return false;
+
+            var triggerMode = ProfileTriggerModes.TryGetValue(matchedProfile, out var tm) ? tm : TriggerMode.OnPress;
+
+            // Same replay-time rule as the keyboard path: Toggle/WhilePressed still dispatch
+            // (stop semantics); everything else is swallowed-but-inert mid-action.
+            if (IsReplayingAction && triggerMode != TriggerMode.Toggle && triggerMode != TriggerMode.WhilePressed)
+                return true;
+
+            bool needsMenuCancel = ShouldCancelMenuFor(combo);
+
+            switch (triggerMode)
+            {
+                case TriggerMode.OnPress:
+                    LastTriggerHotkey = combo;
+                    if (needsMenuCancel) InjectMenuCancelKey();
+                    OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
+                    return true;
+
+                case TriggerMode.OnRelease:
+                    _pendingReleaseProfile = matchedProfile;
+                    _pendingReleaseVkCode = vk;
+                    if (needsMenuCancel) InjectMenuCancelKey();
+                    return true;
+
+                case TriggerMode.WhilePressed:
+                    LastTriggerHotkey = combo;
+                    if (needsMenuCancel) InjectMenuCancelKey();
+                    ArmWhilePressedHold(matchedProfile, vk);
+                    return true;
+
+                case TriggerMode.Toggle:
+                    LastTriggerHotkey = combo;
+                    if (needsMenuCancel) InjectMenuCancelKey();
+                    OnHotkeyPressed?.Invoke($"PROFILE_TOGGLE::{matchedProfile}");
+                    return true;
+
+                case TriggerMode.DoubleTap:
+                    if (RegisterTapAndCheckDouble(combo))
+                    {
+                        LastTriggerHotkey = combo;
+                        if (needsMenuCancel) InjectMenuCancelKey();
+                        OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
+                    }
+                    return true;
+
+                case TriggerMode.Hold:
+                    LastTriggerHotkey = combo;
+                    if (needsMenuCancel) InjectMenuCancelKey();
+                    ArmHoldFire(matchedProfile, vk);
+                    return true;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Feeds one key-down into the hotstring engine (buffer management + terminator /
+        /// instant matching). Returns true when a hotstring FIRED — the caller must swallow
+        /// the key (and, on the remap path, must NOT inject the replacement). Extracted from
+        /// the keyboard dispatch so the remap layer can feed the LOGICAL (mapped-to) key:
+        /// injected replacements are invisible to this hook (LLKHF_INJECTED), so without
+        /// this hop remapping any key used in a hotstring sequence would silently kill it.
+        /// </summary>
+        private static bool ProcessHotstringKeyDown(int vkCode)
+        {
+            if (IsReplayingAction || !UserProfile.Current.ProfileKeyEnabled
+                || ProfileHotstrings.Count == 0
+                || MainController.Instance == null || MainController.Instance.IsRecording())
+            {
+                return false;
+            }
+
+            if (vkCode == 0x08) // Backspace: pop last char
+            {
+                if (_hotstringBufferLen > 0)
+                    _hotstringBufferLen--;
+            }
+            else if (vkCode == 0x1B  // Escape
+                  || vkCode == 0x11 || vkCode == 0xA2 || vkCode == 0xA3  // Ctrl
+                  || vkCode == 0x12 || vkCode == 0xA4 || vkCode == 0xA5) // Alt
+            {
+                HotstringBufferClear();
+            }
+            else if (_terminatorVkCodes.Contains(vkCode)) // Enter, Space, Tab
+            {
+                var matchedProfile = CheckHotstringMatch(isTerminator: true);
+                if (matchedProfile != null && IsForegroundWindowMatch(matchedProfile))
+                {
+                    var config = ProfileHotstrings[matchedProfile];
+                    int backspaceCount = config.Sequence.Length; // erase typed chars
+                    HotstringBufferClear();
+                    EraseCharacters(backspaceCount);
+
+                    LastTriggerHotkey = $"HOTSTRING::{matchedProfile}";
+                    OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
+                    return true; // swallow the terminator key
+                }
+                HotstringBufferClear(); // terminator without match resets buffer
+            }
+            else
+            {
+                char? ch = VkCodeToChar(vkCode);
+                if (ch.HasValue)
+                {
+                    HotstringBufferAppend(ch.Value);
+
+                    var matchedProfile = CheckHotstringMatch(isTerminator: false);
+                    if (matchedProfile != null && IsForegroundWindowMatch(matchedProfile))
+                    {
+                        var config = ProfileHotstrings[matchedProfile];
+                        int backspaceCount = config.Sequence.Length - 1; // previous chars (current key swallowed)
+                        HotstringBufferClear();
+                        if (backspaceCount > 0)
+                            EraseCharacters(backspaceCount);
+
+                        LastTriggerHotkey = $"HOTSTRING::{matchedProfile}";
+                        OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
+                        return true; // swallow current key
+                    }
+                }
+                else if (vkCode != 0x10 && vkCode != 0xA0 && vkCode != 0xA1) // not Shift
+                {
+                    HotstringBufferClear(); // non-character key clears buffer
+                }
+            }
+            return false;
+        }
+
         private static string GetKeyName(int vkCode)
         {
             return KeyUtils.NormalizeKeyName(vkCode) ?? SafeKeyFallback(vkCode);
@@ -844,6 +1430,24 @@ namespace TrueReplayer
         {
             if (nCode >= 0)
             {
+                // Remap pairing release runs BEFORE every other gate (capture mode swallows
+                // all keys, SuppressAllHotkeys passes them through raw) — if the FROM key's
+                // up is eaten by either path while a pairing is open, the injected TO key
+                // stays logically DOWN system-wide (a stuck Ctrl turns all typing into
+                // shortcuts) until the user presses the FROM key again. Physical ups only:
+                // injected events keep their normal gates.
+                if (_activeRemapDowns.Count > 0)
+                {
+                    int remapVk = Marshal.ReadInt32(lParam);
+                    bool remapIsDown = wParam == (IntPtr)NativeMethods.WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN;
+                    uint remapFlags = (uint)Marshal.ReadInt32(lParam, 8);
+                    if (!remapIsDown && (remapFlags & LLKHF_INJECTED) == 0 && _activeRemapDowns.ContainsKey(remapVk))
+                    {
+                        CloseRemapPairing(remapVk);
+                        return (IntPtr)1;
+                    }
+                }
+
                 // Capture mode handled first: composes the combo via BuildComposedKey, emits
                 // it through OnHotkeyCaptured, then swallows the event so the Shell never sees
                 // it. This is the only way to bind Win+letter combos — WebView2's JS keydown
@@ -920,6 +1524,61 @@ namespace TrueReplayer
                     }
                 }
 
+                // ── Key remap layer ──
+                // Runs BEFORE hotkey composition: the FROM key vanishes physically and the TO
+                // key exists logically — chords compose through the _vkCodesCurrentlyDown
+                // mirror, hotstrings track the LOGICAL keystream via ProcessHotstringKeyDown
+                // (the injected replacement is LLKHF_INJECTED and can't re-enter this layer,
+                // so without both hops a remapped modifier would kill every chord and a
+                // remapped letter every hotstring). The DOWN branch is suspended while
+                // recording (the recorder must see raw physical keys — a remapped key would
+                // otherwise vanish from recordings entirely); UP-side pairing release is
+                // hoisted ABOVE the capture/suppress early-returns (top of this method) so an
+                // injected TO key can never be left stuck down by a dialog opening mid-hold.
+                var remaps = _remapMap;
+                if (isDown && remaps != null && MainController.Instance != null)
+                {
+                    if (MainController.Instance.IsRecording())
+                    {
+                        // Recording started MID-HOLD of a remapped key: close the injected
+                        // pair now and let the raw key flow to the recorder from this repeat
+                        // onward — otherwise the recording captures an unbalanced KeyDown
+                        // whose KeyUp the pairing release would swallow.
+                        if (_activeRemapDowns.ContainsKey(vkCode))
+                            CloseRemapPairing(vkCode);
+                        // fall through: raw processing while recording
+                    }
+                    // New pairings only start on a GENUINE first down: a mid-hold auto-repeat
+                    // of a key that went down RAW (e.g. pressed during a recording that just
+                    // stopped) must not begin remapping halfway through the hold — its
+                    // eventual physical up would be swallowed and the app that saw the raw
+                    // down would never see the up.
+                    else if (_activeRemapDowns.ContainsKey(vkCode)
+                        || (remaps.ContainsKey(vkCode) && !_vkCodesCurrentlyDown.Contains(vkCode)))
+                    {
+                        if (!_activeRemapDowns.TryGetValue(vkCode, out var toVk))
+                        {
+                            toVk = remaps[vkCode];
+                            _activeRemapDowns[vkCode] = toVk;
+                            // Mirror the TO into the chord state only if the physical key (or
+                            // another pairing) didn't already put it there — and remember WE
+                            // did, so release can't strip someone else's entry.
+                            if (toVk != 0 && !_vkCodesCurrentlyDown.Contains(toVk))
+                            {
+                                _vkCodesCurrentlyDown.Add(toVk);
+                                _remapMirroredVks.Add(toVk);
+                            }
+                        }
+                        if (toVk != 0)
+                        {
+                            if (ProcessHotstringKeyDown(toVk))
+                                return (IntPtr)1;   // hotstring consumed the logical key — nothing to inject
+                            InjectRemappedKey(toVk, down: true);
+                        }
+                        return (IntPtr)1;
+                    }
+                }
+
                 string key = BuildComposedKey(vkCode);
                 string keyName = GetKeyName(vkCode);
 
@@ -958,6 +1617,12 @@ namespace TrueReplayer
                     return (IntPtr)1;
                 }
                 if (isDown && _pendingReleaseProfile != null && _pendingReleaseVkCode == vkCode)
+                {
+                    return (IntPtr)1;
+                }
+                // Same unconditional swallow for a pending Hold long-press (repeats of the held
+                // key must not leak as text while the fire timer is counting).
+                if (isDown && _pendingHoldFireProfile != null && _pendingHoldFireVkCode == vkCode)
                 {
                     return (IntPtr)1;
                 }
@@ -1145,36 +1810,7 @@ namespace TrueReplayer
                                 {
                                     LastTriggerHotkey = key;
                                     if (needsMenuCancel) InjectMenuCancelKey();
-                                    // Debounce: only fire PROFILE_HOLD after the key has been held
-                                    // long enough to be "intentional" — stops accidental brushes
-                                    // from kicking off the infinite-loop replay.
-                                    var profileCapture = matchedProfile;
-                                    var vkCapture = vkCode;
-                                    lock (_holdLock)
-                                    {
-                                        _activeHoldProfile = matchedProfile;
-                                        _activeHoldVkCode = vkCode;
-                                        _holdConfirmed = false;
-                                        _holdDebounceTimer?.Dispose();
-                                        _holdDebounceTimer = new System.Threading.Timer(_ =>
-                                        {
-                                            // Confirm-and-fire under the lock so a concurrent
-                                            // key-up / ClearActiveHold can't clear the hold between
-                                            // the check and the fire decision. The PROFILE_HOLD
-                                            // invoke runs outside the lock to avoid holding it
-                                            // across an event handler.
-                                            bool fire = false;
-                                            lock (_holdLock)
-                                            {
-                                                if (_activeHoldVkCode == vkCapture && _activeHoldProfile == profileCapture)
-                                                {
-                                                    _holdConfirmed = true;
-                                                    fire = true;
-                                                }
-                                            }
-                                            if (fire) OnHotkeyPressed?.Invoke($"PROFILE_HOLD::{profileCapture}");
-                                        }, null, WhilePressedDebounceMs, System.Threading.Timeout.Infinite);
-                                    }
+                                    ArmWhilePressedHold(matchedProfile, vkCode);
                                 }
                                 return (IntPtr)1;
 
@@ -1186,71 +1822,46 @@ namespace TrueReplayer
                                     OnHotkeyPressed?.Invoke($"PROFILE_TOGGLE::{matchedProfile}");
                                 }
                                 return (IntPtr)1;
+
+                            case TriggerMode.DoubleTap:
+                                // Fire only on the SECOND tap inside the window. Every down is
+                                // swallowed either way — the key is a dedicated trigger, exactly
+                                // like OnPress (a lone first tap is intentionally lost).
+                                if (!isRepeat && RegisterTapAndCheckDouble(key))
+                                {
+                                    LastTriggerHotkey = key;
+                                    if (needsMenuCancel) InjectMenuCancelKey();
+                                    OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
+                                }
+                                return (IntPtr)1;
+
+                            case TriggerMode.Hold:
+                                // Long-press to fire once. The key-up handler below cancels the
+                                // timer when released before the threshold (quick tap = nothing).
+                                if (!isRepeat)
+                                {
+                                    LastTriggerHotkey = key;
+                                    if (needsMenuCancel) InjectMenuCancelKey();
+                                    ArmHoldFire(matchedProfile, vkCode);
+                                }
+                                return (IntPtr)1;
                         }
                     }
 
                     // ── Hotstring buffer management ──
-                    if (!IsReplayingAction && UserProfile.Current.ProfileKeyEnabled &&
-                        ProfileHotstrings.Count > 0 &&
-                        MainController.Instance != null && !MainController.Instance.IsRecording())
-                    {
-                        if (vkCode == 0x08) // Backspace: pop last char
-                        {
-                            if (_hotstringBufferLen > 0)
-                                _hotstringBufferLen--;
-                        }
-                        else if (vkCode == 0x1B  // Escape
-                              || vkCode == 0x11 || vkCode == 0xA2 || vkCode == 0xA3  // Ctrl
-                              || vkCode == 0x12 || vkCode == 0xA4 || vkCode == 0xA5) // Alt
-                        {
-                            HotstringBufferClear();
-                        }
-                        else if (_terminatorVkCodes.Contains(vkCode)) // Enter, Space, Tab
-                        {
-                            var matchedProfile = CheckHotstringMatch(isTerminator: true);
-                            if (matchedProfile != null && IsForegroundWindowMatch(matchedProfile))
-                            {
-                                var config = ProfileHotstrings[matchedProfile];
-                                int backspaceCount = config.Sequence.Length; // erase typed chars
-                                HotstringBufferClear();
-                                EraseCharacters(backspaceCount);
+                    if (ProcessHotstringKeyDown(vkCode))
+                        return (IntPtr)1;
+                }
 
-                                LastTriggerHotkey = $"HOTSTRING::{matchedProfile}";
-                                OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
-                                return (IntPtr)1; // swallow the terminator key
-                            }
-                            else
-                            {
-                                HotstringBufferClear(); // terminator without match resets buffer
-                            }
-                        }
-                        else
-                        {
-                            char? ch = VkCodeToChar(vkCode);
-                            if (ch.HasValue)
-                            {
-                                HotstringBufferAppend(ch.Value);
-
-                                var matchedProfile = CheckHotstringMatch(isTerminator: false);
-                                if (matchedProfile != null && IsForegroundWindowMatch(matchedProfile))
-                                {
-                                    var config = ProfileHotstrings[matchedProfile];
-                                    int backspaceCount = config.Sequence.Length - 1; // previous chars (current key swallowed)
-                                    HotstringBufferClear();
-                                    if (backspaceCount > 0)
-                                        EraseCharacters(backspaceCount);
-
-                                    LastTriggerHotkey = $"HOTSTRING::{matchedProfile}";
-                                    OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
-                                    return (IntPtr)1; // swallow current key
-                                }
-                            }
-                            else if (vkCode != 0x10 && vkCode != 0xA0 && vkCode != 0xA1) // not Shift
-                            {
-                                HotstringBufferClear(); // non-character key clears buffer
-                            }
-                        }
-                    }
+                // KEY UP for a pending Hold long-press: released BEFORE the threshold — cancel
+                // the timer and swallow the up (the matching down was swallowed; a quick tap of
+                // a Hold-bound key must do nothing, which is the mode's one contract). If the
+                // timer already fired, the pending state is cleared and this block is skipped —
+                // the post-fire up falls through as a harmless orphan (OnPress precedent).
+                if (!isDown && _pendingHoldFireProfile != null && _pendingHoldFireVkCode == vkCode)
+                {
+                    ClearPendingHoldFire();
+                    return (IntPtr)1;
                 }
 
                 // KEY UP handling for OnRelease mode (matched by physical vkCode so releasing

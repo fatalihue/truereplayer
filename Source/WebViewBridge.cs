@@ -658,6 +658,12 @@ namespace TrueReplayer
                     case "actions:resetRow": HandleActionsResetRow(); break;
                     case "data:request": HandleDataRequest(); break;
                     case "data:save": HandleDataSave(payload); break;
+                    case "automation:request": PushAutomationState(); break;
+                    case "automation:save": HandleAutomationSave(payload); break;
+                    case "automation:setArmed": HandleAutomationSetArmed(payload); break;
+                    case "automation:setEnabled": HandleAutomationSetEnabled(payload); break;
+                    case "automation:captureImage": HandleAutomationCaptureImage(payload); break;
+                    case "remap:save": HandleRemapSave(payload); break;
                     case "actions:reorder": HandleActionsReorder(payload); break;
                     case "actions:convertMode": HandleConvertActionMode(payload); break;
                     case "actions:insertAction": HandleInsertAction(payload); break;
@@ -789,6 +795,8 @@ namespace TrueReplayer
             Models.TriggerMode.OnRelease => "onRelease",
             Models.TriggerMode.WhilePressed => "whilePressed",
             Models.TriggerMode.Toggle => "toggle",
+            Models.TriggerMode.DoubleTap => "doubleTap",
+            Models.TriggerMode.Hold => "hold",
             _ => "onPress"
         };
 
@@ -797,6 +805,8 @@ namespace TrueReplayer
             "onRelease" => Models.TriggerMode.OnRelease,
             "whilePressed" => Models.TriggerMode.WhilePressed,
             "toggle" => Models.TriggerMode.Toggle,
+            "doubleTap" => Models.TriggerMode.DoubleTap,
+            "hold" => Models.TriggerMode.Hold,
             _ => Models.TriggerMode.OnPress
         };
 
@@ -965,6 +975,9 @@ namespace TrueReplayer
                 isSkipped = a.IsSkipped,
                 isFocusClick = a.IsFocusClick,
                 repeatCount = a.RepeatCount,
+                // RunProfile data-loop Phase C — projected as a plain bool (null = false)
+                // so the editor toggle and grid detail render without null-juggling.
+                runOverData = a.RunOverData == true,
                 // Keystroke × N inter-cycle gap. Forwarded so the edit dialog can
                 // restore the user's chosen delay (and the Keystroke replay loop
                 // on the C# side already reads it from the action's own property).
@@ -1117,6 +1130,288 @@ namespace TrueReplayer
 
             PushDataTable();
         }
+
+        // ── Automation (trigger daemon) ──
+
+        // Full config + runtime status per trigger-bearing profile. One payload feeds both
+        // the automation:state push and the cold-start state:init blob (hand-mirrored like
+        // dataTable — built here once so they can't drift).
+        private object BuildAutomationStatePayload()
+        {
+            var status = TriggerService.Instance?.GetStatus();
+            var byName = status?.ToDictionary(s => s.Profile, StringComparer.OrdinalIgnoreCase);
+            var entries = profileController.ProfileEntries
+                .Where(p => p.Triggers != null)
+                .Select(p =>
+                {
+                    TriggerService.AutomationStatusEntry? st = null;
+                    byName?.TryGetValue(p.Name, out st);
+                    return new
+                    {
+                        profile = p.Name,
+                        isDisabled = p.IsDisabled,
+                        hasEffectiveTarget = p.HasEffectiveTarget,
+                        trigger = ProjectTriggerConfig(p.Triggers!),
+                        running = st?.Running ?? false,
+                        conditionTrue = st?.ConditionTrue ?? false,
+                        nextDueAt = st?.NextDueAt?.ToString("o"),
+                        lastFiredAt = st?.LastFiredAt?.ToString("o"),
+                        fireCount = st?.FireCount ?? 0,
+                        skippedBusy = st?.SkippedBusy ?? 0,
+                        skippedDirty = st?.SkippedDirty ?? 0,
+                        skippedModal = st?.SkippedModal ?? 0,
+                        lastResult = st?.LastResult,
+                    };
+                }).ToArray();
+            return new
+            {
+                enabled = TriggerService.Instance?.GlobalEnabled ?? true,
+                entries,
+            };
+        }
+
+        public void PushAutomationState() => SendMessage("automation:state", BuildAutomationStatePayload());
+
+        private static object ProjectTriggerConfig(ProfileTriggerConfig t) => new
+        {
+            kind = t.Kind,
+            armed = t.Armed,
+            intervalSeconds = t.IntervalSeconds,
+            timeOfDay = t.TimeOfDay,
+            daysOfWeek = t.DaysOfWeek,
+            conditionType = t.ConditionType,
+            windowProcessName = t.WindowProcessName,
+            windowTitle = t.WindowTitle,
+            windowTitleMatchMode = t.WindowTitleMatchMode,
+            windowMatchForegroundOnly = t.WindowMatchForegroundOnly,
+            filePath = t.FilePath,
+            pixelX = t.PixelX,
+            pixelY = t.PixelY,
+            pixelColor = t.PixelColor,
+            pixelTolerance = t.PixelTolerance,
+            imagePath = t.ImagePath,
+            imageConfidence = t.ImageConfidence,
+            clipboardPattern = t.ClipboardPattern,
+            cooldownSeconds = t.CooldownSeconds,
+            retrigger = t.Retrigger,
+        };
+
+        private static ProfileTriggerConfig? ParseTriggerConfig(JsonElement el)
+        {
+            if (el.ValueKind != JsonValueKind.Object) return null;
+            var t = new ProfileTriggerConfig();
+            if (el.TryGetProperty("kind", out var v) && v.ValueKind == JsonValueKind.String) t.Kind = v.GetString() ?? "interval";
+            t.Armed = el.TryGetProperty("armed", out v) && v.ValueKind == JsonValueKind.True;
+            if (el.TryGetProperty("intervalSeconds", out v) && v.TryGetInt32(out var iv)) t.IntervalSeconds = iv;
+            if (el.TryGetProperty("timeOfDay", out v) && v.ValueKind == JsonValueKind.String) t.TimeOfDay = v.GetString();
+            if (el.TryGetProperty("daysOfWeek", out v) && v.TryGetInt32(out var dw)) t.DaysOfWeek = dw;
+            if (el.TryGetProperty("conditionType", out v) && v.ValueKind == JsonValueKind.String) t.ConditionType = v.GetString();
+            if (el.TryGetProperty("windowProcessName", out v) && v.ValueKind == JsonValueKind.String) t.WindowProcessName = v.GetString();
+            if (el.TryGetProperty("windowTitle", out v) && v.ValueKind == JsonValueKind.String) t.WindowTitle = v.GetString();
+            if (el.TryGetProperty("windowTitleMatchMode", out v) && v.ValueKind == JsonValueKind.String) t.WindowTitleMatchMode = v.GetString();
+            t.WindowMatchForegroundOnly = el.TryGetProperty("windowMatchForegroundOnly", out v) && v.ValueKind == JsonValueKind.True;
+            if (el.TryGetProperty("filePath", out v) && v.ValueKind == JsonValueKind.String) t.FilePath = v.GetString();
+            if (el.TryGetProperty("pixelX", out v) && v.TryGetInt32(out var px)) t.PixelX = px;
+            if (el.TryGetProperty("pixelY", out v) && v.TryGetInt32(out var py)) t.PixelY = py;
+            if (el.TryGetProperty("pixelColor", out v) && v.ValueKind == JsonValueKind.String) t.PixelColor = v.GetString();
+            if (el.TryGetProperty("pixelTolerance", out v) && v.TryGetInt32(out var pt)) t.PixelTolerance = pt;
+            if (el.TryGetProperty("imagePath", out v) && v.ValueKind == JsonValueKind.String) t.ImagePath = v.GetString();
+            if (el.TryGetProperty("imageConfidence", out v) && v.ValueKind == JsonValueKind.Number) t.ImageConfidence = v.GetDouble();
+            if (el.TryGetProperty("clipboardPattern", out v) && v.ValueKind == JsonValueKind.String) t.ClipboardPattern = v.GetString();
+            if (el.TryGetProperty("cooldownSeconds", out v) && v.TryGetInt32(out var cd)) t.CooldownSeconds = cd;
+            if (el.TryGetProperty("retrigger", out v) && v.ValueKind == JsonValueKind.String) t.Retrigger = v.GetString();
+            return t;
+        }
+
+        // Persist a profile's trigger config (null = remove the automation). Dual-path like
+        // HandleDataSave: the ACTIVE profile must mutate UserProfile.Current FIRST — every
+        // grid-save path rebuilds the profile from Current, so a stale Current.Triggers
+        // would make the next Save silently delete the just-configured automation.
+        // Reload is called EXPLICITLY in every path: the disk watcher's debounce can land
+        // inside another refresh's suppression window and never deliver it.
+        private async Task PersistTriggerAsync(string name, ProfileTriggerConfig? trigger)
+        {
+            if (name == CurrentProfileName)
+                UserProfile.Current.Triggers = trigger;
+
+            var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
+            if (entry != null) entry.Triggers = trigger;
+
+            if (name != "No Profile" && entry != null && File.Exists(entry.FilePath))
+            {
+                var profile = await profileController.LoadProfileByNameAsync(name);
+                if (profile != null)
+                {
+                    profile.Triggers = trigger;
+                    await profileController.SaveProfileByNameAsync(name, profile);
+                }
+            }
+            else if (name == CurrentProfileName)
+            {
+                HasUnsavedChanges = true;
+            }
+
+            TriggerService.Instance?.Reload(profileController.GetProfileTriggers());
+            PushAutomationState();
+            TrayIconService.UpdateTrayIcon();
+        }
+
+        private async void HandleAutomationSave(JsonElement payload)
+        {
+            try
+            {
+                var name = payload.TryGetProperty("profile", out var pEl) ? pEl.GetString() : null;
+                if (string.IsNullOrEmpty(name)) return;
+                ProfileTriggerConfig? trigger = payload.TryGetProperty("trigger", out var tEl)
+                    ? ParseTriggerConfig(tEl)
+                    : null;
+                await PersistTriggerAsync(name, trigger);
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Error("automation:save failed", ex);
+                SendMessage("alert:show", new { message = $"Could not save automation: {ex.Message}" });
+            }
+        }
+
+        private async void HandleAutomationSetArmed(JsonElement payload)
+        {
+            try
+            {
+                var name = payload.TryGetProperty("profile", out var pEl) ? pEl.GetString() : null;
+                bool armed = payload.TryGetProperty("armed", out var aEl) && aEl.ValueKind == JsonValueKind.True;
+                if (string.IsNullOrEmpty(name)) return;
+                var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
+                if (entry?.Triggers == null) return;
+                var updated = entry.Triggers.Clone();
+                updated.Armed = armed;
+                await PersistTriggerAsync(name, updated);
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Error("automation:setArmed failed", ex);
+            }
+        }
+
+        // Capture a reference PNG for an Image-condition trigger — same minimize + region
+        // overlay flow as the WaitImage recapture, but profile-addressed (the trigger's
+        // owner, not necessarily the active profile) and correlated by requestId so the
+        // Automation panel can pair the reply. Saves into the SAME per-profile store as
+        // WaitImage PNGs (orphan sweep / export / duplicate all know about trigger paths).
+        private void HandleAutomationCaptureImage(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
+            string profileName = payload.TryGetProperty("profile", out var pEl) ? (pEl.GetString() ?? "") : "";
+            if (string.IsNullOrEmpty(profileName) || profileName == "No Profile") profileName = "default";
+            _ = HandleAutomationCaptureImageAsync(requestId, profileName);
+        }
+
+        private async Task HandleAutomationCaptureImageAsync(string requestId, string profileName)
+        {
+            // Gate autonomous fires for the whole capture: the region overlay is exactly the
+            // "user mid-interaction" state the SkippedModal trigger gate exists for, but it
+            // never set the modal flag — a due interval trigger could swap profiles and start
+            // injecting input while the user drag-selects. Cleared in the finally below.
+            InputHookManager.SuppressAllHotkeys = true;
+            var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
+            await Task.Delay(400);
+
+            System.Drawing.Bitmap screenshot;
+            try
+            {
+                screenshot = ScreenCaptureService.CaptureVirtualScreen();
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Error("Automation capture screenshot failed", ex);
+                NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
+                SendMessage("automation:imageCaptured", new { requestId, cancelled = true });
+                // The later finally never runs on this early return — a leaked flag here
+                // would leave EVERY hotkey dead for the rest of the session.
+                InputHookManager.SuppressAllHotkeys = false;
+                return;
+            }
+
+            try
+            {
+                RegionSelectionResult? selection = null;
+                var thread = new Thread(() =>
+                {
+                    System.Windows.Forms.Application.EnableVisualStyles();
+                    using var overlay = new ScreenOverlayForm(screenshot);
+                    overlay.ShowDialog();
+                    selection = overlay.GetSelectionAsync().Result;
+                });
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                await Task.Run(() => thread.Join());
+
+                dispatcherQueue.TryEnqueue(() =>
+                {
+                    NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
+                });
+
+                if (selection?.CroppedImage == null)
+                {
+                    SendMessage("automation:imageCaptured", new { requestId, cancelled = true });
+                    return;
+                }
+
+                string newImagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, profileName);
+                selection.CroppedImage.Dispose();
+                SendMessage("automation:imageCaptured", new { requestId, cancelled = false, imagePath = newImagePath });
+            }
+            finally
+            {
+                screenshot.Dispose();
+                InputHookManager.SuppressAllHotkeys = false;
+            }
+        }
+
+        private void HandleAutomationSetEnabled(JsonElement payload)
+        {
+            bool enabled = payload.GetProperty("enabled").GetBoolean();
+            UserProfile.Current.AutomationEnabled = enabled;
+            SaveGlobalSettings();
+            TriggerService.Instance?.SetGlobalEnabled(enabled);
+            PushSettingsLoaded();
+            PushAutomationState();
+            TrayIconService.UpdateTrayIcon();
+        }
+
+        // Key remap layer — whole-list save (the list is tiny, capped at 32). RemapService
+        // persists to its sidecar remaps.json and republishes the hook snapshot.
+        private void HandleRemapSave(JsonElement payload)
+        {
+            var config = new RemapService.RemapConfig
+            {
+                Enabled = !payload.TryGetProperty("enabled", out var eEl) || eEl.ValueKind != JsonValueKind.False,
+            };
+            if (payload.TryGetProperty("remaps", out var rEl) && rEl.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var r in rEl.EnumerateArray())
+                {
+                    if (r.ValueKind != JsonValueKind.Object) continue;
+                    config.Remaps.Add(new RemapService.RemapEntry
+                    {
+                        From = r.TryGetProperty("from", out var fEl) ? (fEl.GetString() ?? "") : "",
+                        To = r.TryGetProperty("to", out var tEl) ? (tEl.GetString() ?? "") : "",
+                        Enabled = !r.TryGetProperty("enabled", out var enEl) || enEl.ValueKind != JsonValueKind.False,
+                    });
+                }
+            }
+            RemapService.Save(config);
+            PushSettingsLoaded();
+        }
+
+        // Settings-blob projection for the remap layer (rides settings:loaded + state:init).
+        private static object ProjectRemaps() => new
+        {
+            enabled = RemapService.Current.Enabled,
+            entries = RemapService.Current.Remaps
+                .Select(r => new { from = r.From, to = r.To, enabled = r.Enabled }).ToArray(),
+        };
 
         private void PushUndoState()
         {
@@ -1284,6 +1579,9 @@ namespace TrueReplayer
                 restoreSize = p.RestoreSize,
                 triggerMode = TriggerModeToString(p.TriggerMode),
                 isDisabled = p.IsDisabled,
+                // Automation badge scalars — the sidebar renders a Zap badge on armed profiles.
+                hasTrigger = p.Triggers != null,
+                triggerArmed = p.Triggers?.Armed ?? false,
                 // Sharing metadata mirror for sidebar badges + Info tab seed values. The
                 // Info tab still calls profile:get-metadata on open to refresh; this is just
                 // so the list can render emoji/tags without a round-trip per profile.
@@ -1424,7 +1722,9 @@ namespace TrueReplayer
                     startMinimized = profile.StartMinimized,
                     runEndFlash = profile.RunEndFlash,
                     runEndSound = profile.RunEndSound,
-                    runAsAdmin = AppSettingsManager.Load().RunAsAdmin
+                    runAsAdmin = AppSettingsManager.Load().RunAsAdmin,
+                    automationEnabled = profile.AutomationEnabled,
+                    remaps = ProjectRemaps()
                 }
             });
         }
@@ -1558,6 +1858,9 @@ namespace TrueReplayer
                 // Data-loop table travels with the profile so a normal Save preserves it
                 // (data:save also persists immediately, but the main Save must not null it).
                 Data = UserProfile.Current.Data,
+                // Automation trigger — preserved VERBATIM (incl. Armed): this is the local
+                // user's own save, not a copy/import (those disarm).
+                Triggers = UserProfile.Current.Triggers,
             };
         }
 
@@ -1617,7 +1920,10 @@ namespace TrueReplayer
                     restorePosition = p.RestorePosition,
                     restoreSize = p.RestoreSize,
                     triggerMode = TriggerModeToString(p.TriggerMode),
-                    isDisabled = p.IsDisabled
+                    isDisabled = p.IsDisabled,
+                    // Keep in sync with PushProfilesUpdate (automation badge scalars).
+                    hasTrigger = p.Triggers != null,
+                    triggerArmed = p.Triggers?.Armed ?? false
                 }).ToArray(),
                 activeProfile = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName,
                 profileOrder = new
@@ -1701,8 +2007,13 @@ namespace TrueReplayer
                     startMinimized = profile.StartMinimized,
                     runEndFlash = profile.RunEndFlash,
                     runEndSound = profile.RunEndSound,
-                    runAsAdmin = AppSettingsManager.Load().RunAsAdmin
+                    runAsAdmin = AppSettingsManager.Load().RunAsAdmin,
+                    automationEnabled = profile.AutomationEnabled,
+                    remaps = ProjectRemaps()
                 },
+                // Cold-start automation state — MUST mirror PushAutomationState (same builder,
+                // so it can't drift). Without it the panel seeds empty until the first push.
+                automation = BuildAutomationStatePayload(),
                 toolbar = new { profileName = CurrentProfileName, actionCount = actions.Count },
                 statusBar = new
                 {
@@ -2806,6 +3117,9 @@ namespace TrueReplayer
                 ActionType = "RunProfile",
                 Key = targetName,
                 RepeatCount = repeat,
+                // Phase C — null-means-false so plain rows stay byte-identical on disk.
+                RunOverData = payload.TryGetProperty("runOverData", out var rodEl)
+                    && rodEl.ValueKind == JsonValueKind.True ? true : null,
                 Delay = delay,
             };
 
@@ -2847,6 +3161,11 @@ namespace TrueReplayer
 
             if (payload.TryGetProperty("repeatCount", out var rEl) && rEl.ValueKind == JsonValueKind.Number)
                 actions[index].RepeatCount = Math.Clamp(rEl.GetInt32(), 1, 999);
+
+            // Phase C toggle — stored null-means-false so pre-feature rows stay byte-identical.
+            if (payload.TryGetProperty("runOverData", out var rodEl)
+                && (rodEl.ValueKind == JsonValueKind.True || rodEl.ValueKind == JsonValueKind.False))
+                actions[index].RunOverData = rodEl.ValueKind == JsonValueKind.True ? true : null;
 
             HasUnsavedChanges = true;
             PushActionsUpdate();
@@ -4041,6 +4360,10 @@ namespace TrueReplayer
         private async Task HandlePixelColorPickAsync(JsonElement payload)
         {
             string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
+            // Automation pixel-watchers store ABSOLUTE virtual-screen coords (TriggerService
+            // samples them with no window context) — they must opt out of the profile-relative
+            // translation the If/WaitPixelColor editors want.
+            bool absolute = payload.TryGetProperty("absolute", out var absEl) && absEl.ValueKind == JsonValueKind.True;
 
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
@@ -4085,12 +4408,13 @@ namespace TrueReplayer
                     return;
                 }
 
-                // Translate absolute pick → profile-relative when rel coords on + target running.
+                // Translate absolute pick → profile-relative when rel coords on + target running
+                // — unless the caller asked for absolute coords (automation watchers).
                 // The sampled colour is independent of coord space (taken from the screenshot
                 // pixel directly) so it round-trips unchanged.
                 int storedX = selection.ScreenX;
                 int storedY = selection.ScreenY;
-                if (TryGetRelativeCaptureOffset(out var winRect))
+                if (!absolute && TryGetRelativeCaptureOffset(out var winRect))
                 {
                     storedX -= winRect.Left;
                     storedY -= winRect.Top;
@@ -4802,18 +5126,22 @@ namespace TrueReplayer
             try
             {
                 File.Copy(entry.FilePath, copyPath);
-                await profileController.RefreshProfileListAsync(true);
 
-                // File.Copy only duplicated the JSON, which still pointed at the SOURCE profile's
-                // per-profile PNGs — so the copy's WaitImage / IF-Image rows rendered an empty
-                // thumbnail. Clone each referenced image into the copy's own image dir under a fresh
-                // GUID filename (matching the paste / duplicate-action convention so the base64 cache
-                // key is naturally unique) and repoint the copy's rows. A null clone (source PNG
-                // missing) clears ImagePath → empty thumbnail + "recapture" hint, never a broken ref.
-                var copyProfile = await profileController.LoadProfileByNameAsync(copyName);
+                // Fix up the copy BEFORE the profile-list refresh sees it: the refresh's tail
+                // re-arms the trigger daemon from the on-disk configs, so an armed source
+                // profile would put a LIVE armed watcher on the copy — and the disarming save
+                // below would land inside the refresh's watcher-suppression window and never
+                // be picked up (daemon + UI armed, disk disarmed, firing until restart).
+                //
+                // File.Copy also duplicated a JSON that still points at the SOURCE profile's
+                // per-profile PNGs — clone each referenced image (WaitImage / IF-Image rows +
+                // the automation image-watcher) into the copy's own image dir under a fresh
+                // GUID filename and repoint. A null clone (source PNG missing) clears the
+                // reference → empty thumbnail + "recapture" hint, never a broken ref.
+                var copyProfile = await SettingsManager.LoadProfileAsync(copyPath);
                 if (copyProfile != null)
                 {
-                    bool clonedAny = false;
+                    bool mutated = false;
                     foreach (var action in copyProfile.Actions)
                     {
                         if (string.IsNullOrEmpty(action.ImagePath)) continue;
@@ -4821,11 +5149,29 @@ namespace TrueReplayer
                             || (action.ActionType == "If" && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
                         if (!refsImage) continue;
                         action.ImagePath = ImageStorageService.CloneReferenceImage(name, action.ImagePath!, copyName);
-                        clonedAny = true;
+                        mutated = true;
                     }
-                    if (clonedAny)
-                        await profileController.SaveProfileByNameAsync(copyName, copyProfile);
+                    if (copyProfile.Triggers != null)
+                    {
+                        // Both firing the same schedule is never what Duplicate means.
+                        if (copyProfile.Triggers.Armed)
+                        {
+                            copyProfile.Triggers.Armed = false;
+                            mutated = true;
+                        }
+                        if (string.Equals(copyProfile.Triggers.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)
+                            && !string.IsNullOrEmpty(copyProfile.Triggers.ImagePath))
+                        {
+                            copyProfile.Triggers.ImagePath =
+                                ImageStorageService.CloneReferenceImage(name, copyProfile.Triggers.ImagePath!, copyName);
+                            mutated = true;
+                        }
+                    }
+                    if (mutated)
+                        await SettingsManager.SaveProfileAsync(copyPath, copyProfile);
                 }
+
+                await profileController.RefreshProfileListAsync(true);
 
                 // Place the copy in the same folder as the original
                 var order = profileController.GetProfileOrder();
@@ -4887,6 +5233,9 @@ namespace TrueReplayer
                     CurrentProfileName = actualNewName;
                     CurrentProfilePath = newFilePath;
                 }
+                // Migrate the automation fire-stats BEFORE the refresh re-arms under the new
+                // name — otherwise cooldown/fire history restarts from zero on every rename.
+                TriggerService.Instance?.RenameStats(oldName, actualNewName);
                 await profileController.RenameProfileInOrderAsync(oldName, actualNewName);
                 await profileController.RefreshProfileListAsync(true);
 
@@ -7283,6 +7632,7 @@ namespace TrueReplayer
                 ProfileKeyEnabled = ProfileKeyEnabled,
                 BrowserSelectorEnabled = BrowserSelectorEnabled,
                 RunAsAdmin = AppSettingsManager.Load().RunAsAdmin,
+                AutomationEnabled = UserProfile.Current.AutomationEnabled,
             };
             AppSettingsManager.Save(s);
         }

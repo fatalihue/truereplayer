@@ -7,10 +7,10 @@ import { Button } from './common/Button';
 
 export interface RunProfileDialogProps {
   /** When set, the dialog is in edit mode for this existing action. */
-  initial?: { profileName: string; repeatCount: number };
+  initial?: { profileName: string; repeatCount: number; runOverData?: boolean };
   /** Name of the profile that will own the action. Used to filter self-reference. */
   excludeProfileName?: string;
-  onConfirm: (profileName: string, repeatCount: number) => void;
+  onConfirm: (profileName: string, repeatCount: number, runOverData: boolean) => void;
   onClose: () => void;
 }
 
@@ -25,6 +25,7 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
   const { profiles } = useAppState();
   const [profileName, setProfileName] = useState(initial?.profileName ?? '');
   const [repeatCount, setRepeatCount] = useState(initial?.repeatCount ?? 1);
+  const [runOverData, setRunOverData] = useState(initial?.runOverData ?? false);
   const selectRef = useRef<HTMLSelectElement>(null);
 
   // Drop self-references and disabled profiles from the picker. Disabled profiles are
@@ -56,7 +57,7 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
 
   const handleConfirm = () => {
     if (!canConfirm) return;
-    onConfirm(profileName, Math.max(1, Math.min(999, repeatCount)));
+    onConfirm(profileName, Math.max(1, Math.min(999, repeatCount)), runOverData);
   };
 
   return (
@@ -120,7 +121,7 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
               <label className="text-[10px] uppercase tracking-wide font-semibold text-text-tertiary">
                 Repeat
               </label>
-              <div className="flex items-center gap-2">
+              <div className={`flex items-center gap-2 ${runOverData ? 'opacity-40 pointer-events-none' : ''}`}>
                 <span className="inline-flex">
                   <NumberInput
                     value={repeatCount}
@@ -137,6 +138,18 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
                 </span>
               </div>
             </div>
+
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={runOverData}
+                onChange={(e) => setRunOverData(e.target.checked)}
+              />
+              <span className="text-xs text-text-primary"
+                data-tip="Iterates the called profile's own Data table: one run per row, with {row:column} resolving from that row. Replaces Repeat. Falls back to a single run if it has no data.">
+                Run once per data row
+              </span>
+            </label>
 
             <div className="text-[11px] text-text-tertiary leading-relaxed bg-bg-card border border-border-subtle rounded px-2.5 py-2">
               Runs the profile's actions inline here. Its own Loops / Interval

@@ -12,6 +12,10 @@ namespace TrueReplayer.Models
     /// OnRelease - fire once on key up; key down is swallowed but does nothing.
     /// WhilePressed - start replay with infinite loop on key down, cancel on key up (autofire).
     /// Toggle - key down starts replay (respecting loop settings); pressing again stops it.
+    /// DoubleTap - fire once when the key is pressed twice within the tap window (single
+    ///             presses do nothing — the key is a dedicated trigger, downs are swallowed).
+    /// Hold - fire once after the key has been held for the long-press threshold; a quick
+    ///        tap does nothing (distinct from WhilePressed, which runs only WHILE held).
     /// </summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public enum TriggerMode
@@ -19,7 +23,9 @@ namespace TrueReplayer.Models
         OnPress,
         OnRelease,
         WhilePressed,
-        Toggle
+        Toggle,
+        DoubleTap,
+        Hold
     }
 
     public class UserProfile
@@ -135,8 +141,20 @@ namespace TrueReplayer.Models
         // pipelines for free; large sets would want a sidecar but that's a later increment.
         public ProfileDataTable? Data { get; set; }
 
+        // Automation trigger: fires this profile WITHOUT a hotkey press (interval / clock
+        // schedule / watched condition). null = feature unused (byte-identical old profiles,
+        // same convention as Data). Armed is persisted so the daemon re-arms at startup,
+        // but it is MACHINE-LOCAL intent: import / duplicate / copy paths force it false so
+        // a shared or cloned profile can never start self-firing without explicit consent.
+        public ProfileTriggerConfig? Triggers { get; set; }
+
         [JsonIgnore]
         public bool ProfileKeyEnabled { get; set; } = true;
+
+        // Automation master switch mirror (AppSettings-backed, global — same convention as
+        // ProfileKeyEnabled above).
+        [JsonIgnore]
+        public bool AutomationEnabled { get; set; } = true;
 
         public static UserProfile Default => new UserProfile
         {
@@ -200,6 +218,51 @@ namespace TrueReplayer.Models
         public bool Instant { get; set; } = false;  // false = needs Enter/Space/Tab terminator
     }
 
+    // Automation trigger config (one per profile). Kind selects which field group applies;
+    // unused groups keep defaults and are harmless in the JSON. Executed by TriggerService —
+    // N armed triggers watch concurrently, but fires funnel into the single replay engine
+    // (skip-if-busy; there is only one mouse/keyboard).
+    public class ProfileTriggerConfig
+    {
+        public string Kind { get; set; } = "interval";      // "interval" | "schedule" | "condition"
+        // Armed = the daemon actively runs this trigger (and re-arms it at startup).
+        public bool Armed { get; set; }
+
+        // interval — every N seconds (runtime clamps to >= 5).
+        public int IntervalSeconds { get; set; } = 300;
+
+        // schedule — fire at TimeOfDay ("HH:mm", local) on the days in DaysOfWeek
+        // (bitmask, Sun = 1<<0 — same convention as the If-Time condition; 0 = every day).
+        public string? TimeOfDay { get; set; }
+        public int DaysOfWeek { get; set; }
+
+        // condition — poll a probe and fire on a false→true edge (or continuously, see
+        // Retrigger). ConditionType: WindowOpen | ProcessRunning | FileExists |
+        // PixelColorMatch | ImageFound | ClipboardChanged. Field names mirror the
+        // If-condition fields on ActionItem so the concepts stay recognizably the same.
+        public string? ConditionType { get; set; }
+        public string? WindowProcessName { get; set; }
+        public string? WindowTitle { get; set; }
+        public string? WindowTitleMatchMode { get; set; }   // "contains" | "regex"
+        public bool WindowMatchForegroundOnly { get; set; }
+        public string? FilePath { get; set; }
+        public int PixelX { get; set; }
+        public int PixelY { get; set; }                     // absolute virtual-screen coords (no rel-coords for watchers)
+        public string? PixelColor { get; set; }             // "#RRGGBB"
+        public int PixelTolerance { get; set; } = 10;
+        public string? ImagePath { get; set; }              // per-profile PNG, same store as WaitImage
+        public double ImageConfidence { get; set; } = 0.8;  // runtime clamps to <= 0.99
+        public string? ClipboardPattern { get; set; }       // contains-filter; empty = any clipboard change
+
+        // Firing policy (condition kind): CooldownSeconds <= 0 = default 30 s between fires;
+        // Retrigger null/"edge" = must observe the condition false again before the next
+        // fire, "level" = keep firing every cooldown while the condition stays true.
+        public int CooldownSeconds { get; set; }
+        public string? Retrigger { get; set; }
+
+        public ProfileTriggerConfig Clone() => (ProfileTriggerConfig)MemberwiseClone();
+    }
+
     public class ProfileEntry : INotifyPropertyChanged
     {
         public string Name { get; set; } = string.Empty;
@@ -242,6 +305,10 @@ namespace TrueReplayer.Models
         public string EffectiveTargetTitleMatchMode { get; set; } = "contains";
         public TriggerMode TriggerMode { get; set; } = TriggerMode.OnPress;
         public bool IsDisabled { get; set; }
+        // Automation trigger mirror (full config, in-memory only — ProfileEntry is never
+        // persisted). Lets TriggerService re-arm and the Automation panel project configs
+        // without re-reading every profile JSON. Populated by LoadProfileListAsync.
+        public ProfileTriggerConfig? Triggers { get; set; }
         public string Display => string.IsNullOrEmpty(Hotkey) ? Name : $"{Name} ({Hotkey})";
 
         private bool _isActive;
@@ -328,6 +395,10 @@ namespace TrueReplayer.Models
         // Data-loop table — round-tripped to the .trprofile envelope like the other
         // per-profile fields; null omitted, old apps ignore the unknown key.
         public ProfileDataTable? Data { get; set; }
+        // Automation trigger — round-tripped so the receiver gets the configuration, but
+        // the import builder FORCES Armed=false (a shared profile must never self-fire
+        // without the receiver explicitly arming it).
+        public ProfileTriggerConfig? Triggers { get; set; }
     }
 
     public class ProfileExportOrganization

@@ -33,6 +33,11 @@ namespace TrueReplayer.Interop
         public const int WM_MBUTTONDOWN = 0x0207;
         public const int WM_MBUTTONUP = 0x0208;
         public const int WM_MOUSEWHEEL = 0x020A;
+        // X-buttons (mouse side buttons). HIWORD(mouseData) tells which one: 1 = XButton1
+        // (back), 2 = XButton2 (forward). Used only as profile-hotkey triggers — the
+        // recorder/replayer deliberately do not know about them.
+        public const int WM_XBUTTONDOWN = 0x020B;
+        public const int WM_XBUTTONUP = 0x020C;
 
         public const int WM_KEYDOWN = 0x0100;
         public const int WM_KEYUP = 0x0101;
@@ -135,6 +140,13 @@ namespace TrueReplayer.Interop
 
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
+
+        // Monotonic per-session clipboard revision counter — bumps on every clipboard write
+        // without opening the clipboard (cheap enough to poll). Returns 0 when the calling
+        // thread's desktop has no clipboard access (locked workstation / secure desktop) —
+        // callers must treat 0 as "unknown", NOT as a change.
+        [DllImport("user32.dll")]
+        public static extern uint GetClipboardSequenceNumber();
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);

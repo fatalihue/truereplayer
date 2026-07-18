@@ -45,6 +45,23 @@ namespace TrueReplayer.Services
             (p => p.TriggerMode == TriggerMode.WhilePressed || p.TriggerMode == TriggerMode.Toggle,
                 new Version(2, 1, 0), "TriggerMode WhilePressed/Toggle"),
 
+            // DoubleTap / Hold trigger modes — an older build's JsonStringEnumConverter THROWS
+            // on the unknown enum string: the local profile.json fails to load entirely (a
+            // _loadFailures toast, worse than divergence), and inside a .trprofile envelope the
+            // parse failure bricks the WHOLE batch with a generic "corrupt file" error before
+            // the per-entry compat gate ever runs. The pin can't soften either failure (it is
+            // metadata inside the same JSON) — it exists so the export carries an honest
+            // AppMinVersion. Introduced after 2.8.1 — bump at release.
+            (p => p.TriggerMode == TriggerMode.DoubleTap || p.TriggerMode == TriggerMode.Hold,
+                new Version(2, 8, 1), "TriggerMode double-tap/hold"),
+
+            // Mouse X-button hotkey ("XButton1"/"XButton2" in CustomHotkey) — an older build's
+            // mouse hook never decodes WM_XBUTTON*, so the hotkey is silently dead (profile
+            // loads fine, trigger never fires). Same divergence class as the mode pins.
+            // Introduced after 2.8.1 — bump at release.
+            (p => p.CustomHotkey?.Contains("XButton", StringComparison.OrdinalIgnoreCase) == true,
+                new Version(2, 8, 1), "Mouse-button hotkey"),
+
             // WaitPixelColor + the pixel:* bridge messages were introduced in 2.1.4.
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "WaitPixelColor", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 1, 4), "WaitPixelColor"),
@@ -147,6 +164,14 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "RunProfile", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 0, 0), "RunProfile (profile chaining)"),
 
+            // RunProfile-over-data (data-loop Phase C) — an older build drops the unknown
+            // RunOverData property and runs the sub-profile ONCE instead of once per data row
+            // (silent divergence; a 40-row batch quietly becomes 1). Property-level Detect so
+            // plain RunProfile rows keep the 2.0.0 floor. Introduced after 2.8.1 — bump at release.
+            (p => p.Actions.Any(a => string.Equals(a.ActionType, "RunProfile", StringComparison.OrdinalIgnoreCase)
+                && a.RunOverData == true),
+                new Version(2, 8, 1), "RunProfile over data"),
+
             // Combined-mode single clicks (LeftClick/RightClick/MiddleClick — press+release in one
             // row) shipped in 2.4.0. Builds without the replay switch cases silently skip the click,
             // so pin the profile the moment one appears. Kept in lockstep with the app version so an
@@ -218,6 +243,16 @@ namespace TrueReplayer.Services
             // leaving the base action unpinned.
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "SetVariable", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 6, 12), "Set Variable"),
+
+            // Automation trigger (interval / schedule / condition self-firing) — an older build
+            // has no Triggers property, so the config is DROPPED at load and any save from that
+            // build rewrites the profile without it (no JsonExtensionData anywhere): the entire
+            // automation silently evaporates. That is the destroy-on-round-trip class of
+            // divergence this matrix exists for (the NotifyOnLapComplete no-pin precedent does
+            // NOT apply — that field is a cosmetic notice, this is a whole feature's config).
+            // Introduced after 2.8.1 — bump at release.
+            (p => p.Triggers != null,
+                new Version(2, 8, 1), "Automation trigger"),
 
             // Restore Size split from Restore Position in 2.0.5; older builds only honour Position.
             (p => p.RestoreSize,

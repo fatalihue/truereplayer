@@ -18,6 +18,8 @@ A referência completa de tudo o que o TrueReplayer pode fazer. Primeira vez por
 - [Blocos condicionais (If / Else / EndIf)](#blocos-condicionais-if--else--endif)
 - [Perfis e pastas](#perfis-e-pastas)
 - [Hotkeys e hotstrings](#hotkeys-e-hotstrings)
+- [Automação (disparo sem hotkey)](#automação-disparo-sem-hotkey)
+- [Remaps de tecla](#remaps-de-tecla)
 - [Alvo de janela e coordenadas relativas](#alvo-de-janela-e-coordenadas-relativas)
 - [Automação multi-janela (Activate Window)](#automação-multi-janela-activate-window)
 - [Clicker mode (auto-clicker)](#clicker-mode-auto-clicker)
@@ -180,8 +182,63 @@ Vincule um perfil a um gatilho para que ele rode sem abrir o aplicativo.
 | **On Release** | Dispara uma vez quando a tecla é solta (o pressionamento é absorvido enquanto segurada). |
 | **While Pressed** | Repete a macro continuamente enquanto pressionada; para ao soltar (autofire). |
 | **Toggle** | O primeiro pressionamento inicia (respeitando os loops do perfil); o segundo para. |
+| **Double-tap** | Dispara uma vez com dois toques rápidos (~0,4 s). Toques únicos não fazem nada. |
+| **Hold (long-press)** | Dispara **uma vez** após segurar a tecla ~0,6 s; um toque rápido não faz nada. Diferente do *While Pressed*, a execução **não** para ao soltar. |
 
 > Os modos de gatilho se aplicam apenas às **hotkeys**. As **hotstrings** sempre disparam quando digitadas.
+
+**Botões laterais do mouse.** Os dois botões laterais (**XButton1** / **XButton2**, sozinhos ou com
+modificadores) podem ser capturados como hotkeys igual a teclas, com todos os modos acima — ideais
+para macros de jogo cheias de cliques. A roda (`ScrollUp`/`ScrollDown`) também funciona, mas sempre
+dispara em On Press.
+
+---
+
+## Automação (disparo sem hotkey)
+
+Uma **Automação** dispara um perfil sozinha — sem apertar hotkey. Gerencie em
+**Settings → Global → Automation → Manage** (ou no menu da bandeja → **Automations…**).
+Três tipos de gatilho por perfil (uma automação cada):
+
+| Tipo | Dispara |
+| --- | --- |
+| **Interval** | A cada N segundos/minutos (o primeiro disparo vem um intervalo após armar). |
+| **Schedule** | Em um horário (`HH:mm`) nos dias da semana que você escolher. |
+| **Condition** | Quando uma condição vigiada **fica verdadeira**: uma janela abre (ou vem ao primeiro plano), um processo inicia, um arquivo aparece, um pixel bate com uma cor, uma imagem aparece na tela, ou o clipboard muda. |
+
+Como se comporta:
+
+- **Armed** — só automações armadas rodam; elas se re-armam sozinhas ao iniciar o app, então
+  *Run on Startup* + *Start minimized* transformam o TrueReplayer em um daemon de bandeja.
+  Armar é **local da sua máquina**: perfis importados, duplicados ou copiados sempre chegam desarmados.
+- **Uma execução por vez** — um disparo é **pulado** (e contado no painel) enquanto um replay ou
+  gravação roda, enquanto há edições não salvas na grade, ou enquanto um diálogo está aberto.
+  Uma automação nunca descarta seu trabalho não salvo.
+- **Disparos de condição** são por borda por padrão: a condição precisa voltar a ficar falsa antes
+  do próximo disparo (mude para **Continuous** para re-disparar a cada cooldown enquanto verdadeira).
+  Um **Cooldown** (padrão 30 s) espaça os disparos; o vigia de clipboard ignora o tráfego de
+  clipboard produzido pelo próprio TrueReplayer.
+- **Chave mestra** — Settings → Global → Automation, espelhada no menu da bandeja
+  (**Enable Automations**). O tooltip da bandeja mostra quantas automações estão armadas.
+- Perfis sem janela-alvo agem sobre a janela que estiver em foco quando o gatilho disparar —
+  o editor avisa. Prefira perfis com alvo (ou *Activate Window* como primeira ação).
+
+---
+
+## Remaps de tecla
+
+**Settings → Global → Key Remaps** — uma camada 1:1 sempre ativa, independente de perfis:
+
+- **Remapear uma tecla** — ex. `CapsLock → Esc`: em todo o sistema, enquanto o TrueReplayer roda,
+  apertar CapsLock digita Esc. Botões laterais do mouse (**XButton1/2**) também podem ser origem
+  (botão lateral → tecla).
+- **Desativar uma tecla** — mapeie para nada.
+- Remaps **pausam automaticamente durante a gravação** de macro (a gravação captura as teclas
+  físicas) e podem ser pausados globalmente pela bandeja (**Enable Key Remaps**) — a saída de
+  emergência só com o mouse se um remap atrapalhar a digitação.
+- Hotstrings seguem o fluxo **remapeado** (o que os apps veem), e combos tratam um modificador
+  remapeado como a tecla que ele virou. Uma tecla usada como **origem** de remap não pode ser
+  também hotkey de perfil — o remap vence.
 
 ---
 
@@ -316,6 +373,15 @@ Ao fazer loop sobre os dados, **On row error** decide o que uma linha com falha 
 ### Transformações de célula — `{row:column:mods}`
 
 Um token `{row:column}` aceita a **mesma cadeia de modificadores do `{clipboard}`** (veja [Send Text](#send-text)) — acrescente os modificadores após o nome da coluna, ex.: `{row:name:trim:upper}`. Clique num chip `{row:…}` dentro de um editor de texto para configurá-los num popover com um preview ao vivo do valor da primeira linha, ou digite a cadeia à mão. O pipeline roda numa ordem fixa: **trim → operações de lista (range / lines / sort / dedupe / reverse / join) → extração (line / word) → limite (first / last) → caixa (upper / lower / sentence / title)**.
+
+### Rodar um sub-perfil uma vez por linha
+
+Uma ação **Run Profile** pode marcar **Run once per data row**: o perfil *chamado* roda uma vez
+por linha da **própria** tabela de dados dele, com `{row:column}` resolvendo daquela linha — assim
+uma macro pai faz o setup uma vez e depois processa um sub-perfil em lote sobre uma lista no meio
+da execução (Repeat é ignorado enquanto isso está ligado). Se a tabela do perfil chamado optar por
+**Skip row**, linhas com erro são puladas e resumidas exatamente como num data loop de nível
+superior; sem tabela, o sub-perfil apenas roda uma vez.
 
 ---
 

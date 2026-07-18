@@ -66,12 +66,15 @@ const defaultSettings = {
   runEndFlash: false,
   runEndSound: false,
   runAsAdmin: false,
+  automationEnabled: true,
+  remaps: { enabled: true, entries: [] as { from: string; to: string; enabled: boolean }[] },
 };
 
 const initialState: AppState = {
   status: 'ready',
   actions: [],
   dataTable: { headers: [], rows: [], loopOverData: false, onRowError: 'halt', notifyOnLapComplete: true },
+  automation: { enabled: true, entries: [] },
   highlightedActionIndex: null,
   profiles: [],
   activeProfile: null,
@@ -110,6 +113,7 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
         ...message.payload,
         settings: { ...initialState.settings, ...(message.payload.settings ?? {}) },
         profileOrder: message.payload.profileOrder ?? initialState.profileOrder,
+        automation: message.payload.automation ?? initialState.automation,
       };
     case 'status:changed':
       // New run starting → reset Clicker counter to zero so we don't carry over the
@@ -148,6 +152,8 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
       return { ...state, actions: message.payload.actions, highlightedActionIndex: null };
     case 'data:table':
       return { ...state, dataTable: message.payload };
+    case 'automation:state':
+      return { ...state, automation: message.payload ?? state.automation };
     case 'actions:highlight':
       return { ...state, highlightedActionIndex: message.payload.index };
     case 'profiles:updated':

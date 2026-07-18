@@ -402,7 +402,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const prevProfileRef = useRef(activeProfile);
   const wasRecording = useRef(false);
   const [sendTextEdit, setSendTextEdit] = useState<{ index: number; text: string; html?: string | null; mode?: 'rich' | 'markdown' | 'plain' | 'discord' } | null>(null);
-  const [runProfileEdit, setRunProfileEdit] = useState<{ index: number; profileName: string; repeatCount: number } | null>(null);
+  const [runProfileEdit, setRunProfileEdit] = useState<{ index: number; profileName: string; repeatCount: number; runOverData: boolean } | null>(null);
   // Editing a Keystroke OR HoldKey row reopens the unified KeystrokeCaptureDialog —
   // these two ActionTypes share the same edit surface now that Press/Hold is a mode
   // toggle inside the dialog. `index` is all we need; the dialog reads the row's
@@ -741,6 +741,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         index: idx,
         profileName: rowAction.key,
         repeatCount: rowAction.repeatCount ?? 1,
+        runOverData: rowAction.runOverData ?? false,
       });
     } else if (rowAction.actionType === 'Keystroke' || rowAction.actionType === 'HoldKey') {
       // Both share the unified Send Keystroke dialog — it seeds Press / Hold
@@ -1980,9 +1981,14 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           col's truncation point and hide the repetition from the user.
                           Only renders when count > 1 (default 1 = no badge). */}
                       {(action.actionType === 'Keystroke' || action.actionType === 'RunProfile')
-                        && (action.repeatCount ?? 1) > 1 && (
+                        && (action.repeatCount ?? 1) > 1 && !action.runOverData && (
                           <span className="ml-0.5 opacity-75">×{action.repeatCount}</span>
                         )}
+                      {/* Phase C indicator — the sub-profile runs once per row of ITS data
+                          table (Repeat is ignored, so the ×N badge above yields to this). */}
+                      {action.actionType === 'RunProfile' && action.runOverData && (
+                        <span className="ml-0.5 opacity-75">{tt('· per row', '· por linha')}</span>
+                      )}
                       {/* Focus-click indicator — a small icon inside the Action pill (never a new
                           column) marking combined clicks that replay twice to focus a small
                           target. Only renders when the per-action flag is on, so off-rows stay
@@ -2389,10 +2395,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
       {runProfileEdit && (
         <RunProfileDialog
-          initial={{ profileName: runProfileEdit.profileName, repeatCount: runProfileEdit.repeatCount }}
+          initial={{ profileName: runProfileEdit.profileName, repeatCount: runProfileEdit.repeatCount, runOverData: runProfileEdit.runOverData }}
           excludeProfileName={activeProfile ?? undefined}
-          onConfirm={(profileName, repeatCount) => {
-            send({ type: 'actions:editRunProfile', payload: { index: runProfileEdit.index, profileName, repeatCount } });
+          onConfirm={(profileName, repeatCount, runOverData) => {
+            send({ type: 'actions:editRunProfile', payload: { index: runProfileEdit.index, profileName, repeatCount, runOverData } });
             setRunProfileEdit(null);
           }}
           onClose={() => setRunProfileEdit(null)}
@@ -2406,8 +2412,8 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         <RunProfileDialog
           excludeProfileName={activeProfile ?? undefined}
           initial={runProfileInsert.profileName ? { profileName: runProfileInsert.profileName, repeatCount: 1 } : undefined}
-          onConfirm={(profileName, repeatCount) => {
-            send({ type: 'actions:addRunProfile', payload: { profileName, repeatCount, insertIndex: runProfileInsert.insertIndex } });
+          onConfirm={(profileName, repeatCount, runOverData) => {
+            send({ type: 'actions:addRunProfile', payload: { profileName, repeatCount, runOverData, insertIndex: runProfileInsert.insertIndex } });
             setRunProfileInsert(null);
           }}
           onClose={() => setRunProfileInsert(null)}

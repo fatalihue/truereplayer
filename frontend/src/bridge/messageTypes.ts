@@ -37,6 +37,9 @@ export interface ActionItem {
   // small icon in the Action pill (no grid column); toggled from the row context menu.
   isFocusClick?: boolean;
   repeatCount?: number;
+  // RunProfile, data-loop Phase C: run the called profile once per row of ITS OWN Data
+  // table ({row:col} resolves per row inside the sub). Replaces Repeat while on.
+  runOverData?: boolean;
   // Keystroke action: ms gap between consecutive press cycles when repeatCount > 1.
   // null/undefined = use the global default (30 ms; matches ActionItem.DefaultRepeatDelayMs
   // on the C# side). Explicit 0 = back-to-back. Ignored when repeatCount == 1.
@@ -200,6 +203,9 @@ export interface ProfileEntry {
   restoreSize: boolean;
   triggerMode: TriggerMode;
   isDisabled: boolean;
+  // Automation badge scalars — sidebar renders a Zap badge on armed profiles.
+  hasTrigger?: boolean;
+  triggerArmed?: boolean;
   // ── Sharing metadata mirror (read-only on this surface; edit via profile:setMetadata) ──
   // Pushed in every profiles:updated payload so the sidebar can render icon/tag badges
   // without an extra round-trip per profile. Null fields mean "not set" — UI renders a
@@ -281,7 +287,7 @@ export interface TagListEntry {
 /** Per-profile conflict resolution sent with profile:confirmImport. */
 export type ImportConflictResolution = 'overwrite' | 'rename' | 'skip';
 
-export type TriggerMode = 'onPress' | 'onRelease' | 'whilePressed' | 'toggle';
+export type TriggerMode = 'onPress' | 'onRelease' | 'whilePressed' | 'toggle' | 'doubleTap' | 'hold';
 
 export interface ProfileFolder {
   name: string;
@@ -380,6 +386,58 @@ export interface SettingsState {
   runEndFlash: boolean;
   runEndSound: boolean;
   runAsAdmin: boolean;
+  // Automation master switch — armed triggers only fire while this is on.
+  automationEnabled: boolean;
+  // Key remap layer (remaps.json sidecar). to: '' = disable the key.
+  remaps: { enabled: boolean; entries: { from: string; to: string; enabled: boolean }[] };
+}
+
+// ── Automation (trigger daemon) ──
+
+/** Per-profile automation trigger config — mirrors ProfileTriggerConfig on the backend. */
+export interface TriggerConfig {
+  kind: 'interval' | 'schedule' | 'condition';
+  armed: boolean;
+  intervalSeconds: number;
+  timeOfDay: string | null;
+  daysOfWeek: number;
+  conditionType: string | null;
+  windowProcessName: string | null;
+  windowTitle: string | null;
+  windowTitleMatchMode: string | null;
+  windowMatchForegroundOnly: boolean;
+  filePath: string | null;
+  pixelX: number;
+  pixelY: number;
+  pixelColor: string | null;
+  pixelTolerance: number;
+  imagePath: string | null;
+  imageConfidence: number;
+  clipboardPattern: string | null;
+  cooldownSeconds: number;
+  retrigger: string | null;
+}
+
+/** One trigger-bearing profile: full config + live runtime status. */
+export interface AutomationEntry {
+  profile: string;
+  isDisabled: boolean;
+  hasEffectiveTarget: boolean;
+  trigger: TriggerConfig;
+  running: boolean;
+  conditionTrue: boolean;
+  nextDueAt: string | null;
+  lastFiredAt: string | null;
+  fireCount: number;
+  skippedBusy: number;
+  skippedDirty: number;
+  skippedModal: number;
+  lastResult: string | null;
+}
+
+export interface AutomationState {
+  enabled: boolean;
+  entries: AutomationEntry[];
 }
 
 export interface ButtonStates {
@@ -401,6 +459,8 @@ export interface AppState {
   actions: ActionItem[];
   // Active profile's data-loop table (empty when unused). Kept in sync via data:table.
   dataTable: ProfileDataTable;
+  // Automation daemon state (master switch + trigger-bearing profiles w/ live status).
+  automation: AutomationState;
   highlightedActionIndex: number | null;
   profiles: ProfileEntry[];
   activeProfile: string | null;
@@ -487,6 +547,12 @@ export type IncomingMessage =
   | { type: 'status:changed'; payload: { status: AppState['status'] } }
   | { type: 'actions:updated'; payload: { actions: ActionItem[] } }
   | { type: 'data:table'; payload: ProfileDataTable }
+  | { type: 'automation:state'; payload: AutomationState }
+  // Tray "Automations…" clicked — restore + open the Automation panel.
+  | { type: 'automation:open'; payload: Record<string, never> }
+  // Reply to automation:captureImage (region overlay). imagePath is the saved PNG's
+  // per-profile relative path, ready to store on the trigger config.
+  | { type: 'automation:imageCaptured'; payload: { requestId: string; cancelled: boolean; imagePath?: string } }
   | { type: 'actions:highlight'; payload: { index: number } }
   | { type: 'profiles:updated'; payload: { profiles: ProfileEntry[]; activeProfile: string | null; profileOrder: ProfileOrderData } }
   | { type: 'settings:loaded'; payload: { settings: SettingsState } }
@@ -556,7 +622,7 @@ export type IncomingMessage =
   // already composed (e.g. "Win+Q", "Ctrl+Shift+F5", "ScrollUp") and the hook has
   // swallowed the underlying OS event so it doesn't trigger Start menu / shell
   // shortcuts. Hotkey dialogs subscribe to this to fill the chip.
-  | { type: 'hotkey:captured'; payload: { combo: string } }
+  | { type: 'hotkey:captured'; payload: { combo: string; owner?: string | null } }
   // ── Sharing-metadata messages ──
   // Pushed in response to profile:import (replaces the old auto-execute flow). The frontend
   // shows the security warning if requiresAcknowledgement, then the Import Preview dialog,
@@ -581,6 +647,14 @@ export type OutgoingMessage =
   | { type: 'ui:ready'; payload: Record<string, never> }
   | { type: 'data:request'; payload: Record<string, never> }
   | { type: 'data:save'; payload: ProfileDataTable }
+  | { type: 'automation:request'; payload: Record<string, never> }
+  // trigger=null removes the automation from the profile.
+  | { type: 'automation:save'; payload: { profile: string; trigger: TriggerConfig | null } }
+  | { type: 'automation:setArmed'; payload: { profile: string; armed: boolean } }
+  | { type: 'automation:setEnabled'; payload: { enabled: boolean } }
+  | { type: 'automation:captureImage'; payload: { requestId: string; profile: string } }
+  // Whole-list save of the key remap layer (capped at 32 entries backend-side).
+  | { type: 'remap:save'; payload: { enabled: boolean; remaps: { from: string; to: string; enabled: boolean }[] } }
   | { type: 'recording:toggle'; payload: { insertIndex?: number } }
   | { type: 'replay:toggle'; payload: { loopEnabled: boolean; loopCount: string; intervalEnabled: boolean; intervalText: string } }
   | { type: 'replay:resume'; payload: Record<string, never> }
@@ -716,8 +790,8 @@ export type OutgoingMessage =
   // The bridge handler validates bounds; replacement is the new row(s) to splice
   // in at startIndex after removing `count` existing rows.
   | { type: 'actions:replaceRange'; payload: { startIndex: number; count: number; replacement: Partial<ActionItem>[] } }
-  | { type: 'actions:addRunProfile'; payload: { profileName: string; repeatCount: number; insertIndex?: number } }
-  | { type: 'actions:editRunProfile'; payload: { index: number; profileName: string; repeatCount: number } }
+  | { type: 'actions:addRunProfile'; payload: { profileName: string; repeatCount: number; runOverData?: boolean; insertIndex?: number } }
+  | { type: 'actions:editRunProfile'; payload: { index: number; profileName: string; repeatCount: number; runOverData?: boolean } }
   | { type: 'waitimage:recapture'; payload: { index: number } }
   | { type: 'waitimage:configureSearchRegion'; payload: { requestId: string; x?: number; y?: number; w?: number; h?: number } }
   | { type: 'clicker:configureArea'; payload: { requestId: string } }
@@ -725,7 +799,9 @@ export type OutgoingMessage =
   | { type: 'waitimage:cropReference'; payload: { index: number; x: number; y: number; w: number; h: number } }
   | { type: 'image:testMatch'; payload: { requestId: string; imagePath: string; confidence: number; searchRegion?: { x: number; y: number; w: number; h: number } } }
   | { type: 'mouse:pickPosition'; payload: { requestId: string } }
-  | { type: 'pixel:pickColor'; payload: { requestId: string } }
+  // absolute: skip the profile-relative translation (automation watchers sample
+  // virtual-screen coords with no window context).
+  | { type: 'pixel:pickColor'; payload: { requestId: string; absolute?: boolean } }
   | { type: 'pixel:testMatch'; payload: { requestId: string; x: number; y: number; hex: string; tolerance: number } }
   | { type: 'selection:changed'; payload: { indices: number[] } }
   | { type: 'window:alwaysOnTop'; payload: { enabled: boolean } }

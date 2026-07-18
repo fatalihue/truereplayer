@@ -190,11 +190,22 @@ namespace TrueReplayer.Services
                 return "TrueReplayer — Replaying…";
             if (_runState == "recording")
                 return "TrueReplayer — Recording…";
+            string line;
             if (settings.UseCursorClick)
-                return "TrueReplayer — Clicker mode";
-            if (!UserProfile.Current.ProfileKeyEnabled)
-                return "TrueReplayer — Replay mode (profile keys paused)";
-            return "TrueReplayer — Replay mode";
+                line = "TrueReplayer — Clicker mode";
+            else if (!UserProfile.Current.ProfileKeyEnabled)
+                line = "TrueReplayer — Replay mode (profile keys paused)";
+            else
+                line = "TrueReplayer — Replay mode";
+            // Armed-watcher count — the tray is the daemon's only always-visible surface.
+            // Configured count (not live loops) so the "paused" hint still shows when the
+            // master switch is off. szTip caps at 127 chars; base lines are short.
+            int armed = TriggerService.Instance?.ConfiguredArmedCount ?? 0;
+            if (armed > 0)
+                line += settings.AutomationEnabled
+                    ? $" · {armed} automation{(armed == 1 ? "" : "s")} armed"
+                    : " · automations paused";
+            return line;
         }
 
         private static void ReleaseCurrentIcon()
@@ -287,6 +298,11 @@ namespace TrueReplayer.Services
         public static Action? OnReloadUI { get; set; }
         public static Action? OnOpenDevTools { get; set; }
         public static Action? OnOpenLogsFolder { get; set; }
+        /// Restore the window + open the Automation panel (daemon usage: everything armed
+        /// lives in the tray; this is the one-click way back to the manager).
+        public static Action? OnOpenAutomations { get; set; }
+        /// Flip the global automation master switch (persist-immediately handled by MainWindow).
+        public static Action? OnToggleAutomations { get; set; }
 
         public static async void ShowContextMenu()
         {
@@ -308,6 +324,16 @@ namespace TrueReplayer.Services
             // Mode switch — mirrors the in-app Macro/Clicker toggle and the ScrollLock hotkey.
             AppendMenu(hMenu, MF_STRING | (!isClicker ? MF_CHECKED : 0), 11, "Macro Mode");
             AppendMenu(hMenu, MF_STRING | (isClicker ? MF_CHECKED : 0), 12, "Clicker Mode");
+            AppendMenu(hMenu, MF_SEPARATOR, 0, null);
+            // Automation daemon controls — the armed watchers keep running while the app sits
+            // in the tray, so their master switch must be reachable without restoring the UI.
+            bool automationEnabled = AppSettingsManager.Load().AutomationEnabled;
+            AppendMenu(hMenu, MF_STRING, 13, "Automations…");
+            AppendMenu(hMenu, MF_STRING | (automationEnabled ? MF_CHECKED : 0), 14, "Enable Automations");
+            // Key-remap kill switch — a bad remap can make typing painful, so the escape
+            // hatch must be reachable by MOUSE alone, without the main window.
+            bool remapsEnabled = RemapService.Current.Enabled;
+            AppendMenu(hMenu, MF_STRING | (remapsEnabled ? MF_CHECKED : 0), 15, "Enable Key Remaps");
             AppendMenu(hMenu, MF_SEPARATOR, 0, null);
             // ── Window category — temporarily disabled (kept for easy restore).
             // AppendMenu(hMenu, MF_STRING | (isAlwaysOnTop ? MF_CHECKED : 0), 5, "Always On Top");
@@ -377,6 +403,21 @@ namespace TrueReplayer.Services
             //     AppSettingsManager.Save(settings);
             //     OnTraySettingChanged?.Invoke();
             // }
+            else if (cmd == 13)
+            {
+                OnOpenAutomations?.Invoke();
+            }
+            else if (cmd == 14)
+            {
+                OnToggleAutomations?.Invoke();
+            }
+            else if (cmd == 15)
+            {
+                // Persists + republishes the hook snapshot itself; the bridge push (so the
+                // Settings toggle mirrors) rides the same callback MainWindow wires.
+                RemapService.SetEnabled(!remapsEnabled);
+                OnTraySettingChanged?.Invoke();
+            }
             else if (cmd == 8)
             {
                 OnReloadUI?.Invoke();
@@ -606,6 +647,7 @@ namespace TrueReplayer.Services
 
         private void ForceExit()
         {
+            TriggerService.Instance?.StopAll();
             InputHookManager.Stop();
             TrayIconService.RemoveTrayIcon();
             Microsoft.UI.Xaml.Application.Current.Exit();
