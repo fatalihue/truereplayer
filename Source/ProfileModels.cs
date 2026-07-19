@@ -52,10 +52,10 @@ namespace TrueReplayer.Models
         [JsonIgnore]
         public string ModeToggleHotkey { get; set; } = "ScrollLock";
 
-        // Capture-selection → clipboard slot ({clip:1}…{clip:9}, sequential). Empty = disabled
-        // (deliberate default — see AppSettings.CaptureSlotHotkey).
+        // Capture-selection → clipboard slot ({clip:1}…{clip:9}, sequential). Empty = disabled;
+        // the shipped default is Win+Ctrl+C — see AppSettings.CaptureSlotHotkey.
         [JsonIgnore]
-        public string CaptureSlotHotkey { get; set; } = "";
+        public string CaptureSlotHotkey { get; set; } = "Win+Ctrl+C";
 
         [JsonIgnore]
         public bool RecordMouse { get; set; } = true;

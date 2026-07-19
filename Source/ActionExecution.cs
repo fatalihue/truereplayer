@@ -3887,8 +3887,13 @@ namespace TrueReplayer.Services
                 var tokenText = System.Net.WebUtility.HtmlDecode(m.Groups[1].Value);
                 var inner = tokenText.Trim('{', '}');
                 var name = inner.Split(':')[0];
+                // SpecialKeyPlaceholders is keyed WITH the braces ("{enter}"), so the lookup
+                // has to re-wrap the bare name exactly like ParseSendTextSegments does. Passing
+                // the bare "enter" never matched, so no key placeholder was ever stripped from
+                // the rich flavor and every {enter}/{tab}/… pasted as literal text next to the
+                // key press it was supposed to BE.
                 if (string.Equals(name, "delay", StringComparison.OrdinalIgnoreCase)
-                    || SpecialKeyPlaceholders.ContainsKey(name))
+                    || SpecialKeyPlaceholders.ContainsKey("{" + name + "}"))
                     return string.Empty;
                 return tokenText;
             });

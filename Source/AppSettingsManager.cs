@@ -93,10 +93,13 @@ namespace TrueReplayer.Services
             public string ProfileKeyToggleHotkey { get; set; } = "Pause";
             public string ForegroundHotkey { get; set; } = "Insert";
             public string ModeToggleHotkey { get; set; } = "ScrollLock";
-            // Capture-selection → clipboard slot. Default EMPTY = disabled: unlike the trio
-            // above, a fresh default here would silently swallow a key system-wide for a
-            // feature the user hasn't opted into. Assigned in Settings → Global → Hotkeys.
-            public string CaptureSlotHotkey { get; set; } = "";
+            // Capture-selection → clipboard slot. Win+Ctrl+C by owner request (2026-07-19):
+            // a three-key Win combo is safe to claim by default — nothing in the shell binds
+            // it out of the box, and the low-level hook suppresses the shell's own handling
+            // anyway. (It used to default to empty precisely to avoid swallowing a key
+            // system-wide; a Win-modified combo is the compromise.) Clearable in
+            // Settings → Keys → Hotkeys, where empty still means disabled.
+            public string CaptureSlotHotkey { get; set; } = "Win+Ctrl+C";
             public bool ProfileKeyEnabled { get; set; } = true;
             public bool BrowserSelectorEnabled { get; set; } = true;
             // Automation master switch — armed per-profile triggers only run while this is on.

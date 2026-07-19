@@ -724,15 +724,18 @@ function HotkeyInput({ value, settingKey, onChange, width = FIELD_W, allowClear 
   if (!allowClear) return input;
   // The clear affordance OVERLAYS the input's right edge inside a wrapper of the same
   // fixed width, so the field stays column-aligned with the plain hotkey inputs above
-  // and nothing reflows when the button mounts/unmounts.
+  // and nothing reflows when the button mounts/unmounts. It stays INVISIBLE until the
+  // row is hovered (owner request: the resting panel should read as one clean column of
+  // key values) — opacity rather than mounting, so the combo underneath never reflows.
+  // focus-visible keeps it reachable by keyboard, where there is no hover to give.
   return (
-    <div className={`relative ${width}`}>
+    <div className={`group relative ${width}`}>
       {input}
       {value !== '' && !isFocused && (
         <button
           type="button"
           onClick={() => onChange(settingKey, '')}
-          className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+          className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-elevated opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-[opacity,color,background-color]"
           data-tip={tt('Clear (disables this hotkey)', 'Limpar (desativa este hotkey)')}
         >
           <X size={11} />
