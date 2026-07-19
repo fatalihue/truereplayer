@@ -992,10 +992,13 @@ export function Toolbar(_props: ToolbarProps) {
       {showRunProfileDialog && (
         <RunProfileDialog
           excludeProfileName={activeProfile ?? undefined}
-          onConfirm={(profileName, repeatCount) => {
+          onConfirm={(profileName, repeatCount, runOverData) => {
             const sel = selectionRef.current;
             const insertIndex = sel.size > 0 ? Math.min(...sel) : undefined;
-            send({ type: 'actions:addRunProfile', payload: { profileName, repeatCount, insertIndex } });
+            // runOverData must ride along: dropping it here silently discarded the
+            // dialog's "Run once per data row" tick on the toolbar-add path, while
+            // the grid's add/edit paths (ActionTable) carried it correctly.
+            send({ type: 'actions:addRunProfile', payload: { profileName, repeatCount, runOverData, insertIndex } });
             setShowRunProfileDialog(false);
           }}
           onClose={() => setShowRunProfileDialog(false)}
