@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Repeat2 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
+import { useTt } from '../state/LanguageContext';
 import { NumberInput } from './common/NumberInput';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
@@ -23,6 +24,7 @@ export interface RunProfileDialogProps {
  */
 export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClose }: RunProfileDialogProps) {
   const { profiles } = useAppState();
+  const tt = useTt();
   const [profileName, setProfileName] = useState(initial?.profileName ?? '');
   const [repeatCount, setRepeatCount] = useState(initial?.repeatCount ?? 1);
   const [runOverData, setRunOverData] = useState(initial?.runOverData ?? false);
@@ -69,7 +71,7 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
       // one-keystroke tweak — a stray backdrop click discards nothing hard to redo,
       // so backdrop-dismiss stays enabled (the default).
       closeOnBackdrop={true}
-      footerHint="Enter to confirm · Esc to cancel"
+      footerHint={tt('Enter to confirm · Esc to cancel', 'Enter confirma · Esc cancela')}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -93,9 +95,9 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
       <div className="px-4 py-4 flex flex-col gap-4">
         {eligibleProfiles.length === 0 ? (
           <div className="text-xs text-text-tertiary py-4 text-center">
-            No other profiles available to chain.
+            {tt('No other profile to call.', 'Nenhum outro perfil para chamar.')}
             <br />
-            Create another profile first.
+            {tt('Create one first.', 'Crie um perfil antes.')}
           </div>
         ) : (
           <>
@@ -130,11 +132,12 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
                     max={999}
                     inputWidth="w-16"
                     inputHeight="h-8"
-                    ariaLabel="Repeat count"
+                    ariaLabel={tt('Repeat count', 'Número de repetições')}
                   />
                 </span>
                 <span className="text-xs text-text-tertiary">
-                  {repeatCount === 1 ? 'time' : 'times'} per call
+                  {tt(repeatCount === 1 ? 'time per call' : 'times per call',
+                      repeatCount === 1 ? 'vez por chamada' : 'vezes por chamada')}
                 </span>
               </div>
             </div>
@@ -146,15 +149,15 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
                 onChange={(e) => setRunOverData(e.target.checked)}
               />
               <span className="text-xs text-text-primary"
-                data-tip="Iterates the called profile's own Data table: one run per row, with {row:column} resolving from that row. Replaces Repeat. Falls back to a single run if it has no data.">
+                data-tip={tt('Runs the called profile once per row of ITS own Data table, with {row:column} coming from that row. Overrides Repeat; with no table it just runs once.',
+                  'Roda o perfil chamado uma vez por linha da tabela de dados DELE, com {row:column} vindo daquela linha. Substitui o Repeat; sem tabela, roda uma vez só.')}>
                 Run once per data row
               </span>
             </label>
 
             <div className="text-[11px] text-text-tertiary leading-relaxed bg-bg-card border border-border-subtle rounded px-2.5 py-2">
-              Runs the profile's actions inline here. Its own Loops / Interval
-              are ignored — use Repeat above. Disabled profiles are skipped;
-              cycles and 5+ level chains are blocked.
+              {tt('The called profile’s actions run right here. Its own Loops / Interval are ignored — use Repeat above. Disabled profiles are skipped, and chains deeper than 5 levels are blocked.',
+                'As ações do perfil chamado rodam aqui mesmo. Os Loops / Interval dele são ignorados — use o Repeat acima. Perfis desativados são pulados, e cadeias com mais de 5 níveis são bloqueadas.')}
             </div>
           </>
         )}

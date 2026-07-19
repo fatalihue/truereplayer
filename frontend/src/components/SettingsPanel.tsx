@@ -1248,8 +1248,8 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             <Section title="Automation">
               <SettingRow
                 label="Enable Automations"
-                tooltip={tt('Master switch — armed per-profile triggers (interval / schedule / condition) only fire while this is on. Also in the tray menu.',
-                  'Chave mestra — gatilhos armados por profile (intervalo / horário / condição) só disparam com isto ligado. Também no menu da bandeja.')}
+                tooltip={tt('Turns every armed automation on or off. Also in the tray menu.',
+                  'Liga e desliga todas as automações armadas. Também no menu da bandeja.')}
               >
                 <CompactToggle
                   isOn={settings.automationEnabled}

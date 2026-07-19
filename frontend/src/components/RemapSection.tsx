@@ -146,8 +146,8 @@ export function RemapSection() {
     <div className="flex flex-col gap-1.5 px-2.5 py-1">
       {remaps.entries.length === 0 && !addOpen && (
         <div className="text-[11px] text-text-tertiary leading-relaxed">
-          {tt('No remaps. A remap turns one key into another everywhere (CapsLock → Esc, mouse side button → a key), or disables it.',
-            'Nenhum remap. Um remap transforma uma tecla em outra em todo o sistema (CapsLock → Esc, botão lateral do mouse → uma tecla), ou a desativa.')}
+          {tt('Nothing yet. A remap turns one key into another — CapsLock → Esc — or disables it.',
+            'Nada por aqui. Um remap troca uma tecla por outra — CapsLock → Esc — ou desativa a tecla.')}
         </div>
       )}
 
@@ -193,7 +193,6 @@ export function RemapSection() {
             type="button"
             onClick={() => saveList(remaps.entries.filter((_, j) => j !== i))}
             className="shrink-0 h-full px-1.5 flex items-center text-text-tertiary hover:text-text-primary transition-colors"
-            data-tip={tt('Remove remap', 'Remover remap')}
           >
             <X size={11} />
           </button>
