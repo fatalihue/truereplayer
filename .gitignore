@@ -30,3 +30,17 @@ frontend/dist/
 
 # Mockups (design reference only)
 mockup/
+
+# Debug symbols. NativeHost/publish/*.exe IS tracked on purpose — the CopyNativeHost
+# target copies it into the output dir for the Chrome extension — but the .pdb only
+# carries a SourceLink map of the build machine's absolute paths.
+*.pdb
+
+# Visual Studio MSIX packaging scaffolding (the app ships via Velopack, not AppX)
+BundleArtifacts/
+
+# Internal QA checklists — manual test plans written against a local build.
+# They name unreleased defects and read badly in a public repo; keep them outside it.
+TESTE-*.md
+TEST-GUIDE-*.md
+*-CHECKLIST.md

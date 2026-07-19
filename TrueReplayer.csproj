@@ -234,7 +234,6 @@
     <AppxSymbolPackageEnabled>False</AppxSymbolPackageEnabled>
     <GenerateTestArtifacts>True</GenerateTestArtifacts>
     <AppxBundle>Never</AppxBundle>
-    <AppInstallerUri>C:\Users\vcton\source\repos\TrueReplayerWinUI3\TrueReplayer\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\AppPackages\</AppInstallerUri>
     <HoursBetweenUpdateChecks>0</HoursBetweenUpdateChecks>
   </PropertyGroup>
 </Project>
