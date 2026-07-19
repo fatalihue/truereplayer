@@ -200,7 +200,7 @@ Fix the confirm flow once and all twenty improve. Chains deeper than 5 levels ar
 
 > Saving is not arming. A configured automation does nothing until you arm it — that toggle is the one people miss.
 
-Turn on **Run on Startup** + **Start minimized** (Settings → App → Startup) and TrueReplayer becomes a background helper in the tray.
+Turn on **Run on Startup** + **Startup Minimized** (Settings → App → Startup) and TrueReplayer becomes a background helper in the tray.
 
 ---
 
@@ -253,7 +253,7 @@ The central table lists every action in the profile. Columns: **selection checkb
 - **Select** — click a row (single), `Ctrl+Click` (toggle), `Shift+Click` (range), or use the checkboxes.
 - **Edit inline** — click a cell to edit **Delay**, **Notes**, **coordinates** (`x, y` for mouse rows — separators can be comma/semicolon/space) or the **Key** (keyboard rows capture the next key you press). Commit with **Enter/Tab**, cancel with **Esc**.
 - **Reorder** — drag a row, or select and press **`Alt+↑` / `Alt+↓`**.
-- **Right-click** a row for **Duplicate, Delete, Edit, Insert Else** (inside an If block), and more.
+- **Right-click** a row for **Duplicate**, **Delete**, **Edit** and more. (**Else** isn't here — it goes in via the dashed **+ Add Else branch** row inside the If block.)
 - **Skip** — unchecking a row keeps it in the list but it won't run during replay.
 - **Bulk bar** — when multiple rows are selected, a bar appears with **Set delay**, **Set X / Set Y** (a `+10` / `-5` offset adjusts each; a plain number sets all), **Set notes**, **Move ↑/↓**, **Skip**, **Delete**.
 - **Sheet panel** — right-click → Edit (or open the Sheet) for a full form with every field of the selected row.
@@ -316,7 +316,7 @@ Make a macro react to what's on screen.
 - If the probe is **true**, the actions between **If** and **Else/EndIf** run; if **false**, execution jumps to the **Else** branch (if present) or past the **EndIf**.
 - **Negate (IFNOT)** flips the test — the *true* branch runs when the probe **fails**.
 - **Wait for condition (optional)** — by default an **If** checks once and branches instantly. Set a *Wait for condition* value (ms) and it polls that long for the condition to become true before deciding: satisfied in time → **true** branch; time runs out → **Else / false**. Great for *"wait up to 3 s for the button to enable, else take a fallback path."* `0` = instant (the default).
-- Blocks can be **nested** — each nesting level shows in its own colour (with matching scope rails) so deep conditionals stay readable. To create a nested block, select a row **inside** an existing block, then **Insert Conditional**. Add an **Else** via the row's *Insert Else*. The structure is validated and auto-repaired on load (orphan markers removed, missing `EndIf` added).
+- Blocks can be **nested** — each nesting level shows in its own colour (with matching scope rails) so deep conditionals stay readable. To create a nested block, select a row **inside** an existing block, then **Insert Conditional**. Add an **Else** via the dashed **+ Add Else branch** row inside the block. The structure is validated and auto-repaired on load (orphan markers removed, missing `EndIf` added).
 
 **Editing a block's contents** — actions *inside* a block edit granularly; an operation only snaps to the **whole block** when your selection includes a marker (*If / Else / EndIf*), so markers can never be orphaned:
 - **Drag** one or more body actions freely **in or out** of a block (single, multiple, even non-contiguous).
@@ -324,6 +324,34 @@ Make a macro react to what's on screen.
 - **Reorder** with **Move ↑/↓** or **`Alt+↑` / `Alt+↓`**: a body-only selection moves on its own; a selection touching a marker carries the whole block.
 - **Duplicate** an **If** to copy the whole block as a sibling.
 - Dragging the **If** itself (or any selection that includes a marker) always moves the whole block together.
+
+### Worked example — the dialog that only shows up sometimes
+
+**The situation.** Every time you close a ticket, the system *sometimes* pops a "Are you sure?" dialog — and sometimes doesn't. When it shows up, the macro types straight over it and wrecks the run; when it doesn't, a fixed 3-second pause just makes you wait for nothing. What you want is simple: if the dialog is there, click **OK**; if it isn't, carry on immediately.
+
+**Step 1 — pick where the block goes.** Click the grid row that comes right after the moment the dialog usually appears. The block is inserted **before** the selected row (with nothing selected, it lands at the end of the list).
+
+**Step 2 — insert the block.** Toolbar → the branch-icon button (its tooltip reads **Conditional**) → the flyout is headed **Insert Conditional** and lists the ten condition types. For a real dialog window, use **Window Open**. Two rows go in at once: **If** and **EndIf**.
+
+**Step 3 — describe the window.** The editor opens on its own. Fill in **Process Name** (say `notepad.exe`) and/or **Title** — either one is enough. Leave **Foreground window only** unchecked if the dialog can sit behind another window. With the dialog on screen, hit **Test**: it should read *Found* followed by the matched window's process and title.
+
+**Step 4 — put the click inside the block.** Drag the action that clicks **OK** to sit between the **If** and the **EndIf** (a lone body row drags freely). Now it only runs when the dialog exists.
+
+| Row | When it runs |
+| --- | --- |
+| **If** — Window Open · `Confirm` | always — it's the check |
+| Left Click (612, 428) | only if the window exists |
+| **EndIf** | closes the block |
+
+**Step 5 — give the dialog time to appear.** Open the **If** row's editor (hover the row and click the pencil, or select the row and press **Enter**, or right-click → **Edit** — a plain click only toggles selection) and set **Wait for condition** to, say, `2000` ms. Instead of deciding in a blink, it keeps re-checking for up to 2 seconds: showed up in time → the block runs; time ran out → it jumps past the **EndIf**. And if it appears in 200 ms, the macro moves on in 200 ms — it doesn't sit through the full 2 seconds.
+
+**Step 6 (optional) — the plan B.** If you want to do something else when the dialog *doesn't* appear, look inside the block: just above the **EndIf** there's a dashed **+ Add Else branch** row. Click it and the **Else** drops in there. Whatever sits after the **Else** runs only when the check comes back negative.
+
+> **To flip it without an Else.** On the **If** row, the **Condition** field has two options: **Found** and **NOT Found** (that's IFNOT). With **NOT Found**, the block's body runs precisely when the window is **not** there — handy for "if the dialog never showed, something went wrong, grab a screenshot."
+
+Here's the difference between the two waits: the **If** row's own **Delay** — which isn't in this editor at all, but in the grid's **Delay** column (click the cell to edit it) — is a **fixed wait before** the check, and it always burns the whole thing, even if the window was already there; **Wait for condition** burns only as long as it needs to. Fill in both and they add up. (**Else** and **EndIf** rows have no Delay field at all — the cell is blank and not editable, and a bulk "set delay" skips them.)
+
+> **If it goes wrong.** Almost everyone hunts for **Else** in the right-click menu, doesn't find it, and concludes the app has no Else. It genuinely isn't there: **+ Add Else branch** is that dashed row inside the block, right before the **EndIf** — and it only shows while the block **doesn't yet have** an Else (once you add one it disappears, which is correct). It's also disabled while you're recording or replaying: stop the macro and it works again.
 
 ---
 
@@ -386,14 +414,14 @@ Three trigger kinds per profile (one automation each):
 
 | Kind | Fires |
 | --- | --- |
-| **Interval** | Every N seconds/minutes (first fire one interval after arming). |
+| **Interval** | Every N seconds (the field is in seconds; 300 = 5 minutes). The first fire comes one interval after arming. |
 | **Schedule** | At a clock time (`HH:mm`) on the weekdays you pick. |
 | **Condition** | When a watched condition **becomes true**: a window opens (or comes to the foreground), a process starts, a file appears, a pixel matches a color, an image appears on screen, or the clipboard changes. |
 
 How it behaves:
 
 - **Armed** — only armed automations run; they re-arm automatically at startup, so
-  *Run on Startup* + *Start minimized* turns TrueReplayer into a tray daemon. Arming is
+  *Run on Startup* + *Startup Minimized* turns TrueReplayer into a tray daemon. Arming is
   **local to your machine**: imported, duplicated or copied profiles always arrive disarmed.
 - **One run at a time** — a fire is **skipped** (and counted in the panel) while a replay or
   recording is running, while you have unsaved edits in the grid, or while a dialog is open.
@@ -406,6 +434,34 @@ How it behaves:
   (**Enable Automations**). The tray tooltip shows how many automations are armed.
 - Profiles without a window target act on whatever window is focused when the trigger fires —
   the editor warns you. Prefer targeted profiles (or *Activate Window* as the first action).
+
+### Worked example — the 8 a.m. macro that runs itself
+
+**The situation.** Every weekday at 8, someone has to open the system and post the shift-opening message. It's the same sequence of clicks, at the same time, every day — and it always depends on somebody remembering. A hotkey doesn't solve it: a hotkey needs a finger on the keyboard.
+
+**Step 1 — open the panel.** Settings → **App** → **Automation** → **Manage ›**. (The tray menu opens it too, under **Automations…**.)
+
+**Step 2 — create the automation.** Click **Add automation** (the button with the + icon) and pick the profile from the list. Only profiles that don't have one yet show up — each profile gets at most one automation.
+
+**Step 3 — pick the trigger.** The **Trigger** field offers three:
+
+| Trigger | Fires | Fields and limits |
+| --- | --- | --- |
+| **Interval** | Every N seconds (the field is in seconds; 300 = 5 minutes) | **Every** — the field is in **seconds** (`s` suffix): minimum 5, maximum 86,400 (24 h), default 300 (= 5 min). The first fire happens one interval after you arm it. |
+| **Schedule** | At a clock time | **At** in `HH:mm` format, plus the **Mon** … **Sun** pills under **Days**. |
+| **Condition** | When something becomes true | Six watched conditions: **Window open**, **Process running**, **File exists**, **Pixel color**, **Image on screen**, **Clipboard changed**. |
+
+**Step 4 — set the time.** Choose **Schedule**, type `08:00` in **At**, and click the **Mon** through **Fri** pills in **Days**. Leaving all of them off means **every day**. Click **Save**.
+
+**Step 5 — arm it.** Flip the toggle on the profile's row in the list on the left. It takes effect immediately, independent of **Save**. Check the master switch too — the panel footer labels it **Automations enabled**, while Settings → App → Automation and the tray menu label it **Enable Automations**.
+
+**Step 6 — leave the app on watch.** Settings → **App** → **Startup** → turn on **Run on Startup**, then **Startup Minimized** (the second one stays greyed out while the first is off). TrueReplayer now starts with Windows, disappears into the tray, and re-arms its automations by itself.
+
+That's the difference between the first two: **Interval** counts from the moment you armed it — arm at 9:47 with 5 minutes and it fires at 9:52, 9:57, and the clock times depend on when you flipped the switch. **Schedule** counts by the clock: 08:00 is 08:00, whenever you armed it. Use **Interval** for "every so often", **Schedule** for "every day at 8".
+
+> Arming is **local to this machine**. Imported, duplicated or copied profiles always arrive **disarmed** — deliberately, so a profile someone sent you never starts acting on your computer on its own.
+
+> **If it goes wrong.** By far the most common miss: **saving is not arming**. **Save** stores the trigger's configuration; the toggle on the list row is what actually brings the automation to life. If it's armed and still doesn't run, the fire was **skipped** — an automation never runs over your work: it skips while a replay, a recording or Clicker mode is going, while a dialog is open (or you're capturing a hotkey), or while the action list has unsaved edits. Once there are skips, the panel shows a **Skipped fires** line at the bottom of the editor, broken down by reason (*busy* · *unsaved changes* · *dialog open*) — it only appears after the first skip. A skipped **Schedule** keeps retrying for up to 3 minutes and then gives up for the day.
 
 ---
 
@@ -440,6 +496,36 @@ Tie a profile (or a whole folder) to a specific application window.
 - **Restore position / size** — snap the window back to a saved geometry first (use **Update window** to capture the current one).
 
 > If a profile uses relative coordinates and its target window isn't found at replay time, replay stops with an error (rather than clicking the wrong place).
+
+### Worked example — the macro that worked yesterday and clicks the wrong place today
+
+**The situation.** You recorded a macro that clicks three buttons inside your company's system, and it ran fine all week. Today it clicked empty space — or worse, the button next door. The macro didn't change: someone dragged the window, snapped it to half the screen, or the macro fired while the browser was in front. A recorded click stores a point **on the screen**, so the window only has to move ten pixels for every click to miss at once.
+
+**Step 1 — name the window.** Right-click the profile → **Window target…** → **Detect Window (click on target)**, then click the real window. **Process Name** and the title fill themselves in (`Esc` cancels detection if you click the wrong one).
+
+**Step 2 — check before you save.** Leave the system visible behind the dialog and hit **Test front window**. It has to read *✓ Matches* with the process name. TrueReplayer's own window is excluded from that test, so the verdict is always about the app behind it. The button resets on its own after a few seconds — just click again. If the title changes with every ticket, start with **Contains**: delete the part that varies and keep only the chunk that never changes — that's enough most of the time. **Regex** is the escape hatch for when the fixed part isn't one single chunk, e.g. when the steady text sits at both the start *and* the end of the title:
+
+```
+^Orders .* — Internal System$
+```
+
+In plain words: `^` anchors to the start of the title, `Orders ` is literal text, `.*` accepts anything in the middle (the order number, the customer name), ` — Internal System` is literal again, and `$` anchors to the end. So: it matches any title that **starts** with "Orders " and **ends** with " — Internal System".
+
+**Step 3 — turn on Relative Coordinates.** Clicks are now stored against the window's top-left corner instead of the screen — and so are **WaitImage** search regions and **WaitPixel** coordinates, which is why the notice counts "actions" and not just clicks. Since the macro was already recorded, an amber notice appears — *"12 actions captured in absolute coords"* — with two buttons: press **Apply target & convert** to migrate the old actions — that's the label you'll see here, because Step 1's detection counts as editing the target fields. (It reads plain **Convert** only when the target was already saved and you changed nothing but the toggle.) **Skip** leaves the old numbers to be read as if they were already relative, which is exactly how a macro starts clicking in a corner.
+
+**Step 4 (optional) — pin the window down.** In this order:
+
+1. Turn on **Bring to Focus**, so the window comes to the front before a run.
+2. If the app needs a particular size, arrange the window the way you want it and click **Update Window Size & Position** to capture the geometry.
+3. Only then turn on **Restore Position** and **Restore Size**. Turning on **Restore Position** with nothing captured moves the window to the top-left corner of the screen (the saved X/Y default to 0,0); **Restore Size** with nothing captured simply does nothing.
+
+**Step 5 — click Set Target.** This step is not optional: **nothing** from the earlier steps is written to the profile until you click it. Until that click the target and the toggles live only in the dialog, and closing it throws them away. (The one exception is **Update Window Size & Position**, which writes the geometry straight away.)
+
+That's the difference between the two: **Relative Coordinates** lets the macro *follow* the window wherever it sits; **Restore Position / Size** *puts the window back* to a saved size and spot before anything starts. Together they're belt and braces — the second one earns its keep when the app's layout reflows with the window width.
+
+> Once a target is set, the profile's **hotkey only fires when that window is in front** — *unless* you also turn on **Bring to Focus** (Step 4), which exempts the profile from the gate entirely and lets the hotkey fire from any window. Without it, no more "I pressed it by accident and the macro typed into my editor". And if the profile uses relative coordinates and the window isn't found at replay time, the run **stops with an error** (*Target window 'x' not found — open it and retry*) instead of clicking somewhere random.
+
+> **If it goes wrong.** Two things look like a frozen dialog and aren't. First: the **Relative Coordinates** toggle stays greyed out and won't switch on while **Process Name** and the title are both empty — relative coordinates need a window to hang off, so fill the target in first. Second: while the conversion notice is up, **Set Target** is disabled — you have to pick **Apply target & convert** or **Skip** before you can save. Hover it and the tooltip says so.
 
 ---
 
@@ -515,6 +601,42 @@ The **Insert Text** editor composes text that's injected via clipboard paste (so
 | **Discord** | Discord's own flavour (`**bold**`, `~~strike~~`). |
 | **Plain** | Plain characters only — safest for search boxes, game chats and code fields. |
 
+### Worked example — the reply you retype twenty times a day
+
+**The situation.** Every day you send the same support reply, changing only the person's name and the time. Twenty-odd times a day: copy the name from the ticket, retype the text, check you didn't fumble a word, glance at the clock to write the timestamp. Five lines you know by heart, rewritten from scratch every single time.
+
+**Step 1 — open the editor.** Toolbar → the **Send Text** button (a "T" icon; the name only shows on hover). The window that opens is titled **Insert Text** — same thing. Write the body of the message normally, as if you were typing it into the chat.
+
+**Step 2 — drop tokens where the text changes.** In the right-hand panel, **Insert** tab, the chips sit in sections:
+
+- **Clipboard** — **Clipboard** (`{clipboard}`) and **Advanced…**, which builds transforms like `{clipboard:trim}`.
+- **Values** — **Date**, **Time**, **DateTime** and **Random**.
+- **Keys & timing** — **Enter**, **Tab** and **Delay** (`{delay:500}`), plus a **More keys** toggle for the rarer keys.
+- **Run state** — **Variable…**, **Counter**, **Row #** and others.
+
+Click a chip and it lands at the cursor. The body ends up like this:
+
+```
+Hi {clipboard:trim}, how are you?
+We got your ticket and we're on it.
+You'll hear back within 2 business hours.
+Logged at {datetime}.{delay:500}{enter}
+```
+
+**Step 3 — pick the Delivery.** At the bottom of the dialog, to the left of the **Cancel** and **Add** buttons, sits the **Delivery** selector: **Rich** for email and docs, **Markdown** for WhatsApp, **Discord** for Discord, **Plain** for search boxes and game chat. It ships on **Rich**.
+
+**Step 4 — save it as a Snippet**, while the text is still on screen. At the bottom of the right-hand panel find **Snippets** and click the bookmark icon next to it. Give it a name (`standard-reply`) → **Save**. From then on, clicking that name in the list inserts the whole text, tokens and formatting included, into the **Insert Text** editor.
+
+**Step 5 — confirm with `Ctrl+Enter`.** Plain `Enter` makes a new line inside the text; `Ctrl+Enter` — or the **Add** button in the bottom-right corner — is what closes the box and saves the action. `Esc` or **Cancel** discards.
+
+**When you actually use it:** `{clipboard:trim}` picks up whatever is copied *at that moment*. So the gesture is always the same: select the customer's name, copy it with `Ctrl+C`, and only then fire the macro. Fire it with nothing copied and the message goes out with a hole where the name should be.
+
+> **Every app understands a different flavour.** If the message arrives showing the asterisks on screen (`*bold*` instead of bold), you sent **Markdown** (or **Discord**) to an app that doesn't parse those marks — switch to **Rich** or **Plain**. If the opposite happens and the formatting vanishes entirely, the target won't take rich text: WhatsApp wants **Markdown**, Discord wants **Discord**, Gmail and Word want **Rich**. Test it once per app you use and you're set.
+
+That's the difference between the two: a **Snippet** is a shortcut for *writing* — it saves you retyping while you build the action; the **Send Text** action saved in the profile is what actually *runs*. One is for you, the other is for the machine.
+
+> **If it goes wrong.** Snippets are stored in the app, not in the profile. Export the profile and open it on another machine and the message travels fine (the text lives inside the action), but the **Snippets** list shows up empty over there — it doesn't travel with export/import. Worth recreating the snippets on the new machine. The other common stumble is pressing `Enter` thinking you confirmed: it only makes a new line, and the text sits there unsaved.
+
 ---
 
 ## Variables, slots & prompts
@@ -538,6 +660,42 @@ Three ways to make one macro handle changing values instead of writing a new mac
 **`{counter}`** — the current loop iteration number, handy for numbering output.
 
 > **Seeing what's set.** Press **`Ctrl+K`** → **Toggle Live Variables** to open a small card that shows every variable, every slot and the current data row *while the macro runs* — the quickest way to debug a token that resolves to nothing.
+
+### Worked example — collecting three scattered values
+
+**The situation.** To close an order you need to send one message containing three values that live on three different screens: the customer's name in the ticket, the order number in the admin panel, and the delivery code on the supplier's page. Copying them one at a time means three round trips between windows — and getting the order wrong means starting over.
+
+**Step 1 — set the hotkey (once).** Settings → **Keys** → **Hotkeys** → **Capture Slot** → press any combo, say `Ctrl+Shift+C`. It ships empty, which means disabled.
+
+**Step 2 — collect the three values.** Just select and press; no pasting anywhere:
+
+1. Select the customer's name → `Ctrl+Shift+C`. A toast reads *Selection captured → {clip:1}*.
+2. Select the order number → `Ctrl+Shift+C` → becomes `{clip:2}`.
+3. Select the delivery code → `Ctrl+Shift+C` → becomes `{clip:3}`.
+
+**Step 3 — write the message once.** Make a profile with one **Send Text** action:
+
+```
+Hi {clip:1}, your order {clip:2} has shipped!
+Delivery code: {clip:3}
+Any questions, just ask. {enter}
+```
+
+Give that profile a hotkey (right-click the profile → **Assign hotkey…**) and you're done: three taps to collect, one to send.
+
+> Slots stay put from one run to the next: collect the three values now and run the macro a while later. They only change when you record something over them — but they are gone once you **close the app**.
+
+**An alternative path — when the values are always in the same place.** Then you can automate the collecting too, and the three steps above stop being necessary: instead of the hotkey, use the **Copy to Slot** action inside the macro, with a name instead of a number:
+
+1. A click (or a `Ctrl+A`) that leaves the text **selected**.
+2. Toolbar → **Copy to Slot** → in **Slot**, type `order`.
+3. Later on, use `{clip:order}`.
+
+That's the difference between the two: the **hotkey** is for when *you* pick what to copy, on the spot; the **action** is for when the macro always finds the value in the same corner of the screen — and it's the only one that works *during* a run, since the hotkey is blocked while a macro is playing.
+
+> **The numbers carry on from where they stopped.** The counter doesn't reset to 1 on its own: if you already captured two things today, the next one lands in `{clip:3}`, not `{clip:1}`. The toast always tells you where it landed — and **`Ctrl+K`** → **Toggle Live Variables** shows the whole list. When in doubt, capture all three in one go, in order, and use the numbers the toasts report.
+
+> **If it goes wrong — a slot came back empty.** Both of them copy by sending a `Ctrl+C` to the focused app, so **the text has to be selected** first. If nothing is copied, the slot keeps its previous value (it never goes blank) and the hotkey's counter **does not advance** — just select properly and press again, without worrying that you skipped a number.
 
 ---
 
@@ -599,6 +757,62 @@ can do its setup once, then batch a sub-profile over a list mid-run (Repeat is i
 this is on). If the called profile's table opts into **Skip row**, failed rows are skipped and
 summarized exactly like a top-level data loop; with no table, the sub-profile just runs once.
 
+### Worked example — registering a list of products in a form
+
+**The situation.** Every week a spreadsheet lands with 40-odd new products to register in a web system. It's always the same clicks: open the form, type the name, type the price, save. Only the typing changes. Doing it 40 times by hand eats an afternoon — and that's where the typos come from.
+
+**Step 1 — build the macro for ONE product.** Record (or assemble) the actions normally, actually typing the name and price of some product. Test it until one run goes through cleanly. That's your template.
+
+**Step 2 — bring in the spreadsheet.** Toolbar → table icon (**Data Loop**) → **Paste / bulk edit…**. Copy the range in Excel, drop it in the box, leave **First row is the header** ticked and click **Replace table**:
+
+| product | price |
+| --- | --- |
+| HDMI cable 2m | 39.90 |
+| Wireless mouse | 89.00 |
+| ABNT2 keyboard | 129.90 |
+
+Headers only become tokens if they're letters, digits or `_` — no accents, no spaces. A header that breaks the rule gets a ⚠ right in the paste preview (it still saves — it just won't work as a token). The **wand** that renames it in one click lives afterwards, in the right-hand **Columns · tokens** list.
+
+**Step 3 — swap the fixed values for tokens.** In the **Columns · tokens** rail, click the `{row:product}` chip to copy it. Open the **Send Text** action that typed the name, delete the fixed text and paste the token in its place. Do the same with `{row:price}`. Then check the rail: each column should read `×1` instead of *unused*.
+
+**Step 4 — turn the loop on.** Tick **Loop over data**, set **On row error** → **Skip row**, and click **Save**. Done: one hotkey press registers the whole spreadsheet, and if one product fails it gets logged and the macro moves on to the next (a line at the end reports how many rows were skipped, and the first reason).
+
+> With **Loop over data** on, the table is in charge: it **overrides** the profile's **Loops** count (Settings → Profile → Execution → **Loops**) and a While-Pressed / Toggle infinite replay too — 40 rows = 40 runs, no more, no less. And if the table is empty, replay **won't even start**: you get *The data table has no rows*.
+
+That's the difference between the two modes: with **Loop over data** on, the macro chews through the whole list in one go; with it off, each hotkey press handles **one** row and advances, and after the last one it starts again at the first — that's for working item by item, at your own pace.
+
+> **If it goes wrong.** The usual mix-up: the table is right there, the macro runs… and registers **one product only**. That means **Loop over data** is unticked — not a bug, it's cursor mode, which walks one row per run. To tell which mode you're in, look at the right-hand rail: on, it shows a coloured notice *"N iterations — one full run per row"* and the **On row error** control appears; off, it reads *"Cursor mode: each run uses the next row and advances (wrapping). Right-click a row → Reset row position to start over."* — that **Reset row position** is how you send the list back to row 1. And **Notify on list complete** shows up where **On row error** used to be — it only appears once the table has more than one row.
+
+### Worked example — the same ending in twenty macros
+
+**The situation.** You have twenty support macros and they all end the same way: click **Confirm**, wait for the toast to clear, press `Esc`, go back to the list. Right now those five steps are copy-pasted into all twenty. When the site moved that button, you spent an afternoon fixing macro by macro — and still missed two.
+
+**Step 1 — pull the shared block into its own profile.** You don't have to re-record anything: open one of the macros, select the five repeated rows and use **`Ctrl+K`** → **Copy as Table**. Create a new profile called `Confirm` and, inside it, **`Ctrl+K`** → **Paste Actions**. It needs no hotkey: nobody will trigger it by hand, it exists to be called by the others.
+
+**Step 2 — call it from each macro.** Open the first macro, select the row where the block used to start, then toolbar → **Run Profile**. In the dialog:
+
+1. Under **Profile to run**, pick `Confirm`.
+2. Leave **Repeat** at `1` (the normal case — the caption beside the stepper reads *time per call*, and accepts 1–999).
+3. **Add**.
+
+**Step 3 — delete the duplicated steps.** Now select the five old rows and delete them. The macro gets shorter, and the confirmation block lives in exactly one place.
+
+| Macro | Before | After |
+| --- | --- | --- |
+| `New order` | 12 steps (5 confirming) | 7 steps + **Run Profile** `Confirm` |
+| `Exchange` | 9 steps (5 confirming) | 4 steps + **Run Profile** `Confirm` |
+| `Refund` | 15 steps (5 confirming) | 10 steps + **Run Profile** `Confirm` |
+
+Repeat across all twenty. Next time that button moves, you fix `Confirm` once and all twenty get better together.
+
+> **The sub-profile doesn't control its own repetition.** The **Loops** and **Interval** set inside `Confirm` are ignored when another profile calls it — only the **Repeat** in the **Run Profile** dialog applies. If you want the block to run three times, put `3` in the caller's **Repeat**, not in the callee's **Loops**.
+
+When the sub-profile has a data table of its own, there's **Run once per data row**: it runs once for every row of *its* table, with `{row:column}` pulling from that row. That's the difference between the two: **Repeat** runs the identical block N times; **Run once per data row** runs it once per row, with different values each time. Ticking the box greys out **Repeat** — it stops applying entirely.
+
+Worth knowing too: disabled profiles don't show up in the **Profile to run** list (they'd be skipped at run time anyway, so they're hidden from the choice) — the one exception is editing an existing action whose target was disabled after the fact, where it stays visible so you can see what's stored. A profile also can't call itself or anything already in the chain, and the chain stops at 5 levels counting the macro you triggered — meaning four nested sub-profiles. In every one of those cases the action is **simply skipped, with no message on screen**: only the session log records it.
+
+> **If it goes wrong.** The profile you want to call isn't in the **Profile to run** list? Nine times out of ten it's **disabled** — a disabled profile drops out of the picker, because it would be skipped at run time anyway. And it's an easy trap right here: since `Confirm` needs no hotkey, it's tempting to switch it off to keep it out of the way. Re-enable the profile and it's back in the list.
+
 ---
 
 ## Browser automation
@@ -652,7 +866,7 @@ The Settings panel (right side) has three tabs; everything **auto-saves** (no Sa
 
 **App tab** (app-wide):
 - **Window** — Always on top, Minimize to tray.
-- **Startup** — Run on startup, Start minimized, Run as administrator.
+- **Startup** — Run on Startup, Startup Minimized, Run as Administrator.
 - **Notifications** — flash / sound when a replay ends while the window is in the background.
 - **Automation** — the Automations master switch + the panel opener.
 - **Interface** — opens the Theme Editor; tooltip language: **Português (BR)** or English (names and menus stay in English; only tooltips localize).
