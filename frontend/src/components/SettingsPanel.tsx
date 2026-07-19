@@ -1167,8 +1167,8 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             <Section title="Key Remaps">
               <SettingRow
                 label="Enable Key Remaps"
-                tooltip={tt('Master switch for the remap layer. Also in the tray menu, so a bad remap can be turned off by mouse alone.',
-                  'Chave mestra da camada de remap. Também no menu da bandeja — um remap ruim pode ser desligado só com o mouse.')}
+                tooltip={tt('Turns every remap on or off. Also in the tray menu.',
+                  'Liga e desliga todos os remaps. Também no menu da bandeja.')}
               >
                 <CompactToggle
                   isOn={settings.remaps.enabled}

@@ -125,7 +125,10 @@ export function RemapSection() {
     <button
       type="button"
       onClick={() => (capturing === side ? stopCapture() : startCapture(side))}
-      className={`h-7 min-w-[72px] px-2 rounded border text-[11px] transition-colors ${
+      // flex-1 + min-w-0 lets the two chips split the row evenly instead of sizing to
+      // their text and overflowing the 224px panel; truncate is the safety net for a
+      // long key name (the placeholders themselves are kept short enough to fit).
+      className={`h-7 flex-1 min-w-0 truncate px-2 rounded border text-[11px] transition-colors ${
         capturing === side
           ? 'border-accent-solid text-accent bg-accent-solid/10 animate-pulse'
           : value
@@ -133,7 +136,7 @@ export function RemapSection() {
             : 'border-border-default text-text-tertiary bg-bg-input'
       } ${dimmed ? 'opacity-40 pointer-events-none' : ''}`}
     >
-      {capturing === side ? tt('press a key…', 'aperte uma tecla…') : value || tt('click to set', 'clique p/ definir')}
+      {capturing === side ? tt('press…', 'aperte…') : value || tt('set key', 'definir')}
     </button>
   );
 
@@ -207,7 +210,7 @@ export function RemapSection() {
           <label className="flex items-center gap-1.5 text-[11px] text-text-tertiary cursor-pointer select-none">
             <input type="checkbox" checked={disableMode}
               onChange={(e) => { setDisableMode(e.target.checked); if (capturing === 'to') stopCapture(); }} />
-            {tt('Disable the key instead (no replacement)', 'Desativar a tecla (sem substituta)')}
+            {tt('Just disable the key', 'Só desativar a tecla')}
           </label>
           {captureError && <div className="text-[10px]" style={{ color: 'var(--color-recording)' }}>{captureError}</div>}
           {duplicateFrom && (
