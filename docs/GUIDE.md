@@ -1,468 +1,709 @@
 <div align="center">
 
-# TrueReplayer — User Guide
+# TrueReplayer — Guia do Usuário
 
-**English** · [Português (BR)](GUIDE.pt-BR.md) &nbsp;·&nbsp; [← Back to README](../README.md)
+**Português (BR)** · [English](GUIDE.en.md) &nbsp;·&nbsp; [← Voltar ao README](../README.md)
 
 </div>
 
-The complete reference for everything TrueReplayer can do. New here? Start with the [Quick start](../README.md#quick-start) in the README, then come back for the details.
+A referência completa de tudo o que o TrueReplayer pode fazer. Primeira vez por aqui? Comece pelo [Início rápido](../README.md#início-rápido) no README e depois volte para os detalhes.
 
-## Contents
+## Conteúdo
 
-- [Core concepts](#core-concepts)
+- [Conceitos básicos](#conceitos-básicos)
+- [Receitas — aprenda fazendo](#receitas--aprenda-fazendo)
 - [Recording](#recording)
-- [Replaying & execution settings](#replaying--execution-settings)
-- [The action grid](#the-action-grid)
-- [Action reference](#action-reference)
-- [Conditional blocks (If / Else / EndIf)](#conditional-blocks-if--else--endif)
-- [Profiles & folders](#profiles--folders)
-- [Hotkeys & hotstrings](#hotkeys--hotstrings)
-- [Automation (fire without a hotkey)](#automation-fire-without-a-hotkey)
-- [Key remaps](#key-remaps)
-- [Window targeting & relative coordinates](#window-targeting--relative-coordinates)
-- [Multi-window automation (Activate Window)](#multi-window-automation-activate-window)
+- [Reprodução e configurações de execução](#reprodução-e-configurações-de-execução)
+- [A grade de ações](#a-grade-de-ações)
+- [Referência de ações](#referência-de-ações)
+- [Blocos condicionais (If / Else / EndIf)](#blocos-condicionais-if--else--endif)
+- [Perfis e pastas](#perfis-e-pastas)
+- [Hotkeys e hotstrings](#hotkeys-e-hotstrings)
+- [Automação (disparo sem hotkey)](#automação-disparo-sem-hotkey)
+- [Remaps de tecla](#remaps-de-tecla)
+- [Alvo de janela e coordenadas relativas](#alvo-de-janela-e-coordenadas-relativas)
+- [Automação multi-janela (Activate Window)](#automação-multi-janela-activate-window)
 - [Clicker mode (auto-clicker)](#clicker-mode-auto-clicker)
 - [Game mode](#game-mode)
 - [Send Text](#send-text)
+- [Variáveis, slots e prompts](#variáveis-slots-e-prompts)
 - [Data Loop](#data-loop)
-- [Browser automation](#browser-automation)
-- [Themes & appearance](#themes--appearance)
-- [Settings reference](#settings-reference)
-- [Where your data lives](#where-your-data-lives)
-- [Troubleshooting](#troubleshooting)
+- [Automação de navegador](#automação-de-navegador)
+- [Temas e aparência](#temas-e-aparência)
+- [Referência de configurações](#referência-de-configurações)
+- [Onde seus dados ficam](#onde-seus-dados-ficam)
+- [Solução de problemas](#solução-de-problemas)
 
 ---
 
-## Core concepts
+## Conceitos básicos
 
-- **Profile** — a single macro: an ordered list of actions plus its own settings (delays, loops, window target, etc.). Saved as a `.json` file.
-- **Action** — one step in a profile (a click, a keystroke, a pause, an *If*, …). Shown as a row in the grid.
-- **Folder** — an organizational, colored group of profiles. A profile lives in at most one folder.
-- **Macro mode vs Clicker mode** — *Macro mode* records and replays action lists; *Clicker mode* is a dedicated auto-clicker. Switch with **`ScrollLock`** or the Macro/Clicker toggle at the bottom.
+- **Perfil (profile)** — uma única macro: uma lista ordenada de ações mais suas próprias configurações (delays, loops, alvo de janela, etc.). Salvo como um arquivo `.json`.
+- **Ação (action)** — um passo dentro de um perfil (um clique, uma tecla, uma pausa, um *If*, …). Mostrado como uma linha na grade.
+- **Pasta (folder)** — um grupo organizacional e colorido de perfis. Um perfil fica em no máximo uma pasta.
+- **Macro mode vs Clicker mode** — o *Macro mode* grava e reproduz listas de ações; o *Clicker mode* é um auto-clicker dedicado. Alterne com **`ScrollLock`** ou com o botão Macro/Clicker na parte inferior.
+
+---
+
+## Receitas — aprenda fazendo
+
+São catorze tarefas curtas e completas, da mais fácil para a mais difícil. Cada uma mostra exatamente onde clicar, e todas são trabalhos de verdade que alguém automatiza todo dia. Faça duas ou três e você já sabe usar o app.
+
+A maioria das macros úteis é **minúscula** — uma ou duas ações. Não ache que você precisa gravar algo longo.
+
+### 1. Uma resposta pronta que você digita em qualquer lugar
+
+**O resultado:** você digita `.cp` em qualquer caixa de chat e ela vira uma resposta completa, já enviada.
+
+1. Barra de ferramentas → **Send Text**. Escreva a mensagem.
+2. Na paleta de tokens à direita, clique em **Enter** para colocar `{enter}` no fim do texto — é isso que envia a mensagem.
+3. **`Ctrl+Enter`** para confirmar e depois **Save** no perfil.
+4. Botão direito no perfil → **Assign hotstring…** → digite `.cp` → **Assign**.
+
+*Na prática:* um atendente cria uma macro dessas para cada resposta que ele repete o dia todo — `.cp` para o código de desconto, `/ve` para "já está a caminho", `/pg` para o link de pagamento. Uma ação em cada uma.
+
+### 2. Coloque o que você copiou dentro da resposta
+
+**O resultado:** você copia o nome do cliente, aperta uma tecla e o app digita um passo a passo inteiro já com o nome dele no meio do texto.
+
+1. No **Send Text**, escreva seu texto e ponha `{clipboard}` onde entra o valor copiado.
+2. Precisa só de um pedaço? Use modificadores: `{clipboard:trim}` (tira espaços e quebras de linha sobrando), `{clipboard:line:3}` (só a terceira linha), `{clipboard:upper}`.
+
+O que você tinha copiado volta para a área de transferência logo depois, então nada se perde.
+
+*Na prática:* copie de uma vez um cadastro inteiro, com várias linhas, e reescreva só as linhas que interessam com `{clipboard:line:1}` e `{clipboard:line:3}`.
+
+### 3. Carimbe a hora e feche o chamado
+
+**O resultado:** uma tecla escreve a mensagem de "entregue" já com a data de hoje e, logo depois, aciona o atalho que marca o chamado como resolvido no seu sistema de atendimento.
+
+1. **Send Text** → sua mensagem, depois `Finalizado em {datetime}`, depois `{enter}`.
+2. Barra de ferramentas → **Send Keystroke** → pressione `Ctrl+Alt+R` (o atalho que o seu app usa) → **Add**.
+3. Botão direito no perfil → **Assign hotkey…** → pressione `F1` → **Assign**.
+
+Duas ações, e o fechamento inteiro vira um toque de tecla.
+
+### 4. Me pergunte um valor na hora de rodar
+
+**O resultado:** a macro para, faz uma pergunta e digita a sua resposta no lugar certo.
+
+1. No **Send Text**, digite `{input:Número do pedido}` onde a resposta deve entrar.
+2. Quer uma lista de opções em vez de uma caixa de texto? Use `{input:Prioridade|menu:Baixa,Média,Alta}`.
+
+A pergunta aparece **uma vez a cada execução**: se você usar `{input:Número do pedido}` de novo mais para frente, ele repete a mesma resposta sem perguntar outra vez.
+
+### 5. Faça funcionar só em um app
+
+**O resultado:** a hotkey da macro dispara só quando a janela certa está na frente, e os cliques acompanham a janela quando ela se move.
+
+1. Botão direito no perfil → **Window target…**.
+2. Clique em **Detect Window (click on target)** e depois clique na janela de verdade — o processo e o título se preenchem sozinhos.
+3. Clique em **Test front window** para confirmar que aparece *Matches*.
+4. Ligue **Relative Coordinates** para os cliques serem guardados em relação ao canto da janela.
+5. Se a macro já estava gravada, aceite o aviso **Convert to Relative**.
+
+> Sem isso, basta alguém mover a janela 20 px para todos os cliques caírem no lugar errado.
+
+### 6. Espere a tela em vez de chutar
+
+**O resultado:** a macro espera o botão realmente aparecer, em vez de clicar num ponto que ainda não está pronto.
+
+1. Barra de ferramentas → **Wait for Image / Pixel** → **Wait for Image**.
+2. A tela congela — arraste um retângulo em volta do botão (ou ícone) que a macro vai ficar esperando aparecer.
+3. No painel que abre, clique em **Test match** para conferir com a tela ao vivo. Procure uma correspondência folgada e deixe a confiança por volta de **85%**.
+
+> **Nunca coloque a confiança em 100%.** Uma tela viva nunca fica idêntica, pixel por pixel, à imagem que você recortou — então a macro nunca considera que achou e acaba parando por esgotar o tempo.
+
+*Na prática:* é isso que conserta o "funciona quando a internet está rápida e quebra quando está lenta".
+
+### 7. Faça o clique opcional só quando ele aparecer
+
+**O resultado:** a macro clica na janelinha de confirmação *se* ela aparecer, e segue em frente normalmente quando ela não aparece.
+
+1. Barra de ferramentas → **Conditional** → **Pixel Color Match**.
+2. Escolha um ponto dentro da cor sólida do botão de confirmar.
+3. Selecione a linha **If** e coloque **Wait for condition** em `5000` (são milissegundos, ou seja, 5 segundos) — agora ele fica verificando por até 5 segundos antes de decidir.
+4. Ponha o clique *entre* **If** e **EndIf**.
+
+Cor funciona melhor que imagem quando dois estados só se diferenciam pela cor — um botão verde ligado contra um cinza desligado.
+
+### 8. Guarde um valor entre os passos
+
+**O resultado:** você captura ou monta um valor uma vez só e usa ele de novo em qualquer passo seguinte da macro.
+
+1. Barra de ferramentas → **Set Variable**. Dê um **Name** (ex.: `cliente`) e um **Value** — o valor pode conter tokens, como `{clipboard:trim}`.
+2. Em qualquer lugar depois, digite `{var:cliente}`.
+
+As variáveis são apagadas no começo de cada execução. Coloque o modo em **Cycle** e o valor vira uma lista: cada execução pega a *próxima* linha e, quando chega na última, volta para a primeira.
+
+### 9. Junte vários valores e cole todos depois
+
+**O resultado:** você pega três coisas de três lugares diferentes e depois preenche um formulário com todas.
+
+1. Settings → **Keys** → **Hotkeys** → **Capture Slot** → pressione uma combinação.
+2. Selecione um texto em qualquer lugar e aperte essa combinação. Repita: as capturas vão caindo nos slots 1, 2, 3… até o 9 e, depois do 9, voltam para o 1.
+3. Num perfil, digite `{clip:1}`, `{clip:2}`, `{clip:3}` onde cada um entra.
+
+Os slots continuam guardados de uma execução para outra, ao contrário das variáveis. Para capturar *durante* uma macro, em vez de manualmente, use a ação **Copy to Slot** com um slot nomeado e leia de volta com `{clip:name}`.
+
+### 10. Digite o próximo item de uma lista a cada toque
+
+**O resultado:** uma hotkey que percorre uma lista — um item diferente a cada vez que você aperta.
+
+1. Barra de ferramentas → **Data Loop** → **Paste / bulk edit…** → cole sua lista do Excel → **Replace table**.
+2. Deixe **Loop over data** desligado.
+3. No **Send Text**, digite `{row:col1}` (ou o nome da sua coluna) e `{enter}`.
+
+Cada toque usa a próxima linha e avança; no fim ele volta para o topo e toca um som. Botão direito numa linha → **Reset row position** para recomeçar.
+
+### 11. Troque 20 passos repetidos por um loop
+
+**O resultado:** uma macro pequena mais uma tabela, em vez das mesmas cinco ações copiadas e coladas dezessete vezes.
+
+1. Monte a macro **uma vez**, para um único item.
+2. Barra de ferramentas → **Data Loop** → cole uma tabela com uma coluna por valor que muda (ex.: `item` e `qtd`).
+3. Troque os valores fixos das suas ações por `{row:item}` e `{row:qtd}`.
+4. Ligue **Loop over data** — agora a macro roda uma vez por linha.
+5. Coloque **On row error** em **Skip row** para que uma linha com problema não interrompa as outras — ele pula essa linha e continua.
+
+*Na prática:* uma macro de 87 ações que carrega 17 itens num formulário vira 5 ações e uma tabela de 17 linhas — e adicionar um item é uma linha nova, não uma regravação.
+
+### 12. Reaproveite um mesmo final em várias macros
+
+**O resultado:** vinte macros que terminam com os mesmos passos de confirmação — corrigidos num lugar só.
+
+1. Ponha os passos comuns num perfil só deles (ex.: `Confirmar`).
+2. Em cada macro, barra de ferramentas → **Run Profile** → escolha `Confirmar` → **Add**.
+
+Conserte o fluxo de confirmação uma vez e as vinte melhoram. Um perfil pode chamar outro, que chama outro — mas depois de 5 níveis o app bloqueia sozinho, para não entrar em loop infinito.
+
+> Os **Loops** do próprio sub-perfil são ignorados — só vale a contagem **Repeat** do diálogo.
+
+### 13. Clique num site pelo nome, não pela posição
+
+**O resultado:** passos no navegador que continuam funcionando mesmo quando os elementos da página mudam de lugar.
+
+1. Instale a extensão do Chrome (veja [Automação de navegador](#automação-de-navegador)) e garanta que ela está conectada.
+2. Barra de ferramentas → **Browser** → **Browser Click**, e escolha o elemento na página.
+3. Prefira usar o **texto** visível (ex.: `text=Enviar`) quando o layout muda com frequência.
+
+*Na prática:* três cliques identificados por seletor movem uma conversa de atendimento para outra caixa de entrada — nenhum deles usa coordenada, então tudo continua funcionando mesmo se a janela mudar de tamanho.
+
+### 14. Rode sem apertar nada
+
+**O resultado:** a macro dispara sozinha — a cada N minutos, num horário definido, ou quando algo aparece na tela.
+
+1. Settings → **App** → **Automation** → **Manage ›**.
+2. **+ Add automation** → escolha o perfil.
+3. Escolha o **Trigger**: **Interval**, **Schedule** ou **Condition**.
+4. **Save**, e depois ligue a chave **Armed** da linha na lista.
+
+> Salvar não é armar. Uma automação configurada não faz nada até você armá-la — essa chave é a que todo mundo esquece.
+
+Ligue **Run on Startup** + **Start minimized** (Settings → App → Startup) e o TrueReplayer vira um ajudante que fica rodando sozinho, escondido na bandeja do sistema (ao lado do relógio).
 
 ---
 
 ## Recording
 
-1. Make sure a profile is active (or start a new one).
-2. Press **`Ctrl+PageUp`** (or click **Recording**). The Recording badge and button start glowing so you can't miss that capture is live.
-3. Do your actions — clicks, typing, scrolling.
-4. Press **`Ctrl+PageUp`** again to stop.
+1. Garanta que um perfil esteja ativo (ou inicie um novo).
+2. Pressione **`Ctrl+PageUp`** (ou clique em **Recording**). O selo e o botão Recording começam a brilhar para você não perder que a captura está ativa.
+3. Faça suas ações — cliques, digitação, rolagem.
+4. Pressione **`Ctrl+PageUp`** novamente para parar.
 
-**Where new steps land:** if you have rows **selected**, recording inserts **before** the first selected row; with **no selection**, it **appends** to the end. Clear the selection to append.
+**Onde os novos passos vão parar:** se você tiver linhas **selecionadas**, a gravação insere **antes** da primeira linha selecionada; **sem seleção**, ela **acrescenta** ao final. Limpe a seleção para acrescentar ao final.
 
-### Capture filters (Settings → Recording)
+### Filtros de captura (Settings → Recording)
 
-| Toggle | Effect |
+| Opção | Efeito |
 | --- | --- |
-| **Mouse Clicks** | Capture left / right / middle clicks and double-clicks. |
-| **Mouse Scroll** | Capture scroll-wheel up/down. |
-| **Keyboard** | Capture key presses and modifiers. |
-| **Combined Actions** | **On** → input is merged into single rows (e.g. `Ctrl+C` = one *Keystroke* row). **Off** → recorded as separate `KeyDown`/`KeyUp` (and `LeftClickDown`/`LeftClickUp`) rows — needed for drags or holding a key while doing other things. |
+| **Mouse Clicks** | Captura cliques esquerdo / direito / do meio e cliques duplos. |
+| **Mouse Scroll** | Captura rolagem da roda do mouse para cima/baixo. |
+| **Keyboard** | Captura pressionamentos de teclas e modificadores. |
+| **Combined Actions** | **On** → a entrada é mesclada em linhas únicas (ex.: `Ctrl+C` = uma linha *Keystroke*). **Off** → gravado como linhas `KeyDown`/`KeyUp` (e `LeftClickDown`/`LeftClickUp`) separadas — necessário para arrastar com o mouse ou para segurar uma tecla enquanto faz outras coisas. |
 
-All four default to **On**.
+Todos os quatro vêm como **On** por padrão.
 
 ---
 
-## Replaying & execution settings
+## Reprodução e configurações de execução
 
-Press **`Ctrl+PageDown`** (or click **Replay**) to run the active profile; press again or click **Stop** to halt immediately (any held buttons are released). During replay the **"Replaying"** badge and **Stop** button pulse so the running state is obvious, and the status bar shows progress, elapsed time and the loop counter.
+Pressione **`Ctrl+PageDown`** (ou clique em **Replay**) para executar o perfil ativo; pressione novamente ou clique em **Stop** para interromper imediatamente (qualquer botão pressionado é solto). Durante a reprodução, o selo **"Replaying"** e o botão **Stop** pulsam para deixar o estado em execução óbvio, e a barra de status mostra o progresso, o tempo decorrido e o contador de loops.
 
-**Execution** settings (Settings → Profile tab) control timing:
+As configurações de **Execution** (aba Settings → Profile) controlam o tempo:
 
-| Setting | What it does | Default |
+| Configuração | O que faz | Padrão |
 | --- | --- | --- |
-| **Delay** | A fixed delay (ms) applied before each action, overriding recorded timing. | 100 ms (on) |
-| **Loops** | How many times to repeat the whole macro. **0 = forever.** | 1 |
-| **Interval** | Pause (ms) between loop iterations. | off |
-| **Jitter** | Random ± % applied to each delay, so playback isn't perfectly regular. | off |
+| **Delay** | Um atraso fixo (ms) aplicado antes de cada ação, substituindo o tempo gravado. | 100 ms (ligado) |
+| **Loops** | Quantas vezes repetir a macro inteira. **0 = infinito.** | 1 |
+| **Interval** | Pausa (ms) entre as iterações do loop. | desligado |
+| **Jitter** | Variação aleatória de ± % aplicada a cada delay, para que a reprodução não fique perfeitamente regular. | desligado |
 
 ---
 
-## The action grid
+## A grade de ações
 
-The central table lists every action in the profile. Columns: **selection checkbox · Action (colored pill) · Details · Delay · Notes**.
+A tabela central lista todas as ações do perfil. Colunas: **caixa de seleção · Action (pílula colorida) · Details · Delay · Notes**.
 
 <p align="center">
-  <img src="img/main.png" width="820" alt="The TrueReplayer main window and action grid" /><br>
-  <sub><i>Profiles &amp; folders on the left, the action grid in the center, settings on the right.</i></sub>
+  <img src="img/main.png" width="820" alt="A janela principal e a grade de ações do TrueReplayer" /><br>
+  <sub><i>Perfis &amp; pastas à esquerda, a grade de ações no centro, configurações à direita.</i></sub>
 </p>
 
-- **Select** — click a row (single), `Ctrl+Click` (toggle), `Shift+Click` (range), or use the checkboxes.
-- **Edit inline** — click a cell to edit **Delay**, **Notes**, **coordinates** (`x, y` for mouse rows — separators can be comma/semicolon/space) or the **Key** (keyboard rows capture the next key you press). Commit with **Enter/Tab**, cancel with **Esc**.
-- **Reorder** — drag a row, or select and press **`Alt+↑` / `Alt+↓`**.
-- **Right-click** a row for **Duplicate, Delete, Edit, Insert Else** (inside an If block), and more.
-- **Skip** — unchecking a row keeps it in the list but it won't run during replay.
-- **Bulk bar** — when multiple rows are selected, a bar appears with **Set delay**, **Set X / Set Y** (a `+10` / `-5` offset adjusts each; a plain number sets all), **Set notes**, **Move ↑/↓**, **Skip**, **Delete**.
-- **Sheet panel** — right-click → Edit (or open the Sheet) for a full form with every field of the selected row.
+- **Selecionar** — clique numa linha (única), `Ctrl+Click` (alternar), `Shift+Click` (intervalo), ou use as caixas de seleção.
+- **Editar na própria linha** — clique numa célula para editar **Delay**, **Notes**, **coordenadas** (`x, y` para linhas de mouse — os separadores podem ser vírgula/ponto e vírgula/espaço) ou a **Key** (linhas de teclado capturam a próxima tecla que você pressionar). Confirme com **Enter/Tab**, cancele com **Esc**.
+- **Reordenar** — arraste uma linha, ou selecione e pressione **`Alt+↑` / `Alt+↓`**.
+- **Clique com o botão direito** numa linha para **Duplicate, Delete, Edit, Insert Else** (dentro de um bloco If) e mais.
+- **Pular** — desmarcar uma linha a mantém na lista, mas ela não roda durante a reprodução.
+- **Barra em massa** — quando várias linhas estão selecionadas, aparece uma barra com **Set delay**, **Set X / Set Y** (um deslocamento `+10` / `-5` ajusta cada uma; um número simples define todas), **Set notes**, **Move ↑/↓**, **Skip**, **Delete**.
+- **Painel Sheet** — clique com o botão direito → Edit (ou abra o Sheet) para um formulário completo com todos os campos da linha selecionada.
 
-> **Note:** *Else / EndIf* are pure jump markers — their Delay cell is blank and not editable, and a bulk "set delay" skips them. The opening **If** *does* take a delay: it's a **pre-probe wait** applied before the condition is checked, so a slow-to-appear image/pixel isn't read as "false" and the block wrongly skipped.
+> **Nota:** *Else / EndIf* são marcadores de salto puros — a célula Delay deles fica em branco e não é editável, e um "set delay" em massa as ignora. O **If** de abertura *aceita* delay: é uma **espera pré-sondagem** aplicada antes de checar a condição, para que uma imagem/pixel que demora a aparecer não seja lida como "falsa" e o bloco pulado por engano.
 
 ---
 
-## Action reference
+## Referência de ações
 
-| Action | What it does |
+| Ação | O que faz |
 | --- | --- |
-| **Left / Right / Middle Click** | A single click of that button at `(x, y)`. |
-| **Double Click** | Two left clicks at the same point, timed below the system double-click threshold so apps treat it as a real double-click. |
-| **Keystroke** | Press a key or combo once — or **N times** with a configurable gap. |
-| **Hold Key** | Hold a single key down for a set duration (default 1000 ms). Modifiers are dropped. |
-| **Key Down / Key Up** | A standalone press or release — for holds and drags where down/up must be separate. |
-| **Scroll Up / Down** | One mouse-wheel notch at the cursor. |
-| **Send Text** | Inject text (with tokens, snippets, clipboard transforms) — see [Send Text](#send-text). |
-| **Pause** | Halt until a **resume hotkey** is pressed or a **timeout** expires (whichever comes first). Needs at least one of the two. |
-| **Wait Image** | Block until a reference image appears on screen (optionally within a cropped search region; confidence default ≈ 85%). |
-| **Wait Pixel Color** | Block until the pixel at `(x, y)` matches a target hex color (within tolerance). |
-| **Run Profile** | Run another profile as a sub-step — optionally a set number of times. Cycles and chains deeper than 5 levels are blocked automatically. |
-| **Activate Window** | Bring another app's window to the foreground mid-run — launch it first if it isn't open, wait for it, optionally restore its saved position/size. Changes the OS focus target only, never the coordinate context. See [Multi-window automation](#multi-window-automation-activate-window). |
-| **If / Else / EndIf** | Conditional branch — see [Conditional blocks](#conditional-blocks-if--else--endif). |
-| **Browser actions** | Click / Type / Navigate / Wait element / Select option in Chrome — see [Browser automation](#browser-automation). |
+| **Left / Right / Middle Click** | Um único clique daquele botão em `(x, y)`. |
+| **Double Click** | Dois cliques esquerdos no mesmo ponto, cronometrados abaixo do limiar de clique duplo do sistema para que os aplicativos os tratem como um clique duplo real. |
+| **Keystroke** | Pressiona uma tecla ou combinação uma vez — ou **N vezes** com um intervalo configurável. |
+| **Hold Key** | Mantém uma única tecla pressionada por uma duração definida (padrão 1000 ms). Modificadores são descartados. |
+| **Key Down / Key Up** | Um pressionamento ou liberação isolado — para segurar teclas e arrastar, em que o down/up precisa ser separado. |
+| **Scroll Up / Down** | Um passo da roda do mouse na posição do cursor. |
+| **Send Text** | Injeta texto (com tokens, snippets, transformações de clipboard) — veja [Send Text](#send-text). |
+| **Set Variable** | Guarda um valor com nome pelo resto da execução, lido de volta com `{var:name}`. No modo *Cycle* o valor é uma lista e cada execução pega a próxima linha — veja [Variáveis, slots e prompts](#variáveis-slots-e-prompts). |
+| **Copy to Slot** | Copia o que estiver **selecionado agora** no app em foco para um slot de clipboard nomeado, lido de volta com `{clip:name}`. |
+| **Pause** | Interrompe até que uma **hotkey de retomada** seja pressionada ou um **timeout** expire (o que vier primeiro). Precisa de pelo menos um dos dois. |
+| **Wait Image** | Bloqueia até que uma imagem de referência apareça na tela (opcionalmente dentro de uma região de busca recortada; confiança padrão ≈ 85%). |
+| **Wait Pixel Color** | Bloqueia até que o pixel em `(x, y)` corresponda a uma cor hex alvo (dentro da tolerância). |
+| **Run Profile** | Executa outro perfil como um subpasso — opcionalmente um número definido de vezes. Ciclos e cadeias com mais de 5 níveis de profundidade são bloqueados automaticamente. |
+| **Activate Window** | Age sobre a janela de outro app no meio da execução: **Activate** (trazer para a frente — abrindo o app antes, se preciso), **Maximize**, **Minimize** ou **Close**. O *Activate* muda só o alvo de foco do SO, nunca o contexto de coordenadas. Veja [Automação multi-janela](#automação-multi-janela-activate-window). |
+| **If / Else / EndIf** | Ramificação condicional — veja [Blocos condicionais](#blocos-condicionais-if--else--endif). |
+| **Browser actions** | Click / Type / Navigate / Wait element / Assert element / Select option no Chrome — veja [Automação de navegador](#automação-de-navegador). |
 
-Insert actions from the **toolbar** (Send Keystroke, Send Text, Pause, Wait, Conditional, Browser, Run Profile, Activate Window). Most actions open a small dialog to configure them; click an action's Details cell later to edit it.
+Insira ações pela **barra de ferramentas** (Send Keystroke, Send Text, Set Variable, Copy to Slot, Pause, Wait, Conditional, Browser, Run Profile, Activate Window, Data Loop). A maioria das ações abre um pequeno diálogo para configurá-las; clique na célula Details de uma ação depois para editá-la.
 
-> **Tip — match by colour, not confidence.** Image matching compares the whole reference, so it's great for shape/text but a blunt tool for telling apart two states that differ only in **colour** (e.g. an enabled *green* vs a disabled *grey* button). For that, use **Wait Pixel Color** (or an **If** on *Pixel Color Match*): sample a point in the solid fill and match the colour within a tolerance. Also don't set **confidence to 100%** — a live screen never reproduces a reference pixel-for-pixel, so a 100% match times out (it's capped just under 100% internally).
+> **Dica — diferencie por cor, não por confiança.** O match de imagem compara a referência inteira, ótimo para forma/texto, mas é grosseiro para distinguir dois estados que diferem só na **cor** (ex.: um botão habilitado *verde* vs desabilitado *cinza*). Para isso use **Wait Pixel Color** (ou um **If** em *Pixel Color Match*): amostre um ponto no preenchimento sólido e compare a cor dentro de uma tolerância. E não use **confiança em 100%** — uma tela viva nunca fica idêntica, pixel por pixel, à referência, então uma exigência de 100% nunca é atendida e a macro para por esgotar o tempo (internamente o valor é limitado logo abaixo de 100%).
 
 ---
 
-## Conditional blocks (If / Else / EndIf)
+## Blocos condicionais (If / Else / EndIf)
 
-Make a macro react to what's on screen.
+Faça uma macro reagir ao que está na tela.
 
 <p align="center">
-  <img src="img/conditionals.png" width="820" alt="Two If/Else/EndIf blocks in the action grid" /><br>
-  <sub><i>A negated pixel check (<code>if NOT</code>) and an image check with an <code>else</code> branch.</i></sub>
+  <img src="img/conditionals.png" width="820" alt="Dois blocos If/Else/EndIf na grade de ações" /><br>
+  <sub><i>Uma verificação de pixel negada (<code>if NOT</code>) e uma verificação de imagem com ramo <code>else</code>.</i></sub>
 </p>
 
-- An **If** runs a **probe**: *Image Found* (is this image visible?) or *Pixel Color Match* (does this pixel match this color?).
-- If the probe is **true**, the actions between **If** and **Else/EndIf** run; if **false**, execution jumps to the **Else** branch (if present) or past the **EndIf**.
-- **Negate (IFNOT)** flips the test — the *true* branch runs when the probe **fails**.
-- **Wait for condition (optional)** — by default an **If** checks once and branches instantly. Set a *Wait for condition* value (ms) and it polls that long for the condition to become true before deciding: satisfied in time → **true** branch; time runs out → **Else / false**. Great for *"wait up to 3 s for the button to enable, else take a fallback path."* `0` = instant (the default).
-- Blocks can be **nested** — each nesting level shows in its own colour (with matching scope rails) so deep conditionals stay readable. To create a nested block, select a row **inside** an existing block, then **Insert Conditional**. Add an **Else** via the row's *Insert Else*. The structure is validated and auto-repaired on load (orphan markers removed, missing `EndIf` added).
+- Um **If** executa uma **sondagem** — uma checagem rápida de sim/não. Escolha o tipo no menu **Conditional** da barra de ferramentas quando você insere o bloco:
 
-**Editing a block's contents** — actions *inside* a block edit granularly; an operation only snaps to the **whole block** when your selection includes a marker (*If / Else / EndIf*), so markers can never be orphaned:
-- **Drag** one or more body actions freely **in or out** of a block (single, multiple, even non-contiguous).
-- **Delete** body rows and the block stays — select the **If** row to delete the whole block.
-- **Reorder** with **Move ↑/↓** or **`Alt+↑` / `Alt+↓`**: a body-only selection moves on its own; a selection touching a marker carries the whole block.
-- **Duplicate** an **If** to copy the whole block as a sibling.
-- Dragging the **If** itself (or any selection that includes a marker) always moves the whole block together.
-
----
-
-## Profiles & folders
-
-- **New / Save / Rename / Duplicate / Delete** from the Profiles panel (left). *Duplicate*, *Reset*, *Import* and *Export all* are also in the command palette (`Ctrl+K`).
-- **Pin** a profile to keep it at the top; **drag** it into a **folder** to group it.
-- **Folders** — create, rename, recolor, collapse. A folder can hold a default **window target** that its profiles inherit.
-- **Profile info** — give a profile an **emoji icon**, **description** and **tags** (right-click → Info). Tags are searchable.
-- **Search** filters the list by name or tag.
-- **Import / Export** — export selected profiles to a `.trprofile` file (actions + metadata + reference images + optional folder/pin layout). Import shows a conflict-resolution screen for name clashes and a security note if the file contains auto-firing actions.
-
----
-
-## Hotkeys & hotstrings
-
-Bind a profile to a trigger so it runs without opening the app.
-
-<p align="center">
-  <img src="img/hotkey.png" width="320" alt="The Assign Hotkey dialog with trigger modes" /><br>
-  <sub><i>Capture a key combo and pick a trigger mode.</i></sub>
-</p>
-
-- **Hotkey** — right-click a profile → **Assign hotkey**, press the combo (e.g. `Ctrl+Alt+F1`), pick a trigger mode. Fires globally.
-- **Hotstring** — assign a typed sequence (e.g. `qqsig`); finishing it runs the profile.
-- **Master switch** — `Pause` (or Settings → Recording → **Profile Keys**) enables/disables **all** hotkeys and hotstrings at once.
-
-### Trigger modes
-
-| Mode | Behavior |
+| Condição | Verdadeiro quando |
 | --- | --- |
-| **On Press** | Fires once when the key goes down. |
-| **On Release** | Fires once when the key is released (the press is swallowed while held). |
-| **While Pressed** | Loops the macro continuously while held; stops on release (autofire). |
-| **Toggle** | First press starts (respecting the profile's loops); second press stops. |
-| **Double-tap** | Fires once when the key is tapped twice quickly (~0.4 s). Single taps do nothing. |
-| **Hold (long-press)** | Fires **once** after the key has been held ~0.6 s; a quick tap does nothing. Unlike *While Pressed*, the run does **not** stop on release. |
+| **Image Found** | Uma imagem de referência está visível na tela. |
+| **Pixel Color Match** | O pixel em `(x, y)` corresponde a uma cor (dentro da tolerância). |
+| **Window Open** | Existe uma janela que corresponde a um processo/título — opcionalmente só quando ela está em primeiro plano. |
+| **Clipboard** | O texto do clipboard corresponde (Contains / Exact / Regex / Empty). |
+| **Browser Element** | Um elemento no Chrome está presente, visível ou habilitado. |
+| **Random** | Um sorteio cai abaixo de N% — para macros que não devem parecer perfeitamente regulares. |
+| **Variable** | Um `{var:name}` compara verdadeiro contra um valor (igual, contém, maior que, …). |
+| **Process Running** | Um processo com aquele nome está rodando. |
+| **File Exists** | Um arquivo ou pasta existe no disco. |
+| **Time** | O relógio está dentro de uma janela de início–fim, nos dias da semana que você escolher. |
 
-> Trigger modes apply to **hotkeys** only. **Hotstrings** always fire when typed.
+- Se a sondagem for **verdadeira**, as ações entre **If** e **Else/EndIf** rodam; se **falsa**, a execução salta para a ramificação **Else** (se houver) ou para depois do **EndIf**.
+- **Negate (IFNOT)** inverte o teste — a ramificação *verdadeira* roda quando a sondagem **falha**.
+- **Wait for condition** (opcional) — por padrão um **If** checa uma vez e ramifica na hora. Defina um valor de *Wait for condition* (ms) e ele fica checando durante esse tempo até a condição ficar verdadeira antes de decidir: satisfez a tempo → ramo **verdadeiro**; o tempo acabou → **Else / falso**. Ótimo para *"espere até 3 s o botão habilitar, senão siga um plano B."* `0` = instantâneo (o padrão).
+- Blocos podem ser **aninhados** — cada nível de aninhamento aparece na sua própria cor (com trilhos de escopo correspondentes) para manter condicionais profundas legíveis. Para criar um bloco aninhado, selecione uma linha **dentro** de um bloco existente e use **Insert Conditional**. Adicione um **Else** pelo *Insert Else* da linha. A estrutura é validada e reparada automaticamente ao carregar (marcadores órfãos removidos, `EndIf` ausente adicionado).
 
-**Mouse side buttons.** The two side buttons (**XButton1** / **XButton2**, alone or with modifiers)
-can be captured as hotkeys just like keys, with every trigger mode above — ideal for click-heavy
-game macros. The wheel (`ScrollUp`/`ScrollDown`) also works but always fires On Press.
-
----
-
-## Automation (fire without a hotkey)
-
-An **Automation** fires a profile by itself — no hotkey press. Manage them in
-**Settings → Global → Automation → Manage** (or the tray menu → **Automations…**).
-Three trigger kinds per profile (one automation each):
-
-| Kind | Fires |
-| --- | --- |
-| **Interval** | Every N seconds/minutes (first fire one interval after arming). |
-| **Schedule** | At a clock time (`HH:mm`) on the weekdays you pick. |
-| **Condition** | When a watched condition **becomes true**: a window opens (or comes to the foreground), a process starts, a file appears, a pixel matches a color, an image appears on screen, or the clipboard changes. |
-
-How it behaves:
-
-- **Armed** — only armed automations run; they re-arm automatically at startup, so
-  *Run on Startup* + *Start minimized* turns TrueReplayer into a tray daemon. Arming is
-  **local to your machine**: imported, duplicated or copied profiles always arrive disarmed.
-- **One run at a time** — a fire is **skipped** (and counted in the panel) while a replay or
-  recording is running, while you have unsaved edits in the grid, or while a dialog is open.
-  An automation never discards your unsaved work.
-- **Condition fires** are edge-based by default: the condition must turn false again before the
-  next fire (switch to **Continuous** to re-fire every cooldown while it stays true). A
-  **Cooldown** (default 30 s) spaces fires; the clipboard watcher ignores clipboard traffic
-  produced by TrueReplayer itself.
-- **Master switch** — Settings → Global → Automation, mirrored in the tray menu
-  (**Enable Automations**). The tray tooltip shows how many automations are armed.
-- Profiles without a window target act on whatever window is focused when the trigger fires —
-  the editor warns you. Prefer targeted profiles (or *Activate Window* as the first action).
+**Editando o conteúdo de um bloco** — ações *dentro* de um bloco são editadas de forma granular; uma operação só engloba o **bloco inteiro** quando a seleção inclui um marcador (*If / Else / EndIf*), para que marcadores nunca fiquem órfãos:
+- **Arraste** uma ou mais ações do corpo livremente **para dentro ou para fora** de um bloco (uma, várias, até não-contíguas).
+- **Delete** linhas do corpo e o bloco permanece — selecione a linha **If** para deletar o bloco inteiro.
+- **Reordene** com **Move ↑/↓** ou **`Alt+↑` / `Alt+↓`**: uma seleção só de corpo move sozinha; uma seleção que toca um marcador leva o bloco inteiro.
+- **Duplique** um **If** para copiar o bloco inteiro como irmão.
+- Arrastar o próprio **If** (ou qualquer seleção que inclua um marcador) sempre move o bloco inteiro junto.
 
 ---
 
-## Key remaps
+## Perfis e pastas
 
-**Settings → Global → Key Remaps** — an always-on 1:1 layer, independent of profiles:
+- **New / Save / Rename / Duplicate / Delete** pelo painel Profiles (à esquerda).
+- **Fixe (Pin)** um perfil para mantê-lo no topo; **arraste-o** para dentro de uma **pasta** para agrupá-lo.
+- **Pastas** — crie, renomeie, mude a cor, recolha. Uma pasta pode conter um **alvo de janela** padrão que seus perfis herdam.
+- **Informações do perfil** — dê ao perfil um **ícone emoji**, uma **descrição** e **tags** (clique com o botão direito → Info). As tags são pesquisáveis.
+- **Pesquisa** filtra a lista por nome ou tag.
+- **Import / Export** — exporte os perfis selecionados para um arquivo `.trprofile` (ações + metadados + imagens de referência + layout opcional de pasta/pin). A importação mostra uma tela de conflitos onde cada perfil em choque recebe **Rename** (o padrão — nada é sobrescrito em silêncio), **Overwrite** ou **Skip**, além de um aviso de segurança se o arquivo contiver ações de disparo automático. Um perfil que exige um TrueReplayer mais novo que o seu fica esmaecido com o motivo.
 
-- **Remap a key** — e.g. `CapsLock → Esc`: everywhere, while TrueReplayer runs, pressing
-  CapsLock types Esc. Mouse side buttons (**XButton1/2**) can be sources too (side button → key).
-- **Disable a key** — map it to nothing.
-- Remaps **pause automatically while you record** a macro (recordings capture the physical keys)
-  and can be paused globally from the tray (**Enable Key Remaps**) — the mouse-only escape hatch
-  if a remap ever makes typing awkward.
-- Hotstrings follow the **remapped** keystream (what the apps see), and key combos treat a
-  remapped modifier as the key it became. A key used as a remap **source** can't also be a
-  profile hotkey — the remap wins.
+### A paleta de comandos (`Ctrl+K`)
+
+Comandos que não têm botão próprio, em três grupos:
+
+- **Profiles** — *Duplicate profile*, *Reset profile*, *Import profiles*, *Export all profiles*.
+- **Actions** — *Copy as Table* / *Paste Actions* (mover passos entre perfis como texto), *Convert to Relative* / *Convert to Absolute* para as coordenadas, e a conversão *Combined ↔ Paired* (juntar linhas `KeyDown`+`KeyUp` numa só, ou separá-las).
+- **Diagnostics** — *Toggle Live Variables*, mais os painéis de Automation e Theme Editor.
 
 ---
 
-## Window targeting & relative coordinates
+## Hotkeys e hotstrings
 
-Tie a profile (or a whole folder) to a specific application window.
+Vincule um perfil a um gatilho para que ele rode sem abrir o aplicativo.
 
 <p align="center">
-  <img src="img/target.png" width="360" alt="The Target Configuration dialog" /><br>
-  <sub><i>Match a window by process / title, with relative coordinates and restore options.</i></sub>
+  <img src="img/hotkey.png" width="320" alt="O diálogo Assign Hotkey com os modos de gatilho" /><br>
+  <sub><i>Capture uma combinação de teclas e escolha um modo de gatilho.</i></sub>
 </p>
 
-- **Window target** — set a process name and/or window title (match *contains* or *regex*). The profile's **hotkey only fires when that window is in front**. Use **Detect window** to click a window and auto-fill the fields, and **Test** to check the match.
-- **Relative coordinates** — store clicks relative to the window's top-left corner instead of the screen, so the macro keeps hitting the right spot when the window moves or resizes. Use **Convert to Relative / Absolute** to migrate an existing macro's coordinates.
-- **Bring to focus** — restore + foreground the window before replay.
-- **Restore position / size** — snap the window back to a saved geometry first (use **Update window** to capture the current one).
+- **Hotkey** — clique com o botão direito num perfil → **Assign hotkey**, pressione a combinação (ex.: `Ctrl+Alt+F1`), escolha um modo de gatilho. Dispara globalmente.
+- **Hotstring** — atribua uma sequência digitada (ex.: `qqsig`); ao terminar de digitá-la, o perfil roda.
+- **Chave-mestra** — `Pause` (ou Settings → Recording → **Profile Keys**) ativa/desativa **todas** as hotkeys e hotstrings de uma vez.
 
-> If a profile uses relative coordinates and its target window isn't found at replay time, replay stops with an error (rather than clicking the wrong place).
+### Modos de gatilho
+
+| Modo | Comportamento |
+| --- | --- |
+| **On Press** | Dispara uma vez quando a tecla é pressionada. |
+| **On Release** | Dispara uma vez quando a tecla é solta (o pressionamento é absorvido enquanto segurada). |
+| **While Pressed** | Repete a macro continuamente enquanto pressionada; para ao soltar (autofire). |
+| **Toggle** | O primeiro pressionamento inicia (respeitando os loops do perfil); o segundo para. |
+| **Double-tap** | Dispara uma vez com dois toques rápidos (~0,4 s). Toques únicos não fazem nada. |
+| **Hold (long-press)** | Dispara **uma vez** após segurar a tecla ~0,6 s; um toque rápido não faz nada. Diferente do *While Pressed*, a execução **não** para ao soltar. |
+
+> Os modos de gatilho se aplicam apenas às **hotkeys**. As **hotstrings** sempre disparam quando digitadas.
+
+**Botões laterais do mouse.** Os dois botões laterais (**XButton1** / **XButton2**, sozinhos ou com
+modificadores) podem ser capturados como hotkeys igual a teclas, com todos os modos acima — ideais
+para macros de jogo cheias de cliques. A roda (`ScrollUp`/`ScrollDown`) também funciona, mas sempre
+dispara em On Press.
 
 ---
 
-## Multi-window automation (Activate Window)
+## Automação (disparo sem hotkey)
 
-The **Activate Window** action switches which app is in front *mid-run*, so one macro can drive several windows in turn. It's distinct from the profile-level [Window targeting](#window-targeting--relative-coordinates) above: that pins a *whole profile* to one window (and gates its hotkey); this is a single **action** you drop into the grid at each app switch.
+Uma **Automação** dispara um perfil sozinha — sem apertar hotkey. Gerencie em
+**Settings → App → Automation → Manage** (ou no menu da bandeja → **Automations…**).
+Três tipos de gatilho por perfil (uma automação cada):
 
-**It changes only the OS foreground — never your coordinate context.** Clicks keep resolving against the profile's target (or the screen, when there's none), so the pattern you pick depends on whether the steps after a switch need clicks *relative to that new window*:
+| Tipo | Dispara |
+| --- | --- |
+| **Interval** | A cada N segundos/minutos (o primeiro disparo vem um intervalo após armar). |
+| **Schedule** | Em um horário (`HH:mm`) nos dias da semana que você escolher. |
+| **Condition** | Quando uma condição vigiada **fica verdadeira**: uma janela abre (ou vem ao primeiro plano), um processo inicia, um arquivo aparece, um pixel bate com uma cor, uma imagem aparece na tela, ou o clipboard muda. |
 
-- **Simple multi-window (absolute clicks).** Leave the profile with **no target**, record clicks in absolute screen coordinates, and drop an **Activate Window** row before each app's steps. Fill **Path** so it launches the app if it isn't already open; leave Path empty to just wait-and-focus an already-running window.
-- **Precision multi-window (relative clicks per window).** Make a target-less **orchestrator** profile that alternates **Activate Window X (launch)** → **Run Profile "X-steps"**, where each sub-profile owns *its own* window target + relative coordinates. Activating X first guarantees the sub-profile's target exists before its first relative click.
-- **Return to your own window.** An **Activate Window** pointing at the profile's own target is a mid-run "come back here" step after a detour into another app.
+Como se comporta:
 
-**Fields.** Match the window by **Process** and/or **Title** (Contains or Regex) — use the **picker** to choose a running process, or **Detect window** to click the target. **Path / Args** launch the app when no window matches (a full path is safest; a bare `app.exe` only resolves if it's on `PATH`). **Placement** optionally moves/resizes the activated window — positional only; it does *not* change where clicks land. **Timeout / On timeout** decide how long to wait and whether to **Halt** (default — safe, since keystrokes follow whatever window is focused) or **Continue** if the window can't be found or focused. **Test** checks whether a matching window exists right now.
+- **Armed** — só automações armadas rodam; elas se re-armam sozinhas ao iniciar o app, então
+  *Run on Startup* + *Start minimized* transformam o TrueReplayer em um daemon de bandeja.
+  Armar é **local da sua máquina**: perfis importados, duplicados ou copiados sempre chegam desarmados.
+- **Uma execução por vez** — um disparo é **pulado** (e contado no painel) enquanto um replay ou
+  gravação roda, enquanto há edições não salvas na grade, ou enquanto um diálogo está aberto.
+  Uma automação nunca descarta seu trabalho não salvo.
+- **Disparos de condição** só acontecem na virada: por padrão a condição precisa voltar a ficar falsa antes
+  do próximo disparo (mude para **Continuous** para re-disparar a cada cooldown enquanto verdadeira).
+  Um **Cooldown** (padrão 30 s) espaça os disparos; o vigia de clipboard ignora o tráfego de
+  clipboard produzido pelo próprio TrueReplayer.
+- **Chave-mestra** — Settings → App → Automation, espelhada no menu da bandeja
+  (**Enable Automations**). O tooltip da bandeja mostra quantas automações estão armadas.
+- Perfis sem alvo de janela agem sobre a janela que estiver em foco quando o gatilho disparar —
+  o editor avisa. Prefira perfis com alvo (ou *Activate Window* como primeira ação).
+
+---
+
+## Remaps de tecla
+
+**Settings → Keys → Key Remaps** — uma camada 1:1 sempre ativa, independente de perfis:
+
+- **Remapear uma tecla** — ex. `CapsLock → Esc`: em todo o sistema, enquanto o TrueReplayer roda,
+  apertar CapsLock digita Esc. Botões laterais do mouse (**XButton1/2**) também podem ser origem
+  (botão lateral → tecla).
+- **Desativar uma tecla** — mapeie para nada.
+- Remaps **pausam automaticamente durante a gravação** de macro (a gravação captura as teclas
+  físicas) e podem ser pausados globalmente pela bandeja (**Enable Key Remaps**) — a saída de
+  emergência só com o mouse se um remap atrapalhar a digitação.
+- Hotstrings seguem o fluxo **remapeado** (o que os apps veem), e combos tratam um modificador
+  remapeado como a tecla que ele virou. Uma tecla usada como **origem** de remap não pode ser
+  também hotkey de perfil — o remap vence.
+
+---
+
+## Alvo de janela e coordenadas relativas
+
+Vincule um perfil (ou uma pasta inteira) a uma janela de aplicativo específica.
+
+<p align="center">
+  <img src="img/target.png" width="360" alt="O diálogo Target Configuration" /><br>
+  <sub><i>Corresponda a uma janela por processo / título, com coordenadas relativas e opções de restauração.</i></sub>
+</p>
+
+- **Window target** — defina um nome de processo e/ou título de janela (correspondência por *contains* ou *regex*). A **hotkey do perfil só dispara quando aquela janela está em primeiro plano**. Use **Detect window** para clicar numa janela e preencher os campos automaticamente, e **Test** para verificar a correspondência.
+- **Relative Coordinates** — armazene os cliques relativos ao canto superior esquerdo da janela em vez da tela, para que a macro continue acertando o ponto certo quando a janela se mover ou for redimensionada. Use **Convert to Relative / Absolute** para migrar as coordenadas de uma macro existente.
+- **Bring to focus** — restaura + traz a janela para frente antes da reprodução.
+- **Restore position / size** — encaixa a janela de volta numa geometria salva primeiro (use **Update window** para capturar a atual).
+
+> Se um perfil usa coordenadas relativas e sua janela alvo não é encontrada no momento da reprodução, a reprodução para com um erro (em vez de clicar no lugar errado).
+
+---
+
+## Automação multi-janela (Activate Window)
+
+A ação **Activate Window** troca qual app está em primeiro plano *no meio da execução*, então uma macro pode dirigir várias janelas em sequência. É diferente do [Alvo de janela](#alvo-de-janela-e-coordenadas-relativas) no nível do perfil acima: aquele prende um *perfil inteiro* a uma janela (e condiciona a hotkey dele); esta é uma única **ação** que você coloca na grade a cada troca de app.
+
+**Ela muda só o primeiro plano do SO — nunca o seu contexto de coordenadas.** Os cliques continuam resolvendo contra o alvo do perfil (ou a tela, quando não há nenhum), então o padrão que você escolhe depende de os passos após uma troca precisarem de cliques *relativos àquela nova janela*:
+
+- **Multi-janela simples (cliques absolutos).** Deixe o perfil **sem alvo**, grave os cliques em coordenadas absolutas de tela, e coloque uma linha **Activate Window** antes dos passos de cada app. Preencha **Path** para que ele abra o app se ainda não estiver aberto; deixe Path vazio para só esperar-e-focar uma janela já em execução.
+- **Multi-janela de precisão (cliques relativos por janela).** Faça um perfil **orquestrador** sem alvo que alterna **Activate Window X (launch)** → **Run Profile "passos-de-X"**, onde cada sub-perfil tem *seu próprio* alvo de janela + coordenadas relativas. Ativar X primeiro garante que o alvo do sub-perfil exista antes do primeiro clique relativo dele.
+- **Voltar para a sua janela.** Um **Activate Window** apontando para o próprio alvo do perfil é um passo "volte pra cá" no meio da execução, depois de um desvio para outro app.
+
+**Campos.** Identifique a janela por **Process** e/ou **Title** (Contains ou Regex) — use o **seletor** para escolher um processo em execução, ou **Detect window** para clicar no alvo. **Path / Args** abrem o app quando nenhuma janela corresponde (um caminho completo é o mais seguro; um `app.exe` puro só resolve se estiver no `PATH`). **Placement** opcionalmente move/redimensiona a janela ativada — só posicional; não muda onde os cliques caem. **Timeout / On timeout** decidem quanto esperar e se deve **Halt** (padrão — seguro, já que as teclas seguem a janela em foco) ou **Continue** se a janela não for encontrada ou focada. **Test** verifica se existe agora uma janela correspondente.
 
 ---
 
 ## Clicker mode (auto-clicker)
 
-Switch to **Clicker** with **`ScrollLock`** (or the Macro/Clicker toggle). The Profile panel swaps to clicker settings:
+Mude para **Clicker** com **`ScrollLock`** (ou o botão Macro/Clicker). O painel Profile troca para as configurações do clicker:
 
-| Setting | What it does | Default |
+| Configuração | O que faz | Padrão |
 | --- | --- | --- |
 | **Button** | Left / Right / Middle. | Left |
-| **Rate** | Click speed, as a delay (ms) or clicks/second. | 100 ms (10/s) |
-| **Loops** | Number of clicks. **0 = infinite.** | 0 |
-| **Interval** | Pause between loop iterations. | off |
-| **Jitter** | Random ± % on the delay. | off |
-| **Position** | Randomize the click position slightly. | off |
-| **Area** | Drag a rectangle to click random points inside it (mutually exclusive with Position jitter). | off |
+| **Rate** | Velocidade do clique, como um delay (ms) ou cliques/segundo. | 100 ms (10/s) |
+| **Loops** | Número de cliques. **0 = infinito.** | 0 |
+| **Interval** | Pausa entre as iterações do loop. | desligado |
+| **Jitter** | Variação aleatória de ± % no delay. | desligado |
+| **Position** | Aleatoriza ligeiramente a posição do clique. | desligado |
+| **Area** | Arraste um retângulo para clicar em pontos aleatórios dentro dele (mutuamente exclusivo com o Position jitter). | desligado |
 
-Start/stop with **`PageDown`**, pause/resume with **`PageUp`**. While running, the **live dashboard** shows the click count, rate, elapsed time, loop progress and ETA.
+Inicie/pare com **`PageDown`**, pause/retome com **`PageUp`**. Enquanto roda, o **painel ao vivo** mostra a contagem de cliques, a taxa, o tempo decorrido, o progresso dos loops e o ETA.
 
 <p align="center">
-  <img src="img/clicker.png" width="820" alt="The Clicker dashboard while running" /><br>
-  <sub><i>Live count, rate, elapsed time, loop progress, ETA and a progress bar.</i></sub>
+  <img src="img/clicker.png" width="820" alt="O painel do Clicker enquanto roda" /><br>
+  <sub><i>Contagem ao vivo, taxa, tempo decorrido, progresso do loop, ETA e uma barra de progresso.</i></sub>
 </p>
 
 ---
 
 ## Game mode
 
-For games (e.g. Roblox) that ignore an instant cursor "teleport", *Game mode* makes the movement look human. It's **on by default**; turn it off for normal apps that don't need it.
+Para jogos (ex.: Roblox) que ignoram um "teleporte" instantâneo do cursor, o *Game mode* faz o movimento parecer humano. Vem **ligado por padrão**; desligue-o para aplicativos normais que não precisam dele.
 
-- **Smooth movement** — walks the cursor to the target in small steps (tune **Path step** px, **Step delay**, **Click delay**). Defaults: 20 px / 2 ms / 10 ms.
-- **Fast approach** — for long moves, teleports invisibly to within **Settle distance** (default 80 px) of the target, then walks the final stretch — so far clicks stay quick.
-- **Focus-click** *(per action)* — some tiny targets (a small Roblox text field) only take keyboard focus on a *second* click. Toggle **Focus click** on a click row (right-click) and it clicks twice a few pixels apart. **Use it only on small text fields, never on buttons** (a button would fire twice).
+- **Smooth movement** — leva o cursor até o alvo em pequenos passos (ajuste **Path step** px, **Step delay**, **Click delay**). Padrões: 20 px / 2 ms / 10 ms.
+- **Fast approach** — para movimentos longos, teleporta invisivelmente até a **Settle distance** (padrão 80 px) do alvo e depois percorre o trecho final devagar — assim os cliques distantes continuam rápidos.
+- **Focus-click** *(por ação)* — alguns alvos minúsculos (um pequeno campo de texto do Roblox) só recebem foco do teclado num *segundo* clique. Ative **Focus click** numa linha de clique (botão direito) e ela clica duas vezes a alguns pixels de distância. **Use-o apenas em campos de texto pequenos, nunca em botões** (um botão dispararia duas vezes).
 
 ---
 
 ## Send Text
 
-The **Insert Text** editor composes text that's injected via clipboard paste (so layouts and special characters survive).
+O editor **Insert Text** compõe o texto que é injetado via colagem do clipboard (para que layouts e caracteres especiais sobrevivam).
 
 <p align="center">
-  <img src="img/sendtext.png" width="820" alt="The Send Text editor with token chips and a key/clipboard palette" /><br>
-  <sub><i>Editable token chips inline, with a key &amp; clipboard palette on the side.</i></sub>
+  <img src="img/sendtext.png" width="820" alt="O editor Send Text com chips de token e uma paleta de teclas/clipboard" /><br>
+  <sub><i>Chips de token editáveis inline, com uma paleta de teclas &amp; clipboard ao lado.</i></sub>
 </p>
 
-- **Tokens** — embed special keys and values: `{enter}`, `{tab}`, `{space}`, arrows and other keys; `{date}` / `{time}` / `{datetime}`; `{delay:500}` to pause mid-text. Repeatable keys take a count: `{enter:3}`.
-- **Clipboard** — `{clipboard}` inserts the current clipboard; `{clipboard:upper}`, `{clipboard:trim}`, `{clipboard:line:1}` etc. transform it (trim → extract → limit → case order). Your real clipboard is restored afterward.
-- **Token chips** — each token shows as an editable chip; click it to tweak its parameters.
-- **Snippets** — save reusable text under a name for quick insertion later.
-- Confirm with **`Ctrl+Enter`**; `Esc` cancels.
+- **Tokens** — incorpore teclas e valores especiais: `{enter}`, `{tab}`, `{space}`, setas e outras teclas; `{date}` / `{time}` / `{datetime}`; `{delay:500}` para pausar no meio do texto. Teclas repetíveis aceitam uma contagem: `{enter:3}`.
+- **Clipboard** — `{clipboard}` insere o clipboard atual; `{clipboard:upper}`, `{clipboard:trim}`, `{clipboard:line:1}` etc. o transformam (trim → extrair → limitar → ordem de caixa). Seu clipboard real é restaurado depois.
+- **Tokens de estado da execução** — `{var:name}`, `{clip:name}`, `{input:Label}`, `{counter}` e `{row:column}` puxam valores da macro em execução; veja [Variáveis, slots e prompts](#variáveis-slots-e-prompts) e [Data Loop](#data-loop).
+- **Chips de token** — cada token aparece como um chip editável; clique nele para ajustar seus parâmetros.
+- **Snippets** — salve texto reutilizável sob um nome para inserção rápida depois. Os snippets ficam no app, não no perfil, então não viajam no export/import.
+- Confirme com **`Ctrl+Enter`** (o `Enter` sozinho cria uma nova linha); `Esc` cancela.
+
+O **Delivery** decide como a formatação chega, já que cada app entende uma coisa diferente:
+
+| Modo | Envia |
+| --- | --- |
+| **Rich** | Formatação de verdade (negrito, listas, links) onde o destino aceita — clientes de e-mail, documentos, a maioria dos editores web. |
+| **Markdown** | O estilo `*negrito*` / `_itálico_` que apps tipo WhatsApp esperam. |
+| **Discord** | O sabor próprio do Discord (`**negrito**`, `~~riscado~~`). |
+| **Plain** | Só caracteres simples — mais seguro para caixas de busca, chats de jogo e campos de código. |
+
+---
+
+## Variáveis, slots e prompts
+
+Três jeitos de fazer uma única macro lidar com valores que mudam, em vez de criar uma macro para cada caso.
+
+| Ferramenta | Quanto tempo o valor dura | Como ler o valor |
+| --- | --- | --- |
+| **Set Variable** | Só até o fim da execução atual (tudo é apagado quando uma nova começa). | `{var:name}` |
+| Ação **Copy to Slot** / hotkey **Capture Slot** | Até você gravar outra coisa por cima — continua guardado entre execuções e mesmo se fechar o app. | `{clip:name}` ou `{clip:1}`…`{clip:9}` |
+| **`{input:Label}`** | Só a execução atual — o app pergunta uma vez e reaproveita a resposta até o fim. | O próprio token, escrito de novo |
+
+**Set Variable** *(barra de ferramentas)* — dê um **Name** e um **Value**. O valor é montado antes de ser guardado, então pode conter `{clipboard}`, `{row:col}`, `{date}` ou até outro `{var:}`. Guardar um valor vazio apaga a variável. Mude o modo para **Cycle** e o valor vira uma lista (um item por linha): cada execução guarda a **próxima** linha e, quando chega na última, volta para a primeira — assim uma hotkey percorre a lista, um item por toque. Para voltar ao primeiro item, clique com o botão direito na linha do **Set Variable**, dentro da grade de ações → **Reset row position**.
+
+**Copy to Slot** *(barra de ferramentas)* — copia o que estiver **selecionado** no app em foco para um slot com nome. Garanta que o texto esteja mesmo selecionado antes (uma tecla `Ctrl+A` logo antes, por exemplo). Se a captura falhar, o valor anterior continua lá em vez de ser apagado.
+
+**Capture Slot** *(hotkey)* — a versão manual: Settings → **Keys** → **Hotkeys** → **Capture Slot**. Cada toque guarda o texto selecionado no próximo slot numerado, de `{clip:1}` até `{clip:9}`; depois do 9 volta para o 1. Um aviso mostra em qual slot o texto foi parar. Essa hotkey não funciona enquanto uma macro está rodando — lá dentro, use a ação **Copy to Slot**.
+
+**`{input:Label}`** — pausa a execução e pergunta o valor: `{input:Número do pedido}` mostra uma caixa de texto e `{input:Prioridade|menu:Baixa,Média,Alta}` mostra uma lista de opções. O app pergunta uma única vez para cada rótulo, a cada execução: se você usar o mesmo `{input:Número do pedido}` mais para frente, ele repete a resposta sem perguntar outra vez. Se você fechar a caixa de pergunta, a macro para.
+
+**`{counter}`** — o número da repetição atual (1 na primeira volta, 2 na segunda…). Serve para numerar o texto que a macro digita, tipo "Item 1", "Item 2".
+
+> **Para ver o que está guardado.** Aperte **`Ctrl+K`** → **Toggle Live Variables** e abre um cartãozinho mostrando todas as variáveis, todos os slots e a linha de dados atual *enquanto a macro roda* — é o jeito mais rápido de descobrir por que um token está saindo vazio.
 
 ---
 
 ## Data Loop
 
-Run the whole profile once for **each row** of a table — mail-merge style. Paste rows from Excel or a CSV, and every column header becomes a `{row:column}` token you drop into text, keystrokes or browser fields.
+Execute o perfil inteiro uma vez para **cada linha** de uma tabela — no estilo mala direta. Cole linhas do Excel ou de um CSV e cada cabeçalho de coluna vira um token `{row:column}` que você solta em campos de texto, teclas ou navegador.
 
-Open it from the **toolbar** (the table icon → *Data Loop*). The table is saved **inside the profile**, so it travels with export/import — a large table grows the profile file.
+Abra pela **barra de ferramentas** (o ícone de tabela → *Data Loop*). A tabela é salva **dentro do perfil**, então acompanha o export/import — uma tabela grande faz o arquivo do perfil crescer.
 
-### Getting data in
+### Colocando dados na tabela
 
-- **Paste from Excel / Sheets** — **Paste / bulk edit…**, drop a copied range into the box, and pick **Replace table** or **Append rows**. Tabs, quotes and multi-line cells survive the paste. **First row is the header** turns the top line into column names (off → columns become `col1…colN` and every line is data).
-- **Import CSV** — **Import CSV…** loads a `.csv` / `.tsv` / `.txt` file; the delimiter is auto-detected (comma, semicolon — as Brazilian Excel writes — or tab).
-- **Edit in place** — click any cell to edit it; **Add row** / **Add column**, duplicate or delete rows, and the header **⋯** menu inserts / moves / renames / deletes columns. `Ctrl+Z` undoes the last grid change.
-- **Copy back out** — **Copy table (TSV)** puts the whole grid on the clipboard to paste straight into Excel/Sheets. **Clear table…** empties it (saving an empty grid removes the table from the profile).
+- **Colar do Excel / Sheets** — em **Paste / bulk edit…**, jogue um intervalo copiado na caixa e escolha **Replace table** ou **Append rows**. Tabs, aspas e células com várias linhas sobrevivem à colagem. **First row is the header** transforma a primeira linha em nomes de coluna (desligado → as colunas viram `col1…colN` e toda linha é dado).
+- **Importar CSV** — **Import CSV…** carrega um arquivo `.csv` / `.tsv` / `.txt`; o delimitador é detectado automaticamente (vírgula, ponto e vírgula — como o Excel brasileiro escreve — ou tab).
+- **Editar na própria grade** — clique em qualquer célula para editá-la; **Add row** / **Add column**, duplique ou apague linhas, e o menu **⋯** do cabeçalho insere / move / renomeia / apaga colunas. `Ctrl+Z` desfaz a última alteração da grade.
+- **Copiar de volta** — **Copy table (TSV)** coloca a grade inteira no clipboard para colar direto no Excel/Sheets. **Clear table…** a esvazia (salvar uma grade vazia remove a tabela do perfil).
 
-### Headers → tokens
+### Cabeçalhos → tokens
 
-Every column header becomes a token you can paste into **Insert Text**, a **Keystroke** key, or **Browser Type**:
+Cada cabeçalho de coluna vira um token que você cola em **Insert Text**, na tecla de um **Keystroke** ou em **Browser Type**:
 
-| Token | Resolves to |
+| Token | Resolve para |
 | --- | --- |
-| `{row:column}` | The current row's value in that **column** (lookup is case-insensitive). |
-| `{row}` | The current **row number** (1-based). |
+| `{row:column}` | O valor da linha atual naquela **coluna** (a busca ignora maiúsculas/minúsculas). |
+| `{row}` | O **número da linha** atual (base 1). |
 
-- Copy a token from the **Columns · tokens** rail (click the chip) or the header **⋯** menu. The rail also shows how many actions use each column (`×N` / *unused*), and flags **orphans** — a `{row:…}` an action references but the table has no such column (it types empty text).
-- Headers must be **letters, digits or `_`** to work as tokens. An invalid header is flagged ⚠; click the **wand** to auto-fix it (it still saves either way).
-- A missing cell — or a `{row:column}` with no matching header — resolves to **empty text**, never an error. With duplicate columns, the **last** one wins.
+- Copie um token no painel **Columns · tokens** (clique no chip) ou no menu **⋯** do cabeçalho. O painel também mostra quantas ações usam cada coluna (`×N` / *unused*) e sinaliza **órfãos** — um `{row:…}` que uma ação referencia mas a tabela não tem essa coluna (vai digitar texto vazio).
+- Cabeçalhos precisam ser **letras, dígitos ou `_`** para virar token. Um cabeçalho inválido é marcado com ⚠; clique na **varinha** para corrigir automaticamente (de todo jeito ele é salvo).
+- Uma célula vazia — ou um `{row:column}` sem cabeçalho correspondente — vira **texto vazio**, nunca um erro. Com colunas duplicadas, a **última** vence.
 
-### Running over the data
+### Executando sobre os dados
 
-The **Loop over data** toggle decides how the table drives replay:
+A chave **Loop over data** decide como a tabela dirige a reprodução:
 
-| Mode | Behavior |
+| Modo | Comportamento |
 | --- | --- |
-| **Loop over data ON** | One **full run per row** — an N-row table = N iterations. **Overrides** the profile's Loop count *and* a While-Pressed / Toggle infinite replay. Replay **refuses to start** if the table has no rows. |
-| **Loop over data OFF** (*cursor*) | Each replay uses the **next row** and advances, **wrapping** back to the top at the end — good for "process one record per hotkey press". Right-click any row → **Reset row position** to start over at row 1. **Notify on list complete** (rail checkbox, on by default) chimes when a run uses the **last** row, so the wrap isn't silent. |
+| **Loop over data ligado** | Uma **execução completa por linha** — uma tabela de N linhas = N iterações. **Ignora** o Loop count do perfil *e* o replay infinito de While-Pressed / Toggle. A reprodução **se recusa a iniciar** se a tabela não tiver linhas. |
+| **Loop over data desligado** (*cursor*) | Cada reprodução usa a **próxima linha** e avança; ao chegar na última, **volta para a primeira** — ótimo para "processar um registro por toque de hotkey". Botão direito em qualquer linha → **Reset row position** para recomeçar na linha 1. **Notify on list complete** (checkbox no trilho, ligado por padrão) toca um som quando uma execução usa a **última** linha, para a volta não passar despercebida. |
 
-> The row is chosen **once per run**, so a profile with its own inner Loop count repeats the *same* row that many times before moving to the next.
+> A linha é escolhida **uma vez por execução**, então um perfil com seu próprio Loop count interno repete a *mesma* linha esse número de vezes antes de passar para a próxima.
 
-### Skip on error (loop-over-data only)
+### Pular em erro (só com loop-over-data)
 
-When looping over data, **On row error** decides what a failed row does:
+Ao fazer loop sobre os dados, **On row error** decide o que uma linha com falha faz:
 
-| Policy | Behavior |
+| Política | Comportamento |
 | --- | --- |
-| **Halt** *(default)* | Stop the replay on the first row that errors. |
-| **Skip row** | Log the failed row, release anything it left held, and continue with the next row. A one-line summary at the end reports how many rows were skipped (and the first reason). |
+| **Halt** *(padrão)* | Para a reprodução na primeira linha que der erro. |
+| **Skip row** | Registra a linha com falha, solta o que ela tiver deixado pressionado e continua na próxima linha. Um resumo de uma linha no fim informa quantas linhas foram puladas (e o primeiro motivo). |
 
-### Cell transforms — `{row:column:mods}`
+### Transformações de célula — `{row:column:mods}`
 
-A `{row:column}` token accepts the **same modifier chain as `{clipboard}`** (see [Send Text](#send-text)) — append the modifiers after the column name, e.g. `{row:name:trim:upper}`. Click a `{row:…}` chip inside a text editor to configure them in a popover with a live preview of the first row's value, or type the chain by hand. The pipeline runs in a fixed order: **trim → list ops (range / lines / sort / dedupe / reverse / join) → extract (line / word) → limit (first / last) → case (upper / lower / sentence / title)**.
+Um token `{row:column}` aceita a **mesma cadeia de modificadores do `{clipboard}`** (veja [Send Text](#send-text)) — acrescente os modificadores após o nome da coluna, ex.: `{row:name:trim:upper}`. Clique num chip `{row:…}` dentro de um editor de texto para configurá-los num popover com um preview ao vivo do valor da primeira linha, ou digite a cadeia à mão. O pipeline roda numa ordem fixa: **trim → operações de lista (range / lines / sort / dedupe / reverse / join) → extração (line / word) → limite (first / last) → caixa (upper / lower / sentence / title)**.
 
-### Run a sub-profile once per row
+### Rodar um sub-perfil uma vez por linha
 
-A **Run Profile** action can tick **Run once per data row**: the *called* profile runs once per
-row of **its own** Data table, with `{row:column}` resolving from that row — so a parent macro
-can do its setup once, then batch a sub-profile over a list mid-run (Repeat is ignored while
-this is on). If the called profile's table opts into **Skip row**, failed rows are skipped and
-summarized exactly like a top-level data loop; with no table, the sub-profile just runs once.
+Uma ação **Run Profile** pode marcar **Run once per data row**: o perfil *chamado* roda uma vez
+por linha da **própria** tabela de dados dele, com `{row:column}` resolvendo daquela linha — assim
+uma macro pai faz o setup uma vez e depois processa um sub-perfil em lote sobre uma lista no meio
+da execução (Repeat é ignorado enquanto isso está ligado). Se a tabela do perfil chamado optar por
+**Skip row**, linhas com erro são puladas e resumidas exatamente como num data loop de nível
+superior; sem tabela, o sub-perfil apenas roda uma vez.
 
 ---
 
-## Browser automation
+## Automação de navegador
 
-Drive Google Chrome by **CSS selector** instead of screen coordinates — robust against layout shifts. Requires the **TrueReplayer Chrome extension** to be connected (browser menu items are disabled until it is). See the **[extension setup guide](https://github.com/fatalihue/TrueReplayer-releases/blob/main/docs/extension-setup/README.md)** to install it.
+Controle o Google Chrome por **seletor CSS** em vez de coordenadas de tela — robusto contra mudanças de layout. Requer que a **extensão TrueReplayer para Chrome** esteja conectada (os itens de menu do navegador ficam desabilitados até que esteja). Veja o **[guia de instalação da extensão](https://github.com/fatalihue/TrueReplayer-releases/blob/main/docs/extension-setup/README.md)** para instalá-la.
 
-| Action | What it does |
+| Ação | O que faz |
 | --- | --- |
-| **Browser Click / Right Click** | Click an element by selector — or by visible **text** (Exact / Contains / Regex). |
-| **Browser Type** | Type into a field, with the same token/clipboard support as Send Text, plus *paste vs type* and a per-character delay. |
-| **Navigate** | Open a URL; optionally wait until the URL matches a pattern and/or an element appears. |
-| **Wait Element** | Pause until an element appears (or disappears). |
-| **Select Option** | Choose an option in a native `<select>` by text, value or index. |
+| **Browser Click / Right Click** | Clica num elemento por seletor — ou pelo **texto** visível (Exact / Contains / Regex). |
+| **Browser Type** | Digita num campo, com o mesmo suporte a token/clipboard do Send Text, além de *paste vs type* e um delay por caractere. |
+| **Navigate** | Abre uma URL; opcionalmente espera até que a URL corresponda a um padrão e/ou um elemento apareça. |
+| **Wait Element** | Pausa até que um elemento apareça (ou desapareça). |
+| **Assert Element** | Confere se a página está no estado esperado e para a execução (ou segue em frente) se não estiver — é uma guarda, não uma espera. |
+| **Select Option** | Escolhe uma opção num `<select>` nativo por texto, valor ou índice. |
 
-A **selector quality** badge (S → C) hints how stable each captured selector is likely to be.
+Um selo de **qualidade do seletor** (S → C) indica quão estável cada seletor capturado provavelmente será.
 
 ---
 
-## Themes & appearance
+## Temas e aparência
 
-Open the **Theme Editor** from Settings → Global → Appearance → *Customise*.
+Abra o **Theme Editor** em Settings → App → Interface → *Customise*.
 
 <p align="center">
-  <img src="img/theme.png" width="820" alt="The Theme Editor presets tab with a live preview" /><br>
-  <sub><i>40+ presets, with a live preview that updates as you edit.</i></sub>
+  <img src="img/theme.png" width="820" alt="A aba de presets do Theme Editor com um preview ao vivo" /><br>
+  <sub><i>Mais de 40 presets, com um preview ao vivo que se atualiza enquanto você edita.</i></sub>
 </p>
 
-- **Presets** — 40+ curated themes grouped by hue; click to apply. The default is *Lavender Coal* (dark).
-- **Colors** — fine-tune all 15 theme colors via picker, hex or HSL; a contrast checker flags low-contrast text.
-- **Appearance** — adjust **font size, border radius, row height, zoom**, the per-action pill colors, and an optional **match-system (dark/light)** auto-switch.
-- **Import / Export** — share a theme as JSON.
-- **Animations** — a master toggle to disable transitions (accessibility / low-end hardware).
+- **Presets** — mais de 40 temas selecionados agrupados por matiz; clique para aplicar. O padrão é *Lavender Coal* (escuro).
+- **Colors** — ajuste finamente todas as 15 cores do tema via seletor, hex ou HSL; um verificador de contraste sinaliza texto com baixo contraste.
+- **Appearance** — ajuste **font size**, **border radius**, **row height**, **zoom**, as cores das pílulas por ação e uma troca automática opcional **match-system (dark/light)**.
+- **Import / Export** — compartilhe um tema como JSON.
+- **Animations** — uma chave-mestra para desativar as transições (acessibilidade / hardware modesto).
 
 ---
 
-## Settings reference
+## Referência de configurações
 
-The Settings panel (right side) has two tabs; everything **auto-saves** (no Save button). Collapse it to a slim icon rail to reclaim space.
+O painel Settings (lado direito) tem três abas; tudo é **salvo automaticamente** (sem botão Save). Recolha o painel numa barra fina de ícones para ganhar espaço.
 
-**Profile tab** (per profile / mode):
+**Aba Profile** (por perfil / modo):
 - **Execution** — Delay, Loops, Interval, Jitter (Macro mode).
-- **Game Mode** — Smooth movement + Fast approach (and their knobs).
-- **Recording** — the capture filters + **Profile Keys** master switch + Browser selector capture.
-- **Clicker** — replaces Execution/Recording while in Clicker mode.
+- **Game Mode** — Smooth movement + Fast approach (e seus ajustes).
+- **Recording** — os filtros de captura + chave-mestra **Profile Keys** + captura de seletor do Browser.
+- **Clicker** — substitui Execution/Game Mode/Recording enquanto no Clicker mode.
 
-**Global tab** (app-wide):
-- **Hotkeys** — Recording, Replay, Mode toggle, Foreground, and the Clicker hotkeys. Defaults: Record `Ctrl+PageUp`, Replay `Ctrl+PageDown`, Mode `ScrollLock`, Profile-keys `Pause`, Foreground `Insert`, Clicker start `PageDown`, Clicker pause `PageUp`.
-- **Window** — Always on top, Minimize to tray, Run on startup, Start minimized, Run as administrator.
-- **Appearance** — opens the Theme Editor.
-- **Language** — tooltip language: **Português (BR)** (default) or English. Names and menus stay in English; only tooltips localize.
-- **Updates** — manual "check for updates" (it also auto-checks on launch).
+**Aba Keys** (tudo que intercepta tecla):
+- **Hotkeys** — Recording, Replay, Profile Keys, Foreground, Mode toggle, [Capture Slot](#variáveis-slots-e-prompts). Padrões: Record `Ctrl+PageUp`, Replay `Ctrl+PageDown`, Profile-keys `Pause`, Foreground `Insert`, Mode toggle `ScrollLock`, Capture Slot vazio (desativado).
+- **Clicker** — as hotkeys de Start/Pause do Clicker (`PageDown` / `PageUp`); só disparam no Clicker mode.
+- **Key Remaps** — a camada de remap sempre ativa (chave-mestra + a lista de remaps; veja [Remaps de tecla](#remaps-de-tecla)).
 
----
-
-## Where your data lives
-
-- **Profiles:** `Documents\TrueReplayer\Profiles\*.json`
-- **App settings:** `appsettings.json` under the app's local data.
-- **Reference images, themes, WebView2 data:** `%LocalAppData%\TrueReplayer\…` — pinned here so it **survives auto-updates**.
+**Aba App** (em todo o aplicativo):
+- **Window** — Always on top, Minimize to tray.
+- **Startup** — Run on startup, Start minimized, Run as administrator.
+- **Notifications** — flash / som quando um replay termina com a janela em segundo plano.
+- **Automation** — a chave-mestra de Automations + o botão que abre o painel.
+- **Interface** — abre o Theme Editor; idioma das tooltips: **Português (BR)** ou English (nomes e menus permanecem em inglês; apenas as tooltips são localizadas).
+- O **rodapé** da aba mostra a versão em execução e um **Check for Updates** manual (também verifica automaticamente ao iniciar).
 
 ---
 
-## Troubleshooting
+## Onde seus dados ficam
 
-**A hotkey / replay doesn't fire.**
-Check: the profile's **window target** matches the foreground app; the **Profile Keys** master switch (`Pause`) is on; the profile isn't **disabled**; and (for elevated target apps) that TrueReplayer runs **as administrator** (Settings → Global → Window).
+- **Perfis:** `Documents\TrueReplayer\Profiles\*.json`
+- **Configurações do app:** `appsettings.json` sob os dados locais do aplicativo.
+- **Imagens de referência, temas, dados do WebView2:** `%LocalAppData%\TrueReplayer\…` — fixados aqui para que **sobrevivam às atualizações automáticas**.
 
-**Clicks land in the wrong place after the window moved.**
-Enable a **window target** + **relative coordinates** for that profile, then **Convert to Relative**.
+---
 
-**Clicks fire twice.**
-**Focus-click** is enabled on those rows (a focus icon shows on the pill). Turn it off unless the target is a small text field that needs it; never use it on buttons.
+## Solução de problemas
 
-**A game ignores the clicks.**
-Keep **Game mode** on (smooth movement). If a specific game still misclicks, try turning **Fast approach** off, or lowering **Path step** px.
+**Uma hotkey / reprodução não dispara.**
+Verifique: o **alvo de janela** do perfil corresponde ao aplicativo em primeiro plano; a chave-mestra **Profile Keys** (`Pause`) está ligada; o perfil não está **desabilitado**; e, se o app que você automatiza roda como administrador, que o TrueReplayer também rode **como administrador** (Settings → App → Startup).
 
-**The UI doesn't load.**
-Install the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) — the app prompts for it on first run if it's missing.
+**Os cliques caem no lugar errado depois que a janela se moveu.**
+Ative um **alvo de janela** + **coordenadas relativas** para aquele perfil e depois faça **Convert to Relative**.
+
+**Os cliques disparam duas vezes.**
+O **Focus-click** está ativado nessas linhas (um ícone de foco aparece na pílula). Desligue-o, a menos que o alvo seja um campo de texto pequeno que precise dele; nunca o use em botões.
+
+**Um jogo ignora os cliques.**
+Mantenha o **Game mode** ligado (smooth movement). Se um jogo específico ainda errar o clique, tente desligar o **Fast approach** ou reduzir o valor de **Path step** (px).
+
+**Minha automação nunca dispara.**
+Salvar uma automação não a inicia — ligue a chave **Armed** dela na lista. Confira também a chave-mestra **Enable Automations**, e lembre que um disparo é pulado enquanto um replay roda, um diálogo está aberto, ou a grade tem edições não salvas.
+
+**Um sub-perfil ignora os próprios Loops.**
+Isso é de propósito: só vale a contagem **Repeat** do diálogo *Run Profile*. Ponha a repetição no perfil pai, ou use uma tabela de dados.
+
+**Um passo gravado foi parar no lugar errado.**
+A gravação insere **antes da primeira linha selecionada**. Clique num espaço vazio para limpar a seleção se você queria acrescentar no fim.
+
+**Um token não digitou nada.**
+Ele resolveu para vazio — um `{row:column}` cuja coluna não existe, ou um `{var:}` que nunca foi definido, os dois resolvem para texto vazio em vez de dar erro. Aperte **`Ctrl+K`** → **Toggle Live Variables** e rode de novo para ver o que está realmente definido.
+
+**A interface não carrega.**
+Instale o [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) — o aplicativo o solicita na primeira execução se estiver faltando.
 
 ---
 
 <div align="center">
 
-[← Back to README](../README.md) &nbsp;·&nbsp; [Português (BR)](GUIDE.pt-BR.md)
+[← Voltar ao README](../README.md) &nbsp;·&nbsp; [English](GUIDE.en.md)
 
 </div>

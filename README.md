@@ -4,183 +4,186 @@
 
 # TrueReplayer
 
-**Record what you do. Replay it any time — on demand or with a hotkey.**
+**Grave o que você faz. Reproduza quando quiser — sob demanda ou com um atalho.**
 
-A fast, lightweight **macro recorder & automation tool for Windows**. Capture your mouse clicks, key presses and scrolls, then play them back perfectly — or go further with waits, conditions, text injection, a built-in auto-clicker, and input that real games actually accept.
+Um gravador de macros e ferramenta de automação rápido e leve **para Windows**. Capture seus cliques de mouse, pressionamentos de tecla e rolagens, depois reproduza tudo perfeitamente — ou vá além com esperas, condições, injeção de texto, um auto-clicker embutido e entrada que os jogos de verdade realmente aceitam.
 
 [![Latest release](https://img.shields.io/github/v/release/fatalihue/TrueReplayer-releases?style=flat-square&color=60CDFF&label=download)](https://github.com/fatalihue/TrueReplayer-releases/releases/latest)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%2F%2011%20(x64)-0078D4?style=flat-square&logo=windows)](https://github.com/fatalihue/TrueReplayer-releases/releases/latest)
 ![Built with .NET 8 + React](https://img.shields.io/badge/built%20with-.NET%208%20%C2%B7%20React-6bcb77?style=flat-square)
 [![License: MIT](https://img.shields.io/badge/license-MIT-9b8cff?style=flat-square)](LICENSE)
 
-**English** · [Português (BR)](README.pt-BR.md)
+**Português (BR)** · [English](README.en.md)
 
 </div>
 
 <p align="center">
-  <img src="docs/img/main.png" width="860" alt="TrueReplayer main window — a profile's action list with the profiles panel on the left and settings on the right" />
+  <img src="docs/img/main.png" width="860" alt="Janela principal do TrueReplayer — a lista de ações de um perfil, com o painel de perfis à esquerda e as configurações à direita" />
 </p>
 
 ---
 
-## Contents
+## Conteúdo
 
-- [What is TrueReplayer?](#what-is-truereplayer)
-- [Features](#features)
-- [Download & install](#download--install)
-- [Quick start](#quick-start)
-- [Keyboard shortcuts](#keyboard-shortcuts)
-- [Full guide](#full-guide)
-- [FAQ](#faq)
-- [Built with](#built-with)
-- [License](#license)
-
----
-
-## What is TrueReplayer?
-
-TrueReplayer records your real input — every click, keystroke and scroll — and plays it back exactly, as many times as you want. Bind a macro to a **hotkey** and it fires even while another app is focused. Organize your macros into **profiles and colored folders**, then make them smart: add pauses, wait for an image or a pixel color to appear, type text, run another macro, or branch with **IF conditions**.
-
-It sends input the way real apps and **games** expect (tested in Roblox and others), runs as a tiny native Windows app, and **updates itself** automatically.
+- [O que é o TrueReplayer?](#o-que-é-o-truereplayer)
+- [Recursos](#recursos)
+- [Download e instalação](#download-e-instalação)
+- [Início rápido](#início-rápido)
+- [Atalhos de teclado](#atalhos-de-teclado)
+- [Guia completo](#guia-completo)
+- [Perguntas frequentes](#perguntas-frequentes)
+- [Construído com](#construído-com)
+- [Licença](#licença)
 
 ---
 
-## Features
+## O que é o TrueReplayer?
 
-### 🎬 Record & replay
-- **One-tap recording** — press **`Ctrl+PageUp`** (or the Recording button), do your thing, press again to stop.
-- **Pixel-perfect playback** — replay with **`Ctrl+PageDown`**, with full control over **delay, loops** (0 = forever), **interval** between loops, and **jitter** (random ± variation so it's not robotic).
-- **Capture filters** — record only what you want: mouse clicks, scroll, keyboard — together or separately.
-- **Editable action grid** — every step is a row you can reorder (drag or `Alt+↑/↓`), edit inline, duplicate, skip, or bulk-edit.
+O TrueReplayer grava sua entrada real — cada clique, tecla e rolagem — e reproduz tudo exatamente, quantas vezes você quiser. Vincule uma macro a um **atalho** e ela dispara mesmo enquanto outro aplicativo está em foco. Organize suas macros em **perfis e pastas coloridas** e depois deixe-as inteligentes: adicione pausas, espere por uma imagem ou cor de pixel aparecer, digite texto, execute outra macro ou ramifique com **condições IF**.
 
-### ⌨️ Triggers
-- **Hotkeys** — bind any key combo to a profile; it fires globally, even over other apps.
-- **Hotstrings** — type a short text trigger (e.g. `qqsig`) and a macro runs.
-- **4 trigger modes** — *On Press*, *On Release*, *While Pressed* (autofire while held), and *Toggle* (on/off).
+Ele envia a entrada da forma que aplicativos e **jogos** reais esperam (testado no Roblox e em outros), roda como um pequeno aplicativo nativo do Windows e **se atualiza** automaticamente.
 
-### 🧩 Smart steps — beyond plain recording
-- **Pause** — wait for a hotkey or a timeout before continuing.
-- **Wait for Image / Pixel Color** — block until something appears on screen (great for syncing with slower apps).
-- **Send Text** — paste rich text with tokens like `{enter}`, `{tab}`, `{clipboard}`, dates, saved snippets and clipboard transforms.
-- **Run Profile** — call another macro as a sub-step and build modular, reusable automations.
-- **Conditionals (If / Else / EndIf)** — branch on whether an image is found or a pixel matches; supports *IFNOT*, nesting, and an optional per-condition timeout (wait for the condition, then branch).
-- **Browser actions** — drive Chrome by CSS selector (Click, Type, Navigate, Wait for element, Select option) via the [companion Chrome extension](https://github.com/fatalihue/TrueReplayer-releases/blob/main/docs/extension-setup/README.md).
+---
+
+## Recursos
+
+### 🎬 Gravar e reproduzir
+- **Gravação com um toque** — pressione **`Ctrl+PageUp`** (ou o botão Recording), faça o que precisa e pressione de novo para parar.
+- **Reprodução perfeita** — reproduza com **`Ctrl+PageDown`**, com controle total sobre **delay, loops** (0 = para sempre), **interval** entre loops e **jitter** (variação ± aleatória para não ficar robótico).
+- **Filtros de captura** — grave só o que você quer: cliques de mouse, rolagem, teclado — juntos ou separados.
+- **Grade de ações editável** — cada passo é uma linha que você pode reordenar (arrastando ou com `Alt+↑/↓`), editar na hora, duplicar, pular ou editar em lote.
+
+### ⌨️ Gatilhos
+- **Hotkeys** — vincule qualquer combinação de teclas a um perfil; ela dispara globalmente, mesmo sobre outros aplicativos.
+- **Hotstrings** — digite um gatilho de texto curto (ex.: `qqsig`) e uma macro é executada.
+- **6 modos de gatilho** — *On Press*, *On Release*, *While Pressed* (disparo automático enquanto segura), *Toggle* (liga/desliga), *Double-tap* (dois toques rápidos) e *Hold* (segurar por ~0,6 s). Os botões laterais do mouse também servem de hotkey.
+
+### 🧩 Passos inteligentes — além da gravação simples
+- **Pause** — espere por um atalho ou um tempo limite antes de continuar.
+- **Wait for Image / Pixel Color** — bloqueie até algo aparecer na tela (ótimo para sincronizar com aplicativos mais lentos).
+- **Send Text** — cole texto formatado com tokens como `{enter}`, `{tab}`, `{clipboard}`, datas, snippets salvos e transformações da área de transferência.
+- **Run Profile** — chame outra macro como um sub-passo e construa automações modulares e reutilizáveis.
+- **Variáveis, slots e prompts** — guarde um valor com `{var:name}`, mantenha várias áreas de transferência com `{clip:name}`, ou faça a macro te perguntar um valor no meio da execução com `{input:Label}`.
+- **Condicionais (If / Else / EndIf)** — ramifique com dez checagens: imagem encontrada, cor de pixel, janela aberta, área de transferência, elemento no navegador, uma variável, um processo em execução, um arquivo, o horário do dia ou uma chance aleatória; suporta *IFNOT*, aninhamento e um timeout opcional por condição (espere pela condição e ramifique).
+- **Ações de navegador** — controle o Chrome por seletor CSS (Click, Type, Navigate, Wait for element, Select option) por meio da [extensão Chrome complementar](https://github.com/fatalihue/TrueReplayer-releases/blob/main/docs/extension-setup/README.md).
 
 <p align="center">
-  <img src="docs/img/conditionals.png" width="760" alt="An If/Else/EndIf conditional block in the action grid" /><br>
-  <sub><i>If / Else / EndIf blocks branch on what's on screen — an image being found, or a pixel color matching.</i></sub>
+  <img src="docs/img/conditionals.png" width="760" alt="Um bloco condicional If/Else/EndIf na grade de ações" /><br>
+  <sub><i>Blocos If / Else / EndIf ramificam conforme o que está na tela — uma imagem encontrada ou uma cor de pixel correspondente.</i></sub>
 </p>
 
-### 🖱️ Built-in auto-clicker
-A dedicated **Clicker mode** (switch with **`ScrollLock`**) for fast, steady clicking: pick the button, set a rate (clicks/sec or delay), add random jitter, restrict it to a screen region, and watch **live stats** (count, rate, elapsed, ETA, loop progress).
+### 🖱️ Auto-clicker embutido
+Um **Clicker mode** dedicado (alterne com **`ScrollLock`**) para cliques rápidos e constantes: escolha o botão, defina uma taxa (cliques/seg ou delay), adicione jitter aleatório, restrinja a uma região da tela e acompanhe as **estatísticas ao vivo** (contagem, taxa, tempo decorrido, ETA, progresso do loop).
 
 <p align="center">
-  <img src="docs/img/clicker.png" width="760" alt="The Clicker mode live dashboard with click count, rate and progress" /><br>
-  <sub><i>The Clicker dashboard — live count, rate, elapsed time, loop progress and ETA.</i></sub>
+  <img src="docs/img/clicker.png" width="760" alt="O dashboard ao vivo do Clicker mode com contagem de cliques, taxa e progresso" /><br>
+  <sub><i>O dashboard do Clicker — contagem ao vivo, taxa, tempo decorrido, progresso do loop e ETA.</i></sub>
 </p>
 
 ### 🎮 Game mode
-- **Smooth movement** — moves the cursor along a path instead of teleporting, so games (e.g. Roblox) that reject single jumps accept the clicks.
-- **Fast approach** — teleports most of the way and only "settles" the last stretch smoothly, so far clicks stay fast.
-- **Focus-click** — an opt-in double-tap for tiny text fields that need a second click to take focus.
+- **Smooth movement** — move o cursor ao longo de um caminho em vez de teletransportá-lo, para que jogos (ex.: Roblox) que rejeitam saltos únicos aceitem os cliques.
+- **Fast approach** — teletransporta a maior parte do trajeto e só "ajusta" o último trecho suavemente, mantendo os cliques distantes rápidos.
+- **Focus-click** — um toque duplo opcional para campos de texto minúsculos que precisam de um segundo clique para receber foco.
 
-### 🎯 Window targeting
-- Bind a profile to a **specific window** so its hotkey only fires there.
-- **Relative coordinates** — clicks anchor to the window's top-left, so the macro keeps working when the window moves or resizes.
-- **Bring to focus / restore position & size** before replay for reproducible runs.
+### 🎯 Mira de janela
+- Vincule um perfil a uma **janela específica** para que seu atalho dispare apenas ali.
+- **Coordenadas relativas** — os cliques se ancoram ao canto superior esquerdo da janela, então a macro continua funcionando quando a janela é movida ou redimensionada.
+- **Bring to focus / restore position & size** antes da reprodução para execuções reproduzíveis.
 
-### 🎨 Make it yours
-- **40+ built-in themes** plus a full **Theme Editor** (colors, fonts, row height, per-action colors; export/import themes as JSON).
-- **Profiles & folders** with icons, descriptions, tags and colors.
-- **Bilingual tooltips** — English or **Português (BR)** (Settings → Global → Language).
-- **Import / export** profiles as portable `.trprofile` files (includes reference images and organization).
+### 🎨 Deixe do seu jeito
+- **Mais de 40 temas embutidos** mais um **Theme Editor** completo (cores, fontes, altura das linhas, cores por ação; exporte/importe temas como JSON).
+- **Perfis e pastas** com ícones, descrições, tags e cores.
+- **Tooltips bilíngues** — English ou **Português (BR)** (Settings → App → Interface).
+- **Importe / exporte** perfis como arquivos `.trprofile` portáteis (inclui imagens de referência e organização).
 
 <p align="center">
-  <img src="docs/img/theme.png" width="820" alt="The Theme Editor with 40+ presets and a live preview" /><br>
-  <sub><i>The Theme Editor — 40+ presets with a live preview, plus full color &amp; layout control.</i></sub>
+  <img src="docs/img/theme.png" width="820" alt="O Theme Editor com mais de 40 presets e um preview ao vivo" /><br>
+  <sub><i>O Theme Editor — mais de 40 presets com preview ao vivo, além de controle total de cores &amp; layout.</i></sub>
 </p>
 
 ---
 
-## Download & install
+## Download e instalação
 
-1. Download the latest **`TrueReplayer-win-Setup.exe`** from the **[Releases page](https://github.com/fatalihue/TrueReplayer-releases/releases/latest)**.
-2. Run it — it installs in seconds and pins to your Start menu.
-3. That's it. TrueReplayer **checks for updates on launch** and updates itself in the background (delta updates, usually a few MB).
+1. Baixe o **`TrueReplayer-win-Setup.exe`** mais recente na **[página de Releases](https://github.com/fatalihue/TrueReplayer-releases/releases/latest)**.
+2. Execute-o — instala em segundos e fixa no menu Iniciar.
+3. Pronto. O TrueReplayer **verifica atualizações ao iniciar** e se atualiza em segundo plano (atualizações delta, normalmente alguns MB).
 
-> **Requirements:** Windows 10 or 11 (64-bit). The [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) powers the UI — it ships with modern Windows, and the app offers to install it if it's missing.
-
----
-
-## Quick start
-
-1. **Record** — press **`Ctrl+PageUp`**, perform your actions, press it again to stop.
-2. **Replay** — press **`Ctrl+PageDown`** (or click **Replay**) to play it back.
-3. **Save** — click **Save** and give it a name.
-4. **Assign a hotkey** — right-click the profile → **Assign hotkey**, pick a combo and a trigger mode. Now it runs any time you press it.
-
-That's all you need. Everything else — waits, conditions, the auto-clicker, themes — is there when you want it.
+> **Requisitos:** Windows 10 ou 11 (64 bits). O [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) alimenta a interface — ele já vem com o Windows moderno, e o aplicativo se oferece para instalá-lo caso esteja ausente.
 
 ---
 
-## Keyboard shortcuts
+## Início rápido
 
-| Action | Shortcut |
+1. **Grave** — pressione **`Ctrl+PageUp`**, execute suas ações e pressione de novo para parar.
+2. **Reproduza** — pressione **`Ctrl+PageDown`** (ou clique em **Replay**) para reproduzir.
+3. **Salve** — clique em **Save** e dê um nome.
+4. **Atribua um atalho** — clique com o botão direito no perfil → **Assign hotkey**, escolha uma combinação e um modo de gatilho. Agora ela é executada sempre que você pressionar.
+
+É tudo o que você precisa. Todo o resto — esperas, condições, o auto-clicker, temas — está lá quando você quiser.
+
+---
+
+## Atalhos de teclado
+
+| Ação | Atalho |
 | --- | --- |
-| Start / stop **recording** | `Ctrl+PageUp` |
-| Start / stop **replay** | `Ctrl+PageDown` |
-| Switch **Macro ↔ Clicker** mode | `ScrollLock` (or `Ctrl+ScrollLock`) |
-| Start / stop the **clicker** | `PageDown` |
-| Pause / resume the **clicker** | `PageUp` |
-| Enable / disable **profile hotkeys** | `Pause` |
-| Bring the app **to the front** | `Insert` |
-| **Command palette** | `Ctrl+K` |
-| Undo / redo | `Ctrl+Z` / `Ctrl+Y` |
-| Save profile | `Ctrl+S` |
-| Move selected rows up / down | `Alt+↑` / `Alt+↓` |
-| Delete selected rows | `Delete` |
+| Iniciar / parar **gravação** | `Ctrl+PageUp` |
+| Iniciar / parar **reprodução** | `Ctrl+PageDown` |
+| Alternar modo **Macro ↔ Clicker** | `ScrollLock` (ou `Ctrl+ScrollLock`) |
+| Iniciar / parar o **clicker** | `PageDown` |
+| Pausar / retomar o **clicker** | `PageUp` |
+| Ativar / desativar **atalhos de perfil** | `Pause` |
+| Trazer o aplicativo **para a frente** | `Insert` |
+| **Paleta de comandos** | `Ctrl+K` |
+| Desfazer / refazer | `Ctrl+Z` / `Ctrl+Y` |
+| Salvar perfil | `Ctrl+S` |
+| Mover linhas selecionadas para cima / baixo | `Alt+↑` / `Alt+↓` |
+| Excluir linhas selecionadas | `Delete` |
 
-> All hotkeys (record, replay, mode, etc.) are configurable in **Settings → Global → Hotkeys**. The defaults are shown above.
-
----
-
-## Full guide
-
-The complete reference — every action type, conditionals, the clicker, game mode, window targeting, Send Text tokens, browser automation, themes and settings — lives in the guide:
-
-📖 **[docs/GUIDE.md](docs/GUIDE.md)** &nbsp;·&nbsp; 📖 **[Guia completo em Português](docs/GUIDE.pt-BR.md)**
+> Todos os atalhos (gravar, reproduzir, modo, etc.) são configuráveis em **Settings → Keys → Hotkeys**. Os padrões são mostrados acima.
 
 ---
 
-## FAQ
+## Guia completo
 
-**Does it work in games?**
-Yes — it sends real input via `SendInput`, with optional *Game mode* (smooth movement) for engines like Roblox that reject teleported cursors. Toggle it off for normal apps that don't need it.
+A referência completa — cada tipo de ação, condicionais, o clicker, game mode, mira de janela, tokens do Send Text, automação de navegador, temas e configurações — está no guia:
 
-**Where are my profiles stored?**
-Profiles are `.json` files under `Documents\TrueReplayer\Profiles`. App settings, themes, reference images and WebView2 data live under `%LocalAppData%\TrueReplayer` (this survives updates).
+📖 **[docs/GUIDE.md](docs/GUIDE.md)** &nbsp;·&nbsp; 📖 **[Full guide in English](docs/GUIDE.en.md)**
 
-**Can I share a macro?**
-Yes — select profiles → **Export** to a `.trprofile` file (it bundles actions, metadata and reference images). The other person **Imports** it, with conflict resolution for name clashes.
-
-**My clicks are duplicating / firing twice.**
-Check whether **Focus-click** is enabled on those click rows (a small focus icon shows on the action pill). It's an opt-in that deliberately clicks twice to focus tiny text fields — turn it off (row right-click → *Focus click*) unless you need it, and never use it on buttons.
+Prefere aprender fazendo? Comece pelas **[Receitas](docs/GUIDE.md#receitas--aprenda-fazendo)** — quatorze tarefas curtas e reais (uma resposta pronta, esperar a tela, preencher um formulário a partir de uma lista), cada uma com poucos passos.
 
 ---
 
-## Built with
+## Perguntas frequentes
 
-- **Host:** WinUI 3 (.NET 8) + WebView2 — a tiny native Windows shell.
-- **UI:** React + TypeScript + Vite + Tailwind, rendered in WebView2.
-- **Engine:** C# / .NET 8 using native Windows input APIs (`SendInput`, low-level hooks).
-- **Updates:** [Velopack](https://velopack.io) (delta auto-updates).
+**Funciona em jogos?**
+Sim — ele envia entrada real via `SendInput`, com *Game mode* opcional (smooth movement) para engines como o Roblox que rejeitam cursores teletransportados. Desligue-o para aplicativos normais que não precisam dele.
 
-Two repositories:
-- **Code** — [`fatalihue/truereplayer`](https://github.com/fatalihue/truereplayer)
-- **Releases** (auto-update source) — [`fatalihue/TrueReplayer-releases`](https://github.com/fatalihue/TrueReplayer-releases)
+**Onde meus perfis ficam armazenados?**
+Os perfis são arquivos `.json` em `Documents\TrueReplayer\Profiles`. Configurações do aplicativo, temas, imagens de referência e dados do WebView2 ficam em `%LocalAppData%\TrueReplayer` (isso sobrevive às atualizações).
+
+**Posso compartilhar uma macro?**
+Sim — selecione os perfis → **Export** para um arquivo `.trprofile` (ele empacota ações, metadados e imagens de referência). A outra pessoa faz o **Import**, com resolução de conflitos para nomes iguais.
+
+**Meus cliques estão duplicando / disparando duas vezes.**
+Verifique se o **Focus-click** está ativado nessas linhas de clique (um pequeno ícone de foco aparece na pílula da ação). É um recurso opcional que clica duas vezes de propósito para dar foco a campos de texto minúsculos — desligue-o (clique direito na linha → *Focus click*) a menos que você precise dele, e nunca o use em botões.
 
 ---
 
-## License
+## Construído com
+
+- **Host:** WinUI 3 (.NET 8) + WebView2 — um pequeno shell nativo do Windows.
+- **UI:** React + TypeScript + Vite + Tailwind, renderizado no WebView2.
+- **Engine:** C# / .NET 8 usando APIs de entrada nativas do Windows (`SendInput`, hooks de baixo nível).
+- **Atualizações:** [Velopack](https://velopack.io) (atualizações automáticas delta).
+
+Dois repositórios:
+- **Código** — [`fatalihue/truereplayer`](https://github.com/fatalihue/truereplayer)
+- **Releases** (fonte de atualização automática) — [`fatalihue/TrueReplayer-releases`](https://github.com/fatalihue/TrueReplayer-releases)
+
+---
+
+## Licença
 
 [MIT](LICENSE) © fatalihue
