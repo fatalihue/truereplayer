@@ -453,7 +453,7 @@ export function Toolbar(_props: ToolbarProps) {
   return (
     <>
       {/* Explicit h-[47px] so the toolbar's bottom edge lines up with the right panel's
-          Profile/Global tab strip (also h-[47px]). Earlier the toolbar used py-2.5 which
+          Profile/Keys/App tab strip (also h-[47px]). Earlier the toolbar used py-2.5 which
           worked when the contents were flat (~46px), but the boxed-group containers
           added in the redesign bumped the row to ~52px and broke the alignment. */}
       <div className="flex items-center gap-3 px-4 h-[47px] bg-bg-surface border border-border-subtle rounded-ui">

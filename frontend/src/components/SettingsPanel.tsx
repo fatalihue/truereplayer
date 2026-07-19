@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useContext, createContext } from 'react';
-import { Timer, TimerReset, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Download, MousePointerClick, Palette, Gamepad2, AlertTriangle, Power, BellRing, X, ArrowLeftRight } from 'lucide-react';
+import { Timer, TimerReset, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, MousePointerClick, Palette, Gamepad2, AlertTriangle, Power, BellRing, X, ArrowLeftRight } from 'lucide-react';
+import { APP_VERSION } from '../appVersion';
 import { RemapSection } from './RemapSection';
 import { useLanguage, useTt } from '../state/LanguageContext';
 // `Search` import removed with the disabled Settings filter — re-add it to revive the filter.
@@ -16,17 +17,12 @@ function CompactToggle(props: { isOn: boolean; onChange: (v: boolean) => void; d
   return <Toggle {...props} size="sm" />;
 }
 
-// Width for hotkey-capture fields and comboboxes that must fit a "Ctrl+PageDown" combo
-// (110px = the widest un-shrinkable content; also fits a thousands-separated "10.000 ms").
-// Value/number chips use the tighter 96px instead — the EnableChip default in macro mode,
-// and CLICKER_W in clicker mode — since they only ever hold a number.
-const CTRL_W = 'w-[110px]';
-
-// Width for EVERY clicker-mode field — the settings chips (Button / Rate / Loops / Interval /
-// Jitter / Position / Area) AND the Start / Pause hotkey fields — so the whole clicker column is
-// one uniform 96px (matching the macro Execution chips across a mode switch). The default clicker
-// hotkeys are single keys (PageDown / PageUp) that fit; a long modified combo would truncate.
-const CLICKER_W = 'w-[96px]';
+// ONE width for EVERY right-aligned settings field — hotkeys, value chips, combos — across
+// all tabs and both modes (the 2026-07 "Option B" reorg's single 100px column). It fits a
+// thousands-separated "10.000 ms" chip, and the widest hotkey default ("Ctrl+PageDown",
+// ~86px at 12px Consolas) ONLY because HotkeyInput uses px-1.5 padding (88px content box —
+// see the comment there); together with the reserved scrollbar gutter no row label wraps.
+const FIELD_W = 'w-[100px]';
 
 // Upper bounds for the timing / scatter fields — typing past these snaps back to the cap on
 // commit (blur/Enter). A typo-guard (stops an accidental extra zero making a macro appear to
@@ -36,62 +32,46 @@ const CLICKER_W = 'w-[96px]';
 const MAX_DELAY_MS = 60000;
 const MAX_POSITION_PX = 500;
 
+// Auto-focus knobs — both OFF by request (2026-07-19): the panel never changes tab on its
+// own, so whichever tab the user left open stays open. The logic is kept intact behind
+// these flags; flip one back to `true` to restore that behaviour.
+//   • ON_MODE_SWITCH — a macro↔clicker toggle jumped to Profile (each mode's settings live
+//     there, so staying on Keys/App hid them).
+//   • ON_RUN_START — a run starting jumped to Profile so the running context was on screen.
+// Typed `boolean` (not the inferred `false` literal) so the guarded branches don't read as
+// dead code to the compiler/editor while the flags are off.
+const FOCUS_PROFILE_ON_MODE_SWITCH: boolean = false;
+const FOCUS_PROFILE_ON_RUN_START: boolean = false;
+
 // Live "Filter settings" query (lowercased). SettingRow reads it and hides itself when its
 // label doesn't match, so the search needs no prop-drilling through every row.
 const FilterContext = createContext('');
 
-// Flat section: a small colored dot + label, no bordered card and (by default) no collapse
-// chevron — the per-group cards + always-present expanders were the "boxy noise" users
-// flagged. Pass collapsible for a long/secondary group (e.g. Updates), which adds the
-// chevron; its open state persists across mounts unless persist={false} (see below).
-// data-section still drives the collapsed rail's scroll.
-function Section({ color, title, children, collapsible = false, defaultOpen = true, persist = true }: {
-  color: string;
+// Quiet section header: monochrome label-micro title + hairline rule. The 2026-07
+// "Option B" reorg killed the per-group colored dots (12 hues carrying no information)
+// and the collapse chevrons — every section is always open; the only hue that survives
+// is semantic, passed via `color` (the Clicker purple mode cue). data-section still
+// drives the collapsed rail's expand-and-scroll targeting.
+function Section({ title, color, children }: {
   title: string;
+  // Optional title tint for sections whose hue IS information (Clicker purple).
+  color?: string;
   children: React.ReactNode;
-  collapsible?: boolean;
-  defaultOpen?: boolean;
-  // Remember the open/closed choice across mounts (default). Pass persist={false}
-  // for a group that should ALWAYS mount at defaultOpen regardless of a prior
-  // choice — used by Updates, which the user wants reliably collapsed on every
-  // open; expanding it is a transient, per-view action, not a sticky preference.
-  persist?: boolean;
 }) {
-  const [isOpen, setIsOpen] = useState(() => {
-    if (!collapsible) return true;
-    if (!persist) return defaultOpen;
-    const saved = localStorage.getItem(`ui:settings-section:${title}`);
-    return saved === null ? defaultOpen : saved === '1';
-  });
-  const toggleOpen = () => {
-    setIsOpen(prev => {
-      if (persist) localStorage.setItem(`ui:settings-section:${title}`, prev ? '0' : '1');
-      return !prev;
-    });
-  };
-  const dot = <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: color }} />;
   return (
     <div data-section={title}>
-      {collapsible ? (
-        <button onClick={toggleOpen} className="group w-full flex items-center gap-2 px-1.5 pt-2 pb-0.5">
-          {dot}
-          <span className="label-micro text-text-tertiary flex-1 text-left group-hover:text-text-secondary transition-colors">{title}</span>
-          {isOpen ? <ChevronDown size={12} className="text-text-tertiary" /> : <ChevronRight size={12} className="text-text-tertiary" />}
-        </button>
-      ) : (
-        <div className="flex items-center gap-2 px-1.5 pt-2 pb-0.5">
-          {dot}
-          <span className="label-micro text-text-tertiary">{title}</span>
-        </div>
-      )}
-      {isOpen && <div>{children}</div>}
+      <div className="flex items-center gap-2 px-1.5 pt-3 pb-0.5">
+        <span className="label-micro text-text-tertiary" style={color ? { color } : undefined}>{title}</span>
+        <span className="flex-1 h-px bg-border-subtle" />
+      </div>
+      <div>{children}</div>
     </div>
   );
 }
 
 // Merged value+enable control: one chip carrying the number, its unit and an enable dot —
 // replaces the old "field + separate switch" pair so a setting reads as a single unit. Same
-// CTRL_W as the plain value fields so the column stays aligned. The dot toggles enable;
+// FIELD_W as the plain value fields so the column stays aligned. The dot toggles enable;
 // editing the number commits on blur/Enter (Enter also runs onEnterActivate — e.g. flip the
 // setting on when the user types a value into a disabled chip).
 function EnableChip({ value, isOn, unit, format, max, width, onCommitValue, onToggle, onEnterActivate }: {
@@ -102,8 +82,7 @@ function EnableChip({ value, isOn, unit, format, max, width, onCommitValue, onTo
   // Upper bound applied on commit (Loops 999, Jitter 100): typing a larger number
   // snaps back to max on blur/Enter.
   max?: number;
-  // Field width. Defaults to the compact 96px used by the macro Execution fields;
-  // the Clicker section passes CTRL_W so its fields all line up at one width.
+  // Field width. Defaults to FIELD_W — the panel-wide single column.
   width?: string;
   onCommitValue: (v: string) => void;
   onToggle: (v: boolean) => void;
@@ -126,7 +105,7 @@ function EnableChip({ value, isOn, unit, format, max, width, onCommitValue, onTo
   };
   return (
     <div
-      className={`${width ?? 'w-[96px]'} h-7 flex items-center rounded border overflow-hidden focus-within:!border-accent-solid`}
+      className={`${width ?? FIELD_W} h-7 flex items-center rounded border overflow-hidden focus-within:!border-accent-solid`}
       style={isOn
         ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
         : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
@@ -175,7 +154,7 @@ function ValueField({ value, unit, onCommitValue }: {
   const focused = useRef(false);
   useEffect(() => { if (!focused.current) setLocal(value); }, [value]);
   return (
-    <div className={`${CTRL_W} h-7 flex items-center gap-1.5 px-2 rounded border border-border-default bg-bg-input focus-within:border-accent-solid`}>
+    <div className={`${FIELD_W} h-7 flex items-center gap-1.5 px-2 rounded border border-border-default bg-bg-input focus-within:border-accent-solid`}>
       <input
         type="text"
         value={local}
@@ -248,7 +227,7 @@ function SettingRow({ label, tooltip, children, danger }: { label: string; toolt
 // UI zoom, which double-scales fixed coords, and absolute shares the field's coordinate space
 // so it lands exactly under the input. These rows sit near the top of their group, so the
 // short menu stays within the inset and isn't clipped. Closes on outside-click / Escape.
-function ComboInput({ value, onCommit, options, width = CTRL_W, editable = true }: {
+function ComboInput({ value, onCommit, options, width = FIELD_W, editable = true }: {
   value: string;
   onCommit: (v: string) => void;
   options: { value: string; label: string }[];
@@ -333,8 +312,8 @@ function ComboInput({ value, onCommit, options, width = CTRL_W, editable = true 
 // Clicker v2 — dedicated section that replaces Execution + Recording in the Profile tab
 // when useCursorClick is on. Reads/writes the cursorClick* fields directly via settings:change,
 // so it's fully decoupled from the active profile's Delay/Jitter/Loop settings. Visual
-// identity: purple header + subtle purple border so the user immediately sees "I'm
-// configuring Clicker, not the macro profile".
+// identity: the purple section title so the user immediately sees "I'm configuring
+// Clicker, not the macro profile".
 function ClickerSection({
   button, rate, rateJitter, useRateJitter, positionJitter, usePositionJitter,
   useArea, area, useFixed, fixedPoint,
@@ -416,9 +395,9 @@ function ClickerSection({
 
   return (
     // Uses the shared Section so it matches macro mode exactly (header above a single
-    // inset group, same row layout). Purple icon/title keep the "you're in Clicker" cue.
+    // inset group, same row layout). The purple title keeps the "you're in Clicker" cue.
     <Section color="var(--color-clicker)" title="Clicker">
-          {/* Flat/chip layout: every settings control is one CLICKER_W (96px) box, flush right,
+          {/* Flat/chip layout: every settings control is one FIELD_W (100px) box, flush right,
               so chips, combos and the area control all line up — and match the macro Execution
               chips' width across a mode switch. Value+enable rows are a single EnableChip;
               Button/Rate are pickers; Area is chip-shaped (dot + picker). */}
@@ -429,7 +408,6 @@ function ClickerSection({
               editable={false}
               value={button}
               onCommit={(v) => onChange('cursorClickButton', v)}
-              width={CLICKER_W}
               options={[
                 { value: 'Left', label: 'Left' },
                 { value: 'Right', label: 'Right' },
@@ -438,8 +416,8 @@ function ClickerSection({
             />
           </SettingRow>
           <SettingRow label="Rate" tooltip={tt('Click rate: /s or delay (ms). Type or pick a preset.', 'Taxa de clique: /s ou atraso (ms). Digite ou escolha um preset.')}>
-            {/* Combo + /s↔ms unit toggle share one CLICKER_W slot so the row aligns with the chips. */}
-            <div className={`${CLICKER_W} flex items-center gap-1`}>
+            {/* Combo + /s↔ms unit toggle share one FIELD_W slot so the row aligns with the chips. */}
+            <div className={`${FIELD_W} flex items-center gap-1`}>
               <ComboInput
                 /* Key on (unit, localDelayMs) so it remounts with the right displayValue when
                    either changes — toggling the unit, or picking a preset (commitRate updates
@@ -467,7 +445,6 @@ function ClickerSection({
               value={loops}
               isOn={useLoops}
               max={999}
-              width={CLICKER_W}
               onCommitValue={(v) => onChange('cursorClickLoops', v)}
               onToggle={(v) => onChange('cursorClickUseLoops', v)}
               onEnterActivate={() => activateIfOff(useLoops, 'cursorClickUseLoops')}
@@ -478,7 +455,6 @@ function ClickerSection({
               value={interval}
               isOn={useInterval}
               unit="ms" format max={MAX_DELAY_MS}
-              width={CLICKER_W}
               onCommitValue={(v) => onChange('cursorClickInterval', v)}
               onToggle={(v) => onChange('cursorClickUseInterval', v)}
               onEnterActivate={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
@@ -489,7 +465,6 @@ function ClickerSection({
               value={rateJitter}
               isOn={useRateJitter}
               unit="%" max={100}
-              width={CLICKER_W}
               onCommitValue={(v) => onChange('cursorClickDelayJitter', v)}
               onToggle={(v) => onChange('cursorClickUseJitter', v)}
               onEnterActivate={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
@@ -500,7 +475,6 @@ function ClickerSection({
               value={positionJitter}
               isOn={usePositionJitter}
               max={MAX_POSITION_PX}
-              width={CLICKER_W}
               onCommitValue={(v) => onChange('cursorClickPositionJitter', v)}
               onToggle={(v) => setClickMode('cursorClickUsePositionJitter', v)}
               onEnterActivate={() => setClickMode('cursorClickUsePositionJitter', true)}
@@ -511,7 +485,7 @@ function ClickerSection({
               auto-enables useArea + disables Position jitter on a successful draw. */}
           <SettingRow label="Area" tooltip={tt('Clicks a random point in a screen box. Exclusive with Position / Fixed.', 'Clica em um ponto aleatório em uma caixa na tela. Exclusivo com Position / Fixed.')}>
             <div
-              className={`${CLICKER_W} h-7 flex items-center rounded border overflow-hidden group`}
+              className={`${FIELD_W} h-7 flex items-center rounded border overflow-hidden group`}
               style={useArea
                 ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
                 : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
@@ -568,7 +542,7 @@ function ClickerSection({
               auto-enables useFixed + disables the other two on a successful pick. */}
           <SettingRow label="Fixed" tooltip={tt('Always clicks one point. No point set = locks to the cursor when clicking starts. Exclusive with Position / Area.', 'Sempre clica em um ponto. Sem ponto = trava na posição do cursor quando começa a clicar. Exclusivo com Position / Area.')}>
             <div
-              className={`${CLICKER_W} h-7 flex items-center rounded border overflow-hidden group`}
+              className={`${FIELD_W} h-7 flex items-center rounded border overflow-hidden group`}
               style={useFixed
                 ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
                 : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
@@ -627,7 +601,7 @@ function ClickerSection({
   );
 }
 
-function HotkeyInput({ value, settingKey, onChange, width = CTRL_W, allowClear = false }: {
+function HotkeyInput({ value, settingKey, onChange, width = FIELD_W, allowClear = false }: {
   value: string;
   settingKey: string;
   onChange: (key: string, hotkey: string) => void;
@@ -736,7 +710,10 @@ function HotkeyInput({ value, settingKey, onChange, width = CTRL_W, allowClear =
         }
       }}
       onBlur={() => { setIsFocused(false); setLocalValue(value); send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } }); disarmCaptureTimer(); }}
-      className={`${allowClear ? 'w-full' : width} h-7 px-2 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
+      // px-1.5 (not the fields' usual px-2): the 100px column's content box is 82px at
+      // px-2, and the DEFAULT Replay combo "Ctrl+PageDown" needs ~86px at 12px Consolas —
+      // the 6px padding gives it 88px so no factory default ever clips.
+      className={`${allowClear ? 'w-full' : width} h-7 px-1.5 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
         isFocused
           ? 'text-accent-light border-accent-solid animate-pulse'
           : 'text-accent border-border-default'
@@ -776,7 +753,10 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
   const tt = useTt();
   const { send, subscribe } = useBridge();
   const selectionRef = useSelectionRef();
-  const [activeTab, setActiveTab] = useState<'profile' | 'global'>('profile');
+  // Three scopes (2026-07 "Option B" reorg): Profile = what changes per macro/mode;
+  // Keys = everything that intercepts a key (global hotkeys, clicker hotkeys, remaps);
+  // App = window/startup/notifications/automation/interface + the Updates footer.
+  const [activeTab, setActiveTab] = useState<'profile' | 'keys' | 'app'>('profile');
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'up-to-date' | 'error'>('idle');
   // SETTINGS FILTER (disabled). To revive: uncomment the line below, the filter input + its
   // FilterContext.Provider wrapper in the tab content, and re-add `Search` to the lucide import.
@@ -790,29 +770,30 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
     });
   }, [subscribe]);
 
-  // Switching mode in EITHER direction jumps to the Profile tab — each mode's settings live
-  // there (the Clicker panel / the macro Execution+Recording stack), so landing on a stale
-  // Global section would hide them. Fires only on an actual macro↔clicker toggle (a value
-  // CHANGE), never on mount, so it doesn't fight the initial 'profile' default; the user can
-  // still open Global manually afterwards.
+  // Switching mode in EITHER direction used to jump to the Profile tab (see
+  // FOCUS_PROFILE_ON_MODE_SWITCH). Edge-only: fires on an actual macro↔clicker toggle (a
+  // value CHANGE), never on mount, so it can't fight the initial 'profile' default. The
+  // ref keeps tracking the mode either way, so flipping the flag on needs no other change.
   const prevClickerMode = useRef(settings.useCursorClick);
   useEffect(() => {
-    if (settings.useCursorClick !== prevClickerMode.current) setActiveTab('profile');
+    const modeChanged = settings.useCursorClick !== prevClickerMode.current;
     prevClickerMode.current = settings.useCursorClick;
+    if (FOCUS_PROFILE_ON_MODE_SWITCH && modeChanged) setActiveTab('profile');
   }, [settings.useCursorClick]);
 
-  // When a run STARTS — a macro profile fires or the Clicker begins clicking, both of which
-  // set status='replaying' — surface the Profile tab if the user is parked on Global, so the
-  // running context (the actions / the Clicker panel) is what they see. Keyed off `status`,
-  // NOT clickerStats.active/replayActive: clickerStats.active LATCHES true after the first
-  // Clicker run (the reducer preserves it on status:changed), which poisoned an OR-combination
-  // so it only fired once; `status` cleanly toggles ready↔replaying every run. Edge-only, and
-  // only from Global, so it never yanks the user off a tab they chose mid-run.
+  // A run STARTING — a macro profile fires or the Clicker begins clicking, both of which
+  // set status='replaying' — used to surface the Profile tab (see FOCUS_PROFILE_ON_RUN_START).
+  // Keyed off `status`, NOT clickerStats.active/replayActive: clickerStats.active LATCHES
+  // true after the first Clicker run (the reducer preserves it on status:changed), which
+  // poisoned an OR-combination so it only fired once; `status` cleanly toggles
+  // ready↔replaying every run. Edge-only, and only from a non-Profile tab. The ref keeps
+  // tracking run state either way, so flipping the flag on needs no other change.
   const prevRunActive = useRef(false);
   const runActive = status === 'replaying';
   useEffect(() => {
-    if (runActive && !prevRunActive.current && activeTab === 'global') setActiveTab('profile');
+    const runStarted = runActive && !prevRunActive.current;
     prevRunActive.current = runActive;
+    if (FOCUS_PROFILE_ON_RUN_START && runStarted && activeTab !== 'profile') setActiveTab('profile');
   }, [runActive, activeTab]);
 
   const changeSetting = (key: string, value: string | boolean | number | object | null) => {
@@ -825,9 +806,8 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
 
   // ── Collapsed rail → expand straight into a section ──
   // Clicking a rail icon expands the panel on the right tab with the target
-  // section open and scrolled into view. The open flag is written to
-  // localStorage BEFORE expanding because Sections read it in their useState
-  // initializer (they're unmounted while the panel is collapsed).
+  // section scrolled into view (sections are always open since the quiet reorg
+  // dropped the collapse chevrons).
   const pendingScrollSection = useRef<string | null>(null);
   useEffect(() => {
     if (collapsed || !pendingScrollSection.current) return;
@@ -837,47 +817,37 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
       document.querySelector(`[data-section="${title}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     });
   }, [collapsed]);
-  const expandToSection = (tab: 'profile' | 'global', sectionTitle: string) => {
-    localStorage.setItem(`ui:settings-section:${sectionTitle}`, '1');
+  const expandToSection = (tab: 'profile' | 'keys' | 'app', sectionTitle: string) => {
     setActiveTab(tab);
     pendingScrollSection.current = sectionTitle;
     onToggleCollapse?.();
   };
 
-  // Rail entries mirror the sections of each tab (profile side swaps to the
-  // Clicker panel when Clicker mode is on, like the expanded panel does).
-  // `onClick` overrides the default expand-to-section behaviour for entries that
-  // are a direct action rather than a section (none currently — the old Appearance
-  // shortcut became the two-row Interface section, which expands like the rest).
-  type RailEntry = { tab: 'profile' | 'global'; title: string; icon: React.ElementType; color: string; onClick?: () => void };
-  // In Clicker mode the relevant hotkeys are the clicker Start/Pause group, which lives in the
-  // Profile tab (the global macro hotkeys are inert in Clicker mode). So the rail mirrors the
-  // expanded panel: Hotkeys then Clicker under Profile, and the Global group drops its now-
-  // redundant Hotkeys icon.
+  // Rail entries mirror the three tabs' sections (profile group swaps to the Clicker
+  // panel when Clicker mode is on, like the expanded panel does), with two deliberate
+  // exceptions: the Keys tab's small Clicker hotkey pair has no entry of its own (it
+  // sits right under Hotkeys), and Updates lost its entry along with its section (it's
+  // the App-tab footer now). Quiet reorg: icons are MONOCHROME (text-tertiary, hover →
+  // primary via CSS) — the only surviving hue is the semantic Clicker purple (`color`).
+  type RailEntry = { tab: 'profile' | 'keys' | 'app'; title: string; icon: React.ElementType; color?: string };
   const railProfile: RailEntry[] =
     settings.useCursorClick
-      ? [
-          { tab: 'profile', title: 'Hotkeys', icon: Zap, color: '#60cdff' },
-          { tab: 'profile', title: 'Clicker', icon: MousePointerClick, color: 'var(--color-clicker)' },
-        ]
+      ? [{ tab: 'profile', title: 'Clicker', icon: MousePointerClick, color: 'var(--color-clicker)' }]
       : [
-          { tab: 'profile', title: 'Execution', icon: Timer, color: '#ffd93d' },
-          { tab: 'profile', title: 'Game Mode', icon: Gamepad2, color: '#51cf66' },
-          { tab: 'profile', title: 'Recording', icon: Mic, color: '#ff6b6b' },
+          { tab: 'profile', title: 'Execution', icon: Timer },
+          { tab: 'profile', title: 'Game Mode', icon: Gamepad2 },
+          { tab: 'profile', title: 'Recording', icon: Mic },
         ];
-  // Colors: one distinct hue per group across BOTH tabs (2026-07 reorg) — no shared greens,
-  // no reuse of the Clicker purple. All hues already exist in the app: #b3814e = the
-  // conditional-block bronze (--color-block-3), #fb923c = the Browser action orange,
-  // #f472b6 = the Pixel action pink, #4dd0a0 = the old Language teal.
-  const railGlobal: RailEntry[] = [
-    ...(settings.useCursorClick ? [] : [{ tab: 'global', title: 'Hotkeys', icon: Zap, color: '#60cdff' } as RailEntry]),
-    { tab: 'global', title: 'Window', icon: Monitor, color: '#7a8599' },
-    { tab: 'global', title: 'Startup', icon: Power, color: '#b3814e' },
-    { tab: 'global', title: 'Notifications', icon: BellRing, color: '#fb923c' },
-    { tab: 'global', title: 'Automation', icon: TimerReset, color: '#a78bfa' },
-    { tab: 'global', title: 'Key Remaps', icon: ArrowLeftRight, color: '#38bdf8' },
-    { tab: 'global', title: 'Interface', icon: Palette, color: '#f472b6' },
-    { tab: 'global', title: 'Updates', icon: Download, color: '#4dd0a0' },
+  const railKeys: RailEntry[] = [
+    { tab: 'keys', title: 'Hotkeys', icon: Zap },
+    { tab: 'keys', title: 'Key Remaps', icon: ArrowLeftRight },
+  ];
+  const railApp: RailEntry[] = [
+    { tab: 'app', title: 'Window', icon: Monitor },
+    { tab: 'app', title: 'Startup', icon: Power },
+    { tab: 'app', title: 'Notifications', icon: BellRing },
+    { tab: 'app', title: 'Automation', icon: TimerReset },
+    { tab: 'app', title: 'Interface', icon: Palette },
   ];
 
   // Collapsed: a slim icon rail — one button per section (tooltips name them on
@@ -898,24 +868,27 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
           </button>
         </div>
         <div className="flex-1 flex flex-col items-center gap-1 py-2">
-          {railProfile.map(s => (
-            <button
-              key={s.title}
-              onClick={s.onClick ?? (() => expandToSection(s.tab, s.title))}
-              className="w-8 h-8 flex items-center justify-center rounded hover:bg-bg-elevated transition-colors shrink-0"
-            >
-              <s.icon size={15} style={{ color: s.color }} />
-            </button>
-          ))}
-          <div className="w-6 my-1 border-t border-border-subtle shrink-0" />
-          {railGlobal.map(s => (
-            <button
-              key={s.title}
-              onClick={s.onClick ?? (() => expandToSection(s.tab, s.title))}
-              className="w-8 h-8 flex items-center justify-center rounded hover:bg-bg-elevated transition-colors shrink-0"
-            >
-              <s.icon size={15} style={{ color: s.color }} />
-            </button>
+          {[railProfile, railKeys, railApp].map((group, gi) => (
+            // display:contents wrapper keyed by group index (contributes no box of its
+            // own); a thin divider separates the three tab groups.
+            <div key={gi} className="contents">
+              {gi > 0 && <div className="w-6 my-1 border-t border-border-subtle shrink-0" />}
+              {group.map(s => (
+                <button
+                  key={s.title}
+                  onClick={() => expandToSection(s.tab, s.title)}
+                  className="group w-8 h-8 flex items-center justify-center rounded hover:bg-bg-elevated transition-colors shrink-0"
+                  data-tip={s.title}
+                  data-tip-pos="left"
+                >
+                  <s.icon
+                    size={15}
+                    className={s.color ? undefined : 'text-text-tertiary group-hover:text-text-primary transition-colors'}
+                    style={s.color ? { color: s.color } : undefined}
+                  />
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       </div>
@@ -927,7 +900,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
     // the tab bar and would be clipped at the panel edge (scrolling is handled
     // by the tab-content div below).
     <div className="w-[224px] flex flex-col shrink-0 bg-bg-surface border border-border-subtle rounded-ui transition-[width,background-color,border-color] duration-200">
-      {/* Tab Bar — explicit 44 px height (matches the Toolbar's measured rendered height in
+      {/* Tab Bar — explicit 47 px height (matches the Toolbar's measured rendered height in
           the centre column) so the section header below this tab bar lines up vertically
           with the action grid's column-header row in the centre. Without this, the tab
           bar was ~39 px (default py-1.5 + 1 px border) vs the Toolbar's ~46 px, pulling
@@ -942,7 +915,8 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
           onChange={setActiveTab}
           options={[
             { value: 'profile', label: 'Profile' },
-            { value: 'global', label: 'Global' },
+            { value: 'keys', label: 'Keys' },
+            { value: 'app', label: 'App' },
           ]}
         />
         {onToggleCollapse && (
@@ -955,9 +929,10 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
         )}
       </div>
 
-      {/* Tab Content — more vertical gap between groups now that each section is a
-          floating header + inset (not a tight stack of bordered cards). */}
-      <div className="flex-1 overflow-y-auto px-1.5 py-2">
+      {/* Tab Content — scrollbar-gutter reserves the 6px scrollbar lane on every tab, so
+          the single 100px field column never shifts (and no row label wraps) when one
+          tab scrolls and another doesn't. */}
+      <div className="flex-1 overflow-y-auto px-1.5 py-2 [scrollbar-gutter:stable]">
         {/* SETTINGS FILTER (disabled — uncomment this block, the Provider close tag below, the
             query state above, and re-add `Search` to the lucide import to revive):
         <div className="flex items-center gap-2 h-7 px-2 mb-1 rounded border border-border-default bg-bg-input">
@@ -976,19 +951,9 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
         {activeTab === 'profile' ? (
           <>
             {/* Clicker mode swaps the Execution + Recording stack for a dedicated panel.
-                Macro mode keeps the existing layout untouched. */}
+                Macro mode keeps the existing layout untouched. The clicker Start/Pause
+                hotkeys moved to the Keys tab (2026-07 reorg: every key in one place). */}
             {settings.useCursorClick ? (
-              <>
-              {/* Clicker hotkeys — their own group, pinned above the Clicker settings.
-                  Decoupled from the global macro hotkeys; active only in Clicker mode. */}
-              <Section color="#60cdff" title="Hotkeys">
-                <SettingRow label="Start" tooltip={tt('Run / stop the clicker.', 'Inicia / para o clicker.')}>
-                  <HotkeyInput value={settings.cursorClickStartHotkey} settingKey="cursorClickStartHotkey" onChange={changeHotkey} width={CLICKER_W} />
-                </SettingRow>
-                <SettingRow label="Pause" tooltip={tt('Pause / resume the clicker.', 'Pausa / retoma o clicker.')}>
-                  <HotkeyInput value={settings.cursorClickPauseHotkey} settingKey="cursorClickPauseHotkey" onChange={changeHotkey} width={CLICKER_W} />
-                </SettingRow>
-              </Section>
               <ClickerSection
                 /* Remount on reset so the local /s ↔ ms unit toggle goes back to its
                    default ('ms'). Backend stays the source of truth for everything else. */
@@ -1010,10 +975,9 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 useInterval={settings.cursorClickUseInterval}
                 onChange={changeSetting}
               />
-              </>
             ) : (
               <>
-            <Section color="#ffd93d" title="Execution">
+            <Section title="Execution">
               <SettingRow label="Delay" tooltip={tt('Fixed delay between actions (ms).', 'Atraso fixo entre ações (ms).')}>
                 <EnableChip
                   value={settings.customDelay}
@@ -1068,7 +1032,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             {/* Game Mode — interpolated cursor path so games (e.g. Roblox) that ignore a single
                 large jump follow the cursor. Off = instant jumps, perfect for normal apps. Fast
                 approach speeds far moves on top of that; the numeric knobs live under Tuning. */}
-            <Section color="#51cf66" title="Game Mode">
+            <Section title="Game Mode">
               <SettingRow label="Smooth movement" tooltip={tt('Cursor follows a path so games (e.g. Roblox) accept it. Off = instant jumps, fine for normal apps.', 'O cursor segue um caminho para que jogos (ex.: Roblox) o aceitem. Off = saltos instantâneos, ideal para apps normais.')}>
                 <CompactToggle isOn={settings.smoothMovement} onChange={(v) => changeSetting('smoothMovement', v)} />
               </SettingRow>
@@ -1101,7 +1065,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 the danger accent (left bar + red icon/label) when off, since its shortcuts
                 and hotstrings stop firing. (The 2026-07 reorg tried moving it to
                 Global · Hotkeys; the owner preferred it here, next to what it gates.) */}
-            <Section color="#ff6b6b" title="Recording">
+            <Section title="Recording">
               <SettingRow label="Mouse Clicks">
                 <CompactToggle isOn={settings.recordMouse} onChange={(v) => changeSetting('recordMouse', v)} />
               </SettingRow>
@@ -1125,10 +1089,11 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             )}
 
           </>
-        ) : (
+        ) : activeTab === 'keys' ? (
           <>
-            {/* Hotkeys */}
-            <Section color="#60cdff" title="Hotkeys">
+            {/* Keys tab — everything that intercepts a key, in one place: the global
+                hotkeys, the clicker Start/Pause pair, and the remap layer. */}
+            <Section title="Hotkeys">
               <SettingRow label="Recording">
                 <HotkeyInput
                   value={settings.recordingHotkey}
@@ -1180,10 +1145,41 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               </SettingRow>
             </Section>
 
-            {/* Window — window behaviour only (the startup trio got its own Startup
-                section in the 2026-07 reorg; "Run as Administrator" no longer lives
-                under "window"). */}
-            <Section color="#7a8599" title="Window">
+            {/* Clicker Start/Pause — moved here from the Profile tab so every key lives in
+                one tab. Decoupled from the macro hotkeys; they only fire in Clicker mode.
+                Purple title = the Clicker mode cue (the one surviving section hue). */}
+            <Section title="Clicker" color="var(--color-clicker)">
+              <SettingRow label="Start" tooltip={tt('Run / stop the clicker. Active in Clicker mode.', 'Inicia / para o clicker. Ativo no modo Clicker.')}>
+                <HotkeyInput value={settings.cursorClickStartHotkey} settingKey="cursorClickStartHotkey" onChange={changeHotkey} />
+              </SettingRow>
+              <SettingRow label="Pause" tooltip={tt('Pause / resume the clicker. Active in Clicker mode.', 'Pausa / retoma o clicker. Ativo no modo Clicker.')}>
+                <HotkeyInput value={settings.cursorClickPauseHotkey} settingKey="cursorClickPauseHotkey" onChange={changeHotkey} />
+              </SettingRow>
+            </Section>
+
+            {/* Key Remaps — the always-on 1:1 layer (CapsLock→Esc, side-button→key,
+                disable a key). List body lives in RemapSection; the master switch here.
+                Also toggleable from the tray ("Enable Key Remaps") — the mouse-only
+                escape hatch for a remap that made typing painful. */}
+            <Section title="Key Remaps">
+              <SettingRow
+                label="Enable Key Remaps"
+                tooltip={tt('Master switch for the remap layer. Also in the tray menu, so a bad remap can be turned off by mouse alone.',
+                  'Chave mestra da camada de remap. Também no menu da bandeja — um remap ruim pode ser desligado só com o mouse.')}
+              >
+                <CompactToggle
+                  isOn={settings.remaps.enabled}
+                  onChange={(v) => send({ type: 'remap:save', payload: { enabled: v, remaps: settings.remaps.entries } })}
+                />
+              </SettingRow>
+              <RemapSection />
+            </Section>
+          </>
+        ) : (
+          <>
+            {/* App tab — window behaviour, launch, notifications, automation, interface;
+                Updates lives in the panel footer below. */}
+            <Section title="Window">
               <SettingRow label="Always On Top">
                 <CompactToggle
                   isOn={settings.alwaysOnTop}
@@ -1198,9 +1194,8 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               </SettingRow>
             </Section>
 
-            {/* Startup — how the app launches. Bronze = --color-block-3, the one hue
-                family no other group uses. */}
-            <Section color="#b3814e" title="Startup">
+            {/* Startup — how the app launches. */}
+            <Section title="Startup">
               <SettingRow label="Run on Startup">
                 <CompactToggle
                   isOn={settings.runOnStartup}
@@ -1229,7 +1224,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
 
             {/* Notifications — out-of-window run-end cues. Both apply only while the
                 TrueReplayer window is NOT foreground (the game usually covers it). */}
-            <Section color="#fb923c" title="Notifications">
+            <Section title="Notifications">
               <SettingRow label="Flash on Replay End">
                 <CompactToggle
                   isOn={settings.runEndFlash}
@@ -1247,7 +1242,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             {/* Automation — the trigger daemon's master switch + the panel opener. The
                 per-profile triggers themselves are configured inside the panel; this is
                 just the always-discoverable settings-surface home (tray mirrors both). */}
-            <Section color="#a78bfa" title="Automation">
+            <Section title="Automation">
               <SettingRow
                 label="Enable Automations"
                 tooltip={tt('Master switch — armed per-profile triggers (interval / schedule / condition) only fire while this is on. Also in the tray menu.',
@@ -1272,30 +1267,10 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               </SettingRow>
             </Section>
 
-            {/* Key Remaps — the always-on 1:1 layer (CapsLock→Esc, side-button→key,
-                disable a key). List body lives in RemapSection; the master switch here.
-                Also toggleable from the tray ("Enable Key Remaps") — the mouse-only
-                escape hatch for a remap that made typing painful. */}
-            <Section color="#38bdf8" title="Key Remaps" collapsible defaultOpen={false} persist>
-              <SettingRow
-                label="Enable Key Remaps"
-                tooltip={tt('Master switch for the remap layer. Also in the tray menu, so a bad remap can be turned off by mouse alone.',
-                  'Chave mestra da camada de remap. Também no menu da bandeja — um remap ruim pode ser desligado só com o mouse.')}
-              >
-                <CompactToggle
-                  isOn={settings.remaps.enabled}
-                  onChange={(v) => send({ type: 'remap:save', payload: { enabled: v, remaps: settings.remaps.entries } })}
-                />
-              </SettingRow>
-              <RemapSection />
-            </Section>
-
-            {/* Interface — how the UI looks & speaks (the old single-row Appearance and
-                Language sections, merged in the 2026-07 reorg). Theme & layout opens the
+            {/* Interface — how the UI looks & speaks. Theme & layout opens the
                 Theme Editor; Tooltips picks the tooltip language (names/labels stay
-                English — only tooltip text is localised; frontend-only, switches live).
-                Pink (#f472b6, the Pixel action hue) frees the Clicker purple. */}
-            <Section color="#f472b6" title="Interface">
+                English — only tooltip text is localised; frontend-only, switches live). */}
+            <Section title="Interface">
               <SettingRow label="Theme & layout">
                 <button
                   onClick={() => window.dispatchEvent(new CustomEvent('cmd:themeeditor'))}
@@ -1316,27 +1291,31 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               </SettingRow>
             </Section>
 
-            {/* Updates — the app auto-checks on launch; this is just a manual re-check.
-                (The old always-on "Auto Check" switch was a no-op placeholder — removed.) */}
-            <Section color="#4dd0a0" title="Updates" collapsible defaultOpen={false} persist={false}>
-              <button
-                onClick={() => {
-                  setUpdateStatus('checking');
-                  send({ type: 'update:check', payload: {} });
-                }}
-                disabled={updateStatus === 'checking'}
-                className="w-full flex items-center justify-center gap-1.5 h-9 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors disabled:opacity-50"
-              >
-                {updateStatus === 'checking' ? 'Checking...'
-                  : updateStatus === 'up-to-date' ? '✓ Up to date'
-                  : updateStatus === 'error' ? 'Check failed — Retry'
-                  : 'Check for Updates'}
-              </button>
-            </Section>
           </>
         )}
         {/* </FilterContext.Provider>  ← re-enable together with the disabled filter block above */}
       </div>
+
+      {/* App-tab footer — Updates demoted from a section to one quiet line (the app
+          auto-checks on launch; this is just the manual re-check + the running version). */}
+      {activeTab === 'app' && (
+        <div className="shrink-0 border-t border-border-subtle flex items-center justify-between px-3 py-1.5 text-[11px] text-text-tertiary">
+          <span className="font-mono">{APP_VERSION}</span>
+          <button
+            onClick={() => {
+              setUpdateStatus('checking');
+              send({ type: 'update:check', payload: {} });
+            }}
+            disabled={updateStatus === 'checking'}
+            className="hover:text-accent-solid hover:underline transition-colors disabled:opacity-50 disabled:no-underline"
+          >
+            {updateStatus === 'checking' ? 'Checking...'
+              : updateStatus === 'up-to-date' ? '✓ Up to date'
+              : updateStatus === 'error' ? 'Check failed — Retry'
+              : 'Check for Updates'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

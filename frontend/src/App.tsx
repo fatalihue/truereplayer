@@ -83,7 +83,7 @@ function AppShell() {
     return () => window.removeEventListener('cmd:dataeditor', handler);
   }, []);
 
-  // Automation panel — openers: Settings → Global → Automation row (cmd:automation)
+  // Automation panel — openers: Settings → App → Automation row (cmd:automation)
   // and the tray "Automations…" item (backend automation:open push).
   const [showAutomation, setShowAutomation] = useState(false);
   useEffect(() => {

@@ -3,7 +3,6 @@ import { X, Plus, ArrowRight, Ban } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
 import { useTt } from '../state/LanguageContext';
-import { Toggle } from './common/Toggle';
 import { Button } from './common/Button';
 
 type RemapEntry = { from: string; to: string; enabled: boolean };
@@ -11,7 +10,7 @@ type RemapEntry = { from: string; to: string; enabled: boolean };
 const MAX_REMAPS = 32;
 
 /**
- * Body of the Settings → Global → "Key Remaps" section: the always-on 1:1 layer
+ * Body of the Settings → Keys → "Key Remaps" section: the always-on 1:1 layer
  * (CapsLock→Esc, XButton1→F, disable a key). Rows edit + save the WHOLE list via
  * remap:save (the backend sidecar is tiny); the master switch lives in the parent
  * SettingRow. Add-flow captures single keys through the shared low-level
@@ -139,35 +138,58 @@ export function RemapSection() {
   );
 
   return (
-    <div className="flex flex-col gap-1.5 px-1 py-1">
+    // px-2.5 = the SettingRow content inset, so the chip borders (and the add-flow /
+    // empty-state text) line up with the rows above them.
+    <div className="flex flex-col gap-1.5 px-2.5 py-1">
       {remaps.entries.length === 0 && !addOpen && (
-        <div className="text-[11px] text-text-tertiary leading-relaxed px-1">
+        <div className="text-[11px] text-text-tertiary leading-relaxed">
           {tt('No remaps. A remap turns one key into another everywhere (CapsLock → Esc, mouse side button → a key), or disables it.',
             'Nenhum remap. Um remap transforma uma tecla em outra em todo o sistema (CapsLock → Esc, botão lateral do mouse → uma tecla), ou a desativa.')}
         </div>
       )}
 
+      {/* Each entry is one full-width EnableChip-style chip — the same enable-dot +
+          accent-wash vocabulary the Execution value chips teach (2026-07 reorg, V1
+          "chip" variant): dot toggles the entry, ✕ removes it, both live inside the
+          chip so a row is a single object. Off = plain input chrome + tertiary text
+          (the hollow dot carries the state; no strike-through needed). */}
       {remaps.entries.map((r, i) => (
-        <div key={`${r.from}-${i}`} className="flex items-center gap-2 h-7 px-1">
-          <span className={`text-[11px] font-mono ${r.enabled ? 'text-text-primary' : 'text-text-tertiary line-through'}`}>
-            {r.from}
+        <div
+          key={`${r.from}-${i}`}
+          className="h-7 flex items-center rounded border overflow-hidden"
+          style={r.enabled
+            ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
+            : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
+        >
+          <button
+            type="button"
+            onClick={() => saveList(remaps.entries.map((e, j) => (j === i ? { ...e, enabled: !r.enabled } : e)))}
+            aria-label={r.enabled ? 'Disable remap' : 'Enable remap'}
+            data-tip={tt(r.enabled ? 'Disable this remap' : 'Enable this remap', r.enabled ? 'Desativar este remap' : 'Ativar este remap')}
+            className="h-full pl-2 pr-1.5 flex items-center shrink-0 cursor-pointer transition-colors hover:bg-[rgba(127,127,127,0.18)]"
+          >
+            <span
+              className="w-2 h-2 rounded-full block shrink-0"
+              style={r.enabled
+                ? { background: 'var(--color-accent-solid)' }
+                : { background: 'transparent', border: '1.5px solid var(--color-text-tertiary)' }}
+            />
+          </button>
+          <span className={`flex-1 min-w-0 flex items-center gap-1.5 text-[11px] font-mono ${r.enabled ? 'text-text-primary' : 'text-text-tertiary'}`}>
+            <span className="truncate">{r.from}</span>
+            <ArrowRight size={10} className="text-text-tertiary shrink-0" />
+            {r.to ? (
+              <span className="truncate">{r.to}</span>
+            ) : (
+              <span className="text-text-tertiary flex items-center gap-1 min-w-0">
+                <Ban size={9} className="shrink-0" /> <span className="truncate">{tt('disabled', 'desativada')}</span>
+              </span>
+            )}
           </span>
-          <ArrowRight size={10} className="text-text-tertiary shrink-0" />
-          {r.to ? (
-            <span className={`text-[11px] font-mono flex-1 truncate ${r.enabled ? 'text-text-primary' : 'text-text-tertiary line-through'}`}>
-              {r.to}
-            </span>
-          ) : (
-            <span className="text-[11px] text-text-tertiary flex-1 flex items-center gap-1">
-              <Ban size={9} /> {tt('disabled', 'desativada')}
-            </span>
-          )}
-          <Toggle size="sm" isOn={r.enabled}
-            onChange={(v) => saveList(remaps.entries.map((e, j) => (j === i ? { ...e, enabled: v } : e)))} />
           <button
             type="button"
             onClick={() => saveList(remaps.entries.filter((_, j) => j !== i))}
-            className="p-0.5 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+            className="shrink-0 h-full px-1.5 flex items-center text-text-tertiary hover:text-text-primary transition-colors"
             data-tip={tt('Remove remap', 'Remover remap')}
           >
             <X size={11} />
@@ -176,7 +198,7 @@ export function RemapSection() {
       ))}
 
       {addOpen ? (
-        <div className="flex flex-col gap-1.5 px-1 py-1 border-t border-border-subtle mt-1">
+        <div className="flex flex-col gap-1.5 py-1 border-t border-border-subtle mt-1">
           <div className="flex items-center gap-2">
             {keyChip('from', fromKey, false)}
             <ArrowRight size={10} className="text-text-tertiary shrink-0" />
@@ -212,7 +234,7 @@ export function RemapSection() {
           </div>
         </div>
       ) : (
-        <div className="px-1">
+        <div>
           <Button variant="ghost" size="sm" onClick={() => setAddOpen(true)}
             disabled={remaps.entries.length >= MAX_REMAPS}
             data-tip={tt('Remaps apply everywhere while the app runs. They pause automatically while you record a macro. Keyboard keys and mouse side buttons (XButton1/2) can be sources.',
