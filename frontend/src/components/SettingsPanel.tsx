@@ -601,14 +601,11 @@ function ClickerSection({
   );
 }
 
-function HotkeyInput({ value, settingKey, onChange, width = FIELD_W, allowClear = false }: {
+function HotkeyInput({ value, settingKey, onChange, width = FIELD_W }: {
   value: string;
   settingKey: string;
   onChange: (key: string, hotkey: string) => void;
   width?: string;
-  // Opt-in hotkeys (empty = feature off) get a clear affordance; the always-set
-  // five keep the plain input — clearing them would leave a dead core hotkey.
-  allowClear?: boolean;
 }) {
   const { send, subscribe } = useBridge();
   const [localValue, setLocalValue] = useState(value);
@@ -713,7 +710,7 @@ function HotkeyInput({ value, settingKey, onChange, width = FIELD_W, allowClear 
       // px-1.5 (not the fields' usual px-2): the 100px column's content box is 82px at
       // px-2, and the DEFAULT Replay combo "Ctrl+PageDown" needs ~86px at 12px Consolas —
       // the 6px padding gives it 88px so no factory default ever clips.
-      className={`${allowClear ? 'w-full' : width} h-7 px-1.5 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
+      className={`w-full h-7 px-1.5 text-xs font-mono bg-bg-input border rounded text-center outline-none cursor-pointer placeholder:text-accent-light/50 ${
         isFocused
           ? 'text-accent-light border-accent-solid animate-pulse'
           : 'text-accent border-border-default'
@@ -721,13 +718,20 @@ function HotkeyInput({ value, settingKey, onChange, width = FIELD_W, allowClear 
       placeholder="New key..."
     />
   );
-  if (!allowClear) return input;
-  // The clear affordance OVERLAYS the input's right edge inside a wrapper of the same
-  // fixed width, so the field stays column-aligned with the plain hotkey inputs above
-  // and nothing reflows when the button mounts/unmounts. It stays INVISIBLE until the
-  // row is hovered (owner request: the resting panel should read as one clean column of
-  // key values) — opacity rather than mounting, so the combo underneath never reflows.
-  // focus-visible keeps it reachable by keyboard, where there is no hover to give.
+  // EVERY hotkey field clears (2026-07-19). It used to be opt-in for Capture Slot alone,
+  // on the theory that clearing a core hotkey would leave it dead — but each of the six
+  // has another way in (Recording/Replay have their ActionBar buttons, Mode toggle the
+  // Macro/Clicker segment plus the tray, Profile Keys its Settings toggle, Foreground the
+  // tray icon), and three of the defaults claim keys other apps want back: Ctrl+PageUp /
+  // Ctrl+PageDown are tab navigation, Insert toggles overwrite, ScrollLock matters in
+  // Excel. Clearing is safe at the hook too: the combo is built with string.Join, never
+  // empty for a real keypress, so a stored "" simply never matches.
+  //
+  // The affordance OVERLAYS the input's right edge inside a wrapper of the same fixed
+  // width, so nothing reflows when it appears. It stays INVISIBLE until the row is
+  // hovered (the resting panel should read as one clean column of key values) — opacity
+  // rather than mounting, so the combo underneath never shifts. focus-visible keeps it
+  // reachable by keyboard, where there is no hover to give.
   return (
     <div className={`group relative ${width}`}>
       {input}
@@ -1143,7 +1147,6 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   value={settings.captureSlotHotkey}
                   settingKey="captureSlotHotkey"
                   onChange={changeHotkey}
-                  allowClear
                 />
               </SettingRow>
             </Section>
