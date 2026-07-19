@@ -53,14 +53,14 @@ namespace TrueReplayer.Services
             // metadata inside the same JSON) — it exists so the export carries an honest
             // AppMinVersion. Introduced after 2.8.1 — bump at release.
             (p => p.TriggerMode == TriggerMode.DoubleTap || p.TriggerMode == TriggerMode.Hold,
-                new Version(2, 8, 1), "TriggerMode double-tap/hold"),
+                new Version(2, 9, 0), "TriggerMode double-tap/hold"),
 
             // Mouse X-button hotkey ("XButton1"/"XButton2" in CustomHotkey) — an older build's
             // mouse hook never decodes WM_XBUTTON*, so the hotkey is silently dead (profile
             // loads fine, trigger never fires). Same divergence class as the mode pins.
             // Introduced after 2.8.1 — bump at release.
             (p => p.CustomHotkey?.Contains("XButton", StringComparison.OrdinalIgnoreCase) == true,
-                new Version(2, 8, 1), "Mouse-button hotkey"),
+                new Version(2, 9, 0), "Mouse-button hotkey"),
 
             // WaitPixelColor + the pixel:* bridge messages were introduced in 2.1.4.
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "WaitPixelColor", StringComparison.OrdinalIgnoreCase)),
@@ -123,7 +123,7 @@ namespace TrueReplayer.Services
             // 2.8.0 floor; gated on LoopOverData because skip is runtime-inert without the
             // batch loop (matches SkipRowOnErrorActive). Introduced after 2.8.1 — bump at release.
             (p => p.Data is { LoopOverData: true } d && string.Equals(d.OnRowError, "skip", StringComparison.OrdinalIgnoreCase),
-                new Version(2, 8, 1), "Data-loop skip-on-error"),
+                new Version(2, 9, 0), "Data-loop skip-on-error"),
 
             // Data-loop cell modifiers ({row:column:mods}) — an older build's row-token regex
             // requires '}' right after the column name, so the WHOLE token stays literal and
@@ -131,13 +131,13 @@ namespace TrueReplayer.Services
             // where at least the content substitutes). Text-scan over every token-resolved
             // string field. Introduced after 2.8.1 — bump at release.
             (p => p.Actions.Any(UsesModifiedRowToken),
-                new Version(2, 8, 1), "Data-loop cell modifiers"),
+                new Version(2, 9, 0), "Data-loop cell modifiers"),
 
             // Copy to Slot ({clip:name} capture) — an older build has no dispatch case for the
             // unknown ActionType → silently skips the capture and every {clip:} token resolves
             // empty. Introduced after 2.8.1 — bump at release.
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "CopyToSlot", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 8, 1), "Copy to Slot"),
+                new Version(2, 9, 0), "Copy to Slot"),
 
             // BrowserAssert — a DEDICATED row (the Browser* predicate below auto-pins 2.1.0,
             // but that is INSUFFICIENT: an older build has no dispatch case for the unknown
@@ -170,7 +170,7 @@ namespace TrueReplayer.Services
             // plain RunProfile rows keep the 2.0.0 floor. Introduced after 2.8.1 — bump at release.
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "RunProfile", StringComparison.OrdinalIgnoreCase)
                 && a.RunOverData == true),
-                new Version(2, 8, 1), "RunProfile over data"),
+                new Version(2, 9, 0), "RunProfile over data"),
 
             // Combined-mode single clicks (LeftClick/RightClick/MiddleClick — press+release in one
             // row) shipped in 2.4.0. Builds without the replay switch cases silently skip the click,
@@ -215,7 +215,7 @@ namespace TrueReplayer.Services
             // version) so own-export→import round-trips; bump at release with the other pins.
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "ActivateWindow", StringComparison.OrdinalIgnoreCase)
                 && (!string.IsNullOrEmpty(a.WindowVerb) || (a.WindowMatchIndex is int mi && mi > 1))),
-                new Version(2, 8, 1), "Activate Window verb/nth-match"),
+                new Version(2, 9, 0), "Activate Window verb/nth-match"),
 
             // SetVariable Cycle mode — older builds drop the unknown VariableMode property
             // and run the row in SET mode, storing the ENTIRE multi-line list instead of
@@ -252,7 +252,7 @@ namespace TrueReplayer.Services
             // NOT apply — that field is a cosmetic notice, this is a whole feature's config).
             // Introduced after 2.8.1 — bump at release.
             (p => p.Triggers != null,
-                new Version(2, 8, 1), "Automation trigger"),
+                new Version(2, 9, 0), "Automation trigger"),
 
             // Restore Size split from Restore Position in 2.0.5; older builds only honour Position.
             (p => p.RestoreSize,
