@@ -938,8 +938,21 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
 
       {/* Tab Content — scrollbar-gutter reserves the 6px scrollbar lane on every tab, so
           the single 100px field column never shifts (and no row label wraps) when one
-          tab scrolls and another doesn't. */}
-      <div className="flex-1 overflow-y-auto px-1.5 py-2 [scrollbar-gutter:stable]">
+          tab scrolls and another doesn't.
+
+          key={activeTab} is load-bearing: without it React reconciles the three tab
+          branches BY POSITION, and where two branches happen to render the same component
+          type at the same index it REUSES the DOM node instead of remounting. Keys→App hit
+          exactly that — Section #3 is "Key Remaps" there and "Notifications" here, and each
+          opens with a SettingRow + Toggle, so the "Enable Key Remaps" switch node became the
+          "Flash on Replay End" switch with aria-checked flipped. The knob's class went
+          left-[13px] → left-[1px] and its transition-[left] played, showing a phantom
+          "switching off" animation on a control the user never touched. (Profile was
+          accidentally immune only because its branch nests an extra fragment, so its child[0]
+          is a Fragment, not a Section.) Keying by tab makes a switch always unmount + remount,
+          which is what "different tab" means anyway — and it stops a future section being
+          added from silently reintroducing this. */}
+      <div key={activeTab} className="flex-1 overflow-y-auto px-1.5 py-2 [scrollbar-gutter:stable]">
         {/* SETTINGS FILTER (disabled — uncomment this block, the Provider close tag below, the
             query state above, and re-add `Search` to the lucide import to revive):
         <div className="flex items-center gap-2 h-7 px-2 mb-1 rounded border border-border-default bg-bg-input">

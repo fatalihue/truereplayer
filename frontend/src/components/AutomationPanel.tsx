@@ -326,7 +326,21 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
               {tt('Select an automation on the left, or add one.', 'Selecione uma automação à esquerda, ou adicione uma.')}
             </div>
           ) : (
-            <div className="flex flex-col gap-4 max-w-[520px]">
+            // key={selected} for the same reason SettingsPanel keys its tab content:
+            // without it, picking a different automation keeps this subtree mounted and
+            // React reuses every node by position. The "Foreground only" Toggle would then
+            // slide its knob (transition-[left], 150ms) as the new automation's value
+            // replaced the old one — a switch animating on a control the user never
+            // touched. draft/selected live in this component, not in the subtree, so
+            // remounting costs nothing.
+            // key={selected} for the same reason SettingsPanel keys its tab content:
+            // without it, picking a different automation keeps this subtree mounted and
+            // React reuses every node by position — measured: 49 of 49 nodes survive the
+            // switch. The "Foreground only" Toggle would then slide its knob
+            // (transition-[left], 150ms) as the new automation's value replaced the old
+            // one, i.e. a switch animating on a control the user never touched. draft and
+            // selected live in this component, not in the subtree, so remounting is free.
+            <div key={selected} className="flex flex-col gap-4 max-w-[520px]">
               <div className="flex items-center justify-between">
                 <div className="text-[13px] font-medium text-text-primary truncate">{selected}</div>
                 <Button variant="ghost" size="sm" onClick={handleRemove}
