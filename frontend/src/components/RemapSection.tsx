@@ -158,7 +158,13 @@ export function RemapSection() {
           (the hollow dot carries the state; no strike-through needed). */}
       {remaps.entries.map((r, i) => (
         <div
-          key={`${r.from}-${i}`}
+          // Keyed by the FROM key alone, not by index: with the index in the key, deleting
+          // one row shifts every later row's key, so React unmounts and rebuilds the
+          // survivors — dropping keyboard focus to <body> mid-list. FROM is unique by
+          // construction (the add flow rejects a duplicate, and RemapService is first-wins),
+          // and the raw string is deliberate: lower-casing it would make "CapsLock" and
+          // "capslock" collide in a hand-edited file, which raw keys keep distinct.
+          key={r.from}
           className="h-7 flex items-center rounded border overflow-hidden"
           style={r.enabled
             ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }

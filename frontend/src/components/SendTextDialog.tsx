@@ -572,8 +572,13 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
         )
       }
       footer={
+        // Keyed fragments so the two footers never reconcile against each other. Unkeyed,
+        // React matched them by position: child[1] is the PRIMARY "Insert" here and the
+        // SECONDARY "Cancel" below, both <Button>, so the same node was reused and its
+        // transition-colors cross-faded accent → grey — the Insert button appearing to melt
+        // into Cancel when the Advanced Clipboard surface closed.
         surface ? (
-          <>
+          <React.Fragment key="surface">
             <Button variant="secondary" onClick={closeSurface}>Cancel</Button>
             <Button
               variant="primary"
@@ -582,9 +587,9 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
             >
               {surface.mode === 'insert' ? 'Insert' : 'Apply'}
             </Button>
-          </>
+          </React.Fragment>
         ) : (
-          <>
+          <React.Fragment key="main">
             <div
               className="mr-auto flex items-center gap-1.5"
               data-tip={tt('Delivery: Rich pastes formatting where the target accepts it (Gmail, Crisp, Word) and plain text elsewhere. Markdown pastes *bold*/_italic_ as plain text for WhatsApp; Discord uses **bold**/~~strike~~. Plain sends the raw text.', 'Entrega: Rich cola formatação onde o alvo aceita (Gmail, Crisp, Word) e texto puro no resto. Markdown cola *negrito*/_itálico_ como texto puro para WhatsApp; Discord usa **negrito**/~~tachado~~. Plain envia o texto cru.')}
@@ -606,7 +611,7 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
             <Button variant="primary" onClick={handleConfirm} disabled={!text.trim()}>
               {mode === 'add' ? 'Add' : 'Save'}
             </Button>
-          </>
+          </React.Fragment>
         )
       }
       onCardKeyDown={(e) => {
