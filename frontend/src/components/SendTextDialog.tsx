@@ -837,8 +837,14 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
                             <div className="text-xs font-medium text-text-primary truncate">{s.name}</div>
                             <div className="text-[11px] text-text-tertiary line-clamp-2 mt-0.5">{s.text}</div>
                           </button>
+                          {/* Keyed fragments: unkeyed, child[1] is the Trash button in one
+                              branch and the red confirm button in the other — both <button> —
+                              so React reused the node. Its transition-colors faded the red
+                              fill in while the glyph swapped instantly (a checkmark on a
+                              still-transparent button), and autoFocus below never fired,
+                              since autoFocus only acts on mount. */}
                           {deletingSnippetId === s.id ? (
-                            <>
+                            <React.Fragment key="confirm">
                               <span className="text-[10px] text-red-300 mr-1 shrink-0">Delete?</span>
                               <button
                                 type="button"
@@ -855,9 +861,9 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
                               >
                                 <X size={12} />
                               </button>
-                            </>
+                            </React.Fragment>
                           ) : (
-                            <>
+                            <React.Fragment key="actions">
                               <button
                                 type="button"
                                 onClick={() => setEditingSnippetId(s.id)}
@@ -872,7 +878,7 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
                               >
                                 <Trash2 size={12} />
                               </button>
-                            </>
+                            </React.Fragment>
                           )}
                         </div>
                       ),
