@@ -1295,6 +1295,10 @@ namespace TrueReplayer.Services
         public event Action<string, string, string[]?>? OnInputRequested;   // (requestId, label, menu?)
         public event Action<string>? OnInputDismissed;                       // (requestId)
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<string?>> _pendingInputs = new();
+        // An {input:} prompt with no answer aborts the run after this, instead of pausing the single
+        // replay engine forever (an unattended automation would otherwise block it and starve every
+        // other trigger). A present, hotkey-driven user beats 60 s easily; timeout = clean cancel.
+        private const int InputTimeoutMs = 60_000;
 
         // Live-variables snapshot for the frontend debug pane: (variables, clip slots, current
         // data row or null). Raised on the dispatcher with COPIES of the dictionaries (the live
@@ -3389,10 +3393,17 @@ namespace TrueReplayer.Services
             // (Notepad/Chrome) instead of typing into TrueReplayer itself.
             IntPtr prevForeground = NativeMethods.GetForegroundWindow();
             dispatcherQueue.TryEnqueue(() => OnInputRequested?.Invoke(requestId, label, menu));
+            using var timeoutCts = new CancellationTokenSource(InputTimeoutMs);
             try
             {
-                // A Stop mid-prompt cancels the token → resolve as cancel (null) so the caller aborts.
+                // Resolve as cancel (null) — the caller then aborts the run — on either a Stop mid-prompt
+                // (token) or the no-response timeout (timeoutCts), so the engine is never held forever.
                 using (token.Register(() => tcs.TrySetResult(null)))
+                using (timeoutCts.Token.Register(() =>
+                {
+                    if (tcs.TrySetResult(null))
+                        DiagnosticLog.Info($"Ask-Input '{label}': no response after {InputTimeoutMs / 1000}s — run aborted");
+                }))
                 {
                     var answer = await tcs.Task;
                     // Hand focus back before returning — on a real submit so the resolved text lands on
