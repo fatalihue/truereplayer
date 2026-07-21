@@ -130,6 +130,10 @@ export interface ActionItem {
   // line, wrapping; the cursor survives across runs so repeated hotkey presses
   // walk the list — resets on app restart).
   variableMode?: string | null;
+  // CopyToSlot mode: null/undefined = 'capture' (grab the current selection into the
+  // slot named in `key`) | 'clear' (empty that slot; a blank `key` wipes all slots 1–9
+  // and resets the capture-hotkey cursor to 1). Only 'clear' is persisted.
+  slotMode?: string | null;
   // ActivateWindow — find → launch-if-missing → wait → focus. The window MATCHER
   // reuses windowProcessName/windowTitle/windowTitleMatchMode above; `timeout` is the
   // wait-for-window budget. launchPath: exe / bare name / .lnk / document / URL opened

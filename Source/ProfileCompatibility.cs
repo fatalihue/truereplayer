@@ -225,6 +225,13 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(a => string.Equals(a.VariableMode, "cycle", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 8, 0), "Set Variable cycle mode"),
 
+            // CopyToSlot Clear mode — an older build drops the unknown SlotMode property and
+            // runs the row in CAPTURE mode, grabbing the current selection into the slot
+            // instead of emptying it (silent semantic flip, and it fires a synthetic Ctrl+C
+            // that a clear was never meant to). Introduced in 2.9.2.
+            (p => p.Actions.Any(a => string.Equals(a.SlotMode, "clear", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 9, 2), "Copy to Slot clear mode"),
+
             // SendText rich text (KeyHtml) shipped AFTER 2.8.0. An older build drops the unknown
             // KeyHtml property and pastes the plain Key — content preserved, formatting silently
             // lost. That is a mild divergence (never literal markup), but formatting can be

@@ -1651,7 +1651,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                       : action.actionType === 'CopyToSlot'
                         // Show the read-back token — the one thing the user needs to reuse
                         // the capture. Fresh row (no slot yet) stays blank like SetVariable.
-                        ? (!action.key ? '' : `selection → {clip:${action.key.toLowerCase()}}`)
+                        // Clear rows read "clear {clip:x}" / "clear all slots".
+                        ? (action.slotMode === 'clear'
+                            ? (!action.key ? 'clear all slots' : `clear {clip:${action.key.toLowerCase()}}`)
+                            : (!action.key ? '' : `selection → {clip:${action.key.toLowerCase()}}`))
                       : action.actionType === 'ActivateWindow'
                         // Matcher summary "proc · title" (— launch marks launch-capable
                         // rows); pure-run rows read "run: <path>". Phase-3 verb prefix +

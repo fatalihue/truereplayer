@@ -157,6 +157,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const [variableValue, setVariableValue] = useState('');
   // SetVariable mode: 'set' (default) | 'cycle' (value = list, next line per execution).
   const [variableMode, setVariableMode] = useState<'set' | 'cycle'>('set');
+  // CopyToSlot mode: 'capture' (default) | 'clear' (empty the slot / all slots).
+  const [slotMode, setSlotMode] = useState<'capture' | 'clear'>('capture');
   // Imperative handle to the Lexical-based BrowserType editor — used by the chip
   // buttons to insertText at the current cursor position instead of always appending.
   const browserTextEditorRef = useRef<LexicalEditorHandle | null>(null);
@@ -505,6 +507,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       setBrowserText(action.browserText || '');
       setVariableValue(action.variableValue ?? '');
       setVariableMode(action.variableMode === 'cycle' ? 'cycle' : 'set');
+      setSlotMode(action.slotMode === 'clear' ? 'clear' : 'capture');
       setNewTab(action.newTab || false);
       setWaitMode(action.waitMode || 'appears');
       setUrlWaitPattern(action.urlWaitPattern || '');
@@ -956,6 +959,15 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       }
     }
 
+    // Copy to Slot — the slot NAME (key state) is saved by the generic effectiveKey block
+    // above; only the mode needs its own round-trip. Backend persists only 'clear'.
+    if (actionType === 'CopyToSlot') {
+      const currentSlotMode = action.slotMode === 'clear' ? 'clear' : 'capture';
+      if (slotMode !== currentSlotMode) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'slotMode', value: slotMode === 'clear' ? 'clear' : '' } });
+      }
+    }
+
     // ActivateWindow — matcher (shared window* fields, no conditionType gate: the type
     // itself is the discriminator), launch fields, wait budget and failure policy.
     if (actionType === 'ActivateWindow') {
@@ -1041,7 +1053,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // from actionType + action.conditionType which are already in the array, so the
     // callback rebinds whenever those change. Listing the derived flags would also
     // be a forward-reference error (they're declared further down the component body).
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, assertOnFail, alternatives, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, assertOnFail, alternatives, send, onClose]);
 
   // Are there edits the Save-Changes button would persist? MIRRORS handleSave's diffs
   // exactly (same guards/normalisation), returning true on the first field that differs —
@@ -1219,6 +1231,11 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       if (variableMode !== currentVarMode) return true;
     }
 
+    if (actionType === 'CopyToSlot') {
+      const currentSlotMode = action.slotMode === 'clear' ? 'clear' : 'capture';
+      if (slotMode !== currentSlotMode) return true;
+    }
+
     if (actionType === 'ActivateWindow') {
       if (windowProcessName !== (action.windowProcessName ?? '')) return true;
       if (windowTitle !== (action.windowTitle ?? '')) return true;
@@ -1257,7 +1274,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     }
 
     return false;
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, windowVerb, matchIndex, assertOnFail, alternatives]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, windowVerb, matchIndex, assertOnFail, alternatives]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
@@ -3359,18 +3376,35 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               key block). The card explains the read-back token — the panel is tiny otherwise. */}
           {isCopyToSlot && (
             <>
+              <Field label="Mode">
+                <SegmentedControl<'capture' | 'clear'>
+                  ariaLabel="Slot mode"
+                  grow
+                  value={slotMode}
+                  onChange={setSlotMode}
+                  options={[
+                    { value: 'capture', label: 'Capture', tip: tt('Copy the focused app’s current selection into this slot.', 'Copia a seleção atual do app em foco para este slot.') },
+                    { value: 'clear', label: 'Clear', tip: tt('Empty this slot — or leave the name blank to clear all slots (1–9) and reset the capture cursor. Nothing is typed.', 'Esvazia este slot — ou deixe o nome vazio para limpar todos (1–9) e zerar o cursor de captura. Nada é digitado.') },
+                  ]}
+                />
+              </Field>
               <Field
                 label="Slot"
-                hint={tt(
-                  'Letters, digits and underscore. Read the capture back anywhere with {clip:slot} — matching is case-insensitive.',
-                  'Letras, dígitos e underscore. Leia a captura com {clip:slot} em qualquer texto — sem diferenciar maiúsculas.'
-                )}
+                hint={slotMode === 'clear'
+                  ? tt(
+                      'Which slot to empty. Leave BLANK to clear all slots (1–9) and reset the capture hotkey back to slot 1.',
+                      'Qual slot esvaziar. Deixe VAZIO para limpar todos os slots (1–9) e voltar o hotkey de captura ao slot 1.'
+                    )
+                  : tt(
+                      'Letters, digits and underscore. Read the capture back anywhere with {clip:slot} — matching is case-insensitive.',
+                      'Letras, dígitos e underscore. Leia a captura com {clip:slot} em qualquer texto — sem diferenciar maiúsculas.'
+                    )}
               >
                 <input
                   type="text"
                   value={key}
                   onChange={(e) => setKey(e.target.value)}
-                  placeholder="1"
+                  placeholder={slotMode === 'clear' ? 'all slots' : '1'}
                   spellCheck={false}
                   className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
                 />
@@ -3379,10 +3413,15 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 className="border-l-2 rounded px-2.5 py-2 text-[11px] leading-relaxed text-text-tertiary"
                 style={{ borderColor: 'var(--color-border-subtle)' }}
               >
-                {tt(
-                  'Copies the CURRENT SELECTION of the focused app (sends Ctrl+C) into this slot, then restores your clipboard. Slots survive between runs — capture several, paste them with {clip:…} tokens.',
-                  'Copia a SELEÇÃO ATUAL do app em foco (envia Ctrl+C) para este slot e restaura sua área de transferência. Slots sobrevivem entre execuções — capture vários e cole com tokens {clip:…}.'
-                )}
+                {slotMode === 'clear'
+                  ? tt(
+                      'Empties the slot above — or ALL slots (1–9) if the name is blank, also resetting the capture hotkey to slot 1. Nothing is typed or pasted, and the clipboard is untouched.',
+                      'Esvazia o slot acima — ou TODOS os slots (1–9) se o nome estiver vazio, voltando também o hotkey de captura para o slot 1. Nada é digitado ou colado, e a área de transferência não é tocada.'
+                    )
+                  : tt(
+                      'Copies the CURRENT SELECTION of the focused app (sends Ctrl+C) into this slot, then restores your clipboard. Slots survive between runs — capture several, paste them with {clip:…} tokens.',
+                      'Copia a SELEÇÃO ATUAL do app em foco (envia Ctrl+C) para este slot e restaura sua área de transferência. Slots sobrevivem entre execuções — capture vários e cole com tokens {clip:…}.'
+                    )}
               </div>
             </>
           )}

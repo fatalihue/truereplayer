@@ -3413,6 +3413,30 @@ namespace TrueReplayer.Services
         private async Task ExecuteCopyToSlot(ActionItem action, CancellationToken token)
         {
             var name = action.Key?.Trim();
+
+            // Clear mode: empty a slot instead of capturing. A blank name wipes ALL slots
+            // (1..9) and resets the capture hotkey's cursor to slot 1 — the "start over" the
+            // sequential hotkey otherwise can't do. Nothing is typed/pasted. No capture, so
+            // no selection is needed and it never touches the clipboard.
+            if (string.Equals(action.SlotMode, "clear", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrEmpty(name))
+                {
+                    lock (_runStateLock) _clipSlots.Clear();
+                    _nextHotkeySlot = 1;
+                }
+                else if (VariableNameRegex.IsMatch(name))
+                {
+                    lock (_runStateLock) _clipSlots.Remove(name.ToLowerInvariant());
+                }
+                else
+                {
+                    return; // unusable slot name — no-op
+                }
+                PushVariablesSnapshot(force: true);
+                return;
+            }
+
             if (string.IsNullOrEmpty(name) || !VariableNameRegex.IsMatch(name))
                 return; // unusable slot name — no-op, same forgiveness as SetVariable
             var key = name.ToLowerInvariant();

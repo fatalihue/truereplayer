@@ -268,6 +268,13 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? VariableMode { get; set; }
 
+        // CopyToSlot mode. null (default) = "capture": grab the focused app's current
+        // selection (synthetic Ctrl+C) into the slot named in Key. "clear": empty that
+        // slot instead — or, when Key is blank, wipe ALL slots (1..9) and reset the
+        // capture hotkey's cursor back to slot 1. Nothing is typed/pasted either way.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? SlotMode { get; set; }
+
         // ── SendText rich text (ActionType == "SendText") ──
         // Optional HTML flavor of the payload, authored in the Insert Text rich editor.
         // Key remains the CANONICAL plain-text-with-tokens payload (grid display, plain
@@ -575,9 +582,14 @@ namespace TrueReplayer.Models
                 }
 
                 // Copy to Slot — show the token the capture is read back with, so the grid
-                // tells the user exactly what to type elsewhere ({clip:name}).
+                // tells the user exactly what to type elsewhere ({clip:name}). Clear rows read
+                // "clear {clip:name}", or "clear all slots" when the name is blank.
                 if (string.Equals(ActionType, "CopyToSlot", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (string.Equals(SlotMode, "clear", StringComparison.OrdinalIgnoreCase))
+                        return string.IsNullOrWhiteSpace(Key) ? "clear all slots" : $"clear {{clip:{Key.Trim().ToLowerInvariant()}}}";
                     return string.IsNullOrWhiteSpace(Key) ? "" : $"{{clip:{Key.Trim().ToLowerInvariant()}}}";
+                }
 
                 // IF row — show the condition's primary identifier so the user can read
                 // the block intent without opening the Sheet. The frontend renders the
@@ -776,6 +788,7 @@ namespace TrueReplayer.Models
             SelectMatchMode = SelectMatchMode,
             VariableValue = VariableValue,
             VariableMode = VariableMode,
+            SlotMode = SlotMode,
             LaunchPath = LaunchPath,
             LaunchArgs = LaunchArgs,
             ActivateOnTimeout = ActivateOnTimeout,

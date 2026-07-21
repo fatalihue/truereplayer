@@ -1006,6 +1006,8 @@ namespace TrueReplayer
                 // note above for why forgetting one here is a silent round-trip bug).
                 variableValue = a.VariableValue,
                 variableMode = a.VariableMode,
+                // CopyToSlot — capture vs clear (the slot NAME rides the shared Key field).
+                slotMode = a.SlotMode,
                 // ActivateWindow — launch + failure-policy fields (matcher fields are the
                 // shared window* trio above).
                 launchPath = a.LaunchPath,
@@ -2624,6 +2626,11 @@ namespace TrueReplayer
                     // Only the non-default "cycle" is persisted; "set" stays null on disk
                     // (same convention as waitImageOnTimeout / activateOnTimeout).
                     action.VariableMode = value == "cycle" ? "cycle" : null;
+                    break;
+                case "slotMode":
+                    // CopyToSlot: only the non-default "clear" is persisted; "capture"
+                    // stays null on disk (same convention as variableMode above).
+                    action.SlotMode = value == "clear" ? "clear" : null;
                     break;
                 case "windowProcessName":
                     action.WindowProcessName = string.IsNullOrEmpty(value) ? null : value;
