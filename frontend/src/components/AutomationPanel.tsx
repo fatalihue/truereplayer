@@ -221,9 +221,7 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
       showClose
       footer={() => (
         <>
-          <div className="flex items-center gap-2 mr-auto"
-            data-tip={tt('Master switch — armed automations only fire while this is on. Also in the tray menu.',
-              'Chave mestra — automações armadas só disparam com isto ligado. Também no menu da bandeja.')}>
+          <div className="flex items-center gap-2 mr-auto">
             <Toggle isOn={automation.enabled}
               onChange={(v) => send({ type: 'automation:setEnabled', payload: { enabled: v } })} />
             <span className="text-[12px] text-text-secondary">Automations enabled</span>
