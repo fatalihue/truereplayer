@@ -187,12 +187,18 @@ const MORE_KEY_CHIPS: PaletteChip[] = [
   { label: 'Right', insert: '{right}', tip: ['Press Right arrow', 'Pressiona seta →'] },
 ];
 
+// Clipboard-sourced tokens — grouped under the Clipboard section next to {clipboard}
+// itself. {clip:N} is an in-app capture slot; {winclip:N} is the Windows Win+V history.
+const CLIPBOARD_CHIPS: PaletteChip[] = [
+  { label: 'Clip slot…', prompt: 'clip', tip: ['Selection captured by a Copy to Slot action or the capture hotkey', 'Seleção capturada por uma action Copy to Slot ou pelo hotkey de captura'] },
+  { label: 'Clipboard history', insert: '{winclip:1}', tip: ['Windows Win+V history — {winclip:1} is the last thing copied (click the chip to change which item). Needs clipboard history on; may hold anything recently copied, including passwords.', 'Histórico do Windows (Win+V) — {winclip:1} é a última coisa copiada (clique no chip para trocar o item). Precisa do histórico ligado; pode conter qualquer coisa copiada recentemente, inclusive senhas.'] },
+];
+
 const RUN_STATE_CHIPS: PaletteChip[] = [
   { label: 'Variable…', prompt: 'var', tip: ['Value stored by a Set Variable action', 'Valor gravado por uma action Set Variable'] },
   { label: 'Counter', insert: '{counter}', tip: ['Current loop iteration (1, 2, 3…)', 'Iteração atual do loop (1, 2, 3…)'] },
   { label: 'Row #', insert: '{row}', tip: ["Current action's grid row number", 'Número da linha atual da action na grade'] },
   { label: 'Row column…', prompt: 'row', tip: ["Data table column of the current row (loop over data) — click the chip after inserting to add transforms (trim, UPPERCASE…)", 'Coluna da tabela de dados na linha atual (loop over data) — clique no chip depois de inserir para adicionar transformações (trim, MAIÚSCULAS…)'] },
-  { label: 'Clip slot…', prompt: 'clip', tip: ['Selection captured by a Copy to Slot action or the capture hotkey', 'Seleção capturada por uma action Copy to Slot ou pelo hotkey de captura'] },
   { label: 'Ask input…', prompt: 'input', tip: ['Prompt for a value at replay time (pauses the run)', 'Pergunta um valor durante a execução (pausa o replay)'] },
 ];
 
@@ -592,7 +598,7 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
           <React.Fragment key="main">
             <div
               className="mr-auto flex items-center gap-1.5"
-              data-tip={tt('Delivery: Rich pastes formatting where the target accepts it (Gmail, Crisp, Word) and plain text elsewhere. Markdown pastes *bold*/_italic_ as plain text for WhatsApp; Discord uses **bold**/~~strike~~. Plain sends the raw text.', 'Entrega: Rich cola formatação onde o alvo aceita (Gmail, Crisp, Word) e texto puro no resto. Markdown cola *negrito*/_itálico_ como texto puro para WhatsApp; Discord usa **negrito**/~~tachado~~. Plain envia o texto cru.')}
+              data-tip={tt('How your formatting reaches the target.', 'Como a formatação chega ao alvo.')}
             >
               <span className="text-[10px] uppercase tracking-wide text-text-tertiary">Delivery</span>
               <SegmentedControl<SendMode>
@@ -600,10 +606,10 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
                 value={sendMode}
                 onChange={setSendMode}
                 options={[
-                  { value: 'rich', label: 'Rich' },
-                  { value: 'markdown', label: 'Markdown' },
-                  { value: 'discord', label: 'Discord' },
-                  { value: 'plain', label: 'Plain' },
+                  { value: 'rich', label: 'Rich', tip: tt('Real formatting where the target accepts it (Gmail, Crisp, Word).', 'Formatação real onde o alvo aceita (Gmail, Crisp, Word).') },
+                  { value: 'markdown', label: 'Markdown', tip: tt('*bold* / _italic_ as text — for WhatsApp.', '*negrito* / _itálico_ como texto — para WhatsApp.') },
+                  { value: 'discord', label: 'Discord', tip: tt('**bold** / ~~strike~~ as text — for Discord.', '**negrito** / ~~tachado~~ como texto — para Discord.') },
+                  { value: 'plain', label: 'Plain', tip: tt('Raw text, no formatting.', 'Texto cru, sem formatação.') },
                 ]}
               />
             </div>
@@ -712,6 +718,7 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
                     <Wand2 size={11} className="shrink-0" />
                     Advanced…
                   </button>
+                  {CLIPBOARD_CHIPS.map((c) => renderChip(c))}
                 </div>
 
                 {sectionLabel('Values')}
