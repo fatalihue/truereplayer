@@ -196,6 +196,10 @@ namespace TrueReplayer
             // prompt in React, and replay:inputResult routes the answer back to ReplayService.
             replayService.OnInputRequested += (requestId, label, menu) =>
             {
+                // Surface the app so the prompt is actually visible — otherwise a minimized/behind
+                // TrueReplayer shows the input modal where nobody can see it. Best-effort, and a
+                // no-op (skips the activation dance) when the window is already in front.
+                _ = SurfaceAppForInputAsync();
                 bridge?.PushInputRequest(requestId, label, menu);
             };
             replayService.OnInputDismissed += (requestId) =>
@@ -717,6 +721,26 @@ namespace TrueReplayer
 
             Services.DiagnosticLog.Info($"Close guard resolved: canClose={canClose}");
             return canClose;
+        }
+
+        // Brings TrueReplayer forward so an {input:} Ask-Input modal is visible. Handles all three
+        // hidden states: closed-to-TRAY (AppWindow.Hide → not iconic, so it must be SHOWN first or
+        // SetForegroundWindow no-ops on a hidden window), MINIMIZED and merely BEHIND (both handled by
+        // ActivateAsync). Best-effort: if Windows still refuses (a fullscreen-exclusive app holding
+        // focus), log it so the "I never saw the prompt" case is diagnosable instead of silent.
+        private async Task SurfaceAppForInputAsync()
+        {
+            try
+            {
+                // Un-hide from the system tray first. SW_SHOW (not SW_RESTORE) so a maximized window
+                // isn't un-maximized; ActivateAsync below still un-minimizes + foregrounds.
+                if (!NativeMethods.IsWindowVisible(hwnd))
+                    NativeMethods.ShowWindow(hwnd, NativeMethods.SW_SHOW);
+                bool surfaced = await TrueReplayer.Helpers.WindowActivation.ActivateAsync(hwnd);
+                if (!surfaced)
+                    Services.DiagnosticLog.Info("Ask-Input: could not bring TrueReplayer to the foreground (a fullscreen app may be holding focus) — the input prompt may be hidden");
+            }
+            catch (Exception ex) { Services.DiagnosticLog.Warn($"Ask-Input surface failed: {ex.Message}"); }
         }
 
         private void SetupInputHooks()

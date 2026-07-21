@@ -3383,18 +3383,54 @@ namespace TrueReplayer.Services
             var requestId = Guid.NewGuid().ToString("N")[..8];
             var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
             _pendingInputs[requestId] = tcs;
+            // Remember who had focus BEFORE the prompt surfaces the TrueReplayer window
+            // (OnInputRequested brings the app forward so the modal is visible). After a real answer
+            // we hand focus back, so the replay's resolved text lands where the user was pointing
+            // (Notepad/Chrome) instead of typing into TrueReplayer itself.
+            IntPtr prevForeground = NativeMethods.GetForegroundWindow();
             dispatcherQueue.TryEnqueue(() => OnInputRequested?.Invoke(requestId, label, menu));
             try
             {
                 // A Stop mid-prompt cancels the token → resolve as cancel (null) so the caller aborts.
                 using (token.Register(() => tcs.TrySetResult(null)))
-                    return await tcs.Task;
+                {
+                    var answer = await tcs.Task;
+                    // Hand focus back before returning — on a real submit so the resolved text lands on
+                    // the target, and on a modal Cancel so the user's window isn't left buried behind TR.
+                    // A hard Stop cancels the token, so ActivateAsync short-circuits and skips the poll.
+                    await RestoreForegroundAfterInputAsync(prevForeground, token);
+                    return answer;
+                }
             }
             finally
             {
                 _pendingInputs.TryRemove(requestId, out _);
                 dispatcherQueue.TryEnqueue(() => OnInputDismissed?.Invoke(requestId));
             }
+        }
+
+        // Hand foreground back after an Ask-Input prompt (which surfaced the TrueReplayer window):
+        // prefer the profile's explicit target (customer-service flows type into Chrome/Crisp), else
+        // the window that was focused when the prompt appeared (the simple no-target flow → Notepad).
+        // Best-effort — a refused switch never breaks the run. ActivateAsync no-ops when the chosen
+        // window is already foreground, so this is cheap when nothing needs restoring.
+        private async Task RestoreForegroundAfterInputAsync(IntPtr prevForeground, CancellationToken token)
+        {
+            try
+            {
+                if (_bringToFocus && _windowTarget != null)
+                {
+                    var targetHwnd = FindTargetWindow();
+                    if (targetHwnd != IntPtr.Zero)
+                    {
+                        await Helpers.WindowActivation.ActivateAsync(targetHwnd, _windowTarget, _windowTargetTitleRegex, token);
+                        return;
+                    }
+                }
+                if (prevForeground != IntPtr.Zero)
+                    await Helpers.WindowActivation.ActivateAsync(prevForeground, token: token);
+            }
+            catch { /* focus restore is best-effort (also swallows the token's OCE on a hard Stop) */ }
         }
 
         // Called by the host when the Ask-Input modal is submitted or cancelled. Completes the
