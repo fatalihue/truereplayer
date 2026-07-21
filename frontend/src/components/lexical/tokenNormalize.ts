@@ -18,6 +18,7 @@ const COMPOUND_NAMES: Record<string, string> = {
   datetime: 'DateTime',
   pageup: 'PageUp',
   pagedown: 'PageDown',
+  winclip: 'WinClip',
 };
 
 // Tokens whose args are user-chosen NAMES (variable / clip slot) or free text

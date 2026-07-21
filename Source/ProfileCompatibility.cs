@@ -133,6 +133,17 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(UsesModifiedRowToken),
                 new Version(2, 9, 0), "Data-loop cell modifiers"),
 
+            // Windows clipboard-history token {winclip:N} — an older build has no WinClipTokenRegex,
+            // so the whole token stays literal and gets typed into the target verbatim (same failure
+            // class as the modified-row token above). Text-scan over every token-resolved field.
+            // PLACEHOLDER: 2.9.2 is already released WITHOUT this feature; {winclip} ships in the NEXT
+            // release. 2.9.2 is the current dev floor so this build accepts its own export; Step 0
+            // sees it as a pin added-since-the-2.9.2-tag whose version == last released, and bumps it
+            // to the release version. (Do NOT conflate with the CopyToSlot-clear pin below, which
+            // genuinely shipped in 2.9.2 and must stay at 2.9.2.)
+            (p => p.Actions.Any(UsesWinClipToken),
+                new Version(2, 9, 2), "Clipboard history token"),
+
             // Copy to Slot ({clip:name} capture) — an older build has no dispatch case for the
             // unknown ActionType → silently skips the capture and every {clip:} token resolves
             // empty. Introduced after 2.8.1 — bump at release.
@@ -307,6 +318,28 @@ namespace TrueReplayer.Services
         private static bool ContainsModifiedRowToken(string? text) =>
             !string.IsNullOrEmpty(text) && text.Contains("{row", StringComparison.OrdinalIgnoreCase)
                 && ModifiedRowTokenRegex.IsMatch(text);
+
+        // {winclip:N} / bare {winclip} — mirrors ActionExecution.WinClipTokenRegex (index optional,
+        // bare = 1). Same token-resolved field set as the modified-row scan (that is exactly where a
+        // {winclip} token can take effect).
+        private static readonly Regex WinClipTokenRegex = new(
+            @"\{winclip(?::\d+)?\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static bool UsesWinClipToken(ActionItem a) =>
+            (KeyResolvingActionTypes.Contains(a.ActionType) && ContainsWinClipToken(a.Key)) ||
+            ContainsWinClipToken(a.KeyHtml) ||
+            ContainsWinClipToken(a.KeyMarkdown) ||
+            (BrowserTextResolvingActionTypes.Contains(a.ActionType) && ContainsWinClipToken(a.BrowserText)) ||
+            ContainsWinClipToken(a.VariableValue) ||
+            ContainsWinClipToken(a.ConditionOperand) ||
+            ContainsWinClipToken(a.FilePath) ||
+            ContainsWinClipToken(a.LaunchPath) ||
+            ContainsWinClipToken(a.LaunchArgs);
+
+        private static bool ContainsWinClipToken(string? text) =>
+            !string.IsNullOrEmpty(text) && text.Contains("{winclip", StringComparison.OrdinalIgnoreCase)
+                && WinClipTokenRegex.IsMatch(text);
 
         /// <summary>
         /// Walks the feature matrix and returns the highest minimum version among all

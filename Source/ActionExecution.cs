@@ -3618,6 +3618,48 @@ namespace TrueReplayer.Services
             return await tcsClip.Task;
         }
 
+        // Reads the Windows clipboard HISTORY (Win+V) as a recency-ordered list of text values —
+        // element 0 = most recent. The WinRT Items order is NOT documented, so we sort by Timestamp
+        // DESCENDING (a stable OrderBy) rather than trust the raw order. Each element is the item's
+        // text, or null when that item carries no text (image / other format). Returns null when
+        // history is disabled/denied or the call throws — the resolver treats a null list and a null
+        // element alike as empty, and never throws. Marshaled to the UI thread like
+        // ReadClipboardTextAsync (the WinRT clipboard APIs want the UI thread; a background-daemon
+        // call may legitimately fail here, which surfaces as "history unavailable" = empty).
+        internal static async Task<IReadOnlyList<string?>?> ReadClipboardHistoryTextsAsync(DispatcherQueue dispatcherQueue)
+        {
+            var tcs = new TaskCompletionSource<IReadOnlyList<string?>?>();
+            if (!dispatcherQueue.TryEnqueue(async () =>
+            {
+                try
+                {
+                    var result = await Windows.ApplicationModel.DataTransfer.Clipboard.GetHistoryItemsAsync();
+                    if (result.Status != Windows.ApplicationModel.DataTransfer.ClipboardHistoryItemsResultStatus.Success)
+                    {
+                        tcs.SetResult(null); // disabled / access denied — treat as empty
+                        return;
+                    }
+                    var texts = new List<string?>(result.Items.Count);
+                    foreach (var item in result.Items.OrderByDescending(i => i.Timestamp))
+                    {
+                        try
+                        {
+                            texts.Add(item.Content.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text)
+                                ? await item.Content.GetTextAsync()
+                                : null); // non-text item (image/other) — placeholder so indices still align
+                        }
+                        catch { texts.Add(null); } // one unreadable item must not sink the whole read
+                    }
+                    tcs.SetResult(texts);
+                }
+                catch { tcs.SetResult(null); }
+            }))
+            {
+                tcs.TrySetResult(null); // queue shut down (app closing)
+            }
+            return await tcs.Task;
+        }
+
         // HTML-flavor substitution guard: a resolved clipboard/var/row value containing '<' or
         // '&' must paste as visible TEXT inside the rich payload, never inject markup; newlines
         // in the value become <br> so multi-line values still render (the CRLF normalization is
@@ -3640,6 +3682,54 @@ namespace TrueReplayer.Services
                 var mods = m.Groups[1].Success ? m.Groups[1].Value : null;
                 var resolved = ApplyClipboardModifiers(raw, mods);
                 if (htmlEncodeSubstitution) resolved = HtmlEncodeValue(resolved);
+                return escapeBracesInSubstitution ? EscapeBracesForParser(resolved) : resolved;
+            });
+        }
+
+        // Matches {winclip:N} — a 1-based index into the WINDOWS clipboard history (Win+V),
+        // most-recent first ({winclip:1} = the last thing copied). The index is OPTIONAL: a bare
+        // {winclip} means index 1, matching the editor chip (which defaults to 1) so a hand-typed
+        // {winclip} resolves instead of pasting literally. Deliberately DISJOINT from {clip:name}
+        // (in-app capture slots) and {clipboard} (the live OS clipboard). IgnoreCase like the others.
+        private static readonly Regex WinClipTokenRegex = new(
+            @"\{winclip(?::(\d+))?\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // Resolves {winclip:N} against the Windows clipboard history. Fetches the history ONCE per
+        // pass (so several {winclip:N} in one field see a consistent snapshot; different actions in a
+        // run each read fresh, which is MORE correct than a run-start snapshot) and indexes it
+        // 1-based, most-recent-first. Consume-always forgiveness — history disabled, index out of
+        // range, or a non-text item at that slot all resolve to empty; it never throws or stalls the
+        // run. On the rich SendText double-resolve the plain pass RECORDS each resolved value and the
+        // html pass REPLAYS it, so both flavors agree and the html pass skips the second history read.
+        internal static async Task<string> ResolveWinClipTokensAsync(
+            string text, DispatcherQueue dispatcherQueue,
+            bool escapeBracesInSubstitution, bool htmlEncodeSubstitution, TokenFlavorSync? sync = null)
+        {
+            if (string.IsNullOrEmpty(text) || !WinClipTokenRegex.IsMatch(text)) return text;
+            bool replaying = sync?.WinClipReplay is { Count: > 0 };
+            IReadOnlyList<string?>? history = replaying
+                ? null
+                : await ReadClipboardHistoryTextsAsync(dispatcherQueue);
+            return WinClipTokenRegex.Replace(text, m =>
+            {
+                string raw;
+                if (sync?.WinClipReplay is { Count: > 0 } replay)
+                {
+                    raw = replay.Dequeue();
+                }
+                else
+                {
+                    raw = string.Empty;
+                    // Bare {winclip} (no group) = index 1; {winclip:N} parses N (overflow → skip).
+                    int n = 1;
+                    bool haveIndex = !m.Groups[1].Success || int.TryParse(m.Groups[1].Value, out n);
+                    if (history != null && haveIndex
+                        && n >= 1 && n <= history.Count && history[n - 1] != null)
+                        raw = history[n - 1]!;
+                    sync?.WinClipRecord?.Add(raw);
+                }
+                var resolved = htmlEncodeSubstitution ? HtmlEncodeValue(raw) : raw;
                 return escapeBracesInSubstitution ? EscapeBracesForParser(resolved) : resolved;
             });
         }
@@ -3674,6 +3764,7 @@ namespace TrueReplayer.Services
         {
             if (string.IsNullOrEmpty(text)) return text;
             text = await ResolveClipboardTokensAsync(text, dispatcherQueue, clipboardOverride, escapeBracesInSubstitution, htmlEncodeSubstitution);
+            text = await ResolveWinClipTokensAsync(text, dispatcherQueue, escapeBracesInSubstitution, htmlEncodeSubstitution, flavorSync);
             text = ResolveDateTimeTokens(text, flavorSync);
             text = ResolveRandomTokens(text, flavorSync);
             // {input:Label} runs BEFORE run-state so a {var:Label} in the same text sees the answer
@@ -3757,6 +3848,8 @@ namespace TrueReplayer.Services
             public DateTime Now = DateTime.Now;
             public List<string>? RandomRecord;   // set on the recording (plain) pass
             public Queue<string>? RandomReplay;  // set on the replay (html) pass
+            public List<string>? WinClipRecord;  // {winclip:N} resolved values — recording (plain) pass
+            public Queue<string>? WinClipReplay; // replayed on the html pass so both flavors agree
         }
 
         private static string ResolveRandomTokens(string text, TokenFlavorSync? sync = null)
@@ -3940,7 +4033,7 @@ namespace TrueReplayer.Services
             // value so content like "{enter}" is pasted as text, not re-interpreted as a key press.
             // The flavor sync RECORDS this pass's {random} draws + DateTime.Now snapshot so the
             // html pass below replays the exact same values (one paste = one set of values).
-            var flavorSync = new TokenFlavorSync { RandomRecord = new List<string>() };
+            var flavorSync = new TokenFlavorSync { RandomRecord = new List<string>(), WinClipRecord = new List<string>() };
             text = await ResolveTokens(text, originalClipboard.Text ?? string.Empty, escapeBracesInSubstitution: true, flavorSync);
 
             if (string.IsNullOrEmpty(text) || token.IsCancellationRequested)
@@ -3969,6 +4062,7 @@ namespace TrueReplayer.Services
                 {
                     Now = flavorSync.Now,
                     RandomReplay = new Queue<string>(flavorSync.RandomRecord!),
+                    WinClipReplay = new Queue<string>(flavorSync.WinClipRecord!),
                 };
                 resolvedHtml = await ResolveTokensAsync(PrepareRichHtmlForSend(html), dispatcherQueue, CurrentRunCtx,
                     originalClipboard.Text ?? string.Empty, escapeBracesInSubstitution: true,

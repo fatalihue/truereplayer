@@ -32,7 +32,7 @@ const REPEATABLE_TOKEN_NAMES = new Set([
   'right',
 ]);
 
-type TokenKind = 'clipboard' | 'delay' | 'repeatable' | 'random' | 'var' | 'rowcol' | 'clip' | 'input' | 'static';
+type TokenKind = 'clipboard' | 'delay' | 'repeatable' | 'random' | 'var' | 'rowcol' | 'clip' | 'winclip' | 'input' | 'static';
 
 function getTokenKind(token: string): TokenKind {
   const inner = token.slice(1, -1);
@@ -46,6 +46,8 @@ function getTokenKind(token: string): TokenKind {
   if (name === 'row' && inner.includes(':')) return 'rowcol';
   // {clip:name} — a captured clipboard slot (Copy to Slot / capture hotkey).
   if (name === 'clip') return 'clip';
+  // {winclip:N} — item N of the Windows clipboard history (Win+V).
+  if (name === 'winclip') return 'winclip';
   if (name === 'input') return 'input';
   if (REPEATABLE_TOKEN_NAMES.has(name)) return 'repeatable';
   return 'static';
@@ -70,6 +72,13 @@ function parseDelay(token: string): { ms: number } {
   const parts = inner.split(':');
   const parsed = parts[1] !== undefined ? parseInt(parts[1], 10) : 500;
   return { ms: !Number.isFinite(parsed) || parsed < 0 ? 500 : parsed };
+}
+
+function parseWinClip(token: string): { index: number } {
+  const inner = token.slice(1, -1);
+  const parts = inner.split(':');
+  const parsed = parts[1] !== undefined ? parseInt(parts[1], 10) : 1;
+  return { index: !Number.isFinite(parsed) || parsed < 1 ? 1 : parsed };
 }
 
 function parseRandom(token: string): { min: number; max: number } {
@@ -209,6 +218,7 @@ export function TokenChipPopover({
         {kind === 'var' && <NameEditor token={token} tokenName="var" onChange={updateLive} />}
         {kind === 'rowcol' && <RowColEditor token={token} onChange={updateLive} />}
         {kind === 'clip' && <NameEditor token={token} tokenName="clip" onChange={updateLive} />}
+        {kind === 'winclip' && <WinClipEditor token={token} onChange={updateLive} />}
         {kind === 'input' && <InputEditor token={token} onChange={updateLive} />}
         {kind === 'static' && <StaticInfo token={token} />}
       </div>
@@ -371,6 +381,31 @@ function RandomEditor({ token, onChange }: { token: string; onChange: (t: string
       </div>
       <div className="text-[10px] text-text-tertiary mt-1">
         A fresh integer between the two bounds (inclusive) each time this text runs.
+      </div>
+    </Section>
+  );
+}
+
+// {winclip:N} — pick which item of the Windows clipboard history (Win+V) to paste,
+// newest first (1 = the last thing copied). Emits only on real input (same open-then-
+// close guard as the others). The note carries the two things a user must know: the
+// history has to be enabled, and it can hold anything recently copied — passwords too.
+function WinClipEditor({ token, onChange }: { token: string; onChange: (t: string) => void }) {
+  const initial = parseWinClip(token);
+  const [index, setIndex] = useState(initial.index);
+
+  const update = (v: number) => { const c = v < 1 ? 1 : v; setIndex(c); onChange(`{winclip:${c}}`); };
+
+  return (
+    <Section label="Clipboard history">
+      <div className="flex items-center gap-2 py-1">
+        <span className="text-[11px] text-text-tertiary">item</span>
+        <NumInput value={index} onChange={update} min={1} width={70} />
+        <span className="text-[11px] text-text-tertiary">1 = most recent</span>
+      </div>
+      <div className="text-[10px] text-text-tertiary mt-1 leading-relaxed">
+        Item {index} of the Windows clipboard history (Win+V), newest first. Needs clipboard history
+        turned on. It can hold anything recently copied by any app — including passwords.
       </div>
     </Section>
   );

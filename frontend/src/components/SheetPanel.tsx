@@ -3043,6 +3043,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                     { var: '{Time}', label: 'Time' },
                     { var: '{Random:1-10}', label: 'Random' },
                     { var: '{Clip:1}', label: 'Clip slot' },
+                    { var: '{WinClip:1}', label: 'Clip history' },
                     { var: '{Escape}', label: 'Escape' },
                     { var: '{Backspace}', label: 'Backspace' },
                     { var: '{Delete}', label: 'Delete' },
