@@ -283,8 +283,10 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           <span className="kbd">Esc</span>
         </div>
 
-        {/* Command list */}
-        <div className="max-h-[320px] overflow-y-auto py-1.5">
+        {/* Command list — tall enough to show the whole (deliberately small) command set
+            without scrolling; the vh cap keeps it on-screen when the window is short, where
+            overflow-y still kicks in. Bump the px value if the command count ever grows. */}
+        <div className="max-h-[min(480px,72vh)] overflow-y-auto py-1.5">
           {filteredGroups.length === 0 && (
             <div className="px-4 py-6 text-center text-xs text-text-tertiary">
               No results found
