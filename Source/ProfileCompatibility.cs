@@ -136,13 +136,9 @@ namespace TrueReplayer.Services
             // Windows clipboard-history token {winclip:N} — an older build has no WinClipTokenRegex,
             // so the whole token stays literal and gets typed into the target verbatim (same failure
             // class as the modified-row token above). Text-scan over every token-resolved field.
-            // PLACEHOLDER: 2.9.2 is already released WITHOUT this feature; {winclip} ships in the NEXT
-            // release. 2.9.2 is the current dev floor so this build accepts its own export; Step 0
-            // sees it as a pin added-since-the-2.9.2-tag whose version == last released, and bumps it
-            // to the release version. (Do NOT conflate with the CopyToSlot-clear pin below, which
-            // genuinely shipped in 2.9.2 and must stay at 2.9.2.)
+            // Introduced in 2.9.3.
             (p => p.Actions.Any(UsesWinClipToken),
-                new Version(2, 9, 2), "Clipboard history token"),
+                new Version(2, 9, 3), "Clipboard history token"),
 
             // Copy to Slot ({clip:name} capture) — an older build has no dispatch case for the
             // unknown ActionType → silently skips the capture and every {clip:} token resolves
