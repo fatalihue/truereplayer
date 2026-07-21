@@ -252,6 +252,13 @@ namespace TrueReplayer.Models
         public int PixelTolerance { get; set; } = 10;
         public string? ImagePath { get; set; }              // per-profile PNG, same store as WaitImage
         public double ImageConfidence { get; set; } = 0.8;  // runtime clamps to <= 0.99
+        // Optional ImageFound search region (sub-rect, ABSOLUTE virtual-screen coords — no rel-coords
+        // for watchers, same convention as PixelX/Y). null or W|H <= 0 = full virtual screen. Four
+        // nullable ints (mirrors ActionItem.WaitImageSearchX/Y/W/H); treated as a unit.
+        public int? SearchRegionX { get; set; }
+        public int? SearchRegionY { get; set; }
+        public int? SearchRegionW { get; set; }
+        public int? SearchRegionH { get; set; }
         public string? ClipboardPattern { get; set; }       // contains-filter; empty = any clipboard change
 
         // Firing policy (condition kind): CooldownSeconds <= 0 = default 30 s between fires;

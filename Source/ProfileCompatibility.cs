@@ -268,6 +268,15 @@ namespace TrueReplayer.Services
             (p => p.Triggers != null,
                 new Version(2, 9, 0), "Automation trigger"),
 
+            // Automation ImageFound search region (ROI). An older build has the Triggers property but
+            // no SearchRegion field → it drops the ROI and scans full-screen (slower, more false
+            // positives — behavioural divergence, not a hard failure). Property-level so plain triggers
+            // keep the 2.9.0 floor; gates on BOTH W and H (matches the probe + projection). PLACEHOLDER
+            // at the current released version 2.9.3 (same as the winclip@2.9.2 placeholder was) — Step 0's
+            // pin check flags any pin == last-released and bumps it to the real version at release.
+            (p => p.Triggers is { SearchRegionW: > 0, SearchRegionH: > 0 },
+                new Version(2, 9, 3), "Automation image search region"),
+
             // Restore Size split from Restore Position in 2.0.5; older builds only honour Position.
             (p => p.RestoreSize,
                 new Version(2, 0, 5), "RestoreSize"),

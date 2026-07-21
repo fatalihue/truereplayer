@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Zap, Plus, Trash2, Pipette, Camera, CircleDot } from 'lucide-react';
+import { Zap, Plus, Trash2, Pipette, Camera, CircleDot, Frame, X, ScanSearch, Check } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
 import { useTt } from '../state/LanguageContext';
@@ -10,6 +10,7 @@ import { SegmentedControl } from './common/SegmentedControl';
 import { NumberInput } from './common/NumberInput';
 import { Field } from './sheet/Field';
 import { WindowTargetFields } from './WindowTargetFields';
+import { ImageCropper } from './ImageCropper';
 import type { AutomationEntry, TriggerConfig } from '../bridge/messageTypes';
 
 // Day-pill order matches the backend bitmask convention (Sun = 1<<0, the If-Time one).
@@ -51,6 +52,8 @@ function defaultTrigger(): TriggerConfig {
     pixelTolerance: 10,
     imagePath: null,
     imageConfidence: 0.8,
+    imageBase64: null,
+    searchRegion: null,
     clipboardPattern: '',
     cooldownSeconds: 30,
     retrigger: 'edge',
@@ -86,6 +89,8 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<TriggerConfig | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [cropperOpen, setCropperOpen] = useState(false); // ImageFound: re-crop the reference PNG
+  const [testMatchResult, setTestMatchResult] = useState<{ found: boolean; score: number; error?: string } | null>(null);
   // A not-yet-saved automation for a profile that has none. Only one at a time.
   const [newDraftProfile, setNewDraftProfile] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -148,7 +153,9 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
     // (automation:setArmed persists immediately). Sending the seeded draft.armed here
     // would silently revert a list-toggle made after the draft was seeded.
     const armed = entryByProfile.get(selected)?.trigger.armed ?? false;
-    send({ type: 'automation:save', payload: { profile: selected, trigger: { ...draft, armed } } });
+    // imageBase64 is display-only (the on-disk PNG is the source) — the backend never parses it, so
+    // send null instead of round-tripping the large derived blob across the bridge on every save.
+    send({ type: 'automation:save', payload: { profile: selected, trigger: { ...draft, imageBase64: null, armed } } });
     setDirty(false);
     // newDraftProfile stays set until the automation:state echo lands — clearing it now
     // would drop the row from the list (entries doesn't have it yet) and blank the editor.
@@ -174,6 +181,8 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
   // ── Pick-from-screen round-trips (pixel color + image capture) ──
   const pickReqRef = useRef<string | null>(null);
   const captureReqRef = useRef<string | null>(null);
+  const regionReqRef = useRef<string | null>(null);
+  const testMatchReqRef = useRef<string | null>(null);
   useEffect(() => {
     return subscribe((msg) => {
       if (msg.type === 'pixel:colorPicked' && msg.payload.requestId === pickReqRef.current) {
@@ -185,12 +194,42 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
       if (msg.type === 'automation:imageCaptured' && msg.payload.requestId === captureReqRef.current) {
         captureReqRef.current = null;
         if (!msg.payload.cancelled && msg.payload.imagePath) {
-          patch({ imagePath: msg.payload.imagePath });
+          // A new/cropped reference makes any test-match badge stale → drop it. A fresh CAPTURE (not a
+          // crop of the same image, which keeps its location) may point at a different target, so also
+          // clear the snapped ROI — otherwise the daemon would search the new image inside the old box.
+          const wasCrop = msg.payload.requestId.startsWith('autocrop-');
+          setTestMatchResult(null);
+          patch({ imagePath: msg.payload.imagePath, imageBase64: msg.payload.imageBase64 ?? null, ...(wasCrop ? {} : { searchRegion: null }) });
+        }
+      }
+      // Shared reply message with SheetPanel's WaitImage ROI — the autoregion- requestId + this
+      // per-panel ref guard keep the two listeners from crossing wires.
+      if (msg.type === 'waitimage:searchRegionSet' && msg.payload.requestId === regionReqRef.current) {
+        regionReqRef.current = null;
+        const r = msg.payload;
+        if (!r.cancelled && r.w && r.h && r.w > 0 && r.h > 0) {
+          patch({ searchRegion: { x: r.x ?? 0, y: r.y ?? 0, w: r.w, h: r.h } });
+        }
+      }
+      // Test match reply (shared type with SheetPanel; testMatchReqRef guards it). On a hit, snap the
+      // search region to an 80px box around where the image was found — one click sets the ROI right.
+      if (msg.type === 'image:testMatchResult' && msg.payload.requestId === testMatchReqRef.current) {
+        testMatchReqRef.current = null;
+        const r = msg.payload;
+        setTestMatchResult({ found: r.found, score: r.score, error: r.error });
+        if (r.found) {
+          // No Math.max(0,…): watcher coords are ABSOLUTE virtual-screen and go negative on a monitor
+          // left of / above the primary; the backend MatchOnce clamps the ROI to the bitmap itself.
+          const m = 80;
+          patch({ searchRegion: { x: r.x - m, y: r.y - m, w: r.w + m * 2, h: r.h + m * 2 } });
         }
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subscribe]);
+
+  // Drop a stale test-match badge when switching automations.
+  useEffect(() => { setTestMatchResult(null); }, [selected]);
 
   const pickPixel = () => {
     const id = `autopix-${Date.now()}`;
@@ -205,12 +244,40 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
     captureReqRef.current = id;
     send({ type: 'automation:captureImage', payload: { requestId: id, profile: selected } });
   };
+  const configureRegion = () => {
+    if (!selected) return;
+    const id = `autoregion-${Date.now()}`;
+    regionReqRef.current = id;
+    // absolute: watcher ROI is virtual-screen coords (the backend skips the rel-coords round-trip).
+    const r = draft?.searchRegion;
+    send({ type: 'waitimage:configureSearchRegion', payload: { requestId: id, absolute: true, ...(r ? { x: r.x, y: r.y, w: r.w, h: r.h } : {}) } });
+  };
+  // Crop the current reference tighter — the backend replies over automation:imageCaptured (new
+  // path + thumbnail), so reuse captureReqRef to match it. rect is image-pixel coords from the cropper.
+  const cropReference = (rect: { x: number; y: number; w: number; h: number }) => {
+    if (!selected || !draft?.imagePath) { setCropperOpen(false); return; }
+    const id = `autocrop-${Date.now()}`;
+    captureReqRef.current = id;
+    send({ type: 'automation:cropReference', payload: { requestId: id, profile: selected, imagePath: draft.imagePath, ...rect } });
+    setCropperOpen(false);
+  };
+  const testMatch = () => {
+    if (!selected || !draft?.imagePath) return;
+    const id = `autotest-${Date.now()}`;
+    testMatchReqRef.current = id;
+    setTestMatchResult(null);
+    // absolute + profile: the test image lives under the trigger's profile and its coords are
+    // virtual-screen (the backend skips the rel-coords round-trip and reports absolute).
+    const r = draft.searchRegion;
+    send({ type: 'image:testMatch', payload: { requestId: id, absolute: true, profile: selected, imagePath: draft.imagePath, confidence: draft.imageConfidence || 0.8, ...(r ? { searchRegion: r } : {}) } });
+  };
 
   const selectedEntry = selected ? entryByProfile.get(selected) : undefined;
   const selectedProfile = selected ? profiles.find((p) => p.name === selected) : undefined;
   const noTarget = selectedProfile ? !selectedProfile.hasEffectiveTarget : false;
 
   return (
+    <>
     <DialogShell
       icon={<Zap size={14} className="text-accent-light" />}
       title="Automation"
@@ -528,17 +595,57 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
 
                   {draft.conditionType === 'ImageFound' && (
                     <>
-                      <div className="flex items-end gap-2">
-                        <Field label="Reference image">
-                          <div className={`${inputCls} flex items-center text-text-tertiary truncate`}>
-                            {draft.imagePath ?? tt('none captured', 'nenhuma capturada')}
-                          </div>
-                        </Field>
+                      <Field label="Reference image">
+                        <div
+                          onClick={() => draft.imageBase64 && setCropperOpen(true)}
+                          data-tip={draft.imageBase64 ? tt('Click to crop tighter', 'Clique para recortar mais justo') : undefined}
+                          className={draft.imageBase64
+                            ? 'w-full rounded border border-border-subtle bg-bg-input p-1 cursor-pointer hover:border-accent-solid transition-colors'
+                            : `${inputCls} flex items-center text-text-tertiary truncate`}>
+                          {draft.imageBase64
+                            ? <img src={`data:image/png;base64,${draft.imageBase64}`} alt="" className="max-h-[120px] w-full object-contain" />
+                            : (draft.imagePath ?? tt('none captured', 'nenhuma capturada'))}
+                        </div>
+                      </Field>
+                      <div className="flex gap-2">
                         <Button variant="secondary" size="sm" onClick={captureImage}
                           data-tip={tt('Capture a region of the screen to watch for', 'Capturar uma região da tela para vigiar')}>
                           <Camera size={12} /> Capture
                         </Button>
+                        <Button variant="secondary" size="sm" onClick={testMatch} disabled={!draft.imagePath}
+                          data-tip={tt('Search the screen now — on a hit, snaps the region to the match', 'Procura na tela agora — se achar, ajusta a região no ponto do match')}>
+                          <ScanSearch size={12} /> Test match
+                        </Button>
                       </div>
+                      {testMatchResult && (
+                        <div className={`flex items-center gap-1.5 text-[11px] ${testMatchResult.found ? 'text-accent-light' : 'text-text-tertiary'}`}>
+                          {testMatchResult.found ? <Check size={12} /> : <X size={12} />}
+                          {testMatchResult.error
+                            ? testMatchResult.error
+                            : testMatchResult.found
+                              ? `${tt('Found', 'Encontrado')} (${Math.round(testMatchResult.score * 100)}%) — ${tt('region snapped to it', 'região ajustada no ponto')}`
+                              : `${tt('Not found on screen', 'Não encontrado na tela')} (${Math.round(testMatchResult.score * 100)}%)`}
+                        </div>
+                      )}
+                      <Field label="Search region" hint={tt('Limit matching to a screen region — faster and fewer false positives for a background watcher. Empty = full screen.', 'Limita a busca a uma região da tela — mais rápido e menos falso-positivo num vigia de fundo. Vazio = tela inteira.')}>
+                        <div className="flex items-center gap-2">
+                          <div className={`${inputCls} flex-1 flex items-center ${draft.searchRegion ? 'font-mono text-[11px]' : 'text-text-disabled italic'}`}>
+                            {draft.searchRegion
+                              ? `${draft.searchRegion.x}, ${draft.searchRegion.y}  ·  ${draft.searchRegion.w} × ${draft.searchRegion.h}`
+                              : tt('Full screen (default)', 'Tela inteira (padrão)')}
+                          </div>
+                          <Button variant="secondary" size="sm" onClick={configureRegion}>
+                            <Frame size={12} /> {tt('Configure', 'Configurar')}
+                          </Button>
+                          {draft.searchRegion && (
+                            <button type="button" onClick={() => patch({ searchRegion: null })}
+                              data-tip={tt('Clear region (search full screen)', 'Limpar região (buscar tela inteira)')}
+                              className="h-7 w-7 shrink-0 flex items-center justify-center rounded text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors">
+                              <X size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </Field>
                       <Field label="Confidence" hint={tt('Match threshold. 80% is a good start; 100% never matches a live screen.', 'Limiar de match. 80% é um bom começo; 100% nunca bate numa tela real.')}>
                         <NumberInput
                           value={Math.round((draft.imageConfidence || 0.8) * 100)}
@@ -601,5 +708,13 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
         </div>
       </div>
     </DialogShell>
+    {cropperOpen && draft?.imageBase64 && (
+      <ImageCropper
+        imageBase64={draft.imageBase64}
+        onSave={cropReference}
+        onCancel={() => setCropperOpen(false)}
+      />
+    )}
+    </>
   );
 }

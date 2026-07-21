@@ -417,6 +417,10 @@ export interface TriggerConfig {
   pixelTolerance: number;
   imagePath: string | null;
   imageConfidence: number;
+  // Derived C#→JS, display-only (never sent back): the reference PNG as base64 for the thumbnail.
+  imageBase64: string | null;
+  // ImageFound search region (ROI), absolute virtual-screen coords; null = full screen.
+  searchRegion: { x: number; y: number; w: number; h: number } | null;
   clipboardPattern: string | null;
   cooldownSeconds: number;
   retrigger: string | null;
@@ -556,7 +560,7 @@ export type IncomingMessage =
   | { type: 'automation:open'; payload: Record<string, never> }
   // Reply to automation:captureImage (region overlay). imagePath is the saved PNG's
   // per-profile relative path, ready to store on the trigger config.
-  | { type: 'automation:imageCaptured'; payload: { requestId: string; cancelled: boolean; imagePath?: string } }
+  | { type: 'automation:imageCaptured'; payload: { requestId: string; cancelled: boolean; imagePath?: string; imageBase64?: string } }
   | { type: 'actions:highlight'; payload: { index: number } }
   | { type: 'profiles:updated'; payload: { profiles: ProfileEntry[]; activeProfile: string | null; profileOrder: ProfileOrderData } }
   | { type: 'settings:loaded'; payload: { settings: SettingsState } }
@@ -657,6 +661,7 @@ export type OutgoingMessage =
   | { type: 'automation:setArmed'; payload: { profile: string; armed: boolean } }
   | { type: 'automation:setEnabled'; payload: { enabled: boolean } }
   | { type: 'automation:captureImage'; payload: { requestId: string; profile: string } }
+  | { type: 'automation:cropReference'; payload: { requestId: string; profile: string; imagePath: string; x: number; y: number; w: number; h: number } }
   // Whole-list save of the key remap layer (capped at 32 entries backend-side).
   | { type: 'remap:save'; payload: { enabled: boolean; remaps: { from: string; to: string; enabled: boolean }[] } }
   | { type: 'recording:toggle'; payload: { insertIndex?: number } }
@@ -797,11 +802,11 @@ export type OutgoingMessage =
   | { type: 'actions:addRunProfile'; payload: { profileName: string; repeatCount: number; runOverData?: boolean; insertIndex?: number } }
   | { type: 'actions:editRunProfile'; payload: { index: number; profileName: string; repeatCount: number; runOverData?: boolean } }
   | { type: 'waitimage:recapture'; payload: { index: number } }
-  | { type: 'waitimage:configureSearchRegion'; payload: { requestId: string; x?: number; y?: number; w?: number; h?: number } }
+  | { type: 'waitimage:configureSearchRegion'; payload: { requestId: string; absolute?: boolean; x?: number; y?: number; w?: number; h?: number } }
   | { type: 'clicker:configureArea'; payload: { requestId: string } }
   | { type: 'clicker:configurePoint'; payload: { requestId: string } }
   | { type: 'waitimage:cropReference'; payload: { index: number; x: number; y: number; w: number; h: number } }
-  | { type: 'image:testMatch'; payload: { requestId: string; imagePath: string; confidence: number; searchRegion?: { x: number; y: number; w: number; h: number } } }
+  | { type: 'image:testMatch'; payload: { requestId: string; imagePath: string; confidence: number; searchRegion?: { x: number; y: number; w: number; h: number }; absolute?: boolean; profile?: string } }
   | { type: 'mouse:pickPosition'; payload: { requestId: string } }
   // absolute: skip the profile-relative translation (automation watchers sample
   // virtual-screen coords with no window context).

@@ -663,6 +663,7 @@ namespace TrueReplayer
                     case "automation:setArmed": HandleAutomationSetArmed(payload); break;
                     case "automation:setEnabled": HandleAutomationSetEnabled(payload); break;
                     case "automation:captureImage": HandleAutomationCaptureImage(payload); break;
+                    case "automation:cropReference": HandleAutomationCropReference(payload); break;
                     case "remap:save": HandleRemapSave(payload); break;
                     case "actions:reorder": HandleActionsReorder(payload); break;
                     case "actions:convertMode": HandleConvertActionMode(payload); break;
@@ -1153,7 +1154,9 @@ namespace TrueReplayer
                         profile = p.Name,
                         isDisabled = p.IsDisabled,
                         hasEffectiveTarget = p.HasEffectiveTarget,
-                        trigger = ProjectTriggerConfig(p.Triggers!),
+                        // Normalize the image-store key the same way HandleAutomationCaptureImage does
+                        // (No Profile / empty → "default") so a No-Profile trigger's thumbnail resolves.
+                        trigger = ProjectTriggerConfig(p.Triggers!, (string.IsNullOrEmpty(p.Name) || p.Name == "No Profile") ? "default" : p.Name),
                         running = st?.Running ?? false,
                         conditionTrue = st?.ConditionTrue ?? false,
                         nextDueAt = st?.NextDueAt?.ToString("o"),
@@ -1174,7 +1177,7 @@ namespace TrueReplayer
 
         public void PushAutomationState() => SendMessage("automation:state", BuildAutomationStatePayload());
 
-        private static object ProjectTriggerConfig(ProfileTriggerConfig t) => new
+        private object ProjectTriggerConfig(ProfileTriggerConfig t, string profileName) => new
         {
             kind = t.Kind,
             armed = t.Armed,
@@ -1193,6 +1196,14 @@ namespace TrueReplayer
             pixelTolerance = t.PixelTolerance,
             imagePath = t.ImagePath,
             imageConfidence = t.ImageConfidence,
+            // Derived, display-only (never parsed back): the reference PNG as base64 so the editor
+            // shows a thumbnail, exactly like the WaitImage action projection.
+            imageBase64 = (string.IsNullOrEmpty(t.ImagePath)
+                    || !string.Equals(t.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase))
+                ? "" : GetImageBase64Cached(profileName, t.ImagePath!),
+            searchRegion = (t.SearchRegionW is int w && w > 0 && t.SearchRegionH is int h && h > 0)
+                ? new { x = t.SearchRegionX ?? 0, y = t.SearchRegionY ?? 0, w, h }
+                : null,
             clipboardPattern = t.ClipboardPattern,
             cooldownSeconds = t.CooldownSeconds,
             retrigger = t.Retrigger,
@@ -1219,6 +1230,22 @@ namespace TrueReplayer
             if (el.TryGetProperty("pixelTolerance", out v) && v.TryGetInt32(out var pt)) t.PixelTolerance = pt;
             if (el.TryGetProperty("imagePath", out v) && v.ValueKind == JsonValueKind.String) t.ImagePath = v.GetString();
             if (el.TryGetProperty("imageConfidence", out v) && v.ValueKind == JsonValueKind.Number) t.ImageConfidence = v.GetDouble();
+            // ImageFound ROI: nested {x,y,w,h} object, or null to clear. Absent → stays full-screen.
+            // (imageBase64 is display-only and never parsed back — the PNG on disk is the source.)
+            if (el.TryGetProperty("searchRegion", out v))
+            {
+                if (v.ValueKind == JsonValueKind.Object)
+                {
+                    if (v.TryGetProperty("x", out var srx) && srx.TryGetInt32(out var sx)) t.SearchRegionX = sx;
+                    if (v.TryGetProperty("y", out var sry) && sry.TryGetInt32(out var sy)) t.SearchRegionY = sy;
+                    if (v.TryGetProperty("w", out var srw) && srw.TryGetInt32(out var sw)) t.SearchRegionW = sw;
+                    if (v.TryGetProperty("h", out var srh) && srh.TryGetInt32(out var sh)) t.SearchRegionH = sh;
+                }
+                else if (v.ValueKind == JsonValueKind.Null)
+                {
+                    t.SearchRegionX = t.SearchRegionY = t.SearchRegionW = t.SearchRegionH = null;
+                }
+            }
             if (el.TryGetProperty("clipboardPattern", out v) && v.ValueKind == JsonValueKind.String) t.ClipboardPattern = v.GetString();
             if (el.TryGetProperty("cooldownSeconds", out v) && v.TryGetInt32(out var cd)) t.CooldownSeconds = cd;
             if (el.TryGetProperty("retrigger", out v) && v.ValueKind == JsonValueKind.String) t.Retrigger = v.GetString();
@@ -1362,13 +1389,57 @@ namespace TrueReplayer
 
                 string newImagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, profileName);
                 selection.CroppedImage.Dispose();
-                SendMessage("automation:imageCaptured", new { requestId, cancelled = false, imagePath = newImagePath });
+                // Carry the base64 on the reply so the panel thumbnails the just-captured image
+                // immediately (the draft is seeded once per selection; automation:state won't re-stomp it).
+                SendMessage("automation:imageCaptured", new { requestId, cancelled = false, imagePath = newImagePath, imageBase64 = GetImageBase64Cached(profileName, newImagePath) });
             }
             finally
             {
                 screenshot.Dispose();
                 InputHookManager.SuppressAllHotkeys = false;
             }
+        }
+
+        // Re-crop a trigger's reference PNG tighter (the panel's crop-on-thumbnail-click), the
+        // profile-addressed twin of HandleCropReference (which is action-index-addressed). Loads the
+        // draft's current imagePath, crops in image-pixel coords, saves a NEW PNG, and replies over the
+        // same automation:imageCaptured path so the panel patches imagePath + thumbnail. The trigger is
+        // persisted on the next automation:save (mirrors capture — the draft holds the new path).
+        private void HandleAutomationCropReference(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
+            string profileName = payload.TryGetProperty("profile", out var pEl) ? (pEl.GetString() ?? "") : "";
+            if (string.IsNullOrEmpty(profileName) || profileName == "No Profile") profileName = "default";
+            string imagePath = payload.TryGetProperty("imagePath", out var ipEl) ? (ipEl.GetString() ?? "") : "";
+            if (string.IsNullOrEmpty(imagePath)) return;
+            int x = payload.GetProperty("x").GetInt32();
+            int y = payload.GetProperty("y").GetInt32();
+            int w = payload.GetProperty("w").GetInt32();
+            int h = payload.GetProperty("h").GetInt32();
+
+            using var current = ImageStorageService.LoadReferenceImage(profileName, imagePath);
+            if (current == null) return;
+            // Clamp to the image bounds (belt-and-suspenders over the frontend clamp); reject tiny or
+            // no-op (full-image) crops — same rules as HandleCropReference.
+            x = Math.Max(0, Math.Min(current.Width - 1, x));
+            y = Math.Max(0, Math.Min(current.Height - 1, y));
+            w = Math.Min(current.Width - x, w);
+            h = Math.Min(current.Height - y, h);
+            if (w < 10 || h < 10) return;
+            if (x == 0 && y == 0 && w == current.Width && h == current.Height) return;
+
+            string newPath;
+            try
+            {
+                using var cropped = current.Clone(new System.Drawing.Rectangle(x, y, w, h), current.PixelFormat);
+                newPath = ImageStorageService.SaveReferenceImage(cropped, profileName);
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Warn($"Automation crop failed: {ex.Message}");
+                return;
+            }
+            SendMessage("automation:imageCaptured", new { requestId, cancelled = false, imagePath = newPath, imageBase64 = GetImageBase64Cached(profileName, newPath) });
         }
 
         private void HandleAutomationSetEnabled(JsonElement payload)
@@ -4161,6 +4232,11 @@ namespace TrueReplayer
             string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
             string imagePath = payload.TryGetProperty("imagePath", out var ipEl) ? (ipEl.GetString() ?? "") : "";
             double confidence = payload.TryGetProperty("confidence", out var cEl) && cEl.ValueKind == JsonValueKind.Number ? cEl.GetDouble() : 0.8;
+            // Automation callers pass absolute:true (watcher coords are virtual-screen) + the trigger's
+            // profile (the test image lives under the trigger's profile, not the active one). WaitImage /
+            // If callers omit both → CurrentProfileName + the rel-coords round-trip, byte-identical to before.
+            bool absolute = payload.TryGetProperty("absolute", out var absEl2) && absEl2.ValueKind == JsonValueKind.True;
+            string profileOverride = payload.TryGetProperty("profile", out var pEl2) && pEl2.ValueKind == JsonValueKind.String ? (pEl2.GetString() ?? "") : "";
 
             System.Drawing.Rectangle? searchRegion = null;
             if (payload.TryGetProperty("searchRegion", out var srEl) && srEl.ValueKind == JsonValueKind.Object)
@@ -4171,7 +4247,7 @@ namespace TrueReplayer
                 int sh = srEl.GetProperty("h").GetInt32();
                 if (sw > 0 && sh > 0)
                 {
-                    if (TryGetRelativeCaptureOffset(out var winRect))
+                    if (!absolute && TryGetRelativeCaptureOffset(out var winRect))
                     {
                         sx += winRect.Left;
                         sy += winRect.Top;
@@ -4182,7 +4258,9 @@ namespace TrueReplayer
 
             try
             {
-                string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
+                string profileName = !string.IsNullOrEmpty(profileOverride)
+                    ? (profileOverride == "No Profile" ? "default" : profileOverride)
+                    : (CurrentProfileName != "No Profile" ? CurrentProfileName : "default");
                 using var refImage = ImageStorageService.LoadReferenceImage(profileName, imagePath);
                 if (refImage == null)
                 {
@@ -4210,7 +4288,7 @@ namespace TrueReplayer
                 // shifting the displayed Configure rect and the search region by the window origin.
                 int reportX = result.X;
                 int reportY = result.Y;
-                if (TryGetRelativeCaptureOffset(out var winRectReport))
+                if (!absolute && TryGetRelativeCaptureOffset(out var winRectReport))
                 {
                     reportX -= winRectReport.Left;
                     reportY -= winRectReport.Top;
@@ -4559,7 +4637,14 @@ namespace TrueReplayer
         {
             string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
 
-            bool hasRelativeOffset = TryGetRelativeCaptureOffset(out var winRect);
+            // Automation watchers ask for ABSOLUTE coords (no target-window origin) — skip the
+            // profile-relative round-trip entirely, same flag the pixel picker uses. WaitImage / If
+            // callers omit it, so their existing relative behavior is byte-identical.
+            bool absolute = payload.TryGetProperty("absolute", out var absEl) && absEl.ValueKind == JsonValueKind.True;
+            // Call TryGet FIRST (an out param is always assigned) so winRect is definitely assigned even
+            // when absolute; the && !absolute just gates whether we USE it. Short-circuiting the other
+            // way would leave winRect possibly-unassigned for the `if (hasRelativeOffset)` block (CS0170).
+            bool hasRelativeOffset = TryGetRelativeCaptureOffset(out var winRect) && !absolute;
 
             System.Drawing.Rectangle? initialRect = null;
             if (payload.TryGetProperty("x", out var xEl) && xEl.ValueKind == JsonValueKind.Number &&
@@ -4581,8 +4666,8 @@ namespace TrueReplayer
             var selection = await RunRegionPickerAsync(
                 initialRect,
                 hintWhenSet: "Drag to redraw the search area  •  ESC to keep current",
-                hintWhenEmpty: "Drag to set the search area for this Wait Image  •  ESC to cancel",
-                logPrefix: "WaitImage");
+                hintWhenEmpty: "Drag to set the image search area  •  ESC to cancel",
+                logPrefix: absolute ? "Automation ImageFound" : "WaitImage");
 
             if (selection == null)
             {
@@ -4594,7 +4679,7 @@ namespace TrueReplayer
             // Re-check the target window in case it moved or closed between display and selection.
             int storedX = selection.ScreenX;
             int storedY = selection.ScreenY;
-            if (TryGetRelativeCaptureOffset(out var winRectNow))
+            if (!absolute && TryGetRelativeCaptureOffset(out var winRectNow))
             {
                 storedX -= winRectNow.Left;
                 storedY -= winRectNow.Top;

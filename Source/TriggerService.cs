@@ -574,7 +574,12 @@ namespace TrueReplayer.Services
                     {
                         if (refImage == null) return false;
                         double confidence = Math.Min(0.99, cfg.ImageConfidence <= 0 ? 0.8 : cfg.ImageConfidence);
-                        return ImageMatchingService.MatchOnce(refImage).Score >= confidence;
+                        // Optional ROI — constrain the scan to a sub-rect (cheaper + fewer false
+                        // positives for a background poll). Absolute coords; no offset translation.
+                        System.Drawing.Rectangle? searchRegion = null;
+                        if (cfg.SearchRegionW is int sw && cfg.SearchRegionH is int sh && sw > 0 && sh > 0)
+                            searchRegion = new System.Drawing.Rectangle(cfg.SearchRegionX ?? 0, cfg.SearchRegionY ?? 0, sw, sh);
+                        return ImageMatchingService.MatchOnce(refImage, searchRegion).Score >= confidence;
                     }
                     default:
                         return false;
