@@ -1727,6 +1727,16 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   // composes one final layout. Same reasoning for the data-attribute.
   root.style.zoom = `${uiSettings.zoom / 100}`;
 
+  // Native controls (the <input type="time"> picker glyph, date pickers, scrollbars)
+  // render their built-in icons per `color-scheme`. Without this the time-picker clock
+  // icon stays a dark UA glyph — invisible on a dark theme (Automation → Schedule, the
+  // If-Time condition). Derive it from the background luminance so the glyphs track
+  // whatever preset is active: dark bg → light glyphs, light bg → dark glyphs. Set after
+  // the cssText batch (which replaces the whole inline style), same as zoom above.
+  let bgLum = 0;
+  try { bgLum = relativeLuminance(colors['bg-base']); } catch { bgLum = 0; }
+  root.style.colorScheme = bgLum < 0.5 ? 'dark' : 'light';
+
   // Animations toggle — exposes a single data-attribute the CSS can hook into
   // (e.g. `html[data-animations="true"] .some-thing { transition: ... }`).
   root.setAttribute('data-animations', uiSettings.enableAnimations ? 'true' : 'false');
