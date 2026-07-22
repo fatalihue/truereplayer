@@ -6,8 +6,10 @@ import { useClipboardContent } from './useClipboardContent';
 import {
   buildClipboardToken,
   buildRowToken,
+  buildRowNextToken,
   parseClipboardToken,
   parseRowToken,
+  parseRowNextToken,
   type TransformState,
 } from './clipboardModifiers';
 import { NumInput, Section } from './popoverAtoms';
@@ -32,7 +34,7 @@ const REPEATABLE_TOKEN_NAMES = new Set([
   'right',
 ]);
 
-type TokenKind = 'clipboard' | 'delay' | 'repeatable' | 'random' | 'var' | 'rowcol' | 'clip' | 'winclip' | 'input' | 'static';
+type TokenKind = 'clipboard' | 'delay' | 'repeatable' | 'random' | 'var' | 'rowcol' | 'rownextcol' | 'clip' | 'winclip' | 'input' | 'static';
 
 function getTokenKind(token: string): TokenKind {
   const inner = token.slice(1, -1);
@@ -44,6 +46,8 @@ function getTokenKind(token: string): TokenKind {
   // {row:column} edits its data-table column name.
   if (name === 'var') return 'var';
   if (name === 'row' && inner.includes(':')) return 'rowcol';
+  // {rownext:column} — like {row:column} but auto-advancing (next data row each use).
+  if (name === 'rownext') return 'rownextcol';
   // {clip:name} — a captured clipboard slot (Copy to Slot / capture hotkey).
   if (name === 'clip') return 'clip';
   // {winclip:N} — item N of the Windows clipboard history (Win+V).
@@ -194,7 +198,7 @@ export function TokenChipPopover({
         position: 'fixed',
         ...visibilityStyle,
         zIndex: 100,
-        width: kind === 'clipboard' || kind === 'rowcol' ? 300 : 260,
+        width: kind === 'clipboard' || kind === 'rowcol' || kind === 'rownextcol' ? 300 : 260,
         background: 'var(--color-bg-elevated, #2d2d2d)',
         border: '1px solid color-mix(in srgb, var(--color-accent-solid) 35%, transparent)',
         boxShadow: '0 16px 40px rgba(0, 0, 0, 0.55)',
@@ -217,6 +221,7 @@ export function TokenChipPopover({
         {kind === 'random' && <RandomEditor token={token} onChange={updateLive} />}
         {kind === 'var' && <NameEditor token={token} tokenName="var" onChange={updateLive} />}
         {kind === 'rowcol' && <RowColEditor token={token} onChange={updateLive} />}
+        {kind === 'rownextcol' && <RowColEditor token={token} onChange={updateLive} head="rownext" />}
         {kind === 'clip' && <NameEditor token={token} tokenName="clip" onChange={updateLive} />}
         {kind === 'winclip' && <WinClipEditor token={token} onChange={updateLive} />}
         {kind === 'input' && <InputEditor token={token} onChange={updateLive} />}
@@ -464,9 +469,12 @@ function NameEditor({
 // transform effects are visible while editing; header match is case-insensitive
 // + trimmed, mirroring the backend BuildRowDict lookup. Emits only with a
 // non-empty column (clearing the field never emits a broken `{row:}`).
-function RowColEditor({ token, onChange }: { token: string; onChange: (t: string) => void }) {
-  const [column, setColumn] = useState(() => parseRowToken(token).column);
-  const [state, setState] = useState<TransformState>(() => parseRowToken(token).state);
+function RowColEditor({ token, onChange, head = 'row' }: { token: string; onChange: (t: string) => void; head?: 'row' | 'rownext' }) {
+  const isNext = head === 'rownext';
+  const parse = isNext ? parseRowNextToken : parseRowToken;
+  const build = isNext ? buildRowNextToken : buildRowToken;
+  const [column, setColumn] = useState(() => parse(token).column);
+  const [state, setState] = useState<TransformState>(() => parse(token).state);
   // The token box always shows what will actually be committed: the original
   // (normalized) token until the first real edit, then the latest build. Never
   // blanks while the column field is cleared mid-edit.
@@ -493,7 +501,7 @@ function RowColEditor({ token, onChange }: { token: string; onChange: (t: string
   // exactly what will run. Clearing the column never emits a broken `{row:}`.
   const emit = (col: string, s: TransformState) => {
     if (!col) return;
-    const t = buildRowToken(col, s);
+    const t = build(col, s);
     setDisplayToken(t);
     onChange(t);
   };
@@ -530,7 +538,9 @@ function RowColEditor({ token, onChange }: { token: string; onChange: (t: string
           />
         </div>
         <div className="text-[10px] text-text-tertiary mt-1">
-          Replaced with this column&apos;s cell of the current data row (loop over data).
+          {isNext
+            ? 'Each use pulls the NEXT data row for this column — 1st use → row 1, 2nd → row 2… Resets each run.'
+            : "Replaced with this column's cell of the current data row (loop over data)."}
         </div>
       </Section>
       <ClipboardModifierBody

@@ -154,8 +154,8 @@ function SnippetEditForm({
 
 interface PaletteChip {
   label: string;
-  insert?: string;                            // direct-insert seed (byte-identical to 2.7.x)
-  prompt?: 'var' | 'row' | 'clip' | 'input';  // opens the name/label prompt instead
+  insert?: string;                                       // direct-insert seed (byte-identical to 2.7.x)
+  prompt?: 'var' | 'row' | 'rownext' | 'clip' | 'input'; // opens the name/label prompt instead
   tip: [string, string];                      // tt(en, ptBr)
 }
 
@@ -197,8 +197,9 @@ const CLIPBOARD_CHIPS: PaletteChip[] = [
 const RUN_STATE_CHIPS: PaletteChip[] = [
   { label: 'Variable…', prompt: 'var', tip: ['Value stored by a Set Variable action', 'Valor gravado por uma action Set Variable'] },
   { label: 'Counter', insert: '{counter}', tip: ['Current loop iteration (1, 2, 3…)', 'Iteração atual do loop (1, 2, 3…)'] },
-  { label: 'Row #', insert: '{row}', tip: ["Current action's grid row number", 'Número da linha atual da action na grade'] },
+  { label: 'Action row #', insert: '{row}', tip: ["Current action's grid row number (not the data table)", 'Número da linha da action na grade (não é a tabela de dados)'] },
   { label: 'Row column…', prompt: 'row', tip: ["Data table column of the current row (loop over data) — click the chip after inserting to add transforms (trim, UPPERCASE…)", 'Coluna da tabela de dados na linha atual (loop over data) — clique no chip depois de inserir para adicionar transformações (trim, MAIÚSCULAS…)'] },
+  { label: 'Row column (next)…', prompt: 'rownext', tip: ["Auto-advancing: each use pulls the NEXT data row for the column (1st action → row 1, 2nd → row 2…). Resets each run — swap the list, keep the fields. Click the chip after inserting to add transforms.", 'Auto-avança: cada uso pega a PRÓXIMA linha da tabela para a coluna (1ª action → linha 1, 2ª → linha 2…). Reinicia a cada execução — troque a lista, mantenha os campos. Clique no chip depois de inserir para adicionar transformações.'] },
   { label: 'Ask input…', prompt: 'input', tip: ['Prompt for a value at replay time (pauses the run)', 'Pergunta um valor durante a execução (pausa o replay)'] },
 ];
 
@@ -217,7 +218,7 @@ function NamePromptPopover({
   onInsert,
   onClose,
 }: {
-  kind: 'var' | 'row' | 'clip' | 'input';
+  kind: 'var' | 'row' | 'rownext' | 'clip' | 'input';
   anchor: HTMLElement;
   onInsert: (token: string) => void;
   onClose: () => void;
@@ -321,6 +322,8 @@ function NamePromptPopover({
             ? tt('Replay pauses and asks you for this value. Click the chip to add dropdown options.', 'A execução pausa e pede este valor. Clique no chip para adicionar opções de dropdown.')
             : kind === 'clip'
             ? tt('Filled by a Copy to Slot action or the capture hotkey (slots 1–9).', 'Preenchido por uma action Copy to Slot ou pelo hotkey de captura (slots 1–9).')
+            : kind === 'rownext'
+            ? tt('Each use pulls the NEXT row of this column — 1st → row 1, 2nd → row 2… Resets each run.', 'Cada uso pega a PRÓXIMA linha desta coluna — 1º → linha 1, 2º → linha 2… Reinicia a cada execução.')
             : tt("Column header from the profile's Data table.", 'Cabeçalho de coluna da tabela Data do profile.')}
         </div>
       </div>
@@ -363,7 +366,7 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
   // byte-identical for hand-typed edge cases, so open+Apply must not rewrite.
   const [clipDirty, setClipDirty] = useState(false);
   // {Variable…}/{Row column…} name prompt.
-  const [namePrompt, setNamePrompt] = useState<{ kind: 'var' | 'row' | 'clip' | 'input'; anchor: HTMLElement } | null>(null);
+  const [namePrompt, setNamePrompt] = useState<{ kind: 'var' | 'row' | 'rownext' | 'clip' | 'input'; anchor: HTMLElement } | null>(null);
   const lexicalApiRef = useRef<LexicalEditorHandle | null>(null);
 
   // Pick the emoji picker's built-in LIGHT/DARK variant from the ACTIVE theme's

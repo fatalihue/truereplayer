@@ -19,6 +19,7 @@ const COMPOUND_NAMES: Record<string, string> = {
   pageup: 'PageUp',
   pagedown: 'PageDown',
   winclip: 'WinClip',
+  rownext: 'RowNext',
 };
 
 // Tokens whose args are user-chosen NAMES (variable / clip slot) or free text
@@ -46,7 +47,8 @@ export function normalizeToken(token: string): string {
     COMPOUND_NAMES[lowerName] ?? name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
   const mods = parts.slice(1);
   const keepArgsVerbatim = VERBATIM_ARG_NAMES.has(lowerName);
-  const isRow = lowerName === 'row';
+  // {row:Column} and {rownext:Column} both carry a verbatim column name as their first arg.
+  const isRow = lowerName === 'row' || lowerName === 'rownext';
   const normalizedMods = mods.map((p, idx) => {
     // Name-bearing tokens ({var:Name}/{clip:Name}/{input:...}) keep args untouched.
     if (keepArgsVerbatim) return p;

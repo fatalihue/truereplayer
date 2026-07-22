@@ -1215,6 +1215,16 @@ namespace TrueReplayer.Services
         // the caller's next iteration re-stamps it before any of its own tokens resolve, so no
         // save/restore is needed around the recursion.
         private int _currentActionRow;
+        // {rownext:column} source — a run-local, per-column cursor. The Nth {rownext:col} resolved
+        // in a run reads the Nth row of that column (0-based here), advancing on EACH resolution
+        // across all actions in the run. Keyed by lowercased column name. UNLIKE _rowCursors /
+        // _cycleCursors, this IS cleared in StartAsync's fresh-run reset so every run walks the list
+        // from the top — swapping the data table then feeds new values into the same fields. Past
+        // the last row resolves empty (consume-always). Reference-swapped for a FRESH walk inside a
+        // RunProfile-over-data sub-call (RunSubProfileOverDataAsync): the sub owns its own table, so
+        // its {rownext} walks that table independently and the parent's cursor is restored on return
+        // — mirroring the _currentRowData save/restore there (hence not readonly).
+        private Dictionary<string, int> _rowNextCursors = new(StringComparer.OrdinalIgnoreCase);
         // Data-loop state. _dataTable is the profile's table (set once per run in StartReplay);
         // _dataLoopOver drives the "one iteration per row" loop override; _currentRowData is the
         // current iteration's column→cell dict that {row:column} resolves from. Like _currentIteration,
@@ -1559,6 +1569,7 @@ namespace TrueReplayer.Services
                 _pendingTokenKeyDowns.Clear();
                 _currentIteration = 0;
                 _currentActionRow = 0;
+                _rowNextCursors.Clear();   // {rownext:col} — restart the per-column walk each run
                 _currentRowData = null;
                 _rowFaulted = false;
                 _rowFaultReason = null;
@@ -2325,6 +2336,7 @@ namespace TrueReplayer.Services
             var savedTable = _dataTable;
             bool savedLoopOver = _dataLoopOver;
             var savedRowData = _currentRowData;
+            var savedRowNextCursors = _rowNextCursors;   // {rownext} walks the SUB's table on a fresh cursor
             bool savedSoftOverride = _softFaultOverride;
             bool subSkip = string.Equals(subTable.OnRowError, "skip", StringComparison.OrdinalIgnoreCase);
             int rowCount = subTable.Rows?.Count ?? 0;
@@ -2340,6 +2352,9 @@ namespace TrueReplayer.Services
 
                 _dataTable = subTable;
                 _dataLoopOver = true;               // fault sites now read the SUB's skip policy…
+                // Fresh {rownext} cursor for the sub — it indexes the SUB's table, so the parent's
+                // walk (against the parent's table) must NOT bleed into or be advanced by it.
+                _rowNextCursors = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                 _softFaultOverride = parentSkipActive && !subSkip;   // …or stay soft for the parent's sake
 
                 for (int i = 0; i < rowCount && !token.IsCancellationRequested; i++)
@@ -2398,6 +2413,7 @@ namespace TrueReplayer.Services
                 _dataTable = savedTable;
                 _dataLoopOver = savedLoopOver;
                 _currentRowData = savedRowData;
+                _rowNextCursors = savedRowNextCursors;   // restore the parent's {rownext} walk verbatim
                 _softFaultOverride = savedSoftOverride;
                 PushVariablesSnapshot();   // live pane: back on the parent's row
             }
@@ -3258,6 +3274,12 @@ namespace TrueReplayer.Services
             // Data-loop current row: column name (lowercased) → cell value. Non-null only
             // while a "loop over data" run is stamping rows. {row:column} resolves from here.
             public IReadOnlyDictionary<string, string>? RowData { get; init; }
+            // {rownext:column} data source + its run-local per-column cursor. DataTable is the whole
+            // table (row lookup by index); RowNextCursors is a LIVE reference to the replayer's cursor
+            // dict (mutated in place as tokens resolve). Both null on the static Test-Action path
+            // (RunCtx.Empty) → {rownext} resolves empty, no advance.
+            public Models.ProfileDataTable? DataTable { get; init; }
+            public IDictionary<string, int>? RowNextCursors { get; init; }
             // Clipboard slots (Copy to Slot / capture hotkey): slot name (lowercased) → captured
             // text. {clip:name} resolves from here. Null on the static Test-Action path → empty.
             public IReadOnlyDictionary<string, string>? ClipSlots { get; init; }
@@ -3276,6 +3298,8 @@ namespace TrueReplayer.Services
             Iteration = _currentIteration,
             Row = _currentActionRow,
             RowData = _currentRowData,
+            DataTable = _dataTable,
+            RowNextCursors = _rowNextCursors,
             // Snapshot, not the live dict — the capture hotkey mutates _clipSlots on the UI
             // thread and a TryGetValue racing a resize is undefined. Slots are tiny (≤ a few
             // entries), so a copy per resolution is noise. _runtimeVariables needs no copy:
@@ -3819,6 +3843,7 @@ namespace TrueReplayer.Services
             // resolves empty (consume-always), keeping that path byte-identical.
             text = await ResolveInputTokensAsync(text, runCtx, escapeBracesInSubstitution, htmlEncodeSubstitution);
             text = ResolveRunStateTokens(text, runCtx, escapeBracesInSubstitution, htmlEncodeSubstitution);
+            text = ResolveRowNextTokens(text, runCtx, escapeBracesInSubstitution, htmlEncodeSubstitution, flavorSync);
             return text;
         }
 
@@ -3897,6 +3922,8 @@ namespace TrueReplayer.Services
             public Queue<string>? RandomReplay;  // set on the replay (html) pass
             public List<string>? WinClipRecord;  // {winclip:N} resolved values — recording (plain) pass
             public Queue<string>? WinClipReplay; // replayed on the html pass so both flavors agree
+            public List<string>? RowNextRecord;  // {rownext:col} resolved values — recording (plain) pass
+            public Queue<string>? RowNextReplay; // replayed on the html pass so the cursor advances once
         }
 
         private static string ResolveRandomTokens(string text, TokenFlavorSync? sync = null)
@@ -3931,6 +3958,16 @@ namespace TrueReplayer.Services
         // as {clipboard:mods} — the FIRST segment is always the column, the rest modifiers).
         private static readonly Regex RowDataTokenRegex = new(
             @"\{row:([A-Za-z0-9_]+)(?::([^}]+))?\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // Sequential data-row token {rownext:column} / {rownext:column:mods}. A run-local,
+        // per-column cursor: the FIRST {rownext:col} resolved in a run reads row 1, the next reads
+        // row 2, and so on — every occurrence (across actions) advances that column's cursor.
+        // DISJOINT from {row}/{row:column}: "{rownext:" shares no literal prefix with the bare "{row}"
+        // replace and never matches RowDataTokenRegex ("{row:" needs ':' as the 5th char, here it's
+        // 'n'). Group 2 is the optional clipboard-style modifier chain, same as {row:column:mods}.
+        private static readonly Regex RowNextTokenRegex = new(
+            @"\{rownext:([A-Za-z0-9_]+)(?::([^}]+))?\}",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         // Clipboard-slot token {clip:name}. Disjoint from {clipboard...}: this regex requires
@@ -4013,6 +4050,52 @@ namespace TrueReplayer.Services
             return text;
         }
 
+        // Resolves {rownext:column} against the run's data table with a run-local, per-column cursor
+        // (runCtx.RowNextCursors, mutated in place). The Nth occurrence of {rownext:col} in a run reads
+        // row N of that column and advances; past the last row resolves empty (consume-always). On the
+        // rich SendText double-resolve the plain pass RECORDS each resolved value + advances the cursor,
+        // and the html pass REPLAYS the recorded values WITHOUT advancing — so both flavors agree and the
+        // cursor moves exactly once per occurrence (same discipline as {winclip:N}). On the static
+        // Test-Action path (RunCtx.Empty: DataTable/cursors null) every token resolves empty, no advance.
+        private static string ResolveRowNextTokens(
+            string text, RunCtx runCtx, bool escapeBracesInSubstitution,
+            bool htmlEncodeSubstitution, TokenFlavorSync? sync = null)
+        {
+            if (string.IsNullOrEmpty(text) || !RowNextTokenRegex.IsMatch(text)) return text;
+            var table = runCtx.DataTable;
+            var cursors = runCtx.RowNextCursors;
+            int rowN = table?.Rows?.Count ?? 0;
+            return RowNextTokenRegex.Replace(text, m =>
+            {
+                string value;
+                if (sync?.RowNextReplay is { Count: > 0 } replay)
+                {
+                    // html pass — reuse the plain pass's value (the cursor already advanced there).
+                    value = replay.Dequeue();
+                }
+                else
+                {
+                    var col = m.Groups[1].Value.ToLowerInvariant();
+                    value = string.Empty;
+                    if (cursors != null && rowN > 0)
+                    {
+                        int cur = cursors.TryGetValue(col, out var cv) ? cv : 0;
+                        if (cur < rowN)
+                        {
+                            BuildRowDict(table!, cur).TryGetValue(col, out value!);
+                            value ??= string.Empty;
+                        }
+                        cursors[col] = cur + 1; // advance this column's cursor for the next occurrence
+                    }
+                    if (m.Groups[2].Success)
+                        value = ApplyClipboardModifiers(value, m.Groups[2].Value);
+                    sync?.RowNextRecord?.Add(value);
+                }
+                if (htmlEncodeSubstitution) value = HtmlEncodeValue(value);
+                return escapeBracesInSubstitution ? EscapeBracesForParser(value) : value;
+            });
+        }
+
         // Resolves {datetime}/{date}/{time} ({datetime} first to avoid partial matches). The
         // substituted values contain no braces, so no brace-escaping is needed here.
         private static string ResolveDateTimeTokens(string text, TokenFlavorSync? sync = null)
@@ -4080,7 +4163,7 @@ namespace TrueReplayer.Services
             // value so content like "{enter}" is pasted as text, not re-interpreted as a key press.
             // The flavor sync RECORDS this pass's {random} draws + DateTime.Now snapshot so the
             // html pass below replays the exact same values (one paste = one set of values).
-            var flavorSync = new TokenFlavorSync { RandomRecord = new List<string>(), WinClipRecord = new List<string>() };
+            var flavorSync = new TokenFlavorSync { RandomRecord = new List<string>(), WinClipRecord = new List<string>(), RowNextRecord = new List<string>() };
             text = await ResolveTokens(text, originalClipboard.Text ?? string.Empty, escapeBracesInSubstitution: true, flavorSync);
 
             if (string.IsNullOrEmpty(text) || token.IsCancellationRequested)
@@ -4110,6 +4193,7 @@ namespace TrueReplayer.Services
                     Now = flavorSync.Now,
                     RandomReplay = new Queue<string>(flavorSync.RandomRecord!),
                     WinClipReplay = new Queue<string>(flavorSync.WinClipRecord!),
+                    RowNextReplay = new Queue<string>(flavorSync.RowNextRecord!),
                 };
                 resolvedHtml = await ResolveTokensAsync(PrepareRichHtmlForSend(html), dispatcherQueue, CurrentRunCtx,
                     originalClipboard.Text ?? string.Empty, escapeBracesInSubstitution: true,

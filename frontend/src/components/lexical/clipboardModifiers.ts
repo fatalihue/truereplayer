@@ -59,6 +59,13 @@ export function buildRowToken(column: string, s: TransformState): string {
   return '{' + ['row', column, ...buildModifierParts(s)].join(':') + '}';
 }
 
+// {rownext:column[:mods]} — the auto-advancing data-row token. Same shape/modifier chain as
+// {row:column}, different head; at replay each use pulls the NEXT row (backend cursor), resetting
+// per run. No mods → plain {rownext:column}, byte-identical to what NamePromptPopover inserts.
+export function buildRowNextToken(column: string, s: TransformState): string {
+  return '{' + ['rownext', column, ...buildModifierParts(s)].join(':') + '}';
+}
+
 // The modifier tail shared by every token head that supports transforms.
 function buildModifierParts(s: TransformState): string[] {
   const parts: string[] = [];
@@ -161,6 +168,13 @@ export function parseClipboardToken(token: string): TransformState {
 // parts[0] === 'row', parts[1] === column, mods from 2 on.
 export function parseRowToken(token: string): { column: string; state: TransformState } {
   if (!/^\{row:/i.test(token)) return { column: '', state: { ...DEFAULT_TRANSFORM } };
+  const parts = token.slice(1, -1).split(':');
+  return { column: parts[1] ?? '', state: parseModifierParts(parts, 2) };
+}
+
+// Reverse of buildRowNextToken — {rownext:column[:mods]} → column name (verbatim) + modifier state.
+export function parseRowNextToken(token: string): { column: string; state: TransformState } {
+  if (!/^\{rownext:/i.test(token)) return { column: '', state: { ...DEFAULT_TRANSFORM } };
   const parts = token.slice(1, -1).split(':');
   return { column: parts[1] ?? '', state: parseModifierParts(parts, 2) };
 }

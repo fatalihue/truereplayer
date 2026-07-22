@@ -140,6 +140,14 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(UsesWinClipToken),
                 new Version(2, 9, 3), "Clipboard history token"),
 
+            // Sequential data-row token {rownext:column} — an older build has no RowNextTokenRegex, so
+            // the whole token stays literal and gets typed into the target verbatim (same failure class
+            // as the modified-row and winclip tokens above). Text-scan over every token-resolved field.
+            // Introduced after 2.9.4; pinned at the 2.9.4 dev placeholder (≤ running) so own-export→import
+            // round-trips — bump at release.
+            (p => p.Actions.Any(UsesRowNextToken),
+                new Version(2, 9, 4), "Sequential data-row token"),
+
             // Copy to Slot ({clip:name} capture) — an older build has no dispatch case for the
             // unknown ActionType → silently skips the capture and every {clip:} token resolves
             // empty. Introduced after 2.8.1 — bump at release.
@@ -343,6 +351,27 @@ namespace TrueReplayer.Services
         private static bool ContainsWinClipToken(string? text) =>
             !string.IsNullOrEmpty(text) && text.Contains("{winclip", StringComparison.OrdinalIgnoreCase)
                 && WinClipTokenRegex.IsMatch(text);
+
+        // {rownext:column} / {rownext:column:mods} — mirrors ActionExecution.RowNextTokenRegex. Same
+        // token-resolved field set as the modified-row / winclip scans (where a {rownext} can take effect).
+        private static readonly Regex RowNextTokenRegex = new(
+            @"\{rownext:[A-Za-z0-9_]+(?::[^}]+)?\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static bool UsesRowNextToken(ActionItem a) =>
+            (KeyResolvingActionTypes.Contains(a.ActionType) && ContainsRowNextToken(a.Key)) ||
+            ContainsRowNextToken(a.KeyHtml) ||
+            ContainsRowNextToken(a.KeyMarkdown) ||
+            (BrowserTextResolvingActionTypes.Contains(a.ActionType) && ContainsRowNextToken(a.BrowserText)) ||
+            ContainsRowNextToken(a.VariableValue) ||
+            ContainsRowNextToken(a.ConditionOperand) ||
+            ContainsRowNextToken(a.FilePath) ||
+            ContainsRowNextToken(a.LaunchPath) ||
+            ContainsRowNextToken(a.LaunchArgs);
+
+        private static bool ContainsRowNextToken(string? text) =>
+            !string.IsNullOrEmpty(text) && text.Contains("{rownext", StringComparison.OrdinalIgnoreCase)
+                && RowNextTokenRegex.IsMatch(text);
 
         /// <summary>
         /// Walks the feature matrix and returns the highest minimum version among all

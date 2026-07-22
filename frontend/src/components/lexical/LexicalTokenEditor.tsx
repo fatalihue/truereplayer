@@ -80,6 +80,9 @@ const KNOWN_TOKEN_NAMES: ReadonlySet<string> = new Set([
   'var',
   'counter',
   'row',
+  // {rownext:column} — like {row:column} but auto-advancing: each use pulls the NEXT
+  // data row for that column (1st use → row 1, 2nd → row 2…), resetting each run.
+  'rownext',
   // Clipboard slots: {clip:name} reads a selection captured by Copy to Slot /
   // the capture hotkey. Disjoint from {clipboard} (different name).
   'clip',
