@@ -943,7 +943,16 @@ export function Toolbar(_props: ToolbarProps) {
               <Trash2 size={14} />
             </button>
             {showClearConfirm && (
-              <div ref={clearFlyout.ref} className={`absolute w-60 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 p-3 ${clearFlyout.flipX ? 'right-0' : 'left-0'} ${clearFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+              // -right-[30px] centers the destructive "Clear all" button directly
+              // under the Trash trigger instead of leaving it 30px to the left (a
+              // plain right-0 lines the trash icon up with the button's *right edge*,
+              // not its centre). The popover always extends leftward from here, where
+              // there's room in every panel state, so the horizontal flip the sibling
+              // dropdowns use isn't needed — a right-0 popover never clips on the left.
+              // 30px = half the fixed-width "Clear all" button (its English label is a
+              // constant, so the offset is stable). Same kind of pixel nudge as the
+              // deselect X's -ml-[13px]. flipY is kept for the (rare) short-window case.
+              <div ref={clearFlyout.ref} className={`absolute w-60 bg-bg-surface border border-border-default rounded-lg shadow-xl z-50 p-3 -right-[30px] ${clearFlyout.flipY ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
                 <div className="text-xs font-semibold text-text-primary">
                   Clear all {actions.length} action{actions.length === 1 ? '' : 's'}?
                 </div>
