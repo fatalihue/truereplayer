@@ -47,6 +47,11 @@ const DEFAULT_REPEAT_DELAY_MS = 30;
 const MAX_REPEAT = 999;
 const MAX_REPEAT_DELAY = 5000;
 
+// Gap jitter — OFF by default (the field stays 0/absent so existing macros replay
+// byte-identically). When the user turns it on, this is the ±% seeded into the input.
+const DEFAULT_JITTER_PCT = 20;
+const MAX_JITTER_PCT = 100;
+
 const DEFAULT_HOLD_MS = 1000;
 const MIN_HOLD_MS = 10;
 const MAX_HOLD_MS = 60000;
@@ -65,7 +70,7 @@ const stepFor = (v: number) => v >= 1000 ? 1000 : 100;
 type Mode = 'press' | 'hold';
 
 export type SendKeystrokeResult =
-  | { actionType: 'Keystroke'; key: string; repeat: number; repeatDelayMs: number }
+  | { actionType: 'Keystroke'; key: string; repeat: number; repeatDelayMs: number; repeatDelayJitterPct: number }
   | { actionType: 'HoldKey'; key: string; holdDurationMs: number };
 
 interface KeystrokeCaptureDialogProps {
@@ -79,6 +84,7 @@ interface KeystrokeCaptureDialogProps {
   initialKey?: string;
   initialRepeat?: number;
   initialRepeatDelayMs?: number;
+  initialRepeatDelayJitterPct?: number;
   initialHoldDurationMs?: number;
   onConfirm: (result: SendKeystrokeResult) => void;
   onClose: () => void;
@@ -89,6 +95,7 @@ export function KeystrokeCaptureDialog({
   initialKey,
   initialRepeat,
   initialRepeatDelayMs,
+  initialRepeatDelayJitterPct,
   initialHoldDurationMs,
   onConfirm,
   onClose,
@@ -126,6 +133,13 @@ export function KeystrokeCaptureDialog({
   // Press-mode state.
   const [repeat, setRepeat] = useState<number>(initialRepeat ?? 1);
   const [repeatDelay, setRepeatDelay] = useState<number>(initialRepeatDelayMs ?? DEFAULT_REPEAT_DELAY_MS);
+  // Gap jitter is stored as a single number (0 = off), but the dialog keeps the on/off and the
+  // ±% value on separate tracks — mirroring the app's EnableChip — so toggling off and back on
+  // restores the last value instead of snapping to 0. Off by default.
+  const [jitterOn, setJitterOn] = useState<boolean>((initialRepeatDelayJitterPct ?? 0) > 0);
+  const [jitterPct, setJitterPct] = useState<number>(
+    initialRepeatDelayJitterPct && initialRepeatDelayJitterPct > 0 ? initialRepeatDelayJitterPct : DEFAULT_JITTER_PCT,
+  );
 
   // Hold-mode state. Two-track (state + ref) because the Insert button can fire
   // immediately after a preset click before React's batched state has flushed —
@@ -154,10 +168,12 @@ export function KeystrokeCaptureDialog({
     setManualEntry((initialKey ?? '').includes('{'));
     setRepeat(initialRepeat ?? 1);
     setRepeatDelay(initialRepeatDelayMs ?? DEFAULT_REPEAT_DELAY_MS);
+    setJitterOn((initialRepeatDelayJitterPct ?? 0) > 0);
+    setJitterPct(initialRepeatDelayJitterPct && initialRepeatDelayJitterPct > 0 ? initialRepeatDelayJitterPct : DEFAULT_JITTER_PCT);
     const ms = initialHoldDurationMs ?? DEFAULT_HOLD_MS;
     setHoldMsState(ms);
     holdMsRef.current = ms;
-  }, [initialActionType, initialKey, initialRepeat, initialRepeatDelayMs, initialHoldDurationMs]);
+  }, [initialActionType, initialKey, initialRepeat, initialRepeatDelayMs, initialRepeatDelayJitterPct, initialHoldDurationMs]);
 
   // Stable refcount slot — see InputHookManager.RegisterCapture. Per-mount ID so
   // enable/disable target the same slot, and a sibling consumer (Settings hotkey
@@ -227,6 +243,7 @@ export function KeystrokeCaptureDialog({
   // so the input doesn't snap while the user is still typing.
   const clampRepeat = (v: number) => Math.max(1, Math.min(MAX_REPEAT, Math.floor(v)));
   const clampDelay = (v: number) => Math.max(0, Math.min(MAX_REPEAT_DELAY, Math.floor(v)));
+  const clampJitter = (v: number) => Math.max(1, Math.min(MAX_JITTER_PCT, Math.floor(v)));
   const clampHold = (v: number) => Math.max(MIN_HOLD_MS, Math.min(MAX_HOLD_MS, Math.floor(v)));
 
   // Derived values used by the renderer + commit.
@@ -254,6 +271,9 @@ export function KeystrokeCaptureDialog({
         key: captured.trim(),
         repeat: clampRepeat(repeat),
         repeatDelayMs: clampDelay(repeatDelay),
+        // 0 = off. Jitter only applies across repeats, so a single press (or jitter
+        // toggled off) always commits 0 — the backend then stores null (schema-clean).
+        repeatDelayJitterPct: jitterOn && repeat > 1 ? clampJitter(jitterPct) : 0,
       });
     }
   };
@@ -425,6 +445,43 @@ export function KeystrokeCaptureDialog({
                   suffix="ms" suffixInside
                   inputWidth="w-24"
                   ariaLabel="Gap between presses (ms)"
+                />
+              </div>
+
+              {/* Gap jitter — OFF by default (hollow dot). Adds a random ±% to each gap so a
+                  repeat burst doesn't fire on a perfectly fixed interval — a constant gap is the
+                  clearest "it's a bot" tell. Like Gap, the whole row is inert until Times > 1.
+                  The enable dot (the app's own affordance, see SettingsPanel's EnableChip) sits to
+                  the RIGHT of the label, so the label text starts at the row's left edge and lines
+                  up with the two rows above with no margin trickery. */}
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => setJitterOn(v => !v)}
+                  disabled={repeat <= 1}
+                  aria-pressed={jitterOn}
+                  className="flex items-center gap-1.5 disabled:cursor-not-allowed"
+                  data-tip={tt('Random ±% on each gap — less robotic.', 'Variação ±% aleatória em cada intervalo — menos robótico.')}
+                >
+                  <span className={`text-[12px] font-medium transition-colors ${jitterOn && repeat > 1 ? 'text-text-secondary' : 'text-text-tertiary'}`}>
+                    Gap jitter
+                  </span>
+                  <span
+                    className="w-2 h-2 rounded-full block shrink-0 transition-colors"
+                    style={jitterOn && repeat > 1
+                      ? { background: 'var(--color-accent-solid)' }
+                      : { background: 'transparent', border: '1.5px solid var(--color-text-tertiary)' }}
+                  />
+                </button>
+                <NumberInput
+                  value={jitterPct}
+                  onChange={(n) => setJitterPct(clampJitter(n))}
+                  min={1}
+                  max={MAX_JITTER_PCT}
+                  disabled={!jitterOn || repeat <= 1}
+                  suffix="%" suffixInside
+                  inputWidth="w-24"
+                  ariaLabel="Gap jitter (%)"
                 />
               </div>
             </div>

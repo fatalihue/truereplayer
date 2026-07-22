@@ -1057,11 +1057,14 @@ export function Toolbar(_props: ToolbarProps) {
               // Omit `repeat`/`repeatDelayMs` for the single-press default so the bridge
               // payload stays minimal and the C# side leaves RepeatDelayMs as null (clean
               // profile JSON). Mirrors the previous insertion convention.
-              const payload: { keystroke: string; insertIndex: number; repeat?: number; repeatDelayMs?: number } =
+              const payload: { keystroke: string; insertIndex: number; repeat?: number; repeatDelayMs?: number; repeatDelayJitterPct?: number } =
                 { keystroke: result.key, insertIndex };
               if (result.repeat > 1) {
                 payload.repeat = result.repeat;
                 if (result.repeatDelayMs !== DEFAULT_REPEAT_DELAY_MS) payload.repeatDelayMs = result.repeatDelayMs;
+                // Only carried when the user turned jitter on (0 = off, left out to keep the
+                // payload + the persisted profile JSON minimal).
+                if (result.repeatDelayJitterPct > 0) payload.repeatDelayJitterPct = result.repeatDelayJitterPct;
               }
               send({ type: 'actions:insertKeystroke', payload });
             }

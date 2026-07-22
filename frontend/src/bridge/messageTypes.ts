@@ -44,6 +44,10 @@ export interface ActionItem {
   // null/undefined = use the global default (30 ms; matches ActionItem.DefaultRepeatDelayMs
   // on the C# side). Explicit 0 = back-to-back. Ignored when repeatCount == 1.
   repeatDelayMs?: number | null;
+  // Keystroke action: random ±% variation applied to each gap (1..100). null/undefined/0 =
+  // off (fixed gap). Only meaningful when repeatCount > 1. Mirrors RepeatDelayJitterPct on
+  // the C# side; a constant gap is the clearest "it's a bot" tell, this scatters it.
+  repeatDelayJitterPct?: number | null;
   // HoldKey action: how long the key stays pressed before the matching KEYUP fires.
   // 0/undefined = use the C# default (1000 ms; matches ActionItem.DefaultHoldDurationMs).
   // Clamped 10..60000 ms on every edit surface (dialog, inline, bridge).
@@ -783,7 +787,7 @@ export type OutgoingMessage =
   // `repeat` / `repeatDelayMs` are optional — present when the "Press × N" insert flow
   // dispatches this message so the new row lands with RepeatCount preset; absent for
   // the regular "Send Keystroke" path which creates a single-press row (RepeatCount = 1).
-  | { type: 'actions:insertKeystroke'; payload: { keystroke: string; insertIndex: number; repeat?: number; repeatDelayMs?: number } }
+  | { type: 'actions:insertKeystroke'; payload: { keystroke: string; insertIndex: number; repeat?: number; repeatDelayMs?: number; repeatDelayJitterPct?: number } }
   // HoldKey insert — captures a single key and a hold duration (ms). Replay
   // engine emits KEYDOWN, waits holdDurationMs, then KEYUP. Default duration
   // applied server-side when holdDurationMs is absent.

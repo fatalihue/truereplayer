@@ -433,6 +433,17 @@ namespace TrueReplayer.Models
         // frontend dialog can all reference the same value via the messages they exchange.
         public const int DefaultRepeatDelayMs = 30;
 
+        // Keystroke × N: random ±% variation applied to EACH inter-press gap so the burst
+        // doesn't fire on a perfectly fixed interval — a constant gap is the single biggest
+        // "this is a bot" tell (far more than the raw speed). null/0 = off (a fixed gap, the
+        // pre-feature behaviour). Clamped 0..100 on edit. Only consulted when RepeatCount > 1
+        // and the effective gap > 0. Same ±% rate-jitter model the Clicker already uses.
+        // Nullable + WhenWritingNull keeps profiles written before this feature schema-clean
+        // (the field is simply absent), and lets an older build's "drops unknown property →
+        // fixed gap" divergence be gated in ProfileCompatibility.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? RepeatDelayJitterPct { get; set; }
+
         // HoldKey action: how long the key stays pressed before the replay engine fires
         // the matching KEYUP. Replaces the two-row "KeyDown + KeyUp (delay = hold)" pattern
         // with a single atomic row whose Value column reads "W · 1.5s hold". 0 = use the
@@ -806,6 +817,7 @@ namespace TrueReplayer.Models
             RepeatCount = RepeatCount,
             RunOverData = RunOverData,
             RepeatDelayMs = RepeatDelayMs,
+            RepeatDelayJitterPct = RepeatDelayJitterPct,
             HoldDurationMs = HoldDurationMs,
             RecordedAt = RecordedAt,
         };

@@ -214,6 +214,7 @@ namespace TrueReplayer.Services
                 leadRow.Comment = ks.Comment;
                 leadRow.RepeatCount = ks.RepeatCount;
                 leadRow.RepeatDelayMs = ks.RepeatDelayMs;
+                leadRow.RepeatDelayJitterPct = ks.RepeatDelayJitterPct;
             }
         }
 

@@ -172,6 +172,15 @@ namespace TrueReplayer.Services
                                       string.Equals(a.ActionType, "Keystroke", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 0, 0), "HoldKey/Keystroke"),
 
+            // Keystroke × N gap jitter (RepeatDelayJitterPct > 0) — an older build drops the
+            // unknown property and fires the burst on a FIXED interval instead of the intended
+            // ±% human-like variance (a constant gap is the classic bot tell). Silent behavioural
+            // divergence, exactly this matrix's purpose. Property-level Detect so plain Keystroke
+            // × N rows keep the 2.0.0 floor. Pinned at the 2.9.4 dev placeholder (≤ running) so
+            // own-export→import round-trips — bump at release.
+            (p => p.Actions.Any(a => a.RepeatDelayJitterPct is int rj && rj > 0),
+                new Version(2, 9, 4), "Keystroke repeat jitter"),
+
             // RunProfile (profile chaining) shipped in the 2.0.0 line, same era as WaitImage /
             // HoldKey / Keystroke which ARE pinned here — but it was missed. A pre-2.0.0 build
             // has no "RunProfile" switch case (no default) → silently skips the sub-profile

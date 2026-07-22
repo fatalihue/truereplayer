@@ -2334,6 +2334,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         const isHold = editing?.actionType === 'HoldKey';
         const curRepeat = editing?.repeatCount ?? 1;
         const curDelay = editing?.repeatDelayMs ?? 30;
+        const curJitter = editing?.repeatDelayJitterPct ?? 0;
         const curDuration = editing?.holdDurationMs && editing.holdDurationMs > 0 ? editing.holdDurationMs : 1000;
         return (
           <KeystrokeCaptureDialog
@@ -2341,6 +2342,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             initialKey={editing?.key}
             initialRepeat={curRepeat}
             initialRepeatDelayMs={curDelay}
+            initialRepeatDelayJitterPct={curJitter}
             initialHoldDurationMs={isHold ? curDuration : undefined}
             onConfirm={(result) => {
               const idx = keystrokeEdit.index;
@@ -2359,6 +2361,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                 }
                 if (result.repeatDelayMs !== curDelay) {
                   send({ type: 'actions:edit', payload: { index: idx, field: 'repeatDelayMs', value: String(result.repeatDelayMs) } });
+                }
+                if (result.repeatDelayJitterPct !== curJitter) {
+                  send({ type: 'actions:edit', payload: { index: idx, field: 'repeatDelayJitterPct', value: String(result.repeatDelayJitterPct) } });
                 }
               } else {
                 if (result.holdDurationMs !== curDuration) {

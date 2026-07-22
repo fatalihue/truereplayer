@@ -1917,6 +1917,9 @@ namespace TrueReplayer.Services
                             // of waiting for the whole burst to finish.
                             int repeats = Math.Max(1, Math.Min(999, action.RepeatCount));
                             int gap = Math.Max(0, Math.Min(5000, action.RepeatDelayMs ?? ActionItem.DefaultRepeatDelayMs));
+                            // Optional ±% jitter on each gap. A fixed inter-press interval is the
+                            // clearest "this is a bot" signal, so this scatters the gap per cycle.
+                            int jitterPct = Math.Max(0, Math.Min(100, action.RepeatDelayJitterPct ?? 0));
                             // Resolve once, outside the burst — no other action runs between
                             // repeats, so the value can't legitimately change mid-burst.
                             var combo = await ResolveKeyTokens(action.Key);
@@ -1924,7 +1927,16 @@ namespace TrueReplayer.Services
                                 if (token.IsCancellationRequested) break;
                                 SimulateKeystroke(combo, token);
                                 if (r < repeats - 1 && gap > 0) {
-                                    try { await Task.Delay(gap, token); }
+                                    // Re-roll the jitter EVERY cycle — a single up-front roll would
+                                    // just shift the whole burst to a different constant, defeating
+                                    // the point. Same ±jitterPct% formula as the Clicker's rate
+                                    // jitter; clamped ≥ 0 so a large % can't produce a negative delay.
+                                    int thisGap = gap;
+                                    if (jitterPct > 0) {
+                                        int variation = gap * jitterPct / 100;
+                                        thisGap = Math.Max(0, gap + Random.Shared.Next(-variation, variation + 1));
+                                    }
+                                    try { await Task.Delay(thisGap, token); }
                                     catch (OperationCanceledException) { break; }
                                 }
                             }

@@ -983,6 +983,9 @@ namespace TrueReplayer
                 // restore the user's chosen delay (and the Keystroke replay loop
                 // on the C# side already reads it from the action's own property).
                 repeatDelayMs = a.RepeatDelayMs,
+                // Keystroke × N gap jitter (±%). Same forward-so-the-editor-restores-it
+                // rationale as repeatDelayMs above; the replay loop reads the property directly.
+                repeatDelayJitterPct = a.RepeatDelayJitterPct,
                 // HoldKey duration — without this, the frontend's badge / edit
                 // dialog never see the value the user set, fall back to a
                 // hardcoded 1000 ms default, and every "press for X seconds"
@@ -2612,6 +2615,13 @@ namespace TrueReplayer
                     if (string.IsNullOrEmpty(value)) action.RepeatDelayMs = null;
                     else if (int.TryParse(value, out int rd)) action.RepeatDelayMs = Math.Max(0, Math.Min(5000, rd));
                     break;
+                case "repeatDelayJitterPct":
+                    // Empty / 0 → null (jitter OFF, schema-clean). Explicit > 0 → clamp 1..100.
+                    // Storing null when off keeps a Keystroke × N without jitter byte-identical
+                    // to a pre-feature profile (WhenWritingNull drops the property).
+                    if (string.IsNullOrEmpty(value)) action.RepeatDelayJitterPct = null;
+                    else if (int.TryParse(value, out int rj)) action.RepeatDelayJitterPct = rj > 0 ? Math.Min(100, rj) : (int?)null;
+                    break;
                 case "waitImageSearchRegion":
                     // Value format: "x,y,w,h" (all ints) — or empty string to clear.
                     if (string.IsNullOrEmpty(value)) {
@@ -3877,6 +3887,14 @@ namespace TrueReplayer
             int? repeatDelay = null;
             if (payload.TryGetProperty("repeatDelayMs", out var dEl) && dEl.ValueKind == JsonValueKind.Number)
                 repeatDelay = Math.Max(0, Math.Min(5000, dEl.GetInt32()));
+            // Optional gap jitter (±%). Present only when the user turned it on in the dialog;
+            // clamped 1..100 to match the editor. Values <= 0 collapse to null (off).
+            int? repeatJitter = null;
+            if (payload.TryGetProperty("repeatDelayJitterPct", out var jEl) && jEl.ValueKind == JsonValueKind.Number)
+            {
+                int jv = jEl.GetInt32();
+                if (jv > 0) repeatJitter = Math.Min(100, jv);
+            }
 
             int delay = int.TryParse(CustomDelay, out var pd) ? pd : 100;
             // ONE row with the whole combo. ExecuteKeystroke in ActionExecution parses
@@ -3894,6 +3912,8 @@ namespace TrueReplayer
                 // single-press case schema-clean (the WhenWritingNull JSON ignore drops
                 // it from the serialized profile when it's null).
                 RepeatDelayMs = repeat > 1 ? repeatDelay : null,
+                // Same gate as the gap — jitter only makes sense across repeats.
+                RepeatDelayJitterPct = repeat > 1 ? repeatJitter : null,
             });
             for (int i = 0; i < actions.Count; i++)
                 actions[i].RowNumber = i + 1;
