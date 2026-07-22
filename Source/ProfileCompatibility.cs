@@ -143,10 +143,9 @@ namespace TrueReplayer.Services
             // Sequential data-row token {rownext:column} — an older build has no RowNextTokenRegex, so
             // the whole token stays literal and gets typed into the target verbatim (same failure class
             // as the modified-row and winclip tokens above). Text-scan over every token-resolved field.
-            // Introduced after 2.9.4; pinned at the 2.9.4 dev placeholder (≤ running) so own-export→import
-            // round-trips — bump at release.
+            // Introduced in 2.9.5.
             (p => p.Actions.Any(UsesRowNextToken),
-                new Version(2, 9, 4), "Sequential data-row token"),
+                new Version(2, 9, 5), "Sequential data-row token"),
 
             // Copy to Slot ({clip:name} capture) — an older build has no dispatch case for the
             // unknown ActionType → silently skips the capture and every {clip:} token resolves
@@ -176,10 +175,9 @@ namespace TrueReplayer.Services
             // unknown property and fires the burst on a FIXED interval instead of the intended
             // ±% human-like variance (a constant gap is the classic bot tell). Silent behavioural
             // divergence, exactly this matrix's purpose. Property-level Detect so plain Keystroke
-            // × N rows keep the 2.0.0 floor. Pinned at the 2.9.4 dev placeholder (≤ running) so
-            // own-export→import round-trips — bump at release.
+            // × N rows keep the 2.0.0 floor. Introduced in 2.9.5.
             (p => p.Actions.Any(a => a.RepeatDelayJitterPct is int rj && rj > 0),
-                new Version(2, 9, 4), "Keystroke repeat jitter"),
+                new Version(2, 9, 5), "Keystroke repeat jitter"),
 
             // RunProfile (profile chaining) shipped in the 2.0.0 line, same era as WaitImage /
             // HoldKey / Keystroke which ARE pinned here — but it was missed. A pre-2.0.0 build
