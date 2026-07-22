@@ -138,18 +138,14 @@ export function ActionBar() {
       <div className="flex items-center gap-1.5">
         <button
           onClick={() => send({ type: 'profile:save', payload: {} })}
-          disabled={isClicker}
-          data-tip={isClicker ? tt('Profiles are unavailable in Clicker mode', 'Perfis não estão disponíveis no modo Clicker') : undefined}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[13px] bg-bg-elevated/40 border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-bg-elevated/40 disabled:hover:text-text-secondary"
+          disabled={isClicker}          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[13px] bg-bg-elevated/40 border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-bg-elevated/40 disabled:hover:text-text-secondary"
         >
           <Save size={14} />
           Save
         </button>
         <button
           onClick={() => send({ type: 'profile:load', payload: {} })}
-          disabled={isClicker}
-          data-tip={isClicker ? tt('Profiles are unavailable in Clicker mode', 'Perfis não estão disponíveis no modo Clicker') : undefined}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[13px] bg-bg-elevated/40 border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-bg-elevated/40 disabled:hover:text-text-secondary"
+          disabled={isClicker}          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[13px] bg-bg-elevated/40 border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-bg-elevated/40 disabled:hover:text-text-secondary"
         >
           <FolderOpen size={14} />
           Load

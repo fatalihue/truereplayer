@@ -244,9 +244,7 @@ export function RemapSection() {
       ) : (
         <div>
           <Button variant="ghost" size="sm" onClick={() => setAddOpen(true)}
-            disabled={remaps.entries.length >= MAX_REMAPS}
-            data-tip={tt('Remaps apply everywhere while the app runs. They pause automatically while you record a macro. Keyboard keys and mouse side buttons (XButton1/2) can be sources.',
-              'Remaps valem em todo o sistema enquanto o app roda. Pausam automaticamente durante gravação de macro. Teclas e botões laterais do mouse (XButton1/2) podem ser origem.')}>
+            disabled={remaps.entries.length >= MAX_REMAPS}>
             <Plus size={11} /> Add remap
           </Button>
         </div>

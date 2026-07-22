@@ -610,7 +610,6 @@ function HotkeyInput({ value, settingKey, onChange, width = FIELD_W }: {
   const { send, subscribe } = useBridge();
   const [localValue, setLocalValue] = useState(value);
   const [isFocused, setIsFocused] = useState(false);
-  const tt = useTt();
   // Idle-cancel timer — without an explicit Esc-to-cancel rule (so users can capture
   // Escape as a hotkey if they want), the only way out of capture mode is to click away
   // or wait this many ms. Resets on every captured combo so an actively engaged user is
@@ -740,7 +739,7 @@ function HotkeyInput({ value, settingKey, onChange, width = FIELD_W }: {
           type="button"
           onClick={() => onChange(settingKey, '')}
           className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-elevated opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-[opacity,color,background-color]"
-          data-tip={tt('Clear (disables this hotkey)', 'Limpar (desativa este hotkey)')}
+          aria-label="Clear hotkey"
         >
           <X size={11} />
         </button>
@@ -1151,10 +1150,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
               </SettingRow>
               <SettingRow
                 label="Capture Slot"
-                tooltip={tt(
-                  'Copies the current selection (Ctrl+C) into the next clipboard slot — {clip:1}…{clip:9}, wrapping. Empty = disabled.',
-                  'Copia a seleção atual (Ctrl+C) para o próximo slot — {clip:1}…{clip:9}, dando a volta. Vazio = desativado.',
-                )}
+                tooltip={tt('Capture the selection into the next slot ({clip:1}…{clip:9}).', 'Captura a seleção no próximo slot ({clip:1}…{clip:9}).')}
               >
                 <HotkeyInput
                   value={settings.captureSlotHotkey}
@@ -1168,10 +1164,10 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 one tab. Decoupled from the macro hotkeys; they only fire in Clicker mode.
                 Purple title = the Clicker mode cue (the one surviving section hue). */}
             <Section title="Clicker" color="var(--color-clicker)">
-              <SettingRow label="Start" tooltip={tt('Run / stop the clicker. Active in Clicker mode.', 'Inicia / para o clicker. Ativo no modo Clicker.')}>
+              <SettingRow label="Start">
                 <HotkeyInput value={settings.cursorClickStartHotkey} settingKey="cursorClickStartHotkey" onChange={changeHotkey} />
               </SettingRow>
-              <SettingRow label="Pause" tooltip={tt('Pause / resume the clicker. Active in Clicker mode.', 'Pausa / retoma o clicker. Ativo no modo Clicker.')}>
+              <SettingRow label="Pause">
                 <HotkeyInput value={settings.cursorClickPauseHotkey} settingKey="cursorClickPauseHotkey" onChange={changeHotkey} />
               </SettingRow>
             </Section>
@@ -1233,7 +1229,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   disabled={!settings.runOnStartup}
                 />
               </SettingRow>
-              <SettingRow label="Run as Administrator" tooltip={tt('Relaunch as admin on startup — needed for elevated apps.', 'Reinicia como admin ao iniciar — necessário para apps elevados.')}>
+              <SettingRow label="Run as Administrator">
                 <CompactToggle
                   isOn={settings.runAsAdmin ?? false}
                   onChange={(v) => changeSetting('runAsAdmin', v)}
@@ -1262,21 +1258,13 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 per-profile triggers themselves are configured inside the panel; this is
                 just the always-discoverable settings-surface home (tray mirrors both). */}
             <Section title="Automation">
-              <SettingRow
-                label="Enable Automations"
-                tooltip={tt('Turns every armed automation on or off. Also in the tray menu.',
-                  'Liga e desliga todas as automações armadas. Também no menu da bandeja.')}
-              >
+              <SettingRow label="Enable Automations">
                 <CompactToggle
                   isOn={settings.automationEnabled}
                   onChange={(v) => send({ type: 'automation:setEnabled', payload: { enabled: v } })}
                 />
               </SettingRow>
-              <SettingRow
-                label="Automations"
-                tooltip={tt('Fire profiles without a hotkey: on a timer, at a clock time, or when something appears on screen.',
-                  'Dispare profiles sem hotkey: por timer, em um horário, ou quando algo aparece na tela.')}
-              >
+              <SettingRow label="Automations">
                 <button
                   onClick={() => window.dispatchEvent(new CustomEvent('cmd:automation'))}
                   className="flex items-center gap-1 text-ui text-accent-solid hover:underline"

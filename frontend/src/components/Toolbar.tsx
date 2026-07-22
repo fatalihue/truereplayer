@@ -83,10 +83,8 @@ function ResponsiveProfileName({ name }: { name: string }) {
 
   return (
     <div ref={containerRef} className="flex-1 min-w-0 relative">
-      {/* data-tip carries the full name for the truncation case. */}
       <span
         className={`block font-semibold text-text-primary truncate ${size === 'sm' ? 'text-sm' : 'text-base'}`}
-        data-tip={name}
       >
         {name}
       </span>
@@ -918,7 +916,7 @@ export function Toolbar(_props: ToolbarProps) {
             tabIndex={-1}
             onClick={() => window.dispatchEvent(new CustomEvent('cmd:dataeditor'))}
             className="p-1.5 rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
-            data-tip={tt('Data Loop (table + {row:column})', 'Data Loop (tabela + {row:coluna})')}
+            data-tip="Data Loop"
           >
             <Table2 size={14} />
           </button>

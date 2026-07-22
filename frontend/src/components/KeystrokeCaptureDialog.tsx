@@ -388,7 +388,7 @@ export function KeystrokeCaptureDialog({
           <button
             type="button"
             onClick={() => setManualEntry(v => !v)}
-            className="self-center -mt-2 text-[10px] text-text-tertiary hover:text-text-secondary underline decoration-dotted transition-colors"
+            className="self-center -mt-2 text-[11px] text-text-secondary hover:text-text-primary underline decoration-dotted transition-colors"
           >
             {manualEntry ? 'Back to key capture' : 'Type manually · {var} tokens'}
           </button>
