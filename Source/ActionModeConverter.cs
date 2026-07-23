@@ -122,6 +122,15 @@ namespace TrueReplayer.Services
                     case "RightClick":
                     case "MiddleClick":
                     {
+                        // A click set to repeat (RepeatCount > 1, the Click × N feature) can't be
+                        // faithfully split into a single Down/Up pair — the paired-half replay cases
+                        // don't loop, so splitting would SILENTLY drop the × N (fires once, not N).
+                        // Pass it through whole, exactly like DoubleClick below: the combined-click
+                        // replay case still honours RepeatCount via ExecuteRepeated, and ToCombined
+                        // leaves an unsplit click untouched, so the round-trip stays stable and the
+                        // ×N badge keeps showing in paired mode. Plain single clicks (RepeatCount 1)
+                        // split as before.
+                        if (a.RepeatCount > 1) { result.Add(a.Clone()); break; }
                         string btn = a.ActionType[..^"Click".Length]; // "LeftClick" → "Left"
                         var down = a.Clone(); down.ActionType = btn + "ClickDown";
                         var up = a.Clone(); up.ActionType = btn + "ClickUp"; up.Delay = 0; up.Comment = "";

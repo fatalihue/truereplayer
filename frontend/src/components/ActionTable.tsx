@@ -1978,12 +1978,15 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           NOT
                         </span>
                       )}
-                      {/* Repeat indicator — Keystroke press-cycles + RunProfile sub-call
-                          counts. Lives inside the Action pill instead of the Key column
-                          because long profile names used to push "×N" past the Key
-                          col's truncation point and hide the repetition from the user.
-                          Only renders when count > 1 (default 1 = no badge). */}
-                      {(action.actionType === 'Keystroke' || action.actionType === 'RunProfile')
+                      {/* Repeat indicator — Keystroke press-cycles, click × N (single + double),
+                          and RunProfile sub-call counts. Lives inside the Action pill instead of
+                          the Key column because long profile names used to push "×N" past the Key
+                          col's truncation point and hide the repetition from the user. Paired
+                          halves (LeftClickDown/Up) don't repeat, so they're excluded. Only renders
+                          when count > 1 (default 1 = no badge). */}
+                      {(action.actionType === 'Keystroke' || action.actionType === 'RunProfile'
+                        || action.actionType === 'LeftClick' || action.actionType === 'RightClick'
+                        || action.actionType === 'MiddleClick' || action.actionType === 'DoubleClick')
                         && (action.repeatCount ?? 1) > 1 && !action.runOverData && (
                           <span className="ml-0.5 opacity-75">×{action.repeatCount}</span>
                         )}

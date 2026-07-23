@@ -204,6 +204,22 @@ namespace TrueReplayer.Services
                                       string.Equals(a.ActionType, "MiddleClick", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 4, 0), "Combined clicks (LeftClick/RightClick/MiddleClick)"),
 
+            // Click × N inline repeat (RepeatCount > 1 on a LeftClick/RightClick/MiddleClick/
+            // DoubleClick) — the 2.4.0 (combined) and 2.5.4 (double) pins above only cover the
+            // click's EXISTENCE. An older build that HAS the click's replay case but predates this
+            // feature ignores RepeatCount on it, so it fires the click ONCE instead of N times — a
+            // silent behavioural divergence (a "click 5×" quietly becomes 1). Property-level Detect
+            // so plain single/double clicks keep their existing floor. The gap-jitter pin above
+            // already covers a click carrying RepeatDelayJitterPct; this adds the plain-count case.
+            // Pinned at the 2.9.5 dev placeholder (≤ running so own-export→import round-trips) —
+            // bump at release.
+            (p => p.Actions.Any(a => a.RepeatCount > 1 &&
+                (string.Equals(a.ActionType, "LeftClick", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(a.ActionType, "RightClick", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(a.ActionType, "MiddleClick", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(a.ActionType, "DoubleClick", StringComparison.OrdinalIgnoreCase))),
+                new Version(2, 9, 5), "Click repeat (× N)"),
+
             // DoubleClick (two press/release pairs replayed as one row) shipped in 2.5.4 —
             // older builds have no replay switch case and would silently skip it.
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "DoubleClick", StringComparison.OrdinalIgnoreCase)),

@@ -433,6 +433,17 @@ namespace TrueReplayer.Models
         // frontend dialog can all reference the same value via the messages they exchange.
         public const int DefaultRepeatDelayMs = 30;
 
+        // DoubleClick × N uses a LARGER default gap than single clicks. Each DoubleClick is
+        // itself two clicks ~50 ms apart (DoubleClickGapMs); for the OS to register consecutive
+        // repeats as DISTINCT double-clicks (rather than blurring them into one long multi-click
+        // burst) the gap BETWEEN repeats must clear the system double-click window — typically
+        // GetDoubleClickTime() ≈ 500 ms. 600 ms sits comfortably above the default so "double-
+        // click × N" does the literal thing out of the box; the user tunes it down for spam or up
+        // on a machine with a longer double-click time. Shared by the replay engine and the Sheet
+        // (frontend mirrors this constant) so a null RepeatDelayMs resolves to the same value both
+        // sides. Single clicks / Keystroke keep DefaultRepeatDelayMs.
+        public const int DefaultDoubleClickRepeatDelayMs = 600;
+
         // Keystroke × N: random ±% variation applied to EACH inter-press gap so the burst
         // doesn't fire on a perfectly fixed interval — a constant gap is the single biggest
         // "this is a bot" tell (far more than the raw speed). null/0 = off (a fixed gap, the
