@@ -1134,7 +1134,7 @@ namespace TrueReplayer.Controllers
         /// that would actually be called — a case-differing/dangling ref names nothing to include.
         /// Returns the seeds plus every newly-pulled dependency, in discovery order.
         /// </summary>
-        private async Task<List<string>> ExpandWithRunProfileDependenciesAsync(List<string> seeds)
+        public async Task<List<string>> ExpandWithRunProfileDependenciesAsync(List<string> seeds)
         {
             var result = new List<string>(seeds);
             var seen = new HashSet<string>(seeds, StringComparer.OrdinalIgnoreCase);

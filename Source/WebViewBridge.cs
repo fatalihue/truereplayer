@@ -2004,6 +2004,18 @@ namespace TrueReplayer
                     // Keep in sync with PushProfilesUpdate (automation badge scalars).
                     hasTrigger = p.Triggers != null,
                     triggerArmed = p.Triggers?.Armed ?? false,
+                    // Sharing-metadata mirror — keep in sync with PushProfilesUpdate. This whole
+                    // block drifted OUT of the cold-start blob before, so on first paint (until the
+                    // first profiles:updated push) the sidebar's icon/tags/version badges and the
+                    // Export dialog's per-profile "N actions" weight were all blank.
+                    description = p.Description,
+                    tags = p.Tags,
+                    iconEmoji = p.IconEmoji,
+                    profileVersion = p.ProfileVersion,
+                    createdAt = p.CreatedAt?.ToString("o"),
+                    updatedAt = p.UpdatedAt?.ToString("o"),
+                    appMinVersion = p.AppMinVersion,
+                    actionCount = p.ActionCount,
                     // Keep in sync with PushProfilesUpdate. Without it the Export dialog can't see
                     // the Run Profile graph on a COLD START, so its "+N referenced sub-profiles
                     // included" disclosure stays hidden for the whole first session even though
@@ -6971,22 +6983,32 @@ namespace TrueReplayer
             if (names.Count == 0) return;
             if (replayService.IsReplaying || recordingService.IsRecording) { SendMessage("alert:show", new { message = "Finish the current recording/replay before exporting." }); return; }
 
-            // Export reads each profile from disk (ExportProfilesAsync → LoadProfileByNameAsync), so
-            // unsaved grid edits held only in the in-memory `actions` collection would be silently
-            // omitted from the .trprofile. When the ACTIVE profile is among the selected names and is
-            // dirty, prompt Save/Discard/Cancel first (Save refreshes the disk copy, Discard exports
-            // the on-disk version knowingly, Cancel aborts).
-            if (HasUnsavedChanges
-                && CurrentProfileName != "No Profile"
-                && names.Any(n => string.Equals(n, CurrentProfileName, StringComparison.OrdinalIgnoreCase)))
-            {
-                if (!await CheckUnsavedChangesAsync()) return;
-            }
-
             try
             {
-                bool includeOrganization = payload.TryGetProperty("includeOrganization", out var orgProp) && orgProp.GetBoolean();
-                bool includeDependencies = payload.TryGetProperty("includeDependencies", out var depProp) && depProp.GetBoolean();
+                // ValueKind (not GetBoolean) so an absent / non-bool property reads as false.
+                bool includeOrganization = payload.TryGetProperty("includeOrganization", out var orgProp) && orgProp.ValueKind == JsonValueKind.True;
+                bool includeDependencies = payload.TryGetProperty("includeDependencies", out var depProp) && depProp.ValueKind == JsonValueKind.True;
+
+                // Export reads each profile from disk (ExportProfilesAsync → LoadProfileByNameAsync), so
+                // unsaved grid edits held only in the in-memory `actions` collection would be silently
+                // omitted from the .trprofile. Prompt Save/Discard/Cancel when the dirty ACTIVE profile
+                // is part of what will actually be exported — either explicitly selected, OR pulled in as
+                // a Run Profile dependency (those always ship now). The closure walk reads the same
+                // on-disk graph the export will; saving first also lets that later walk pick up any
+                // sub-profile the just-saved edits added (and the post-export toast then discloses it).
+                // Kept INSIDE this try so a locked/corrupt profile hit during the walk surfaces the
+                // "Export failed" toast below rather than escaping the async void handler unnoticed.
+                if (HasUnsavedChanges && CurrentProfileName != "No Profile")
+                {
+                    bool activeInExport = names.Any(n => string.Equals(n, CurrentProfileName, StringComparison.OrdinalIgnoreCase));
+                    if (!activeInExport && includeDependencies)
+                    {
+                        var closure = await profileController.ExpandWithRunProfileDependenciesAsync(names);
+                        activeInExport = closure.Any(n => string.Equals(n, CurrentProfileName, StringComparison.OrdinalIgnoreCase));
+                    }
+                    if (activeInExport && !await CheckUnsavedChangesAsync()) return;
+                }
+
                 var (exported, missingImages, bundledDependencies) = await profileController.ExportProfilesAsync(names, includeOrganization, includeDependencies);
                 if (exported > 0)
                 {
