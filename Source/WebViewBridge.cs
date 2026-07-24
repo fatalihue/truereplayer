@@ -1668,7 +1668,11 @@ namespace TrueReplayer
                 createdAt = p.CreatedAt?.ToString("o"),
                 updatedAt = p.UpdatedAt?.ToString("o"),
                 appMinVersion = p.AppMinVersion,
-                actionCount = p.ActionCount
+                actionCount = p.ActionCount,
+                // RunProfile refs — lets the Export dialog work out (client-side, no round-trip)
+                // which sub-profiles ride along with the current selection, and re-derive it as
+                // that selection changes. null when the profile calls none.
+                runProfileTargets = p.RunProfileTargets
             }).ToArray();
 
             var order = profileController.GetProfileOrder();
@@ -1999,7 +2003,12 @@ namespace TrueReplayer
                     isDisabled = p.IsDisabled,
                     // Keep in sync with PushProfilesUpdate (automation badge scalars).
                     hasTrigger = p.Triggers != null,
-                    triggerArmed = p.Triggers?.Armed ?? false
+                    triggerArmed = p.Triggers?.Armed ?? false,
+                    // Keep in sync with PushProfilesUpdate. Without it the Export dialog can't see
+                    // the Run Profile graph on a COLD START, so its "+N referenced sub-profiles
+                    // included" disclosure stays hidden for the whole first session even though
+                    // those sub-profiles do get bundled — the one case where silence is a lie.
+                    runProfileTargets = p.RunProfileTargets
                 }).ToArray(),
                 activeProfile = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName,
                 profileOrder = new
@@ -5356,6 +5365,18 @@ namespace TrueReplayer
                 // time. Touches profiles on disk + the active in-memory action list.
                 int refsUpdated = await ScanRunProfileReferencesAsync(oldName, actualNewName);
 
+                // The scan rewrote RunProfile Keys ON DISK after the refresh above had already
+                // built ProfileEntries, so those entries — and the RunProfileTargets mirror the
+                // Export dialog reads — still name the OLD target. Re-read before pushing, or the
+                // dialog's "+N referenced sub-profiles included" disclosure describes a chain that
+                // no longer exists (it resolves refs against this payload, while the export itself
+                // re-reads from disk), and a renamed sub-profile would ship undisclosed. The
+                // watcher can't heal it: RefreshProfileListAsync(true) suppresses it for 2 s, which
+                // is exactly when these writes land. Guarded so the common no-references rename
+                // still costs a single list load.
+                if (refsUpdated > 0)
+                    await profileController.RefreshProfileListAsync(true);
+
                 PushProfilesUpdate();
                 PushToolbarUpdate();
                 PushStatusBarUpdate();
@@ -6966,7 +6987,7 @@ namespace TrueReplayer
             {
                 bool includeOrganization = payload.TryGetProperty("includeOrganization", out var orgProp) && orgProp.GetBoolean();
                 bool includeDependencies = payload.TryGetProperty("includeDependencies", out var depProp) && depProp.GetBoolean();
-                var (exported, missingImages) = await profileController.ExportProfilesAsync(names, includeOrganization, includeDependencies);
+                var (exported, missingImages, bundledDependencies) = await profileController.ExportProfilesAsync(names, includeOrganization, includeDependencies);
                 if (exported > 0)
                 {
                     // `exported` can EXCEED names.Count when Include-dependencies pulled extra
@@ -6975,6 +6996,12 @@ namespace TrueReplayer
                     var msg = exported >= names.Count
                         ? $"Exported {exported} profile(s) successfully."
                         : $"Exported {exported} of {names.Count} profile(s); {names.Count - exported} could not be loaded.";
+                    // Name the sub-profiles Run Profile dragged in. This is the AUTHORITATIVE egress
+                    // disclosure — computed from what actually shipped, after any Save-on-export — so
+                    // it discloses a bundled (possibly private) sub-profile even in the cases where the
+                    // dialog's pre-export preview was stale (unsaved edit, rename mid-session, etc.).
+                    if (bundledDependencies.Count > 0)
+                        msg += $" Included {bundledDependencies.Count} referenced sub-profile(s): {string.Join(", ", bundledDependencies)}.";
                     if (missingImages > 0) msg += $" {missingImages} reference image(s) were missing and not included.";
                     SendMessage("alert:show", new { message = msg });
                 }

@@ -405,6 +405,20 @@ namespace TrueReplayer.Controllers
                             && (!string.IsNullOrEmpty(profile.TargetWindow.ProcessName)
                                 || !string.IsNullOrEmpty(profile.TargetWindow.WindowTitle));
 
+                        // RunProfile refs this profile calls — free to collect here (the actions are
+                        // already loaded) and lets the Export dialog disclose which sub-profiles ride
+                        // along with a selection. Trimmed + non-empty + distinct ORDINAL, so a
+                        // case-differing ref stays a separate entry and resolves on its own, matching
+                        // the Ordinal lookup ExpandWithRunProfileDependenciesAsync uses when it
+                        // actually bundles them.
+                        var runRefs = profile.Actions
+                            .Where(a => string.Equals(a.ActionType, "RunProfile", StringComparison.OrdinalIgnoreCase))
+                            .Select(a => a.Key?.Trim())
+                            .Where(k => !string.IsNullOrEmpty(k))
+                            .Select(k => k!)
+                            .Distinct(StringComparer.Ordinal)
+                            .ToList();
+
                         ProfileEntries.Add(new ProfileEntry
                         {
                             Name = name,
@@ -436,7 +450,10 @@ namespace TrueReplayer.Controllers
                             CreatedAt = profile.CreatedAt,
                             UpdatedAt = profile.UpdatedAt,
                             AppMinVersion = profile.AppMinVersion,
-                            ActionCount = profile.Actions.Count
+                            ActionCount = profile.Actions.Count,
+                            // null (not an empty list) when the profile calls nothing — keeps the
+                            // profiles:updated payload lean for the common no-RunProfile case.
+                            RunProfileTargets = runRefs.Count > 0 ? runRefs : null
                         });
 
                         if (hasTarget)
@@ -1144,9 +1161,18 @@ namespace TrueReplayer.Controllers
             return result;
         }
 
-        public async Task<(int exported, int missingImages)> ExportProfilesAsync(List<string> profileNames, bool includeOrganization = false, bool includeDependencies = false)
+        // Returns (exported count, missing-image count, names of the EXTRA sub-profiles that got
+        // bundled by dependency expansion beyond the caller's selection). That third value is the
+        // AUTHORITATIVE egress disclosure: it is derived from the envelope actually written, AFTER
+        // any Save-on-export flushed the active profile, so it names exactly what left the machine
+        // even when the dialog's pre-export "+N included" preview (built from a disk snapshot) was
+        // stale. Empty when nothing extra rode along.
+        public async Task<(int exported, int missingImages, List<string> bundledDependencies)> ExportProfilesAsync(List<string> profileNames, bool includeOrganization = false, bool includeDependencies = false)
         {
             var envelope = new ProfileExportEnvelope();
+            // Original selection, captured before dependency expansion mutates profileNames, so we
+            // can name what the closure ADDED (envelope profiles minus these) for the export toast.
+            var seedNames = new HashSet<string>(profileNames, StringComparer.OrdinalIgnoreCase);
             // Distinct (profile, imagePath) refs whose PNG was gone on disk at export time, so the
             // export toast can warn the sender that some rows will arrive broken. Keyed profile+path
             // to mirror the per-profile-per-path dedup the `images` dict does below.
@@ -1163,7 +1189,7 @@ namespace TrueReplayer.Controllers
                 FileName = defaultName,
                 DefaultExt = "trprofile"
             });
-            if (fileName == null) return (-1, 0);   // user cancelled the Save dialog — nothing built yet
+            if (fileName == null) return (-1, 0, new List<string>());   // user cancelled the Save dialog — nothing built yet
 
             // Optionally pull in the sub-profiles this selection RunProfile-calls (transitive closure),
             // so a chain doesn't arrive broken at the receiver. After the dialog so a cancel costs nothing.
@@ -1268,7 +1294,7 @@ namespace TrueReplayer.Controllers
                 });
             }
 
-            if (envelope.Profiles.Count == 0) return (0, 0);   // none of the requested names loaded — distinct from cancel
+            if (envelope.Profiles.Count == 0) return (0, 0, new List<string>());   // none of the requested names loaded — distinct from cancel
 
             if (includeOrganization)
             {
@@ -1308,7 +1334,14 @@ namespace TrueReplayer.Controllers
             var json = JsonSerializer.Serialize(envelope, options);
             // Atomic temp+move so a mid-write crash can't truncate an existing export (item-d).
             await Services.FileHelper.WriteAllTextAtomicAsync(fileName, json);
-            return (envelope.Profiles.Count, missingImagePaths.Count);
+            // Sub-profiles that rode along beyond the selection — read off the ACTUAL envelope in
+            // its authored order, so the toast names exactly what shipped (immune to the dialog's
+            // possibly-stale preview). Empty unless dependency expansion added something.
+            var bundledDependencies = envelope.Profiles
+                .Select(p => p.Name)
+                .Where(n => !seedNames.Contains(n))
+                .ToList();
+            return (envelope.Profiles.Count, missingImagePaths.Count, bundledDependencies);
         }
 
         /// <summary>

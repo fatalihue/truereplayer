@@ -127,9 +127,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   // Whether the export bundles the folder/pin/grouping layout. Was hardcoded true at every
   // call site; now user-controllable via a checkbox in the export dialog. Defaults on.
   const [includeExportOrg, setIncludeExportOrg] = useState(true);
-  // Whether the export also pulls in the sub-profiles the selection RunProfile-calls (transitive),
-  // so a chain doesn't arrive broken. Off by default — it enlarges what leaves the machine.
-  const [includeExportDeps, setIncludeExportDeps] = useState(false);
+  // NOTE: there is deliberately no "include sub-profiles" toggle. The export ALWAYS pulls in the
+  // profiles the selection RunProfile-calls (transitive) — omitting them ships a broken chain that
+  // fails silently on the receiver. The dialog discloses what rides along instead (exportDepNames).
   const [dialogValue, setDialogValue] = useState('');
   const [showCreateFolderDialog, setShowCreateFolderDialog] = useState(false);
   const [folderDialogName, setFolderDialogName] = useState('');
@@ -469,6 +469,42 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     setExportSelection(updated);
   };
 
+  // The EXTRA profiles that ride along with the current selection because it calls them via Run
+  // Profile. Sub-profiles are ALWAYS bundled (no opt-out): leaving them out ships a knowingly
+  // broken export, and it fails SILENTLY — the receiver's HandleRunProfile finds no such profile
+  // and skips the step with no error, so the macro "runs" while quietly doing less. So this is not
+  // a choice, it's a disclosure of what's going along. This is a best-effort PREVIEW built from the
+  // ON-DISK profiles (runProfileTargets is read when the list loads), so it can lag an unsaved grid
+  // edit; the AUTHORITATIVE egress disclosure is the post-export toast, which names what actually
+  // shipped after any Save-on-export. Mirrors ExpandWithRunProfileDependenciesAsync over that disk
+  // state: refs are trimmed and resolved by EXACT (Ordinal) name to a local profile — a case-
+  // differing or dangling ref resolves to nothing and bundles nothing — the walk is transitive, and
+  // the seen-set dedups case-INSENSITIVELY. Already-selected profiles never appear (they ship
+  // regardless). Returned in discovery order, matching the backend.
+  const exportDepNames = useMemo<string[]>(() => {
+    const seeds = profiles.map(p => p.name).filter(name => exportSelection[name]);
+    if (seeds.length === 0) return [];
+    const byExactName = new Map(profiles.map(p => [p.name, p]));
+    const seen = new Set(seeds.map(n => n.toLowerCase()));
+    const queue = [...seeds];
+    const extra: string[] = [];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      for (const raw of byExactName.get(current)?.runProfileTargets ?? []) {
+        const ref = (raw ?? '').trim();
+        if (!ref) continue;
+        const local = byExactName.get(ref);
+        if (!local) continue;
+        const key = local.name.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        extra.push(local.name);
+        queue.push(local.name);
+      }
+    }
+    return extra;
+  }, [profiles, exportSelection]);
+
   const confirmExport = () => {
     // Export EVERY checked profile, including ones the current search filter hides. Scoping to
     // the visible set silently dropped profiles the user had checked before filtering — they
@@ -476,7 +512,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     // count so the total is never a surprise.
     const selectedNames = profiles.map(p => p.name).filter(name => exportSelection[name]);
     if (selectedNames.length > 0) {
-      send({ type: 'profile:export', payload: { names: selectedNames, includeOrganization: includeExportOrg, includeDependencies: includeExportDeps } });
+      // includeDependencies is ALWAYS true — a chain exported without its sub-profiles arrives
+      // broken and fails silently at replay, so it is never a user choice. A no-op when the
+      // selection calls nothing.
+      send({ type: 'profile:export', payload: { names: selectedNames, includeOrganization: includeExportOrg, includeDependencies: true } });
     }
     setShowExportDialog(false);
   };
@@ -2750,28 +2789,35 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               )}
             </div>
 
-            {/* Include folder organization — the export bundles pins/folders/grouping so the
-                recipient rebuilds the same layout. Was hardcoded on; now opt-out. */}
+            {/* Include folder organization — the export bundles pins/folders/grouping AND each
+                folder's window target, so the recipient rebuilds the same layout. Was hardcoded on;
+                now opt-out, and the ONLY checkbox here: MOSTLY cosmetic (usually the export just
+                lands as a flat list), so it is safe to decline — the one caveat is that a profile
+                which INHERITS its window target from a folder loses that target without the folder,
+                so its clicks resolve differently. Sub-profiles get no such checkbox: declining those
+                ships a SILENTLY broken chain, a harder failure than a dropped folder target. */}
             <div className="px-4 py-2.5 border-t border-border-subtle space-y-2">
               <button
                 type="button"
                 onClick={() => setIncludeExportOrg(v => !v)}
                 className="w-full flex items-center gap-2 text-left"
+                data-tip={tt('Keeps pins, folders, order and folder targets.', 'Mantém pins, pastas, ordem e alvos de pasta.')}
               >
                 <CheckboxBox checked={includeExportOrg} />
                 <span className="text-xs text-text-secondary">Include folder organization</span>
               </button>
-              {/* Bundle sub-profiles the selection calls via Run Profile, so a chain isn't exported
-                  broken. Off by default — it enlarges what leaves the machine. */}
-              <button
-                type="button"
-                onClick={() => setIncludeExportDeps(v => !v)}
-                className="w-full flex items-center gap-2 text-left"
-                data-tip={tt('Also export the profiles this selection runs via Run Profile (and their dependencies), so the chain works on the other machine.', 'Exporta também os perfis que esta seleção executa via Run Profile (e as dependências deles), para a cadeia funcionar na outra máquina.')}
-              >
-                <CheckboxBox checked={includeExportDeps} />
-                <span className="text-xs text-text-secondary">Include referenced sub-profiles</span>
-              </button>
+              {/* Sub-profiles ride along ALWAYS (no toggle — see exportDepNames). This is the
+                  disclosure: it names what the Run Profile chain drags in, so the file size and
+                  the contents are never a surprise, and a sub-profile you meant to keep private is
+                  visible BEFORE you export. Hidden entirely when the selection calls nothing. */}
+              {exportDepNames.length > 0 && (
+                <div
+                  className="text-[11px] text-text-tertiary leading-relaxed"
+                  data-tip={`${tt('Called via Run Profile:', 'Chamados via Run Profile:')} ${exportDepNames.join(', ')}`}
+                >
+                  {`+${exportDepNames.length} referenced sub-profile${exportDepNames.length === 1 ? '' : 's'} included`}
+                </div>
+              )}
             </div>
           </DialogShell>
         );

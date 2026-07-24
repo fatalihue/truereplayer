@@ -292,6 +292,15 @@ namespace TrueReplayer.Models
         // + its actions iterated there, so this is free). Lets the Export dialog show per-profile
         // weight, matching the Import Preview which already renders "N actions".
         public int ActionCount { get; set; }
+        // RunProfile refs this profile calls (the called profile names, trimmed). Mirrored onto
+        // the list entry so the Export dialog can DISCLOSE which sub-profiles ride along with a
+        // selection, WITHOUT re-reading every profile JSON — the list build already has the
+        // actions in hand. (Sub-profiles are always bundled; the dialog names them rather than
+        // offering an opt-out, since omitting them ships a chain that breaks silently.) Stored as
+        // authored; resolving a ref to a LOCAL profile is an Ordinal match done by the consumer
+        // (mirrors ProfileController.ExpandWithRunProfileDependenciesAsync, which is what actually
+        // bundles them). null when the profile calls none, so the pushed payload stays lean.
+        public List<string>? RunProfileTargets { get; set; }
         public bool HasWindowTarget { get; set; }
         public string? WindowTargetProcessName { get; set; }
         public string? WindowTargetWindowTitle { get; set; }

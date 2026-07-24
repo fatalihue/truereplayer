@@ -226,6 +226,11 @@ export interface ProfileEntry {
   updatedAt?: string | null;
   appMinVersion?: string | null;
   actionCount?: number;   // per-profile action count (mirror), for the Export dialog weight column
+  // Names this profile calls via Run Profile (trimmed, as authored; null when none). Lets the
+  // Export dialog disclose which sub-profiles a selection bundles (they always ship), without a
+  // round-trip. Resolve a ref to a local profile by EXACT (case-sensitive) name — mirrors the
+  // Ordinal lookup the backend export uses, so a case-differing/dangling ref bundles nothing.
+  runProfileTargets?: string[] | null;
 }
 
 // ── Sharing metadata payloads ──
