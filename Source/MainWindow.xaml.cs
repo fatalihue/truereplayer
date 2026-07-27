@@ -1135,7 +1135,10 @@ namespace TrueReplayer
             {
                 if (mainController.IsReplayInProgress() || mainController.IsRecording())
                     return TriggerFireResult.SkippedBusy;
-                if (InputHookManager.SuppressAllHotkeys || InputHookManager.CaptureHotkeyMode)
+                // IsCaptureDialogOpen, NOT CaptureHotkeyMode: this asks "is a capture dialog
+                // open", and CaptureHotkeyMode is additionally gated on TrueReplayer being the
+                // foreground app — which an autonomous fire, by definition, almost never is.
+                if (InputHookManager.SuppressAllHotkeys || InputHookManager.IsCaptureDialogOpen)
                     return TriggerFireResult.SkippedModal;
                 if (bridge == null)
                     return TriggerFireResult.NotReady;
@@ -1249,7 +1252,12 @@ namespace TrueReplayer
                         tcs.TrySetResult(TriggerFireResult.SkippedBusy);
                         return;
                     }
-                    if (InputHookManager.SuppressAllHotkeys || InputHookManager.CaptureHotkeyMode)
+                    // IsCaptureDialogOpen, NOT CaptureHotkeyMode — see the identical gate in
+                    // RunProfileTriggerAsync. A timer/schedule/condition fire lands while the
+                    // user is in another app, so the foreground-gated property would read false
+                    // exactly when this guard matters and let the fire rebuild the action grid
+                    // under an open Send Keystroke / Insert Pause dialog.
+                    if (InputHookManager.SuppressAllHotkeys || InputHookManager.IsCaptureDialogOpen)
                     {
                         tcs.TrySetResult(TriggerFireResult.SkippedModal);
                         return;

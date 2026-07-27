@@ -8,6 +8,7 @@ import { KeyCaps } from './common/KeyCaps';
 import { DurationChips } from './common/DurationChips';
 import { useBridge } from '../bridge/BridgeContext';
 import { useLanguage, useTt } from '../state/LanguageContext';
+import { useWindowFocused } from '../hooks/useWindowFocused';
 
 /**
  * Unified "Send Keystroke" dialog. One capture pad + a Press/Hold mode toggle covers
@@ -180,6 +181,8 @@ export function KeystrokeCaptureDialog({
   // field, Pause dialog) can't accidentally turn the hook off via shared state.
   const ownerIdRef = useRef(`keystroke-capture-${crypto.randomUUID()}`);
   const { send, subscribe } = useBridge();
+  // Display-only — the capture gate itself lives in InputHookManager.CaptureHotkeyMode.
+  const windowFocused = useWindowFocused();
 
   // (Esc focus handling moved into DialogShell — it focuses the card on mount.)
 
@@ -372,8 +375,13 @@ export function KeystrokeCaptureDialog({
               </>
             ) : captured === null ? (
               <>
+                {/* The hook only captures while TrueReplayer is the FOREGROUND app, so the pad
+                    must not promise "press any key" while the user is in another window —
+                    it would be inviting a press that (correctly) goes to that other app. */}
                 <div className="text-[12px] text-text-secondary mb-1">
-                  {tt('Press any key or combo', 'Pressione qualquer tecla ou combinação')}
+                  {windowFocused
+                    ? tt('Press any key or combo', 'Pressione qualquer tecla ou combinação')
+                    : tt('Click TrueReplayer to capture keys', 'Clique no TrueReplayer para capturar teclas')}
                 </div>
                 <div className="text-[10px] font-mono text-text-tertiary">A · F5 · Ctrl+S · Win+A</div>
               </>

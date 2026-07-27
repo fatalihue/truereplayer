@@ -155,6 +155,15 @@ namespace TrueReplayer
         // foreground app on every swallowed trigger press. Hook-thread-only.
         private static readonly HashSet<int> _swallowedXDowns = new();
 
+        // CAPTURE-swallowed X downs only — deliberately a SEPARATE set from _swallowedXDowns.
+        // The capture UP gate below must fire without consulting CaptureHotkeyMode (the focus
+        // gate can close between a press and its release), but _swallowedXDowns is shared with
+        // the trigger and remap paths, so keying that gate off it would swallow every ordinary
+        // trigger UP before HandleXButtonTrigger could run its up-side handlers — silently
+        // killing OnRelease / WhilePressed-stop / Hold-cancel and wedging the side button.
+        // Hook-thread-only, same as _swallowedXDowns.
+        private static readonly HashSet<int> _captureSwallowedXDowns = new();
+
         public static void RegisterRemaps(Dictionary<int, ushort> map)
         {
             _remapMap = map.Count == 0 ? null : map;
@@ -367,7 +376,52 @@ namespace TrueReplayer
         /// Refcounted by ownerId — multiple frontend consumers (Pause dialog, Sheet editor,
         /// Settings hotkey field, etc.) can simultaneously hold the hook open without one
         /// stomping the other on cleanup. Capture is active while any owner is registered.
+        ///
+        /// AND while TrueReplayer is the FOREGROUND app. Capture swallows every keystroke
+        /// system-wide (this callback returns 1 for all keys), so without the focus gate an
+        /// open Send Keystroke / Insert Pause dialog kept eating the user's typing after they
+        /// alt-tabbed away — their keys never reached the other app AND leaked into the dialog
+        /// as captured combos. Gating here (rather than in each dialog) covers every consumer
+        /// and every input path at once, and needs no frontend round-trip: the check is
+        /// re-evaluated per event, so capture resumes the instant the window is focused again.
         public static bool CaptureHotkeyMode
+        {
+            get
+            {
+                // Refcount first — it's a cheap lock, and when nothing is capturing (the
+                // overwhelmingly common case) we skip the P/Invokes entirely.
+                lock (_captureOwnersLock) { if (_captureOwners.Count == 0) return false; }
+                return IsAppForeground();
+            }
+        }
+
+        /// True when the foreground top-level window belongs to THIS process. Compares process
+        /// IDs rather than a cached HWND so every window we own counts — the main window, WinUI
+        /// ContentDialogs, and the screen-overlay/loupe windows. The WebView2 content lives in a
+        /// separate process, but GetForegroundWindow returns the TOP-LEVEL window (ours) even
+        /// when focus sits inside a WebView2 child HWND, so a focused dialog reads as foreground.
+        private static bool IsAppForeground()
+        {
+            IntPtr fg = NativeMethods.GetForegroundWindow();
+            if (fg == IntPtr.Zero) return false;   // no foreground window (lock screen, transition)
+            NativeMethods.GetWindowThreadProcessId(fg, out uint pid);
+            return pid == _ownProcessId;
+        }
+
+        private static readonly uint _ownProcessId = (uint)Environment.ProcessId;
+
+        /// True while a key-capture dialog is OPEN, regardless of window focus — the raw
+        /// refcount that <see cref="CaptureHotkeyMode"/> used to expose before it grew the
+        /// foreground gate.
+        ///
+        /// This is the predicate for "don't do something autonomous that would yank the UI out
+        /// from under an open capture dialog", and it must NOT be focus-gated: the automation
+        /// daemon fires precisely when TrueReplayer is backgrounded, which is exactly when the
+        /// focus-gated property reads false. Using CaptureHotkeyMode there would let an
+        /// automation swap UserProfile.Current and rebuild the action grid underneath an open
+        /// Send Keystroke / Insert Pause dialog, so confirming it would write the row into a
+        /// DIFFERENT profile. See MainWindow.FireProfileFromTriggerAsync / RunProfileTriggerAsync.
+        public static bool IsCaptureDialogOpen
         {
             get { lock (_captureOwnersLock) return _captureOwners.Count > 0; }
         }
@@ -471,6 +525,7 @@ namespace TrueReplayer
             ClearPendingHoldFire();
             ReleaseActiveRemapDowns();
             _swallowedXDowns.Clear();
+            _captureSwallowedXDowns.Clear();
             _lastTapKey = null;
             _lastTapTicks = 0;
             _vkCodesCurrentlyDown.Clear();
@@ -864,20 +919,35 @@ namespace TrueReplayer
             // Capture mode: X-buttons (side buttons) are valid hotkey triggers and never
             // conflict with normal UI interaction inside the dialog (unlike left/right/middle,
             // which stay excluded) — compose + emit + swallow, mirroring the wheel block below.
-            if (CaptureHotkeyMode && (int)wParam == NativeMethods.WM_XBUTTONDOWN)
+            //
+            // The message-type test comes FIRST in all three capture gates below (it used to be
+            // second). CaptureHotkeyMode takes a lock and — since the focus gate landed — two
+            // P/Invokes; evaluating it first meant every WM_MOUSEMOVE paid that cost three times
+            // at the mouse's polling rate. Reordering makes a move event skip all three.
+            if ((int)wParam == NativeMethods.WM_XBUTTONDOWN && CaptureHotkeyMode)
             {
                 var xCapStruct = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
                 string xCapName = XButtonName(xCapStruct.mouseData);
-                _swallowedXDowns.Add(XButtonVk(xCapName));
+                _captureSwallowedXDowns.Add(XButtonVk(xCapName));
                 OnHotkeyCaptured?.Invoke(ComposeMouseCombo(xCapName));
                 return (IntPtr)1;
             }
-            if (CaptureHotkeyMode && (int)wParam == NativeMethods.WM_XBUTTONUP)
+            // Gated on the CAPTURE-private pending-down set, not on CaptureHotkeyMode: the pair
+            // must be resolved by whoever swallowed the down, and capture can now legitimately
+            // turn off between the two halves (the user alt-tabs mid-press → the focus gate
+            // closes), which would otherwise leak an orphan UP to the other app (Windows
+            // synthesizes WM_APPCOMMAND Back/Forward from one) and strand a stale entry.
+            // MUST NOT be keyed off the shared _swallowedXDowns: that set is also filled by the
+            // ordinary trigger dispatch and the remap path, so this early return would eat their
+            // UPs too — before HandleXButtonTrigger runs Core(isDown:false) — breaking OnRelease,
+            // WhilePressed's stop and Hold's cancel, and leaving their pending state armed
+            // forever (which then swallows every later press of that button).
+            if ((int)wParam == NativeMethods.WM_XBUTTONUP && _captureSwallowedXDowns.Count > 0)
             {
                 // Swallow only the up whose DOWN we captured — an up whose down was
                 // delivered to the app before capture opened must complete normally.
                 var xCapUpStruct = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
-                if (_swallowedXDowns.Remove(XButtonVk(XButtonName(xCapUpStruct.mouseData))))
+                if (_captureSwallowedXDowns.Remove(XButtonVk(XButtonName(xCapUpStruct.mouseData))))
                     return (IntPtr)1;
             }
 
@@ -885,7 +955,7 @@ namespace TrueReplayer
             // with modifier state and emitted through OnHotkeyCaptured, then swallowed.
             // Mouse buttons are not capturable as hotkeys (would conflict with normal UI
             // interaction inside the dialog), so they pass through.
-            if (CaptureHotkeyMode && (int)wParam == NativeMethods.WM_MOUSEWHEEL)
+            if ((int)wParam == NativeMethods.WM_MOUSEWHEEL && CaptureHotkeyMode)
             {
                 var wheelHookStruct = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
                 int wheelDelta = (short)((wheelHookStruct.mouseData >> 16) & 0xffff);
