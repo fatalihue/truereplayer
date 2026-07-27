@@ -1777,7 +1777,17 @@ namespace TrueReplayer.Services
         // (the click bodies guard the release, SimulateKeystroke checks it internally). A
         // RepeatCount of 1 runs the body exactly once with no delay — byte-identical to the
         // pre-repeat single-shot behaviour, so existing macros are unaffected.
-        private async Task ExecuteRepeated(ActionItem action, CancellationToken token, Action body)
+        //
+        // <paramref name="body"/> receives the cycle's (offsetX, offsetY) POSITION jitter — a
+        // ±px scatter re-rolled per cycle from RepeatPositionJitterPx, the positional twin of
+        // the gap jitter above. Timing jitter alone still leaves every click on one exact pixel,
+        // which is the other half of the "this is a bot" signature; scattering both makes a
+        // burst read as a human tapping the same region. The offset is handed to the body (not
+        // applied here) because only the caller knows which coordinates the cycle uses, and
+        // because EVERY event inside one cycle must share the SAME offset — a down and up at
+        // different points is a drag, and a double-click whose two pairs straddle the
+        // SM_CX/CYDOUBLECLK rectangle stops being a double-click. Keystroke ignores it.
+        private async Task ExecuteRepeated(ActionItem action, CancellationToken token, Action<int, int> body)
         {
             int repeats = Math.Max(1, Math.Min(999, action.RepeatCount));
             // DoubleClick × N falls back to a larger default gap (see DefaultDoubleClickRepeatDelayMs)
@@ -1787,10 +1797,25 @@ namespace TrueReplayer.Services
                 : ActionItem.DefaultRepeatDelayMs;
             int gap = Math.Max(0, Math.Min(5000, action.RepeatDelayMs ?? defaultGap));
             int jitterPct = Math.Max(0, Math.Min(100, action.RepeatDelayJitterPct ?? 0));
+            // Position jitter is a real BURST knob: gated on repeats > 1 so a single-shot click
+            // always lands on the exact coordinate the user picked (matches the editor, which
+            // greys the field until Times > 1, and keeps a RepeatCount == 1 click safe for
+            // ActionModeConverter to split into Down/Up halves — those cases don't jitter).
+            int posJitter = repeats > 1
+                ? Math.Max(0, Math.Min(500, action.RepeatPositionJitterPx ?? 0))
+                : 0;
             for (int r = 0; r < repeats; r++)
             {
                 if (token.IsCancellationRequested) break;
-                body();
+                // Re-rolled EVERY cycle, same reasoning as the gap jitter: one up-front roll
+                // would just move the whole burst to a different fixed pixel.
+                int offsetX = 0, offsetY = 0;
+                if (posJitter > 0)
+                {
+                    offsetX = Random.Shared.Next(-posJitter, posJitter + 1);
+                    offsetY = Random.Shared.Next(-posJitter, posJitter + 1);
+                }
+                body(offsetX, offsetY);
                 if (r < repeats - 1 && gap > 0)
                 {
                     int thisGap = gap;
@@ -1957,8 +1982,10 @@ namespace TrueReplayer.Services
                             // shared ExecuteRepeated driver. Resolve the combo ONCE, outside the
                             // burst — no other action runs between repeats, so the value can't
                             // legitimately change mid-burst.
+                            // Position jitter is meaningless for a keystroke (no coordinates) —
+                            // discard the offsets the shared driver hands every body.
                             var combo = await ResolveKeyTokens(action.Key);
-                            await ExecuteRepeated(action, token, () => SimulateKeystroke(combo, token));
+                            await ExecuteRepeated(action, token, (_, _) => SimulateKeystroke(combo, token));
                             break;
                         }
                         case "LeftClickDown": SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN); break;
@@ -1982,32 +2009,38 @@ namespace TrueReplayer.Services
                         // — byte-identical to the pre-feature single-shot. The focus tap, when on,
                         // fires once per cycle so each click still lands on a small target. Paired
                         // halves keep their single-shot cases below; DoubleClick repeats via its own
-                        // wrapped case (each cycle keeps the fixed ×2 timing).
+                        // wrapped case (each cycle keeps the fixed ×2 timing). (jx, jy) is the
+                        // cycle's position-jitter offset (0,0 unless Position jitter is on and
+                        // Times > 1) — applied ONCE per cycle to a local point so the down, the
+                        // up and the focus tap all land together instead of turning into a drag.
                         case "LeftClick":
-                            await ExecuteRepeated(action, token, () => {
-                                SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN);
+                            await ExecuteRepeated(action, token, (jx, jy) => {
+                                int cx = action.X + jx, cy = action.Y + jy;
+                                SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_LEFTDOWN);
                                 if (!token.IsCancellationRequested)
-                                    SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP);
+                                    SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_LEFTUP);
                                 if (action.IsFocusClick && !token.IsCancellationRequested)
-                                    FocusTap(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN, NativeMethods.MOUSEEVENTF_LEFTUP, token);
+                                    FocusTap(cx, cy, NativeMethods.MOUSEEVENTF_LEFTDOWN, NativeMethods.MOUSEEVENTF_LEFTUP, token);
                             });
                             break;
                         case "RightClick":
-                            await ExecuteRepeated(action, token, () => {
-                                SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTDOWN);
+                            await ExecuteRepeated(action, token, (jx, jy) => {
+                                int cx = action.X + jx, cy = action.Y + jy;
+                                SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_RIGHTDOWN);
                                 if (!token.IsCancellationRequested)
-                                    SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTUP);
+                                    SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_RIGHTUP);
                                 if (action.IsFocusClick && !token.IsCancellationRequested)
-                                    FocusTap(action.X, action.Y, NativeMethods.MOUSEEVENTF_RIGHTDOWN, NativeMethods.MOUSEEVENTF_RIGHTUP, token);
+                                    FocusTap(cx, cy, NativeMethods.MOUSEEVENTF_RIGHTDOWN, NativeMethods.MOUSEEVENTF_RIGHTUP, token);
                             });
                             break;
                         case "MiddleClick":
-                            await ExecuteRepeated(action, token, () => {
-                                SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN);
+                            await ExecuteRepeated(action, token, (jx, jy) => {
+                                int cx = action.X + jx, cy = action.Y + jy;
+                                SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_MIDDLEDOWN);
                                 if (!token.IsCancellationRequested)
-                                    SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEUP);
+                                    SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_MIDDLEUP);
                                 if (action.IsFocusClick && !token.IsCancellationRequested)
-                                    FocusTap(action.X, action.Y, NativeMethods.MOUSEEVENTF_MIDDLEDOWN, NativeMethods.MOUSEEVENTF_MIDDLEUP, token);
+                                    FocusTap(cx, cy, NativeMethods.MOUSEEVENTF_MIDDLEDOWN, NativeMethods.MOUSEEVENTF_MIDDLEUP, token);
                             });
                             break;
                         // Two full left press/release pairs at the SAME point with a gap well
@@ -2021,20 +2054,24 @@ namespace TrueReplayer.Services
                         // the inter-repeat gap defaults larger (DefaultDoubleClickRepeatDelayMs) so the
                         // OS reads distinct double-clicks. The internal two-pair / DoubleClickGapMs
                         // timing is untouched — the body below is verbatim the pre-repeat unit, so
-                        // RepeatCount == 1 stays byte-identical.
+                        // RepeatCount == 1 stays byte-identical. Position jitter (jx, jy) offsets
+                        // the WHOLE double-click by one point per cycle — deliberately NOT per
+                        // pair: the two pairs must stay inside the SM_CX/CYDOUBLECLK rectangle or
+                        // the OS stops reading them as a double-click at all.
                         case "DoubleClick":
-                            await ExecuteRepeated(action, token, () => {
-                                SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN);
+                            await ExecuteRepeated(action, token, (jx, jy) => {
+                                int cx = action.X + jx, cy = action.Y + jy;
+                                SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_LEFTDOWN);
                                 if (!token.IsCancellationRequested)
-                                    SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP);
+                                    SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_LEFTUP);
                                 if (!token.IsCancellationRequested)
                                 {
                                     if (DoubleClickGapMs > 0) Thread.Sleep(DoubleClickGapMs);
                                     if (!token.IsCancellationRequested)
                                     {
-                                        SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTDOWN);
+                                        SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_LEFTDOWN);
                                         if (!token.IsCancellationRequested)
-                                            SimulateMouse(action.X, action.Y, NativeMethods.MOUSEEVENTF_LEFTUP);
+                                            SimulateMouse(cx, cy, NativeMethods.MOUSEEVENTF_LEFTUP);
                                     }
                                 }
                             });

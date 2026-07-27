@@ -986,6 +986,10 @@ namespace TrueReplayer
                 // Keystroke × N gap jitter (±%). Same forward-so-the-editor-restores-it
                 // rationale as repeatDelayMs above; the replay loop reads the property directly.
                 repeatDelayJitterPct = a.RepeatDelayJitterPct,
+                // Click × N position jitter (±px). Same forward-so-the-editor-restores-it
+                // rationale; without it the Sheet reopens with the row's scatter switched off
+                // and a plain Save would silently wipe it.
+                repeatPositionJitterPx = a.RepeatPositionJitterPx,
                 // HoldKey duration — without this, the frontend's badge / edit
                 // dialog never see the value the user set, fall back to a
                 // hardcoded 1000 ms default, and every "press for X seconds"
@@ -2642,6 +2646,13 @@ namespace TrueReplayer
                     // to a pre-feature profile (WhenWritingNull drops the property).
                     if (string.IsNullOrEmpty(value)) action.RepeatDelayJitterPct = null;
                     else if (int.TryParse(value, out int rj)) action.RepeatDelayJitterPct = rj > 0 ? Math.Min(100, rj) : (int?)null;
+                    break;
+                case "repeatPositionJitterPx":
+                    // Empty / 0 → null (scatter OFF, schema-clean). Explicit > 0 → clamp 1..500
+                    // (the Clicker's position cap). Storing null when off keeps a click × N
+                    // without scatter byte-identical to a pre-feature profile.
+                    if (string.IsNullOrEmpty(value)) action.RepeatPositionJitterPx = null;
+                    else if (int.TryParse(value, out int rpj)) action.RepeatPositionJitterPx = rpj > 0 ? Math.Min(500, rpj) : (int?)null;
                     break;
                 case "waitImageSearchRegion":
                     // Value format: "x,y,w,h" (all ints) — or empty string to clear.

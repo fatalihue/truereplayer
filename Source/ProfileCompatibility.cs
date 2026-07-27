@@ -219,6 +219,15 @@ namespace TrueReplayer.Services
                  string.Equals(a.ActionType, "DoubleClick", StringComparison.OrdinalIgnoreCase))),
                 new Version(2, 9, 6), "Click repeat (× N)"),
 
+            // Click × N POSITION jitter (RepeatPositionJitterPx > 0) — an older build drops the
+            // unknown property and fires every repeat at the SAME exact pixel instead of the
+            // intended ±px scatter. Same silent-divergence class as the gap-jitter pin above:
+            // the profile still runs, it just runs with the bot signature the user turned this
+            // on to remove. Property-level Detect so plain click × N rows keep the 2.9.6 floor.
+            // Introduced after 2.9.7 — bump at release.
+            (p => p.Actions.Any(a => a.RepeatPositionJitterPx is int rp && rp > 0),
+                new Version(2, 9, 7), "Click repeat position jitter"),
+
             // DoubleClick (two press/release pairs replayed as one row) shipped in 2.5.4 —
             // older builds have no replay switch case and would silently skip it.
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "DoubleClick", StringComparison.OrdinalIgnoreCase)),

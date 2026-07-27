@@ -48,6 +48,11 @@ export interface ActionItem {
   // off (fixed gap). Only meaningful when repeatCount > 1. Mirrors RepeatDelayJitterPct on
   // the C# side; a constant gap is the clearest "it's a bot" tell, this scatters it.
   repeatDelayJitterPct?: number | null;
+  // Combined click (Left/Right/Middle/Double) with repeatCount > 1: random ±px scatter applied
+  // to the click POINT on every repeat cycle (1..500). null/undefined/0 = off (exact point).
+  // Mirrors RepeatPositionJitterPx on the C# side — the positional twin of repeatDelayJitterPct:
+  // scattering only the timing still leaves every click on one exact pixel.
+  repeatPositionJitterPx?: number | null;
   // HoldKey action: how long the key stays pressed before the matching KEYUP fires.
   // 0/undefined = use the C# default (1000 ms; matches ActionItem.DefaultHoldDurationMs).
   // Clamped 10..60000 ms on every edit surface (dialog, inline, bridge).

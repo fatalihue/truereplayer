@@ -455,6 +455,22 @@ namespace TrueReplayer.Models
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public int? RepeatDelayJitterPct { get; set; }
 
+        // Click × N: random ±px scatter applied to the click POINT on every repeat cycle, so a
+        // burst doesn't hammer one exact pixel — the positional twin of RepeatDelayJitterPct
+        // (which only scatters the timing). Together they make a "click 3× here" read like a
+        // human tapping the same region instead of a macro hitting one coordinate on a fixed
+        // metronome. Same ±radius-per-axis model the Clicker's Position jitter uses. null/0 =
+        // off (exact coordinate, the pre-feature behaviour). Clamped 0..500 on edit — matching
+        // the Clicker's MAX_POSITION_PX, past which the Area tool is the right instrument.
+        // Only consulted when RepeatCount > 1: a single-shot click must keep its exact point
+        // (that's also what makes it safe for ActionModeConverter to split a RepeatCount == 1
+        // click into Down/Up halves, whose replay cases don't jitter).
+        // Nullable + WhenWritingNull keeps profiles written before this feature schema-clean,
+        // and lets an older build's "drops unknown property → fixed point" divergence be gated
+        // in ProfileCompatibility.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? RepeatPositionJitterPx { get; set; }
+
         // HoldKey action: how long the key stays pressed before the replay engine fires
         // the matching KEYUP. Replaces the two-row "KeyDown + KeyUp (delay = hold)" pattern
         // with a single atomic row whose Value column reads "W · 1.5s hold". 0 = use the
@@ -829,6 +845,7 @@ namespace TrueReplayer.Models
             RunOverData = RunOverData,
             RepeatDelayMs = RepeatDelayMs,
             RepeatDelayJitterPct = RepeatDelayJitterPct,
+            RepeatPositionJitterPx = RepeatPositionJitterPx,
             HoldDurationMs = HoldDurationMs,
             RecordedAt = RecordedAt,
         };

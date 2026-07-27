@@ -64,12 +64,16 @@ const DEFAULT_DOUBLECLICK_GAP_MS = 600;  // matches ActionItem.DefaultDoubleClic
                                          // DoubleClick needs a gap above the OS double-click window
                                          // so repeats register as DISTINCT double-clicks, not a blur
 const DEFAULT_CLICK_JITTER_PCT = 20;     // seeded into the input when the user turns jitter ON
+const DEFAULT_CLICK_POS_JITTER_PX = 3;   // seeded when the user turns POSITION jitter ON — a few px
+                                         // keeps the burst inside any real target; the cap is 500
+                                         // (MAX_POSITION_PX, the Clicker's own position ceiling)
 // Per-type default gap so the C# null-fallback and this input agree (else a "leave at default"
 // round-trips to the wrong value). Keep in lockstep with ExecuteRepeated's defaultGap on the C# side.
 const clickDefaultGap = (type: string) => type === 'DoubleClick' ? DEFAULT_DOUBLECLICK_GAP_MS : DEFAULT_CLICK_GAP_MS;
 const clampRepeatCount = (v: number) => Math.max(1, Math.min(999, Math.floor(v)));
 const clampRepeatGap = (v: number) => Math.max(0, Math.min(5000, Math.floor(v)));
 const clampRepeatJitter = (v: number) => Math.max(1, Math.min(100, Math.floor(v)));
+const clampRepeatPosJitter = (v: number) => Math.max(1, Math.min(500, Math.floor(v)));
 
 // Semantic result-card colouring via theme tokens — success = replay green, failure/error =
 // recording red. Matches the inline-style pattern the foot-gun cards already use, so no
@@ -167,7 +171,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const [y, setY] = useState('');
   const [delay, setDelay] = useState('');
   const [comment, setComment] = useState('');
-  // Click × N — inline repeat of this click (Times / Gap / Gap-jitter), mirroring Keystroke × N.
+  // Click × N — inline repeat of this click (Times / Gap / Gap-jitter / Position-jitter),
+  // mirroring Keystroke × N (which has no position axis).
   // Held locally during edit; persisted via actions:edit on Save. Jitter is two-track (on/off + %)
   // like the Keystroke dialog so toggling off and back on restores the last %. Only surfaced for
   // the repeatable clicks — Left/Right/Middle + DoubleClick (see isRepeatableClick).
@@ -175,6 +180,11 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const [repeatGapMs, setRepeatGapMs] = useState(DEFAULT_CLICK_GAP_MS);
   const [jitterOn, setJitterOn] = useState(false);
   const [jitterPct, setJitterPct] = useState(DEFAULT_CLICK_JITTER_PCT);
+  // Position jitter — the positional twin of the gap jitter above (±px scatter on the click
+  // POINT, re-rolled each cycle). Same two-track on/off + value shape so toggling off and back
+  // on restores the last px value.
+  const [posJitterOn, setPosJitterOn] = useState(false);
+  const [posJitterPx, setPosJitterPx] = useState(DEFAULT_CLICK_POS_JITTER_PX);
   const [timeout, setTimeout_] = useState('');
   const [confidence, setConfidence] = useState('');
   const [browserText, setBrowserText] = useState('');
@@ -530,6 +540,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       setRepeatGapMs(action.repeatDelayMs ?? clickDefaultGap(action.actionType));
       setJitterOn((action.repeatDelayJitterPct ?? 0) > 0);
       setJitterPct(action.repeatDelayJitterPct && action.repeatDelayJitterPct > 0 ? action.repeatDelayJitterPct : DEFAULT_CLICK_JITTER_PCT);
+      setPosJitterOn((action.repeatPositionJitterPx ?? 0) > 0);
+      setPosJitterPx(action.repeatPositionJitterPx && action.repeatPositionJitterPx > 0 ? action.repeatPositionJitterPx : DEFAULT_CLICK_POS_JITTER_PX);
       // Timeout edited in milliseconds (matches the grid + dialogs). Pause defaults
       // to 0 (infinite); other actions default to 5000ms.
       setTimeout_(action.actionType === 'Pause'
@@ -697,9 +709,9 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // DoubleClick). Gated on the CURRENT actionType (re-derived here; isRepeatableClick is declared
     // further down, a forward reference) so switching the picker to a NON-repeatable type (a paired
     // half) before Save never writes a repeat onto it. Diff-based like every field above (unchanged
-    // → no message → clean profile); the gap default is per-type (DoubleClick = 600 ms). Jitter
-    // collapses to 0 when off or Times <= 1; the bridge stores 0 as null (schema-clean), matching a
-    // pre-feature single click byte-for-byte.
+    // → no message → clean profile); the gap default is per-type (DoubleClick = 600 ms). Both
+    // jitters collapse to 0 when off or Times <= 1; the bridge stores 0 as null (schema-clean),
+    // matching a pre-feature single click byte-for-byte.
     if (REPEATABLE_CLICKS.has(actionType)) {
       const effRepeat = clampRepeatCount(repeatCount);
       if (effRepeat !== (action.repeatCount ?? 1)) {
@@ -712,6 +724,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       const effJitter = jitterOn && effRepeat > 1 ? clampRepeatJitter(jitterPct) : 0;
       if (effJitter !== (action.repeatDelayJitterPct ?? 0)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'repeatDelayJitterPct', value: String(effJitter) } });
+      }
+      const effPosJitter = posJitterOn && effRepeat > 1 ? clampRepeatPosJitter(posJitterPx) : 0;
+      if (effPosJitter !== (action.repeatPositionJitterPx ?? 0)) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'repeatPositionJitterPx', value: String(effPosJitter) } });
       }
     }
 
@@ -1107,7 +1123,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // from actionType + action.conditionType which are already in the array, so the
     // callback rebinds whenever those change. Listing the derived flags would also
     // be a forward-reference error (they're declared further down the component body).
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, repeatCount, repeatGapMs, jitterOn, jitterPct, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, assertOnFail, alternatives, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, repeatCount, repeatGapMs, jitterOn, jitterPct, posJitterOn, posJitterPx, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, assertOnFail, alternatives, send, onClose]);
 
   // Are there edits the Save-Changes button would persist? MIRRORS handleSave's diffs
   // exactly (same guards/normalisation), returning true on the first field that differs —
@@ -1150,6 +1166,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       if (effGap !== (action.repeatDelayMs ?? clickDefaultGap(actionType))) return true;
       const effJitter = jitterOn && effRepeat > 1 ? clampRepeatJitter(jitterPct) : 0;
       if (effJitter !== (action.repeatDelayJitterPct ?? 0)) return true;
+      const effPosJitter = posJitterOn && effRepeat > 1 ? clampRepeatPosJitter(posJitterPx) : 0;
+      if (effPosJitter !== (action.repeatPositionJitterPx ?? 0)) return true;
     }
 
     if (actionType === 'WaitImage' || _isIfImage) {
@@ -1339,7 +1357,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     }
 
     return false;
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, repeatCount, repeatGapMs, jitterOn, jitterPct, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, windowVerb, matchIndex, assertOnFail, alternatives]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, repeatCount, repeatGapMs, jitterOn, jitterPct, posJitterOn, posJitterPx, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, windowVerb, matchIndex, assertOnFail, alternatives]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
@@ -3857,9 +3875,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               auto-Clicker's spam mode), mirroring Keystroke × N. Single clicks (Left/Right/Middle)
               AND DoubleClick reach here (isRepeatableClick); paired halves are excluded. The replay
               engine loops the whole click (down→up + focus tap if on, or the full double-click)
-              Times times with the Gap between cycles, applying the optional ±% jitter. DoubleClick
-              defaults to a larger Gap so repeats stay distinct. Reuses the Send Keystroke dialog's
-              exact NumberInput + enable-dot pattern. Gap/Jitter dim until Times > 1. */}
+              Times times with the Gap between cycles, applying the optional ±% gap jitter and ±px
+              position jitter. DoubleClick defaults to a larger Gap so repeats stay distinct. Reuses
+              the Send Keystroke dialog's exact NumberInput + enable-dot pattern. Gap and both
+              jitters dim until Times > 1. */}
           {isRepeatableClick && (
             <div className="flex flex-col gap-2.5">
               <div className="label-micro text-text-tertiary">Repeat</div>
@@ -3931,6 +3950,43 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   inputWidth="w-24"
                   inputHeight="h-8"
                   ariaLabel="Gap jitter (%)"
+                />
+              </div>
+              {/* Position jitter — the positional twin of Gap jitter, same row format (enable dot
+                  RIGHT of the label, inert until Times > 1). Scatters the click POINT by ±px on
+                  every cycle, so "click × 3" lands on three nearby pixels of the same target
+                  instead of hammering one exact coordinate — scattering only the timing still
+                  leaves a perfectly fixed position, which is the other half of the bot signature.
+                  OFF by default: pure desktop automation wants the exact point. */}
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => setPosJitterOn(v => !v)}
+                  disabled={repeatCount <= 1}
+                  aria-pressed={posJitterOn}
+                  className="flex items-center gap-1.5 disabled:cursor-not-allowed"
+                  data-tip={tt('Random ±px on the click point — less robotic.', 'Variação ±px aleatória no ponto do clique — menos robótico.')}
+                >
+                  <span className={`text-[12px] font-medium transition-colors ${posJitterOn && repeatCount > 1 ? 'text-text-secondary' : 'text-text-tertiary'}`}>
+                    Position jitter
+                  </span>
+                  <span
+                    className="w-2 h-2 rounded-full block shrink-0 transition-colors"
+                    style={posJitterOn && repeatCount > 1
+                      ? { background: 'var(--color-accent-solid)' }
+                      : { background: 'transparent', border: '1.5px solid var(--color-text-tertiary)' }}
+                  />
+                </button>
+                <NumberInput
+                  value={posJitterPx}
+                  onChange={(n) => setPosJitterPx(clampRepeatPosJitter(n))}
+                  min={1}
+                  max={500}
+                  disabled={!posJitterOn || repeatCount <= 1}
+                  suffix="px" suffixInside
+                  inputWidth="w-24"
+                  inputHeight="h-8"
+                  ariaLabel="Position jitter (px)"
                 />
               </div>
             </div>
