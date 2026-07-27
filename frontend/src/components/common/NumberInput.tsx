@@ -195,8 +195,15 @@ export function NumberInput({
   // Built once so it can render bare (default) or wrapped with an inside unit (suffixInside).
   // Wrapped: the input goes borderless + right-aligned and the bordered box moves to the
   // wrapper, so the dim "ms" span sits inside the same border as the number.
+  // NOTE the deliberate absence of ${inputHeight} on the inside-layout input: the WRAPPER owns
+  // the height there. Giving the input the same h-8 made its BORDER-box (32px) taller than the
+  // wrapper's CONTENT box (32px minus the 1px top/bottom border = 30px); under `items-stretch`
+  // an explicit height pins the item to the cross-start, so it overflowed 2px at the bottom and
+  // the value — which the native input centres inside its OWN box — rendered exactly 1px below
+  // the centre of the visible bordered box. Measured live at 1.0px on every field. Letting
+  // stretch size it to the content box puts the value dead centre.
   const inputClassName = insideLayout
-    ? `flex-1 min-w-0 ${inputHeight} pl-1.5 pr-1 text-right text-xs font-mono text-text-primary bg-transparent border-0 outline-none tabular-nums`
+    ? `flex-1 min-w-0 pl-1.5 pr-1 text-right text-xs font-mono text-text-primary bg-transparent border-0 outline-none tabular-nums`
     : `${inputWidth} ${inputHeight} px-1 text-center text-xs font-mono text-text-primary bg-bg-input border border-border-default outline-none focus:border-accent-solid focus:z-10 tabular-nums disabled:opacity-50`;
   const inputEl = (
     <input
@@ -244,13 +251,14 @@ export function NumberInput({
         <span className={`${inputWidth} ${inputHeight} inline-flex items-stretch overflow-hidden bg-bg-input border border-border-default focus-within:border-accent-solid focus-within:z-10 ${disabled ? 'opacity-50' : ''}`}>
           {inputEl}
           {suffixInside && text !== '' && suffix && (
-            // relative top-[2px]: the value (text-xs) and the unit (text-[10px]) are each vertically
+            // relative top-[1px]: the value (text-xs) and the unit (text-[10px]) are each vertically
             // centered by a DIFFERENT mechanism — the native input centers its own text, the unit is
-            // flex-self-centered — which leaves their text baselines ~2px apart (the smaller unit sits
-            // higher). Nudging the unit down by the measured 2px baseline delta makes "1.000 ms" read
-            // as one baseline-aligned line. Uniform for this 12px/10px pairing, so it holds for every
-            // suffixInside call site.
-            <span className="shrink-0 self-center relative top-[2px] select-none pointer-events-none text-[10px] text-text-tertiary font-mono pl-0.5 pr-1.5">{suffix}</span>
+            // flex-self-centered — which leaves their text baselines ~1px apart (the smaller unit sits
+            // higher). Nudging the unit down by that measured delta makes "1.000 ms" read as one
+            // baseline-aligned line. Uniform for this 12px/10px pairing, so it holds for every
+            // suffixInside call site. (Was 2px while the input sat 1px low — see inputClassName;
+            // centering the value absorbed exactly 1px of this nudge.)
+            <span className="shrink-0 self-center relative top-[1px] select-none pointer-events-none text-[10px] text-text-tertiary font-mono pl-0.5 pr-1.5">{suffix}</span>
           )}
           {ghostSuffix && !suffixInside && (
             <span aria-hidden="true" className="shrink-0 self-center select-none pointer-events-none text-[10px] font-mono pl-0.5 pr-1.5 invisible">{ghostSuffix}</span>
