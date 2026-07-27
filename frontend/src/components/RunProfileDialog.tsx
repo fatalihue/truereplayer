@@ -1,10 +1,11 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Repeat2 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useTt } from '../state/LanguageContext';
 import { NumberInput } from './common/NumberInput';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
+import { ProfileSearchList } from './common/ProfileSearchList';
 
 export interface RunProfileDialogProps {
   /** When set, the dialog is in edit mode for this existing action. */
@@ -28,7 +29,6 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
   const [profileName, setProfileName] = useState(initial?.profileName ?? '');
   const [repeatCount, setRepeatCount] = useState(initial?.repeatCount ?? 1);
   const [runOverData, setRunOverData] = useState(initial?.runOverData ?? false);
-  const selectRef = useRef<HTMLSelectElement>(null);
 
   // Drop self-references and disabled profiles from the picker. Disabled profiles are
   // skipped at replay time anyway (HandleRunProfile early-returns), so hiding them here
@@ -49,11 +49,8 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
     }
   }, [eligibleProfiles, profileName]);
 
-  // Focus the select over DialogShell's card focus (the shell's effect runs first,
-  // then this one wins) so arrow keys pick a profile immediately.
-  useEffect(() => {
-    selectRef.current?.focus();
-  }, []);
+  // The picker's search field autofocuses (see ProfileSearchList autoFocus) over
+  // DialogShell's card focus, so the user can type to filter immediately.
 
   const canConfirm = profileName.trim().length > 0 && repeatCount >= 1;
 
@@ -101,22 +98,20 @@ export function RunProfileDialog({ initial, excludeProfileName, onConfirm, onClo
           </div>
         ) : (
           <>
+            {/* Search-and-pick instead of a native <select>: the OS dropdown has no filter,
+                so picking one of ~80 profiles meant scrolling a wall of names. Same
+                type-to-narrow behaviour as the Profiles panel and the export dialog. */}
             <div className="flex flex-col gap-1.5">
               <label className="text-[10px] uppercase tracking-wide font-semibold text-text-tertiary">
                 Profile to run
               </label>
-              <select
-                ref={selectRef}
-                value={profileName}
-                onChange={(e) => setProfileName(e.target.value)}
-                className="h-8 px-2 text-xs text-text-primary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid"
-              >
-                {eligibleProfiles.map((p) => (
-                  <option key={p.name} value={p.name}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+              <ProfileSearchList
+                profiles={eligibleProfiles.map((p) => p.name)}
+                value={profileName || null}
+                onChange={setProfileName}
+                autoFocus
+                ariaLabel={tt('Profile to run', 'Profile a executar')}
+              />
             </div>
 
             <div className="flex flex-col gap-1.5">

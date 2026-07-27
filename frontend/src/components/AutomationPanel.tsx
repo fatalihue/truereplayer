@@ -8,6 +8,7 @@ import { Button } from './common/Button';
 import { Toggle } from './common/Toggle';
 import { SegmentedControl } from './common/SegmentedControl';
 import { NumberInput } from './common/NumberInput';
+import { ProfileSearchList } from './common/ProfileSearchList';
 import { Field } from './sheet/Field';
 import { WindowTargetFields } from './WindowTargetFields';
 import { ImageCropper } from './ImageCropper';
@@ -303,24 +304,38 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
         <div className="w-72 shrink-0 border-r border-border-subtle flex flex-col min-h-0">
           <div className="p-2 border-b border-border-subtle">
             {addOpen ? (
-              <select
-                autoFocus
-                className={inputCls}
-                value=""
-                onChange={(e) => {
-                  const name = e.target.value;
-                  setAddOpen(false);
-                  if (!name) return;
-                  setNewDraftProfile(name);
-                  setSelected(name);
-                }}
-                onBlur={() => setAddOpen(false)}
-              >
-                <option value="">{tt('Pick a profile…', 'Escolha um profile…')}</option>
-                {profilesWithoutTrigger.map((n) => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </select>
+              // Search-and-pick instead of a native <select>: the OS dropdown has no filter,
+              // so choosing among ~80 profiles meant scrolling a wall of names. Same
+              // type-to-narrow behaviour as the Profiles panel and the export dialog.
+              // Dismissal is the ✕ or Esc — NOT blur, which a click on a list row also fires.
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="label-micro text-text-tertiary flex-1">
+                    {tt('Pick a profile', 'Escolha um profile')}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setAddOpen(false)}
+                    aria-label={tt('Cancel', 'Cancelar')}
+                    className="text-text-disabled hover:text-text-secondary transition-colors shrink-0"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                <ProfileSearchList
+                  profiles={profilesWithoutTrigger}
+                  value={null}
+                  onChange={(name) => {
+                    setAddOpen(false);
+                    setNewDraftProfile(name);
+                    setSelected(name);
+                  }}
+                  autoFocus
+                  onCancel={() => setAddOpen(false)}
+                  listMaxHeightClass="max-h-[220px]"
+                  ariaLabel={tt('Profiles without an automation', 'Profiles sem automação')}
+                />
+              </div>
             ) : (
               <Button variant="secondary" size="sm" onClick={() => setAddOpen(true)}
                 disabled={profilesWithoutTrigger.length === 0}>
