@@ -637,6 +637,7 @@ namespace TrueReplayer
                     case "replay:resume": HandleReplayResume(payload); break;
                     case "replay:inputResult": HandleInputResult(payload); break;
                     case "replay:variablesRequest": replayService.RequestVariablesSnapshot(); break;
+                    case "replay:reportRequest": PushRunReport(); break;
                     case "clicker:pause": replayService.PauseClicker(); break;
                     case "actions:clear": HandleActionsClear(); break;
                     case "actions:undo": HandleUndo(); break;
@@ -847,6 +848,11 @@ namespace TrueReplayer
                 // has already fired on its own by then; just clear the chime-suppression flag
                 // so it can't mute the NEXT run's ordinary cue.
                 _lapNoticeJustFired = false;
+            // Push the run report as the run ENDS, so the panel is already populated when the user
+            // opens it after watching something fail — asking them to hit refresh at the moment
+            // they most want an answer is the wrong shape. Cheap: one message per run, and only
+            // when a run actually finished.
+            if (status == "ready" && _lastRunStatus == "replaying") PushRunReport();
             _lastRunStatus = status;
 
             // Reflect the live run-state in the tray hover tooltip (Replaying…/Recording…/idle).
@@ -1313,6 +1319,34 @@ namespace TrueReplayer
                 profileController.ProfileEntries.Select(p => p.Name).ToList());
             PushAutomationState();
             TrayIconService.UpdateTrayIcon();
+        }
+
+        /// <summary>
+        /// Projects the last run's step records to the UI. Named fields rather than the record
+        /// object so the DTO stays explicit — the same convention every other push here follows.
+        /// </summary>
+        public void PushRunReport()
+        {
+            var (steps, overflow, startedAt) = replayService.GetRunReport();
+            SendMessage("replay:report", new
+            {
+                profile = CurrentProfileName,
+                startedAt = steps.Count > 0 ? startedAt.ToString("o") : null,
+                overflow,
+                steps = steps.Select(s => new
+                {
+                    row = s.Row,
+                    actionType = s.ActionType,
+                    detail = s.Detail,
+                    status = s.Status,
+                    durationMs = s.DurationMs,
+                    errorCode = s.ErrorCode,
+                    errorMessage = s.ErrorMessage,
+                    tip = s.Tip,
+                    matchedSelector = s.MatchedSelector,
+                    matchedTier = s.MatchedTier,
+                }).ToArray(),
+            });
         }
 
         private async void HandleAutomationSave(JsonElement payload)

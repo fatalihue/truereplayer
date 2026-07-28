@@ -104,6 +104,10 @@ namespace TrueReplayer.Services
     {
         private readonly ObservableCollection<ActionItem> actions;
         private readonly ActionReplayer replayer;
+
+        /// <summary>Last run's per-step diagnostics — see ActionReplayer.RunStepRecord.</summary>
+        public (List<ActionReplayer.RunStepRecord> Steps, int Overflow, DateTime StartedAt) GetRunReport()
+            => replayer.GetRunReport();
         private readonly DispatcherQueue dispatcherQueue;
         private readonly Action updateButtonStates;
         private readonly Action<string>? onStatusChanged;
@@ -1295,6 +1299,117 @@ namespace TrueReplayer.Services
         private Action<List<string>>? _onChainChanged;
 
         public event Action<ActionItem>? OnActionExecuting;
+
+        // ── Run report ──────────────────────────────────────────────────────────────────────
+        //
+        // One record per executed action, kept for the LAST run only. It exists because a browser
+        // macro that breaks on DOM drift is otherwise undiagnosable after the fact: the engine
+        // already computes which selector tier matched, which structured error code came back and
+        // what the tip was, and then throws all of it away — the fallback match is written to the
+        // session log and the success payload is dropped on the floor at the call site.
+        //
+        // Deliberately in memory and last-run-only: this is a debugging aid for the run you just
+        // watched fail, not an audit trail. Persisting it would need a retention policy, a size
+        // budget and a privacy answer (steps carry resolved text), none of which a diagnostic
+        // panel is worth.
+        public sealed class RunStepRecord
+        {
+            public int Row { get; set; }                  // 1-based grid row
+            public string ActionType { get; set; } = "";
+            public string? Detail { get; set; }           // selector / key / short label
+            public string Status { get; set; } = "ok";    // ok | failed | skipped
+            public long DurationMs { get; set; }
+            // Browser diagnostics — null for every other action type.
+            public string? ErrorCode { get; set; }        // ELEMENT_NOT_FOUND / HIDDEN / DISABLED / …
+            public string? ErrorMessage { get; set; }
+            public string? Tip { get; set; }
+            // Set when the PRIMARY selector failed and a fallback tier matched instead: the single
+            // most useful signal that a selector is drifting and should be re-picked.
+            public string? MatchedSelector { get; set; }
+            public string? MatchedTier { get; set; }
+        }
+
+        // Bounded so a long-running loop cannot grow it without limit. When the cap is hit we stop
+        // appending and count the overflow rather than dropping the FIRST steps — the beginning of
+        // a run is where the setup that caused a later failure usually is.
+        private const int MaxRunStepRecords = 500;
+        private readonly List<RunStepRecord> _runSteps = new();
+        private int _runStepsOverflow;
+        private DateTime _runStartedAt;
+
+        /// <summary>Snapshot of the last run's step records (a copy — the list keeps mutating).</summary>
+        public (List<RunStepRecord> Steps, int Overflow, DateTime StartedAt) GetRunReport()
+        {
+            lock (_runSteps) return (new List<RunStepRecord>(_runSteps), _runStepsOverflow, _runStartedAt);
+        }
+
+        private void ResetRunReport()
+        {
+            lock (_runSteps)
+            {
+                _runSteps.Clear();
+                _runStepsOverflow = 0;
+                _runStartedAt = DateTime.Now;
+            }
+        }
+
+        private void RecordRunStep(RunStepRecord rec)
+        {
+            lock (_runSteps)
+            {
+                if (_runSteps.Count >= MaxRunStepRecords) { _runStepsOverflow++; return; }
+                _runSteps.Add(rec);
+            }
+        }
+
+        /// <summary>
+        /// The one-line "what did this step act on" for the report. Kept SHORT and, for anything
+        /// that types, kept to the RAW authored text — never the resolved value, which is where a
+        /// password or a customer's details would be.
+        /// </summary>
+        private static string? DescribeStepDetail(ActionItem a)
+        {
+            static string? Clip(string? s, int max = 60)
+            {
+                if (string.IsNullOrEmpty(s)) return null;
+                s = s.Replace("\r", " ").Replace("\n", " ").Trim();
+                return s.Length <= max ? s : s.Substring(0, max) + "…";
+            }
+            switch (a.ActionType)
+            {
+                case "BrowserClick":
+                case "BrowserRightClick":
+                case "BrowserType":
+                case "BrowserWaitElement":
+                case "BrowserSelectOption":
+                case "BrowserAssert":
+                    return Clip(a.Key);                       // the selector
+                case "BrowserNavigate":
+                    return Clip(a.BrowserText ?? a.Key);      // the URL
+                case "LeftClick":
+                case "RightClick":
+                case "MiddleClick":
+                case "DoubleClick":
+                    return $"{a.X}, {a.Y}";
+                case "Keystroke":
+                case "KeyDown":
+                case "KeyUp":
+                case "HoldKey":
+                    return Clip(a.Key, 30);
+                case "SetVariable":
+                case "CopyToSlot":
+                    return Clip(a.Key, 30);
+                case "RunProfile":
+                case "ActivateWindow":
+                case "WaitImage":
+                case "WaitPixelColor":
+                case "If":
+                case "Assert":
+                    return Clip(a.Comment) ?? Clip(a.Key, 30);
+                default:
+                    return null;                              // SendText etc — the text is the payload
+            }
+        }
         public event Action<string, int>? OnReplayPaused;
         public event Action? OnReplayResumed;
         // Surfaced when an action can't proceed for a structural reason (e.g. profile uses
@@ -1581,6 +1696,7 @@ namespace TrueReplayer.Services
                 _rowFaulted = false;
                 _rowFaultReason = null;
                 _softFaultOverride = false;
+                ResetRunReport();          // the report describes THIS run only
                 PushVariablesSnapshot(force: true); // live pane: run started, variables cleared
 
                 // Data-loop CURSOR (Model B): table present but "loop over data" OFF → this
@@ -1940,6 +2056,17 @@ namespace TrueReplayer.Services
                 dispatcherQueue.TryEnqueue(() => OnActionExecuting?.Invoke(action));
                 InputHookManager.IsReplayingAction = true;
 
+                // Run report — one record per action. The stopwatch wraps ONLY the switch, so the
+                // number is the action's own cost and not the Delay the user configured before it
+                // (which is already visible in the grid and would swamp the interesting part).
+                var stepRec = new RunStepRecord
+                {
+                    Row = i + 1,
+                    ActionType = action.ActionType ?? "",
+                    Detail = DescribeStepDetail(action),
+                };
+                var stepWatch = System.Diagnostics.Stopwatch.StartNew();
+
                 try
                 {
                     switch (action.ActionType)
@@ -2126,14 +2253,51 @@ namespace TrueReplayer.Services
                                 if ((action.ActionType == "BrowserType" || action.ActionType == "BrowserSelectOption")
                                     && !string.IsNullOrEmpty(action.BrowserText))
                                     resolvedText = await ResolveBrowserTextPlaceholders(action.BrowserText);
-                                await _browserBridge.ExecuteBrowserCommandAsync(action, token, action.Timeout > 0 ? action.Timeout : 5000, resolvedText);
+                                // The result was previously discarded. It carries matchedVia — WHICH
+                                // selector tier actually matched — which is the single most useful
+                                // thing to know when a macro starts failing on DOM drift, because a
+                                // fallback match means the primary selector is already dead.
+                                var browserResult = await _browserBridge.ExecuteBrowserCommandAsync(
+                                    action, token, action.Timeout > 0 ? action.Timeout : 5000, resolvedText);
+                                if (browserResult.ValueKind == System.Text.Json.JsonValueKind.Object
+                                    && browserResult.TryGetProperty("matchedVia", out var mvEl)
+                                    && mvEl.ValueKind == System.Text.Json.JsonValueKind.Object)
+                                {
+                                    stepRec.MatchedSelector = mvEl.TryGetProperty("selector", out var mvS) ? mvS.GetString() : null;
+                                    stepRec.MatchedTier = mvEl.TryGetProperty("tier", out var mvT) ? mvT.GetString() : null;
+                                }
                             }
                             break;
                     }
                 }
+                catch (BrowserActionException bex)
+                {
+                    // Record the STRUCTURED diagnosis before it is flattened into a message string
+                    // higher up. Rethrow untouched — the failure policy above this frame is what
+                    // decides whether the run halts or the data-loop row is skipped.
+                    stepRec.Status = "failed";
+                    stepRec.ErrorCode = bex.Code;
+                    stepRec.ErrorMessage = bex.Message;
+                    stepRec.Tip = bex.Tip;
+                    throw;
+                }
+                catch (OperationCanceledException)
+                {
+                    stepRec.Status = "skipped";   // user stop or a fault policy cancelling the run
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    stepRec.Status = "failed";
+                    stepRec.ErrorMessage = ex.Message;
+                    throw;
+                }
                 finally
                 {
                     InputHookManager.IsReplayingAction = false;
+                    stepWatch.Stop();
+                    stepRec.DurationMs = stepWatch.ElapsedMilliseconds;
+                    RecordRunStep(stepRec);
                 }
             }
         }

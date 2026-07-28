@@ -412,6 +412,30 @@ export interface SettingsState {
 
 // ── Automation (trigger daemon) ──
 
+/** One executed action in the last run's report. Mirrors ActionReplayer.RunStepRecord. */
+export interface RunStep {
+  row: number;                    // 1-based grid row
+  actionType: string;
+  detail: string | null;          // selector / coords / key — never a resolved value
+  status: 'ok' | 'failed' | 'skipped';
+  durationMs: number;
+  // Browser diagnostics; null for every other action type.
+  errorCode: string | null;       // ELEMENT_NOT_FOUND / HIDDEN / DISABLED / COVERED / …
+  errorMessage: string | null;
+  tip: string | null;
+  /** Set only when the PRIMARY selector failed and a fallback tier matched — the signal that
+   *  the selector is drifting and should be re-picked before the fallbacks drift too. */
+  matchedSelector: string | null;
+  matchedTier: string | null;
+}
+
+export interface RunReport {
+  profile: string;
+  startedAt: string | null;       // ISO; null when no run has been recorded yet
+  overflow: number;               // steps dropped past the cap
+  steps: RunStep[];
+}
+
 /** Per-profile automation trigger config — mirrors ProfileTriggerConfig on the backend. */
 export interface TriggerConfig {
   kind: 'interval' | 'schedule' | 'condition';
@@ -581,6 +605,7 @@ export type IncomingMessage =
   | { type: 'automation:state'; payload: AutomationState }
   // Tray "Automations…" clicked — restore + open the Automation panel.
   | { type: 'automation:open'; payload: Record<string, never> }
+  | { type: 'replay:report'; payload: RunReport }
   // Reply to automation:captureImage (region overlay). imagePath is the saved PNG's
   // per-profile relative path, ready to store on the trigger config.
   | { type: 'automation:imageCaptured'; payload: { requestId: string; cancelled: boolean; imagePath?: string; imageBase64?: string } }
@@ -681,6 +706,7 @@ export type OutgoingMessage =
   | { type: 'ui:ready'; payload: Record<string, never> }
   | { type: 'data:request'; payload: Record<string, never> }
   | { type: 'data:save'; payload: ProfileDataTable }
+  | { type: 'replay:reportRequest'; payload: Record<string, never> }
   | { type: 'automation:request'; payload: Record<string, never> }
   // trigger=null removes the automation from the profile.
   | { type: 'automation:save'; payload: { profile: string; trigger: TriggerConfig | null } }

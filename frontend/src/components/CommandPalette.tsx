@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   Search, RotateCcw, Download, Upload, RefreshCw,
   ClipboardPaste, Files, Replace, Table2,
-  Combine, Split, ScrollText, Activity,
+  Combine, Split, ScrollText, Activity, ListChecks,
 } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -183,6 +183,15 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             keywords: ['debug', 'variables', 'slots', 'clip', 'watch', 'row'],
             icon: <Activity size={14} className="text-text-secondary" />,
             onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:livevars')); },
+          },
+          {
+            // Last-run step timeline. Palette-only for the same reason as Live Variables: it is
+            // a diagnostic you reach for AFTER something went wrong, so it earns no permanent
+            // toolbar real estate.
+            id: 'runreport', label: 'Run report',
+            keywords: ['debug', 'trace', 'timeline', 'selector', 'browser', 'failed', 'why', 'relatorio'],
+            icon: <ListChecks size={14} className="text-text-secondary" />,
+            onAction: () => { onClose(); window.dispatchEvent(new CustomEvent('cmd:runreport')); },
           },
           {
             // Recovery hatch for a wedged WebView2 UI.

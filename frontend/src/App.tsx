@@ -20,6 +20,7 @@ import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { UpdateOverlay } from './components/UpdateOverlay';
 import { AskInputHost } from './components/AskInputDialog';
 import { LiveVariablesHost } from './components/LiveVariablesPanel';
+import { RunReportPanel } from './components/RunReportPanel';
 import { ExtensionUpdateBanner } from './components/ExtensionUpdateBanner';
 import { ClickerDashboard } from './components/ClickerDashboard';
 import { CommandPalette } from './components/CommandPalette';
@@ -96,6 +97,15 @@ function AppShell() {
       if (msg.type === 'automation:open') setShowAutomation(true);
     });
   }, [subscribe]);
+
+  // Run report — palette-only (Ctrl+K → "Run report"), same doctrine as Live Variables:
+  // a diagnostic you reach for after something failed, not a permanent control.
+  const [showRunReport, setShowRunReport] = useState(false);
+  useEffect(() => {
+    const handler = () => setShowRunReport(prev => !prev);
+    window.addEventListener('cmd:runreport', handler);
+    return () => window.removeEventListener('cmd:runreport', handler);
+  }, []);
 
   // Global keyboard handler: Ctrl+K for command palette, Ctrl+S to save profile,
   // Ctrl+Z/Y for undo/redo + block UI interaction keys.
@@ -333,6 +343,7 @@ function AppShell() {
       {showThemeEditor && <ThemeEditor onClose={() => setShowThemeEditor(false)} />}
       {showDataEditor && <DataPanel onClose={() => setShowDataEditor(false)} />}
       {showAutomation && <AutomationPanel onClose={() => setShowAutomation(false)} />}
+      {showRunReport && <RunReportPanel onClose={() => setShowRunReport(false)} />}
       <UpdateOverlay />
       <AskInputHost />
       <LiveVariablesHost />
