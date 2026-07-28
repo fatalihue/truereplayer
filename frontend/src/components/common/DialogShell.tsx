@@ -32,6 +32,13 @@ export interface DialogShellProps {
   maxWidthClass?: string;
   /** Called after the exit animation completes (or immediately when animations are off). */
   onClose: () => void;
+  /** Veto a dismissal BEFORE the exit animation starts. Return false to abort — nothing
+   *  visual happens and the dialog stays put. Use it for "you have unsaved changes"
+   *  prompts: intercepting `onClose` instead does NOT work, because by the time onClose
+   *  runs the shell has already committed to leaving (`leaving=true` applies the fade-out
+   *  and a 400 ms fallback timer), so a callback that declines to close leaves the dialog
+   *  faded out but still mounted — an invisible modal that traps the whole app. */
+  canClose?: () => boolean;
   /** Dismiss when the scrim is clicked. Default true; capture dialogs pass false. */
   closeOnBackdrop?: boolean;
   /** Render an X close button in the header (wired to the shell's own requestClose,
@@ -58,6 +65,7 @@ export function DialogShell({
   widthClass = 'w-[440px]',
   maxWidthClass = 'max-w-[90vw]',
   onClose,
+  canClose,
   closeOnBackdrop = true,
   showClose = false,
   scrimMouseDownGuard,
@@ -89,6 +97,9 @@ export function DialogShell({
 
   const requestClose = () => {
     if (leaving) return; // re-entry guard (double Esc, Esc during exit)
+    // Veto FIRST — before any state that commits to leaving. Everything below this line is
+    // one-way.
+    if (canClose && !canClose()) return;
     // With animations off there's no animationend to wait for — close now.
     if (document.documentElement.getAttribute('data-animations') !== 'true') {
       onClose();

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Zap, Plus, Trash2, Pipette, Camera, CircleDot, Frame, X, ScanSearch, Check } from 'lucide-react';
+import { Zap, Plus, Trash2, Pipette, Camera, CircleDot, Frame, X, ScanSearch, Check, Play } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
 import { useTt } from '../state/LanguageContext';
@@ -58,8 +58,61 @@ function defaultTrigger(): TriggerConfig {
     clipboardPattern: '',
     cooldownSeconds: 30,
     retrigger: 'edge',
+    pollIntervalMs: 0,
   };
 }
+
+// Default poll cadence per condition type — mirrors TriggerService.PollCadenceMs so the
+// placeholder shown when the field is left at 0 is the number the daemon will actually use.
+const DEFAULT_POLL_MS: Record<string, number> = { PixelColorMatch: 250, ClipboardChanged: 500 };
+const defaultPollMs = (conditionType: string | null | undefined) =>
+  DEFAULT_POLL_MS[conditionType ?? ''] ?? 1000;
+
+// The cooldown default is per-condition too (Clipboard is 5 s, everything else 30 s) — the hint
+// said 30 s for all of them, which is wrong exactly where a user is most likely to care, since a
+// clipboard watcher is the one that can fire in bursts.
+const defaultCooldownSec = (conditionType: string | null | undefined) =>
+  conditionType === 'ClipboardChanged' ? 5 : 30;
+
+/**
+ * Why a trigger cannot ever fire, or null when it can.
+ *
+ * The failure this prevents is silent and permanent: a condition whose required field is blank
+ * probes FALSE forever (WindowMatcher returns zero for a criteria-less target by design), so the
+ * watcher arms, shows Running, spins at 1 Hz and never fires — with nothing on screen saying so.
+ * ImageFound was the only family that self-reported, which taught users that silence means healthy.
+ */
+function whyCannotFire(t: TriggerConfig, tt: (en: string, pt: string) => string): string | null {
+  if (t.kind === 'schedule' && !t.timeOfDay) {
+    return tt('Pick a time of day.', 'Escolha um horário.');
+  }
+  if (t.kind !== 'condition') return null;
+  switch (t.conditionType) {
+    case 'WindowOpen':
+      return (t.windowProcessName ?? '').trim() || (t.windowTitle ?? '').trim()
+        ? null
+        : tt('Fill in a process name or a window title — with both blank this can never match.',
+             'Preencha um nome de processo ou um título de janela — com os dois vazios isto nunca casa.');
+    case 'ProcessRunning':
+      return (t.windowProcessName ?? '').trim()
+        ? null
+        : tt('Fill in a process name.', 'Preencha um nome de processo.');
+    case 'FileExists':
+      return (t.filePath ?? '').trim()
+        ? null
+        : tt('Fill in a file or folder path.', 'Preencha um caminho de arquivo ou pasta.');
+    case 'ImageFound':
+      return t.imagePath
+        ? null
+        : tt('Capture a reference image.', 'Capture uma imagem de referência.');
+    default:
+      return null;   // PixelColorMatch and ClipboardChanged are valid with their defaults
+  }
+}
+
+/** Where an interrupted navigation was headed. See the pendingNav declaration for why this is
+ *  a tagged union rather than `string | 'close'`. */
+type NavDest = { kind: 'close' } | { kind: 'row'; name: string; asNewDraft: boolean };
 
 const inputCls =
   'h-8 px-2 rounded bg-bg-input border border-border-subtle text-[12px] text-text-primary ' +
@@ -96,6 +149,19 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
   const [newDraftProfile, setNewDraftProfile] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const seededForRef = useRef<string | null>(null);
+  // Confirm gates. `confirmDelete` mirrors the action grid's Clear All popover; `pendingNav`
+  // holds the navigation an unsaved draft is blocking (a row name, or 'close') until the user
+  // decides. Both are deliberately in-panel rather than window.confirm, which DialogShell's
+  // Escape handling would race.
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // A typed destination, not a bare string: a profile can legitimately be NAMED "close", and a
+  // `string | 'close'` union collapses to `string`, so the sentinel would silently hijack it.
+  // `asNewDraft` carries the Add-automation intent through the prompt.
+  const [pendingNav, setPendingNav] = useState<NavDest | null>(null);
+  // Set by handleSave, cleared when the state echo carries the entry (or on selection change).
+  const [savedPendingEcho, setSavedPendingEcho] = useState(false);
+  // Result of a manual "Run now", shown next to the button. Cleared on selection change.
+  const [testFireResult, setTestFireResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Live status refresh while open: pushes are change-driven, so a quiet watcher's
   // nextDue countdown would go stale without a poll. 2 s is plenty.
@@ -148,6 +214,55 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
     setDirty(true);
   };
 
+  // An automation that has never been saved has unsaved work by definition — the seeded
+  // default IS a complete, valid "every 5 minutes" config. Gating Save on `dirty` alone left
+  // the button inert on the single most obvious thing to create, with no tooltip and no hint,
+  // and the only escape was to discover you must nudge a field first. `dirty` keeps meaning
+  // "the user edited something"; the Save gate is what widens.
+  const isNewDraft = selected != null && !entryByProfile.has(selected);
+  const cannotFire = draft ? whyCannotFire(draft, tt) : null;
+  // savedPendingEcho closes a gap the new-draft rule opens: handleSave clears `dirty`, but the
+  // row only stops being a "new draft" when the backend echo lands, so for those few frames the
+  // panel would still call the work unsaved — offering to save an already-saved automation and
+  // popping the discard prompt on the very next click.
+  const hasUnsavedWork = (dirty || (isNewDraft && !savedPendingEcho)) && draft != null;
+  const canSave = hasUnsavedWork && !cannotFire;
+
+  // Every exit from a dirty editor routes through here. Without it, Close, Escape (DialogShell
+  // turns a bare Esc into onClose) and a click on another row all discarded the draft in
+  // silence — including a just-captured reference image, whose PNG is already on disk and
+  // becomes an orphan, and a search region the user snapped by hand.
+  // Commit a navigation, no questions asked. seededForRef is cleared so the seed effect re-runs
+  // even when the destination equals the current selection (React bails out of a same-value
+  // setState, which would otherwise leave the "discarded" draft on screen).
+  const go = (dest: NavDest) => {
+    setPendingNav(null);
+    if (dest.kind === 'close') { onClose(); return; }
+    seededForRef.current = null;
+    if (dest.asNewDraft) setNewDraftProfile(dest.name);
+    setSelected(dest.name);
+    setDraft(entryByProfile.get(dest.name) ? { ...entryByProfile.get(dest.name)!.trigger } : defaultTrigger());
+    setDirty(false);
+  };
+
+  const navigateTo = (dest: NavDest) => {
+    // Once the prompt is up it owns the decision. Without this, DialogShell's Escape keeps
+    // calling through underneath the overlay and rewrites the pending destination to 'close' —
+    // so answering "Discard" would close the panel instead of going to the row that was clicked.
+    if (pendingNav) return;
+    // Re-selecting the row you are already on is not a navigation; prompting about it and then
+    // "discarding" would leave the edits visibly on screen.
+    if (dest.kind === 'row' && dest.name === selected && !dest.asNewDraft) return;
+    if (hasUnsavedWork) { setPendingNav(dest); return; }
+    go(dest);
+  };
+
+  const discardAndGo = (dest: NavDest) => {
+    setDirty(false);
+    if (isNewDraft) setNewDraftProfile(null);
+    go(dest);
+  };
+
   const handleSave = () => {
     if (!selected || !draft) return;
     // Armed is NOT an editor field — the list toggle is the sole arming surface
@@ -158,6 +273,7 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
     // send null instead of round-tripping the large derived blob across the bridge on every save.
     send({ type: 'automation:save', payload: { profile: selected, trigger: { ...draft, imageBase64: null, armed } } });
     setDirty(false);
+    setSavedPendingEcho(true);
     // newDraftProfile stays set until the automation:state echo lands — clearing it now
     // would drop the row from the list (entries doesn't have it yet) and blank the editor.
   };
@@ -175,8 +291,23 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
     } else {
       send({ type: 'automation:save', payload: { profile: selected, trigger: null } });
     }
+    setConfirmDelete(false);
+    setDirty(false);
     setSelected(null);
     setDraft(null);
+  };
+
+  // Fire this automation ONCE, right now, through the real trigger path — so the answer covers
+  // the gates too (busy / unsaved edits / dialog open), not just "is the condition true". The
+  // only way to validate an automation used to be to retype the schedule to two minutes out,
+  // wait, and set it back; a condition watcher could not be exercised at all.
+  const testFireReqRef = useRef<string | null>(null);
+  const runNow = () => {
+    if (!selected) return;
+    const id = `autofire-${Date.now()}`;
+    testFireReqRef.current = id;
+    setTestFireResult(null);
+    send({ type: 'automation:testFire', payload: { requestId: id, profile: selected } });
   };
 
   // ── Pick-from-screen round-trips (pixel color + image capture) ──
@@ -225,12 +356,35 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
           patch({ searchRegion: { x: r.x - m, y: r.y - m, w: r.w + m * 2, h: r.h + m * 2 } });
         }
       }
+      if (msg.type === 'automation:testFireResult' && msg.payload.requestId === testFireReqRef.current) {
+        testFireReqRef.current = null;
+        setTestFireResult({ ok: msg.payload.fired, text: msg.payload.detail });
+      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subscribe]);
 
-  // Drop a stale test-match badge when switching automations.
-  useEffect(() => { setTestMatchResult(null); }, [selected]);
+  // Drop stale badges when switching automations.
+  useEffect(() => {
+    setTestMatchResult(null);
+    setTestFireResult(null);
+    setConfirmDelete(false);
+    setSavedPendingEcho(false);
+    // Drop the in-flight correlation ids too, not just the rendered badges. The subscribe
+    // handlers match on requestId alone, so a reply that lands after the user has moved on
+    // would attach an authoritative-sounding result ("Fired — the profile is running now") to
+    // whichever automation is now on screen.
+    testFireReqRef.current = null;
+    testMatchReqRef.current = null;
+    pickReqRef.current = null;
+    regionReqRef.current = null;
+    captureReqRef.current = null;
+  }, [selected]);
+
+  // The echo landed (or the entry existed all along) — the save is no longer in flight.
+  useEffect(() => {
+    if (savedPendingEcho && selected && entryByProfile.has(selected)) setSavedPendingEcho(false);
+  }, [savedPendingEcho, selected, entryByProfile]);
 
   const pickPixel = () => {
     const id = `autopix-${Date.now()}`;
@@ -285,6 +439,14 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
       widthClass="w-[880px] h-[82vh] max-h-[780px]"
       maxWidthClass="max-w-[calc(100vw-24px)]"
       onClose={onClose}
+      // Pre-close veto, NOT an onClose that declines: DialogShell's onClose runs after it has
+      // already committed to leaving, so refusing there fades the panel out and leaves it
+      // mounted — an invisible modal over the whole app.
+      canClose={() => {
+        if (!hasUnsavedWork) return true;
+        setPendingNav({ kind: 'close' });
+        return false;
+      }}
       closeOnBackdrop={false}
       showClose
       footer={() => (
@@ -294,8 +456,14 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
               onChange={(v) => send({ type: 'automation:setEnabled', payload: { enabled: v } })} />
             <span className="text-[12px] text-text-secondary">Automations enabled</span>
           </div>
-          <Button variant="secondary" onClick={onClose}>Close</Button>
-          <Button variant="primary" onClick={handleSave} disabled={!selected || !draft || !dirty}>Save</Button>
+          <Button variant="secondary" onClick={() => navigateTo({ kind: 'close' })}>Close</Button>
+          {/* The tooltip is the point: an inert Save with no explanation was the previous
+              behaviour, and it read as a broken button rather than a blocked one. */}
+          <span data-tip={!hasUnsavedWork
+            ? tt('Nothing to save.', 'Nada para salvar.')
+            : cannotFire ?? undefined}>
+            <Button variant="primary" onClick={handleSave} disabled={!canSave}>Save</Button>
+          </span>
         </>
       )}
     >
@@ -327,8 +495,11 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                   value={null}
                   onChange={(name) => {
                     setAddOpen(false);
-                    setNewDraftProfile(name);
-                    setSelected(name);
+                    // Through the SAME gate as the other exits. Only one unsaved draft can exist
+                    // at a time, so picking a profile here replaces the current draft outright —
+                    // the very destruction the guard was added to prevent, and the one route
+                    // that still bypassed it.
+                    navigateTo({ kind: 'row', name, asNewDraft: true });
                   }}
                   autoFocus
                   onCancel={() => setAddOpen(false)}
@@ -359,14 +530,20 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                   key={name}
                   role="button"
                   tabIndex={0}
-                  onClick={() => setSelected(name)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(name); } }}
+                  onClick={() => navigateTo({ kind: 'row', name, asNewDraft: false })}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigateTo({ kind: 'row', name, asNewDraft: false }); } }}
                   className={`w-full text-left px-3 py-2 border-b border-border-subtle/60 transition-colors cursor-pointer ${
                     isSel ? 'bg-bg-elevated' : 'hover:bg-bg-elevated/50'
                   }`}
                 >
                   <div className="flex items-center gap-2">
                     <span className="text-[12px] text-text-primary truncate flex-1">{name}</span>
+                    {/* Unsaved marker — nothing in the list used to distinguish an edited row,
+                        so a draft could be abandoned without ever looking abandoned. */}
+                    {isSel && hasUnsavedWork && (
+                      <span className="text-[10px] text-accent-light shrink-0"
+                        data-tip={tt('Unsaved changes', 'Alterações não salvas')}>●</span>
+                    )}
                     {entry ? (
                       <span onClick={(e) => e.stopPropagation()}
                         data-tip={entry.isDisabled
@@ -382,14 +559,31 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                   <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-text-tertiary">
                     {entry?.running && (
                       <CircleDot size={10}
-                        className={entry.conditionTrue ? 'text-[var(--color-replay)]' : 'text-accent-light'} />
+                        className={entry.conditionTrue ? 'text-[var(--color-replay)]' : 'text-accent-light'}
+                        data-tip={entry.conditionTrue
+                          ? tt('Watching — the condition is TRUE right now', 'Vigiando — a condição está VERDADEIRA agora')
+                          : tt('Watching — the condition is false right now', 'Vigiando — a condição está falsa agora')} />
                     )}
                     <span className="truncate">
                       {trig ? kindSummary(trig, tt) : tt('not saved yet', 'ainda não salvo')}
                       {entry && entry.fireCount > 0 && ` · ${entry.fireCount}× · ${fmtWhen(entry.lastFiredAt)}`}
-                      {entry?.trigger.armed && entry.nextDueAt && ` · ${tt('next', 'próx.')} ${fmtWhen(entry.nextDueAt)}`}
+                      {entry?.trigger.armed && entry.running && entry.nextDueAt && ` · ${tt('next', 'próx.')} ${fmtWhen(entry.nextDueAt)}`}
                     </span>
                   </div>
+                  {/* Armed but NOT running is the state that reads as healthy and isn't: the toggle
+                      is on, so the row looks live, while no watcher exists. It happens for three
+                      ordinary reasons — the master switch is off, the profile is disabled, or the
+                      loop stopped itself (missing reference image, unfillable condition). Name it,
+                      instead of conveying it by the absence of a small unlabelled dot. */}
+                  {entry?.trigger.armed && !entry.running && (
+                    <div className="text-[10px] mt-0.5 truncate" style={{ color: 'var(--color-recording)' }}>
+                      {!automation.enabled
+                        ? tt('armed, but all automations are paused', 'armada, mas todas as automações estão pausadas')
+                        : entry.isDisabled
+                          ? tt('armed, but the profile is disabled', 'armada, mas o profile está desativado')
+                          : tt('armed, but not watching — see the reason below', 'armada, mas não está vigiando — veja o motivo abaixo')}
+                    </div>
+                  )}
                   {entry?.lastResult && entry.lastResult !== 'fired' && (
                     <div className="text-[10px] text-text-tertiary mt-0.5 truncate">{entry.lastResult}</div>
                   )}
@@ -421,13 +615,58 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
             // one, i.e. a switch animating on a control the user never touched. draft and
             // selected live in this component, not in the subtree, so remounting is free.
             <div key={selected} className="flex flex-col gap-4 max-w-[520px]">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div className="text-[13px] font-medium text-text-primary truncate">{selected}</div>
-                <Button variant="ghost" size="sm" onClick={handleRemove}
-                  data-tip={tt('Remove this automation (the profile itself is untouched)', 'Remove esta automação (o profile em si não é tocado)')}>
-                  <Trash2 size={12} />
-                </Button>
+                <div className="flex items-center gap-1 shrink-0">
+                  {/* Run now: the ONLY way to find out whether an automation works without
+                      waiting for its real trigger. Goes through the same fire path, so the
+                      answer includes the gates (busy / unsaved edits / dialog open) — a
+                      condition probe alone would report success on a fire that gets skipped. */}
+                  <Button variant="secondary" size="sm" onClick={runNow} disabled={isNewDraft || hasUnsavedWork}
+                    data-tip={isNewDraft || hasUnsavedWork
+                      ? tt('Save first — Run now fires the SAVED automation.', 'Salve primeiro — o Run now dispara a automação SALVA.')
+                      : tt('Fire this profile once, right now, through the automation path', 'Dispara este profile uma vez, agora, pelo caminho da automação')}>
+                    <Play size={12} /> {tt('Run now', 'Rodar agora')}
+                  </Button>
+                  {confirmDelete ? (
+                    <div className="flex items-center gap-1">
+                      <span className="text-[11px] text-text-secondary">{tt('Delete?', 'Excluir?')}</span>
+                      <Button variant="destructive" size="sm" onClick={handleRemove}>{tt('Yes', 'Sim')}</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>{tt('No', 'Não')}</Button>
+                    </div>
+                  ) : (
+                    // Confirm rather than fire-and-forget: this deletes a captured reference
+                    // image, a hand-snapped ROI and a weekday mask with no undo. The action
+                    // grid's Clear All already asks; a one-click destroy here was the outlier.
+                    <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)}
+                      data-tip={tt('Remove this automation (the profile itself is untouched)', 'Remove esta automação (o profile em si não é tocado)')}>
+                      <Trash2 size={12} />
+                    </Button>
+                  )}
+                </div>
               </div>
+
+              {testFireResult && (
+                <div className={`flex items-center gap-1.5 text-[11px] ${testFireResult.ok ? 'text-accent-light' : 'text-text-tertiary'}`}>
+                  {testFireResult.ok ? <Check size={12} /> : <X size={12} />}
+                  {testFireResult.text}
+                </div>
+              )}
+
+              {/* Stated where it is fixable, and BEFORE it can be saved. A watcher whose
+                  required field is blank probes false forever: it arms, reports Running, and
+                  never fires, with nothing on screen to say why. */}
+              {cannotFire && (
+                <div className="rounded border px-3 py-2 text-[11px] leading-relaxed"
+                  style={{
+                    color: 'var(--color-recording)',
+                    borderColor: 'color-mix(in srgb, var(--color-recording) 40%, transparent)',
+                    backgroundColor: 'color-mix(in srgb, var(--color-recording) 10%, transparent)',
+                  }}>
+                  {tt('This automation can never fire as configured. ', 'Esta automação nunca vai disparar como está. ')}
+                  {cannotFire}
+                </div>
+              )}
 
               {selectedEntry?.isDisabled && (
                 <div className="rounded border px-3 py-2 text-[11px] leading-relaxed"
@@ -697,10 +936,38 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                     </Field>
                   )}
 
-                  <Field label="Cooldown" hint={tt('Minimum gap between fires. 0 = default (30 s).', 'Intervalo mínimo entre disparos. 0 = padrão (30 s).')}>
-                    <NumberInput value={draft.cooldownSeconds} onChange={(v) => patch({ cooldownSeconds: v ?? 0 })}
-                      min={0} max={86400} suffix="s" inputWidth="w-24" />
-                  </Field>
+                  {(() => {
+                    const cd = defaultCooldownSec(draft.conditionType);
+                    return (
+                      <Field label="Cooldown" hint={tt(`Minimum gap between fires. 0 = default (${cd} s).`, `Intervalo mínimo entre disparos. 0 = padrão (${cd} s).`)}>
+                        <NumberInput value={draft.cooldownSeconds} onChange={(v) => patch({ cooldownSeconds: v ?? 0 })}
+                          min={0} max={86400} suffix="s" inputWidth="w-24" />
+                      </Field>
+                    );
+                  })()}
+
+                  {/* The one knob that trades reaction time for CPU. Worth surfacing because the
+                      cost is wildly uneven per family: an image watcher captures the entire
+                      virtual screen and template-matches it on EVERY tick, so a slow thing to
+                      wait for (an app launching, a download landing) is far cheaper watched at
+                      5 s than at the 1 s default, and gives up nothing. */}
+                  {(() => {
+                    const def = defaultPollMs(draft.conditionType);
+                    const heavy = draft.conditionType === 'ImageFound';
+                    return (
+                      <Field
+                        label="Check every"
+                        hint={tt(
+                          `How often to re-probe. 0 = default (${def} ms).` +
+                            (heavy ? ' An image check grabs and scans the whole screen each time — raise this for something you can wait a few seconds for.' : ''),
+                          `Com que frequência re-checar. 0 = padrão (${def} ms).` +
+                            (heavy ? ' Uma checagem de imagem captura e varre a tela inteira a cada vez — aumente para algo que pode esperar alguns segundos.' : ''),
+                        )}>
+                        <NumberInput value={draft.pollIntervalMs} onChange={(v) => patch({ pollIntervalMs: v ?? 0 })}
+                          min={0} max={600000} step={250} thousands suffix="ms" inputWidth="w-28" />
+                      </Field>
+                    );
+                  })()}
                 </>
               )}
 
@@ -718,6 +985,16 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                   {selectedEntry.skippedModal} {tt('dialog open', 'diálogo aberto')}
                 </div>
               )}
+
+              {/* Kept apart from the skip counters above: these were never fire attempts. A
+                  clipboard watcher is deaf for a moment after each replay so the app's own paste
+                  and restore traffic doesn't trigger it — a copy the user made in that window is
+                  swallowed with it, and used to be invisible. */}
+              {selectedEntry && selectedEntry.skippedSuppressed > 0 && (
+                <div className="text-[11px] text-text-tertiary leading-relaxed">
+                  {tt('Clipboard changes ignored just after a replay', 'Mudanças de clipboard ignoradas logo após um replay')}: {selectedEntry.skippedSuppressed}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -729,6 +1006,39 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
         onSave={cropReference}
         onCancel={() => setCropperOpen(false)}
       />
+    )}
+    {/* Unsaved-draft gate. Rendered OUTSIDE the DialogShell (sibling, like the cropper) so its
+        own Escape handling can't be swallowed by the panel's. "Save and continue" is offered
+        only when the draft is actually saveable — otherwise the sole options are to go back
+        and fix it or to throw it away, which is the honest set. */}
+    {pendingNav && (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50"
+        onClick={() => setPendingNav(null)}>
+        <div className="w-[380px] rounded-lg border border-border-subtle bg-bg-surface p-4 shadow-xl"
+          onClick={(e) => e.stopPropagation()}>
+          <div className="text-[13px] text-text-primary font-medium mb-1.5">
+            {tt('Unsaved automation', 'Automação não salva')}
+          </div>
+          <div className="text-[12px] text-text-secondary leading-relaxed mb-4">
+            {tt('This automation has changes that were never saved. Leaving now discards them — including any reference image you captured and the search region you set.',
+                'Esta automação tem alterações que nunca foram salvas. Sair agora descarta tudo — inclusive a imagem de referência capturada e a região de busca definida.')}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setPendingNav(null)}>
+              {tt('Keep editing', 'Continuar editando')}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => discardAndGo(pendingNav)}>
+              {tt('Discard', 'Descartar')}
+            </Button>
+            {canSave && (
+              <Button variant="primary" size="sm"
+                onClick={() => { const dest = pendingNav; handleSave(); go(dest); }}>
+                {tt('Save and continue', 'Salvar e continuar')}
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
     )}
     </>
   );

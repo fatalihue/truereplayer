@@ -331,6 +331,18 @@ namespace TrueReplayer.Services
             (p => p.Triggers is { SearchRegionW: > 0, SearchRegionH: > 0 },
                 new Version(2, 9, 4), "Automation image search region"),
 
+            // Automation poll interval. Same destroy-on-round-trip mechanism as the ROI pin above:
+            // there is no [JsonExtensionData] on ProfileTriggerConfig, so an older build does not
+            // merely IGNORE the property — it drops it, and any save from that build writes the
+            // config back without it. A user who deliberately slowed an image watcher from 1 s to
+            // 10 s (the knob exists because that watcher captures and scans the whole virtual
+            // screen every tick) gets it silently reset to the default, i.e. 10x the CPU they
+            // tuned away, with nothing on screen saying so. Property-level so plain triggers keep
+            // the 2.9.0 floor; gated on > 0 because 0 IS the default and carries no information.
+            // Introduced in 2.9.8.
+            (p => p.Triggers is { PollIntervalMs: > 0 },
+                new Version(2, 9, 8), "Automation poll interval"),
+
             // Restore Size split from Restore Position in 2.0.5; older builds only honour Position.
             (p => p.RestoreSize,
                 new Version(2, 0, 5), "RestoreSize"),

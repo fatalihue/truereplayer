@@ -511,7 +511,12 @@ namespace TrueReplayer.Controllers
             // Automation daemon sync — this is the one place that sees every profile reload
             // (disk watcher, imports, saves, toggles), so the watcher pool re-arms here.
             // Reload is diff-based: unchanged triggers keep their running loops and state.
-            TriggerService.Instance?.Reload(GetProfileTriggers());
+            // The second argument is EVERY profile name, not just the trigger-bearing ones: it is
+            // what the daemon prunes stale fire stats against, and GetProfileTriggers() drops
+            // disabled profiles — which would otherwise read as "deleted" and wipe their history.
+            TriggerService.Instance?.Reload(
+                GetProfileTriggers(),
+                ProfileEntries.Select(p => p.Name).ToList());
 
             // Diagnostic snapshot of what's actually ARMED after a (re)load — answers "is my
             // hotkey even registered, and to which target?" without a repro. Fires on profile

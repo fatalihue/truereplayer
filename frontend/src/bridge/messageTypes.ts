@@ -438,6 +438,12 @@ export interface TriggerConfig {
   clipboardPattern: string | null;
   cooldownSeconds: number;
   retrigger: string | null;
+  // How often the watcher re-probes, in ms. 0 = the per-condition default (see
+  // TriggerService.PollCadenceMs). The knob exists because the cost is per-tick and
+  // wildly uneven: an ImageFound watcher grabs and template-matches the whole virtual
+  // screen every tick, so "check every 5 s" instead of every 1 s is a 5x cut a user
+  // watching for something slow (an app launching, a download finishing) gives up nothing for.
+  pollIntervalMs: number;
 }
 
 /** One trigger-bearing profile: full config + live runtime status. */
@@ -454,6 +460,9 @@ export interface AutomationEntry {
   skippedBusy: number;
   skippedDirty: number;
   skippedModal: number;
+  /** Clipboard changes swallowed by the app-traffic suppression window — NOT fire attempts,
+   *  which is why they are counted apart from skippedBusy. */
+  skippedSuppressed: number;
   lastResult: string | null;
 }
 
@@ -575,6 +584,9 @@ export type IncomingMessage =
   // Reply to automation:captureImage (region overlay). imagePath is the saved PNG's
   // per-profile relative path, ready to store on the trigger config.
   | { type: 'automation:imageCaptured'; payload: { requestId: string; cancelled: boolean; imagePath?: string; imageBase64?: string } }
+  // Reply to automation:testFire. `detail` is already user-facing prose (the TriggerFireResult
+  // rendered), because the interesting answers are the SKIPS and each needs its own wording.
+  | { type: 'automation:testFireResult'; payload: { requestId: string; fired: boolean; detail: string } }
   | { type: 'actions:highlight'; payload: { index: number } }
   | { type: 'profiles:updated'; payload: { profiles: ProfileEntry[]; activeProfile: string | null; profileOrder: ProfileOrderData } }
   | { type: 'settings:loaded'; payload: { settings: SettingsState } }
@@ -676,6 +688,7 @@ export type OutgoingMessage =
   | { type: 'automation:setEnabled'; payload: { enabled: boolean } }
   | { type: 'automation:captureImage'; payload: { requestId: string; profile: string } }
   | { type: 'automation:cropReference'; payload: { requestId: string; profile: string; imagePath: string; x: number; y: number; w: number; h: number } }
+  | { type: 'automation:testFire'; payload: { requestId: string; profile: string } }
   // Whole-list save of the key remap layer (capped at 32 entries backend-side).
   | { type: 'remap:save'; payload: { enabled: boolean; remaps: { from: string; to: string; enabled: boolean }[] } }
   | { type: 'recording:toggle'; payload: { insertIndex?: number } }

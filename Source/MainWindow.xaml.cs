@@ -167,6 +167,10 @@ namespace TrueReplayer
             // before WebView2 is up, and it must resume where the last session stopped rather than
             // silently restarting the list.
             RunCursorService.Load();
+            // Automation fire history — restored BEFORE the first Reload, because the interval
+            // loop anchors its first tick to LastFiredAt: without this the countdown restarts on
+            // every launch, and a long interval on a machine rebooted nightly never comes due.
+            triggerService.LoadStats();
 
             SetupInputHooks();
 
@@ -1202,9 +1206,29 @@ namespace TrueReplayer
                     profH = folderGeom.Value.Height;
                 }
             }
+            // Loop count for an AUTONOMOUS fire can never be infinite. Loops/LoopCount are global
+            // app settings, and LoopCount defaults to 0, which the engine reads as "forever" —
+            // so merely enabling the Loops chip and never touching its value turned every
+            // automation fire into a replay that never ends. That run then owns the single engine
+            // permanently: every other armed automation is skipped busy for good, and with the app
+            // in the tray there is no Stop button to reach. A user pressing a hotkey can press it
+            // again; a daemon firing at 3 a.m. cannot. Coerce to a single pass and say so.
+            // startOnly is exactly "this fire is autonomous" (the hotkey path passes false).
+            bool loopEnabled = bridge.EnableLoop;
+            // Only a literal 0 (or a negative) means "forever" — StartReplay already falls back to
+            // a single pass for a non-numeric LoopCount, so widening the guard to unparseable text
+            // would be coercing a value that was never infinite.
+            string loopCount = bridge.LoopCount;
+            if (startOnly && loopEnabled && int.TryParse(loopCount, out var lc) && lc <= 0)
+            {
+                loopCount = "1";
+                DiagnosticLog.Warn(
+                    $"Automation '{profileName}': global Loops is set to 0 (forever) — running ONCE instead. " +
+                    "An endless autonomous replay would block every other automation with no way to stop it from the tray.");
+            }
             mainController.ToggleReplay(
-                bridge.EnableLoop,
-                bridge.LoopCount,
+                loopEnabled,
+                loopCount,
                 bridge.LoopIntervalEnabled,
                 bridge.LoopInterval,
                 bridge.UseDelayVariation,
@@ -1237,6 +1261,18 @@ namespace TrueReplayer
             bridge.PushToolbarUpdate();
             bridge.PushStatusBarUpdate();
             TrayIconService.UpdateTrayIcon();
+
+            // "Fired" used to be returned unconditionally, but ToggleReplay is a NO-OP for an
+            // empty action list and StartReplay bails out when loop-over-data is on with an empty
+            // table. Both cases then reported a successful fire: the panel counted it, stamped a
+            // last-fired time, and Run now said "the profile is running now" — for a profile that
+            // did nothing at all. A WhilePressed hold that was released just above also lands here
+            // with the replay already stopped. Report what actually happened.
+            if (!mainController.IsReplayInProgress())
+            {
+                DiagnosticLog.Warn($"Automation '{profileName}': start produced no replay (empty profile, or an empty data table with loop-over-data on)");
+                return TriggerFireResult.Failed;
+            }
             return TriggerFireResult.Fired;
         }
 
@@ -1408,8 +1444,10 @@ namespace TrueReplayer
                 System.Diagnostics.Process.Start(startInfo);
                 Services.DiagnosticLog.Info("Launched replacement process, exiting current");
                 // Bypasses ForceExit — flush the debounced run cursors before the process dies,
-                // and BEFORE the replacement gets far enough to read the sidecar.
+                // and BEFORE the replacement gets far enough to read the sidecar. Same for the
+                // debounced automation stats.
                 RunCursorService.Flush();
+                TriggerService.Instance?.Flush();
                 Environment.Exit(0);
             }
             catch (Exception ex)

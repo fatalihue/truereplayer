@@ -228,8 +228,9 @@ namespace TrueReplayer.Services
         {
             if (_pendingUpdate?.TargetFullRelease == null) return;
             // This path bypasses ForceExit, so flush the debounced run cursors here too —
-            // an update must not cost the user their place in a list.
+            // an update must not cost the user their place in a list, nor its automation history.
             RunCursorService.Flush();
+            TriggerService.Instance?.Flush();
             _manager.WaitExitThenApplyUpdates(_pendingUpdate.TargetFullRelease, silent: true, restart: true);
             Environment.Exit(0);
         }

@@ -664,6 +664,7 @@ namespace TrueReplayer
                     case "automation:setEnabled": HandleAutomationSetEnabled(payload); break;
                     case "automation:captureImage": HandleAutomationCaptureImage(payload); break;
                     case "automation:cropReference": HandleAutomationCropReference(payload); break;
+                    case "automation:testFire": HandleAutomationTestFire(payload); break;
                     case "remap:save": HandleRemapSave(payload); break;
                     case "actions:reorder": HandleActionsReorder(payload); break;
                     case "actions:convertMode": HandleConvertActionMode(payload); break;
@@ -1173,6 +1174,7 @@ namespace TrueReplayer
                         skippedBusy = st?.SkippedBusy ?? 0,
                         skippedDirty = st?.SkippedDirty ?? 0,
                         skippedModal = st?.SkippedModal ?? 0,
+                        skippedSuppressed = st?.SkippedSuppressed ?? 0,
                         lastResult = st?.LastResult,
                     };
                 }).ToArray();
@@ -1215,6 +1217,7 @@ namespace TrueReplayer
             clipboardPattern = t.ClipboardPattern,
             cooldownSeconds = t.CooldownSeconds,
             retrigger = t.Retrigger,
+            pollIntervalMs = t.PollIntervalMs,
         };
 
         private static ProfileTriggerConfig? ParseTriggerConfig(JsonElement el)
@@ -1257,6 +1260,7 @@ namespace TrueReplayer
             if (el.TryGetProperty("clipboardPattern", out v) && v.ValueKind == JsonValueKind.String) t.ClipboardPattern = v.GetString();
             if (el.TryGetProperty("cooldownSeconds", out v) && v.TryGetInt32(out var cd)) t.CooldownSeconds = cd;
             if (el.TryGetProperty("retrigger", out v) && v.ValueKind == JsonValueKind.String) t.Retrigger = v.GetString();
+            if (el.TryGetProperty("pollIntervalMs", out v) && v.TryGetInt32(out var pi)) t.PollIntervalMs = pi;
             return t;
         }
 
@@ -1268,27 +1272,45 @@ namespace TrueReplayer
         // inside another refresh's suppression window and never deliver it.
         private async Task PersistTriggerAsync(string name, ProfileTriggerConfig? trigger)
         {
+            // The in-memory mirrors are mutated FIRST (see the note above) but the disk write can
+            // still throw — a locked file, a full disk, antivirus holding the temp. Without a
+            // rollback the app then shows an automation state that does not exist on disk and
+            // silently reverts on the next launch, and the caller's "resync the list" push would
+            // faithfully re-render the wrong thing. Snapshot, and put both mirrors back.
+            var prevCurrent = UserProfile.Current.Triggers;
+            var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
+            var prevEntry = entry?.Triggers;
+
             if (name == CurrentProfileName)
                 UserProfile.Current.Triggers = trigger;
-
-            var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
             if (entry != null) entry.Triggers = trigger;
 
-            if (name != "No Profile" && entry != null && File.Exists(entry.FilePath))
+            try
             {
-                var profile = await profileController.LoadProfileByNameAsync(name);
-                if (profile != null)
+                if (name != "No Profile" && entry != null && File.Exists(entry.FilePath))
                 {
-                    profile.Triggers = trigger;
-                    await profileController.SaveProfileByNameAsync(name, profile);
+                    var profile = await profileController.LoadProfileByNameAsync(name);
+                    if (profile != null)
+                    {
+                        profile.Triggers = trigger;
+                        await profileController.SaveProfileByNameAsync(name, profile);
+                    }
+                }
+                else if (name == CurrentProfileName)
+                {
+                    HasUnsavedChanges = true;
                 }
             }
-            else if (name == CurrentProfileName)
+            catch
             {
-                HasUnsavedChanges = true;
+                if (name == CurrentProfileName) UserProfile.Current.Triggers = prevCurrent;
+                if (entry != null) entry.Triggers = prevEntry;
+                throw;   // the callers report it; they also re-push after the rollback
             }
 
-            TriggerService.Instance?.Reload(profileController.GetProfileTriggers());
+            TriggerService.Instance?.Reload(
+                profileController.GetProfileTriggers(),
+                profileController.ProfileEntries.Select(p => p.Name).ToList());
             PushAutomationState();
             TrayIconService.UpdateTrayIcon();
         }
@@ -1327,6 +1349,63 @@ namespace TrueReplayer
             catch (Exception ex)
             {
                 DiagnosticLog.Error("automation:setArmed failed", ex);
+                // Arming used to be silent on failure: entry.Triggers was mutated in memory, the
+                // disk write threw, and the automation looked armed until the next launch dropped
+                // it. Say so, and put the list back in step with what is actually on disk.
+                SendMessage("alert:show", new { message = $"Could not arm automation: {ex.Message}" });
+                PushAutomationState();
+            }
+        }
+
+        /// <summary>
+        /// "Run now" — fire an automation once, on demand, through the SAME path the daemon uses
+        /// (TriggerService.FireProfile → MainWindow's gates → the shared replay start). Going
+        /// through the real path is the whole point: a condition probe alone would report success
+        /// for a fire that would in fact be skipped busy / dirty / modal, which is precisely the
+        /// class of failure a user cannot otherwise observe.
+        /// </summary>
+        private async void HandleAutomationTestFire(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var rEl) ? (rEl.GetString() ?? "") : "";
+            string name = payload.TryGetProperty("profile", out var pEl) ? (pEl.GetString() ?? "") : "";
+            if (string.IsNullOrEmpty(name)) return;
+            try
+            {
+                var fire = TriggerService.Instance?.FireProfile;
+                if (fire == null)
+                {
+                    SendMessage("automation:testFireResult", new { requestId, fired = false, detail = "Automation service not ready." });
+                    return;
+                }
+                // The daemon can never fire a disabled profile — GetProfileTriggers drops those,
+                // so no watcher is ever built for one. Run now goes straight to FireProfile and
+                // would happily bypass that, telling the user the automation works when armed
+                // when in fact it can never run.
+                var entry = profileController.ProfileEntries.FirstOrDefault(p => p.Name == name);
+                if (entry?.IsDisabled == true)
+                {
+                    SendMessage("automation:testFireResult", new { requestId, fired = false,
+                        detail = "Skipped: this profile is disabled, so its automation never runs. Enable it in the sidebar first." });
+                    return;
+                }
+                var result = await fire(name);
+                // The SKIPS are the interesting answers, so each gets its own sentence naming the
+                // blocker and what to do about it — "skipped" alone sends the user hunting.
+                string detail = result switch
+                {
+                    TriggerFireResult.Fired => "Fired — the profile is running now.",
+                    TriggerFireResult.SkippedBusy => "Skipped: a replay, recording or clicker run is already going. Automations wait for the engine to be free.",
+                    TriggerFireResult.SkippedDirty => "Skipped: the action grid has unsaved changes. Automations never fire over unsaved edits — save the profile first.",
+                    TriggerFireResult.SkippedModal => "Skipped: a dialog or key capture is open. Close it and try again.",
+                    TriggerFireResult.NotReady => "Not ready: the app is still starting up.",
+                    _ => "Failed to start — the profile could not be loaded. Check that it still exists and is not disabled.",
+                };
+                SendMessage("automation:testFireResult", new { requestId, fired = result == TriggerFireResult.Fired, detail });
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Error($"automation:testFire '{name}' failed", ex);
+                SendMessage("automation:testFireResult", new { requestId, fired = false, detail = $"Failed: {ex.Message}" });
             }
         }
 

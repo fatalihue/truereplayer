@@ -267,6 +267,14 @@ namespace TrueReplayer.Models
         public int CooldownSeconds { get; set; }
         public string? Retrigger { get; set; }
 
+        // Condition poll cadence in ms; 0 = the per-condition default (TriggerService.PollCadenceMs).
+        // A watcher's cost is entirely per-tick and very uneven — ImageFound captures the whole
+        // virtual screen and runs a template match EVERY tick — so the interval is the one knob that
+        // actually trades reaction time for CPU. PINNED ("Automation poll interval" @ 2.9.8): with
+        // no [JsonExtensionData] here, an older build doesn't just ignore the property, it DROPS it
+        // on any save — silently restoring the CPU cost the user tuned away.
+        public int PollIntervalMs { get; set; }
+
         public ProfileTriggerConfig Clone() => (ProfileTriggerConfig)MemberwiseClone();
     }
 

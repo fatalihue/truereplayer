@@ -42,6 +42,13 @@ namespace TrueReplayer.Services
         private readonly object _lock = new();
         private readonly Dictionary<string, TriggerRuntime> _runtimes = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, TriggerStats> _stats = new(StringComparer.OrdinalIgnoreCase);
+        // Profiles whose watcher loop has started at least once IN THIS PROCESS. Distinguishes a
+        // cold start (the app was closed, an overdue interval tick deserves a catch-up) from a
+        // Reload-driven restart (an edit or an arm toggle, where catching up would be an ambush).
+        private readonly HashSet<string> _coldStarted = new(StringComparer.OrdinalIgnoreCase);
+        // Last fire outcome actually written to the diagnostic log, per profile — so a blocked
+        // watcher retrying every few seconds logs once, not forever. See RequestFireAsync.
+        private readonly Dictionary<string, string?> _lastLoggedOutcome = new(StringComparer.OrdinalIgnoreCase);
         // Last full config list seen (armed or not) — used by SetGlobalEnabled(true) to
         // re-arm without waiting for the next profile-list refresh, and by GetStatus().
         private List<(string Name, ProfileTriggerConfig Config)> _lastConfigs = new();
@@ -83,6 +90,10 @@ namespace TrueReplayer.Services
             public int SkippedBusy;
             public int SkippedDirty;
             public int SkippedModal;
+            // Clipboard changes swallowed by the app-traffic window. Deliberately NOT SkippedBusy:
+            // these were never fire ATTEMPTS, so folding them in would corrupt the number that
+            // means "the engine was busy".
+            public int SkippedSuppressed;
             public string? LastResult;                    // short human-readable outcome line
             public long LastScheduleOccurrenceTicks;      // double-fire guard across loop restarts
             // Cooldown survives loop restarts (config edits) — a loop-local copy would let an
@@ -102,6 +113,7 @@ namespace TrueReplayer.Services
             public int SkippedBusy;
             public int SkippedDirty;
             public int SkippedModal;
+            public int SkippedSuppressed;
             public string? LastResult;
         }
 
@@ -122,9 +134,19 @@ namespace TrueReplayer.Services
         /// registration choke point (every reload) and from SetGlobalEnabled — must stay
         /// cheap and diff-based (see class doc). UI thread.
         /// </summary>
-        public void Reload(List<(string Name, ProfileTriggerConfig Config)> configs)
+        /// <param name="allProfileNames">
+        /// EVERY profile that exists, armed or not, enabled or not. Used ONLY to prune stats for
+        /// profiles that are genuinely gone. It cannot be derived from <paramref name="configs"/>:
+        /// that list is GetProfileTriggers(), which drops disabled profiles and profiles whose
+        /// JSON failed to load — so pruning against it would read "merely disabled" as "deleted"
+        /// and, now that the prune is written through to the sidecar, permanently destroy that
+        /// automation's fire history and its interval anchor. Null = do not prune.
+        /// </param>
+        public void Reload(List<(string Name, ProfileTriggerConfig Config)> configs,
+                           IReadOnlyCollection<string>? allProfileNames = null)
         {
             List<string> started = new(), stopped = new();
+            bool prunedStats = false;
             lock (_lock)
             {
                 _lastConfigs = configs;
@@ -167,11 +189,25 @@ namespace TrueReplayer.Services
 
                 // Drop stats for profiles that no longer carry a trigger at all (renames are
                 // migrated explicitly via RenameStats before the refresh lands here).
-                var known = new HashSet<string>(configs.Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
-                foreach (var name in _stats.Keys.ToList())
-                    if (!known.Contains(name))
-                        _stats.Remove(name);
+                // Only when the caller could tell us what actually exists, and never on an empty
+                // set (a failed/partial profile-list load must not read as "everything is gone").
+                if (allProfileNames is { Count: > 0 })
+                {
+                    var known = new HashSet<string>(allProfileNames, StringComparer.OrdinalIgnoreCase);
+                    foreach (var name in _stats.Keys.ToList())
+                        if (!known.Contains(name))
+                        {
+                            _stats.Remove(name);
+                            _lastLoggedOutcome.Remove(name);
+                            _coldStarted.Remove(name);
+                            prunedStats = true;
+                        }
+                }
             }
+            // The prune has to reach the SIDECAR as well, or a deleted profile's stats live in the
+            // file forever and are read back on the next launch — an entry for a profile that no
+            // longer exists, growing without bound as profiles come and go.
+            if (prunedStats) MarkStatsDirty();
             if (started.Count > 0 || stopped.Count > 0)
             {
                 DiagnosticLog.Info($"Automation: armed [{string.Join(", ", started)}], disarmed [{string.Join(", ", stopped)}]");
@@ -201,6 +237,7 @@ namespace TrueReplayer.Services
                     _stats[newName] = s;
                 }
             }
+            MarkStatsDirty();
         }
 
         /// <summary>Suppress clipboard-change fires for the next 2 s (capture-slot etc.).</summary>
@@ -238,6 +275,7 @@ namespace TrueReplayer.Services
                         SkippedBusy = st?.SkippedBusy ?? 0,
                         SkippedDirty = st?.SkippedDirty ?? 0,
                         SkippedModal = st?.SkippedModal ?? 0,
+                        SkippedSuppressed = st?.SkippedSuppressed ?? 0,
                         LastResult = st?.LastResult,
                     });
                 }
@@ -294,15 +332,89 @@ namespace TrueReplayer.Services
         private async Task RunIntervalLoopAsync(string name, TriggerRuntime rt, TriggerStats stats, CancellationToken ct)
         {
             int seconds = Math.Max(5, rt.Config.IntervalSeconds);
+            var period = TimeSpan.FromSeconds(seconds);
+
+            // Anchor the FIRST tick to the last real fire, not to loop start. Anchoring to loop
+            // start meant the countdown restarted on every app launch AND on every config edit or
+            // arm toggle (Reload restarts a loop whenever the serialized config differs, and Armed
+            // is part of that key) — so "every 12 hours" on a machine rebooted nightly never fired
+            // once, and the row's "next" silently jumped forward each time with no explanation.
+            // Stats are persisted now, so LastFiredAt survives the restart that used to erase it.
+            // The catch-up is ONLY for a cold start. A loop restart is not rare: Reload restarts
+            // one whenever the serialized config differs, and that key includes Armed — so an arm
+            // toggle, a field edit or a master-switch cycle all rebuild the loop. Without this
+            // gate, re-arming an automation whose period had elapsed would seize the mouse and
+            // keyboard 15 s after the click, with the user still standing in the panel. Anchoring
+            // to LastFiredAt is right; treating every restart as "the app was closed" is not.
+            bool coldStart;
+            lock (_lock) coldStart = _coldStarted.Add(name);
+
+            DateTime? lastFired;
+            lock (_lock) lastFired = stats.LastFiredAt;
+            var next = lastFired is DateTime lf ? lf + period : DateTime.Now + period;
+            if (next <= DateTime.Now)
+            {
+                if (coldStart)
+                {
+                    // Overdue while the app was closed. Fire — but after a short settle rather than
+                    // the instant the loop starts: at launch the bridge may still be coming up
+                    // (NotReady), and an autonomous replay landing on a user who just opened the
+                    // app is the same ambush the schedule loop's staleness bound exists to prevent.
+                    next = DateTime.Now.AddSeconds(15);
+                    DiagnosticLog.Info($"Automation '{name}': interval tick was overdue at startup — firing in 15 s");
+                }
+                else
+                {
+                    // Re-armed or edited: start a fresh period, which is also what the editor's own
+                    // hint promises ("the first fire happens one interval after arming").
+                    next = DateTime.Now + period;
+                }
+            }
+
             while (!ct.IsCancellationRequested)
             {
-                rt.NextDueTicks = DateTime.Now.AddSeconds(seconds).Ticks;
-                await Task.Delay(TimeSpan.FromSeconds(seconds), ct);
-                // Skip-if-busy: no retry — the next tick catches up. Missed occurrences
-                // are visible via the skip counters.
-                await RequestFireAsync(name, stats, ct);
+                rt.NextDueTicks = next.Ticks;
+                // Sleep in <= 60 s chunks so a clock change or a long suspend can't strand the loop
+                // on a single huge Task.Delay (the schedule loop already does this).
+                while (!ct.IsCancellationRequested)
+                {
+                    var remaining = next - DateTime.Now;
+                    if (remaining <= TimeSpan.Zero) break;
+                    await Task.Delay(remaining > TimeSpan.FromSeconds(60) ? TimeSpan.FromSeconds(60) : remaining, ct);
+                }
+                if (ct.IsCancellationRequested) break;
+
+                // A busy tick used to be DROPPED outright ("the next tick catches up"), which is
+                // only true when the interval is short. On a 30-minute interval that reasoning
+                // costs the user half an hour because a replay happened to be running for two
+                // seconds. Retry within a window bounded by the interval itself, so a retry can
+                // never collide with the following tick.
+                var graceEnd = next + TimeSpan.FromSeconds(Math.Min(seconds / 2.0, 180));
+                while (!ct.IsCancellationRequested)
+                {
+                    var result = await RequestFireAsync(name, stats, ct);
+                    if (result == TriggerFireResult.Fired || result == TriggerFireResult.Failed) break;
+                    if (DateTime.Now >= graceEnd)
+                    {
+                        SetLastResult(stats, "missed (busy past the grace window)");
+                        NotifyStateChanged();
+                        break;
+                    }
+                    await Task.Delay(TimeSpan.FromSeconds(5), ct);
+                }
+
+                // Anchor the NEXT tick to the tick we just serviced, not to "now" — otherwise a
+                // fire that spent 40 s retrying would push every subsequent tick 40 s later, and
+                // an "every 5 minutes" automation would drift off the clock over a day.
+                next += period;
+                if (next <= DateTime.Now) next = DateTime.Now + period;   // skipped ticks: don't burst-fire the backlog
             }
         }
+
+        // How late a schedule occurrence may be before it is abandoned rather than fired. Sized to
+        // comfortably cover the busy-retry grace window (3 min) plus a slow machine, while still
+        // being unmistakably "we are past the moment you asked for".
+        private static readonly TimeSpan ScheduleStaleAfter = TimeSpan.FromMinutes(10);
 
         private async Task RunScheduleLoopAsync(string name, TriggerRuntime rt, TriggerStats stats, CancellationToken ct)
         {
@@ -333,6 +445,22 @@ namespace TrueReplayer.Services
                 if (ct.IsCancellationRequested) break;
 
                 lock (_lock) stats.LastScheduleOccurrenceTicks = next.Ticks;
+
+                // Staleness bound. The sleep above breaks out as soon as `remaining <= 0`, which
+                // across a suspend/hibernate is deeply negative: a 09:00 automation on a laptop
+                // closed at 08:30 and opened at 18:00 fired the instant the machine woke — nine
+                // hours late, injecting mouse and keyboard at a user who was looking at the
+                // screen. A schedule names a MOMENT; once that moment is well past, running it is
+                // no longer what the user asked for. (Distinct from the busy-retry grace below,
+                // which bounds contention, not lateness.)
+                var lateness = DateTime.Now - next;
+                if (lateness > ScheduleStaleAfter)
+                {
+                    SetLastResult(stats, $"skipped — {(int)lateness.TotalMinutes} min late (machine asleep or clock changed)");
+                    DiagnosticLog.Warn($"Automation '{name}': schedule occurrence {next:t} skipped, {(int)lateness.TotalMinutes} min stale");
+                    NotifyStateChanged();
+                    continue;
+                }
 
                 // A schedule that lands on a busy moment must NOT lose the whole day (the
                 // interval loop's "next tick catches up" reasoning doesn't transfer — the
@@ -377,7 +505,19 @@ namespace TrueReplayer.Services
             bool levelMode = string.Equals(cfg.Retrigger, "level", StringComparison.OrdinalIgnoreCase);
             int cooldownSec = cfg.CooldownSeconds > 0 ? cfg.CooldownSeconds : 30;
             var pendingTtl = TimeSpan.FromSeconds(Math.Max(cooldownSec, 30));
-            int pollMs = PollCadenceMs(cfg.ConditionType);
+            int pollMs = PollCadenceMs(cfg);
+
+            // Stop BEFORE spending a poll loop on something that provably cannot fire, and say so
+            // in the same place a missing reference image is reported. Returning (rather than
+            // spinning) also drops the runtime in the finally, so the panel stops claiming Running.
+            var unfireable = DescribeUnfireable(cfg);
+            if (unfireable != null)
+            {
+                SetLastResult(stats, $"{unfireable} — watcher stopped");
+                DiagnosticLog.Warn($"Automation watcher '{name}': {unfireable}");
+                NotifyStateChanged();
+                return;
+            }
 
             // The loop owns the reference bitmap: loaded after start, disposed in OUR
             // finally — Reload() only cancels the CTS and never touches it (a Dispose from
@@ -483,13 +623,14 @@ namespace TrueReplayer.Services
         {
             var cfg = rt.Config;
             int cooldownSec = cfg.CooldownSeconds > 0 ? cfg.CooldownSeconds : 5;
+            int pollMs = PollCadenceMs(cfg);
             uint lastSeq = NativeMethods.GetClipboardSequenceNumber();
             var cooldownUntil = DateTime.MinValue;
             var lastReplayActiveAt = DateTime.MinValue;
 
             while (!ct.IsCancellationRequested)
             {
-                await Task.Delay(500, ct);
+                await Task.Delay(pollMs, ct);
 
                 uint seq = NativeMethods.GetClipboardSequenceNumber();
                 if (seq == 0) continue;   // locked desktop — unknown, hold previous state
@@ -501,14 +642,40 @@ namespace TrueReplayer.Services
                     || DateTime.UtcNow.Ticks < Interlocked.Read(ref _clipboardSuppressUntilTicks);
                 if (appTraffic)
                 {
-                    lastSeq = seq;        // rebaseline: our own paste/restore traffic is invisible
+                    // Rebaseline: our own paste/restore traffic must stay invisible. But the filter
+                    // is TEMPORAL, not attributional — a copy the USER makes in another app during
+                    // a long macro is swallowed identically, and that IS a lost event worth
+                    // reporting.
+                    //
+                    // Only the TAIL is worth counting. While a replay is actually running (or a
+                    // capture-slot write is in its window) the app is the provable author of the
+                    // traffic — SendText bumps the sequence twice per action, so counting there
+                    // would report dozens of "skipped fires" per successful fire and bury the real
+                    // ones. The residual window is the part where the app is already finished and
+                    // a bump is most likely the user's own copy.
+                    //
+                    // It gets its OWN counter rather than SkippedBusy: these were never fire
+                    // attempts, and folding them in would corrupt the number that means "the
+                    // engine was busy".
+                    bool attributable = replayActive
+                        || DateTime.UtcNow.Ticks < Interlocked.Read(ref _clipboardSuppressUntilTicks);
+                    if (seq != lastSeq && !attributable)
+                    {
+                        lock (_lock)
+                        {
+                            stats.SkippedSuppressed++;
+                            stats.LastResult = "clipboard change ignored (just after a replay)";
+                        }
+                        MarkStatsDirty();
+                        NotifyStateChanged();
+                    }
+                    lastSeq = seq;
                     continue;
                 }
 
                 if (seq == lastSeq) continue;
                 lastSeq = seq;
 
-                // A clipboard change is an EVENT — never pended: a busy skip just drops it.
                 if (DateTime.Now < cooldownUntil) continue;
 
                 if (!string.IsNullOrEmpty(cfg.ClipboardPattern))
@@ -518,18 +685,73 @@ namespace TrueReplayer.Services
                         continue;
                 }
 
-                var r = await RequestFireAsync(name, stats, ct);
-                if (r == TriggerFireResult.Fired)
-                    cooldownUntil = DateTime.Now.AddSeconds(cooldownSec);
+                // A clipboard change is an EVENT, so it can't PEND indefinitely — but dropping it
+                // on the first busy tick was too harsh: the engine is often busy for a second or
+                // two, and the copy the user just made is exactly what they wanted acted on.
+                // Retry briefly, bounded so a stale copy can never ambush them later.
+                var graceEnd = DateTime.Now + TimeSpan.FromSeconds(10);
+                while (!ct.IsCancellationRequested)
+                {
+                    var r = await RequestFireAsync(name, stats, ct);
+                    if (r == TriggerFireResult.Fired)
+                    {
+                        cooldownUntil = DateTime.Now.AddSeconds(cooldownSec);
+                        break;
+                    }
+                    if (r == TriggerFireResult.Failed || DateTime.Now >= graceEnd) break;
+                    await Task.Delay(TimeSpan.FromSeconds(2), ct);
+                }
             }
         }
 
-        private static int PollCadenceMs(string? conditionType) => conditionType?.ToLowerInvariant() switch
+        // Effective poll cadence: the user's PollIntervalMs when set, else the per-condition
+        // default. Clamped to [100 ms, 10 min] — below 100 ms the probe cost dominates the
+        // interval and the watcher just burns a core; above 10 minutes a "watcher" stops being
+        // one and the user wants a schedule trigger instead.
+        internal static int PollCadenceMs(ProfileTriggerConfig cfg)
+        {
+            if (cfg.PollIntervalMs > 0) return Math.Clamp(cfg.PollIntervalMs, 100, 600_000);
+            return DefaultPollCadenceMs(cfg.ConditionType);
+        }
+
+        internal static int DefaultPollCadenceMs(string? conditionType) => conditionType?.ToLowerInvariant() switch
         {
             "pixelcolormatch" => 250,
-            "imagefound" => 1000,
-            _ => 1000,   // WindowOpen / ProcessRunning / FileExists
+            "clipboardchanged" => 500,
+            _ => 1000,   // WindowOpen / ProcessRunning / FileExists / ImageFound
         };
+
+        /// <summary>
+        /// Why this condition can NEVER become true as configured, or null when it can.
+        ///
+        /// A blank required field is not an error anywhere downstream — WindowMatcher returns
+        /// zero for a criteria-less target BY DESIGN, an empty process name returns false, an
+        /// empty path returns false. So the watcher armed, reported Running, polled forever and
+        /// never fired, with nothing on screen saying why. ImageFound was the only family that
+        /// self-reported, which taught users that silence means healthy. The editor now blocks
+        /// saving these, but configs written before that still exist on disk — this is what
+        /// surfaces THOSE, and it is the backend's own answer rather than a mirror of the UI's.
+        /// </summary>
+        internal static string? DescribeUnfireable(ProfileTriggerConfig cfg)
+        {
+            switch (cfg.ConditionType?.ToLowerInvariant())
+            {
+                case "windowopen":
+                    return string.IsNullOrWhiteSpace(cfg.WindowProcessName) && string.IsNullOrWhiteSpace(cfg.WindowTitle)
+                        ? "no process name or window title set — this can never match"
+                        : null;
+                case "processrunning":
+                    return string.IsNullOrWhiteSpace(cfg.WindowProcessName)
+                        ? "no process name set — this can never match"
+                        : null;
+                case "fileexists":
+                    return string.IsNullOrWhiteSpace(cfg.FilePath)
+                        ? "no file path set — this can never match"
+                        : null;
+                default:
+                    return null;   // ImageFound reports its own missing reference below
+            }
+        }
 
         // Raw probes — reuse the app's static primitives; a probe error reads FALSE
         // (transition-only logging keeps DiagnosticLog off the per-poll path).
@@ -636,8 +858,33 @@ namespace TrueReplayer.Services
                         break;
                 }
             }
-            if (result == TriggerFireResult.Fired)
-                DiagnosticLog.Info($"Automation: fired '{name}'");
+            // Only "fired" used to be logged, so a skip left NO durable trace anywhere: the
+            // counters live in the panel and (before persistence) died with the process, meaning
+            // "did my automation run last night?" was unanswerable after a restart.
+            //
+            // Log the TRANSITION, not the state. Every retry loop calls this repeatedly for
+            // exactly the outcomes worth logging — interval every 5 s, schedule every 15 s,
+            // clipboard every 2 s, and level-mode conditions every 5 s with no upper bound — and
+            // DiagnosticLog.Info is a synchronous append under a global lock. Logging per call
+            // would grow the file forever while a watcher sits blocked. One line when the outcome
+            // changes keeps the durable trace and costs nothing while it persists.
+            string? logLine = null;
+            lock (_lock)
+            {
+                var current = result == TriggerFireResult.Fired ? "fired" : stats.LastResult;
+                if (!string.Equals(_lastLoggedOutcome.GetValueOrDefault(name), current, StringComparison.Ordinal))
+                {
+                    _lastLoggedOutcome[name] = current;
+                    // NotReady is excluded even as a transition: it fires once per tick during boot
+                    // and resolves itself the moment the bridge is up.
+                    if (result != TriggerFireResult.NotReady)
+                        logLine = result == TriggerFireResult.Fired
+                            ? $"Automation: fired '{name}'"
+                            : $"Automation: '{name}' {current}";
+                }
+            }
+            if (logLine != null) DiagnosticLog.Info(logLine);
+            MarkStatsDirty();
             NotifyStateChanged();
             return result;
         }
@@ -652,9 +899,157 @@ namespace TrueReplayer.Services
             return s;
         }
 
+        // ── Stats persistence ────────────────────────────────────────────────────────────────
+        //
+        // Fire counts, last-fired times and skip counters were in-memory only, so every launch
+        // reset them to zero and "-". That made the ONE question a background daemon exists to
+        // answer — "did this run while I was away?" — unanswerable, and it also erased the
+        // interval loop's anchor, which is why a long interval could never come due (the loop
+        // re-anchored to launch time on every start).
+        //
+        // Sidecar + debounced atomic write, following the run-cursors.json convention:
+        // FileHelper.WriteAllTextAtomic yields UTF-8 with no BOM, matching the app's other JSON
+        // writers. Debounced because a level-mode watcher can fire every few seconds.
+        private const string StatsFileName = "automation-stats.json";
+        private const int StatsSaveDebounceMs = 2000;
+        private System.Threading.Timer? _statsTimer;
+
+        private sealed class PersistedStats
+        {
+            public DateTime? LastFiredAt { get; set; }
+            public int FireCount { get; set; }
+            public int SkippedBusy { get; set; }
+            public int SkippedDirty { get; set; }
+            public int SkippedModal { get; set; }
+            public int SkippedSuppressed { get; set; }
+            public string? LastResult { get; set; }
+            public long LastScheduleOccurrenceTicks { get; set; }
+        }
+
+        private static string StatsPath()
+        {
+            string dir = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "TrueReplayer");
+            System.IO.Directory.CreateDirectory(dir);
+            return System.IO.Path.Combine(dir, StatsFileName);
+        }
+
+        /// <summary>Restore persisted fire stats. Call once, before the first Reload.</summary>
+        public void LoadStats()
+        {
+            try
+            {
+                var path = StatsPath();
+                if (!System.IO.File.Exists(path)) return;
+                var map = JsonSerializer.Deserialize<Dictionary<string, PersistedStats>>(System.IO.File.ReadAllText(path));
+                if (map == null) return;
+                lock (_lock)
+                {
+                    foreach (var (name, p) in map)
+                    {
+                        _stats[name] = new TriggerStats
+                        {
+                            LastFiredAt = p.LastFiredAt,
+                            FireCount = p.FireCount,
+                            SkippedBusy = p.SkippedBusy,
+                            SkippedDirty = p.SkippedDirty,
+                            SkippedModal = p.SkippedModal,
+                            SkippedSuppressed = p.SkippedSuppressed,
+                            LastResult = p.LastResult,
+                            LastScheduleOccurrenceTicks = p.LastScheduleOccurrenceTicks,
+                            // CooldownUntilTicks is deliberately NOT restored: a cooldown is a
+                            // rate limit on a running watcher, not history. Restoring one would
+                            // silently mute a watcher for minutes after a restart.
+                        };
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Corrupt/unreadable stats must never stop the daemon — worst case we start at zero,
+                // which is exactly the old behaviour.
+                DiagnosticLog.Warn($"Automation stats load failed — starting from zero ({ex.Message})");
+            }
+        }
+
+        private void MarkStatsDirty()
+        {
+            lock (_lock)
+            {
+                if (_statsTimer != null) return;
+                _statsTimer = new System.Threading.Timer(_ =>
+                {
+                    lock (_lock)
+                    {
+                        _statsTimer?.Dispose();
+                        _statsTimer = null;
+                    }
+                    SaveStats();
+                }, null, StatsSaveDebounceMs, System.Threading.Timeout.Infinite);
+            }
+        }
+
+        /// <summary>Write pending stats immediately — call from the app's exit paths.</summary>
+        public void Flush()
+        {
+            lock (_lock)
+            {
+                _statsTimer?.Dispose();
+                _statsTimer = null;
+            }
+            SaveStats();
+        }
+
+        // Serializing AND writing inside _lock is deliberate — the same discipline
+        // RunCursorService.SaveLocked documents. Flush() (exit paths) and the debounce timer
+        // callback can both reach here, and Timer.Dispose does not wait for a callback already in
+        // flight; with the write outside the lock, two WriteAllTextAtomic calls race on the same
+        // target and the older snapshot can land last, losing the very fire the exit flush existed
+        // to save. The payload is a handful of counters per automation, so holding the lock across
+        // the write costs nothing measurable.
+        private void SaveStats()
+        {
+            try
+            {
+                lock (_lock)
+                {
+                    var snapshot = _stats.ToDictionary(
+                        kv => kv.Key,
+                        kv => new PersistedStats
+                        {
+                            LastFiredAt = kv.Value.LastFiredAt,
+                            FireCount = kv.Value.FireCount,
+                            SkippedBusy = kv.Value.SkippedBusy,
+                            SkippedDirty = kv.Value.SkippedDirty,
+                            SkippedModal = kv.Value.SkippedModal,
+                            SkippedSuppressed = kv.Value.SkippedSuppressed,
+                            LastResult = kv.Value.LastResult,
+                            LastScheduleOccurrenceTicks = kv.Value.LastScheduleOccurrenceTicks,
+                        },
+                        StringComparer.OrdinalIgnoreCase);
+
+                    var path = StatsPath();
+                    // Empty snapshot is only a no-op when there is nothing on disk either. Once a
+                    // file exists, "everything was pruned" is a real state that has to be written —
+                    // bailing out would leave the deleted profiles' stats to be read back on the
+                    // next launch, which is the exact staleness the prune exists to remove.
+                    if (snapshot.Count == 0 && !System.IO.File.Exists(path)) return;
+                    FileHelper.WriteAllTextAtomic(path, JsonSerializer.Serialize(snapshot));
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLog.Warn($"Automation stats save failed ({ex.Message})");
+            }
+        }
+
         private void SetLastResult(TriggerStats stats, string message)
         {
             lock (_lock) stats.LastResult = message;
+            // Persist these too, not just fire outcomes. The reasons that arrive through here are
+            // the STOP reasons ("reference image missing", "can never match", "missed") — exactly
+            // what a user needs to still be on screen after the restart that used to erase it.
+            MarkStatsDirty();
         }
 
         // Trailing debounce (300 ms): a flapping condition probe (a pixel watcher on an
