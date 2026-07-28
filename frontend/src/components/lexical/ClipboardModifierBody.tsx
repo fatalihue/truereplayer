@@ -1,9 +1,10 @@
 import React, { useMemo } from 'react';
-import { Section, CheckRow, RadioRow, RadioGroup, NumInput } from './popoverAtoms';
+import { Section, CheckRow, RadioRow, RadioGroup, NumInput, ArgInput } from './popoverAtoms';
 import { CheckboxBox } from '../Checkbox';
 import { useTt } from '../../state/LanguageContext';
 import {
   applyTransformPreview,
+  previewIsRuntimeDependent,
   buildClipboardToken,
   type Extract,
   type Limit,
@@ -48,6 +49,8 @@ export function ClipboardModifierBody({
     [tokenOverride, state],
   );
   const preview = useMemo(() => applyTransformPreview(clipRaw, state), [clipRaw, state]);
+  // A reference argument has no value until the macro runs — never fabricate one in the preview.
+  const runtimeDependent = previewIsRuntimeDependent(state);
 
   const toggleCase = (v: 'upper' | 'lower' | 'sentence' | 'title') =>
     setState((s) => ({ ...s, case: s.case === v ? 'none' : v }));
@@ -56,6 +59,11 @@ export function ClipboardModifierBody({
   const setLimit = (v: Limit) => setState((s) => ({ ...s, limit: v }));
   const setExtractN = (n: number) => setState((s) => ({ ...s, extractN: Math.max(1, n) }));
   const setLimitN = (n: number) => setState((s) => ({ ...s, limitN: Math.max(0, n) }));
+  const setExtractRef = (r: string) => setState((s) => ({ ...s, extractRef: r }));
+  const setLimitRef = (r: string) => setState((s) => ({ ...s, limitRef: r }));
+  const refTip = tt('Take this number from a variable instead — @name, @counter or @row',
+                    'Pegar este número de uma variável — @nome, @counter ou @row');
+  const numTip = tt('Back to a fixed number', 'Voltar para um número fixo');
   const setListPick = (v: ListPick) => setState((s) => ({ ...s, listPick: v }));
 
   return (
@@ -125,11 +133,15 @@ export function ClipboardModifierBody({
             onChange={() => setExtract('line')}
             label="Line #"
             input={
-              <NumInput
+              <ArgInput
                 value={state.extractN}
                 onChange={setExtractN}
+                refValue={state.extractRef}
+                onRefChange={setExtractRef}
                 disabled={state.extract !== 'line'}
                 min={1}
+                refTip={refTip}
+                numTip={numTip}
               />
             }
           />
@@ -138,11 +150,15 @@ export function ClipboardModifierBody({
             onChange={() => setExtract('word')}
             label="Word #"
             input={
-              <NumInput
+              <ArgInput
                 value={state.extractN}
                 onChange={setExtractN}
+                refValue={state.extractRef}
+                onRefChange={setExtractRef}
                 disabled={state.extract !== 'word'}
                 min={1}
+                refTip={refTip}
+                numTip={numTip}
               />
             }
           />
@@ -251,9 +267,13 @@ export function ClipboardModifierBody({
             onChange={() => setLimit('first')}
             label="First N chars"
             input={
-              <NumInput
+              <ArgInput
                 value={state.limitN}
                 onChange={setLimitN}
+                refValue={state.limitRef}
+                onRefChange={setLimitRef}
+                refTip={refTip}
+                numTip={numTip}
                 disabled={state.limit !== 'first'}
                 min={0}
               />
@@ -264,9 +284,13 @@ export function ClipboardModifierBody({
             onChange={() => setLimit('last')}
             label="Last N chars"
             input={
-              <NumInput
+              <ArgInput
                 value={state.limitN}
                 onChange={setLimitN}
+                refValue={state.limitRef}
+                onRefChange={setLimitRef}
+                refTip={refTip}
+                numTip={numTip}
                 disabled={state.limit !== 'last'}
                 min={0}
               />
@@ -310,7 +334,12 @@ export function ClipboardModifierBody({
             color: 'var(--color-replay)',
           }}
         >
-          {preview === '' ? <span className="italic text-text-disabled">(empty)</span> : preview}
+          {runtimeDependent
+            ? <span className="italic text-text-disabled">
+                {tt('Resolved when the macro runs — the index comes from a variable.',
+                    'Resolvido quando a macro roda — o índice vem de uma variável.')}
+              </span>
+            : preview === '' ? <span className="italic text-text-disabled">(empty)</span> : preview}
         </div>
       </div>
     </>

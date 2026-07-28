@@ -4,9 +4,11 @@ import { SegmentedControl } from '../common/SegmentedControl';
 import { NumberInput } from '../common/NumberInput';
 import { CheckboxBox } from '../Checkbox';
 import { useTt } from '../../state/LanguageContext';
+import { ArgInput } from './popoverAtoms';
 import { useClipboardContent } from './useClipboardContent';
 import {
   applyTransformPreview,
+  previewIsRuntimeDependent,
   buildClipboardToken,
   type CaseTransform,
   type Extract,
@@ -43,6 +45,11 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset }: Clip
   const { clipRaw, clipReady, refresh } = useClipboardContent();
   const token = useMemo(() => buildClipboardToken(state), [state]);
   const preview = useMemo(() => applyTransformPreview(clipRaw, state), [clipRaw, state]);
+  // A reference argument has no value until the macro runs — never fabricate one in the preview.
+  const runtimeDependent = previewIsRuntimeDependent(state);
+  const refTip = tt('Take this number from a variable instead — @name, @counter or @row',
+                    'Pegar este número de uma variável — @nome, @counter ou @row');
+  const numTip = tt('Back to a fixed number', 'Voltar para um número fixo');
 
   const set = (patch: Partial<TransformState>) => onStateChange((s) => ({ ...s, ...patch }));
 
@@ -194,12 +201,14 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset }: Clip
                 onChange={(v) => set({ extract: v })}
               />
               {state.extract !== 'none' && (
-                <NumberInput
+                <ArgInput
                   value={state.extractN}
                   onChange={(n) => set({ extractN: Math.max(1, n) })}
+                  refValue={state.extractRef}
+                  onRefChange={(r) => set({ extractRef: r })}
                   min={1}
-                  inputWidth="w-14"
-                  inputHeight="h-8"
+                  refTip={refTip}
+                  numTip={numTip}
                 />
               )}
             </div>
@@ -218,12 +227,14 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset }: Clip
                 onChange={(v) => set({ limit: v })}
               />
               {state.limit !== 'none' && (
-                <NumberInput
+                <ArgInput
                   value={state.limitN}
                   onChange={(n) => set({ limitN: Math.max(0, n) })}
+                  refValue={state.limitRef}
+                  onRefChange={(r) => set({ limitRef: r })}
                   min={0}
-                  inputWidth="w-14"
-                  inputHeight="h-8"
+                  refTip={refTip}
+                  numTip={numTip}
                 />
               )}
             </div>
@@ -288,7 +299,12 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset }: Clip
                 color: 'var(--color-replay)',
               }}
             >
-              {preview === '' ? <span className="italic text-text-disabled">(empty)</span> : preview}
+              {runtimeDependent
+                ? <span className="italic text-text-disabled">
+                    {tt('Resolved when the macro runs — the index comes from a variable.',
+                        'Resolvido quando a macro roda — o índice vem de uma variável.')}
+                  </span>
+                : preview === '' ? <span className="italic text-text-disabled">(empty)</span> : preview}
             </div>
           </div>
 

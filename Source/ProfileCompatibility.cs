@@ -155,6 +155,18 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(UsesClipNextToken),
                 new Version(2, 9, 9), "Sequential clipboard token"),
 
+            // Reference modifier argument ("{clipboard:line:@i}", "{row:Qty:first:@n}") — the line
+            // index comes from a variable, @counter or @row instead of a literal. An older build
+            // has no '@' shape: the argument fails int.TryParse, the modifier is SKIPPED as a typo,
+            // and the caller gets the WHOLE clipboard or the whole cell. Same silent class as the
+            // sequential-token pin above — the profile imports cleanly and pastes far more than the
+            // author meant, into a chat or a customer reply.
+            // Detection delegates to ActionReplayer.ChainUsesTokenArg so the pin and the engine
+            // cannot disagree about which segments are arguments.
+            // Introduced after 2.9.9 — bump at release.
+            (p => p.Actions.Any(UsesTokenArgument),
+                new Version(2, 9, 9), "Reference modifier argument"),
+
             // Desktop Assert — the worst possible degradation, which is exactly why it is pinned.
             // An older build has no "Assert" switch case, so the row is silently SKIPPED: the
             // guard the author added ("this window MUST be focused before I type a password")
@@ -463,6 +475,41 @@ namespace TrueReplayer.Services
             {
                 var chain = m.Groups[1].Success ? m.Groups[1].Value : null;
                 if (ActionReplayer.TrySplitNextModifier(chain, out _)) return true;
+            }
+            return false;
+        }
+
+        // ── Reference arguments ("line:@i") ─────────────────────────────────────────────────
+        // Same three heads the shared applier serves. {clip:name} is NOT here: its regex carries
+        // no modifier chain at all, so there is nothing to reference into.
+        private static readonly Regex ModifierChainHeadRegex = new(
+            @"\{(?:clipboard(?::([^}]*))?|(?:row|rownext):[A-Za-z0-9_]+(?::([^}]*))?)\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static bool UsesTokenArgument(ActionItem a) =>
+            (KeyResolvingActionTypes.Contains(a.ActionType) && ContainsTokenArgument(a.Key)) ||
+            ContainsTokenArgument(a.KeyHtml) ||
+            ContainsTokenArgument(a.KeyMarkdown) ||
+            (BrowserTextResolvingActionTypes.Contains(a.ActionType) && ContainsTokenArgument(a.BrowserText)) ||
+            ContainsTokenArgument(a.VariableValue) ||
+            ContainsTokenArgument(a.ConditionOperand) ||
+            ContainsTokenArgument(a.FilePath) ||
+            ContainsTokenArgument(a.LaunchPath) ||
+            ContainsTokenArgument(a.LaunchArgs);
+
+        private static bool ContainsTokenArgument(string? text)
+        {
+            // Cheap reject first: no sigil anywhere means no reference anywhere.
+            if (string.IsNullOrEmpty(text) || text.IndexOf('@') < 0) return false;
+            foreach (Match m in ModifierChainHeadRegex.Matches(text))
+            {
+                var chain = m.Groups[1].Success ? m.Groups[1].Value
+                          : m.Groups[2].Success ? m.Groups[2].Value : null;
+                // Delegate to the ENGINE's own walk rather than re-deciding here — the same
+                // one-source-of-truth rule the {clipboard:next} pin above follows, and for the
+                // same reason: a hand-written mirror drifts on chains like {clipboard:join:@x}
+                // (a join separator that merely looks like a reference and must NOT pin).
+                if (ActionReplayer.ChainUsesTokenArg(chain)) return true;
             }
             return false;
         }

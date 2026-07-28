@@ -121,6 +121,87 @@ export function RadioGroup({ label, children }: { label: string; children: React
 // Earlier draft tried `inputWidth={\`w-[${width}px]\`}` — Tailwind's static extractor
 // can't see runtime template-literal classes, so those widths were never generated and
 // the chip rendered without any width. Inline style sidesteps that completely.
+/**
+ * A modifier argument that is either a literal number or a REFERENCE to run state ("@i",
+ * "@counter", "@row"). The `@` button flips between the two; the reference is stored verbatim so
+ * the token round-trips byte-for-byte, which matters because the popover REBUILDS the whole token
+ * on every edit — anything this control cannot represent would be silently erased on the first
+ * checkbox tick.
+ *
+ * Deliberately one control rather than two fields: the two are mutually exclusive at the grammar
+ * level (a chain segment is one or the other), and a UI that let both be filled would have to
+ * invent a precedence rule that the backend does not have.
+ */
+export function ArgInput({
+  value,
+  onChange,
+  refValue,
+  onRefChange,
+  disabled,
+  min = 0,
+  width = 54,
+  refPlaceholder = '@name',
+  refTip,
+  numTip,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+  refValue: string;
+  onRefChange: (r: string) => void;
+  disabled?: boolean;
+  min?: number;
+  width?: number;
+  refPlaceholder?: string;
+  refTip?: string;
+  numTip?: string;
+}) {
+  const isRef = !!refValue;
+  return (
+    <span onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1">
+      {isRef ? (
+        <input
+          type="text"
+          value={refValue}
+          disabled={disabled}
+          placeholder={refPlaceholder}
+          onChange={(e) => {
+            // Keep the sigil pinned to the front: the value IS the chain segment, and a segment
+            // without it would silently become a literal that fails to parse.
+            const raw = e.target.value.replace(/[^A-Za-z0-9_@]/g, '');
+            onRefChange('@' + raw.replace(/@/g, ''));
+          }}
+          className="h-7 px-1.5 rounded bg-bg-input border border-border-subtle text-[11px] font-mono text-text-primary focus:outline-none focus:border-accent-solid disabled:opacity-50"
+          style={{ width: width + 22 }}
+        />
+      ) : (
+        <span style={{ display: 'inline-flex', width }}>
+          <NumberInput
+            value={value}
+            onChange={onChange}
+            min={min}
+            disabled={disabled}
+            inputWidth="w-full"
+            inputHeight="h-7"
+          />
+        </span>
+      )}
+      <button
+        type="button"
+        disabled={disabled}
+        data-tip={isRef ? numTip : refTip}
+        onClick={() => onRefChange(isRef ? '' : '@')}
+        className={`h-7 w-6 shrink-0 rounded border text-[11px] font-mono transition-colors disabled:opacity-40 ${
+          isRef
+            ? 'bg-accent-solid border-accent-solid text-[color:var(--color-accent-ink)]'
+            : 'bg-bg-input border-border-subtle text-text-tertiary hover:text-text-primary hover:border-border-strong'
+        }`}
+      >
+        @
+      </button>
+    </span>
+  );
+}
+
 export function NumInput({
   value,
   onChange,

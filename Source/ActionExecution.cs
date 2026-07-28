@@ -3283,11 +3283,140 @@ namespace TrueReplayer.Services
             @"\{clipboard(?::([^}]+))?\}",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        // ── Reference arguments: "@name" in an argument position ────────────────────────────
+        //
+        // A modifier argument is normally a literal ("line:3"). It may instead be a REFERENCE to
+        // run state — "line:@i" takes the index from the variable `i`. Reserved: @counter (the
+        // loop iteration) and @row (the data-loop row number).
+        //
+        // Why a sigil and not the obvious `{clipboard:line:{i}}`: '@' is not '{', '}' or ':', so
+        // every token regex, every Split(':') and every positional mirror in this file AND in the
+        // frontend keeps working untouched. A brace form would instead have to widen
+        // ClipboardTokenRegex, the pin's ClipboardTokenShapeRegex and the TS mirror in lockstep —
+        // three hand-written walks over the same grammar, in the one area of this codebase with a
+        // documented history of drifting apart (see the note above TrySplitNextModifier). It would
+        // also silently re-read text already on disk: `{clipboard:join:{enter}}` means "join with
+        // the literal string `{enter`" today, and brace-awareness would change that meaning under
+        // profiles nobody edited.
+        //
+        // Deliberately excluded as reference targets: {input:}, {winclip:}, {clipboard:next},
+        // {rownext:} and {random:} — every one is async or stateful, and this resolution runs
+        // inside synchronous Regex.Replace evaluators. A user who wants a prompt-driven index sets
+        // a variable one row earlier, which costs a row and keeps this path deadlock-free.
+        private const string ArgRefSigil = "@";
+
+        /// <summary>
+        /// True when a chain segment has the SHAPE of a reference argument. Shape only — it never
+        /// asks whether the reference resolves, because arity must not depend on run-time data: the
+        /// applier, <see cref="TrySplitNextModifier"/> and the frontend's findNextModifier all step
+        /// through the chain using this predicate, and a value-dependent answer would make "is this
+        /// segment `next`?" depend on what a variable happens to hold.
+        /// </summary>
+        internal static bool IsArgRef(string? segment)
+        {
+            if (string.IsNullOrEmpty(segment) || segment.Length < 2) return false;
+            if (segment[0] != ArgRefSigil[0]) return false;
+            for (int k = 1; k < segment.Length; k++)
+            {
+                char c = segment[k];
+                if (!char.IsLetterOrDigit(c) && c != '_') return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Resolves an "@name" segment to its run-state text. Returns false when the name is
+        /// unknown — callers then yield EMPTY rather than skipping the modifier (see the fail-empty
+        /// note at each call site).
+        /// </summary>
+        private static bool TryResolveRefArg(string segment, in RunCtx ctx, out string value)
+        {
+            value = string.Empty;
+            if (!IsArgRef(segment)) return false;
+            var name = segment.Substring(1);
+            // Reserved names first so a variable literally called "counter" can't shadow them.
+            if (string.Equals(name, "counter", StringComparison.OrdinalIgnoreCase))
+            {
+                value = ctx.Iteration.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                return true;
+            }
+            if (string.Equals(name, "row", StringComparison.OrdinalIgnoreCase))
+            {
+                value = ctx.Row.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                return true;
+            }
+            // Lowercased lookup, mirroring how {var:name} reads the same dictionary.
+            if (ctx.Variables != null && ctx.Variables.TryGetValue(name.ToLowerInvariant(), out var v))
+            {
+                value = v ?? string.Empty;
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Reads an integer argument that may be a literal or an "@name" reference.
+        /// <paramref name="consumed"/> says whether the segment belongs to this modifier — for a
+        /// reference it is ALWAYS true (shape-decided arity), for a literal it is true only when it
+        /// parsed, preserving today's behaviour where a typo'd "line:upper" leaves `upper` to be
+        /// read as its own modifier.
+        /// </summary>
+        private static bool TryReadIntArg(string segment, in RunCtx ctx, int min, out int n, out bool consumed)
+        {
+            if (IsArgRef(segment))
+            {
+                consumed = true;
+                return TryResolveRefArg(segment, ctx, out var text)
+                    && int.TryParse(text.Trim(), System.Globalization.NumberStyles.Integer,
+                                    System.Globalization.CultureInfo.InvariantCulture, out n)
+                    && n >= min
+                    ? true
+                    : Fail(out n);
+            }
+            consumed = int.TryParse(segment, out n) && n >= min;
+            return consumed;
+
+            static bool Fail(out int n) { n = 0; return false; }
+        }
+
+        /// <summary>
+        /// True when the chain uses a reference argument anywhere — the single source of truth the
+        /// version pin delegates to, so the pin can never disagree with the engine about what
+        /// counts (the doctrine the {clipboard:next} pin already follows).
+        /// </summary>
+        internal static bool ChainUsesTokenArg(string? modifierChain)
+        {
+            if (string.IsNullOrEmpty(modifierChain)) return false;
+            if (modifierChain.IndexOf(ArgRefSigil[0]) < 0) return false;
+            // Walk with the SAME stepping as the applier so a `join` separator that happens to
+            // start with '@' is seen as a separator, not as a reference.
+            var parts = modifierChain.Split(':');
+            for (int i = 0; i < parts.Length;)
+            {
+                switch (parts[i].ToLowerInvariant())
+                {
+                    case "join":
+                        i += 2;   // separator is raw and unconditionally consumed
+                        break;
+                    case "line": case "word": case "first": case "last": case "range": case "lines":
+                        if (i + 1 < parts.Length && IsArgRef(parts[i + 1])) return true;
+                        i += 2;
+                        break;
+                    default:
+                        i++;
+                        break;
+                }
+            }
+            return false;
+        }
+
         /// <summary>
         /// Applies modifier chain (e.g. "trim:line:1:first:8:upper") to clipboard content.
         /// Unknown modifiers are silently ignored so that future modifiers stay forward-compatible.
+        /// An argument may be a literal or an "@name" reference (see <see cref="IsArgRef"/>);
+        /// <paramref name="ctx"/> is what a reference resolves against and is ignored otherwise.
         /// </summary>
-        internal static string ApplyClipboardModifiers(string content, string? modifierChain)
+        internal static string ApplyClipboardModifiers(string content, string? modifierChain, RunCtx ctx = default)
         {
             if (string.IsNullOrEmpty(modifierChain)) return content;
             if (content == null) return string.Empty;
@@ -3330,37 +3459,57 @@ namespace TrueReplayer.Services
                         result = result.Trim();
                         i++;
                         break;
+                    // The four int-argument modifiers share one shape: read the arg (literal or
+                    // "@name"), and when a REFERENCE fails to resolve, yield EMPTY rather than
+                    // leaving the modifier unapplied. Falling through would hand the caller the
+                    // WHOLE content — a typo'd variable name would paste an entire clipboard into
+                    // a customer reply, which is exactly the silent-divergence class this file
+                    // already pins {clipboard:next} against.
                     case "line":
-                        if (i + 1 < parts.Length && int.TryParse(parts[i + 1], out var lineN) && lineN >= 1)
+                        if (i + 1 < parts.Length)
                         {
-                            var lines = result.Replace("\r\n", "\n").Split('\n');
-                            result = lineN <= lines.Length ? lines[lineN - 1] : string.Empty;
-                            i += 2;
+                            bool ok = TryReadIntArg(parts[i + 1], ctx, 1, out var lineN, out var lineUsed);
+                            if (ok)
+                            {
+                                var lines = result.Replace("\r\n", "\n").Split('\n');
+                                result = lineN <= lines.Length ? lines[lineN - 1] : string.Empty;
+                            }
+                            else if (lineUsed) result = string.Empty;   // reference that didn't resolve
+                            i += lineUsed ? 2 : 1;
                         }
                         else i++;
                         break;
                     case "word":
-                        if (i + 1 < parts.Length && int.TryParse(parts[i + 1], out var wordN) && wordN >= 1)
+                        if (i + 1 < parts.Length)
                         {
-                            var words = result.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                            result = wordN <= words.Length ? words[wordN - 1] : string.Empty;
-                            i += 2;
+                            bool ok = TryReadIntArg(parts[i + 1], ctx, 1, out var wordN, out var wordUsed);
+                            if (ok)
+                            {
+                                var words = result.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                                result = wordN <= words.Length ? words[wordN - 1] : string.Empty;
+                            }
+                            else if (wordUsed) result = string.Empty;
+                            i += wordUsed ? 2 : 1;
                         }
                         else i++;
                         break;
                     case "first":
-                        if (i + 1 < parts.Length && int.TryParse(parts[i + 1], out var firstN) && firstN >= 0)
+                        if (i + 1 < parts.Length)
                         {
-                            result = firstN >= result.Length ? result : result.Substring(0, firstN);
-                            i += 2;
+                            bool ok = TryReadIntArg(parts[i + 1], ctx, 0, out var firstN, out var firstUsed);
+                            if (ok) result = firstN >= result.Length ? result : result.Substring(0, firstN);
+                            else if (firstUsed) result = string.Empty;
+                            i += firstUsed ? 2 : 1;
                         }
                         else i++;
                         break;
                     case "last":
-                        if (i + 1 < parts.Length && int.TryParse(parts[i + 1], out var lastN) && lastN >= 0)
+                        if (i + 1 < parts.Length)
                         {
-                            result = lastN >= result.Length ? result : result.Substring(result.Length - lastN);
-                            i += 2;
+                            bool ok = TryReadIntArg(parts[i + 1], ctx, 0, out var lastN, out var lastUsed);
+                            if (ok) result = lastN >= result.Length ? result : result.Substring(result.Length - lastN);
+                            else if (lastUsed) result = string.Empty;
+                            i += lastUsed ? 2 : 1;
                         }
                         else i++;
                         break;
@@ -3371,13 +3520,26 @@ namespace TrueReplayer.Services
                     case "range":
                         // range:a-b → keep lines a..b (1-based, inclusive; bounds swap when
                         // reversed; clamped to the available lines; no overlap → empty).
-                        if (i + 1 < parts.Length && TryParseLineRange(parts[i + 1], out var rangeFrom, out var rangeTo))
+                        // A reference here is resolved to text and fed to the SAME "a-b" parser, so
+                        // a variable holding "2-4" works. Reference included even though the UI
+                        // keeps this control literal-only: without it a hand-typed "range:@r" would
+                        // drop through the unknown-modifier default and paste everything.
+                        if (i + 1 < parts.Length)
                         {
-                            var lines = SplitContentLines(result);
-                            int from = Math.Max(1, rangeFrom);
-                            int to = Math.Min(lines.Length, rangeTo);
-                            result = from <= to ? string.Join("\n", lines[(from - 1)..to]) : string.Empty;
-                            i += 2;
+                            var seg = parts[i + 1];
+                            bool isRef = IsArgRef(seg);
+                            string argText = seg;
+                            bool resolved = !isRef || TryResolveRefArg(seg, ctx, out argText);
+                            if (resolved && TryParseLineRange(argText, out var rangeFrom, out var rangeTo))
+                            {
+                                var lines = SplitContentLines(result);
+                                int from = Math.Max(1, rangeFrom);
+                                int to = Math.Min(lines.Length, rangeTo);
+                                result = from <= to ? string.Join("\n", lines[(from - 1)..to]) : string.Empty;
+                                i += 2;
+                            }
+                            else if (isRef) { result = string.Empty; i += 2; }
+                            else i++;
                         }
                         else i++;
                         break;
@@ -3388,17 +3550,27 @@ namespace TrueReplayer.Services
                         // consumed when it actually contains a digit — same validating
                         // posture as line/word, so a typo'd "lines:upper" doesn't eat
                         // the next modifier.
-                        if (i + 1 < parts.Length && parts[i + 1].AsSpan().IndexOfAnyInRange('0', '9') >= 0)
+                        // Same reference treatment as range, and for the same fail-closed reason.
+                        if (i + 1 < parts.Length)
                         {
-                            var lines = SplitContentLines(result);
-                            var picked = new List<string>();
-                            foreach (var tok in parts[i + 1].Split(','))
+                            var seg = parts[i + 1];
+                            bool isRef = IsArgRef(seg);
+                            string argText = seg;
+                            bool resolved = !isRef || TryResolveRefArg(seg, ctx, out argText);
+                            if (resolved && argText.AsSpan().IndexOfAnyInRange('0', '9') >= 0)
                             {
-                                if (int.TryParse(tok, out var n) && n >= 1 && n <= lines.Length)
-                                    picked.Add(lines[n - 1]);
+                                var lines = SplitContentLines(result);
+                                var picked = new List<string>();
+                                foreach (var tok in argText.Split(','))
+                                {
+                                    if (int.TryParse(tok, out var n) && n >= 1 && n <= lines.Length)
+                                        picked.Add(lines[n - 1]);
+                                }
+                                result = string.Join("\n", picked);
+                                i += 2;
                             }
-                            result = string.Join("\n", picked);
-                            i += 2;
+                            else if (isRef) { result = string.Empty; i += 2; }
+                            else i++;
                         }
                         else i++;
                         break;
@@ -3969,8 +4141,10 @@ namespace TrueReplayer.Services
                 string resolved;
                 // {clipboard:next} — sequential line consumption. Handled HERE rather than inside
                 // ApplyClipboardModifiers because it is the only STATEFUL modifier: that method is
-                // static and shared verbatim by {row:col:mods} and {clip:name:mods}, which have no
-                // cursor and must keep resolving identically.
+                // static and shared verbatim by {row:col:mods} and {rownext:col:mods}, which have
+                // no cursor of their own here and must keep resolving identically.
+                // (NOT {clip:name}: ClipSlotTokenRegex is \{clip:([A-Za-z0-9_]+)\} — a slot token
+                // carries no modifier chain at all, so it never reaches the applier.)
                 if (TrySplitNextModifier(mods, out var restMods))
                 {
                     if (sync?.ClipNextReplay is { Count: > 0 } replay)
@@ -3983,13 +4157,13 @@ namespace TrueReplayer.Services
                     else
                     {
                         resolved = TakeNextClipboardLine(raw, runCtx.ClipNextCursors);
-                        resolved = ApplyClipboardModifiers(resolved, restMods);
+                        resolved = ApplyClipboardModifiers(resolved, restMods, runCtx);
                         sync?.ClipNextRecord?.Add(resolved);
                     }
                 }
                 else
                 {
-                    resolved = ApplyClipboardModifiers(raw, mods);
+                    resolved = ApplyClipboardModifiers(raw, mods, runCtx);
                 }
                 if (htmlEncodeSubstitution) resolved = HtmlEncodeValue(resolved);
                 return escapeBracesInSubstitution ? EscapeBracesForParser(resolved) : resolved;
@@ -4034,18 +4208,21 @@ namespace TrueReplayer.Services
                     // Consume the argument only when it parses, exactly like the applier. A
                     // non-numeric follower (…:line:next) is NOT an argument there either, so
                     // "next" stays a modifier in that position and both sides agree.
+                    // A REFERENCE argument ("@i") is consumed unconditionally — the applier decides
+                    // that on SHAPE alone, so this walk must too, or the two disagree about which
+                    // segment is `next` depending on what a variable happens to hold.
                     case "line":
                     case "word":
                     case "first":
                     case "last":
-                        i += hasArg && int.TryParse(parts[i + 1], out _) ? 2 : 1;
+                        i += hasArg && (IsArgRef(parts[i + 1]) || int.TryParse(parts[i + 1], out _)) ? 2 : 1;
                         continue;
                     case "range":
-                        i += hasArg && TryParseLineRange(parts[i + 1], out _, out _) ? 2 : 1;
+                        i += hasArg && (IsArgRef(parts[i + 1]) || TryParseLineRange(parts[i + 1], out _, out _)) ? 2 : 1;
                         continue;
                     case "lines":
                         // Same "contains a digit" gate the applier uses for lines:3,1,2.
-                        i += hasArg && parts[i + 1].AsSpan().IndexOfAnyInRange('0', '9') >= 0 ? 2 : 1;
+                        i += hasArg && (IsArgRef(parts[i + 1]) || parts[i + 1].AsSpan().IndexOfAnyInRange('0', '9') >= 0) ? 2 : 1;
                         continue;
                     default:
                         if (found < 0 && mod == "next") found = i;
@@ -4358,7 +4535,7 @@ namespace TrueReplayer.Services
                     runCtx.RowData?.TryGetValue(col, out value!);
                     value ??= string.Empty;
                     if (m.Groups[2].Success)
-                        value = ApplyClipboardModifiers(value, m.Groups[2].Value);
+                        value = ApplyClipboardModifiers(value, m.Groups[2].Value, runCtx);
                     if (htmlEncodeSubstitution) value = HtmlEncodeValue(value);
                     return escapeBracesInSubstitution ? EscapeBracesForParser(value) : value;
                 });
@@ -4428,7 +4605,7 @@ namespace TrueReplayer.Services
                         cursors[col] = cur + 1; // advance this column's cursor for the next occurrence
                     }
                     if (m.Groups[2].Success)
-                        value = ApplyClipboardModifiers(value, m.Groups[2].Value);
+                        value = ApplyClipboardModifiers(value, m.Groups[2].Value, runCtx);
                     sync?.RowNextRecord?.Add(value);
                 }
                 if (htmlEncodeSubstitution) value = HtmlEncodeValue(value);

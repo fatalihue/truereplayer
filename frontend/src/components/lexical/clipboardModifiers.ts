@@ -13,6 +13,18 @@ export type Extract = 'none' | 'line' | 'word';
 export type Limit = 'none' | 'first' | 'last';
 export type ListPick = 'none' | 'range' | 'lines';
 
+/**
+ * Mirror of the backend's ActionReplayer.IsArgRef. A chain segment shaped "@name" is a REFERENCE
+ * to run state (a variable, or the reserved @counter / @row), not a literal argument.
+ *
+ * Shape only — it must never ask whether the reference resolves, because arity is decided
+ * syntactically on both sides: the backend applier, its next-walk and findNextModifier below all
+ * step through the chain with this predicate, and a value-dependent answer would make "is this
+ * segment `next`?" depend on what a variable happens to hold at run time.
+ */
+export const isArgRef = (seg: string | undefined): boolean =>
+  seg !== undefined && /^@[A-Za-z0-9_]+$/.test(seg);
+
 export interface TransformState {
   // {clipboard:next} — take ONE line per use and advance a cursor, instead of the whole
   // clipboard. Clipboard-only: {row:col}/{rownext:col} share this state object but their
@@ -25,6 +37,13 @@ export interface TransformState {
   extractN: number;
   limit: Limit;
   limitN: number;
+  // Reference arguments — "@name" instead of a literal index (e.g. {clipboard:line:@i}, where
+  // the line number comes from the variable i, or from @counter / @row). Empty string = use the
+  // numeric field above. Kept as a SEPARATE field rather than widening extractN to string so
+  // every existing numeric consumer stays typed, and so a chain that carries a reference always
+  // round-trips: parse sets it, build re-emits it, and nothing in between can quietly drop it.
+  extractRef: string;
+  limitRef: string;
   // List ops — operate on the content as CRLF-normalized lines (backend list modifiers).
   listPick: ListPick;   // 'range' → range:a-b · 'lines' → lines:i,j,k (1-based)
   rangeFrom: number;
@@ -45,6 +64,8 @@ export const DEFAULT_TRANSFORM: TransformState = {
   extractN: 1,
   limit: 'none',
   limitN: 10,
+  extractRef: '',
+  limitRef: '',
   listPick: 'none',
   rangeFrom: 1,
   rangeTo: 3,
@@ -90,10 +111,12 @@ function buildModifierParts(s: TransformState): string[] {
   // join ALWAYS emits its separator as the very next part — an explicit empty part
   // ("...:join:") means empty separator. Matches the backend's consume-one-arg rule.
   if (s.join) parts.push('join', s.joinSep);
-  if (s.extract === 'line') parts.push('line', String(s.extractN));
-  else if (s.extract === 'word') parts.push('word', String(s.extractN));
-  if (s.limit === 'first') parts.push('first', String(s.limitN));
-  else if (s.limit === 'last') parts.push('last', String(s.limitN));
+  const extractArg = s.extractRef ? s.extractRef : String(s.extractN);
+  if (s.extract === 'line') parts.push('line', extractArg);
+  else if (s.extract === 'word') parts.push('word', extractArg);
+  const limitArg = s.limitRef ? s.limitRef : String(s.limitN);
+  if (s.limit === 'first') parts.push('first', limitArg);
+  else if (s.limit === 'last') parts.push('last', limitArg);
   if (s.case === 'upper') parts.push('upper');
   else if (s.case === 'lower') parts.push('lower');
   else if (s.case === 'sentence') parts.push('sentence');
@@ -108,6 +131,15 @@ function splitLines(t: string): string[] {
 
 // Mirror of backend ApplyClipboardModifiers — used for the live preview only.
 // Every backend modifier needs a mirrored branch here or the preview lies.
+/**
+ * True when the chain depends on a value that only exists at run time, so no honest preview can
+ * be computed. Surfaces MUST branch on this and say so rather than render a number — showing the
+ * result for index 1 when the real index comes from a variable is the same class of lie as the
+ * WaitImage 100%-confidence footgun: authoritative-looking and wrong.
+ */
+export const previewIsRuntimeDependent = (s: TransformState): boolean =>
+  (s.extract !== 'none' && !!s.extractRef) || (s.limit !== 'none' && !!s.limitRef);
+
 export function applyTransformPreview(raw: string, s: TransformState): string {
   let r = raw;
   // 'next' first, mirroring the backend. The preview can only ever show the FIRST line: the
@@ -206,11 +238,11 @@ function findNextModifier(parts: string[], from: number): number {
       case 'join':                                   // always consumes its separator, verbatim
         i += 2; continue;
       case 'line': case 'word': case 'first': case 'last':
-        i += hasArg && /^\d+$/.test(arg.trim()) ? 2 : 1; continue;
+        i += hasArg && (isArgRef(arg) || /^\d+$/.test(arg.trim())) ? 2 : 1; continue;
       case 'range':
-        i += hasArg && /^\d+-\d+$/.test(arg.trim()) ? 2 : 1; continue;
+        i += hasArg && (isArgRef(arg) || /^\d+-\d+$/.test(arg.trim())) ? 2 : 1; continue;
       case 'lines':
-        i += hasArg && /\d/.test(arg) ? 2 : 1; continue;
+        i += hasArg && (isArgRef(arg) || /\d/.test(arg)) ? 2 : 1; continue;
       default:
         if (p === 'next') return i;
         i++; continue;
@@ -253,6 +285,15 @@ function parseModifierParts(parts: string[], from: number): TransformState {
         break;
       case 'line':
       case 'word': {
+        // A reference is consumed unconditionally (shape-decided arity, mirroring the backend);
+        // a literal only when it parses, so a typo like "line:upper" still leaves the following
+        // segment to be read as its own modifier.
+        if (isArgRef(parts[i + 1])) {
+          state.extract = p;
+          state.extractRef = parts[i + 1];
+          i++;
+          break;
+        }
         const n = parseInt(parts[i + 1] ?? '', 10);
         if (Number.isFinite(n) && n >= 1) {
           state.extract = p;
@@ -263,6 +304,12 @@ function parseModifierParts(parts: string[], from: number): TransformState {
       }
       case 'first':
       case 'last': {
+        if (isArgRef(parts[i + 1])) {
+          state.limit = p;
+          state.limitRef = parts[i + 1];
+          i++;
+          break;
+        }
         const n = parseInt(parts[i + 1] ?? '', 10);
         if (Number.isFinite(n) && n >= 0) {
           state.limit = p;
