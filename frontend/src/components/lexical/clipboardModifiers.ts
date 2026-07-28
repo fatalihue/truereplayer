@@ -2,10 +2,11 @@
 // between the side-panel "Advanced Clipboard" insert popover and the chip click-to-edit
 // popovers (clipboard + data-row cell — both run the SAME backend modifier pipeline).
 //
-// Modifier order in the emitted chain MUST match the backend ApplyClipboardModifiers
-// pipeline: trim → range/lines → sort → dedupe → reverse → join → line/word →
-// first/last → upper/lower/sentence/title. (List ops narrow/reshape the multiline
-// content first; line/word then extracts a single piece; limit and case finish.)
+// Modifier order in the emitted chain MUST match the backend pipeline:
+// next → trim → range/lines → sort → dedupe → reverse → join → line/word →
+// first/last → upper/lower/sentence/title. ('next' picks WHICH text the rest sees and is
+// handled in ResolveClipboardTokensAsync, ahead of ApplyClipboardModifiers; list ops then
+// narrow/reshape the multiline content, line/word extracts a single piece, limit and case finish.)
 
 export type CaseTransform = 'none' | 'upper' | 'lower' | 'sentence' | 'title';
 export type Extract = 'none' | 'line' | 'word';
@@ -13,6 +14,11 @@ export type Limit = 'none' | 'first' | 'last';
 export type ListPick = 'none' | 'range' | 'lines';
 
 export interface TransformState {
+  // {clipboard:next} — take ONE line per use and advance a cursor, instead of the whole
+  // clipboard. Clipboard-only: {row:col}/{rownext:col} share this state object but their
+  // heads have no such modifier, so it is emitted by buildClipboardToken alone (never by
+  // the shared buildModifierParts) and only parseClipboardToken ever sets it.
+  next: boolean;
   trim: boolean;
   case: CaseTransform;
   extract: Extract;
@@ -32,6 +38,7 @@ export interface TransformState {
 }
 
 export const DEFAULT_TRANSFORM: TransformState = {
+  next: false,
   trim: false,
   case: 'none',
   extract: 'none',
@@ -50,7 +57,12 @@ export const DEFAULT_TRANSFORM: TransformState = {
 };
 
 export function buildClipboardToken(s: TransformState): string {
-  return '{' + ['clipboard', ...buildModifierParts(s)].join(':') + '}';
+  // 'next' leads the chain because the backend applies it first (pick the line, THEN transform
+  // it) and this module's contract is that the emitted order matches the backend pipeline.
+  // Deliberately NOT part of buildModifierParts: that tail is shared with {row:col} and
+  // {rownext:col}, whose heads ignore 'next' — emitting it there would persist a silent no-op.
+  const lead = s.next ? ['next'] : [];
+  return '{' + ['clipboard', ...lead, ...buildModifierParts(s)].join(':') + '}';
 }
 
 // {row:column[:mods]} — the data-loop cell token with the same modifier chain.
@@ -98,6 +110,14 @@ function splitLines(t: string): string[] {
 // Every backend modifier needs a mirrored branch here or the preview lies.
 export function applyTransformPreview(raw: string, s: TransformState): string {
   let r = raw;
+  // 'next' first, mirroring the backend. The preview can only ever show the FIRST line: the
+  // real cursor lives in the replay engine and a preview must never consume it. Surfaces that
+  // show this must say so in copy — an authoritative-looking preview that silently disagrees
+  // with runtime is the WaitImage-confidence class of footgun.
+  if (s.next) {
+    const items = splitLines(r).filter(l => l.trim() !== '');   // backend drops blank lines
+    r = items.length > 0 ? items[0] : '';
+  }
   if (s.trim) r = r.trim();
   if (s.listPick === 'range') {
     const lines = splitLines(r);
@@ -161,7 +181,42 @@ export function applyTransformPreview(raw: string, s: TransformState): string {
 export function parseClipboardToken(token: string): TransformState {
   if (!/^\{clipboard(?::|\})/i.test(token)) return { ...DEFAULT_TRANSFORM };
   // parts[0] === 'clipboard'; the modifier tail starts at 1.
-  return parseModifierParts(token.slice(1, -1).split(':'), 1);
+  const parts = token.slice(1, -1).split(':');
+  // Pull 'next' out BEFORE the shared tail parser, which has no case for it and would drop it
+  // silently — and a dropped flag here is not cosmetic: the chip editors rebuild the token from
+  // this state, so a lost 'next' is written back to the profile as a plain {clipboard}.
+  const at = findNextModifier(parts, 1);
+  if (at >= 0) parts.splice(at, 1);
+  const state = parseModifierParts(parts, 1);
+  state.next = at >= 0;
+  return state;
+}
+
+// Mirror of the backend's TrySplitNextModifier walk (ActionExecution.cs): returns the index of
+// the standalone 'next' segment, or -1. Steps over ARGUMENTS exactly as the applier does, so a
+// join separator that happens to be the word "next" ({clipboard:join:next}) is left alone — the
+// backend treats it as a separator, and the two sides must agree or the chip rewrites the token
+// into something that behaves differently.
+function findNextModifier(parts: string[], from: number): number {
+  for (let i = from; i < parts.length; ) {
+    const p = parts[i].toLowerCase();
+    const arg = parts[i + 1];
+    const hasArg = arg !== undefined;
+    switch (p) {
+      case 'join':                                   // always consumes its separator, verbatim
+        i += 2; continue;
+      case 'line': case 'word': case 'first': case 'last':
+        i += hasArg && /^\d+$/.test(arg.trim()) ? 2 : 1; continue;
+      case 'range':
+        i += hasArg && /^\d+-\d+$/.test(arg.trim()) ? 2 : 1; continue;
+      case 'lines':
+        i += hasArg && /\d/.test(arg) ? 2 : 1; continue;
+      default:
+        if (p === 'next') return i;
+        i++; continue;
+    }
+  }
+  return -1;
 }
 
 // Reverse of buildRowToken — column name (verbatim) + hydrated modifier state.

@@ -670,6 +670,7 @@ namespace TrueReplayer
                     case "actions:insertAction": HandleInsertAction(payload); break;
                     case "actions:addElseBranch": HandleActionsAddElseBranch(payload); break;
                     case "actions:insertConditional": HandleActionsInsertConditional(payload); break;
+                    case "actions:insertAssert": HandleActionsInsertAssert(payload); break;
                     case "actions:deleteConditional": HandleActionsDeleteConditional(payload); break;
                     case "actions:insertKeystroke": HandleInsertKeystroke(payload); break;
                     case "actions:insertHoldKey": HandleInsertHoldKey(payload); break;
@@ -3653,6 +3654,63 @@ namespace TrueReplayer
         // region or pixel to pick, so the {If, EndIf} pair lands immediately with empty probe
         // fields and the Sheet auto-opens for the user to fill them — same ending as the
         // image/pixel capture flows above.
+        /// Desktop Assert insert — a LEAF row, so unlike InsertConditionalDirect below there is no
+        /// EndIf partner and none of the block-marker machinery (rainbow nesting, block-aware
+        /// duplicate, multi-row drag snapping) applies.
+        ///
+        /// Seeds ConditionTimeout to a small grace budget instead of If's instant 0: an assert
+        /// guards a precondition that a UI usually needs a beat to satisfy (a window finishing its
+        /// activation, a paste landing), and a zero-timeout probe on that is a flake generator.
+        /// Image/Pixel reuse the SAME capture overlays as the If path — an assert on a screen
+        /// region is worthless without a region to compare.
+        private void HandleActionsInsertAssert(JsonElement payload)
+        {
+            string conditionType = payload.TryGetProperty("conditionType", out var ct) && ct.ValueKind == JsonValueKind.String
+                ? ct.GetString() ?? ""
+                : "";
+            int insertIndex = payload.TryGetProperty("insertIndex", out var iEl) && iEl.ValueKind == JsonValueKind.Number
+                ? iEl.GetInt32()
+                : actions.Count;
+            if (insertIndex < 0 || insertIndex > actions.Count) insertIndex = actions.Count;
+
+            // The SIX state conditions — deliberately not Image/Pixel. Those two are already
+            // assertable: WaitImage and WaitPixelColor abort the run on timeout and support
+            // invert, so "require this image to be on screen" ships today. Offering them here
+            // would either duplicate that or, without wiring the capture overlays, insert a
+            // row with no reference image that can never pass. Random is assertable but
+            // meaningless ("require a coin flip"), and BrowserElementState has its own
+            // BrowserAssert action with the selector/alternatives editor behind it.
+            switch (conditionType)
+            {
+                case "WindowOpen":
+                case "ProcessRunning":
+                case "FileExists":
+                case "Variable":
+                case "ClipboardMatch":
+                case "TimeWindow":
+                    break;
+                default:
+                    return;   // unknown/unsupported family — no-op, same posture as the If path
+            }
+
+            PushUndoState();
+            actions.Insert(insertIndex, new ActionItem
+            {
+                ActionType = "Assert",
+                ConditionType = conditionType,
+                Delay = 0,
+                Key = "",
+                Comment = "",
+                ConditionTimeout = 1500,
+            });
+            for (int i = 0; i < actions.Count; i++)
+                actions[i].RowNumber = i + 1;
+            HasUnsavedChanges = true;
+            PushActionsUpdate();
+            mainController.UpdateButtonStates();
+            SendMessage("sheet:openIndex", new { index = insertIndex });
+        }
+
         private void InsertConditionalDirect(int insertIndex, string conditionType)
         {
             PushUndoState();
@@ -5380,6 +5438,10 @@ namespace TrueReplayer
                 // Migrate the automation fire-stats BEFORE the refresh re-arms under the new
                 // name — otherwise cooldown/fire history restarts from zero on every rename.
                 TriggerService.Instance?.RenameStats(oldName, actualNewName);
+                // Same reason, same moment: the data-loop row position and every SetVariable
+                // cycle position are keyed by profile name, so without this a rename silently
+                // sends every list in the profile back to item 1.
+                RunCursorService.RenameProfile(oldName, actualNewName);
                 await profileController.RenameProfileInOrderAsync(oldName, actualNewName);
                 await profileController.RefreshProfileListAsync(true);
 

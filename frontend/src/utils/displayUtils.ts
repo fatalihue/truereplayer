@@ -17,7 +17,7 @@ const DISPLAY_KEY_MAP: Record<string, string> = {
   'Next': 'Page Down', 'Prior': 'Page Up',
 };
 
-const NO_COORD_TYPES = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'CopyToSlot', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'RunProfile', 'Pause', 'If', 'Else', 'EndIf']);
+const NO_COORD_TYPES = new Set(['Assert', 'KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'CopyToSlot', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'RunProfile', 'Pause', 'If', 'Else', 'EndIf']);
 
 export function getDisplayKey(key: string): string {
   if (!key) return '';
@@ -93,6 +93,11 @@ function computeActionTypeColors(actionType: string): { bg: string; fg: string }
   // Check conditional types first — they share a single token regardless of which
   // marker (If / Else / EndIf) so the whole block reads as one cohesive surface.
   if (actionType === 'If' || actionType === 'Else' || actionType === 'EndIf')
+    return { bg: 'var(--color-action-if-bg)', fg: 'var(--color-action-if-fg)' };
+  // Desktop Assert shares the If hue: it runs the SAME condition probes, so the grid reads the
+  // two as one family. A dedicated token would have to be added to all 48 theme presets for a
+  // single action — the same trade-off the CopyToSlot and ActivateWindow entries below record.
+  if (actionType === 'Assert')
     return { bg: 'var(--color-action-if-bg)', fg: 'var(--color-action-if-fg)' };
   if (actionType.startsWith('Browser'))
     return { bg: 'var(--color-action-browser-bg)', fg: 'var(--color-action-browser-fg)' };

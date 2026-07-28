@@ -162,6 +162,12 @@ namespace TrueReplayer
             // tray-daemon usage). The bridge only edits + republishes.
             RemapService.Load();
 
+            // Run cursors (data-loop row position, SetVariable cycle position) — loaded here for
+            // the same reason as the remaps: an automation or a hotkey can fire a replay long
+            // before WebView2 is up, and it must resume where the last session stopped rather than
+            // silently restarting the list.
+            RunCursorService.Load();
+
             SetupInputHooks();
 
             mainController.UpdateButtonStates();
@@ -542,6 +548,13 @@ namespace TrueReplayer
                 // Runs once at startup (before user can trigger any undo) so we never delete a
                 // file the in-memory undo stack would still need.
                 ImageStorageService.CleanupOrphanImages(profileController.ReferencedImagesByProfile, profileController.FailedLoadFolders);
+
+                // Same one-shot startup sweep for run cursors: drop positions belonging to
+                // profiles that no longer exist, so a deleted profile can't rot in the sidecar
+                // (or hand its old position to a NEW profile that reuses the name). No-ops on an
+                // empty list, so a failed profile load never wipes the user's positions.
+                RunCursorService.PruneMissingProfiles(
+                    profileController.ProfileEntries.Select(p => p.Name).ToList());
 
                 var defaultProfile = await SettingsManager.LoadProfileAsync();
                 if (defaultProfile != null)
@@ -1394,6 +1407,9 @@ namespace TrueReplayer
                 };
                 System.Diagnostics.Process.Start(startInfo);
                 Services.DiagnosticLog.Info("Launched replacement process, exiting current");
+                // Bypasses ForceExit — flush the debounced run cursors before the process dies,
+                // and BEFORE the replacement gets far enough to read the sidecar.
+                RunCursorService.Flush();
                 Environment.Exit(0);
             }
             catch (Exception ex)

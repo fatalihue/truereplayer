@@ -52,7 +52,9 @@ const familyTypes: Record<ActionFamily, { value: string; label: string }[]> = {
   ],
 };
 
-const noCoordTypes = new Set(['KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'RunProfile', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'CopyToSlot', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'Pause', 'If', 'Else', 'EndIf']);
+// NOTE this is the SHEET's copy; displayUtils has its own for the grid's Details column. Both
+// must list a coordinate-less action or it grows phantom X/Y fields in one surface only.
+const noCoordTypes = new Set(['Assert', 'KeyDown', 'KeyUp', 'Keystroke', 'HoldKey', 'RunProfile', 'ScrollUp', 'ScrollDown', 'SendText', 'SetVariable', 'CopyToSlot', 'ActivateWindow', 'WaitImage', 'WaitPixelColor', 'BrowserClick', 'BrowserRightClick', 'BrowserType', 'BrowserWaitElement', 'BrowserNavigate', 'BrowserSelectOption', 'BrowserAssert', 'Pause', 'If', 'Else', 'EndIf']);
 
 // Click × N inline repeat — mirrors the Send Keystroke dialog's Press body. Combined single
 // clicks (Left/Right/Middle) AND DoubleClick repeat; paired halves (they'd double-fire one edge)
@@ -662,8 +664,12 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // TS2448 / TS2454 in strict mode, even though the closure would read
     // them correctly at runtime. Cost is one bool eval per save click.
     const _isIf = actionType === 'If';
-    const _isIfImage = _isIf && action.conditionType === 'ImageFound';
-    const _isIfPixel = _isIf && action.conditionType === 'PixelColorMatch';
+    // Desktop Assert stores the SAME condition payload, so every condition field below must
+    // persist for it too. Gating these on _isIf alone would render a full Assert editor whose
+    // window/clipboard/variable fields silently never save.
+    const _hasCondition = _isIf || actionType === 'Assert';
+    const _isIfImage = _hasCondition && action.conditionType === 'ImageFound';
+    const _isIfPixel = _hasCondition && action.conditionType === 'PixelColorMatch';
 
     if (actionType !== action.actionType) {
       send({ type: 'actions:edit', payload: { index: actionIndex, field: 'actionType', value: actionType } });
@@ -833,7 +839,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // ifOnProbeError persists "Halt" only; "TreatAsFalse" stays null on disk (matches
     // the WaitImage / WaitPixelColor "Continue" convention). conditionNegate persists
     // as a plain boolean.
-    if (_isIf) {
+    if (_hasCondition) {
       if (!!conditionNegate !== !!(action.conditionNegate)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'conditionNegate', value: String(conditionNegate) } });
       }
@@ -841,10 +847,15 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       if (ctVal !== (action.conditionTimeout ?? 0)) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'conditionTimeout', value: String(ctVal) } });
       }
-      const persistedErr = ifOnProbeError === 'Halt' ? 'Halt' : '';
-      const currentErr = action.ifOnProbeError === 'Halt' ? 'Halt' : '';
-      if (persistedErr !== currentErr) {
-        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'ifOnProbeError', value: persistedErr } });
+      // IF-only: the Assert editor deliberately doesn't render On Probe Error (its "Halt" makes
+      // the probe rethrow, bypassing the assert's own failure policy), so it must not write it
+      // either — otherwise a hand-edited Assert would have the field silently reset on save.
+      if (_isIf) {
+        const persistedErr = ifOnProbeError === 'Halt' ? 'Halt' : '';
+        const currentErr = action.ifOnProbeError === 'Halt' ? 'Halt' : '';
+        if (persistedErr !== currentErr) {
+          send({ type: 'actions:edit', payload: { index: actionIndex, field: 'ifOnProbeError', value: persistedErr } });
+        }
       }
 
       // If Window probe fields — only meaningful on a WindowOpen row, but gating on the
@@ -983,6 +994,16 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       if ((persistedMode || '') !== (action.waitMode || '')) {
         send({ type: 'actions:edit', payload: { index: actionIndex, field: 'waitMode', value: persistedMode } });
       }
+      const persistedPolicy = assertOnFail === 'Continue' ? 'Continue' : '';
+      const currentPolicy = action.assertOnFail === 'Continue' ? 'Continue' : '';
+      if (persistedPolicy !== currentPolicy) {
+        send({ type: 'actions:edit', payload: { index: actionIndex, field: 'assertOnFail', value: persistedPolicy } });
+      }
+    }
+
+    // Desktop Assert shares assertOnFail with BrowserAssert but none of its browser fields,
+    // so it gets its own narrow block rather than widening the gate above.
+    if (actionType === 'Assert') {
       const persistedPolicy = assertOnFail === 'Continue' ? 'Continue' : '';
       const currentPolicy = action.assertOnFail === 'Continue' ? 'Continue' : '';
       if (persistedPolicy !== currentPolicy) {
@@ -1134,8 +1155,12 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const hasUnsavedChanges = useMemo<boolean>(() => {
     if (actionIndex == null || !action) return false;
     const _isIf = actionType === 'If';
-    const _isIfImage = _isIf && action.conditionType === 'ImageFound';
-    const _isIfPixel = _isIf && action.conditionType === 'PixelColorMatch';
+    // Desktop Assert stores the SAME condition payload, so every condition field below must
+    // persist for it too. Gating these on _isIf alone would render a full Assert editor whose
+    // window/clipboard/variable fields silently never save.
+    const _hasCondition = _isIf || actionType === 'Assert';
+    const _isIfImage = _hasCondition && action.conditionType === 'ImageFound';
+    const _isIfPixel = _hasCondition && action.conditionType === 'PixelColorMatch';
 
     if (actionType !== action.actionType) return true;
     const effectiveKey = textMatch.trim() ? buildTextSelector(textMode, textMatch.trim()) : key;
@@ -1220,13 +1245,17 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       }
     }
 
-    if (_isIf) {
+    if (_hasCondition) {
       if (!!conditionNegate !== !!(action.conditionNegate)) return true;
       const ctVal = Math.max(0, parseInt(conditionTimeout, 10) || 0);
       if (ctVal !== (action.conditionTimeout ?? 0)) return true;
-      const persistedErr = ifOnProbeError === 'Halt' ? 'Halt' : '';
-      const currentErr = action.ifOnProbeError === 'Halt' ? 'Halt' : '';
-      if (persistedErr !== currentErr) return true;
+      // Mirrors the IF-only gate in handleSave — an Assert never writes ifOnProbeError, so it
+      // must not report a difference in it as unsaved work either.
+      if (_isIf) {
+        const persistedErr = ifOnProbeError === 'Halt' ? 'Halt' : '';
+        const currentErr = action.ifOnProbeError === 'Halt' ? 'Halt' : '';
+        if (persistedErr !== currentErr) return true;
+      }
       if (action.conditionType === 'WindowOpen') {
         if (windowProcessName !== (action.windowProcessName ?? '')) return true;
         if (windowTitle !== (action.windowTitle ?? '')) return true;
@@ -1289,6 +1318,14 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     if (actionType === 'BrowserAssert') {
       const persistedMode = (waitMode === 'appears') ? '' : waitMode;
       if ((persistedMode || '') !== (action.waitMode || '')) return true;
+      const persistedPolicy = assertOnFail === 'Continue' ? 'Continue' : '';
+      const currentPolicy = action.assertOnFail === 'Continue' ? 'Continue' : '';
+      if (persistedPolicy !== currentPolicy) return true;
+    }
+
+    // Mirror of the Desktop Assert save block — a reflexive Esc must arm the dirty warning
+    // instead of silently dropping an on-failure change.
+    if (actionType === 'Assert') {
       const persistedPolicy = assertOnFail === 'Continue' ? 'Continue' : '';
       const currentPolicy = action.assertOnFail === 'Continue' ? 'Continue' : '';
       if (persistedPolicy !== currentPolicy) return true;
@@ -1817,16 +1854,22 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const isIf = actionType === 'If';
   const isElse = actionType === 'Else';
   const isEndIf = actionType === 'EndIf';
-  const isIfImage = isIf && action?.conditionType === 'ImageFound';
-  const isIfPixel = isIf && action?.conditionType === 'PixelColorMatch';
-  const isIfWindow = isIf && action?.conditionType === 'WindowOpen';
-  const isIfClipboard = isIf && action?.conditionType === 'ClipboardMatch';
+  // Desktop Assert reuses the If condition editor wholesale — same ConditionType family, same
+  // Negate, same wait-for-condition. So every per-condition flag below keys off "this row HAS a
+  // condition", not off If specifically; only the surrounding chrome differs (Assert adds an
+  // on-failure policy and hides On Probe Error — see the editor block).
+  const isAssert = actionType === 'Assert';
+  const hasCondition = isIf || isAssert;
+  const isIfImage = hasCondition && action?.conditionType === 'ImageFound';
+  const isIfPixel = hasCondition && action?.conditionType === 'PixelColorMatch';
+  const isIfWindow = hasCondition && action?.conditionType === 'WindowOpen';
+  const isIfClipboard = hasCondition && action?.conditionType === 'ClipboardMatch';
   const isIfBrowser = isIf && action?.conditionType === 'BrowserElementState';
-  const isIfRandom = isIf && action?.conditionType === 'Random';
-  const isIfVariable = isIf && action?.conditionType === 'Variable';
-  const isIfProcess = isIf && action?.conditionType === 'ProcessRunning';
-  const isIfFile = isIf && action?.conditionType === 'FileExists';
-  const isIfTime = isIf && action?.conditionType === 'TimeWindow';
+  const isIfRandom = hasCondition && action?.conditionType === 'Random';
+  const isIfVariable = hasCondition && action?.conditionType === 'Variable';
+  const isIfProcess = hasCondition && action?.conditionType === 'ProcessRunning';
+  const isIfFile = hasCondition && action?.conditionType === 'FileExists';
+  const isIfTime = hasCondition && action?.conditionType === 'TimeWindow';
   const isConditional = isIf || isElse || isEndIf;
   const isBrowserType = actionType === 'BrowserType';
   const isBrowserNavigate = actionType === 'BrowserNavigate';
@@ -1872,21 +1915,28 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
 
   // Human-readable action name — defined once, used as the header headline (and reusable
   // for tooltips). Replaces the inline 17-branch ternary that used to live in the header.
+  // "If" vs "Assert" for the condition-family headings below — the flags they key off are
+  // shared by both row types now.
+  const condPrefix = isAssert ? 'Assert' : 'If';
   const actionLabel = isWaitImage ? 'Wait Image'
     : isSetVariable ? 'Set Variable'
     : isCopyToSlot ? 'Copy to Slot'
     : isActivateWindow ? 'Activate Window'
     : isWaitPixelColor ? 'Wait Pixel Color'
-    : isIfImage ? 'If Image Found'
-    : isIfPixel ? 'If Pixel Color Match'
-    : isIfWindow ? 'If Window Open'
-    : isIfClipboard ? 'If Clipboard'
+    // The isIfX flags now mean "this row HAS condition X" (they cover Assert too), so the
+    // prefix must come from the row's actual TYPE — otherwise an Assert row's drawer headline
+    // reads "If Window Open", i.e. it names the one action it is deliberately NOT.
+    : isIfImage ? `${condPrefix} Image Found`
+    : isIfPixel ? `${condPrefix} Pixel Color Match`
+    : isIfWindow ? `${condPrefix} Window Open`
+    : isIfClipboard ? `${condPrefix} Clipboard`
     : isIfBrowser ? 'If Browser Element'
-    : isIfRandom ? 'If Random'
-    : isIfVariable ? 'If Variable'
-    : isIfProcess ? 'If Process Running'
-    : isIfFile ? 'If File Exists'
-    : isIfTime ? 'If Time'
+    : isIfRandom ? `${condPrefix} Random`
+    : isIfVariable ? `${condPrefix} Variable`
+    : isIfProcess ? `${condPrefix} Process Running`
+    : isIfFile ? `${condPrefix} File Exists`
+    : isIfTime ? `${condPrefix} Time`
+    : isAssert ? 'Assert'
     : isIf ? 'If'
     : isElse ? 'Else'
     : isEndIf ? 'End If'
@@ -2037,9 +2087,19 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               Sits ABOVE the WaitImage / WaitPixelColor sub-editor so it reads as the
               top-of-mind question ("what does this IF do?") before the user dives into
               the probe configuration. */}
-          {isIf && (
+          {hasCondition && (
           <>
-            <Field label="Condition">
+            {/* What an Assert IS, said once where it's decided. The three condition-shaped
+                actions are easy to confuse, and picking the wrong one fails quietly:
+                WaitImage synchronises, If branches, Assert requires. */}
+            {isAssert && (
+              <div className="text-[11px] text-text-tertiary leading-relaxed bg-bg-card border border-border-subtle rounded px-2.5 py-2">
+                {tt('Stops the run and names the failure when this is not true. Use it for the preconditions a macro assumes — the right window focused, the clipboard actually holding what you copied — instead of finding out 40 blind clicks later.',
+                    'Interrompe a execução e nomeia a falha quando isto não for verdade. Use para as premissas que a macro assume — a janela certa em foco, o clipboard realmente com o que você copiou — em vez de descobrir 40 cliques cegos depois.')}
+              </div>
+            )}
+
+            <Field label={isAssert ? 'Require' : 'Condition'}>
               {/* 2-bucket label map (pure render): object probes read Found/NOT Found;
                   state checks (Clipboard/Variable/Random/Time) read Met/NOT Met. Same
                   conditionNegate boolean write either way. */}
@@ -2084,6 +2144,11 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             </Field>
             )}
 
+            {/* On Probe Error is an IF-only knob and must stay that way. Its "Halt" setting makes
+                the probe RETHROW, which on an Assert would skip HandleAssertFailure entirely —
+                no "Assert failed" framing, and On failure below silently ignored. The engine
+                instead routes a broken probe through the same failure path as a false one. */}
+            {isIf && (
             <Field
               label="On Probe Error"
               hint={tt('What to do if the check itself errors.', 'O que fazer se a própria checagem der erro.')}
@@ -2099,6 +2164,28 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 ]}
               />
             </Field>
+            )}
+
+            {isAssert && (
+            <Field
+              label="On failure"
+              hint={tt('Abort names the failure and stops. Continue only logs a warning — it does NOT mark a data-loop row failed; for that leave this on Abort and set the Data panel to "Skip row".',
+                      'Abort nomeia a falha e para. Continue só registra um aviso — NÃO marca a linha do data loop como falha; para isso deixe em Abort e ponha o painel Data em "Skip row".')}
+            >
+              {/* Same 'Halt' | 'Continue' state BrowserAssert uses (persisted as ''|'Continue');
+                  only the label reads "Abort", which is what the failure actually does. */}
+              <SegmentedControl<'Halt' | 'Continue'>
+                ariaLabel="On assert failure"
+                grow
+                value={assertOnFail}
+                onChange={setAssertOnFail}
+                options={[
+                  { value: 'Halt', label: 'Abort', tip: tt('Stop the run and report which assert failed (default)', 'Para a execução e informa qual assert falhou (padrão)') },
+                  { value: 'Continue', label: 'Continue', tip: tt('Log a warning and keep going', 'Registra um aviso e segue') },
+                ]}
+              />
+            </Field>
+            )}
 
             {/* Hairline between the shared If chrome and the family-specific fields —
                 the family's first Field label is header enough; no text needed. */}
@@ -3128,7 +3215,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                       ? 'text-accent-light bg-accent-solid/15 border-accent-solid/50'
                       : 'bg-bg-surface border-border-subtle text-text-secondary hover:text-warning hover:border-warning/40'
                   }`}
-                  data-tip={showMoreTypeChips ? tt('Hide extra tokens', 'Ocultar tokens extras') : tt('More tokens (Tab, Date, Time, Random, Escape, Backspace, Delete, arrows)', 'Mais tokens (Tab, Date, Time, Random, Escape, Backspace, Delete, setas)')}
+                  data-tip={showMoreTypeChips ? tt('Hide extra tokens', 'Ocultar tokens extras') : tt('More tokens (Tab, Date, Time, Random, clipboard slot/history/next line, Escape, Backspace, Delete, arrows)', 'Mais tokens (Tab, Date, Time, Random, slot/histórico/próxima linha do clipboard, Escape, Backspace, Delete, setas)')}
                 >
                   ⋯
                 </button>
@@ -3143,6 +3230,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                     { var: '{Random:1-10}', label: 'Random' },
                     { var: '{Clip:1}', label: 'Clip slot' },
                     { var: '{WinClip:1}', label: 'Clip history' },
+                    { var: '{Clipboard:next}', label: 'Clip line (next)' },
                     { var: '{Escape}', label: 'Escape' },
                     { var: '{Backspace}', label: 'Backspace' },
                     { var: '{Delete}', label: 'Delete' },

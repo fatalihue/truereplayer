@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Braces, AppWindow, Clipboard, ClipboardCopy, ChevronDown, Dice5, Cpu, FileCheck, Clock, Table2 } from 'lucide-react';
+import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Braces, AppWindow, Clipboard, ClipboardCopy, ChevronDown, Dice5, Cpu, FileCheck, Clock, Table2, ShieldCheck } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
@@ -815,6 +815,40 @@ export function Toolbar(_props: ToolbarProps) {
                       const sel = selectionRef.current;
                       const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
                       send({ type: 'actions:insertConditional', payload: { conditionType: ct, insertIndex } });
+                      setShowConditionalMenu(false);
+                    }}
+                  >
+                    <Icon size={12} style={{ color: 'var(--color-action-if-fg)' }} />
+                    {label}
+                  </button>
+                ))}
+
+                {/* Assert — same probe families, opposite intent: an If BRANCHES on the answer
+                    (both outcomes legitimate, silence is correct), an Assert REQUIRES it and
+                    stops with a named failure otherwise. Listed here because that is where a
+                    user goes looking for "check something", and kept to the six STATE families:
+                    image/pixel already abort on timeout via Wait Image / Wait Pixel Color, and
+                    a page element has its own Assert Element under Browser Actions. */}
+                <div className="my-1 border-t border-border-subtle" />
+                <div className="px-3 py-1 label-micro text-text-tertiary flex items-center gap-1.5">
+                  <ShieldCheck size={11} />
+                  Insert Assert — must be true
+                </div>
+                {([
+                  { ct: 'WindowOpen', Icon: AppWindow, label: 'Window Open' },
+                  { ct: 'ProcessRunning', Icon: Cpu, label: 'Process Running' },
+                  { ct: 'ClipboardMatch', Icon: Clipboard, label: 'Clipboard' },
+                  { ct: 'Variable', Icon: Braces, label: 'Variable' },
+                  { ct: 'FileExists', Icon: FileCheck, label: 'File Exists' },
+                  { ct: 'TimeWindow', Icon: Clock, label: 'Time' },
+                ] as const).map(({ ct, Icon, label }) => (
+                  <button
+                    key={`assert-${ct}`}
+                    className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors flex items-center gap-2"
+                    onClick={() => {
+                      const sel = selectionRef.current;
+                      const insertIndex = sel.size > 0 ? Math.min(...sel) : actions.length;
+                      send({ type: 'actions:insertAssert', payload: { conditionType: ct, insertIndex } });
                       setShowConditionalMenu(false);
                     }}
                   >

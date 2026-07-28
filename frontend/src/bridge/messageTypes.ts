@@ -783,6 +783,11 @@ export type OutgoingMessage =
   // to fill them. BrowserElementState reuses BrowserWaitElement's probe fields (key =
   // selector, waitMode, browserText = text pattern) the same way If-Image reuses WaitImage's.
   | { type: 'actions:insertConditional'; payload: { conditionType: 'ImageFound' | 'PixelColorMatch' | 'WindowOpen' | 'ClipboardMatch' | 'BrowserElementState' | 'Random' | 'Variable' | 'ProcessRunning' | 'FileExists' | 'TimeWindow'; insertIndex: number } }
+  // Desktop Assert — a LEAF row (no EndIf partner), so it gets its own message instead of riding
+  // actions:insertConditional, which always inserts a block pair. Narrower condition union on
+  // purpose: image/pixel already abort on timeout via WaitImage/WaitPixelColor, Random is
+  // meaningless as a requirement, and a page element has its own BrowserAssert action.
+  | { type: 'actions:insertAssert'; payload: { conditionType: 'WindowOpen' | 'ProcessRunning' | 'ClipboardMatch' | 'Variable' | 'FileExists' | 'TimeWindow'; insertIndex: number } }
   // Conditional logic — delete the entire IF/ELSE/ENDIF block. Backend forward-scans
   // from ifRowIndex with a nested-IF stack to find the matching EndIf, then removes
   // the contiguous range [ifRowIndex..endIfIdx] inclusive (covers body + optional ELSE

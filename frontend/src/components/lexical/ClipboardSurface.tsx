@@ -33,8 +33,8 @@ interface ClipboardSurfaceProps {
 // underneath never unmounts (undo stack, caret and selection all survive a
 // round-trip through this surface).
 //
-// The five config sections are laid out in the BACKEND PIPELINE ORDER
-// (trim → lines → extract → limit → case — see clipboardModifiers.ts header),
+// The six config sections are laid out in the BACKEND PIPELINE ORDER
+// (sequence → trim → lines → extract → limit → case — see clipboardModifiers.ts header),
 // each with a step badge that lights up while its step is active, so the UI
 // reads as the data flow it actually is. Serialization stays exclusively in
 // buildClipboardToken — this component emits no token strings of its own.
@@ -82,7 +82,29 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset }: Clip
             whitespace. Everything left over goes to the preview rail, which is the part
             that actually benefits from width (long clipboard lines wrap less). */}
         <div className="min-w-0 flex-1 max-w-[560px] overflow-y-auto p-4 space-y-4">
-          <Step n={1} title="Trim" active={state.trim}>
+          {/* Step 1 because the backend applies it first — it picks WHICH text the rest of the
+              ladder then transforms. The steps below shifted up by one to keep the numbering
+              honest about pipeline order, which is what the ladder exists to communicate. */}
+          <Step n={1} title="Sequence" active={state.next}>
+            <CheckRow
+              checked={state.next}
+              onChange={() => set({ next: !state.next })}
+              label="One line per use"
+            />
+            <div className="text-[11px] text-text-tertiary leading-snug mt-1">
+              {state.next
+                ? tt(
+                    'Each use takes the next line and moves on; copying something new starts over. The preview always shows line 1 — the real position lives in the run.',
+                    'Cada uso pega a próxima linha e avança; copiar algo novo recomeça do início. A prévia sempre mostra a linha 1 — a posição real fica na execução.',
+                  )
+                : tt(
+                    'Off: every use pastes the whole clipboard.',
+                    'Desligado: cada uso cola a área de transferência inteira.',
+                  )}
+            </div>
+          </Step>
+
+          <Step n={2} title="Trim" active={state.trim}>
             <CheckRow
               checked={state.trim}
               onChange={() => set({ trim: !state.trim })}
@@ -90,7 +112,7 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset }: Clip
             />
           </Step>
 
-          <Step n={2} title="Lines" active={linesActive}>
+          <Step n={3} title="Lines" active={linesActive}>
             <div className="space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <SegmentedControl<ListPick>
@@ -159,7 +181,7 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset }: Clip
             </div>
           </Step>
 
-          <Step n={3} title="Extract" active={state.extract !== 'none'}>
+          <Step n={4} title="Extract" active={state.extract !== 'none'}>
             <div className="flex items-center gap-2 flex-wrap">
               <SegmentedControl<Extract>
                 ariaLabel="Extract"
@@ -183,7 +205,7 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset }: Clip
             </div>
           </Step>
 
-          <Step n={4} title="Limit length" active={state.limit !== 'none'}>
+          <Step n={5} title="Limit length" active={state.limit !== 'none'}>
             <div className="flex items-center gap-2 flex-wrap">
               <SegmentedControl<Limit>
                 ariaLabel="Limit length"
@@ -207,7 +229,7 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset }: Clip
             </div>
           </Step>
 
-          <Step n={5} title="Case" active={state.case !== 'none'}>
+          <Step n={6} title="Case" active={state.case !== 'none'}>
             {/* Wrap like Steps 2-4 so the block-level SegmentedControl track hugs its
                 buttons instead of stretching to the full config-column width (which left
                 a wide empty pill after the last "Title" segment). */}

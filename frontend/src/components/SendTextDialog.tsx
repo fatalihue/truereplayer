@@ -190,6 +190,7 @@ const MORE_KEY_CHIPS: PaletteChip[] = [
 // Clipboard-sourced tokens — grouped under the Clipboard section next to {clipboard}
 // itself. {clip:N} is an in-app capture slot; {winclip:N} is the Windows Win+V history.
 const CLIPBOARD_CHIPS: PaletteChip[] = [
+  { label: 'Clipboard line (next)', insert: '{clipboard:next}', tip: ['Auto-advancing: each use takes the NEXT line of the clipboard instead of the whole thing (1st use → line 1, 2nd → line 2…). Copy something new and it starts over; past the last line it resolves empty. Blank lines are skipped. Click the chip after inserting to add transforms.', 'Auto-avança: cada uso pega a PRÓXIMA linha do clipboard em vez do conteúdo inteiro (1º uso → linha 1, 2º → linha 2…). Copiou algo novo, recomeça; depois da última linha resolve vazio. Linhas em branco são puladas. Clique no chip depois de inserir para adicionar transformações.'] },
   { label: 'Clip slot…', prompt: 'clip', tip: ['Selection captured by a Copy to Slot action or the capture hotkey', 'Seleção capturada por uma action Copy to Slot ou pelo hotkey de captura'] },
   { label: 'Clipboard history', insert: '{winclip:1}', tip: ['Windows Win+V history — {winclip:1} is the last thing copied (click the chip to change which item). Needs clipboard history on; may hold anything recently copied, including passwords.', 'Histórico do Windows (Win+V) — {winclip:1} é a última coisa copiada (clique no chip para trocar o item). Precisa do histórico ligado; pode conter qualquer coisa copiada recentemente, inclusive senhas.'] },
 ];

@@ -552,8 +552,11 @@ namespace TrueReplayer.Models
             "RunProfile", "Pause", "SetVariable", "CopyToSlot", "ActivateWindow",
             // Conditional structural rows never carry their OWN coordinates — the IF row
             // borrows X/Y from its underlying probe data (handled below in DisplayX/Y);
-            // Else/EndIf are pure markers with no coordinate semantics at all.
-            "If", "Else", "EndIf"
+            // Else/EndIf are pure markers with no coordinate semantics at all. Assert is a
+            // leaf condition row in the same boat: it checks state, it never clicks anywhere.
+            // (This is the THIRD no-coord list — SheetPanel.tsx and displayUtils.ts each keep
+            // their own; a type missing here shows phantom 0,0 in the Copy-as-Table export.)
+            "If", "Else", "EndIf", "Assert"
         };
 
         private bool HideCoordinates => NoCoordinateActionTypes.Contains(ActionType ?? "");

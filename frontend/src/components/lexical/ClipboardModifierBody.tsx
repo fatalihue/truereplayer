@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Section, CheckRow, RadioRow, RadioGroup, NumInput } from './popoverAtoms';
 import { CheckboxBox } from '../Checkbox';
+import { useTt } from '../../state/LanguageContext';
 import {
   applyTransformPreview,
   buildClipboardToken,
@@ -21,6 +22,11 @@ interface ClipboardModifierBodyProps {
   /** Label above the raw-source box (default "Clipboard"; the row-cell chip
    *  passes "Cell (first row)"). */
   sourceLabel?: string;
+  /** Show the "One line per use" control. CLIPBOARD ONLY — {row:col} / {rownext:col}
+   *  share this body but their heads have no 'next' modifier, so the control would
+   *  promise a behaviour their runtime never performs. Off by default so a consumer
+   *  has to opt in deliberately. */
+  showNext?: boolean;
 }
 
 // The Transform / Extract / Limit + Source / Token / Preview sections.
@@ -34,7 +40,9 @@ export function ClipboardModifierBody({
   clipReady,
   token: tokenOverride,
   sourceLabel = 'Clipboard',
+  showNext = false,
 }: ClipboardModifierBodyProps) {
+  const tt = useTt();
   const token = useMemo(
     () => tokenOverride ?? buildClipboardToken(state),
     [tokenOverride, state],
@@ -52,6 +60,26 @@ export function ClipboardModifierBody({
 
   return (
     <>
+      {/* Sequential consumption. Sits ABOVE Transform because that is the order the backend
+          runs it in — pick the line first, then transform that line. Clipboard-only (showNext). */}
+      {showNext && (
+        <Section label="Sequence">
+          <CheckRow
+            checked={state.next}
+            onChange={() => setState((s) => ({ ...s, next: !s.next }))}
+            label="One line per use"
+          />
+          <div className="text-[10px] text-text-tertiary leading-snug mt-0.5">
+            {state.next
+              ? tt(
+                  'Each use takes the next line and moves on. Copying something new starts over. The preview always shows line 1.',
+                  'Cada uso pega a próxima linha e avança. Copiar algo novo recomeça do início. A prévia sempre mostra a linha 1.',
+                )
+              : tt('Pastes the whole clipboard.', 'Cola a área de transferência inteira.')}
+          </div>
+        </Section>
+      )}
+
       {/* Transform case — 2-col grid (column-flow). Case options share a single
           radio-style state, so combinations like UPPERCASE + Sentence case are
           impossible by construction. Trim is orthogonal (whitespace, not case). */}

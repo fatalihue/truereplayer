@@ -147,6 +147,23 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(UsesRowNextToken),
                 new Version(2, 9, 5), "Sequential data-row token"),
 
+            // Sequential clipboard token {clipboard:next} — WORSE than the literal-token failures
+            // above, because it doesn't look broken. ApplyClipboardModifiers documents that unknown
+            // modifiers are silently ignored (forward-compatibility by design), so an older build
+            // drops "next" and pastes the ENTIRE clipboard where the author meant ONE line — into a
+            // chat, a form, a customer reply. Introduced after 2.9.7 — bump at release.
+            (p => p.Actions.Any(UsesClipNextToken),
+                new Version(2, 9, 7), "Sequential clipboard token"),
+
+            // Desktop Assert — the worst possible degradation, which is exactly why it is pinned.
+            // An older build has no "Assert" switch case, so the row is silently SKIPPED: the
+            // guard the author added ("this window MUST be focused before I type a password")
+            // simply does not run, and the macro proceeds as if the precondition held. The user
+            // sees a profile that imports cleanly and behaves like the unguarded original.
+            // Introduced after 2.9.7 — bump at release.
+            (p => p.Actions.Any(a => string.Equals(a.ActionType, "Assert", StringComparison.OrdinalIgnoreCase)),
+                new Version(2, 9, 7), "Desktop Assert"),
+
             // Copy to Slot ({clip:name} capture) — an older build has no dispatch case for the
             // unknown ActionType → silently skips the capture and every {clip:} token resolves
             // empty. Introduced after 2.8.1 — bump at release.
@@ -403,6 +420,40 @@ namespace TrueReplayer.Services
         private static bool ContainsRowNextToken(string? text) =>
             !string.IsNullOrEmpty(text) && text.Contains("{rownext", StringComparison.OrdinalIgnoreCase)
                 && RowNextTokenRegex.IsMatch(text);
+
+        // Structural only: find each {clipboard[:chain]} and hand the chain to the ENGINE's own
+        // splitter. Deciding "is this token sequential?" with a regex means re-implementing
+        // ApplyClipboardModifiers' argument-consumption walk in a different language, and the two
+        // drift: an earlier lookbehind-based version matched the walk everywhere except chains
+        // like {clipboard:join:join:next} (a join separator that is itself the word "join"), where
+        // the engine reads a sequential token and the regex refused to pin — shipping precisely
+        // the silent whole-clipboard paste the pin exists to prevent.
+        private static readonly Regex ClipboardTokenShapeRegex = new(
+            @"\{clipboard(?::([^}]*))?\}",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static bool UsesClipNextToken(ActionItem a) =>
+            (KeyResolvingActionTypes.Contains(a.ActionType) && ContainsClipNextToken(a.Key)) ||
+            ContainsClipNextToken(a.KeyHtml) ||
+            ContainsClipNextToken(a.KeyMarkdown) ||
+            (BrowserTextResolvingActionTypes.Contains(a.ActionType) && ContainsClipNextToken(a.BrowserText)) ||
+            ContainsClipNextToken(a.VariableValue) ||
+            ContainsClipNextToken(a.ConditionOperand) ||
+            ContainsClipNextToken(a.FilePath) ||
+            ContainsClipNextToken(a.LaunchPath) ||
+            ContainsClipNextToken(a.LaunchArgs);
+
+        private static bool ContainsClipNextToken(string? text)
+        {
+            if (string.IsNullOrEmpty(text) || !text.Contains("{clipboard", StringComparison.OrdinalIgnoreCase))
+                return false;
+            foreach (Match m in ClipboardTokenShapeRegex.Matches(text))
+            {
+                var chain = m.Groups[1].Success ? m.Groups[1].Value : null;
+                if (ActionReplayer.TrySplitNextModifier(chain, out _)) return true;
+            }
+            return false;
+        }
 
         /// <summary>
         /// Walks the feature matrix and returns the highest minimum version among all

@@ -1233,13 +1233,20 @@ namespace TrueReplayer.Services
         private Models.ProfileDataTable? _dataTable;
         private bool _dataLoopOver;
         private IReadOnlyDictionary<string, string>? _currentRowData;
-        // Data-loop CURSOR (Model B). When a table exists but "loop over data" is OFF,
-        // each RUN uses ONE row — this per-profile cursor's current row — and advances
-        // (wrapping) for the next run, exactly like a SetVariable cycle but for a whole
-        // row. Session-lifetime, keyed by the executing (root) profile name; the table is
-        // per-profile. DELIBERATELY not in the fresh-run reset block (same as _cycleCursors)
-        // so the position survives across runs — that IS the feature.
-        private readonly Dictionary<string, int> _rowCursors = new(StringComparer.Ordinal);
+        // Data-loop CURSOR (Model B) and the SetVariable cycle cursor both live in
+        // RunCursorService now — they SURVIVE A RESTART, so the position is no longer lost
+        // when the app closes. Still deliberately absent from the fresh-run reset block:
+        // carrying across runs is the whole point. Keys are unchanged (row = executing root
+        // profile name; cycle = "profile|actionId"), so an in-flight list keeps its place.
+        // {clipboard:next} cursor — how many lines of the CURRENT clipboard have been consumed.
+        // Single-entry by construction: the key is a hash of the clipboard text, so copying
+        // something new leaves the old key behind and the walk restarts at line 1 by itself. That
+        // content-keying is what makes ONE cursor serve both shapes of the feature — "one run
+        // consumes N lines" (several {clipboard:next} in a run) and "one line per hotkey press"
+        // (the same action fired repeatedly) — without the user choosing a mode.
+        // DELIBERATELY not in the fresh-run reset block: clearing it per run would break the
+        // press-per-line shape. Session-lifetime, like _rowCursors / _cycleCursors / _clipSlots.
+        private readonly Dictionary<string, int> _clipNextCursors = new(StringComparer.Ordinal);
         // Clipboard SLOTS behind Copy to Slot / {clip:name}. "Multiple clipboards": each slot
         // holds one captured selection, read back via {clip:1}…{clip:name}. DELIBERATELY not in
         // the fresh-run reset block — slots are captured ad hoc (capture hotkey, earlier runs)
@@ -1333,16 +1340,16 @@ namespace TrueReplayer.Services
         {
             if (string.IsNullOrEmpty(actionId)) return;
             var profile = _getProfileName?.Invoke() ?? "default";
-            _cycleCursors.Remove(profile + "|" + actionId);
+            RunCursorService.RemoveCycle(profile + "|" + actionId);
         }
 
         // Reset the data-loop row cursor (Model B) to the first row for the active UI
-        // profile — the "start over" the table can't trigger itself. Session-only, keyed
-        // the same way StartAsync reads it. No-op when the profile never cursored.
+        // profile — the "start over" the table can't trigger itself. Keyed the same way
+        // StartAsync reads it. No-op when the profile never cursored.
         public void ResetRowCursor()
         {
             var profile = _getProfileName?.Invoke() ?? "default";
-            _rowCursors.Remove(profile);
+            RunCursorService.RemoveRow(profile);
         }
 
         public void SetProfileNameProvider(Func<string> getProfileName)
@@ -1587,9 +1594,9 @@ namespace TrueReplayer.Services
                 {
                     string rowKey = _getProfileName?.Invoke() ?? "default";
                     int rowN = _dataTable.Rows!.Count;
-                    int cur = _rowCursors.TryGetValue(rowKey, out var cv) ? ((cv % rowN) + rowN) % rowN : 0;
+                    int cur = RunCursorService.TryGetRow(rowKey, out var cv) ? ((cv % rowN) + rowN) % rowN : 0;
                     cursorRowData = BuildRowDict(_dataTable, cur);
-                    _rowCursors[rowKey] = (cur + 1) % rowN; // advance for the next run
+                    RunCursorService.SetRow(rowKey, (cur + 1) % rowN); // advance for the next run
                     // Lap complete = this run consumed the LAST row, so the next one wraps to
                     // the top. Detected HERE (not at the wrap) so the notice fires while it is
                     // still true — "that was the last one" — instead of after row 1 was already
@@ -2096,6 +2103,7 @@ namespace TrueReplayer.Services
                         }
                         case "SetVariable": await ExecuteSetVariable(action); break;
                         case "CopyToSlot": await ExecuteCopyToSlot(action, token); break;
+                        case "Assert": await ExecuteAssert(action, token); break;
                         case "ActivateWindow": await ExecuteActivateWindow(action, token); break;
                         case "WaitImage": await ExecuteWaitImage(action, token); break;
                         case "WaitPixelColor": await ExecuteWaitPixelColor(action, token); break;
@@ -2910,6 +2918,121 @@ namespace TrueReplayer.Services
         // BrowserAssert failure policy — mirrors HandleActivateWindowFailure. Default (null)
         // = Halt: report LOUDLY (OnReplayError — the whole point of an assertion) and stop.
         // "Continue" logs and lets the run proceed.
+        /// <summary>
+        /// Desktop Assert — "this MUST be true, or stop and say why".
+        ///
+        /// Fills the gap between the three things that already exist and none of which state a
+        /// REQUIREMENT: WaitImage/WaitPixelColor are synchronisation (poll, then abort — but only
+        /// for image/pixel), and an <c>If</c> whose probe reads false jumps to ENDIF and carries on
+        /// SILENTLY, which is the right semantic for a branch and the wrong one for a precondition.
+        /// So the six state conditions (window / process / file / variable / clipboard / time)
+        /// had no way to be required at all.
+        ///
+        /// Reuses the If machinery verbatim — same ConditionType family, same ConditionNegate,
+        /// same ConditionTimeout polling — so nothing here re-implements a probe.
+        ///
+        /// Deliberately does NOT honour IfOnProbeError: on the If path a "Halt" setting makes the
+        /// probe RETHROW, which would bypass HandleAssertFailure entirely and surface a raw
+        /// exception with no "Assert failed" framing and no AssertOnFail policy. An Assert catches
+        /// here instead and routes a broken probe through the SAME failure path as a false one —
+        /// "couldn't check" and "checked and it was false" are both "the precondition is not
+        /// established", and the user's on-fail choice should govern both.
+        /// </summary>
+        private async Task ExecuteAssert(ActionItem action, CancellationToken token)
+        {
+            bool satisfied;
+            try
+            {
+                satisfied = await EvaluateConditionWithTimeout(action, token);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;   // user pressed Stop — never a failed assertion
+            }
+            catch (Exception ex)
+            {
+                HandleAssertFailure(action, $"could not check the condition ({ex.Message})");
+                return;
+            }
+            // The probe can return FALSE because the run was stopped mid-check, not because the
+            // precondition failed: a blocking probe (File.Exists on a dead UNC share, a clipboard
+            // another app has locked) observes no token until it returns, and
+            // EvaluateConditionWithTimeout's elapsed-window exit doesn't re-check either. Without
+            // this guard, hitting Stop during that window pops a red "Assert failed" toast naming
+            // a precondition that was never actually judged.
+            if (token.IsCancellationRequested) return;
+            // A probe that faulted the row in skip-mode already unwound it; adding an assert
+            // failure on top would double-report the same row.
+            if (!satisfied && !_rowFaulted)
+                HandleAssertFailure(action, DescribeAssertExpectation(action));
+        }
+
+        /// Human-readable "what was required" for the failure toast/log. The label (Comment/Key)
+        /// is prepended by HandleAssertFailure, so this is only the expectation clause. Phrased
+        /// from the USER's side ("window … was not open") rather than the engine's ("probe
+        /// returned false") — the whole point of an assert is that the message names the thing.
+        private static string DescribeAssertExpectation(ActionItem action)
+        {
+            bool neg = action.ConditionNegate;
+            string who(string? a, string? b) =>
+                !string.IsNullOrWhiteSpace(a) && !string.IsNullOrWhiteSpace(b) ? $"{a} · {b}"
+                : !string.IsNullOrWhiteSpace(a) ? a!
+                : !string.IsNullOrWhiteSpace(b) ? b!
+                : "(unspecified)";
+
+            switch (action.ConditionType)
+            {
+                case "WindowOpen":
+                    var target = who(action.WindowProcessName, action.WindowTitle);
+                    var scope = action.WindowMatchForegroundOnly ? "in the foreground" : "open";
+                    return neg ? $"window {target} was {scope}" : $"window {target} was not {scope}";
+                case "ProcessRunning":
+                    return neg
+                        ? $"process '{action.WindowProcessName}' was running"
+                        : $"process '{action.WindowProcessName}' was not running";
+                case "FileExists":
+                    return neg ? $"file exists: {action.FilePath}" : $"file not found: {action.FilePath}";
+                case "Variable":
+                    return neg
+                        ? $"variable '{action.Key}' matched {action.ConditionOperator} {action.ConditionOperand}"
+                        : $"variable '{action.Key}' did not match {action.ConditionOperator} {action.ConditionOperand}";
+                case "ClipboardMatch":
+                    return neg ? "clipboard matched the pattern" : "clipboard did not match the pattern";
+                case "TimeWindow":
+                {
+                    // ProbeTimeWindow fails on TWO independent criteria and SHORT-CIRCUITS on the
+                    // day check, and it supports a day-only mode (no start/end). Rendering only
+                    // the time clause therefore produced "the current time was outside –" for a
+                    // plain "weekdays only" guard, and blamed the clock for a wrong-day failure.
+                    var days = Models.ActionItem.FormatDaysOfWeek(action.DaysOfWeek);
+                    bool hasWindow = !string.IsNullOrWhiteSpace(action.TimeStart)
+                                  && !string.IsNullOrWhiteSpace(action.TimeEnd);
+                    var window = hasWindow ? $"{action.TimeStart}–{action.TimeEnd}" : "";
+                    string need =
+                        days.Length > 0 && hasWindow ? $"{days} {window}" :
+                        days.Length > 0 ? days :
+                        hasWindow ? window :
+                        "(no day or time window set)";
+                    // A negated assert fails only when the probe returned TRUE — i.e. day AND
+                    // time both matched — so the combined clause is exactly right there.
+                    if (neg) return $"the current time was inside {need}";
+                    var today = DateTime.Now.DayOfWeek;
+                    bool dayOk = action.DaysOfWeek == 0
+                              || (action.DaysOfWeek & (1 << (int)today)) != 0;
+                    if (!dayOk) return $"today ({today}) is not one of {days}";
+                    return hasWindow
+                        ? $"the current time was outside {window}"
+                        : $"the required window was not met ({need})";
+                }
+                case "ImageFound":
+                    return neg ? "the image was on screen" : "the image was not on screen";
+                case "PixelColorMatch":
+                    return neg ? "the pixel matched the colour" : "the pixel did not match the colour";
+                default:
+                    return neg ? "the condition was met" : "the condition was not met";
+            }
+        }
+
         private void HandleAssertFailure(ActionItem action, string reason)
         {
             string label = !string.IsNullOrWhiteSpace(action.Comment) ? action.Comment
@@ -3368,6 +3491,11 @@ namespace TrueReplayer.Services
             // (RunCtx.Empty) → {rownext} resolves empty, no advance.
             public Models.ProfileDataTable? DataTable { get; init; }
             public IDictionary<string, int>? RowNextCursors { get; init; }
+            // {clipboard:next} cursor — a LIVE reference to the replayer's dict (mutated in place
+            // as tokens resolve), keyed by a hash of the clipboard text so new content restarts the
+            // walk. Null on the static Test-Action path (RunCtx.Empty), where {clipboard:next}
+            // falls back to the FIRST line and never advances — a preview must not consume.
+            public IDictionary<string, int>? ClipNextCursors { get; init; }
             // Clipboard slots (Copy to Slot / capture hotkey): slot name (lowercased) → captured
             // text. {clip:name} resolves from here. Null on the static Test-Action path → empty.
             public IReadOnlyDictionary<string, string>? ClipSlots { get; init; }
@@ -3388,6 +3516,7 @@ namespace TrueReplayer.Services
             RowData = _currentRowData,
             DataTable = _dataTable,
             RowNextCursors = _rowNextCursors,
+            ClipNextCursors = _clipNextCursors,
             // Snapshot, not the live dict — the capture hotkey mutates _clipSlots on the UI
             // thread and a TryGetValue racing a resize is undefined. Slots are tiny (≤ a few
             // entries), so a copy per resolution is noise. _runtimeVariables needs no copy:
@@ -3405,18 +3534,16 @@ namespace TrueReplayer.Services
         // lowercased). Same shape as the {var:name} token regex below — keep the two in sync.
         private static readonly Regex VariableNameRegex = new(@"^[A-Za-z0-9_]+$", RegexOptions.Compiled);
 
-        // Cycle-mode cursors, keyed by executing-profile-name + ActionItem.Id.
-        // Deliberately NOT cleared in StartAsync — surviving across runs is the
-        // feature: each hotkey press walks the list one item further. Session-lifetime
-        // only (the replayer instance is created once per app session); an app restart
-        // starts lists over at item 1. The profile-name half of the key matters:
-        // Profile Duplicate is a raw File.Copy and import keeps envelope Actions
-        // verbatim, so the SAME action Id can exist in several profiles — Id alone
-        // would make copies share (and fight over) one cursor. Row-level copies are
-        // covered the other way: Clone() gives duplicated rows a fresh Id. Renaming a
-        // profile resets its cursors (acceptable for session-only state); deleted rows
-        // strand a dead int (negligible).
-        private readonly Dictionary<string, int> _cycleCursors = new(StringComparer.Ordinal);
+        // Cycle-mode cursors live in RunCursorService, keyed by executing-profile-name +
+        // ActionItem.Id. Deliberately NOT cleared in StartAsync — surviving across runs is the
+        // feature: each hotkey press walks the list one item further — and they now survive an
+        // APP RESTART too (the sidecar), so closing the app no longer silently restarts every
+        // list at item 1. The profile-name half of the key matters: Profile Duplicate is a raw
+        // File.Copy and import keeps envelope Actions verbatim, so the SAME action Id can exist
+        // in several profiles — Id alone would make copies share (and fight over) one cursor.
+        // Row-level copies are covered the other way: Clone() gives duplicated rows a fresh Id.
+        // A profile RENAME now carries its cursors across (RunCursorService.RenameProfile);
+        // deleted rows strand a dead int until the profile itself goes (then Prune sweeps it).
 
         // SetVariable action: resolve the value's tokens against the live run state, then write
         // (or, for an empty resolved value, delete) the entry. Pure state mutation — no input
@@ -3450,9 +3577,9 @@ namespace TrueReplayer.Services
                 }
                 var idPart = string.IsNullOrEmpty(action.Id) ? key : action.Id; // Id always set in practice
                 var cursorKey = CurrentExecutingProfileName + "|" + idPart;
-                _cycleCursors.TryGetValue(cursorKey, out int cursor);
+                RunCursorService.TryGetCycle(cursorKey, out int cursor);
                 lock (_runStateLock) _runtimeVariables[key] = items[((cursor % items.Length) + items.Length) % items.Length];
-                _cycleCursors[cursorKey] = (cursor + 1) % items.Length;
+                RunCursorService.SetCycle(cursorKey, (cursor + 1) % items.Length);
                 PushVariablesSnapshot(force: true);
                 return;
             }
@@ -3826,7 +3953,7 @@ namespace TrueReplayer.Services
         internal static string HtmlEncodeValue(string value)
             => System.Net.WebUtility.HtmlEncode(value).Replace("\r\n", "\n").Replace("\n", "<br>");
 
-        internal static async Task<string> ResolveClipboardTokensAsync(string text, DispatcherQueue dispatcherQueue, string? clipboardOverride = null, bool escapeBracesInSubstitution = false, bool htmlEncodeSubstitution = false)
+        internal static async Task<string> ResolveClipboardTokensAsync(string text, DispatcherQueue dispatcherQueue, string? clipboardOverride = null, bool escapeBracesInSubstitution = false, bool htmlEncodeSubstitution = false, RunCtx runCtx = default, TokenFlavorSync? sync = null)
         {
             if (string.IsNullOrEmpty(text)) return text;
             if (!ClipboardTokenRegex.IsMatch(text)) return text;
@@ -3839,10 +3966,133 @@ namespace TrueReplayer.Services
             return ClipboardTokenRegex.Replace(text, m =>
             {
                 var mods = m.Groups[1].Success ? m.Groups[1].Value : null;
-                var resolved = ApplyClipboardModifiers(raw, mods);
+                string resolved;
+                // {clipboard:next} — sequential line consumption. Handled HERE rather than inside
+                // ApplyClipboardModifiers because it is the only STATEFUL modifier: that method is
+                // static and shared verbatim by {row:col:mods} and {clip:name:mods}, which have no
+                // cursor and must keep resolving identically.
+                if (TrySplitNextModifier(mods, out var restMods))
+                {
+                    if (sync?.ClipNextReplay is { Count: > 0 } replay)
+                    {
+                        // html pass of the rich SendText double-resolve — reuse the plain pass's
+                        // line; the cursor already advanced there, and advancing twice would make
+                        // one paste eat two lines.
+                        resolved = replay.Dequeue();
+                    }
+                    else
+                    {
+                        resolved = TakeNextClipboardLine(raw, runCtx.ClipNextCursors);
+                        resolved = ApplyClipboardModifiers(resolved, restMods);
+                        sync?.ClipNextRecord?.Add(resolved);
+                    }
+                }
+                else
+                {
+                    resolved = ApplyClipboardModifiers(raw, mods);
+                }
                 if (htmlEncodeSubstitution) resolved = HtmlEncodeValue(resolved);
                 return escapeBracesInSubstitution ? EscapeBracesForParser(resolved) : resolved;
             });
+        }
+
+        // Pulls a bare "next" segment out of a {clipboard:...} modifier chain, returning the
+        // remaining chain in <paramref name="rest"/>. Extracted from ANY position rather than only
+        // the first: "next" always applies first (pick the line, then transform it), so honouring it
+        // only in front would make "{clipboard:trim:next}" a silent no-op — ApplyClipboardModifiers
+        // ignores unknown modifiers by design, so the user would get the whole clipboard with no
+        // hint anything was wrong.
+        //
+        // The walk MIRRORS ApplyClipboardModifiers' own stepping so a segment that is an ARGUMENT
+        // is never mistaken for the modifier. That is not hypothetical: "join" always consumes the
+        // next segment as its separator, and the separator inputs only strip '{', '}' and ':' — so
+        // a user can legitimately build {clipboard:join:next} ("glue the lines with the word next").
+        // A naive scan would eat that separator and turn a join into a line-pop.
+        // internal, not private: ProfileCompatibility asks THIS method whether a token is
+        // sequential instead of re-implementing the walk in a regex. A hand-written mirror of an
+        // execution walk drifts — a lookbehind that only checks one segment back disagrees with
+        // the real walk on chains like {clipboard:join:join:next}, and a pin that under-fires
+        // ships the exact silent divergence the pin exists to prevent. One source of truth.
+        internal static bool TrySplitNextModifier(string? modifierChain, out string? rest)
+        {
+            rest = modifierChain;
+            if (string.IsNullOrEmpty(modifierChain)) return false;
+            if (modifierChain.IndexOf("next", StringComparison.OrdinalIgnoreCase) < 0) return false;
+
+            var parts = modifierChain.Split(':');
+            int found = -1;
+            for (int i = 0; i < parts.Length; )
+            {
+                var mod = parts[i].ToLowerInvariant();
+                bool hasArg = i + 1 < parts.Length;
+                switch (mod)
+                {
+                    // Always consumes its argument verbatim — the separator may be ANY text.
+                    case "join":
+                        i += 2;
+                        continue;
+                    // Consume the argument only when it parses, exactly like the applier. A
+                    // non-numeric follower (…:line:next) is NOT an argument there either, so
+                    // "next" stays a modifier in that position and both sides agree.
+                    case "line":
+                    case "word":
+                    case "first":
+                    case "last":
+                        i += hasArg && int.TryParse(parts[i + 1], out _) ? 2 : 1;
+                        continue;
+                    case "range":
+                        i += hasArg && TryParseLineRange(parts[i + 1], out _, out _) ? 2 : 1;
+                        continue;
+                    case "lines":
+                        // Same "contains a digit" gate the applier uses for lines:3,1,2.
+                        i += hasArg && parts[i + 1].AsSpan().IndexOfAnyInRange('0', '9') >= 0 ? 2 : 1;
+                        continue;
+                    default:
+                        if (found < 0 && mod == "next") found = i;
+                        i++;
+                        continue;
+                }
+            }
+            if (found < 0) return false;
+
+            var kept = new List<string>(parts.Length - 1);
+            for (int i = 0; i < parts.Length; i++) if (i != found) kept.Add(parts[i]);
+            rest = kept.Count > 0 ? string.Join(":", kept) : null;
+            return true;
+        }
+
+        // Reads the line the cursor is on and advances it. Blank lines are dropped (a trailing
+        // newline is near-universal in copied text and would otherwise waste a press on an empty
+        // value) — same rule SetVariable's Cycle mode uses on its list. Past the last line resolves
+        // EMPTY and does not wrap, matching {rownext:column}: an empty result is how a macro can
+        // tell the list is finished, which wrapping would hide forever.
+        // A null cursor dict = the static Test-Action path: return line 1 WITHOUT advancing, so a
+        // preview never consumes the user's list.
+        private static string TakeNextClipboardLine(string raw, IDictionary<string, int>? cursors)
+        {
+            var lines = SplitContentLines(raw);
+            var items = new List<string>(lines.Length);
+            foreach (var l in lines) if (!string.IsNullOrWhiteSpace(l)) items.Add(l);
+            if (items.Count == 0) return string.Empty;
+            if (cursors == null) return items[0];
+
+            // Content-keyed, single-entry: a different clipboard drops the old key and restarts.
+            string key = ClipboardContentKey(raw);
+            if (!cursors.TryGetValue(key, out int cur))
+            {
+                cursors.Clear();
+                cur = 0;
+            }
+            cursors[key] = cur + 1;
+            return cur < items.Count ? items[cur] : string.Empty;
+        }
+
+        // Stable, cheap identity for "is this the same clipboard as last time". Content hash, not
+        // the content itself, so a megabyte paste doesn't sit in the dictionary for the session.
+        private static string ClipboardContentKey(string raw)
+        {
+            var bytes = System.Text.Encoding.UTF8.GetBytes(raw);
+            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
         }
 
         // Matches {winclip:N} — a 1-based index into the WINDOWS clipboard history (Win+V),
@@ -3922,7 +4172,7 @@ namespace TrueReplayer.Services
             bool htmlEncodeSubstitution = false, TokenFlavorSync? flavorSync = null)
         {
             if (string.IsNullOrEmpty(text)) return text;
-            text = await ResolveClipboardTokensAsync(text, dispatcherQueue, clipboardOverride, escapeBracesInSubstitution, htmlEncodeSubstitution);
+            text = await ResolveClipboardTokensAsync(text, dispatcherQueue, clipboardOverride, escapeBracesInSubstitution, htmlEncodeSubstitution, runCtx, flavorSync);
             text = await ResolveWinClipTokensAsync(text, dispatcherQueue, escapeBracesInSubstitution, htmlEncodeSubstitution, flavorSync);
             text = ResolveDateTimeTokens(text, flavorSync);
             text = ResolveRandomTokens(text, flavorSync);
@@ -4012,6 +4262,8 @@ namespace TrueReplayer.Services
             public Queue<string>? WinClipReplay; // replayed on the html pass so both flavors agree
             public List<string>? RowNextRecord;  // {rownext:col} resolved values — recording (plain) pass
             public Queue<string>? RowNextReplay; // replayed on the html pass so the cursor advances once
+            public List<string>? ClipNextRecord;  // {clipboard:next} resolved lines — recording (plain) pass
+            public Queue<string>? ClipNextReplay; // replayed on the html pass so one paste eats one line
         }
 
         private static string ResolveRandomTokens(string text, TokenFlavorSync? sync = null)
@@ -4251,7 +4503,7 @@ namespace TrueReplayer.Services
             // value so content like "{enter}" is pasted as text, not re-interpreted as a key press.
             // The flavor sync RECORDS this pass's {random} draws + DateTime.Now snapshot so the
             // html pass below replays the exact same values (one paste = one set of values).
-            var flavorSync = new TokenFlavorSync { RandomRecord = new List<string>(), WinClipRecord = new List<string>(), RowNextRecord = new List<string>() };
+            var flavorSync = new TokenFlavorSync { RandomRecord = new List<string>(), WinClipRecord = new List<string>(), RowNextRecord = new List<string>(), ClipNextRecord = new List<string>() };
             text = await ResolveTokens(text, originalClipboard.Text ?? string.Empty, escapeBracesInSubstitution: true, flavorSync);
 
             if (string.IsNullOrEmpty(text) || token.IsCancellationRequested)
@@ -4282,6 +4534,7 @@ namespace TrueReplayer.Services
                     RandomReplay = new Queue<string>(flavorSync.RandomRecord!),
                     WinClipReplay = new Queue<string>(flavorSync.WinClipRecord!),
                     RowNextReplay = new Queue<string>(flavorSync.RowNextRecord!),
+                    ClipNextReplay = new Queue<string>(flavorSync.ClipNextRecord!),
                 };
                 resolvedHtml = await ResolveTokensAsync(PrepareRichHtmlForSend(html), dispatcherQueue, CurrentRunCtx,
                     originalClipboard.Text ?? string.Empty, escapeBracesInSubstitution: true,

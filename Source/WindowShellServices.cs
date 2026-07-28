@@ -647,6 +647,9 @@ namespace TrueReplayer.Services
 
         private void ForceExit()
         {
+            // Before anything else tears down: the cursor sidecar is debounced, so a run that
+            // advanced a list in the last second still has its position only in memory.
+            RunCursorService.Flush();
             TriggerService.Instance?.StopAll();
             InputHookManager.Stop();
             TrayIconService.RemoveTrayIcon();

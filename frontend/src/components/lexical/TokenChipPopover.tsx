@@ -295,18 +295,29 @@ function ClipboardEditor({
 }) {
   const [state, setState] = useState<TransformState>(() => parseClipboardToken(token));
   const { clipRaw, clipReady } = useClipboardContent();
-  const newToken = useMemo(() => buildClipboardToken(state), [state]);
 
-  useEffect(() => {
-    onChange(newToken);
-  }, [newToken, onChange]);
+  // Report changes only on real user input — NOT from a mount-time effect, matching every other
+  // editor here. The effect this replaces fired on mount and emitted the REBUILT token, so merely
+  // opening a chip and clicking away committed whatever the parser had failed to understand. That
+  // was not theoretical: any modifier this module can't parse round-trips as a silent deletion.
+  // Derived from the render-time `state` rather than inside the updater, so onChange stays out
+  // of React's updater (which StrictMode invokes twice) — each interaction re-renders before the
+  // next one, so the closure value is the current one.
+  const update: React.Dispatch<React.SetStateAction<TransformState>> = (action) => {
+    const next = typeof action === 'function'
+      ? (action as (prev: TransformState) => TransformState)(state)
+      : action;
+    setState(next);
+    onChange(buildClipboardToken(next));
+  };
 
   return (
     <ClipboardModifierBody
       state={state}
-      setState={setState}
+      setState={update}
       clipRaw={clipRaw}
       clipReady={clipReady}
+      showNext
     />
   );
 }

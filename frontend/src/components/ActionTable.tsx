@@ -52,6 +52,8 @@ const blockColor = (level: number): string =>
 export function ActionIcon({ actionType, size = 12 }: { actionType: string; size?: number }) {
   // ShieldCheck (verify-or-fail) before the generic Browser→Globe so Assert reads distinctly.
   if (actionType === 'BrowserAssert') return <ShieldCheck size={size} />;
+  // Desktop Assert: the same shield, filled — it states a requirement rather than checking a page.
+  if (actionType === 'Assert') return <ShieldCheck size={size} />;
   if (actionType.startsWith('Browser')) return <Globe size={size} />;
   if (actionType.includes('Click')) return <Mouse size={size} />;
   if (actionType === 'ScrollUp') return <ArrowUp size={size} />;
@@ -147,6 +149,7 @@ function actionPillLabel(action: ActionItem): string {
     case 'BrowserType': return 'Type Text';
     case 'BrowserSelectOption': return 'Select Option';
     case 'BrowserAssert': return 'Assert Element';
+    case 'Assert': return 'Assert';
     case 'BrowserWaitElement': return 'Wait Element';
     case 'BrowserNavigate': return 'Open URL';
     case 'RunProfile': return 'Run Profile';
@@ -277,7 +280,10 @@ function ProbeDetails({ action }: { action: ActionItem }) {
 // ConditionDetails below instead, which mirrors ProbeDetails' "type tag + value" shape so
 // the grid reads which condition family a row is without opening the Sheet.
 function isConditionAction(action: ActionItem): boolean {
-  return action.actionType === 'If'
+  // Desktop Assert carries the same ConditionType payload as an If, so it reuses this exact
+  // "type tag + value" summary — the grid then reads WHAT is being checked identically for
+  // both, and only the Action pill says whether it branches or requires.
+  return (action.actionType === 'If' || action.actionType === 'Assert')
     && (action.conditionType === 'WindowOpen'
       || action.conditionType === 'ClipboardMatch'
       || action.conditionType === 'BrowserElementState'
@@ -1969,11 +1975,16 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                           to "if" so the pill reads "if NOT"; the Details cell stays
                           focused on the probe payload. Solid fill (if-fg on the row's
                           surface) so it reads as an emphatic modifier on the keyword. */}
-                      {action.actionType === 'If' && action.conditionNegate && (
+                      {/* Assert carries the same conditionNegate and it matters MORE there: an If
+                          shows both outcomes in the block below it, but "require X" and "require
+                          NOT X" are opposite guards that would otherwise render identically. */}
+                      {(action.actionType === 'If' || action.actionType === 'Assert') && action.conditionNegate && (
                         <span
                           className="ml-0.5 px-1 rounded text-[9px] font-bold tracking-wider"
                           style={{ background: 'var(--color-action-if-fg)', color: 'var(--color-bg-surface)' }}
-                          data-tip={tt('Negated condition — the TRUE branch fires when the probe FAILS (IFNOT)', 'Condição negada — a ramificação TRUE dispara quando a verificação FALHA (IFNOT)')}
+                          data-tip={action.actionType === 'Assert'
+                            ? tt('Negated requirement — this row DEMANDS the probe fails', 'Requisito negado — esta linha EXIGE que a verificação falhe')
+                            : tt('Negated condition — the TRUE branch fires when the probe FAILS (IFNOT)', 'Condição negada — a ramificação TRUE dispara quando a verificação FALHA (IFNOT)')}
                         >
                           NOT
                         </span>
