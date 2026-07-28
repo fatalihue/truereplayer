@@ -827,13 +827,30 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                           <NumberInput value={draft.pixelY} onChange={(v) => patch({ pixelY: v ?? 0 })}
                             min={-20000} max={20000} inputWidth="w-20" />
                         </Field>
+                        {/* Swatch + hex, same pairing as Wait Pixel Color / If Pixel in the Sheet:
+                            a hex code alone is unreadable, and this is the field a user checks to
+                            confirm the eyedropper grabbed what they meant. Dashed border = the
+                            text isn't a valid colour yet, so there is nothing to show. */}
                         <Field label="Color">
-                          <input
-                            className={`${inputCls} w-24 font-mono`}
-                            value={draft.pixelColor ?? ''}
-                            onChange={(e) => patch({ pixelColor: e.target.value })}
-                            placeholder="#RRGGBB"
-                          />
+                          <div className="flex items-center gap-2">
+                            {(() => {
+                              const raw = (draft.pixelColor ?? '').trim();
+                              const validHex = /^#?(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(raw);
+                              return (
+                                <span
+                                  className={`w-8 h-8 rounded border shrink-0 ${validHex ? 'border-border-default' : 'border-dashed border-border-default'}`}
+                                  style={{ background: validHex ? (raw.startsWith('#') ? raw : '#' + raw) : 'transparent' }}
+                                  data-tip={raw || tt('No colour set', 'Nenhuma cor definida')}
+                                />
+                              );
+                            })()}
+                            <input
+                              className={`${inputCls} w-24 font-mono`}
+                              value={draft.pixelColor ?? ''}
+                              onChange={(e) => patch({ pixelColor: e.target.value })}
+                              placeholder="#RRGGBB"
+                            />
+                          </div>
                         </Field>
                         <Button variant="secondary" size="sm" onClick={pickPixel}
                           data-tip={tt('Pick a pixel from the screen (sets X, Y and color)', 'Escolher um pixel na tela (define X, Y e cor)')}>
