@@ -503,7 +503,38 @@
     }
     if (candidates.length === 0) return null;
     candidates.sort((a, b) => (b.directMatch - a.directMatch) || (b.depth - a.depth));
-    return candidates[0].el;
+    return promoteToInteractive(candidates[0].el, parsed);
+  }
+
+  // A text locator names what the user SEES, but the visible text usually lives on an inner
+  // wrapper: <button><span>Sign in</span></button> resolves to the SPAN (it wins the ranking above
+  // on direct-text match). Clicking still works — the event bubbles — which is exactly why this
+  // was invisible. Everything else does not: isInteractable/isVisible/getCoveringElement then run
+  // against a span that has no `disabled`, so a DISABLED button reports as enabled, an "enabled"
+  // wait passes on a dead control, and BrowserAssert green-lights it.
+  //
+  // So promote the hit to its nearest interactive ancestor, but ONLY when that ancestor still
+  // carries the same text — that proves we are climbing the label's own control rather than
+  // escaping into an unrelated container that happens to be nearby. If the wrapper has no such
+  // ancestor, or the ancestor's text no longer matches, the original element is returned
+  // unchanged.
+  function promoteToInteractive(el, parsed) {
+    if (!el) return el;
+    const interactiveTags = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA']);
+    const interactiveRoles = new Set(['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'radio']);
+    const isInteractive = (n) =>
+      interactiveTags.has(n.tagName) || interactiveRoles.has(n.getAttribute('role'));
+
+    if (isInteractive(el)) return el;
+
+    let current = el.parentElement;
+    for (let i = 0; i < 5 && current && current !== document.body; i++) {
+      if (isInteractive(current)) {
+        return elementTextMatches(current, parsed) && isVisible(current) ? current : el;
+      }
+      current = current.parentElement;
+    }
+    return el;
   }
 
   function getDepth(el) {
@@ -551,8 +582,17 @@
       case 'text-match': {
         if (!isVisible(el)) return null;
         if (!textPattern) return el;
+        // A BARE pattern means exact, which is what the editor's hint promises ("plain text =
+        // exact"). parseTextSelector returns {kind:'css'} with NO mode for an unprefixed string,
+        // and elementTextMatches' switch has no case for undefined — so every plain text-match
+        // silently returned false and the wait/assert just timed out. Defaulted HERE rather than
+        // inside parseTextSelector: that function's bare-string branch is what classifies ordinary
+        // CSS selectors, and giving it a text mode would reclassify every selector in the app.
         const parsedText = parseTextSelector(textPattern);
-        return elementTextMatches(el, parsedText) ? el : null;
+        const textCriteria = parsedText.kind === 'text'
+          ? parsedText
+          : { kind: 'text', mode: 'exact', value: textPattern };
+        return elementTextMatches(el, textCriteria) ? el : null;
       }
       default:
         return isVisible(el) ? el : null;
