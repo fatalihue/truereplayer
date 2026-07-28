@@ -151,18 +151,18 @@ namespace TrueReplayer.Services
             // above, because it doesn't look broken. ApplyClipboardModifiers documents that unknown
             // modifiers are silently ignored (forward-compatibility by design), so an older build
             // drops "next" and pastes the ENTIRE clipboard where the author meant ONE line — into a
-            // chat, a form, a customer reply. Introduced after 2.9.7 — bump at release.
+            // chat, a form, a customer reply. Introduced in 2.9.8.
             (p => p.Actions.Any(UsesClipNextToken),
-                new Version(2, 9, 7), "Sequential clipboard token"),
+                new Version(2, 9, 8), "Sequential clipboard token"),
 
             // Desktop Assert — the worst possible degradation, which is exactly why it is pinned.
             // An older build has no "Assert" switch case, so the row is silently SKIPPED: the
             // guard the author added ("this window MUST be focused before I type a password")
             // simply does not run, and the macro proceeds as if the precondition held. The user
             // sees a profile that imports cleanly and behaves like the unguarded original.
-            // Introduced after 2.9.7 — bump at release.
+            // Introduced in 2.9.8.
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "Assert", StringComparison.OrdinalIgnoreCase)),
-                new Version(2, 9, 7), "Desktop Assert"),
+                new Version(2, 9, 8), "Desktop Assert"),
 
             // Copy to Slot ({clip:name} capture) — an older build has no dispatch case for the
             // unknown ActionType → silently skips the capture and every {clip:} token resolves
@@ -241,9 +241,9 @@ namespace TrueReplayer.Services
             // intended ±px scatter. Same silent-divergence class as the gap-jitter pin above:
             // the profile still runs, it just runs with the bot signature the user turned this
             // on to remove. Property-level Detect so plain click × N rows keep the 2.9.6 floor.
-            // Introduced after 2.9.7 — bump at release.
+            // Introduced in 2.9.8.
             (p => p.Actions.Any(a => a.RepeatPositionJitterPx is int rp && rp > 0),
-                new Version(2, 9, 7), "Click repeat position jitter"),
+                new Version(2, 9, 8), "Click repeat position jitter"),
 
             // DoubleClick (two press/release pairs replayed as one row) shipped in 2.5.4 —
             // older builds have no replay switch case and would silently skip it.
