@@ -163,9 +163,8 @@ namespace TrueReplayer.Services
             // author meant, into a chat or a customer reply.
             // Detection delegates to ActionReplayer.ChainUsesTokenArg so the pin and the engine
             // cannot disagree about which segments are arguments.
-            // Introduced after 2.9.9 — bump at release.
             (p => p.Actions.Any(UsesTokenArgument),
-                new Version(2, 9, 9), "Reference modifier argument"),
+                new Version(2, 9, 10), "Reference modifier argument"),
 
             // Desktop Assert — the worst possible degradation, which is exactly why it is pinned.
             // An older build has no "Assert" switch case, so the row is silently SKIPPED: the
