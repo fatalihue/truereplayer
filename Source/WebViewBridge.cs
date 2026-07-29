@@ -7451,7 +7451,7 @@ namespace TrueReplayer
 
             try
             {
-                var (imported, skipped, hasOrganization, imageFailureNames, writtenNames) = await profileController.ConfirmImportAsync(
+                var (imported, skipped, hasOrganization, imageFailureNames, writtenNames, adoptedFolderTargets, keptLocalFolderTargets) = await profileController.ConfirmImportAsync(
                     _pendingImportEnvelope, selectedNames, conflictResolutions);
                 // Names dropped at the bridge guard above never entered ConfirmImportAsync, so add
                 // them to the skipped total the user sees.
@@ -7515,6 +7515,16 @@ namespace TrueReplayer
                         msg += " — see Logs for details.";
                     }
                     if (hasOrganization) msg += " Folder organization imported.";
+                    // A folder's window target decides which window every profile inside it acts
+                    // on, so filling one in silently is as bad as dropping it. Name the folders.
+                    if (adoptedFolderTargets.Count > 0)
+                        msg += $" Window target set on existing folder(s): {string.Join(", ", adoptedFolderTargets)}.";
+                    // The receiver's own target won. That is the right rule, but the imported
+                    // profiles now point at a DIFFERENT window than their author intended and will
+                    // run against it, so it cannot pass unsaid.
+                    if (keptLocalFolderTargets.Count > 0)
+                        msg += $" Kept your existing window target on folder(s): {string.Join(", ", keptLocalFolderTargets)}" +
+                               " — the imported profiles there will use YOUR target, not the sender's.";
                     // Explicit toast type: a partial success (some images didn't restore) must NOT
                     // render red — the frontend infers an error from words like "couldn't". 'info'
                     // (neutral) for the warning case, 'success' (green) for a clean import.

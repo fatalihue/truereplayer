@@ -1457,7 +1457,7 @@ namespace TrueReplayer.Controllers
             return finalName;
         }
 
-        public async Task<(int imported, int skipped, bool hasOrganization, List<string> imageFailureNames, List<string> writtenNames)> ConfirmImportAsync(
+        public async Task<(int imported, int skipped, bool hasOrganization, List<string> imageFailureNames, List<string> writtenNames, List<string> adoptedFolderTargets, List<string> keptLocalFolderTargets)> ConfirmImportAsync(
             ProfileExportEnvelope envelope,
             HashSet<string> selectedNames,
             Dictionary<string, ImportConflictResult> conflictResolutions)
@@ -1766,14 +1766,33 @@ namespace TrueReplayer.Controllers
                 await RefreshProfileListAsync(true);
 
             // Merge organization if present
+            var adoptedFolderTargets = new List<string>();
+            var keptLocalFolderTargets = new List<string>();
             if (hasOrganization && imported > 0)
-                await MergeImportedOrganizationAsync(envelope.Organization!, importedRenames);
+            {
+                (adoptedFolderTargets, keptLocalFolderTargets) =
+                    await MergeImportedOrganizationAsync(envelope.Organization!, importedRenames);
+
+                // Refresh AGAIN, after the merge. The refresh above ran before folder membership
+                // and folder targets existed, so everything derived from them was computed against
+                // the pre-merge layout: PopulateEffectiveTargets, the hotkey-collision buckets
+                // (which group by effective target, so imported profiles looked target-less and
+                // collisions were judged against the wrong signature), and — the one with teeth —
+                // InputHookManager.RegisterProfileWindowTargets, whose snapshot is what the
+                // low-level hook consults to decide whether a hotkey may fire from the current
+                // foreground window. An UNREGISTERED profile is treated as "any window", so a
+                // freshly imported macro whose target is folder-inherited would fire anywhere
+                // until something else happened to reload the list. Since almost every profile
+                // here inherits its target from its folder rather than setting its own, that is
+                // the normal case, not an edge.
+                await RefreshProfileListAsync(true);
+            }
 
             // Final on-disk names actually written this batch (== source name unless a collision
             // bumped it to "name (N)"). The bridge uses this to detect whether the profile
             // currently loaded in the grid was overwritten, so it can reload it instead of
             // leaving a stale in-memory copy that a later Save would clobber the import with.
-            return (imported, skipped, hasOrganization, imageFailureNames, importedRenames.Values.ToList());
+            return (imported, skipped, hasOrganization, imageFailureNames, importedRenames.Values.ToList(), adoptedFolderTargets, keptLocalFolderTargets);
         }
 
         // Delegates to the shared validator (single owner for this security/data-loss check —
@@ -1782,7 +1801,10 @@ namespace TrueReplayer.Controllers
         // device name into a profile name that later feeds Path.Combine.
         private static bool IsSafeProfileName(string name) => Services.ProfileNameValidator.IsSafe(name);
 
-        private async Task MergeImportedOrganizationAsync(
+        /// <returns>Names of EXISTING folders whose empty window context this import filled in —
+        /// the caller reports them, because a target quietly appearing is as confusing as one
+        /// quietly missing.</returns>
+        private async Task<(List<string> Adopted, List<string> KeptLocal)> MergeImportedOrganizationAsync(
             ProfileExportOrganization org,
             IReadOnlyDictionary<string, string> importedRenames)
         {
@@ -1795,6 +1817,13 @@ namespace TrueReplayer.Controllers
             //   * The pre-existing same-named profile was NOT imported, so it's never in the map and
             //     is never re-pinned / moved (no dangling refs, no clobbering local layout).
             // RefreshProfileListAsync(true) ran in the caller, so the remapped names exist on disk.
+
+            // Folders whose window context this import filled in — reported to the caller so the
+            // result can say so out loud. A target arriving (or NOT arriving) silently is what made
+            // the original bug invisible.
+            var adoptedFolderTargets = new List<string>();
+            // Folders where the receiver already had a DIFFERENT target, so the sender's was dropped.
+            var keptLocalFolderTargets = new List<string>();
 
             // Merge pinned: add new pinned items that aren't already pinned, remapped to final names.
             foreach (var name in org.Pinned ?? Enumerable.Empty<string>())  // null-guard: explicit JSON "pinned":null overrides the =new() initializer
@@ -1814,7 +1843,32 @@ namespace TrueReplayer.Controllers
                     .Select(n => importedRenames[n])
                     .ToList();
 
-                var existingFolder = _profileOrder.Folders.FirstOrDefault(f => f.Name == importedFolder.Name);
+                // A folder that contributed NOTHING must not be created. folderItems comes out
+                // empty whenever the user deselected its rows in the preview, or the compat gate
+                // skipped them — and the old code still added the folder, so the receiver got a
+                // phantom folder they never asked for, carrying the sender's window target.
+                if (folderItems.Count == 0) continue;
+
+                // Case-INSENSITIVE, matching how the app itself decides two folder names are the
+                // same everywhere else (CreateFolderAsync / RenameFolderAsync both reject a
+                // case-variant as a duplicate). With an ordinal match, a receiver whose folder is
+                // "roblox" against a sender's "Roblox" got a SECOND folder, which the load-time
+                // duplicate heal then renamed to "Roblox (2)" — and their own folder never received
+                // the target.
+                var existingFolder = _profileOrder.Folders
+                    .FirstOrDefault(f => string.Equals(f.Name, importedFolder.Name, StringComparison.OrdinalIgnoreCase));
+                // A profile belongs to exactly ONE folder. Every effective-target resolver in this
+                // file picks the owning folder with FirstOrDefault(f => f.Items.Contains(name)), so
+                // a name left in two folders resolves to whichever sits EARLIER in the list — the
+                // receiver's pre-existing one. On an Overwrite import that silently handed the
+                // profile the wrong window target (or none) even though the merge had stored the
+                // right one, and it rendered the profile twice in the sidebar. Detach first.
+                foreach (var other in _profileOrder.Folders)
+                {
+                    if (ReferenceEquals(other, existingFolder)) continue;
+                    foreach (var item in folderItems) other.Items.Remove(item);
+                }
+
                 if (existingFolder != null)
                 {
                     // Merge items into existing folder
@@ -1822,6 +1876,47 @@ namespace TrueReplayer.Controllers
                     {
                         if (!existingFolder.Items.Contains(item))
                             existingFolder.Items.Add(item);
+                    }
+
+                    // ...and adopt the folder's WINDOW CONTEXT when the local folder has none.
+                    //
+                    // This branch used to copy Items only, which made the import silently
+                    // receiver-dependent: a clean machine took the "add as new folder" path below
+                    // and got the target, while a machine that already had a folder of that name
+                    // got the profiles into a folder with NO target. Most profiles here INHERIT
+                    // their target from the folder rather than setting their own, so the result is
+                    // a macro that runs against whatever window happens to be focused — the exact
+                    // failure a real user reported, and one nothing on screen explains.
+                    //
+                    // Only fill a GAP, never overwrite: a local folder that already carries a
+                    // target is the receiver's own configuration and outranks the sender's. That
+                    // keeps the merge idempotent and keeps re-importing from clobbering local work.
+                    if (existingFolder.TargetWindow == null && importedFolder.TargetWindow != null)
+                    {
+                        existingFolder.TargetWindow = importedFolder.TargetWindow;
+                        // The switches and geometry only mean anything alongside a target, so they
+                        // travel as ONE unit with it. Splitting them would let a folder end up with
+                        // "restore size" on and nothing to restore.
+                        existingFolder.UseRelativeCoordinates = importedFolder.UseRelativeCoordinates;
+                        existingFolder.BringToFocus = importedFolder.BringToFocus;
+                        existingFolder.RestorePosition = importedFolder.RestorePosition;
+                        existingFolder.RestoreSize = importedFolder.RestoreSize;
+                        existingFolder.WindowX = importedFolder.WindowX;
+                        existingFolder.WindowY = importedFolder.WindowY;
+                        existingFolder.WindowWidth = importedFolder.WindowWidth;
+                        existingFolder.WindowHeight = importedFolder.WindowHeight;
+                        adoptedFolderTargets.Add(existingFolder.Name);
+                    }
+                    else if (importedFolder.TargetWindow != null
+                             && existingFolder.TargetWindow != null
+                             && !string.Equals(existingFolder.TargetWindow.ProcessName,
+                                               importedFolder.TargetWindow.ProcessName,
+                                               StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Local target kept, sender's discarded — the right call, but not one to
+                        // make silently: the imported profiles are now inside a folder pointing at
+                        // a DIFFERENT window than the author intended, and they will run against it.
+                        keptLocalFolderTargets.Add(existingFolder.Name);
                     }
                 }
                 else
@@ -1851,6 +1946,7 @@ namespace TrueReplayer.Controllers
             }
 
             await SaveProfileOrderAsync();
+            return (adoptedFolderTargets, keptLocalFolderTargets);
         }
 
         // ShowImportConflictDialogAsync was removed in 2.2.0 — conflict resolution moved
