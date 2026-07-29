@@ -6,24 +6,35 @@ import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
 import type { RunReport, RunStep } from '../bridge/messageTypes';
 
-// Structured codes the extension emits (content.js mkError). Translated here rather than in the
-// backend because the codes ARE the stable contract — the prose around them is presentation.
+// Structured codes the extension emits (content.js mkError) plus the two the native bridge
+// synthesises on timeout. Translated here rather than in the backend because the CODES are the
+// stable contract — the prose around them is presentation.
+//
+// This list is checked against the real emitters, not guessed: the extension's codes are all
+// ELEMENT_-prefixed (ELEMENT_COVERED, not COVERED), and an unlisted code is not a problem —
+// the row falls back to the raw message, which is still the extension's own English sentence.
 function explainCode(code: string | null, tt: (en: string, pt: string) => string): string | null {
   switch (code) {
     case 'ELEMENT_NOT_FOUND':
       return tt('No element matched the selector.', 'Nenhum elemento casou com o seletor.');
-    case 'HIDDEN':
+    case 'ELEMENT_HIDDEN':
       return tt('Found, but not visible on screen.', 'Encontrado, mas não visível na tela.');
-    case 'DISABLED':
+    case 'ELEMENT_DISABLED':
       return tt('Found, but disabled.', 'Encontrado, mas desabilitado.');
-    case 'COVERED':
+    case 'ELEMENT_COVERED':
       return tt('Found, but something is on top of it.', 'Encontrado, mas há algo por cima dele.');
     case 'SELECTOR_INVALID':
       return tt('The selector is not valid CSS.', 'O seletor não é um CSS válido.');
     case 'NAVIGATION_TIMEOUT':
       return tt('The page did not finish loading in time.', 'A página não terminou de carregar a tempo.');
+    case 'INVALID_URL':
+      return tt('That is not a URL the browser can open.', 'Isso não é uma URL que o navegador consiga abrir.');
     case 'OPTION_NOT_FOUND':
       return tt('No option in the list matched.', 'Nenhuma opção da lista casou.');
+    case 'OPTION_DISABLED':
+      return tt('The option matched, but it is disabled.', 'A opção casou, mas está desabilitada.');
+    case 'NOT_A_SELECT':
+      return tt('That element is not a dropdown list.', 'Esse elemento não é uma lista suspensa.');
     default:
       return null;
   }
