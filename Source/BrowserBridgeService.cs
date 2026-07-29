@@ -192,17 +192,22 @@ namespace TrueReplayer.Services
                             {
                                 if (root.TryGetProperty("error", out var errEl))
                                 {
+                                    // Sits OUTSIDE the error object — background.js attaches it to the
+                                    // whole reply, so it is present on this path too and only needed
+                                    // carrying onto the exception.
+                                    var failedOn = root.TryGetProperty("tabUrl", out var tuEl)
+                                        && tuEl.ValueKind == JsonValueKind.String ? tuEl.GetString() : null;
                                     // Support legacy string format and new {code, message, tip} object format
                                     if (errEl.ValueKind == JsonValueKind.String)
                                     {
-                                        tcs.TrySetException(new BrowserActionException(null, errEl.GetString() ?? "Unknown error", null));
+                                        tcs.TrySetException(new BrowserActionException(null, errEl.GetString() ?? "Unknown error", null) { TabUrl = failedOn });
                                     }
                                     else if (errEl.ValueKind == JsonValueKind.Object)
                                     {
                                         var code = errEl.TryGetProperty("code", out var c) ? c.GetString() : null;
                                         var msg = errEl.TryGetProperty("message", out var m) ? m.GetString() : null;
                                         var tip = errEl.TryGetProperty("tip", out var t) ? t.GetString() : null;
-                                        tcs.TrySetException(new BrowserActionException(code, msg ?? "Unknown error", tip));
+                                        tcs.TrySetException(new BrowserActionException(code, msg ?? "Unknown error", tip) { TabUrl = failedOn });
                                     }
                                     else
                                     {
@@ -618,6 +623,15 @@ namespace TrueReplayer.Services
     {
         public string? Code { get; }
         public string? Tip { get; }
+        /// <summary>
+        /// The page the step was acting on when it failed. The extension puts it on EVERY reply,
+        /// success or error, and the failure path used to drop it — so the run report could tell
+        /// you which page a step that WORKED was on, and not the one that broke. Backwards, since
+        /// "which page was this?" is the first question a failure raises: an ELEMENT_NOT_FOUND
+        /// reads the same whether the session had expired, a banner was covering the page, or the
+        /// run was simply somewhere else entirely.
+        /// </summary>
+        public string? TabUrl { get; init; }
 
         public BrowserActionException(string? code, string message, string? tip)
             : base(BuildMessage(message, tip))

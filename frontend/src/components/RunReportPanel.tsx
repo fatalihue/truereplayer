@@ -149,9 +149,11 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
 
                   {/* The fallback-tier line is the whole reason this panel exists — a step that
                       PASSED can still be the one telling you the macro is about to break. */}
-                  {/* Only when the run spanned more than one page — on a normal run every step
-                      shares the same tab and repeating it on each row would be noise. */}
-                  {s.tabUrl && stats.pages.length > 1 && (
+                  {/* On a passing step this is noise unless the run spanned more than one page.
+                      On a FAILING one it is the first question the failure raises — the same
+                      "no element matched" reads completely differently once you can see the run
+                      was on a login page. So a failure always names its page. */}
+                  {s.tabUrl && (s.status === 'failed' || stats.pages.length > 1) && (
                     <div className="ml-[52px] mt-0.5 text-[10px] font-mono text-text-tertiary truncate" title={s.tabUrl}>
                       {s.tabUrl}
                     </div>

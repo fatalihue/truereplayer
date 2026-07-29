@@ -2291,6 +2291,11 @@ namespace TrueReplayer.Services
                     stepRec.ErrorCode = bex.Code;
                     stepRec.ErrorMessage = bex.Message;
                     stepRec.Tip = bex.Tip;
+                    // The success path records this after the call returns, which never happens
+                    // here — so a failing step used to be the ONE step whose page went unrecorded.
+                    // Null on a timeout, where the extension never answered and there is honestly
+                    // no page to name.
+                    stepRec.TabUrl = bex.TabUrl;
                     throw;
                 }
                 catch (OperationCanceledException)
