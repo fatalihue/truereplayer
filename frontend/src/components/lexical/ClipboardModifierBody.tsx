@@ -86,8 +86,8 @@ export function ClipboardModifierBody({
           {state.unmodeledRefArg
             ? tt('This token takes a line argument from a variable, which these controls can only show as a literal — so it is read-only here. It still runs; if the variable is missing or does not hold a valid value, the step yields nothing. Edit the token text directly to change it.',
                  'Este token pega um argumento de linha de uma variável, e estes controles só conseguem mostrar um valor literal — por isso está só para leitura. Ele roda normalmente; se a variável não existir ou não tiver um valor válido, o passo não devolve nada. Edite o texto do token para mudá-lo.')
-            : tt('This token has a modifier this editor does not know, so it is shown read-only. Editing it here would quietly drop that part.',
-                 'Este token tem um modificador que este editor não conhece, então está só para leitura. Editar aqui descartaria essa parte em silêncio.')}
+            : tt('This editor cannot rebuild this token exactly as written — a modifier it does not know, one used twice, or a different order — so it is read-only. Editing here would quietly change what it does.',
+                 'Este editor não consegue reconstruir este token exatamente como está escrito — um modificador que ele não conhece, um usado duas vezes, ou em outra ordem — então está só para leitura. Editar aqui mudaria em silêncio o que ele faz.')}
         </div>
         <div className="text-[9px] uppercase tracking-wide text-text-tertiary">Token</div>
         <div className="font-mono text-[11.5px] px-2 py-0.5 rounded break-all"

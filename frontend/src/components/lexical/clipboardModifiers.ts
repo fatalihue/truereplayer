@@ -22,8 +22,86 @@ export type ListPick = 'none' | 'range' | 'lines';
  * step through the chain with this predicate, and a value-dependent answer would make "is this
  * segment `next`?" depend on what a variable happens to hold at run time.
  */
-export const isArgRef = (seg: string | undefined): boolean =>
-  seg !== undefined && /^@[A-Za-z0-9_]+$/.test(seg);
+const LETTER_OR_DIGIT = /[\p{L}\p{Nd}]/u;   // char.IsLetterOrDigit: any Unicode letter or decimal digit
+
+export const isArgRef = (seg: string | undefined): boolean => {
+  if (seg === undefined || seg.length < 2) return false;
+  if (seg[0] !== '@') return false;
+  // Per UTF-16 code unit, exactly like the C# char loop — a lone surrogate is not a letter there
+  // and must not be one here. `/^@[A-Za-z0-9_]+$/` was ASCII-only, so "@código" was a valid
+  // reference to the backend and an unknown modifier to this editor.
+  for (let k = 1; k < seg.length; k++) {
+    const c = seg[k];
+    if (c !== '_' && !LETTER_OR_DIGIT.test(c)) return false;
+  }
+  return true;
+};
+
+/**
+ * int.TryParse with the default NumberStyles.Integer: optional surrounding whitespace, optional
+ * sign, decimal digits, and it must fit in Int32. Returns null when the backend would reject it.
+ *
+ * The parser used to gate on `parseInt`, which is a different function wearing the same name:
+ * parseInt('3x') is 3. So {clipboard:line:3x} parsed as "line 3" and any edit REBUILT it as
+ * {clipboard:line:3} — while the backend read the original as a typo, left `line` inert and
+ * returned the whole content. A silent rewrite that changed what the macro does.
+ */
+function tryParseInt(s: string | undefined): number | null {
+  if (s === undefined) return null;
+  if (!/^\s*[+-]?\d+\s*$/.test(s)) return null;
+  const n = Number(s.trim());
+  return Number.isSafeInteger(n) && n >= -2147483648 && n <= 2147483647 ? n : null;
+}
+
+/** Mirror of the backend TryParseLineRange — splits on the FIRST '-', both sides int.TryParse. */
+function isLineRange(s: string | undefined): boolean {
+  if (s === undefined) return false;
+  const dash = s.indexOf('-');
+  if (dash <= 0 || dash >= s.length - 1) return false;
+  return tryParseInt(s.slice(0, dash)) !== null && tryParseInt(s.slice(dash + 1)) !== null;
+}
+
+type ArgKind = 'none' | 'raw' | 'count1' | 'count0' | 'range' | 'indices';
+
+const argOf = (modifier: string): ArgKind => {
+  switch (modifier) {
+    case 'join': return 'raw';
+    case 'line': case 'word': return 'count1';
+    case 'first': case 'last': return 'count0';
+    case 'range': return 'range';
+    case 'lines': return 'indices';
+    default: return 'none';
+  }
+};
+
+/**
+ * Mirror of the backend's ActionReplayer.StepModifier: advances past ONE modifier and reports
+ * where the next one starts and whether the argument consumed was a reference.
+ *
+ * Every walk on this side goes through it, as the three C# walks go through StepModifier. The
+ * gates were transcribed by hand in two places before, and a transcribed rule is a rule that
+ * eventually drifts — which is exactly how the backend's own reference detector came to disagree
+ * with its applier about {clipboard:line:first:@n}.
+ */
+function stepModifier(parts: string[], i: number): { next: number; argIsRef: boolean } {
+  const kind = argOf(parts[i].toLowerCase());
+  if (kind === 'none') return { next: i + 1, argIsRef: false };
+  if (i + 1 >= parts.length) return { next: kind === 'raw' ? i + 2 : i + 1, argIsRef: false };
+
+  const arg = parts[i + 1];
+  if (kind === 'raw') return { next: i + 2, argIsRef: false };
+  if (isArgRef(arg)) return { next: i + 2, argIsRef: true };
+
+  let literalFits: boolean;
+  switch (kind) {
+    case 'count1': { const n = tryParseInt(arg); literalFits = n !== null && n >= 1; break; }
+    case 'count0': { const n = tryParseInt(arg); literalFits = n !== null && n >= 0; break; }
+    case 'range': literalFits = isLineRange(arg); break;
+    case 'indices': literalFits = /[0-9]/.test(arg); break;
+    default: literalFits = false;
+  }
+  return { next: literalFits ? i + 2 : i + 1, argIsRef: false };
+}
 
 export interface TransformState {
   // {clipboard:next} — take ONE line per use and advance a cursor, instead of the whole
@@ -240,6 +318,29 @@ export function applyTransformPreview(raw: string, s: TransformState): string {
   return r;
 }
 
+/**
+ * The last gate, and the only one that cannot be out-argued: if rebuilding the parsed state does
+ * not reproduce the token, this editor CANNOT edit it without changing it, whatever the reason.
+ *
+ * Per-modifier gates only catch the reasons somebody thought of. They missed two whole families:
+ *   - a modifier used TWICE where the state has one slot. `{clipboard:join:trim:join}` joins with
+ *     "trim" and then again with a space; the state holds one separator, so it rebuilt as
+ *     `{clipboard:join: }` — a different result. `reverse:reverse` is identity and rebuilt as one
+ *     `reverse`, which is not.
+ *   - a chain in a different ORDER. The builder emits the fixed backend pipeline order, so
+ *     `{clipboard:upper:join:x}` came back as `{clipboard:join:x:upper}` — upper before the join
+ *     versus after it, which is a different string whenever the separator has letters.
+ * Neither is exotic; both are what you get by hand-typing a token that reads naturally.
+ *
+ * Case is folded because the backend lowercases modifier names too, so `{clipboard:TRIM}` really
+ * is the same token — and a `join` separator round-trips verbatim, so folding can never wave
+ * through a chain whose separator actually differs.
+ */
+function assertRebuildable(state: TransformState, original: string, rebuilt: string): TransformState {
+  if (rebuilt.toLowerCase() !== original.toLowerCase()) state.unmodeled = true;
+  return state;
+}
+
 // Reverse of buildClipboardToken — hydrates state from an existing chip's token
 // so the edit popover starts with the user's prior choices.
 export function parseClipboardToken(token: string): TransformState {
@@ -253,7 +354,10 @@ export function parseClipboardToken(token: string): TransformState {
   if (at >= 0) parts.splice(at, 1);
   const state = parseModifierParts(parts, 1);
   state.next = at >= 0;
-  return state;
+  // `next` is compared at the head, which is free: the backend strips it out before applying the
+  // chain, so where the user wrote it never meant anything.
+  const normalised = '{' + ['clipboard', ...(at >= 0 ? ['next'] : []), ...parts.slice(1)].join(':') + '}';
+  return assertRebuildable(state, normalised, buildClipboardToken(state));
 }
 
 // Mirror of the backend's TrySplitNextModifier walk (ActionExecution.cs): returns the index of
@@ -263,22 +367,9 @@ export function parseClipboardToken(token: string): TransformState {
 // into something that behaves differently.
 function findNextModifier(parts: string[], from: number): number {
   for (let i = from; i < parts.length; ) {
-    const p = parts[i].toLowerCase();
-    const arg = parts[i + 1];
-    const hasArg = arg !== undefined;
-    switch (p) {
-      case 'join':                                   // always consumes its separator, verbatim
-        i += 2; continue;
-      case 'line': case 'word': case 'first': case 'last':
-        i += hasArg && (isArgRef(arg) || /^\d+$/.test(arg.trim())) ? 2 : 1; continue;
-      case 'range':
-        i += hasArg && (isArgRef(arg) || /^\d+-\d+$/.test(arg.trim())) ? 2 : 1; continue;
-      case 'lines':
-        i += hasArg && (isArgRef(arg) || /\d/.test(arg)) ? 2 : 1; continue;
-      default:
-        if (p === 'next') return i;
-        i++; continue;
-    }
+    // Only a segment the walk LANDS on is a modifier — one it steps over is somebody's argument.
+    if (parts[i].toLowerCase() === 'next') return i;
+    i = stepModifier(parts, i).next;
   }
   return -1;
 }
@@ -288,14 +379,18 @@ function findNextModifier(parts: string[], from: number): number {
 export function parseRowToken(token: string): { column: string; state: TransformState } {
   if (!/^\{row:/i.test(token)) return { column: '', state: { ...DEFAULT_TRANSFORM } };
   const parts = token.slice(1, -1).split(':');
-  return { column: parts[1] ?? '', state: parseModifierParts(parts, 2) };
+  const column = parts[1] ?? '';
+  const state = parseModifierParts(parts, 2);
+  return { column, state: assertRebuildable(state, token, buildRowToken(column, state)) };
 }
 
 // Reverse of buildRowNextToken — {rownext:column[:mods]} → column name (verbatim) + modifier state.
 export function parseRowNextToken(token: string): { column: string; state: TransformState } {
   if (!/^\{rownext:/i.test(token)) return { column: '', state: { ...DEFAULT_TRANSFORM } };
   const parts = token.slice(1, -1).split(':');
-  return { column: parts[1] ?? '', state: parseModifierParts(parts, 2) };
+  const column = parts[1] ?? '';
+  const state = parseModifierParts(parts, 2);
+  return { column, state: assertRebuildable(state, token, buildRowNextToken(column, state)) };
 }
 
 // The shared modifier-tail parser — same forgiving grammar as the backend
@@ -322,8 +417,18 @@ function parseModifierParts(parts: string[], from: number): TransformState {
   // reason first — told the user the token was fine and never mentioned `frobnicate`.
   let sawRefArg = false;
   let sawOtherLoss = false;
-  for (let i = from; i < parts.length; i++) {
+  // ARITY comes from stepModifier — the same rule the backend applies — and is asked BEFORE any
+  // representability question. The two are genuinely different: `{clipboard:line:+3}` has its
+  // argument consumed by the backend but cannot be re-emitted from a number field without
+  // rewriting it, so it is consumed AND unrepresentable. Deciding both with one regex is what
+  // let parseInt('3x') === 3 rewrite a token into different behaviour.
+  let i = from;
+  while (i < parts.length) {
     const p = parts[i].toLowerCase();
+    const { next, argIsRef } = stepModifier(parts, i);
+    // The argument, but only when the backend would actually take it.
+    const arg = next === i + 2 ? parts[i + 1] : undefined;
+    const lose = () => { state.unmodeled = true; sawOtherLoss = true; };
     switch (p) {
       case 'trim':
         state.trim = true;
@@ -335,82 +440,44 @@ function parseModifierParts(parts: string[], from: number): TransformState {
         state.case = p;
         break;
       case 'line':
-      case 'word': {
-        // A reference is consumed unconditionally (shape-decided arity, mirroring the backend);
-        // a literal only when it parses, so a typo like "line:upper" still leaves the following
-        // segment to be read as its own modifier.
-        if (isArgRef(parts[i + 1])) {
-          state.extract = p;
-          state.extractRef = parts[i + 1];
-          i++;
-          break;
-        }
-        const n = parseInt(parts[i + 1] ?? '', 10);
-        if (Number.isFinite(n) && n >= 1) {
-          state.extract = p;
-          state.extractN = n;
-          i++;
-        } else { state.unmodeled = true; sawOtherLoss = true; }   // recognised, but nothing set -> would vanish on rebuild
+      case 'word':
+        // Only a bare digit string is representable: the numeric field re-emits String(n), so
+        // " 3 " and "+3" would come back as "3" — a rewrite, even though the backend reads them
+        // the same. Refuse rather than normalise somebody's token behind their back.
+        if (argIsRef) { state.extract = p; state.extractRef = arg!; }
+        else if (arg !== undefined && /^\d+$/.test(arg)) { state.extract = p; state.extractN = Number(arg); }
+        else lose();
         break;
-      }
       case 'first':
-      case 'last': {
-        if (isArgRef(parts[i + 1])) {
-          state.limit = p;
-          state.limitRef = parts[i + 1];
-          i++;
-          break;
-        }
-        const n = parseInt(parts[i + 1] ?? '', 10);
-        if (Number.isFinite(n) && n >= 0) {
-          state.limit = p;
-          state.limitN = n;
-          i++;
-        } else { state.unmodeled = true; sawOtherLoss = true; }
+      case 'last':
+        if (argIsRef) { state.limit = p; state.limitRef = arg!; }
+        else if (arg !== undefined && /^\d+$/.test(arg)) { state.limit = p; state.limitN = Number(arg); }
+        else lose();
         break;
-      }
-      case 'range': {
-        // A reference is consumed here for the same shape-decided reason as line/word — the
-        // backend does, so this walk must, or the two disagree about where the next modifier
-        // starts. It still cannot be DISPLAYED (the control is a literal "a-b" pair), so the
-        // chain goes read-only; the flag only makes the explanation name the real cause.
-        if (isArgRef(parts[i + 1])) {
-          state.unmodeled = true;
-          sawRefArg = true;
-          i++;
-          break;
+      case 'range':
+        // A reference is consumed for the same shape-decided reason as line/word, but still
+        // cannot be DISPLAYED (the control is a literal "a-b" pair), so the chain goes read-only;
+        // the flag only makes the explanation name the real cause.
+        if (argIsRef) { state.unmodeled = true; sawRefArg = true; }
+        else {
+          const m = arg !== undefined ? /^(\d+)-(\d+)$/.exec(arg) : null;
+          if (m) {
+            let a = Number(m[1]);
+            let b = Number(m[2]);
+            if (a > b) [a, b] = [b, a];   // the backend swaps too, so this round-trips in meaning
+            state.listPick = 'range';
+            state.rangeFrom = a;
+            state.rangeTo = b;
+          } else lose();
         }
-        const m = (parts[i + 1] ?? '').match(/^(\d+)-(\d+)$/);
-        if (m) {
-          let a = parseInt(m[1], 10);
-          let b = parseInt(m[2], 10);
-          if (a > b) [a, b] = [b, a];
-          state.listPick = 'range';
-          state.rangeFrom = a;
-          state.rangeTo = b;
-          i++;
-        } else { state.unmodeled = true; sawOtherLoss = true; }
         break;
-      }
-      case 'lines': {
-        // Digit gate mirrors the backend: a digitless arg (hand-typed
-        // "{clipboard:lines:sort}") is NOT lines' argument — it falls through as
-        // its own modifier. Without this, opening the chip would swallow it into
-        // linesSpec and the rebuild-on-close would silently erase it.
-        // Same reference treatment as range above.
-        if (isArgRef(parts[i + 1])) {
-          state.unmodeled = true;
-          sawRefArg = true;
-          i++;
-          break;
-        }
-        if (parts[i + 1] !== undefined && /\d/.test(parts[i + 1])) {
-          state.listPick = 'lines';
-          state.linesSpec = parts[i + 1];
-          i++;
-        } else { state.unmodeled = true; sawOtherLoss = true; }
+      case 'lines':
+        // Same reference treatment as range. The spec is re-emitted VERBATIM, so anything the
+        // backend consumes here round-trips byte-for-byte and needs no second gate.
+        if (argIsRef) { state.unmodeled = true; sawRefArg = true; }
+        else if (arg !== undefined) { state.listPick = 'lines'; state.linesSpec = arg; }
+        else lose();
         break;
-      }
       case 'sort':
         state.sort = true;
         break;
@@ -420,25 +487,20 @@ function parseModifierParts(parts: string[], from: number): TransformState {
       case 'reverse':
         state.reverse = true;
         break;
-      case 'join': {
-        // join ALWAYS owns the next part as its separator (raw, never lowercased —
-        // note the switch matches on the lowercased copy, so read the original).
+      case 'join':
+        // join ALWAYS owns the next part as its separator (raw, never lowercased — the switch
+        // matches on the lowercased copy, so read the original). A hand-typed trailing "join"
+        // with no argument falls back to a space, as the backend does.
         state.join = true;
-        if (parts[i + 1] !== undefined) {
-          state.joinSep = parts[i + 1];
-          i++;
-        } else {
-          state.joinSep = ' '; // hand-typed trailing "join" — backend falls back to space
-        }
+        state.joinSep = parts[i + 1] !== undefined ? parts[i + 1] : ' ';
         break;
-      }
       default:
         // Anything this editor does not know: a modifier added to the backend but not here yet,
         // or a typo. Either way rebuilding would drop it, so refuse to rebuild.
-        state.unmodeled = true;
-        sawOtherLoss = true;
+        lose();
         break;
     }
+    i = next;
   }
   // Only claim "it's just a reference argument" when that is the WHOLE story — anything unknown
   // in the chain outranks it, because that is the reason the user cannot act on.

@@ -93,8 +93,8 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset, origin
             {state.unmodeledRefArg
               ? tt('This token takes a line argument from a variable, which these controls can only show as a literal — so it is read-only here. It still runs; if the variable is missing or does not hold a valid value, the step yields nothing. Edit the token text directly in the editor to change it.',
                    'Este token pega um argumento de linha de uma variável, e estes controles só conseguem mostrar um valor literal — por isso está só para leitura. Ele roda normalmente; se a variável não existir ou não tiver um valor válido, o passo não devolve nada. Edite o texto do token direto no editor para mudá-lo.')
-              : tt('This token has a modifier this builder does not know, so it is read-only here. Rebuilding it would quietly drop that part — edit the token text directly in the editor instead.',
-                   'Este token tem um modificador que este construtor não conhece, então está só para leitura. Reconstruí-lo descartaria essa parte em silêncio — edite o texto do token direto no editor.')}
+              : tt('This builder cannot rebuild this token exactly as written — a modifier it does not know, one used twice, or a different order — so it is read-only here. Edit the token text directly in the editor instead.',
+                   'Este construtor não consegue reconstruir este token exatamente como está escrito — um modificador que ele não conhece, um usado duas vezes, ou em outra ordem — então está só para leitura. Edite o texto do token direto no editor.')}
           </div>
           <div className="text-[9px] uppercase tracking-wide text-text-tertiary">Token</div>
           <div className="font-mono text-[12px] px-2 py-1 rounded break-all"
