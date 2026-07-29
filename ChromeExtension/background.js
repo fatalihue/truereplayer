@@ -205,7 +205,28 @@ function connect() {
               return;
             }
 
-            chrome.tabs.sendMessage(tabs[0].id, {
+            // A content script only exists on pages Chrome lets us inject into. On a chrome://,
+            // chrome-extension:// or Web Store tab — or a tab that simply has not finished
+            // injecting yet — sendMessage rejects with "Could not establish connection. Receiving
+            // end does not exist", which names neither the cause nor the page. Say which page it
+            // was and what to do, and retry once for the injection race.
+            const targetTab = tabs[0];
+            const canHostScript = /^(https?|file):/i.test(targetTab.url || '');
+            const pageLabel = targetTab.url ? targetTab.url.slice(0, 120) : '(unknown page)';
+            if (!canHostScript) {
+              sendToNative({
+                type: 'browser:commandResult',
+                commandId: msg.commandId,
+                error: {
+                  code: 'NO_CONTENT_SCRIPT',
+                  message: `Chrome's active tab is ${pageLabel}, which extensions cannot act on.`,
+                  tip: 'Browser actions run on whichever tab is active. Click the tab with your page first, then run the macro.',
+                },
+              });
+              return;
+            }
+
+            const relay = {
               type: 'executeCommand',
               commandId: msg.commandId,
               command: msg.command,
@@ -226,20 +247,49 @@ function connect() {
               // Ranked fallback selectors — same forward-or-it-dies rule as selectMatchMode
               // above: this relay rebuilds the message field by field.
               alternatives: msg.alternatives,
-            }).then((response) => {
+            };
+
+            const forward = (response) => {
               // Forward response — preserves response.success and response.error (object form)
               sendToNative({
                 type: 'browser:commandResult',
                 commandId: msg.commandId,
                 ...response,
               });
-            }).catch((err) => {
-              sendToNative({
-                type: 'browser:commandResult',
-                commandId: msg.commandId,
-                error: { code: 'EXTENSION_ERROR', message: err.message || 'Failed to execute command', tip: null },
+            };
+            // "Receiving end does not exist" on an http(s) tab means the content script has not
+            // finished injecting — a race, not a dead end, so it is worth exactly one retry. Any
+            // other rejection is reported as-is; retrying it would only delay the real answer.
+            const isInjectionRace = (err) =>
+              /Receiving end does not exist|Could not establish connection/i.test(err?.message || '');
+
+            chrome.tabs.sendMessage(targetTab.id, relay)
+              .then(forward)
+              .catch((err) => {
+                if (!isInjectionRace(err)) {
+                  sendToNative({
+                    type: 'browser:commandResult',
+                    commandId: msg.commandId,
+                    error: { code: 'EXTENSION_ERROR', message: err.message || 'Failed to execute command', tip: null },
+                  });
+                  return;
+                }
+                setTimeout(() => {
+                  chrome.tabs.sendMessage(targetTab.id, relay)
+                    .then(forward)
+                    .catch(() => {
+                      sendToNative({
+                        type: 'browser:commandResult',
+                        commandId: msg.commandId,
+                        error: {
+                          code: 'NO_CONTENT_SCRIPT',
+                          message: `No TrueReplayer content script on ${pageLabel}.`,
+                          tip: 'Reload that tab and try again. If it was just updated, the extension needs the page reloaded before it can act on it.',
+                        },
+                      });
+                    });
+                }, 300);
               });
-            });
           });
           break;
 

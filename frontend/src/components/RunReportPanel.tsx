@@ -35,6 +35,10 @@ function explainCode(code: string | null, tt: (en: string, pt: string) => string
       return tt('The option matched, but it is disabled.', 'A opção casou, mas está desabilitada.');
     case 'NOT_A_SELECT':
       return tt('That element is not a dropdown list.', 'Esse elemento não é uma lista suspensa.');
+    case 'NO_CONTENT_SCRIPT':
+      // Browser actions run on whichever Chrome tab is active, so this fires when that tab is a
+      // page extensions cannot touch (chrome://, the Web Store) or one that needs a reload.
+      return tt('The active Chrome tab cannot be automated.', 'A aba ativa do Chrome não pode ser automatizada.');
     default:
       return null;
   }
