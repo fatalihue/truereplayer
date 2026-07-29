@@ -35,6 +35,8 @@ function explainCode(code: string | null, tt: (en: string, pt: string) => string
       return tt('The option matched, but it is disabled.', 'A opção casou, mas está desabilitada.');
     case 'NOT_A_SELECT':
       return tt('That element is not a dropdown list.', 'Esse elemento não é uma lista suspensa.');
+    case 'TAB_GONE':
+      return tt('The tab this run was acting on was closed.', 'A aba em que esta execução estava agindo foi fechada.');
     case 'NO_CONTENT_SCRIPT':
       // Browser actions run on whichever Chrome tab is active, so this fires when that tab is a
       // page extensions cannot touch (chrome://, the Web Store) or one that needs a reload.
@@ -78,7 +80,10 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
     // A fallback match is not a failure, but it IS the early warning that the primary selector
     // is dead — surface it at the same level as a failure count.
     const drifting = steps.filter((s) => s.matchedTier).length;
-    return { failed, total, drifting };
+    // A run is bound to ONE tab, so more than one distinct page across the steps means something
+    // redirected it. Only worth showing when it happened — on a normal run this is 0 or 1.
+    const pages = [...new Set(steps.map((s) => s.tabUrl).filter(Boolean))] as string[];
+    return { failed, total, drifting, pages };
   }, [steps]);
 
   return (
@@ -144,6 +149,14 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
 
                   {/* The fallback-tier line is the whole reason this panel exists — a step that
                       PASSED can still be the one telling you the macro is about to break. */}
+                  {/* Only when the run spanned more than one page — on a normal run every step
+                      shares the same tab and repeating it on each row would be noise. */}
+                  {s.tabUrl && stats.pages.length > 1 && (
+                    <div className="ml-[52px] mt-0.5 text-[10px] font-mono text-text-tertiary truncate" title={s.tabUrl}>
+                      {s.tabUrl}
+                    </div>
+                  )}
+
                   {s.matchedTier && (
                     <div className="ml-[52px] mt-0.5 text-[10px] leading-snug" style={{ color: 'var(--color-recording)' }}>
                       {tt('matched via fallback', 'casou por reserva')} <b>tier {s.matchedTier}</b>

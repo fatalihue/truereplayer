@@ -1345,6 +1345,7 @@ namespace TrueReplayer
                     tip = s.Tip,
                     matchedSelector = s.MatchedSelector,
                     matchedTier = s.MatchedTier,
+                    tabUrl = s.TabUrl,
                 }).ToArray(),
             });
         }

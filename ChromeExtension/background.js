@@ -63,7 +63,36 @@ function connect() {
           break;
 
         case 'browser:executeCommand':
-          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          // A run is BOUND to one tab. msg.tabId is the tab the run already used (the native side
+          // owns it — a service worker is evicted when idle, so a pin kept here would evaporate).
+          // Only the FIRST command of a run resolves the active tab; the rest reuse it, so moving
+          // focus mid-run can no longer redirect the macro to another page.
+          //
+          // When the pinned tab is gone we fail LOUDLY. Falling back to the active tab would
+          // silently restore the exact bug this exists to prevent, on the one occasion the user is
+          // least likely to notice.
+          const withTab = (cb) => {
+            if (typeof msg.tabId === 'number') {
+              chrome.tabs.get(msg.tabId, (tab) => {
+                if (chrome.runtime.lastError || !tab) {
+                  sendToNative({
+                    type: 'browser:commandResult',
+                    commandId: msg.commandId,
+                    error: {
+                      code: 'TAB_GONE',
+                      message: 'The tab this run was acting on has been closed.',
+                      tip: 'The macro stays on the tab it started on. Reopen the page and run it again.',
+                    },
+                  });
+                  return;
+                }
+                cb([tab]);
+              });
+              return;
+            }
+            chrome.tabs.query({ active: true, currentWindow: true }, cb);
+          };
+          withTab((tabs) => {
             if (!tabs[0]) {
               sendToNative({
                 type: 'browser:commandResult',
@@ -84,11 +113,18 @@ function connect() {
               const postSel = msg.postNavigateSelector || '';
               const urlPattern = msg.urlWaitPattern || '';
 
-              const finishOk = () => {
-                sendToNative({
-                  type: 'browser:commandResult',
-                  commandId: msg.commandId,
-                  success: true,
+              // Navigate RE-PINS: it reports the tab it actually navigated, which is a brand-new
+              // one when the action opened a tab. Without this the run would stay bound to the
+              // tab it started on and every following step would act on the wrong page.
+              const finishOk = (usedTabId) => {
+                chrome.tabs.get(usedTabId, (t) => {
+                  sendToNative({
+                    type: 'browser:commandResult',
+                    commandId: msg.commandId,
+                    success: true,
+                    tabId: usedTabId,
+                    tabUrl: (!chrome.runtime.lastError && t && t.url) ? t.url : null,
+                  });
                 });
               };
               const finishErr = (code, message, tip) => {
@@ -102,7 +138,7 @@ function connect() {
               const runPostChecks = (tabId) => {
                 // If neither check is configured, return success immediately
                 if (!postSel && !urlPattern) {
-                  finishOk();
+                  finishOk(tabId);
                   return;
                 }
                 // Sequential post-checks: urlWaitPattern first (cheap), then postNavigateSelector
@@ -127,7 +163,7 @@ function connect() {
                 };
                 const checkSel = () => {
                   if (!postSel) {
-                    finishOk();
+                    finishOk(tabId);
                     return;
                   }
                   chrome.tabs.sendMessage(tabId, {
@@ -137,7 +173,7 @@ function connect() {
                     selector: postSel,
                     timeout: msg.timeout || 30000, // navTimeout is always >= this, so the old Math.min was a no-op
                   }).then((response) => {
-                    if (response?.success) finishOk();
+                    if (response?.success) finishOk(tabId);
                     else finishErr(
                       response?.error?.code || 'ELEMENT_NOT_FOUND',
                       response?.error?.message || 'Post-navigation element not found.',
@@ -250,11 +286,16 @@ function connect() {
             };
 
             const forward = (response) => {
-              // Forward response — preserves response.success and response.error (object form)
+              // Forward response — preserves response.success and response.error (object form).
+              // tabId binds the run to this tab from here on; tabUrl is recorded per step in the
+              // run report, so a macro that acted on the wrong page is visible after the fact
+              // instead of leaving the user to guess.
               sendToNative({
                 type: 'browser:commandResult',
                 commandId: msg.commandId,
                 ...response,
+                tabId: targetTab.id,
+                tabUrl: targetTab.url || null,
               });
             };
             // "Receiving end does not exist" on an http(s) tab means the content script has not

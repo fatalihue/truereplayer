@@ -1327,6 +1327,9 @@ namespace TrueReplayer.Services
             // most useful signal that a selector is drifting and should be re-picked.
             public string? MatchedSelector { get; set; }
             public string? MatchedTier { get; set; }
+            // The page the step actually acted on. Recorded because "it ran on the wrong tab" is
+            // otherwise invisible after the fact — the step passes, it just passed somewhere else.
+            public string? TabUrl { get; set; }
         }
 
         // Bounded so a long-running loop cannot grow it without limit. When the cap is hit we stop
@@ -1697,6 +1700,9 @@ namespace TrueReplayer.Services
                 _rowFaultReason = null;
                 _softFaultOverride = false;
                 ResetRunReport();          // the report describes THIS run only
+                // Each run picks its browser tab afresh. Inheriting the previous run's tab would
+                // aim a macro at a page the user has since navigated away from.
+                _browserBridge?.ResetTabPin();
                 PushVariablesSnapshot(force: true); // live pane: run started, variables cleared
 
                 // Data-loop CURSOR (Model B): table present but "loop over data" OFF → this
@@ -2265,6 +2271,12 @@ namespace TrueReplayer.Services
                                 {
                                     stepRec.MatchedSelector = mvEl.TryGetProperty("selector", out var mvS) ? mvS.GetString() : null;
                                     stepRec.MatchedTier = mvEl.TryGetProperty("tier", out var mvT) ? mvT.GetString() : null;
+                                }
+                                if (browserResult.ValueKind == System.Text.Json.JsonValueKind.Object
+                                    && browserResult.TryGetProperty("tabUrl", out var tabUrlEl)
+                                    && tabUrlEl.ValueKind == System.Text.Json.JsonValueKind.String)
+                                {
+                                    stepRec.TabUrl = tabUrlEl.GetString();
                                 }
                             }
                             break;

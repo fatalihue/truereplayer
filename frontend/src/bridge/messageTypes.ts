@@ -427,6 +427,9 @@ export interface RunStep {
    *  the selector is drifting and should be re-picked before the fallbacks drift too. */
   matchedSelector: string | null;
   matchedTier: string | null;
+  /** The page this step acted on. Surfaced when a run touched more than one page, which is the
+   *  only way to notice after the fact that a macro drifted onto the wrong tab. */
+  tabUrl: string | null;
 }
 
 export interface RunReport {

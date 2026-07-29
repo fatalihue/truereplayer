@@ -15,7 +15,7 @@ namespace TrueReplayer.Services
     public class BrowserBridgeService : IDisposable
     {
         private const string PipeName = "TrueReplayerBridge";
-        public const string ExpectedExtensionVersion = "1.4.6";
+        public const string ExpectedExtensionVersion = "1.4.7";
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
         private NamedPipeServerStream? _pipeServer;
         private StreamReader? _reader;
@@ -372,7 +372,10 @@ namespace TrueReplayer.Services
                     ? action.SelectorAlternatives
                         .Select(x => new { selector = x.Selector, tier = x.Tier })
                         .ToArray()
-                    : null
+                    : null,
+                // An If-Browser probe must ask the SAME page the run's actions act on, or a
+                // condition could pass on one tab while the click lands on another.
+                tabId = _pinnedTabId
             });
 
             using var timeoutCts = new CancellationTokenSource(pipeTimeoutMs);
@@ -406,6 +409,24 @@ namespace TrueReplayer.Services
                 _pendingCommands.TryRemove(commandId, out _);
             }
         }
+
+        // ── Run-scoped tab pin ──────────────────────────────────────────────────────────────
+        //
+        // The extension resolves the target with chrome.tabs.query({active:true}) — "the tab you
+        // are looking at". For most macros that IS the intent: 4 of the owner's 6 browser profiles
+        // act on a page already open rather than navigating to one. The bug was never the choice,
+        // it was RE-MAKING the choice on every step: move focus mid-run and the macro follows,
+        // silently acting on a different page.
+        //
+        // So resolve ONCE per run and reuse. The pin lives HERE, not in the extension: an MV3
+        // service worker is evicted when idle, so state kept there evaporates. Passing the tabId
+        // down with every command keeps the extension stateless and removes the need for any
+        // "run started / run ended" protocol.
+        private int? _pinnedTabId;
+
+        /// <summary>Drop the pinned tab. Called at the start of every replay — a new run must
+        /// resolve the page afresh rather than inherit whatever the last one was aimed at.</summary>
+        public void ResetTabPin() => _pinnedTabId = null;
 
         public async Task<JsonElement> ExecuteBrowserCommandAsync(
             TrueReplayer.Models.ActionItem action, CancellationToken token, int timeoutMs = 5000, string? resolvedText = null)
@@ -481,7 +502,11 @@ namespace TrueReplayer.Services
                     ? action.SelectorAlternatives
                         .Select(x => new { selector = x.Selector, tier = x.Tier })
                         .ToArray()
-                    : null
+                    : null,
+                // The tab this run is bound to; null on the first command, after which the
+                // extension's reply tells us which one it used. An older extension ignores the key
+                // and keeps its per-command behaviour, which is exactly the pre-fix status quo.
+                tabId = _pinnedTabId
             });
 
             using var timeoutCts = new CancellationTokenSource(pipeTimeout);
@@ -498,6 +523,16 @@ namespace TrueReplayer.Services
                         tip: GetFriendlyTimeoutTip(command)))))
                 {
                     var result = await tcs.Task;
+                    // Bind the run to whatever tab the extension actually used. Every later
+                    // command carries it, so a focus change mid-run can no longer redirect the
+                    // macro. A navigate re-pins by nature: it reports the tab it navigated, which
+                    // is a NEW one when the action opened one.
+                    if (result.ValueKind == JsonValueKind.Object
+                        && result.TryGetProperty("tabId", out var tabEl)
+                        && tabEl.TryGetInt32(out var usedTabId))
+                    {
+                        _pinnedTabId = usedTabId;
+                    }
                     // Surface fallback usage in the session log — the primary selector is
                     // drifting and the user should re-pick before the fallbacks drift too.
                     if (result.ValueKind == JsonValueKind.Object
