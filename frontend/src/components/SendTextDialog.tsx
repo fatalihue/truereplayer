@@ -417,7 +417,10 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
         // insertToken (not insertText): a surface-built token always becomes a
         // chip even when its join separator defeats the typing grammar.
         lexicalApiRef.current?.insertToken(token);
-      } else if (clipDirty) {
+      } else if (clipDirty && !clipState.unmodeled) {
+        // Never commit a rebuild of a chain we could not fully parse — that write is where the
+        // unrepresented modifier vanishes. The surface renders read-only in that case, so this
+        // only guards the path where the state was seeded from such a token.
         cur.commit(token);
       }
       return null;

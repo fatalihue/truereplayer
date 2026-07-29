@@ -44,6 +44,10 @@ export interface TransformState {
   // round-trips: parse sets it, build re-emits it, and nothing in between can quietly drop it.
   extractRef: string;
   limitRef: string;
+  /** The chain carried something this editor cannot represent, so REBUILDING it would silently
+   *  throw that part away. Set by the parser, never emitted into a token. Consumers must go
+   *  read-only rather than re-serialize. See parseModifierParts. */
+  unmodeled: boolean;
   // List ops — operate on the content as CRLF-normalized lines (backend list modifiers).
   listPick: ListPick;   // 'range' → range:a-b · 'lines' → lines:i,j,k (1-based)
   rangeFrom: number;
@@ -66,6 +70,7 @@ export const DEFAULT_TRANSFORM: TransformState = {
   limitN: 10,
   extractRef: '',
   limitRef: '',
+  unmodeled: false,
   listPick: 'none',
   rangeFrom: 1,
   rangeTo: 3,
@@ -269,6 +274,19 @@ export function parseRowNextToken(token: string): { column: string; state: Trans
 // The shared modifier-tail parser — same forgiving grammar as the backend
 // ApplyClipboardModifiers (unknown segments skipped, arg-taking modifiers
 // validate their arg before consuming it).
+//
+// It also reports whether anything was LOST. That matters because this editor round-trips:
+// every popover edit REBUILDS the whole token from state, so a segment the parser could not
+// represent disappears the moment the user ticks any checkbox — and the loss is written back
+// to the profile. Two ways a segment goes unrepresented:
+//
+//   1. It is unknown entirely — a future modifier, or a typo ({clipboard:uppercase}).
+//   2. It is a KNOWN arg-taking modifier whose argument fails its gate, so the modifier is
+//      recognised but no state is set: {clipboard:lines:sort} parses `lines` (no digit in
+//      `sort`, so it is not its argument), sets nothing, and rebuilds as just `{clipboard:sort}`.
+//
+// Either way the answer is the same — refuse to rebuild. `unmodeled` is what the consumers
+// branch on to go read-only.
 function parseModifierParts(parts: string[], from: number): TransformState {
   const state: TransformState = { ...DEFAULT_TRANSFORM };
   for (let i = from; i < parts.length; i++) {
@@ -299,7 +317,7 @@ function parseModifierParts(parts: string[], from: number): TransformState {
           state.extract = p;
           state.extractN = n;
           i++;
-        }
+        } else state.unmodeled = true;   // recognised, but nothing set -> would vanish on rebuild
         break;
       }
       case 'first':
@@ -315,7 +333,7 @@ function parseModifierParts(parts: string[], from: number): TransformState {
           state.limit = p;
           state.limitN = n;
           i++;
-        }
+        } else state.unmodeled = true;
         break;
       }
       case 'range': {
@@ -328,7 +346,7 @@ function parseModifierParts(parts: string[], from: number): TransformState {
           state.rangeFrom = a;
           state.rangeTo = b;
           i++;
-        }
+        } else state.unmodeled = true;
         break;
       }
       case 'lines': {
@@ -340,7 +358,7 @@ function parseModifierParts(parts: string[], from: number): TransformState {
           state.listPick = 'lines';
           state.linesSpec = parts[i + 1];
           i++;
-        }
+        } else state.unmodeled = true;
         break;
       }
       case 'sort':
@@ -364,6 +382,11 @@ function parseModifierParts(parts: string[], from: number): TransformState {
         }
         break;
       }
+      default:
+        // Anything this editor does not know: a modifier added to the backend but not here yet,
+        // or a typo. Either way rebuilding would drop it, so refuse to rebuild.
+        state.unmodeled = true;
+        break;
     }
   }
   return state;

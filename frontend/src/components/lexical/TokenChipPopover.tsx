@@ -304,6 +304,11 @@ function ClipboardEditor({
   // of React's updater (which StrictMode invokes twice) — each interaction re-renders before the
   // next one, so the closure value is the current one.
   const update: React.Dispatch<React.SetStateAction<TransformState>> = (action) => {
+    // The mount-time emit was fixed before; this is the OTHER half. When the chain carried
+    // something the parser could not represent, rebuilding on an edit deletes it just as
+    // silently — {clipboard:lines:sort} becomes {clipboard:sort} the moment any checkbox is
+    // ticked. Refuse to emit; the body renders read-only and says why.
+    if (state.unmodeled) return;
     const next = typeof action === 'function'
       ? (action as (prev: TransformState) => TransformState)(state)
       : action;
@@ -512,6 +517,10 @@ function RowColEditor({ token, onChange, head = 'row' }: { token: string; onChan
   // exactly what will run. Clearing the column never emits a broken `{row:}`.
   const emit = (col: string, s: TransformState) => {
     if (!col) return;
+    // Same refusal as the clipboard editor: a chain carrying something the parser could not
+    // represent must never be rebuilt, because the rebuild is where the unrepresented part
+    // disappears — and it disappears into the saved profile.
+    if (s.unmodeled) return;
     const t = build(col, s);
     setDisplayToken(t);
     onChange(t);

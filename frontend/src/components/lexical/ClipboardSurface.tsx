@@ -56,6 +56,44 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset }: Clip
   const linesActive =
     state.listPick !== 'none' || state.sort || state.dedupe || state.reverse || state.join;
 
+  // Same read-only rule as the chip popover: this surface rebuilds the whole token from state,
+  // so a chain carrying an unrepresentable modifier must not be edited here.
+  if (state.unmodeled) {
+    return (
+      <div className="absolute inset-0 z-20 bg-bg-elevated flex flex-col">
+        <div className="h-9 px-2 flex items-center gap-2 border-b border-border-subtle shrink-0">
+          <button type="button" onClick={onBack}
+            className="flex items-center gap-1 h-6 px-1.5 text-[11px] rounded text-text-tertiary hover:text-text-primary hover:bg-bg-card transition-colors">
+            <ChevronLeft size={13} />
+            Editor
+          </button>
+          <div className="w-px h-4 bg-border-subtle" />
+          <Wand2 size={13} className="text-accent-light shrink-0" />
+          <div className="text-xs font-semibold text-text-primary flex-1">Advanced Clipboard</div>
+        </div>
+        <div className="flex-1 p-4 space-y-3">
+          <div className="rounded border px-3 py-2 text-[11px] leading-relaxed"
+            style={{
+              color: 'var(--color-recording)',
+              borderColor: 'color-mix(in srgb, var(--color-recording) 40%, transparent)',
+              backgroundColor: 'color-mix(in srgb, var(--color-recording) 10%, transparent)',
+            }}>
+            {tt('This token has a modifier this builder does not know, so it is read-only here. Rebuilding it would quietly drop that part — edit the token text directly in the editor instead.',
+                'Este token tem um modificador que este construtor não conhece, então está só para leitura. Reconstruí-lo descartaria essa parte em silêncio — edite o texto do token direto no editor.')}
+          </div>
+          <div className="text-[9px] uppercase tracking-wide text-text-tertiary">Token</div>
+          <div className="font-mono text-[12px] px-2 py-1 rounded break-all"
+            style={{
+              color: 'var(--color-action-sendtext-fg)',
+              background: 'color-mix(in srgb, var(--color-action-sendtext-fg) 10%, transparent)',
+            }}>
+            {token}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="absolute inset-0 z-20 bg-bg-elevated flex flex-col">
       {/* Sub-header — local back affordance, ThemeEditor sub-surface style. */}

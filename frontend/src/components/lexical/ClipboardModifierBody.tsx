@@ -66,6 +66,37 @@ export function ClipboardModifierBody({
   const numTip = tt('Back to a fixed number', 'Voltar para um número fixo');
   const setListPick = (v: ListPick) => setState((s) => ({ ...s, listPick: v }));
 
+  // The chain holds something this editor cannot model, so every control is inert: touching one
+  // would rebuild the token and drop the part we did not understand. Say so instead of letting
+  // the user poke at dead checkboxes, and point at the one place that CAN edit it losslessly.
+  if (state.unmodeled) {
+    return (
+      <div className="p-1 space-y-2">
+        <div className="rounded border px-2.5 py-2 text-[11px] leading-relaxed"
+          style={{
+            color: 'var(--color-recording)',
+            borderColor: 'color-mix(in srgb, var(--color-recording) 40%, transparent)',
+            backgroundColor: 'color-mix(in srgb, var(--color-recording) 10%, transparent)',
+          }}>
+          {tt('This token has a modifier this editor does not know, so it is shown read-only. Editing it here would quietly drop that part.',
+              'Este token tem um modificador que este editor não conhece, então está só para leitura. Editar aqui descartaria essa parte em silêncio.')}
+        </div>
+        <div className="text-[9px] uppercase tracking-wide text-text-tertiary">Token</div>
+        <div className="font-mono text-[11.5px] px-2 py-0.5 rounded break-all"
+          style={{
+            color: 'var(--color-action-sendtext-fg)',
+            background: 'color-mix(in srgb, var(--color-action-sendtext-fg) 10%, transparent)',
+          }}>
+          {token}
+        </div>
+        <div className="text-[10px] text-text-tertiary leading-snug">
+          {tt('To change it, edit the token text directly in the editor.',
+              'Para alterar, edite o texto do token direto no editor.')}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Sequential consumption. Sits ABOVE Transform because that is the order the backend
