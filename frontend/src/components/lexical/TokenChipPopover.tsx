@@ -323,6 +323,11 @@ function ClipboardEditor({
       clipRaw={clipRaw}
       clipReady={clipReady}
       showNext
+      // Only while read-only. The panel exists to say "rebuilding would drop part of this", and it
+      // was rendering the REBUILT token underneath that sentence — showing the loss as if it had
+      // already happened, next to a warning that it would. While editable the rebuilt token is the
+      // right thing to show: it is what an edit will actually write.
+      token={state.unmodeled ? token : undefined}
     />
   );
 }

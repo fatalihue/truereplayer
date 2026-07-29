@@ -3556,6 +3556,73 @@ namespace TrueReplayer.Services
         }
 
         /// <summary>
+        /// How many segments a modifier eats, and how it decides. This is THE arity rule: three
+        /// walks step through a chain (the applier, <see cref="TrySplitNextModifier"/>,
+        /// <see cref="ChainUsesTokenArg"/>) and every one of them must agree segment-for-segment,
+        /// or a chain means one thing to the engine and another to the version pin.
+        /// </summary>
+        private enum ModifierArg
+        {
+            None,       // takes no argument
+            Raw,        // `join` — eats the next segment whatever it says, even a modifier name
+            Count1,     // line/word — a 1-based index
+            Count0,     // first/last — a length
+            Range,      // range — "a-b"
+            Indices,    // lines — "3,1,2"
+        }
+
+        private static ModifierArg ArgOf(string modifier) => modifier switch
+        {
+            "join" => ModifierArg.Raw,
+            "line" or "word" => ModifierArg.Count1,
+            "first" or "last" => ModifierArg.Count0,
+            "range" => ModifierArg.Range,
+            "lines" => ModifierArg.Indices,
+            _ => ModifierArg.None,
+        };
+
+        /// <summary>
+        /// Advances past ONE modifier and returns where the next one starts, reporting whether the
+        /// argument it consumed was an "@name" reference.
+        ///
+        /// Every walk in this file routes its stepping through here rather than re-deriving it.
+        /// That is not tidiness: <see cref="ChainUsesTokenArg"/> used to step `i += 2` after any
+        /// arg-taking modifier while the applier steps `+1` when a LITERAL argument fails its gate,
+        /// and the two disagreed on chains like `{clipboard:line:first:@n}` — the applier reads
+        /// `line` as argument-less (its follower "first" is not a number) and then applies
+        /// `first:@n`, while the pin walk swallowed "first" as line's argument, landed on "@n" as a
+        /// bare modifier, and reported NO reference. The profile then exported with no minimum
+        /// version and an older build pasted the whole clipboard.
+        ///
+        /// Arity is decided on SHAPE alone — never on what a variable holds. A reference is always
+        /// consumed; a literal only when it satisfies that modifier's gate, which is what keeps a
+        /// typo'd `line:upper` from eating the next modifier.
+        /// </summary>
+        private static int StepModifier(string[] parts, int i, out bool argIsRef)
+        {
+            argIsRef = false;
+            var kind = ArgOf(parts[i].ToLowerInvariant());
+            if (kind == ModifierArg.None) return i + 1;
+            // No argument left to take. `join` still steps 2 — the applier does, falling safely
+            // past the end — and every other modifier degrades to argument-less.
+            if (i + 1 >= parts.Length) return kind == ModifierArg.Raw ? i + 2 : i + 1;
+
+            var arg = parts[i + 1];
+            if (kind == ModifierArg.Raw) return i + 2;
+            if (IsArgRef(arg)) { argIsRef = true; return i + 2; }
+
+            bool literalFits = kind switch
+            {
+                ModifierArg.Count1 => int.TryParse(arg, out var one) && one >= 1,
+                ModifierArg.Count0 => int.TryParse(arg, out var zero) && zero >= 0,
+                ModifierArg.Range => TryParseLineRange(arg, out _, out _),
+                ModifierArg.Indices => arg.AsSpan().IndexOfAnyInRange('0', '9') >= 0,
+                _ => false,
+            };
+            return literalFits ? i + 2 : i + 1;
+        }
+
+        /// <summary>
         /// True when the chain uses a reference argument anywhere — the single source of truth the
         /// version pin delegates to, so the pin can never disagree with the engine about what
         /// counts (the doctrine the {clipboard:next} pin already follows).
@@ -3564,24 +3631,11 @@ namespace TrueReplayer.Services
         {
             if (string.IsNullOrEmpty(modifierChain)) return false;
             if (modifierChain.IndexOf(ArgRefSigil[0]) < 0) return false;
-            // Walk with the SAME stepping as the applier so a `join` separator that happens to
-            // start with '@' is seen as a separator, not as a reference.
             var parts = modifierChain.Split(':');
             for (int i = 0; i < parts.Length;)
             {
-                switch (parts[i].ToLowerInvariant())
-                {
-                    case "join":
-                        i += 2;   // separator is raw and unconditionally consumed
-                        break;
-                    case "line": case "word": case "first": case "last": case "range": case "lines":
-                        if (i + 1 < parts.Length && IsArgRef(parts[i + 1])) return true;
-                        i += 2;
-                        break;
-                    default:
-                        i++;
-                        break;
-                }
+                i = StepModifier(parts, i, out var isRef);
+                if (isRef) return true;
             }
             return false;
         }
@@ -3641,53 +3695,62 @@ namespace TrueReplayer.Services
                     // WHOLE content — a typo'd variable name would paste an entire clipboard into
                     // a customer reply, which is exactly the silent-divergence class this file
                     // already pins {clipboard:next} against.
+                    // Arity comes from StepModifier, never from a local `i +=` — see the note there.
+                    // `next == i + 2` IS "the argument belongs to me", so a consumed-but-unusable
+                    // argument fails EMPTY and an unconsumed one leaves the modifier inert.
                     case "line":
-                        if (i + 1 < parts.Length)
                         {
-                            bool ok = TryReadIntArg(parts[i + 1], ctx, 1, out var lineN, out var lineUsed);
-                            if (ok)
+                            int next = StepModifier(parts, i, out _);
+                            if (next == i + 2)
                             {
-                                var lines = result.Replace("\r\n", "\n").Split('\n');
-                                result = lineN <= lines.Length ? lines[lineN - 1] : string.Empty;
+                                if (TryReadIntArg(parts[i + 1], ctx, 1, out var lineN, out _))
+                                {
+                                    var lines = result.Replace("\r\n", "\n").Split('\n');
+                                    result = lineN <= lines.Length ? lines[lineN - 1] : string.Empty;
+                                }
+                                else result = string.Empty;   // reference that didn't resolve
                             }
-                            else if (lineUsed) result = string.Empty;   // reference that didn't resolve
-                            i += lineUsed ? 2 : 1;
+                            i = next;
                         }
-                        else i++;
                         break;
                     case "word":
-                        if (i + 1 < parts.Length)
                         {
-                            bool ok = TryReadIntArg(parts[i + 1], ctx, 1, out var wordN, out var wordUsed);
-                            if (ok)
+                            int next = StepModifier(parts, i, out _);
+                            if (next == i + 2)
                             {
-                                var words = result.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-                                result = wordN <= words.Length ? words[wordN - 1] : string.Empty;
+                                if (TryReadIntArg(parts[i + 1], ctx, 1, out var wordN, out _))
+                                {
+                                    var words = result.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                                    result = wordN <= words.Length ? words[wordN - 1] : string.Empty;
+                                }
+                                else result = string.Empty;
                             }
-                            else if (wordUsed) result = string.Empty;
-                            i += wordUsed ? 2 : 1;
+                            i = next;
                         }
-                        else i++;
                         break;
                     case "first":
-                        if (i + 1 < parts.Length)
                         {
-                            bool ok = TryReadIntArg(parts[i + 1], ctx, 0, out var firstN, out var firstUsed);
-                            if (ok) result = firstN >= result.Length ? result : result.Substring(0, firstN);
-                            else if (firstUsed) result = string.Empty;
-                            i += firstUsed ? 2 : 1;
+                            int next = StepModifier(parts, i, out _);
+                            if (next == i + 2)
+                            {
+                                if (TryReadIntArg(parts[i + 1], ctx, 0, out var firstN, out _))
+                                    result = firstN >= result.Length ? result : result.Substring(0, firstN);
+                                else result = string.Empty;
+                            }
+                            i = next;
                         }
-                        else i++;
                         break;
                     case "last":
-                        if (i + 1 < parts.Length)
                         {
-                            bool ok = TryReadIntArg(parts[i + 1], ctx, 0, out var lastN, out var lastUsed);
-                            if (ok) result = lastN >= result.Length ? result : result.Substring(result.Length - lastN);
-                            else if (lastUsed) result = string.Empty;
-                            i += lastUsed ? 2 : 1;
+                            int next = StepModifier(parts, i, out _);
+                            if (next == i + 2)
+                            {
+                                if (TryReadIntArg(parts[i + 1], ctx, 0, out var lastN, out _))
+                                    result = lastN >= result.Length ? result : result.Substring(result.Length - lastN);
+                                else result = string.Empty;
+                            }
+                            i = next;
                         }
-                        else i++;
                         break;
 
                     // ── List modifiers — operate on CRLF-normalized lines (same split rule
@@ -3700,24 +3763,26 @@ namespace TrueReplayer.Services
                         // a variable holding "2-4" works. Reference included even though the UI
                         // keeps this control literal-only: without it a hand-typed "range:@r" would
                         // drop through the unknown-modifier default and paste everything.
-                        if (i + 1 < parts.Length)
                         {
-                            var seg = parts[i + 1];
-                            bool isRef = IsArgRef(seg);
-                            string argText = seg;
-                            bool resolved = !isRef || TryResolveRefArg(seg, ctx, out argText);
-                            if (resolved && TryParseLineRange(argText, out var rangeFrom, out var rangeTo))
+                            int next = StepModifier(parts, i, out var rangeRef);
+                            if (next == i + 2)
                             {
-                                var lines = SplitContentLines(result);
-                                int from = Math.Max(1, rangeFrom);
-                                int to = Math.Min(lines.Length, rangeTo);
-                                result = from <= to ? string.Join("\n", lines[(from - 1)..to]) : string.Empty;
-                                i += 2;
+                                var seg = parts[i + 1];
+                                string argText = seg;
+                                bool resolved = !rangeRef || TryResolveRefArg(seg, ctx, out argText);
+                                if (resolved && TryParseLineRange(argText, out var rangeFrom, out var rangeTo))
+                                {
+                                    var lines = SplitContentLines(result);
+                                    int from = Math.Max(1, rangeFrom);
+                                    int to = Math.Min(lines.Length, rangeTo);
+                                    result = from <= to ? string.Join("\n", lines[(from - 1)..to]) : string.Empty;
+                                }
+                                // Only reachable for a reference: a literal only gets consumed when
+                                // it already parsed as "a-b".
+                                else result = string.Empty;
                             }
-                            else if (isRef) { result = string.Empty; i += 2; }
-                            else i++;
+                            i = next;
                         }
-                        else i++;
                         break;
                     case "lines":
                         // lines:3,1,2 → pick lines by 1-based index in the given order
@@ -3727,28 +3792,29 @@ namespace TrueReplayer.Services
                         // posture as line/word, so a typo'd "lines:upper" doesn't eat
                         // the next modifier.
                         // Same reference treatment as range, and for the same fail-closed reason.
-                        if (i + 1 < parts.Length)
                         {
-                            var seg = parts[i + 1];
-                            bool isRef = IsArgRef(seg);
-                            string argText = seg;
-                            bool resolved = !isRef || TryResolveRefArg(seg, ctx, out argText);
-                            if (resolved && argText.AsSpan().IndexOfAnyInRange('0', '9') >= 0)
+                            int next = StepModifier(parts, i, out var linesRef);
+                            if (next == i + 2)
                             {
-                                var lines = SplitContentLines(result);
-                                var picked = new List<string>();
-                                foreach (var tok in argText.Split(','))
+                                var seg = parts[i + 1];
+                                string argText = seg;
+                                bool resolved = !linesRef || TryResolveRefArg(seg, ctx, out argText);
+                                if (resolved && argText.AsSpan().IndexOfAnyInRange('0', '9') >= 0)
                                 {
-                                    if (int.TryParse(tok, out var n) && n >= 1 && n <= lines.Length)
-                                        picked.Add(lines[n - 1]);
+                                    var lines = SplitContentLines(result);
+                                    var picked = new List<string>();
+                                    foreach (var tok in argText.Split(','))
+                                    {
+                                        if (int.TryParse(tok, out var n) && n >= 1 && n <= lines.Length)
+                                            picked.Add(lines[n - 1]);
+                                    }
+                                    result = string.Join("\n", picked);
                                 }
-                                result = string.Join("\n", picked);
-                                i += 2;
+                                // Only reachable for a reference — see range above.
+                                else result = string.Empty;
                             }
-                            else if (isRef) { result = string.Empty; i += 2; }
-                            else i++;
+                            i = next;
                         }
-                        else i++;
                         break;
                     case "reverse":
                         {
@@ -3791,7 +3857,8 @@ namespace TrueReplayer.Services
                             string sep = i + 1 < parts.Length ? parts[i + 1] : " ";
                             result = string.Join(sep, SplitContentLines(result));
                         }
-                        i += 2; // safely past-the-end when no arg — the while condition exits
+                        // Steps 2, landing safely past-the-end when there was no arg at all.
+                        i = StepModifier(parts, i, out _);
                         break;
 
                     default:
@@ -4373,38 +4440,14 @@ namespace TrueReplayer.Services
             int found = -1;
             for (int i = 0; i < parts.Length; )
             {
-                var mod = parts[i].ToLowerInvariant();
-                bool hasArg = i + 1 < parts.Length;
-                switch (mod)
-                {
-                    // Always consumes its argument verbatim — the separator may be ANY text.
-                    case "join":
-                        i += 2;
-                        continue;
-                    // Consume the argument only when it parses, exactly like the applier. A
-                    // non-numeric follower (…:line:next) is NOT an argument there either, so
-                    // "next" stays a modifier in that position and both sides agree.
-                    // A REFERENCE argument ("@i") is consumed unconditionally — the applier decides
-                    // that on SHAPE alone, so this walk must too, or the two disagree about which
-                    // segment is `next` depending on what a variable happens to hold.
-                    case "line":
-                    case "word":
-                    case "first":
-                    case "last":
-                        i += hasArg && (IsArgRef(parts[i + 1]) || int.TryParse(parts[i + 1], out _)) ? 2 : 1;
-                        continue;
-                    case "range":
-                        i += hasArg && (IsArgRef(parts[i + 1]) || TryParseLineRange(parts[i + 1], out _, out _)) ? 2 : 1;
-                        continue;
-                    case "lines":
-                        // Same "contains a digit" gate the applier uses for lines:3,1,2.
-                        i += hasArg && (IsArgRef(parts[i + 1]) || parts[i + 1].AsSpan().IndexOfAnyInRange('0', '9') >= 0) ? 2 : 1;
-                        continue;
-                    default:
-                        if (found < 0 && mod == "next") found = i;
-                        i++;
-                        continue;
-                }
+                // A segment only counts as `next` when the walk LANDS on it as a modifier —
+                // "join:next" glues the lines with the word "next" and must not pop a line.
+                // StepModifier owns that decision so this walk cannot drift from the applier;
+                // it used to re-state the gates here, and a transcribed rule is a rule that
+                // eventually diverges.
+                if (found < 0 && string.Equals(parts[i], "next", StringComparison.OrdinalIgnoreCase))
+                    found = i;
+                i = StepModifier(parts, i, out _);
             }
             if (found < 0) return false;
 

@@ -48,6 +48,12 @@ export interface TransformState {
    *  throw that part away. Set by the parser, never emitted into a token. Consumers must go
    *  read-only rather than re-serialize. See parseModifierParts. */
   unmodeled: boolean;
+  /** Why: the unrepresentable part is an "@name" argument on `range`/`lines`, which the backend
+   *  supports and pins but whose controls here are literal-only (a range is "a-b", not a number,
+   *  so it has no ArgInput). Going read-only is still the right answer — the point of this flag is
+   *  that the copy must not blame "a modifier this editor does not know" when the editor knows the
+   *  modifier perfectly well and only cannot SHOW the argument. */
+  unmodeledRefArg: boolean;
   // List ops — operate on the content as CRLF-normalized lines (backend list modifiers).
   listPick: ListPick;   // 'range' → range:a-b · 'lines' → lines:i,j,k (1-based)
   rangeFrom: number;
@@ -71,6 +77,7 @@ export const DEFAULT_TRANSFORM: TransformState = {
   extractRef: '',
   limitRef: '',
   unmodeled: false,
+  unmodeledRefArg: false,
   listPick: 'none',
   rangeFrom: 1,
   rangeTo: 3,
@@ -116,10 +123,15 @@ function buildModifierParts(s: TransformState): string[] {
   // join ALWAYS emits its separator as the very next part — an explicit empty part
   // ("...:join:") means empty separator. Matches the backend's consume-one-arg rule.
   if (s.join) parts.push('join', s.joinSep);
-  const extractArg = s.extractRef ? s.extractRef : String(s.extractN);
+  // isArgRef, not merely non-empty. The `@` toggle writes a bare "@" the instant it is clicked,
+  // and emitting THAT wrote a token the parser cannot read back: reopening the chip hit
+  // parseInt('@') = NaN, set `unmodeled`, and the popover was read-only forever — a trap the
+  // editor laid for itself with one click. Until the name is finished the chain keeps the fixed
+  // number, which is a valid token and exactly what the field beside it still shows.
+  const extractArg = isArgRef(s.extractRef) ? s.extractRef : String(s.extractN);
   if (s.extract === 'line') parts.push('line', extractArg);
   else if (s.extract === 'word') parts.push('word', extractArg);
-  const limitArg = s.limitRef ? s.limitRef : String(s.limitN);
+  const limitArg = isArgRef(s.limitRef) ? s.limitRef : String(s.limitN);
   if (s.limit === 'first') parts.push('first', limitArg);
   else if (s.limit === 'last') parts.push('last', limitArg);
   if (s.case === 'upper') parts.push('upper');
@@ -143,7 +155,20 @@ function splitLines(t: string): string[] {
  * WaitImage 100%-confidence footgun: authoritative-looking and wrong.
  */
 export const previewIsRuntimeDependent = (s: TransformState): boolean =>
-  (s.extract !== 'none' && !!s.extractRef) || (s.limit !== 'none' && !!s.limitRef);
+  (s.extract !== 'none' && isArgRef(s.extractRef)) || (s.limit !== 'none' && isArgRef(s.limitRef));
+
+/**
+ * The reference field holds something the backend would NOT read as a reference — in practice just
+ * "@", which the toggle writes the instant it is clicked, before a name is typed.
+ *
+ * The token keeps the fixed number until the name is finished (see buildModifierParts), so nothing
+ * is broken — but the field on screen says "@" while the chain says "1", and `previewIsRuntimeDependent`
+ * used to call that state runtime-dependent and print "resolved when the macro runs" for a value
+ * that would never be resolved. Surfaces say the reference is unfinished instead.
+ */
+export const argRefIsUnfinished = (s: TransformState): boolean =>
+  (s.extract !== 'none' && !!s.extractRef && !isArgRef(s.extractRef)) ||
+  (s.limit !== 'none' && !!s.limitRef && !isArgRef(s.limitRef));
 
 export function applyTransformPreview(raw: string, s: TransformState): string {
   let r = raw;
@@ -195,6 +220,8 @@ export function applyTransformPreview(raw: string, s: TransformState): string {
   }
   if (s.reverse) r = splitLines(r).reverse().join('\n');
   if (s.join) r = splitLines(r).join(s.joinSep);
+  // An unfinished reference emits the NUMBER (see buildModifierParts), so previewing the number
+  // is the honest thing — it is literally what the token beside this preview says.
   if (s.extract === 'line') {
     const lines = splitLines(r);
     r = lines[s.extractN - 1] ?? '';
@@ -289,6 +316,12 @@ export function parseRowNextToken(token: string): { column: string; state: Trans
 // branch on to go read-only.
 function parseModifierParts(parts: string[], from: number): TransformState {
   const state: TransformState = { ...DEFAULT_TRANSFORM };
+  // Two distinct reasons the chain can be unrepresentable, tracked separately and resolved at the
+  // end. A single sticky flag got this wrong: `{clipboard:range:@r:frobnicate}` set the reference
+  // reason and then the unknown-modifier reason, and the surfaces — which branch on the reference
+  // reason first — told the user the token was fine and never mentioned `frobnicate`.
+  let sawRefArg = false;
+  let sawOtherLoss = false;
   for (let i = from; i < parts.length; i++) {
     const p = parts[i].toLowerCase();
     switch (p) {
@@ -317,7 +350,7 @@ function parseModifierParts(parts: string[], from: number): TransformState {
           state.extract = p;
           state.extractN = n;
           i++;
-        } else state.unmodeled = true;   // recognised, but nothing set -> would vanish on rebuild
+        } else { state.unmodeled = true; sawOtherLoss = true; }   // recognised, but nothing set -> would vanish on rebuild
         break;
       }
       case 'first':
@@ -333,10 +366,20 @@ function parseModifierParts(parts: string[], from: number): TransformState {
           state.limit = p;
           state.limitN = n;
           i++;
-        } else state.unmodeled = true;
+        } else { state.unmodeled = true; sawOtherLoss = true; }
         break;
       }
       case 'range': {
+        // A reference is consumed here for the same shape-decided reason as line/word — the
+        // backend does, so this walk must, or the two disagree about where the next modifier
+        // starts. It still cannot be DISPLAYED (the control is a literal "a-b" pair), so the
+        // chain goes read-only; the flag only makes the explanation name the real cause.
+        if (isArgRef(parts[i + 1])) {
+          state.unmodeled = true;
+          sawRefArg = true;
+          i++;
+          break;
+        }
         const m = (parts[i + 1] ?? '').match(/^(\d+)-(\d+)$/);
         if (m) {
           let a = parseInt(m[1], 10);
@@ -346,7 +389,7 @@ function parseModifierParts(parts: string[], from: number): TransformState {
           state.rangeFrom = a;
           state.rangeTo = b;
           i++;
-        } else state.unmodeled = true;
+        } else { state.unmodeled = true; sawOtherLoss = true; }
         break;
       }
       case 'lines': {
@@ -354,11 +397,18 @@ function parseModifierParts(parts: string[], from: number): TransformState {
         // "{clipboard:lines:sort}") is NOT lines' argument — it falls through as
         // its own modifier. Without this, opening the chip would swallow it into
         // linesSpec and the rebuild-on-close would silently erase it.
+        // Same reference treatment as range above.
+        if (isArgRef(parts[i + 1])) {
+          state.unmodeled = true;
+          sawRefArg = true;
+          i++;
+          break;
+        }
         if (parts[i + 1] !== undefined && /\d/.test(parts[i + 1])) {
           state.listPick = 'lines';
           state.linesSpec = parts[i + 1];
           i++;
-        } else state.unmodeled = true;
+        } else { state.unmodeled = true; sawOtherLoss = true; }
         break;
       }
       case 'sort':
@@ -386,8 +436,12 @@ function parseModifierParts(parts: string[], from: number): TransformState {
         // Anything this editor does not know: a modifier added to the backend but not here yet,
         // or a typo. Either way rebuilding would drop it, so refuse to rebuild.
         state.unmodeled = true;
+        sawOtherLoss = true;
         break;
     }
   }
+  // Only claim "it's just a reference argument" when that is the WHOLE story — anything unknown
+  // in the chain outranks it, because that is the reason the user cannot act on.
+  state.unmodeledRefArg = sawRefArg && !sawOtherLoss;
   return state;
 }

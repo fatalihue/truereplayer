@@ -9,6 +9,7 @@ import { useClipboardContent } from './useClipboardContent';
 import {
   applyTransformPreview,
   previewIsRuntimeDependent,
+  argRefIsUnfinished,
   buildClipboardToken,
   type CaseTransform,
   type Extract,
@@ -27,6 +28,8 @@ interface ClipboardSurfaceProps {
   /** Reset to the session's starting state (DEFAULT_TRANSFORM on insert,
    *  the chip's original token on edit). */
   onReset: () => void;
+  /** The token as the user actually has it, used ONLY by the read-only panel — see `token` below. */
+  originalToken?: string;
 }
 
 // Full-body "Advanced Clipboard" sub-surface of the Insert Text dialog — the
@@ -40,13 +43,22 @@ interface ClipboardSurfaceProps {
 // each with a step badge that lights up while its step is active, so the UI
 // reads as the data flow it actually is. Serialization stays exclusively in
 // buildClipboardToken — this component emits no token strings of its own.
-export function ClipboardSurface({ state, onStateChange, onBack, onReset }: ClipboardSurfaceProps) {
+export function ClipboardSurface({ state, onStateChange, onBack, onReset, originalToken }: ClipboardSurfaceProps) {
   const tt = useTt();
   const { clipRaw, clipReady, refresh } = useClipboardContent();
-  const token = useMemo(() => buildClipboardToken(state), [state]);
+  // While editable, the rebuilt token is correct — it is what an edit will write. While READ-ONLY
+  // it is not: rebuilding is exactly what this surface is refusing to do, so show what the user has.
+  const token = useMemo(
+    () => (state.unmodeled && originalToken ? originalToken : buildClipboardToken(state)),
+    [state, originalToken],
+  );
   const preview = useMemo(() => applyTransformPreview(clipRaw, state), [clipRaw, state]);
   // A reference argument has no value until the macro runs — never fabricate one in the preview.
   const runtimeDependent = previewIsRuntimeDependent(state);
+  // A half-typed "@" is neither a reference nor a number to the backend: the modifier is skipped
+  // and the caller gets everything. Say that, rather than a preview built from a number the user
+  // is no longer using.
+  const refUnfinished = argRefIsUnfinished(state);
   const refTip = tt('Take this number from a variable instead — @name, @counter or @row',
                     'Pegar este número de uma variável — @nome, @counter ou @row');
   const numTip = tt('Back to a fixed number', 'Voltar para um número fixo');
@@ -78,8 +90,11 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset }: Clip
               borderColor: 'color-mix(in srgb, var(--color-recording) 40%, transparent)',
               backgroundColor: 'color-mix(in srgb, var(--color-recording) 10%, transparent)',
             }}>
-            {tt('This token has a modifier this builder does not know, so it is read-only here. Rebuilding it would quietly drop that part — edit the token text directly in the editor instead.',
-                'Este token tem um modificador que este construtor não conhece, então está só para leitura. Reconstruí-lo descartaria essa parte em silêncio — edite o texto do token direto no editor.')}
+            {state.unmodeledRefArg
+              ? tt('This token takes a line argument from a variable, which these controls can only show as a literal — so it is read-only here. It still runs; if the variable is missing or does not hold a valid value, the step yields nothing. Edit the token text directly in the editor to change it.',
+                   'Este token pega um argumento de linha de uma variável, e estes controles só conseguem mostrar um valor literal — por isso está só para leitura. Ele roda normalmente; se a variável não existir ou não tiver um valor válido, o passo não devolve nada. Edite o texto do token direto no editor para mudá-lo.')
+              : tt('This token has a modifier this builder does not know, so it is read-only here. Rebuilding it would quietly drop that part — edit the token text directly in the editor instead.',
+                   'Este token tem um modificador que este construtor não conhece, então está só para leitura. Reconstruí-lo descartaria essa parte em silêncio — edite o texto do token direto no editor.')}
           </div>
           <div className="text-[9px] uppercase tracking-wide text-text-tertiary">Token</div>
           <div className="font-mono text-[12px] px-2 py-1 rounded break-all"
@@ -337,12 +352,18 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset }: Clip
                 color: 'var(--color-replay)',
               }}
             >
-              {runtimeDependent
-                ? <span className="italic text-text-disabled">
-                    {tt('Resolved when the macro runs — the index comes from a variable.',
-                        'Resolvido quando a macro roda — o índice vem de uma variável.')}
+              {/* Unfinished FIRST — see the note in ClipboardModifierBody. */}
+              {refUnfinished
+                ? <span className="italic" style={{ color: 'var(--color-recording)' }}>
+                    {tt('Finish the name after @ — until then the token keeps the fixed number.',
+                        'Complete o nome depois do @ — até lá o token mantém o número fixo.')}
                   </span>
-                : preview === '' ? <span className="italic text-text-disabled">(empty)</span> : preview}
+                : runtimeDependent
+                  ? <span className="italic text-text-disabled">
+                      {tt('Resolved when the macro runs — the index comes from a variable.',
+                          'Resolvido quando a macro roda — o índice vem de uma variável.')}
+                    </span>
+                  : preview === '' ? <span className="italic text-text-disabled">(empty)</span> : preview}
             </div>
           </div>
 

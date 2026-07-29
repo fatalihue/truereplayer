@@ -914,6 +914,10 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
             }}
             onBack={closeSurface}
             onReset={handleSurfaceReset}
+            // What the user actually has, for the read-only panel to show. Without it that panel
+            // rendered the REBUILT token — the loss displayed as done, under a warning that it would
+            // happen. Only meaningful when editing an existing token.
+            originalToken={surface.mode === 'edit' ? surface.token : undefined}
           />
         )}
       </div>

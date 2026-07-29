@@ -5,6 +5,7 @@ import { useTt } from '../../state/LanguageContext';
 import {
   applyTransformPreview,
   previewIsRuntimeDependent,
+  argRefIsUnfinished,
   buildClipboardToken,
   type Extract,
   type Limit,
@@ -51,6 +52,10 @@ export function ClipboardModifierBody({
   const preview = useMemo(() => applyTransformPreview(clipRaw, state), [clipRaw, state]);
   // A reference argument has no value until the macro runs — never fabricate one in the preview.
   const runtimeDependent = previewIsRuntimeDependent(state);
+  // A half-typed "@" is neither a reference nor a number to the backend: the modifier is skipped
+  // and the caller gets everything. Say that, rather than a preview built from a number the user
+  // is no longer using.
+  const refUnfinished = argRefIsUnfinished(state);
 
   const toggleCase = (v: 'upper' | 'lower' | 'sentence' | 'title') =>
     setState((s) => ({ ...s, case: s.case === v ? 'none' : v }));
@@ -78,8 +83,11 @@ export function ClipboardModifierBody({
             borderColor: 'color-mix(in srgb, var(--color-recording) 40%, transparent)',
             backgroundColor: 'color-mix(in srgb, var(--color-recording) 10%, transparent)',
           }}>
-          {tt('This token has a modifier this editor does not know, so it is shown read-only. Editing it here would quietly drop that part.',
-              'Este token tem um modificador que este editor não conhece, então está só para leitura. Editar aqui descartaria essa parte em silêncio.')}
+          {state.unmodeledRefArg
+            ? tt('This token takes a line argument from a variable, which these controls can only show as a literal — so it is read-only here. It still runs; if the variable is missing or does not hold a valid value, the step yields nothing. Edit the token text directly to change it.',
+                 'Este token pega um argumento de linha de uma variável, e estes controles só conseguem mostrar um valor literal — por isso está só para leitura. Ele roda normalmente; se a variável não existir ou não tiver um valor válido, o passo não devolve nada. Edite o texto do token para mudá-lo.')
+            : tt('This token has a modifier this editor does not know, so it is shown read-only. Editing it here would quietly drop that part.',
+                 'Este token tem um modificador que este editor não conhece, então está só para leitura. Editar aqui descartaria essa parte em silêncio.')}
         </div>
         <div className="text-[9px] uppercase tracking-wide text-text-tertiary">Token</div>
         <div className="font-mono text-[11.5px] px-2 py-0.5 rounded break-all"
@@ -365,12 +373,19 @@ export function ClipboardModifierBody({
             color: 'var(--color-replay)',
           }}
         >
-          {runtimeDependent
-            ? <span className="italic text-text-disabled">
-                {tt('Resolved when the macro runs — the index comes from a variable.',
-                    'Resolvido quando a macro roda — o índice vem de uma variável.')}
+          {/* Unfinished FIRST: with one good reference and one half-typed "@", the actionable
+              message is the one about the field still waiting on a name. */}
+          {refUnfinished
+            ? <span className="italic" style={{ color: 'var(--color-recording)' }}>
+                {tt('Finish the name after @ — until then the token keeps the fixed number.',
+                    'Complete o nome depois do @ — até lá o token mantém o número fixo.')}
               </span>
-            : preview === '' ? <span className="italic text-text-disabled">(empty)</span> : preview}
+            : runtimeDependent
+              ? <span className="italic text-text-disabled">
+                  {tt('Resolved when the macro runs — the index comes from a variable.',
+                      'Resolvido quando a macro roda — o índice vem de uma variável.')}
+                </span>
+              : preview === '' ? <span className="italic text-text-disabled">(empty)</span> : preview}
         </div>
       </div>
     </>
