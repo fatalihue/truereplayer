@@ -127,12 +127,19 @@ function connect() {
                   });
                 });
               };
-              const finishErr = (code, message, tip) => {
-                sendToNative({
+              // Same page-reporting contract as finishOk. For a navigate that failed, where the
+              // browser ACTUALLY ended up IS the diagnosis — a redirect to a login page and a slow
+              // page are the same NAVIGATION_TIMEOUT otherwise. The tab id is optional because one
+              // caller genuinely has no tab: the one where creating it is what failed.
+              const finishErr = (code, message, tip, usedTabId) => {
+                const send = (tabUrl) => sendToNative({
                   type: 'browser:commandResult',
                   commandId: msg.commandId,
                   error: { code, message, tip: tip || null },
+                  tabUrl: tabUrl || null,
                 });
+                if (typeof usedTabId !== 'number') { send(null); return; }
+                chrome.tabs.get(usedTabId, (t) => send((!chrome.runtime.lastError && t && t.url) ? t.url : null));
               };
 
               const runPostChecks = (tabId) => {
@@ -155,10 +162,11 @@ function connect() {
                     else finishErr(
                       response?.error?.code || 'NAVIGATION_TIMEOUT',
                       response?.error?.message || `URL didn't match pattern.`,
-                      response?.error?.tip || 'Check the URL pattern (glob or /regex/).'
+                      response?.error?.tip || 'Check the URL pattern (glob or /regex/).',
+                      tabId
                     );
                   }).catch((err) => {
-                    finishErr('NAVIGATION_TIMEOUT', err?.message || 'URL wait failed.', null);
+                    finishErr('NAVIGATION_TIMEOUT', err?.message || 'URL wait failed.', null, tabId);
                   });
                 };
                 const checkSel = () => {
@@ -177,10 +185,11 @@ function connect() {
                     else finishErr(
                       response?.error?.code || 'ELEMENT_NOT_FOUND',
                       response?.error?.message || 'Post-navigation element not found.',
-                      response?.error?.tip || 'Check the selector or extend the timeout.'
+                      response?.error?.tip || 'Check the selector or extend the timeout.',
+                      tabId
                     );
                   }).catch((err) => {
-                    finishErr('ELEMENT_NOT_FOUND', err?.message || 'Post-navigation wait failed.', null);
+                    finishErr('ELEMENT_NOT_FOUND', err?.message || 'Post-navigation wait failed.', null, tabId);
                   });
                 };
                 checkUrl(checkSel);
@@ -220,7 +229,8 @@ function connect() {
                   if (onUpdated) chrome.tabs.onUpdated.removeListener(onUpdated);
                   finishErr('NAVIGATION_TIMEOUT',
                     `Page didn't finish loading after ${Math.round(navTimeout / 1000)}s.`,
-                    'Site is slow or unreachable. Increase timeout or check connection.');
+                    'Site is slow or unreachable. Increase timeout or check connection.',
+                    targetTabId);
                 }, navTimeout);
               };
 
@@ -258,6 +268,10 @@ function connect() {
                   message: `Chrome's active tab is ${pageLabel}, which extensions cannot act on.`,
                   tip: 'Browser actions run on whichever tab is active. Click the tab with your page first, then run the macro.',
                 },
+                // Also as a field, not only inside the prose: the run report translates known
+                // error codes and shows the translation INSTEAD of this message, so the page named
+                // above disappears from the one place the user goes looking for it.
+                tabUrl: targetTab.url || null,
               });
               return;
             }
@@ -312,6 +326,7 @@ function connect() {
                     type: 'browser:commandResult',
                     commandId: msg.commandId,
                     error: { code: 'EXTENSION_ERROR', message: err.message || 'Failed to execute command', tip: null },
+                    tabUrl: targetTab.url || null,
                   });
                   return;
                 }
@@ -327,6 +342,7 @@ function connect() {
                           message: `No TrueReplayer content script on ${pageLabel}.`,
                           tip: 'Reload that tab and try again. If it was just updated, the extension needs the page reloaded before it can act on it.',
                         },
+                        tabUrl: targetTab.url || null,
                       });
                     });
                 }, 300);
@@ -497,6 +513,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       commandId: msg.commandId,
       success: msg.success,
       error: msg.error,
+      // The content script pushing a result on its own knows its page through `sender`, same as
+      // the selectChanged relay just above. One rule everywhere: if the page is known, report it.
+      tabUrl: sender.tab?.url || null,
     });
     sendResponse({ ok: true });
   } else if (msg.type === 'getStatus') {
