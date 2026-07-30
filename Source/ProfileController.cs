@@ -798,6 +798,11 @@ namespace TrueReplayer.Controllers
             // null) — anything else is a designed-for, silent-by-design hotkey routing.
             var byHotkey = new Dictionary<string, List<ProfileEntry>>(StringComparer.OrdinalIgnoreCase);
 
+            // Cleared for EVERY entry, not just the candidates: this method also runs after a
+            // rename or a disable, and a stale true would leave a warning badge on a row whose
+            // conflict is gone.
+            foreach (var entry in ProfileEntries) entry.HotkeyConflict = false;
+
             foreach (var entry in ProfileEntries)
             {
                 if (string.IsNullOrEmpty(entry.Hotkey) || entry.IsDisabled) continue;
@@ -821,6 +826,10 @@ namespace TrueReplayer.Controllers
 
                 foreach (var collidingGroup in byTargetSignature)
                 {
+                    // Stamp the entries so the sidebar can mark the chip. Same grouping that
+                    // produces the toast text below — one definition, so a badge can never
+                    // disagree with the warning the user was shown.
+                    foreach (var e in collidingGroup) e.HotkeyConflict = true;
                     var names = collidingGroup.Select(e => e.Name).ToList();
                     var targetDesc = string.IsNullOrEmpty(collidingGroup.Key)
                         ? "no target window"

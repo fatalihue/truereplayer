@@ -1751,6 +1751,7 @@ namespace TrueReplayer
                 hotkey = p.Hotkey,
                 hotstring = p.Hotstring,
                 hotstringInstant = p.HotstringInstant,
+                hotkeyConflict = p.HotkeyConflict,   // keep in sync with the OTHER projection of ProfileEntry
                 isActive = p.IsActive,
                 hasWindowTarget = p.HasWindowTarget,
                 windowTargetProcessName = p.WindowTargetProcessName,
@@ -2098,6 +2099,7 @@ namespace TrueReplayer
                     hotkey = p.Hotkey,
                     hotstring = p.Hotstring,
                     hotstringInstant = p.HotstringInstant,
+                    hotkeyConflict = p.HotkeyConflict,   // keep in sync with the OTHER projection of ProfileEntry
                     isActive = p.IsActive,
                     hasWindowTarget = p.HasWindowTarget,
                     windowTargetProcessName = p.WindowTargetProcessName,

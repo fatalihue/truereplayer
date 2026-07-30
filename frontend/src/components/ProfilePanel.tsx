@@ -1584,6 +1584,14 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           <RemovableChip
             removeTitle={tt(`Remove hotkey ${p.hotkey}`, `Remover hotkey ${p.hotkey}`)}
             onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'hotkey', name: p.name, label: `hotkey ${p.hotkey}` }); }}
+            /* A contested hotkey reads as a warning instead of a plain chip. The backend has
+               always computed this — it just never left the toast, so the sidebar showed two
+               identical chips for a combo where only one of them can ever fire. */
+            tip={p.hotkeyConflict
+              ? tt('Another profile uses this hotkey with the same target window — only one will fire',
+                   'Outro profile usa este hotkey com a mesma janela-alvo — só um vai disparar')
+              : undefined}
+            className={p.hotkeyConflict ? 'kbd-conflict' : undefined}
           >
             <KbdTag combo={p.hotkey} unified />
           </RemovableChip>

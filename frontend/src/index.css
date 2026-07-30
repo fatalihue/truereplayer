@@ -599,6 +599,19 @@ html[data-animations="true"] .drop-gap-slot {
   border-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
 }
 
+/* A CONTESTED hotkey: another enabled profile binds the same combo with the same effective
+   target window, so only one of them can ever fire. Goes on the RemovableChip wrapper, so it
+   repaints the .kbd spans inside instead of the wrapper — KbdTag owns those spans and must not
+   have to know about conflicts. Same combo on DIFFERENT targets is NOT this: the foreground
+   gate routes between those deliberately, and painting them red would cry wolf on a feature. */
+@utility kbd-conflict {
+  & .kbd {
+    color: var(--color-recording);
+    background: color-mix(in srgb, var(--color-recording) 12%, transparent);
+    border-color: color-mix(in srgb, var(--color-recording) 45%, transparent);
+  }
+}
+
 /* Hide native number-input spinners app-wide. We always pair number inputs with the
    shared <NumberInput> component's explicit +/− buttons, so the native pseudo-elements
    would just sit on top of our buttons (Chromium shows them on hover) and double-up the

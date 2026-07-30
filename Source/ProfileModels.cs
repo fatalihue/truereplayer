@@ -285,6 +285,14 @@ namespace TrueReplayer.Models
         public string? Hotkey { get; set; }
         public string? Hotstring { get; set; }
         public bool HotstringInstant { get; set; }
+        /// <summary>
+        /// This profile's hotkey is REALLY contested — another enabled profile binds the same
+        /// combo with the same effective target, so only one of them will ever fire. Stamped by
+        /// GetProfileHotkeys, which is the single definition of "real collision" in the app:
+        /// the same hotkey on DIFFERENT targets is not a conflict, it is deliberate routing by
+        /// the foreground gate. Not persisted — derived on every list load.
+        /// </summary>
+        public bool HotkeyConflict { get; set; }
         // ── Profile metadata mirror (read from UserProfile on list load) ──
         // Surfaced here so the sidebar can render icon badges + tag chips without re-reading
         // the whole profile JSON. Not edited directly — Info tab calls profile:set-metadata

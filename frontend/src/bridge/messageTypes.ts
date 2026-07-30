@@ -192,6 +192,10 @@ export interface ProfileEntry {
   hotkey: string | null;
   hotstring: string | null;
   hotstringInstant: boolean;
+  /** The hotkey is really contested: another enabled profile binds the same combo with the same
+   *  effective target, so only one of them fires. The same combo on DIFFERENT targets is not a
+   *  conflict — the foreground gate routes between those on purpose. Derived, never persisted. */
+  hotkeyConflict?: boolean;
   isActive: boolean;
   hasWindowTarget: boolean;
   windowTargetProcessName: string | null;
