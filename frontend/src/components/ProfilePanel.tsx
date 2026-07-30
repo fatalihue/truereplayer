@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
-import { Search, SearchX, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, Repeat2, Hourglass, ArrowUpFromDot, ExternalLink, Info, MoreHorizontal, Hash, Upload, Check, TimerReset } from 'lucide-react';
+import { Search, SearchX, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, Repeat2, Hourglass, ArrowUpFromDot, ExternalLink, Info, MoreHorizontal, Hash, Upload, Check } from 'lucide-react';
 import type { ProfileEntry, ImportPreviewPayload, ImportConflictResolution, TriggerMode } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
@@ -1440,7 +1440,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         e.currentTarget.blur();
       }}
       onContextMenu={(e) => handleContextMenu(e, p.name)}
-      className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-left transition-colors outline-none select-none cursor-grab active:cursor-grabbing ${
+      className={`relative w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-left transition-colors outline-none select-none cursor-grab active:cursor-grabbing ${
         dragProfile === p.name && dragActive.current ? 'opacity-50 ' : ''
       }${p.isDisabled ? 'opacity-40 ' : ''}${
         p.isActive
@@ -1448,97 +1448,105 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           : 'hover:bg-bg-card'
       }`}
     >
+        {/* Active marker — ABSOLUTE, deliberately out of the flex flow. As a layout
+            child it pushed the icon and the name 4.5 px right, so the one loaded
+            profile was the one row whose name never lined up with its siblings. */}
         {p.isActive && (
-          <div className="w-[3px] h-4 rounded-sm bg-accent-solid shrink-0" />
+          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-sm bg-accent-solid" />
         )}
 
-        {/* App icon — base64 PNG of the effective target's .exe, resolved server-side.
-            Sits between the active marker and the name. Two render modes:
+        {/* ── Column 1: the icon slot. Width is RESERVED even when empty, which is the
+            whole point: a row with no target must not pull its name left. Everything
+            that identifies the target lives here — the .exe icon, the crosshair
+            fallback when the icon could not be extracted, and the armed-automation
+            dot as a corner badge (a 4th column for 1 row in 80 would indent the 79).
 
-            • Own target  → wrapped in a group with a hover ✕ overlay so the user can
-              remove the target inline (same affordance the crosshair had before the
-              icon took its slot). Full opacity.
-            • Inherited from a folder → plain <img>, no ✕, 55 % opacity. Removal has
-              to happen from the folder, not the row.
-
-            Null when no target is set or icon extraction failed (UWP host, portable
-            apps off PATH) — in that case the crosshair badge to the right renders
-            as the fallback (and keeps its own ✕ for the own-target case). */}
-        {p.appIconBase64 && p.hasWindowTarget && (
-          <RemovableChip
-            variant="circle"
-            removeTitle={tt(`Remove window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`, `Remover janela-alvo (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`)}
-            tip={targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)}
-            onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'profileTarget', name: p.name, label: `window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})` }); }}
-            className="w-3.5 h-3.5"
-          >
-            {/* No tooltip here — the RemovableChip wrapper carries it (the chip-level
-                tip already embeds the .exe name via removeTitle, and a second tip
-                on this span would stack on top of it). */}
+            • Own target      → RemovableChip with a hover ✕, full opacity.
+            • Inherited       → plain <img> at 55 %; removal belongs to the folder.
+            • Icon missing    → crosshair (UWP host, portable apps off PATH).
+            • No target       → empty, and the column still holds its width. */}
+        <span className="relative w-3.5 h-3.5 shrink-0 flex items-center justify-center">
+          {p.appIconBase64 && p.hasWindowTarget && (
+            <RemovableChip
+              variant="circle"
+              removeTitle={tt(`Remove window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`, `Remover janela-alvo (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`)}
+              tip={targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)}
+              onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'profileTarget', name: p.name, label: `window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})` }); }}
+              className="w-3.5 h-3.5"
+            >
+              {/* No tooltip here — the RemovableChip wrapper carries it. */}
+              <span className="flex">
+                <img
+                  src={`data:image/png;base64,${p.appIconBase64}`}
+                  alt=""
+                  className="w-3.5 h-3.5 object-contain pointer-events-none"
+                />
+              </span>
+            </RemovableChip>
+          )}
+          {p.appIconBase64 && !p.hasWindowTarget && (
+            // Inherited folder target — no tooltip (user request): the faded icon is a
+            // passive "this row inherits a target" cue, managed on the folder.
             <span className="flex">
               <img
                 src={`data:image/png;base64,${p.appIconBase64}`}
                 alt=""
-                className="w-3.5 h-3.5 object-contain pointer-events-none"
+                className="w-3.5 h-3.5 object-contain pointer-events-none opacity-55"
               />
             </span>
-          </RemovableChip>
-        )}
-        {p.appIconBase64 && !p.hasWindowTarget && (
-          // Inherited folder target — no tooltip (user request): the faded icon
-          // is just a passive "this row inherits a target" cue, and the source
-          // is managed on the folder, not here.
-          <span className="shrink-0 flex">
-            <img
-              src={`data:image/png;base64,${p.appIconBase64}`}
-              alt=""
-              className="w-3.5 h-3.5 object-contain pointer-events-none opacity-55"
+          )}
+          {!p.appIconBase64 && p.hasWindowTarget && (
+            <RemovableChip
+              variant="circle"
+              removeTitle={tt(`Remove window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`, `Remover janela-alvo (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`)}
+              tip={targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)}
+              onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'profileTarget', name: p.name, label: `window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})` }); }}
+            >
+              <span><Crosshair size={11} className="text-text-tertiary" /></span>
+            </RemovableChip>
+          )}
+          {!p.appIconBase64 && !p.hasWindowTarget && p.hasEffectiveTarget && p.effectiveTargetSource === 'folder' && (
+            <span className="opacity-50 flex"><Crosshair size={11} className="text-text-tertiary" /></span>
+          )}
+          {/* Armed automation — this profile fires with no hotkey. Corner badge rather
+              than a column of its own; the ring keeps it readable over the row hover. */}
+          {p.triggerArmed && (
+            <span
+              data-tip={tt('Automation armed — fires without a hotkey', 'Automação armada — dispara sem hotkey')}
+              data-tip-pos="end"
+              className="absolute -right-1 -bottom-1 w-1.5 h-1.5 rounded-full"
+              style={{ background: 'var(--color-replay)', outline: '1.5px solid var(--color-bg-card)' }}
             />
-          </span>
-        )}
-
-        <span
-          className={`text-ui flex-1 min-w-0 truncate ${
-            p.isActive
-              ? 'text-accent font-semibold'
-              : 'text-text-primary'
-          }`}
-        >
-          {p.name}
+          )}
         </span>
 
-        {p.hasWindowTarget && !p.appIconBase64 ? (
-          // Own target but the icon couldn't be resolved (UWP host, portable not in PATH).
-          // Crosshair stays as a "this row IS gated" cue. Removal via hover ✕ overlay.
-          <RemovableChip
-            variant="circle"
-            removeTitle={tt(`Remove window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`, `Remover janela-alvo (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})`)}
-            tip={targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)}
-            onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'profileTarget', name: p.name, label: `window target (${targetLabel(p.windowTargetProcessName, p.windowTargetWindowTitle)})` }); }}
-          >
-            <span>
-              <Crosshair size={11} className="text-text-tertiary" />
+        {/* ── Column 2: the name. MIDDLE truncation, in pure CSS — the name is split
+            into a shrinking head and a fixed tail, so when the row runs out of room
+            the ellipsis lands in the middle and the END of the name survives.
+            Right-side truncation is the worst possible cut for this library: sibling
+            profiles share long prefixes (SET …, REL …, RANK …, Hora - Copy …), so
+            cutting the tail keeps the redundant half and drops the half that tells
+            them apart. Short names stay a single span — nothing to gain by splitting.
+            The tail needs shrink-0 and the head min-w-0, or the ellipsis never fires. */}
+        {(() => {
+          const cls = `text-ui min-w-0 ${p.isActive ? 'text-accent font-semibold' : 'text-text-primary'}`;
+          if (p.name.length <= 14) {
+            return <span className={`${cls} flex-1 truncate`}>{p.name}</span>;
+          }
+          return (
+            <span className={`${cls} flex-1 flex`} data-tip={p.name} data-tip-pos="start">
+              <span className="min-w-0 truncate">{p.name.slice(0, -6)}</span>
+              <span className="shrink-0">{p.name.slice(-6)}</span>
             </span>
-          </RemovableChip>
-        ) : (!p.appIconBase64 && p.hasEffectiveTarget && p.effectiveTargetSource === 'folder') && (
-          // Inherited from folder AND no icon resolved — fall back to the faded crosshair.
-          // Removal must happen from the folder, not the row, so no ✕ overlay here.
-          // No tooltip (user request) — passive inherited-target cue only.
-          <span className="shrink-0 opacity-50">
-            <Crosshair size={11} className="text-text-tertiary" />
-          </span>
-        )}
+          );
+        })()}
 
-        {/* Automation badge — an armed trigger fires this profile by itself (timer /
-            schedule / watched condition). Accent-tinted when armed; a configured-but-
-            disarmed trigger shows nothing (the Automation panel is the status surface). */}
-        {p.triggerArmed && (
-          <span data-tip={tt('Automation armed — fires without a hotkey', 'Automação armada — dispara sem hotkey')}
-            data-tip-pos="end" className="shrink-0 text-accent-light flex">
-            <TimerReset size={10} />
-          </span>
-        )}
-
+        {/* ── Column 3: the trigger gutter. A fixed floor so the hotkey/hotstring chips
+            land in a column instead of a ragged edge — the panel then reads as the
+            keyboard map it actually is. min-w rather than w: on the rare row that also
+            carries a trigger-mode icon the gutter may grow, which only shortens the
+            name and leaves the two left columns exactly where they were. */}
+        <span className="shrink-0 min-w-[76px] flex items-center justify-end gap-1.5">
         {/* Trigger mode indicator — placed before the hotkey so the visual order
             right-to-left is: hotstring → hotkey → trigger icon → target crosshair.
             Tooltip shows only the mode name; the full description lives in the
@@ -1592,6 +1600,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             </span>
           </RemovableChip>
         )}
+        </span>
     </div>
   );
 
@@ -1794,7 +1803,11 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               {pinnedProfiles.length > 0 && (
                 <>
                   {renderSectionLabel('Pinned')}
-                  {pinnedProfiles.map(renderProfileRow)}
+                  {/* Same inset as Ungrouped — these rows are outside a card too, and the
+                      name column has to be one column across the whole panel. */}
+                  <div className="px-[5px]">
+                    {pinnedProfiles.map(renderProfileRow)}
+                  </div>
                 </>
               )}
 
@@ -1838,12 +1851,24 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                     <div
                       ref={(el) => { if (el) folderRefs.current.set(folder.name, el); else folderRefs.current.delete(folder.name); }}
                       data-drag-item={`folder:${folder.name}`}
-                      className={`rounded transition-colors ${isDragOver ? 'bg-accent-solid/20 ring-2 ring-accent-solid/50' : ''} ${isFolderDragging ? 'opacity-50' : ''}`}
+                      // The group is a CARD now: its own surface plus a border, so a folder
+                      // is separated by containment instead of by a hairline its children
+                      // could be mistaken for. NO overflow-hidden — the panel root omits it
+                      // on purpose so `data-tip` tooltips can escape the box, and clipping
+                      // here would swallow them again. The header carries the matching
+                      // radius instead.
+                      className={`bg-bg-card border rounded-md mx-0.5 my-1 transition-colors ${
+                        isDragOver
+                          ? 'bg-accent-solid/20 border-accent-solid/50 ring-2 ring-accent-solid/50'
+                          : folder.collapsed ? 'border-border-subtle' : 'border-border-default'
+                      } ${isFolderDragging ? 'opacity-50' : ''}`}
                     >
                       <div
-                        // px-2 / gap-1.5 matches the profile rows (tightened to reclaim side
-                        // gutter for longer names + hotkeys without widening the panel).
-                        className={`w-full flex items-center gap-1.5 px-2 py-1.5 mt-1 rounded text-left hover:bg-bg-card transition-colors group cursor-grab active:cursor-grabbing select-none ${selectedFolder === folder.name ? 'bg-bg-card ring-1 ring-accent-solid/30' : ''}`}
+                        // px-2 / gap-1.5 matches the profile rows. The colour the user already
+                        // picked for this folder tints the header and dies out at 72 % of the
+                        // width, so it identifies the group without fighting the label.
+                        style={{ background: `linear-gradient(90deg, color-mix(in srgb, ${folder.color} 18%, transparent), transparent 72%)` }}
+                        className={`w-full flex items-center gap-1.5 px-2 py-1.5 text-left transition-colors group cursor-grab active:cursor-grabbing select-none ${folder.collapsed ? 'rounded-md' : 'rounded-t-md border-b border-border-subtle'} ${selectedFolder === folder.name ? 'ring-1 ring-accent-solid/30' : ''}`}
                         onMouseDown={(e) => handleFolderMouseDown(e, folder.name)}
                         onClick={() => { if (!folderDragActive.current) setSelectedFolder(prev => prev === folder.name ? null : folder.name); }}
                         onContextMenu={(e) => handleFolderContextMenu(e, folder.name)}
@@ -1876,7 +1901,11 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                             </span>
                           </RemovableChip>
                         )}
-                        <span className={`text-xs font-medium flex-1 truncate ${folderAllDisabled ? 'text-text-disabled' : 'text-text-secondary'}`}>{folder.name}</span>
+                        {/* Promoted from 12 px/500 secondary to 650 primary. The folder was
+                            typographically WEAKER than the profiles inside it, so the parent
+                            dissolved into its own children — backwards for a hierarchy, and
+                            worse once the group sits inside a card. */}
+                        <span className={`text-xs font-semibold flex-1 truncate ${folderAllDisabled ? 'text-text-disabled' : 'text-text-primary'}`}>{folder.name}</span>
                         {folder.hasWindowTarget && !folder.appIconBase64 && (
                           <RemovableChip
                             variant="circle"
@@ -1891,7 +1920,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         )}
                       </div>
                       {!folder.collapsed && hasVisibleProfiles && (
-                        <div className="ml-2 pl-1" style={{ borderLeft: `2px solid ${folder.color}40` }}>
+                        // The card border is the containment now, so the old coloured left
+                        // rail is gone — two nested separators for one group read as noise.
+                        <div className="px-0.5 pb-0.5 pt-px">
                           {folder.profiles.map(renderProfileRow)}
                         </div>
                       )}
@@ -1918,7 +1949,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 {ungroupedProfiles.length > 0 && ((profileOrder?.pinned?.length ?? 0) > 0 || (profileOrder?.folders?.length ?? 0) > 0) && (
                   renderSectionLabel('Ungrouped')
                 )}
-                {ungroupedProfiles.map(renderProfileRow)}
+                {/* Loose rows sit OUTSIDE any card, so without a matching inset they start
+                    ~6 px left of the rows inside folders — the panel would carry two name
+                    columns, and the seam shows exactly at the last folder. */}
+                <div className="px-[5px]">
+                  {ungroupedProfiles.map(renderProfileRow)}
+                </div>
               </div>
             </>
           )}
