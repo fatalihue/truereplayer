@@ -1603,14 +1603,15 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         )}
 
         {p.hotstring && (
-          // Same visual tokens as the hotkey KbdTag chips (.kbd: elevated bg,
-          // default border, secondary text) so the two trigger chips read as
-          // siblings \u2014 the old accent-hover text made hotstrings look like a
-          // different kind of thing.
+          // Wears the `kbd` utility itself rather than re-listing its tokens. The old
+          // className copied them by hand to make the two trigger chips read as siblings,
+          // and then drifted: 11px vs 10px text, py-0.5 vs none, px-1.5 vs px-1, giving a
+          // 22.6px chip next to a 20px one. Same class + same px-1 as KbdTag's unified
+          // branch means they cannot disagree about height again.
           <RemovableChip
             removeTitle={tt(`Remove hotstring "${p.hotstring}"`, `Remover hotstring "${p.hotstring}"`)}
             onRemove={(e) => { e.stopPropagation(); setConfirmRemoval({ kind: 'hotstring', name: p.name, label: `hotstring "${p.hotstring}"` }); }}
-            className="px-1.5 py-0.5 rounded text-[11px] font-mono bg-bg-elevated border border-border-default text-text-secondary"
+            className="kbd px-1"
           ><span>
             {p.hotstringInstant ? '\u26A1' : '\u21B5'}{p.hotstring}
             </span>
