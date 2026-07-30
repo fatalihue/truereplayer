@@ -39,7 +39,14 @@ export function KbdTag({ combo, accent = false, unified = false }: KbdTagProps) 
     // ProfilePanel rows ~3px taller; the flex wrapper is a 20px block instead.
     return (
       <div className="flex items-center">
-        <span className={`${cls} px-1.5`}>{parts.join(' + ')}</span>
+        {/* Tightened: px-1 instead of px-1.5, and the two separator spaces pulled in by
+            1.5 px each. A Unicode thin/hair space buys NOTHING here — .kbd is monospace,
+            so every space glyph gets the same cell as any other; wordSpacing is the only
+            lever that actually narrows it. Win + Ctrl + R goes 91 → 81 px, Ctrl + Num4
+            75 → 68, and the gap stays ~4.5 px so the keys still read as separate.
+            Only this `unified` branch changes — the multi-chip branch below is what
+            KeyCaps and the dialogs render, and those are not cramped. */}
+        <span className={`${cls} px-1`} style={{ wordSpacing: '-1.5px' }}>{parts.join(' + ')}</span>
       </div>
     );
   }

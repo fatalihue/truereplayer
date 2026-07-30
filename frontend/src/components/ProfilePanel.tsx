@@ -1549,7 +1549,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             keyboard map it actually is. min-w rather than w: on the rare row that also
             carries a trigger-mode icon the gutter may grow, which only shortens the
             name and leaves the two left columns exactly where they were. */}
-        <span className="shrink-0 min-w-[76px] flex items-center justify-end gap-1.5">
+        {/* 68 px is the widest TWO-part combo after the chip was tightened (Ctrl + Num4 = 68,
+            Shift + F1 = 62, Alt + C = 46). Deliberately not sized for three modifiers:
+            Win + Ctrl + R is 81, and reserving for it would spend 13 px of name on all the
+            rows that never need it. Those rows overflow the floor instead, which only
+            shortens their own name — the two left columns stay put either way. */}
+        <span className="shrink-0 min-w-[68px] flex items-center justify-end gap-1.5">
         {/* Trigger mode indicator — placed before the hotkey so the visual order
             right-to-left is: hotstring → hotkey → trigger icon → target crosshair.
             Tooltip shows only the mode name; the full description lives in the
