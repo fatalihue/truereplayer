@@ -3,7 +3,6 @@ import { SegmentedControl } from './common/SegmentedControl';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
-import { useTt } from '../state/LanguageContext';
 
 // Shared min-width for the primary action buttons so the layout doesn't shift when
 // labels swap (Recording↔Pause, Replay↔Stop, Click↔Stop). Comfortably fits the longest
@@ -14,7 +13,6 @@ export function ActionBar() {
   const { buttonStates, settings, actions } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
-  const tt = useTt();
   const isClicker = settings.useCursorClick;
   const isReplaying = buttonStates.replayActive;
   const isRecording = buttonStates.recordingActive;
@@ -75,14 +73,12 @@ export function ActionBar() {
               value: 'macro',
               label: 'Macro',
               icon: <List size={11} />,
-              tip: tt('Run the recorded actions in order', 'Executa as ações gravadas em ordem'),
               activeClass: 'bg-replay/15 text-replay shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-replay)_35%,transparent)]',
             },
             {
               value: 'clicker',
               label: 'Clicker',
               icon: <MousePointerClick size={11} />,
-              tip: tt('Click repeatedly at cursor position. Ignores recorded actions and profile hotkeys.', 'Clica repetidamente na posição do cursor. Ignora ações gravadas e hotkeys de perfil.'),
               activeClass: 'bg-[var(--color-clicker-bg)] text-[var(--color-clicker)] shadow-[inset_0_0_0_1px_var(--color-clicker-border)]',
             },
           ]}

@@ -2219,9 +2219,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             <div>
               <button
                 onClick={handleTestWindowProbe}
-                disabled={windowProbeRequestId !== null || (!windowProcessName.trim() && !windowTitle.trim())}
-                data-tip={tt('Checks whether a matching window EXISTS right now (ignores the foreground-only option above).', 'Verifica se existe AGORA uma janela correspondente (ignora a opção "só em primeiro plano" acima).')}
-                className="w-full h-8 flex items-center justify-center gap-1.5 px-2.5 rounded text-xs font-medium border border-accent-solid/40 bg-accent-solid/10 hover:bg-accent-solid/20 text-accent-light transition-colors disabled:opacity-60"
+                disabled={windowProbeRequestId !== null || (!windowProcessName.trim() && !windowTitle.trim())}                className="w-full h-8 flex items-center justify-center gap-1.5 px-2.5 rounded text-xs font-medium border border-accent-solid/40 bg-accent-solid/10 hover:bg-accent-solid/20 text-accent-light transition-colors disabled:opacity-60"
               >
                 <PlayCircle size={13} />
                 {windowProbeRequestId ? 'Testing…' : 'Test'}
@@ -2824,9 +2822,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   return (
                     <span
                       className={`w-8 h-8 rounded border shrink-0 ${validHex ? 'border-border-default' : 'border-dashed border-border-default'}`}
-                      style={{ background: validHex ? (pixelColor.trim().startsWith('#') ? pixelColor.trim() : '#' + pixelColor.trim()) : 'transparent' }}
-                      data-tip={pixelColor || tt('No colour set', 'Nenhuma cor definida')}
-                    />
+                      style={{ background: validHex ? (pixelColor.trim().startsWith('#') ? pixelColor.trim() : '#' + pixelColor.trim()) : 'transparent' }}                    />
                   );
                 })()}
                 <input
@@ -3682,8 +3678,6 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 <button
                   type="button"
                   onClick={handleBrowseLaunch}
-                  data-tip={tt('Pick a program — fills the full path so Windows can find it (a bare name like app.exe often will not resolve).', 'Escolha um programa — preenche o caminho completo para o Windows encontrar (um nome puro como app.exe geralmente não resolve).')}
-                  data-tip-pos="left"
                   className="shrink-0 h-8 px-2.5 flex items-center gap-1 rounded text-xs border border-border-default bg-bg-input hover:bg-[rgba(127,127,127,0.14)] text-text-secondary transition-colors"
                 >
                   <FolderOpen size={13} />

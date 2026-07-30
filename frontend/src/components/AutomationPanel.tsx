@@ -623,9 +623,7 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                       answer includes the gates (busy / unsaved edits / dialog open) — a
                       condition probe alone would report success on a fire that gets skipped. */}
                   <Button variant="secondary" size="sm" onClick={runNow} disabled={isNewDraft || hasUnsavedWork}
-                    data-tip={isNewDraft || hasUnsavedWork
-                      ? tt('Save first — Run now fires the SAVED automation.', 'Salve primeiro — o Run now dispara a automação SALVA.')
-                      : tt('Fire this profile once, right now, through the automation path', 'Dispara este profile uma vez, agora, pelo caminho da automação')}>
+>
                     <Play size={12} /> {tt('Run now', 'Rodar agora')}
                   </Button>
                   {confirmDelete ? (
@@ -639,7 +637,7 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                     // image, a hand-snapped ROI and a weekday mask with no undo. The action
                     // grid's Clear All already asks; a one-click destroy here was the outlier.
                     <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)}
-                      data-tip={tt('Remove this automation (the profile itself is untouched)', 'Remove esta automação (o profile em si não é tocado)')}>
+>
                       <Trash2 size={12} />
                     </Button>
                   )}
@@ -699,9 +697,9 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                   value={draft.kind}
                   onChange={(v) => patch({ kind: v as TriggerConfig['kind'] })}
                   options={[
-                    { value: 'interval', label: 'Interval', tip: tt('Fire every N seconds/minutes', 'Dispara a cada N segundos/minutos') },
-                    { value: 'schedule', label: 'Schedule', tip: tt('Fire at a clock time on chosen weekdays', 'Dispara em um horário nos dias escolhidos') },
-                    { value: 'condition', label: 'Condition', tip: tt('Watch the screen/system and fire when a condition becomes true', 'Vigia a tela/sistema e dispara quando a condição fica verdadeira') },
+                    { value: 'interval', label: 'Interval' },
+                    { value: 'schedule', label: 'Schedule' },
+                    { value: 'condition', label: 'Condition' },
                   ]}
                 />
               </Field>
@@ -840,7 +838,6 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                                 <span
                                   className={`w-8 h-8 rounded border shrink-0 ${validHex ? 'border-border-default' : 'border-dashed border-border-default'}`}
                                   style={{ background: validHex ? (raw.startsWith('#') ? raw : '#' + raw) : 'transparent' }}
-                                  data-tip={raw || tt('No colour set', 'Nenhuma cor definida')}
                                 />
                               );
                             })()}
@@ -853,7 +850,7 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                           </div>
                         </Field>
                         <Button variant="secondary" size="sm" onClick={pickPixel}
-                          data-tip={tt('Pick a pixel from the screen (sets X, Y and color)', 'Escolher um pixel na tela (define X, Y e cor)')}>
+>
                           <Pipette size={12} /> Pick
                         </Button>
                       </div>
@@ -869,7 +866,6 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                       <Field label="Reference image">
                         <div
                           onClick={() => draft.imageBase64 && setCropperOpen(true)}
-                          data-tip={draft.imageBase64 ? tt('Click to crop tighter', 'Clique para recortar mais justo') : undefined}
                           className={draft.imageBase64
                             ? 'w-full rounded border border-border-subtle bg-bg-input p-1 cursor-pointer hover:border-accent-solid transition-colors'
                             : `${inputCls} flex items-center text-text-tertiary truncate`}>
@@ -880,11 +876,11 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                       </Field>
                       <div className="flex gap-2">
                         <Button variant="secondary" size="sm" onClick={captureImage}
-                          data-tip={tt('Capture a region of the screen to watch for', 'Capturar uma região da tela para vigiar')}>
+>
                           <Camera size={12} /> Capture
                         </Button>
                         <Button variant="secondary" size="sm" onClick={testMatch} disabled={!draft.imagePath}
-                          data-tip={tt('Search the screen now — on a hit, snaps the region to the match', 'Procura na tela agora — se achar, ajusta a região no ponto do match')}>
+>
                           <ScanSearch size={12} /> Test match
                         </Button>
                       </div>
@@ -910,7 +906,6 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                           </Button>
                           {draft.searchRegion && (
                             <button type="button" onClick={() => patch({ searchRegion: null })}
-                              data-tip={tt('Clear region (search full screen)', 'Limpar região (buscar tela inteira)')}
                               className="h-7 w-7 shrink-0 flex items-center justify-center rounded text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors">
                               <X size={13} />
                             </button>
@@ -989,8 +984,7 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
               )}
 
               <div className="pt-2 border-t border-border-subtle text-[11px] text-text-tertiary leading-relaxed"
-                data-tip={tt('Armed automations run in the background (and re-arm at startup) while the master switch is on. Arming is local to this machine — imports and copies always arrive disarmed.',
-                  'Automações armadas rodam em segundo plano (e re-armam ao iniciar) com a chave mestra ligada. Armar é local desta máquina — imports e cópias sempre chegam desarmados.')}>
+>
                 {tt('Arm or disarm with the toggle on the list row — it takes effect immediately, independent of Save.',
                   'Arme ou desarme pelo toggle na linha da lista — vale imediatamente, independente do Save.')}
               </div>

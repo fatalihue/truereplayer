@@ -157,7 +157,6 @@ export const WindowTargetFields = forwardRef<WindowTargetFieldsHandle, {
                 // Lazy fetch — first open enumerates. Re-opens reuse the cache.
                 if (next && processList === null) send({ type: 'process:list', payload: {} });
               }}
-              data-tip={tt('Pick from running processes', 'Escolher de processos em execução')}
               className={`p-1 transition-colors ${showPicker ? 'text-accent' : 'text-text-tertiary hover:text-text-secondary'}`}
             >
               <ChevronDown size={14} />

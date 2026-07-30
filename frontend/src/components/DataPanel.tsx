@@ -1263,7 +1263,6 @@ export function DataPanel({ onClose }: DataPanelProps) {
               type="button"
               onClick={() => csvInputRef.current?.click()}
               className="flex items-center gap-2 px-3 h-7 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-card transition-colors"
-              data-tip={tt('Load a .csv/.tsv file — the delimiter is auto-detected (comma, semicolon, or tab).', 'Carrega um arquivo .csv/.tsv — o delimitador é detectado automaticamente (vírgula, ponto e vírgula ou tab).')}
             >
               <FileUp size={12} className="shrink-0" />
               {tt('Import CSV…', 'Importar CSV…')}
@@ -1279,9 +1278,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
                 });
               }}
               disabled={emptyGrid}
-              className="flex items-center gap-2 px-3 h-7 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              data-tip={tt('Copy the whole table as TSV — paste it straight into Excel/Sheets', 'Copia a tabela inteira como TSV — cole direto no Excel/Sheets')}
-            >
+              className="flex items-center gap-2 px-3 h-7 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"            >
               {copiedKey === '__table' ? <Check size={12} className="shrink-0" style={{ color: 'var(--color-replay)' }} /> : <Copy size={12} className="shrink-0" />}
               {tt('Copy table (TSV)', 'Copiar tabela (TSV)')}
             </button>

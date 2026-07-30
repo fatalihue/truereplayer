@@ -90,9 +90,7 @@ export function LiveVariablesHost() {
         <button
           type="button"
           onClick={() => window.dispatchEvent(new CustomEvent('cmd:livevars'))}
-          className="p-0.5 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-surface transition-colors"
-          data-tip={tt('Close (reopen from the Command Palette)', 'Fechar (reabra pela Command Palette)')}
-        >
+          className="p-0.5 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-surface transition-colors"        >
           <X size={12} />
         </button>
       </div>
