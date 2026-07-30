@@ -1440,7 +1440,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         e.currentTarget.blur();
       }}
       onContextMenu={(e) => handleContextMenu(e, p.name)}
-      className={`relative w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-left transition-colors outline-none select-none cursor-grab active:cursor-grabbing ${
+      // px-1.5 / gap-1 rather than px-2 / gap-1.5: 8 px reclaimed for the name, which is
+      // the only elastic thing in a 260 px panel. The chips and the icon keep breathing
+      // room because the gutter and the slot are fixed-width anyway.
+      className={`relative w-full flex items-center gap-1 px-1.5 py-1.5 rounded text-left transition-colors outline-none select-none cursor-grab active:cursor-grabbing ${
         dragProfile === p.name && dragActive.current ? 'opacity-50 ' : ''
       }${p.isDisabled ? 'opacity-40 ' : ''}${
         p.isActive
@@ -1805,7 +1808,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                   {renderSectionLabel('Pinned')}
                   {/* Same inset as Ungrouped — these rows are outside a card too, and the
                       name column has to be one column across the whole panel. */}
-                  <div className="px-[5px]">
+                  <div className="px-[3px]">
                     {pinnedProfiles.map(renderProfileRow)}
                   </div>
                 </>
@@ -1857,7 +1860,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       // on purpose so `data-tip` tooltips can escape the box, and clipping
                       // here would swallow them again. The header carries the matching
                       // radius instead.
-                      className={`bg-bg-card border rounded-md mx-0.5 my-1 transition-colors ${
+                      // mx-0 rather than mx-0.5: the .list already pads 4 px on each side, so the
+                      // card's own margin was buying nothing and costing 4 px of name.
+                      className={`bg-bg-card border rounded-md my-1 transition-colors ${
                         isDragOver
                           ? 'bg-accent-solid/20 border-accent-solid/50 ring-2 ring-accent-solid/50'
                           : folder.collapsed ? 'border-border-subtle' : 'border-border-default'
@@ -1868,7 +1873,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                         // picked for this folder tints the header and dies out at 72 % of the
                         // width, so it identifies the group without fighting the label.
                         style={{ background: `linear-gradient(90deg, color-mix(in srgb, ${folder.color} 18%, transparent), transparent 72%)` }}
-                        className={`w-full flex items-center gap-1.5 px-2 py-1.5 text-left transition-colors group cursor-grab active:cursor-grabbing select-none ${folder.collapsed ? 'rounded-md' : 'rounded-t-md border-b border-border-subtle'} ${selectedFolder === folder.name ? 'ring-1 ring-accent-solid/30' : ''}`}
+                        className={`w-full flex items-center gap-1 px-1.5 py-1.5 text-left transition-colors group cursor-grab active:cursor-grabbing select-none ${folder.collapsed ? 'rounded-md' : 'rounded-t-md border-b border-border-subtle'} ${selectedFolder === folder.name ? 'ring-1 ring-accent-solid/30' : ''}`}
                         onMouseDown={(e) => handleFolderMouseDown(e, folder.name)}
                         onClick={() => { if (!folderDragActive.current) setSelectedFolder(prev => prev === folder.name ? null : folder.name); }}
                         onContextMenu={(e) => handleFolderContextMenu(e, folder.name)}
@@ -1952,7 +1957,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                 {/* Loose rows sit OUTSIDE any card, so without a matching inset they start
                     ~6 px left of the rows inside folders — the panel would carry two name
                     columns, and the seam shows exactly at the last folder. */}
-                <div className="px-[5px]">
+                <div className="px-[3px]">
                   {ungroupedProfiles.map(renderProfileRow)}
                 </div>
               </div>
