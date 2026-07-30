@@ -1722,7 +1722,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           </>
         ) : (
           <>
-        <div className="flex items-center justify-between px-3 pt-2 pb-1">
+        {/* px-2 not px-3, and the buttons are w-6: six of them plus two dividers plus the
+            PROFILES label do not fit a 260 px panel at the old sizes. Measured after the
+            change so nothing clips. */}
+        <div className="flex items-center justify-between px-2 pt-2 pb-1">
           <span className="label-micro text-text-tertiary">PROFILES</span>
           {/* Grouped by function (2026-07 reorg), Toolbar divider idiom: panel chrome
               (collapse) | library utilities (open folder, export) | creation (new
@@ -1730,22 +1733,44 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               same glyph the Command Palette uses for "Export All Profiles"; the old
               ArrowLeftRight read as "convert/swap" (it still marks the coordinate
               converters in the context menu, where that meaning is right). */}
-          <div className="flex items-center gap-0.5">
-            <button onClick={onToggleCollapse} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors">
+          <div className="flex items-center">
+            <button onClick={onToggleCollapse} className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('Collapse panel', 'Colapsar painel')}>
               <ChevronsLeft size={14} />
             </button>
-            <div className="w-px h-3.5 bg-border-subtle mx-0.5" />
-            <button onClick={handleOpenProfilesFolder} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('Open profiles folder', 'Abrir pasta de perfis')}>
+            {/* Collapse / expand ALL folders. Promoted out of the folder context menu: it acts
+                on every folder, so hiding it behind a right-click on one of them was the wrong
+                place to look — and the owner's nine folders live collapsed, so this is the
+                switch he actually reaches for. Same flip rule the menu used: collapse while
+                anything is open, expand only once everything is shut. */}
+            {(() => {
+              const folders = profileOrder?.folders ?? [];
+              const anyExpanded = folders.some(f => !f.collapsed);
+              const Icon = anyExpanded ? ChevronsDownUp : ChevronsUpDown;
+              return (
+                <button
+                  onClick={() => send({ type: 'profile:setAllFoldersCollapsed', payload: { collapsed: anyExpanded } })}
+                  disabled={folders.length === 0}
+                  className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-tertiary"
+                  data-tip={anyExpanded
+                    ? tt('Collapse all folders', 'Colapsar todas as pastas')
+                    : tt('Expand all folders', 'Expandir todas as pastas')}
+                >
+                  <Icon size={14} />
+                </button>
+              );
+            })()}
+            <div className="w-px h-3.5 bg-border-subtle mx-1" />
+            <button onClick={handleOpenProfilesFolder} className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('Open profiles folder', 'Abrir pasta de perfis')}>
               <ExternalLink size={14} />
             </button>
-            <button onClick={handleExportClick} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('Export profiles', 'Exportar perfis')}>
+            <button onClick={handleExportClick} className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('Export profiles', 'Exportar perfis')}>
               <Upload size={14} />
             </button>
-            <div className="w-px h-3.5 bg-border-subtle mx-0.5" />
-            <button onClick={handleCreateFolder} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('New folder', 'Nova pasta')}>
+            <div className="w-px h-3.5 bg-border-subtle mx-1" />
+            <button onClick={handleCreateFolder} className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('New folder', 'Nova pasta')}>
               <FolderPlus size={14} />
             </button>
-            <button onClick={handleCreate} className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('New profile', 'Novo perfil')}>
+            <button onClick={handleCreate} className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors" data-tip={tt('New profile', 'Novo perfil')}>
               <FilePlus size={14} />
             </button>
           </div>
@@ -2227,8 +2252,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         //   - Identity (apply to this folder itself)     → Rename · Color ▸
         //   - Triggers (configure children, setup-time)  → Window target…
         //   - State (batch state flip on children)       → Disable / Enable all
-        //   - View (apply to ALL folders)                → Collapse / Expand all folders
         //   - Destructive                                 → Delete folder
+        // Every entry here scopes to THIS folder. Collapse/Expand all used to sit in a
+        // "View" block and did not — it moved to the panel header, where a bulk action
+        // belongs.
         // State got its own block (was bundled into Triggers) so the menu's
         // semantic blocks match the profile context menu's structure:
         // Identity → Triggers → State → … → Delete.
@@ -2341,36 +2368,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
 
           <div className="my-1 border-t border-border-subtle" />
 
-          {/* ── View (all folders) ──
-              Label flips Collapse/Expand based on the majority state, mirroring
-              the "Disable all / Enable all" pattern above. Hidden when there's
-              only one folder (the per-folder chevron in the row already handles
-              that case — a bulk operation on a single item is just noise). */}
-          {(profileOrder?.folders ?? []).length > 1 && (() => {
-            const folders = profileOrder?.folders ?? [];
-            // "Collapse all" if ANY folder is currently expanded — collapsing has
-            // priority because users typically hit this to clean up a busy tree.
-            // Only flip to "Expand all" when every folder is already collapsed.
-            const anyExpanded = folders.some(f => !f.collapsed);
-            const targetCollapsed = anyExpanded; // collapse if any expanded, otherwise expand
-            const Icon = anyExpanded ? ChevronsDownUp : ChevronsUpDown;
-            const label = anyExpanded ? 'Collapse all folders' : 'Expand all folders';
-            return (
-              <>
-                <button
-                  onClick={() => {
-                    send({ type: 'profile:setAllFoldersCollapsed', payload: { collapsed: targetCollapsed } });
-                    setFolderContextMenu(null);
-                  }}
-                  className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-                >
-                  <Icon size={13} className="text-text-tertiary" />
-                  {label}
-                </button>
-                <div className="my-1 border-t border-border-subtle" />
-              </>
-            );
-          })()}
+          {/* Collapse / expand ALL folders used to live here. It moved to the panel header:
+              a bulk action on every folder had no business hiding behind a right-click on
+              one particular folder, and the header button is always visible with the same
+              flip rule. */}
 
           {/* ── Destructive ── */}
           <button
