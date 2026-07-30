@@ -1069,17 +1069,29 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   useEffect(() => {
     const root = scrollRef.current;
     if (!root) return;
-    for (const cell of root.querySelectorAll<HTMLElement>('[data-name-cell]')) {
-      const head = cell.firstElementChild as HTMLElement | null;
-      const cut = !!head && head.scrollWidth > head.clientWidth;
-      if (cut) {
-        cell.setAttribute('data-tip', cell.dataset.full ?? '');
-        cell.setAttribute('data-tip-pos', 'below-start');
-      } else {
-        cell.removeAttribute('data-tip');
-        cell.removeAttribute('data-tip-pos');
+    const measure = () => {
+      for (const cell of root.querySelectorAll<HTMLElement>('[data-name-cell]')) {
+        const head = cell.firstElementChild as HTMLElement | null;
+        const cut = !!head && head.scrollWidth > head.clientWidth;
+        if (cut) {
+          cell.setAttribute('data-tip', cell.dataset.full ?? '');
+          cell.setAttribute('data-tip-pos', 'below-start');
+        } else {
+          cell.removeAttribute('data-tip');
+          cell.removeAttribute('data-tip-pos');
+        }
       }
-    }
+    };
+    measure();
+    // Re-measure on every width change, not just on render. Expanding the panel animates
+    // w-12 → w-[260px] over 200 ms, and the effect fires on the commit that STARTS that
+    // animation — the panel is still ~48 px wide, so every name measures as cut and every
+    // long row got a tooltip that was simply wrong until the next render happened to clear
+    // it. The observer also covers the cases a render never signals: a font-size change from
+    // the Theme Editor, or any future resizable panel.
+    const ro = new ResizeObserver(measure);
+    ro.observe(root);
+    return () => ro.disconnect();
   });
 
   const AUTOSCROLL_ZONE = 40;

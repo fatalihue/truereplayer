@@ -622,10 +622,21 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                       waiting for its real trigger. Goes through the same fire path, so the
                       answer includes the gates (busy / unsaved edits / dialog open) — a
                       condition probe alone would report success on a fire that gets skipped. */}
-                  <Button variant="secondary" size="sm" onClick={runNow} disabled={isNewDraft || hasUnsavedWork}
->
-                    <Play size={12} /> {tt('Run now', 'Rodar agora')}
-                  </Button>
+                  {/* Only the DISABLED reason survives, never a tip on the working button — the
+                      enabled tooltip just restated the label and was rightly cut. This half is
+                      not noise: whyCannotFire cannot cover it (it sees only the TriggerConfig,
+                      never the unsaved state, and returns null outright for the default
+                      `interval` kind), so without this the button greys out with nothing on
+                      screen tying it to the pending edit. Same wrapper the Save button uses, for
+                      the same reason — a tip on a disabled <button> does still show here, since
+                      Button sets no pointer-events:none. */}
+                  <span data-tip={isNewDraft || hasUnsavedWork
+                    ? tt('Save first — Run now fires the SAVED automation.', 'Salve primeiro — o Run now dispara a automação SALVA.')
+                    : undefined}>
+                    <Button variant="secondary" size="sm" onClick={runNow} disabled={isNewDraft || hasUnsavedWork}>
+                      <Play size={12} /> {tt('Run now', 'Rodar agora')}
+                    </Button>
+                  </span>
                   {confirmDelete ? (
                     <div className="flex items-center gap-1">
                       <span className="text-[11px] text-text-secondary">{tt('Delete?', 'Excluir?')}</span>
