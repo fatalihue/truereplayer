@@ -2213,9 +2213,10 @@ namespace TrueReplayer.Controllers
         }
 
         /// <summary>
-        /// Bulk set the collapsed flag on every folder. Used by the "Collapse all
-        /// folders" / "Expand all folders" context-menu item — avoids the N disk
-        /// writes that iterating per-folder ToggleFolderCollapseAsync would cause.
+        /// Bulk set the collapsed flag on every folder. Used by the panel header's
+        /// Collapse-all / Expand-all button (a folder context-menu item until 9beaedb)
+        /// — avoids the N disk writes that iterating per-folder
+        /// ToggleFolderCollapseAsync would cause.
         /// No-op (no save) if nothing actually changes.
         /// </summary>
         public async Task SetAllFoldersCollapsedAsync(bool collapsed)

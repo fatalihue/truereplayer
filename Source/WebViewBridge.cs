@@ -5404,14 +5404,18 @@ namespace TrueReplayer
                 entry.IsDisabled = profile.IsDisabled;
                 if (CurrentProfileName == name)
                     UserProfile.Current.IsDisabled = profile.IsDisabled;
-                PushProfilesUpdate();
 
-                // Re-register hotkeys so disabled profiles are excluded
+                // Re-register hotkeys so disabled profiles are excluded. This runs BEFORE the
+                // push on purpose: GetProfileHotkeys is also what stamps HotkeyConflict, and
+                // disabling one of two profiles that shared a combo resolves the conflict. Push
+                // first and the sidebar keeps showing the red chip until something else pushes.
                 var hotkeys = profileController.GetProfileHotkeys();
                 InputHookManager.RegisterProfileHotkeys(hotkeys);
                 InputHookManager.RegisterProfileTriggerModes(profileController.GetProfileTriggerModes());
                 var hotstrings = profileController.GetProfileHotstrings();
                 InputHookManager.RegisterProfileHotstrings(hotstrings);
+
+                PushProfilesUpdate();
             }
             catch (Exception ex)
             {

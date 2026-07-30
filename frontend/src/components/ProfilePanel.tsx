@@ -1448,7 +1448,10 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       }${p.isDisabled ? 'opacity-40 ' : ''}${
         p.isActive
           ? 'bg-bg-elevated'
-          : 'hover:bg-bg-card'
+          // hover:bg-bg-elevated, not bg-card: the folder CARD is bg-card now, so a row
+          // hovering to bg-card inside it painted #222 over #222 and the rows in folders
+          // silently lost their hover while the loose rows kept theirs.
+          : 'hover:bg-bg-elevated'
       }`}
     >
         {/* Active marker — ABSOLUTE, deliberately out of the flex flow. As a layout
@@ -1536,10 +1539,21 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           if (p.name.length <= 14) {
             return <span className={`${cls} flex-1 truncate`}>{p.name}</span>;
           }
+          // Split by CODE POINT, not UTF-16 unit: slice(-6) on a name ending in an emoji
+          // would cut a surrogate pair in half and render two replacement glyphs.
+          const cps = Array.from(p.name);
+          const head = cps.slice(0, -6).join('');
+          const tail = cps.slice(-6).join('');
           return (
-            <span className={`${cls} flex-1 flex`} data-tip={p.name} data-tip-pos="start">
-              <span className="min-w-0 truncate">{p.name.slice(0, -6)}</span>
-              <span className="shrink-0">{p.name.slice(-6)}</span>
+            // whitespace-pre, NOT truncate. Each flex child opens its own line box, and CSS
+            // trims collapsible whitespace at a line's start and end — `nowrap` is still
+            // collapsible, so a name whose split falls on a space lost it: "REL Crit CHANCE"
+            // rendered "REL CritCHANCE", 13 of the 81 real profiles, always, even with the
+            // column half empty. `pre` is not collapsible, and it still does not wrap, so
+            // overflow-hidden + text-ellipsis keep working on the head.
+            <span className={`${cls} flex-1 flex`} data-tip={p.name} data-tip-pos="below-start">
+              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-pre">{head}</span>
+              <span className="shrink-0 whitespace-pre">{tail}</span>
             </span>
           );
         })()}
@@ -1812,7 +1826,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             // Flat search results — with an explicit empty state instead of the
             // silent blank list the panel used to show.
             filtered.length > 0 ? (
-              filtered.map(renderProfileRow)
+              // Same 3 px inset the loose rows carry, so the name column does not jump
+              // sideways the moment you start typing.
+              <div className="px-[3px]">{filtered.map(renderProfileRow)}</div>
             ) : (
               <div className="flex flex-col items-center gap-1.5 px-3 py-8 text-center select-none">
                 <SearchX size={22} className="text-text-disabled" />
@@ -1901,14 +1917,18 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       // radius instead.
                       // mx-0 rather than mx-0.5: the .list already pads 4 px on each side, so the
                       // card's own margin was buying nothing and costing 4 px of name.
-                      className={`bg-bg-card border rounded-md my-1 transition-colors ${
+                      // The background is a TERNARY, not an addition. Listing bg-bg-card
+                      // unconditionally and adding bg-accent-solid/20 for the drag state put
+                      // both in the same layer at the same specificity, so the one printed
+                      // later in the bundle won and the drop fill never appeared — dead class.
+                      className={`border rounded-md my-1 transition-colors ${
                         isDragOver
                           ? 'bg-accent-solid/20 border-accent-solid/50 ring-2 ring-accent-solid/50'
-                          : folder.collapsed ? 'border-border-subtle' : 'border-border-default'
+                          : `bg-bg-card ${folder.collapsed ? 'border-border-subtle' : 'border-border-default'}`
                       } ${isFolderDragging ? 'opacity-50' : ''}`}
                     >
                       <div
-                        // px-2 / gap-1.5 matches the profile rows. The colour the user already
+                        // px-1.5 / gap-1 matches the profile rows. The colour the user already
                         // picked for this folder tints the header and dies out at 72 % of the
                         // width, so it identifies the group without fighting the label.
                         style={{ background: `linear-gradient(90deg, color-mix(in srgb, ${folder.color} 18%, transparent), transparent 72%)` }}
