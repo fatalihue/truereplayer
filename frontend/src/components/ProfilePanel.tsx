@@ -1059,6 +1059,29 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   // top/bottom edges. Same pattern as ActionTable's DnD: indispensable for long
   // profile lists, otherwise reaching the opposite end mid-drag is impossible.
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Show the full-name tooltip ONLY on rows whose name is actually cut. "Is it cut?" is a
+  // layout fact — it depends on the row's own gutter, which varies with the width of that
+  // row's hotkey chip — so it cannot be answered from the string. Measured after render and
+  // written straight onto the DOM node: TooltipLayer resolves data-tip by delegation at
+  // hover time, so the attribute only has to be right, not to come from JSX. Doing it here
+  // instead of in state also keeps it off the render path — no second pass for 80 rows.
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root) return;
+    for (const cell of root.querySelectorAll<HTMLElement>('[data-name-cell]')) {
+      const head = cell.firstElementChild as HTMLElement | null;
+      const cut = !!head && head.scrollWidth > head.clientWidth;
+      if (cut) {
+        cell.setAttribute('data-tip', cell.dataset.full ?? '');
+        cell.setAttribute('data-tip-pos', 'below-start');
+      } else {
+        cell.removeAttribute('data-tip');
+        cell.removeAttribute('data-tip-pos');
+      }
+    }
+  });
+
   const AUTOSCROLL_ZONE = 40;
   const AUTOSCROLL_MAX_SPEED = 14;
   const autoScrollRaf = useRef<number | null>(null);
@@ -1551,7 +1574,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
             // rendered "REL CritCHANCE", 13 of the 81 real profiles, always, even with the
             // column half empty. `pre` is not collapsible, and it still does not wrap, so
             // overflow-hidden + text-ellipsis keep working on the head.
-            <span className={`${cls} flex-1 flex`} data-tip={p.name} data-tip-pos="below-start">
+            // No data-tip here on purpose — it is added by the effect below ONLY when the
+            // head actually overflows. Whether a name is cut is a layout fact, not a string
+            // length: after the gutter was tightened none of the 81 real names truncate, so
+            // keying the tooltip off `length > 14` popped it on 23 rows that were showing
+            // their name in full.
+            <span className={`${cls} flex-1 flex`} data-name-cell data-full={p.name}>
               <span className="min-w-0 overflow-hidden text-ellipsis whitespace-pre">{head}</span>
               <span className="shrink-0 whitespace-pre">{tail}</span>
             </span>
