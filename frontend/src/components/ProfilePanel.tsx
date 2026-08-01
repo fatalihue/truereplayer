@@ -3122,7 +3122,14 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
               type: 'profile:convertCoordinates',
               payload: { direction },
             })}
-            convertibleActionCount={convertibleActionCount}
+            /* convertibleActionCount is derived from the LOADED profile's actions, and the backend
+               convert rewrites the loaded profile — but this dialog opens for ANY right-clicked
+               row. Feeding the loaded profile's count into another profile's dialog showed the
+               wrong number AND armed a Convert / "Apply target & convert" button that rewrites the
+               wrong profile. Zero here suppresses the migration hint entirely (the hint is the only
+               producer of convertDirection), which is the same gate the two context-menu Convert
+               items already apply via profile?.isActive. */
+            convertibleActionCount={existing?.isActive ? convertibleActionCount : 0}
           />
         );
       })()}

@@ -5894,6 +5894,21 @@ namespace TrueReplayer
             }
             if (string.IsNullOrEmpty(name)) return;
 
+            // "Apply target & convert" only means anything for the LOADED profile: the conversion
+            // rewrites the in-memory action list and UserProfile.Current, which belong to whoever is
+            // open — not to whoever this dialog was opened for. Unlike the two context-menu Convert
+            // items, the dialog has no isActive gate. The call site further down already knows this
+            // and skips the conversion for a different profile, but by then the target and the
+            // flipped UseRelativeCoordinates are on disk, leaving that profile claiming one
+            // coordinate space while its stored coordinates sit in the other — permanently, with no
+            // toast and no error. Refuse the combined op up front, while a refusal is still atomic.
+            // A plain Set Target (no convertDirection) is untouched and still works on any profile.
+            if (convertDirection != null && CurrentProfileName != name)
+            {
+                SendMessage("alert:show", new { message = $"Open \"{name}\" first — converting coordinates rewrites the actions of the profile that is currently loaded." });
+                return;
+            }
+
             // Pre-flight for the "Apply target & convert" path: resolve the target window NOW,
             // before any save runs, so an unreachable target aborts the entire combined op
             // atomically. Without this, the save would complete (target + flag persisted to
@@ -6140,6 +6155,45 @@ namespace TrueReplayer
                 return;
             }
 
+            // Resolved once — the geometry write at the bottom of this method reuses it.
+            string? inheritedFolder = CurrentProfileName != "No Profile"
+                ? profileController.GetInheritedTargetFolderName(CurrentProfileName)
+                : null;
+
+            // A profile that inherits its target from a folder inherits the COORDINATE SPACE too:
+            // GetEffectiveRelativeCoordinates returns the FOLDER's flag for it, and every fire path
+            // re-derives that value. So the UseRelativeCoordinates write further down is DISCARDED
+            // at the next fire while the coordinate rewrite above it is PERMANENT — the actions get
+            // translated into one space and then executed in the other, every click off by the
+            // window origin, with a success toast and no error anywhere. Refuse that.
+            //
+            // Only the DISAGREEING direction is refused, and NOT because agreement proves the
+            // coordinates were in the wrong space. Nothing on disk records which space they are in —
+            // the same reason GetEffectiveGeometry ignores a targetless profile's own rect. All
+            // agreement proves is that this operation cannot leave the flag and the coordinates
+            // pointing at different spaces, which is the defect being closed here. Converting twice
+            // still doubles the offset, exactly as it does for a profile with its own target; that
+            // footgun is not inheritance-specific and is deliberately left alone.
+            //
+            // Refusing BOTH directions was rejected: the agreeing one is the only in-app repair for
+            // the two states that legitimately need one — a folder whose Relative Coordinates flag
+            // was flipped after its members were recorded, and a profile whose own target was
+            // dropped by HandleProfileRemoveWindowTarget (which resets the flags and never touches
+            // the actions). The folder-scope dialog offers no conversion at all, so those users
+            // would be stranded with no way back.
+            //
+            // Placed AFTER the actions.Count check so an empty profile still gets the specific
+            // "No actions to convert.", and BEFORE PushUndoState so a refusal neither pushes an undo
+            // entry nor clears the redo stack. This guard is live on the standalone convert only:
+            // "Apply target & convert" gives the profile its own target and calls
+            // RefreshProfileListAsync before it reaches here, so by then it reads as owning one.
+            if (inheritedFolder is string ownerFolder
+                && profileController.GetEffectiveRelativeCoordinates(CurrentProfileName) != (direction == "toRelative"))
+            {
+                SendMessage("alert:show", new { message = $"\"{CurrentProfileName}\" inherits its window target from the folder \"{ownerFolder}\", so it inherits the coordinate space too — this conversion would be discarded at the next replay and leave the coordinates in the wrong space. Give this profile its own target first: edit the process name or window title in its Window Target dialog, then use \"Apply target & convert\"." });
+                return;
+            }
+
             PushUndoState();
 
             var clickTypes = new HashSet<string> { "LeftClickDown", "LeftClickUp", "RightClickDown", "RightClickUp", "MiddleClickDown", "MiddleClickUp", "LeftClick", "RightClick", "MiddleClick", "DoubleClick" };
@@ -6181,6 +6235,15 @@ namespace TrueReplayer
                 }
             }
 
+            // NOT skipped while inheriting, on purpose. The guard above means this write can only
+            // be setting the value the folder already holds, so it is a no-op when
+            // UserProfile.Current is in sync and a REPAIR when it drifted — and it does drift:
+            // removing a profile's own target forces this to false without re-stamping the newly
+            // effective folder value. Two consumers read this field DIRECTLY rather than through
+            // GetEffectiveRelativeCoordinates — the recorder (seeded from it in StartRecording) and
+            // TryGetRelativeCaptureOffset for WaitImage / WaitPixel captures — so a stale false here
+            // silently records the NEXT click in absolute coords into a list replayed as relative.
+            // "Dormant while inheriting" is true of the fire paths only; it is false for recording.
             UserProfile.Current.UseRelativeCoordinates = direction == "toRelative";
             // toRelative stamps the reference rect — the window as it stood when the coordinates
             // were measured against it. It used to write WIDTH/HEIGHT only and leave X/Y at
@@ -6190,12 +6253,23 @@ namespace TrueReplayer
             // toAbsolute keeps its X/Y — absolute coordinates are only valid with the window back
             // at the position they were measured from, so that restore must survive — and clears
             // the size, as before.
+            //
+            // The stamp is SKIPPED while the profile inherits its target from a folder. Its own four
+            // numbers are ignored by GetEffectiveGeometry precisely because nothing tells a
+            // deliberate capture from a leftover, so stamping here plants exactly the residual rect
+            // that rule exists to neutralise: dormant today, LIVE the moment the profile is later
+            // given its own target (Set Target even copies it forward on purpose). Only the
+            // toRelative branch is skipped — toAbsolute CLEARS residue instead of planting it, so
+            // skipping that one could only ever leave more behind than today.
             if (direction == "toRelative")
             {
-                UserProfile.Current.WindowX = rect.Left;
-                UserProfile.Current.WindowY = rect.Top;
-                UserProfile.Current.WindowWidth = rect.Right - rect.Left;
-                UserProfile.Current.WindowHeight = rect.Bottom - rect.Top;
+                if (inheritedFolder == null)
+                {
+                    UserProfile.Current.WindowX = rect.Left;
+                    UserProfile.Current.WindowY = rect.Top;
+                    UserProfile.Current.WindowWidth = rect.Right - rect.Left;
+                    UserProfile.Current.WindowHeight = rect.Bottom - rect.Top;
+                }
             }
             else
             {

@@ -262,7 +262,16 @@ export function TargetConfigDialog({
   // a target). The toggle component itself styles disabled buttons with opacity-40 +
   // cursor-not-allowed; the wrapping row carries the title attr that explains why.
   const hasTargetInFields = processName.trim().length > 0 || windowTitle.trim().length > 0;
-  const relativeToggleDisabled = !relativeCoordinates && !hasTargetInFields;
+  // Same rule the backend applies when it saves: while the profile keeps its folder-inherited
+  // target, the per-profile flags are NOT persisted, so flipping this toggle is a no-op the user
+  // can't see. Worse, the migration hint it raises can only ever point the OPPOSITE way from the
+  // folder — the hint fires on divergence from `initial`, and `initial` IS the folder's value for
+  // an inheriting profile — so its Convert button asks for exactly the conversion the backend
+  // refuses, after having already thrown the hint away. Disable the toggle instead of walking the
+  // user into a guaranteed refusal: editing the process name or window title (markEdited) drops
+  // keepInheritedTarget and unlocks it, which is the flow that actually works.
+  const relativeCoordsAreDormant = scope === 'profile' && inheritedFromFolder && !edited;
+  const relativeToggleDisabled = (!relativeCoordinates && !hasTargetInFields) || relativeCoordsAreDormant;
 
   // Will the Convert button in the migration hint also need to save the target? True when
   // the user has actually touched the target fields since opening (edited) AND the fields
@@ -400,7 +409,12 @@ export function TargetConfigDialog({
               saving a profile in a coord space that can't be anchored to anything). The
               data-tip on the row surfaces the reason (or, when enabled, what it does) via the
               body-portal tooltip on hover. */}
-          <div className="flex items-center justify-between">
+          <div
+            className="flex items-center justify-between"
+            data-tip={relativeCoordsAreDormant
+              ? tt("This profile inherits its window target from its folder, so the coordinate space is the folder's. Edit the process name or window title above to give it its own target.", 'Este perfil herda a janela-alvo da pasta, então o espaço de coordenadas é o da pasta. Edite o nome do processo ou o título da janela acima para dar um alvo próprio a ele.')
+              : undefined}
+          >
             <span className={`text-xs ${relativeToggleDisabled ? 'text-text-disabled' : 'text-text-secondary'}`}>Relative Coordinates</span>
             <Toggle
               isOn={relativeCoordinates}
