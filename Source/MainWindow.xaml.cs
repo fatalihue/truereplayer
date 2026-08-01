@@ -985,25 +985,20 @@ namespace TrueReplayer
                             var effTarget = hasCurName ? profileController.GetEffectiveWindowTarget(curName) : UserProfile.Current.TargetWindow;
                             var effRelCoords = hasCurName ? profileController.GetEffectiveRelativeCoordinates(curName) : UserProfile.Current.UseRelativeCoordinates;
                             var effBringFocus = hasCurName ? profileController.GetEffectiveBringToFocus(curName) : UserProfile.Current.BringToFocus;
-                            // Geometry + Restore flags: profile's own takes priority when its target is set;
-                            // otherwise fall back to folder. Without this, a profile inheriting a folder
-                            // target but having no own geometry would replay against (0,0,0,0).
+                            // Geometry + Restore flags: profile's own takes priority when its target is
+                            // set; otherwise the FOLDER's apply — geometry whole, never mixed with the
+                            // profile's own numbers (see ProfileController.GetEffectiveGeometry).
                             var effRestorePos = hasCurName ? profileController.GetEffectiveRestorePosition(curName) : UserProfile.Current.RestorePosition;
                             var effRestoreSz = hasCurName ? profileController.GetEffectiveRestoreSize(curName) : UserProfile.Current.RestoreSize;
                             int effW = UserProfile.Current.WindowWidth;
                             int effH = UserProfile.Current.WindowHeight;
                             int effGX = UserProfile.Current.WindowX;
                             int effGY = UserProfile.Current.WindowY;
-                            if (hasCurName && effW == 0 && effH == 0)
+                            if (hasCurName)
                             {
-                                var folderGeom = profileController.GetFolderInheritedGeometry(curName);
-                                if (folderGeom.HasValue)
-                                {
-                                    effGX = folderGeom.Value.X;
-                                    effGY = folderGeom.Value.Y;
-                                    effW = folderGeom.Value.Width;
-                                    effH = folderGeom.Value.Height;
-                                }
+                                var geom = profileController.GetEffectiveGeometry(curName, effGX, effGY, effW, effH);
+                                if (geom is null) { effGX = effGY = effW = effH = 0; effRestorePos = false; effRestoreSz = false; }
+                                else (effGX, effGY, effW, effH) = geom.Value;
                             }
                             mainController.ToggleReplay(
                                 bridge?.EnableLoop ?? false,
@@ -1188,24 +1183,18 @@ namespace TrueReplayer
             var effectiveTarget = profileController.GetEffectiveWindowTarget(profileName);
             var effectiveRelCoords = profileController.GetEffectiveRelativeCoordinates(profileName);
             var effectiveBringToFocus = profileController.GetEffectiveBringToFocus(profileName);
-            // Effective Restore + geometry — same fallback rule as the global Replay path.
+            // Effective Restore + geometry — same inheritance rule as the global Replay path.
             var effectiveRestorePos = profileController.GetEffectiveRestorePosition(profileName);
             var effectiveRestoreSz = profileController.GetEffectiveRestoreSize(profileName);
-            int profW = UserProfile.Current.WindowWidth;
-            int profH = UserProfile.Current.WindowHeight;
-            int profGX = UserProfile.Current.WindowX;
-            int profGY = UserProfile.Current.WindowY;
-            if (profW == 0 && profH == 0)
-            {
-                var folderGeom = profileController.GetFolderInheritedGeometry(profileName);
-                if (folderGeom.HasValue)
-                {
-                    profGX = folderGeom.Value.X;
-                    profGY = folderGeom.Value.Y;
-                    profW = folderGeom.Value.Width;
-                    profH = folderGeom.Value.Height;
-                }
-            }
+            int profGX = 0, profGY = 0, profW = 0, profH = 0;
+            var profGeom = profileController.GetEffectiveGeometry(
+                profileName,
+                UserProfile.Current.WindowX, UserProfile.Current.WindowY,
+                UserProfile.Current.WindowWidth, UserProfile.Current.WindowHeight);
+            // No rect on either side → nothing to restore. Suppress both flags rather than pass a
+            // zero rect: Restore Position is not size-gated, so (0,0) would be executed as a move.
+            if (profGeom is null) { effectiveRestorePos = false; effectiveRestoreSz = false; }
+            else (profGX, profGY, profW, profH) = profGeom.Value;
             // Loop count for an AUTONOMOUS fire can never be infinite. Loops/LoopCount are global
             // app settings, and LoopCount defaults to 0, which the engine reads as "forever" —
             // so merely enabling the Loops chip and never touching its value turned every

@@ -2499,16 +2499,16 @@ namespace TrueReplayer
             int effH = UserProfile.Current.WindowHeight;
             int effGX = UserProfile.Current.WindowX;
             int effGY = UserProfile.Current.WindowY;
-            if (hasCur && effW == 0 && effH == 0)
+            // Profile's own geometry only when it owns its target; otherwise the folder's applies
+            // WHOLE (see ProfileController.GetEffectiveGeometry) — same gate as the Restore flags
+            // just above, so a folder flag can never pair with a profile coordinate. Null means no
+            // rect was ever captured on either side: suppress the flags instead of passing zeroes,
+            // which Restore Position (not size-gated) would execute as a move to the corner.
+            if (hasCur)
             {
-                var folderGeom = profileController.GetFolderInheritedGeometry(CurrentProfileName);
-                if (folderGeom.HasValue)
-                {
-                    effGX = folderGeom.Value.X;
-                    effGY = folderGeom.Value.Y;
-                    effW = folderGeom.Value.Width;
-                    effH = folderGeom.Value.Height;
-                }
+                var geom = profileController.GetEffectiveGeometry(CurrentProfileName, effGX, effGY, effW, effH);
+                if (geom is null) { effGX = effGY = effW = effH = 0; effRestorePos = false; effRestoreSz = false; }
+                else (effGX, effGY, effW, effH) = geom.Value;
             }
 
             // A profile whose steps LAUNCH their own target (an ActivateWindow row with a
@@ -6182,8 +6182,26 @@ namespace TrueReplayer
             }
 
             UserProfile.Current.UseRelativeCoordinates = direction == "toRelative";
-            UserProfile.Current.WindowWidth = direction == "toRelative" ? rect.Right - rect.Left : 0;
-            UserProfile.Current.WindowHeight = direction == "toRelative" ? rect.Bottom - rect.Top : 0;
+            // toRelative stamps the reference rect — the window as it stood when the coordinates
+            // were measured against it. It used to write WIDTH/HEIGHT only and leave X/Y at
+            // whatever they held, which on a profile that never captured a position is 0,0. That
+            // half-write is where "1444x1024 @ 0,0" profiles come from: a folder's inherited
+            // Restore Position then moved the target window to the screen corner. Write all four.
+            // toAbsolute keeps its X/Y — absolute coordinates are only valid with the window back
+            // at the position they were measured from, so that restore must survive — and clears
+            // the size, as before.
+            if (direction == "toRelative")
+            {
+                UserProfile.Current.WindowX = rect.Left;
+                UserProfile.Current.WindowY = rect.Top;
+                UserProfile.Current.WindowWidth = rect.Right - rect.Left;
+                UserProfile.Current.WindowHeight = rect.Bottom - rect.Top;
+            }
+            else
+            {
+                UserProfile.Current.WindowWidth = 0;
+                UserProfile.Current.WindowHeight = 0;
+            }
 
             HasUnsavedChanges = true;
             PushActionsUpdate();
@@ -6213,11 +6231,42 @@ namespace TrueReplayer
                     targetFolderName = fnEl.GetString();
             }
 
+            WindowTarget? target;
+            bool haveDialogTarget = !string.IsNullOrWhiteSpace(dialogProcess) || !string.IsNullOrWhiteSpace(dialogTitle);
+
+            // A profile that inherits its target from a folder inherits the folder's GEOMETRY too —
+            // GetEffectiveGeometry ignores its own rect on purpose, because nothing on disk tells a
+            // deliberate capture from a leftover. Capturing here would write to disk, toast success
+            // and change nothing, so refuse and say where it belongs.
+            //
+            // "The payload carries a target" is NOT the exception to make here: the dialog PREFILLS
+            // an inheriting profile's process/title FROM THE FOLDER, and its Update button is
+            // disabled while both fields are blank — so every reachable profile-scope payload
+            // carries one, and gating on that made this guard dead code. The real question is
+            // whether the payload describes a DIFFERENT target from the inherited one. That is the
+            // documented capture-before-Set-Target flow, where the profile is about to own the rect.
+            if (string.IsNullOrEmpty(targetFolderName))
+            {
+                var scopeName = !string.IsNullOrEmpty(targetProfileName) ? targetProfileName : CurrentProfileName;
+                if (!string.IsNullOrEmpty(scopeName) && scopeName != "No Profile"
+                    && profileController.GetInheritedTargetFolderName(scopeName) is string ownerFolder)
+                {
+                    var inherited = profileController.GetEffectiveWindowTarget(scopeName);
+                    bool definesOwnTarget = haveDialogTarget && inherited != null && !(
+                        string.Equals((dialogProcess ?? string.Empty).Trim(), inherited.ProcessName ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals((dialogTitle ?? string.Empty).Trim(), inherited.WindowTitle ?? string.Empty, StringComparison.Ordinal)
+                        && string.Equals(string.IsNullOrWhiteSpace(dialogMatchMode) ? "contains" : dialogMatchMode, inherited.TitleMatchMode, StringComparison.OrdinalIgnoreCase));
+                    if (!definesOwnTarget)
+                    {
+                        SendMessage("alert:show", new { message = $"\"{scopeName}\" inherits its window target from the folder \"{ownerFolder}\", so it inherits the geometry too. Capture it on the folder, or give this profile its own target first." });
+                        return;
+                    }
+                }
+            }
+
             // Resolve which target definition to search for:
             // - If the dialog supplied process/title, use those (allows capture before Set Target).
             // - Otherwise fall back to the saved effective target of the active profile.
-            WindowTarget? target;
-            bool haveDialogTarget = !string.IsNullOrWhiteSpace(dialogProcess) || !string.IsNullOrWhiteSpace(dialogTitle);
             if (haveDialogTarget)
             {
                 target = new WindowTarget

@@ -1650,6 +1650,12 @@ namespace TrueReplayer.Services
                 // Restore Position / Restore Size: reposition/resize target window before replay.
                 // Independent from Relative Coordinates — the user can restore geometry even with
                 // absolute coordinates (e.g., they just want the window consistently placed).
+                // hasSize gates the SIZE only. Position must NOT be gated on it: "Convert coords →
+                // Absolute" zeroes WindowWidth/Height while deliberately keeping the captured X/Y
+                // (WebViewBridge.ExecuteConvertCoordinatesWithRect), and that position-only restore
+                // is precisely what keeps absolute coordinates valid — the window has to go back
+                // where they were measured. Gating applyPos on width/height turned it into a silent
+                // no-op for every profile that ever went through that conversion.
                 bool hasSize = _lockWidth > 0 && _lockHeight > 0;
                 bool applySize = _restoreSize && hasSize;   // gating explícito + sanity-check
                 bool applyPos = _restorePosition;
@@ -2378,6 +2384,7 @@ namespace TrueReplayer.Services
                 }
             }
 
+            // Size gated, position not — see the note in StartAsync on why.
             bool hasSize = _lockWidth > 0 && _lockHeight > 0;
             bool applySize = _restoreSize && hasSize;
             bool applyPos = _restorePosition;
@@ -2486,17 +2493,28 @@ namespace TrueReplayer.Services
                 Models.WindowTarget? subTarget = null;
                 bool subUseRel = false, subBringFocus = false, subRestorePos = false, subRestoreSz = false;
                 int subW = 0, subH = 0, subX = 0, subY = 0;
-                if (subProfile.TargetWindow != null)
+                // IsUsable, not a bare null check: ProfileController decides inheritance with the
+                // same predicate, and a blank-but-non-null TargetWindow answered differently here
+                // — the sub took its "own" branch and ran against a target that can never resolve,
+                // instead of inheriting the folder's.
+                if (TrueReplayer.Helpers.WindowMatcher.IsUsable(subProfile.TargetWindow))
                 {
                     subTarget = subProfile.TargetWindow;
                     subUseRel = subProfile.UseRelativeCoordinates;
                     subBringFocus = subProfile.BringToFocus;
-                    subRestorePos = subProfile.RestorePosition;
-                    subRestoreSz = subProfile.RestoreSize;
-                    subW = subProfile.WindowWidth;
-                    subH = subProfile.WindowHeight;
-                    subX = subProfile.WindowX;
-                    subY = subProfile.WindowY;
+                    // Same rect rule the direct fire paths use: nothing ever captured means nothing
+                    // to restore, and the Restore flags go with it. applyPos is not size-gated, so
+                    // forwarding a zero rect with RestorePosition still on would move the target
+                    // window to the screen corner — and would make the SAME profile behave one way
+                    // chained and another way fired directly.
+                    var subRect = TrueReplayer.Helpers.WindowMatcher.CapturedRect(
+                        subProfile.WindowX, subProfile.WindowY, subProfile.WindowWidth, subProfile.WindowHeight);
+                    subRestorePos = subRect is not null && subProfile.RestorePosition;
+                    subRestoreSz = subRect is not null && subProfile.RestoreSize;
+                    subX = subRect?.X ?? 0;
+                    subY = subRect?.Y ?? 0;
+                    subW = subRect?.Width ?? 0;
+                    subH = subRect?.Height ?? 0;
                 }
                 else
                 {

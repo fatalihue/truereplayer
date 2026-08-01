@@ -19,6 +19,46 @@ namespace TrueReplayer.Helpers
     public static class WindowMatcher
     {
         /// <summary>
+        /// True when <paramref name="target"/> actually names something to search for. A non-null
+        /// WindowTarget with both fields blank is NOT usable: <see cref="Matches"/> refuses it and
+        /// <see cref="FindWindow"/> returns Zero, so it can never resolve to a window.
+        ///
+        /// This is the same predicate every inheritance decision in ProfileController uses to
+        /// answer "does this profile own a target?". Call sites that only null-checked answered
+        /// YES for a blank target, took the "use its own context" branch, and swapped the replay
+        /// onto an unfindable window instead of inheriting the folder's — so keep the test here,
+        /// in one place, rather than re-spelling it.
+        /// </summary>
+        public static bool IsUsable(WindowTarget? target) =>
+            target != null
+            && (!string.IsNullOrEmpty(target.ProcessName) || !string.IsNullOrEmpty(target.WindowTitle));
+
+        /// <summary>
+        /// The one rule for "was a window rect ever captured?", shared by every resolver that hands
+        /// a rect to the replay engine (ProfileController.GetEffectiveGeometry and
+        /// .GetFolderInheritedContext, ActionExecution's RunProfile context swap). Returns null when
+        /// all four fields are still at their defaults — every capture stamps a size, so "0,0 and
+        /// no size" reads as the untouched state, not a window someone parked at the top-left.
+        ///
+        /// Anything else is a real capture — including the size-less rect that "Convert coords →
+        /// Absolute" leaves behind, where X/Y alone still says where the coordinates were measured
+        /// from. On null the caller must suppress Restore Position AND Restore Size: position is
+        /// deliberately not gated on having a size, so a rect of zeroes would be executed as a real
+        /// move and slam the target window into the screen corner.
+        ///
+        /// KNOWN BLIND SPOT, accepted: those two paragraphs collide for one window. A borderless
+        /// fullscreen game really does sit at 0,0, so capturing it and then running "Convert coords
+        /// → Absolute" — which clears W/H and keeps X/Y on purpose — leaves (0,0,0,0), which this
+        /// rule reads as untouched, and its position-only restore is dropped. Telling a captured
+        /// origin from an untouched one needs a persisted "geometry captured" flag: a schema change
+        /// and a version pin, deliberately out of scope here. A framed window in the corner reports
+        /// -4,0 and is unaffected, and no profile on disk is in that state; the failure is a silent
+        /// no-op, never a move to the wrong place.
+        /// </summary>
+        public static (int X, int Y, int Width, int Height)? CapturedRect(int x, int y, int width, int height)
+            => x == 0 && y == 0 && width <= 0 && height <= 0 ? null : (x, y, width, height);
+
+        /// <summary>
         /// Compile a regex for <see cref="WindowTarget.WindowTitle"/> when match mode is "regex".
         /// Returns null for contains-mode or invalid patterns. Callers should cache the result
         /// when the target is reused across many calls (replay loop, hook snapshot).

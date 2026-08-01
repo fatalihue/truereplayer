@@ -999,24 +999,49 @@ namespace TrueReplayer.Controllers
         }
 
         /// <summary>
-        /// Effective geometry (WindowX/Y/Width/Height) for the given profile. The profile's own
-        /// geometry (kept on the UserProfile loaded from disk) is consulted by the caller —
-        /// this helper only returns folder-inherited values to use as a fallback when the
-        /// profile has no own target. Returns null when no folder geometry applies.
+        /// Effective geometry (WindowX/Y/Width/Height) for the given profile, resolved with the
+        /// SAME gate as every other inherited field above (<see cref="GetEffectiveRestorePosition"/>
+        /// et al): the profile's own TARGET decides. With an own target the profile keeps its own
+        /// geometry — passed in by the caller, since it lives on the loaded UserProfile rather than
+        /// on the list entry. Without an own target the profile has no window context of its own,
+        /// so the folder's geometry applies WHOLE and the profile's own numbers are ignored.
+        ///
+        /// Ignoring them is the point. Nothing on disk tells a rect the user deliberately captured
+        /// apart from a leftover: a targetless profile's four numbers may come from a target that
+        /// was later removed, from the recorder's auto-seed on the first recorded click, or from
+        /// "Convert coords → Relative" stamping the window it converted against. Honouring them
+        /// paired a folder-inherited Restore flag with a profile coordinate and moved the target
+        /// window to the leftover position — the reported bug. The folder is the only side that
+        /// can have meant it, so the folder's rect applies whole or nothing applies.
+        ///
+        /// Returns NULL when neither side ever captured anything — see
+        /// <see cref="TrueReplayer.Helpers.WindowMatcher.CapturedRect"/> for the rule and for why
+        /// the caller must then suppress Restore Position AND Restore Size rather than pass zeroes.
         /// </summary>
-        public (int X, int Y, int Width, int Height)? GetFolderInheritedGeometry(string profileName)
+        public (int X, int Y, int Width, int Height)? GetEffectiveGeometry(
+            string profileName, int ownX, int ownY, int ownWidth, int ownHeight)
         {
-            // Only fall back to the folder when the profile has no target of its own. Profiles
-            // with own target are expected to carry their own geometry too.
-            if (_cachedWindowTargets.ContainsKey(profileName)) return null;
+            if (_cachedWindowTargets.ContainsKey(profileName))
+                return TrueReplayer.Helpers.WindowMatcher.CapturedRect(ownX, ownY, ownWidth, ownHeight);
+
             var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(profileName));
             if (folder == null) return null;
-            // Geometry is meaningful only when both dimensions are positive — a real window
-            // always has width > 0 and height > 0. Width/height of zero means "not captured
-            // yet" (or corrupted) and would yield an invalid SetWindowPos call downstream.
-            // X/Y can legitimately be zero (top-left of primary monitor), so don't check them.
-            if (folder.WindowWidth <= 0 || folder.WindowHeight <= 0) return null;
-            return (folder.WindowX, folder.WindowY, folder.WindowWidth, folder.WindowHeight);
+            return TrueReplayer.Helpers.WindowMatcher.CapturedRect(
+                folder.WindowX, folder.WindowY, folder.WindowWidth, folder.WindowHeight);
+        }
+
+        /// <summary>
+        /// Name of the folder <paramref name="profileName"/> inherits its window target from, or
+        /// null when the profile owns its target, is in no folder, or its folder has no usable
+        /// target. Used to refuse UI actions that would write per-profile window state the
+        /// inheritance rules then ignore.
+        /// </summary>
+        public string? GetInheritedTargetFolderName(string profileName)
+        {
+            if (_cachedWindowTargets.ContainsKey(profileName)) return null;
+            var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(profileName));
+            if (folder == null || !TrueReplayer.Helpers.WindowMatcher.IsUsable(folder.TargetWindow)) return null;
+            return folder.Name;
         }
 
         /// <summary>
@@ -1041,22 +1066,23 @@ namespace TrueReplayer.Controllers
             // disk-loaded values directly.
             if (_cachedWindowTargets.ContainsKey(profileName)) return null;
             var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(profileName));
-            if (folder?.TargetWindow == null) return null;
-            if (string.IsNullOrEmpty(folder.TargetWindow.ProcessName)
-                && string.IsNullOrEmpty(folder.TargetWindow.WindowTitle)) return null;
-            // Geometry only forwarded when both dimensions are populated — same rule as
-            // GetFolderInheritedGeometry; SetWindowPos with zero size would be invalid.
-            bool hasGeom = folder.WindowWidth > 0 && folder.WindowHeight > 0;
+            if (!TrueReplayer.Helpers.WindowMatcher.IsUsable(folder?.TargetWindow)) return null;
+            // Same rect rule as GetEffectiveGeometry, and the same consequence: with nothing ever
+            // captured there is no rect to restore, so the Restore flags must be dropped too. A
+            // chained sub-profile that kept them would run applyPos against (0,0) — the direct fire
+            // paths suppress exactly this, and the two must not disagree about the same profile.
+            var rect = TrueReplayer.Helpers.WindowMatcher.CapturedRect(
+                folder!.WindowX, folder.WindowY, folder.WindowWidth, folder.WindowHeight);
             return new FolderInheritedContext(
-                folder.TargetWindow,
+                folder.TargetWindow!,
                 folder.UseRelativeCoordinates,
                 folder.BringToFocus,
-                folder.RestorePosition,
-                folder.RestoreSize,
-                hasGeom ? folder.WindowX : 0,
-                hasGeom ? folder.WindowY : 0,
-                hasGeom ? folder.WindowWidth : 0,
-                hasGeom ? folder.WindowHeight : 0);
+                rect is not null && folder.RestorePosition,
+                rect is not null && folder.RestoreSize,
+                rect?.X ?? 0,
+                rect?.Y ?? 0,
+                rect?.Width ?? 0,
+                rect?.Height ?? 0);
         }
 
         public async Task SetFolderWindowTargetAsync(
