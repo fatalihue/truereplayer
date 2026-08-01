@@ -1662,7 +1662,10 @@ namespace TrueReplayer.Controllers
                     // moment import completes — the receiver re-arms explicitly.
                     Triggers = DisarmedTriggerClone(entry.Triggers)
                 };
-                SettingsManager.MigrateRestoreSize(profile);
+                // No RestoreSize inference here: ParseImportEnvelope already ran the envelope
+                // through SettingsManager.MigrateProfileJson, which infers on the raw JSON of each
+                // entry — so entry.RestoreSize is already the migrated value. Re-running it on the
+                // deserialized profile is what made the flag impossible to switch off.
 
                 // Defense in depth: confirm the resolved write path stays directly inside the
                 // Profiles dir before writing. Also re-validates the rename-derived finalName

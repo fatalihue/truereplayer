@@ -79,17 +79,68 @@ namespace TrueReplayer.Services
                 {
                     bool changed = false;
                     // UserProfile direto (PascalCase no profile.json)
-                    changed |= RenameLockPositionKey(root);
+                    changed |= MigrateProfileObject(root);
                     // Envelope .trprofile: profiles[] em camelCase OU PascalCase
                     if (root["Profiles"] is JsonArray pascal)
-                        foreach (var p in pascal) if (p is JsonObject po) changed |= RenameLockPositionKey(po);
+                        foreach (var p in pascal) if (p is JsonObject po) changed |= MigrateProfileObject(po);
                     if (root["profiles"] is JsonArray camel)
-                        foreach (var p in camel) if (p is JsonObject po) changed |= RenameLockPositionKey(po);
+                        foreach (var p in camel) if (p is JsonObject po) changed |= MigrateProfileObject(po);
                     if (changed) return root.ToJsonString();
                 }
             }
             catch { /* malformed JSON falls through to deserializer for normal error path */ }
             return json;
+        }
+
+        /// <summary>
+        /// Every raw-JSON migration that applies to one profile object, in dependency order: the
+        /// LockPosition rename can CREATE RestorePosition, and the RestoreSize inference reads it.
+        /// </summary>
+        private static bool MigrateProfileObject(JsonObject obj)
+        {
+            bool changed = RenameLockPositionKey(obj);
+            changed |= InferRestoreSizeFromLegacy(obj);
+            return changed;
+        }
+
+        /// <summary>
+        /// Pre-RestoreSize, a single "Lock Position" flag gated position AND size together. Splitting
+        /// it left old profiles with no RestoreSize key at all, so a profile that used to restore its
+        /// whole rect came back restoring only the position. When the key is ABSENT and the old flag
+        /// was on over a captured rect, restore the original intent.
+        ///
+        /// The ABSENCE of the key is the entire signal, and it has to be read here, from the raw
+        /// JSON. This inference used to run on the DESERIALIZED profile, where a missing key and an
+        /// explicit false are both just `false` — so it re-fired on EVERY load, and a user who turned
+        /// Restore Size off on a profile with a captured rect got it silently turned back on the next
+        /// time that profile was loaded. The setting could not be switched off at all. UserProfile
+        /// .RestoreSize carries no JsonIgnore, so every profile written since the split has the key;
+        /// only a genuinely pre-split file is missing it, and a file can only be missing it once.
+        /// Same shape as <see cref="RenameLockPositionKey"/>, which has always gated on ContainsKey.
+        /// </summary>
+        private static bool InferRestoreSizeFromLegacy(JsonObject obj)
+        {
+            if (obj.ContainsKey("RestoreSize") || obj.ContainsKey("restoreSize")) return false;
+            if (!ReadBoolLoose(GetEitherCase(obj, "RestorePosition", "restorePosition"))) return false;
+            if (ReadIntLoose(GetEitherCase(obj, "WindowWidth", "windowWidth")) <= 0) return false;
+            if (ReadIntLoose(GetEitherCase(obj, "WindowHeight", "windowHeight")) <= 0) return false;
+            // Mirror the casing the object already uses, so a camelCase .trprofile entry stays
+            // camelCase. Both readers bind case-insensitively, but don't make the file mixed.
+            obj[obj.ContainsKey("restorePosition") ? "restoreSize" : "RestoreSize"] = true;
+            return true;
+        }
+
+        private static JsonNode? GetEitherCase(JsonObject obj, string pascal, string camel)
+            => obj.TryGetPropertyValue(pascal, out var p) && p != null ? p
+             : obj.TryGetPropertyValue(camel, out var c) ? c : null;
+
+        // Geometry is written as a JSON number; tolerate a string for the same reason
+        // ReadBoolLoose exists — a hand-edited profile shouldn't abort the whole migration.
+        private static int ReadIntLoose(JsonNode? node)
+        {
+            if (node == null) return 0;
+            try { return node.GetValue<int>(); } catch { }
+            return int.TryParse(node.ToString().Trim(), out var v) ? v : 0;
         }
 
         private static bool RenameLockPositionKey(JsonObject obj)
@@ -118,19 +169,6 @@ namespace TrueReplayer.Services
             try { return node.GetValue<bool>(); } catch { }
             var s = node.ToString().Trim();
             return s.Equals("true", StringComparison.OrdinalIgnoreCase) || s == "1";
-        }
-
-        /// <summary>
-        /// Pré-RestoreSize, "Lock Position" gateava ambos. Se geometria foi capturada e Restore
-        /// Position estava ligado, preserva intenção original ligando RestoreSize também.
-        /// </summary>
-        public static void MigrateRestoreSize(UserProfile profile)
-        {
-            if (profile.RestorePosition && !profile.RestoreSize
-                && profile.WindowWidth > 0 && profile.WindowHeight > 0)
-            {
-                profile.RestoreSize = true;
-            }
         }
 
         /// <summary>
@@ -165,11 +203,12 @@ namespace TrueReplayer.Services
             };
 
             var json = await File.ReadAllTextAsync(filePath);  // Lê o arquivo de perfil
-            json = MigrateProfileJson(json);                    // Renomeia LockPosition→RestorePosition se necessário
+            // Raw-JSON migrations (LockPosition rename + pre-split RestoreSize inference). Both
+            // gate on a key being absent, which only the undeserialized text can tell us.
+            json = MigrateProfileJson(json);
             var profile = JsonSerializer.Deserialize<UserProfile>(json, options);
             if (profile != null)
             {
-                MigrateRestoreSize(profile);   // Infere RestoreSize de perfis pré-split
                 MigrateActionIds(profile);     // Backfill stable Id for pre-2.2.6 actions
             }
             return profile;
