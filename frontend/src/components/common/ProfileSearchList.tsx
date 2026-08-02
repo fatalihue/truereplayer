@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, useEffect, useId, type ReactNode } from 'react';
+import { useMemo, useRef, useState, useEffect, useLayoutEffect, useId, type ReactNode } from 'react';
 import { Search, SearchX, X } from 'lucide-react';
 import { useTt } from '../../state/LanguageContext';
 
@@ -97,6 +97,36 @@ export function ProfileSearchList({
     return () => cancelAnimationFrame(id);
   }, [autoFocus]);
 
+  // Height lock — the list box keeps whatever height the UNFILTERED list gave it, so
+  // typing narrows the rows without the host dialog resizing under the cursor (Run
+  // Profile jumped from a 190px box to a 2-row one on the first keystroke, moving its
+  // own footer buttons). Measured, not computed: the box is already capped by
+  // listMaxHeightClass, so its own border-box height IS min(natural, max) — no row-height
+  // constant to keep in sync, and it re-measures if the theme changes the row metrics.
+  //
+  // Pinned with `height`, NOT `min-height`: min-height only stops the box SHRINKING. The
+  // "no profile matches" empty state is taller than a 2-3 row list, so a short list still
+  // grew ~4.5px the moment a query stopped matching — a visible nudge of the whole dialog,
+  // which is centred by the scrim. An exact height is immune in both directions.
+  const [lockedHeight, setLockedHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    // Only the unfiltered list is a valid measurement; while a query is active the last
+    // lock is what holds the box open. profiles is a dep because AutomationPanel rebuilds
+    // its list on a 2 s poll — a profile added/removed there should re-lock.
+    if (query) return;
+    const el = listRef.current;
+    if (!el) return;
+    // Drop the pin before reading, or the measurement is just last render's pinned value
+    // and the box could never GROW when profiles arrive (the picker mounts before the
+    // bridge has pushed the list — it would stay locked at the empty state's height).
+    // Same layout pass, restored before paint, so nothing flickers.
+    const pinned = el.style.height;
+    el.style.height = '';
+    const natural = Math.ceil(el.getBoundingClientRect().height);
+    el.style.height = pinned;
+    setLockedHeight(natural);
+  }, [query, profiles]);
+
   // Keep the highlighted row visible for both keyboard walking and the initial
   // "reopened on a profile that sits far down the list" case.
   useEffect(() => {
@@ -167,6 +197,10 @@ export function ProfileSearchList({
         role="listbox"
         aria-label={ariaLabel ?? tt('Profiles', 'Profiles')}
         className={`${listMaxHeightClass} overflow-y-auto border border-border-subtle rounded bg-bg-input/40`}
+        // scrollbarGutter reserves the scrollbar's track even when the list doesn't
+        // overflow, so filtering a long list down to two rows no longer shifts every row
+        // sideways by the scrollbar's width as it disappears.
+        style={{ height: lockedHeight ?? undefined, scrollbarGutter: 'stable' }}
       >
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center gap-1.5 py-6 text-text-disabled">
