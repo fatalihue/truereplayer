@@ -31,7 +31,9 @@ export function DurationChips({ presets, value, onSelect, infinityTip }: Duratio
             data-tip={ms === 0 ? infinityTip : undefined}
             className={`px-2 py-0.5 rounded text-[10px] font-mono tabular-nums border transition-colors ${
               active
-                ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
+                // 12% / 40% — the one intensity shared with Toggle, IconToggle and the
+                // enable chips (see chipStyles.ts). Was 10% / 30%, the last drift left.
+                ? 'text-accent border-[color-mix(in_srgb,var(--color-accent)_40%,transparent)] bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)]'
                 : 'text-text-tertiary border-border-subtle bg-bg-card hover:text-text-secondary hover:bg-bg-input'
             }`}
           >

@@ -45,7 +45,7 @@ export function SendTextPreview({ text, badge = null }: SendTextPreviewProps) {
   return (
     <>
       {badge && (
-        <span className="inline-flex items-center px-1 py-[1px] mr-1 text-[9px] font-semibold uppercase tracking-wide rounded text-accent bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] border border-accent/30 select-none align-middle">
+        <span className="inline-flex items-center px-1 py-[1px] mr-1 text-[9px] font-semibold uppercase tracking-wide rounded text-accent bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] border border-[color-mix(in_srgb,var(--color-accent)_40%,transparent)] select-none align-middle">
           {badge}
         </span>
       )}

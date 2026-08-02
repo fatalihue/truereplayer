@@ -5,6 +5,7 @@ import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
 import { SegmentedControl } from './common/SegmentedControl';
 import { KeyCaps } from './common/KeyCaps';
+import { chipDotOn, chipDotOff } from './common/chipStyles';
 import { DurationChips } from './common/DurationChips';
 import { useBridge } from '../bridge/BridgeContext';
 import { useLanguage, useTt } from '../state/LanguageContext';
@@ -476,9 +477,7 @@ export function KeystrokeCaptureDialog({
                   </span>
                   <span
                     className="w-2 h-2 rounded-full block shrink-0 transition-colors"
-                    style={jitterOn && repeat > 1
-                      ? { background: 'var(--color-accent-solid)' }
-                      : { background: 'transparent', border: '1.5px solid var(--color-text-tertiary)' }}
+                    style={jitterOn && repeat > 1 ? chipDotOn : chipDotOff}
                   />
                 </button>
                 <NumberInput

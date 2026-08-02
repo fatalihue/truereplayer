@@ -11,6 +11,7 @@ import { NumberInput } from './common/NumberInput';
 import { SegmentedControl } from './common/SegmentedControl';
 import { DurationChips } from './common/DurationChips';
 import { ProcessNameInput } from './common/ProcessNameInput';
+import { chipDotOn, chipDotOff } from './common/chipStyles';
 import { ImageCropper } from './ImageCropper';
 import { LexicalTokenEditor, type LexicalEditorHandle } from './lexical/LexicalTokenEditor';
 import { getDisplayKey } from '../utils/displayUtils';
@@ -2064,7 +2065,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                     }}
                     className={`px-2.5 py-1 rounded text-[11px] font-medium border transition-colors ${
                       isActive
-                        ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
+                        ? 'text-accent border-[color-mix(in_srgb,var(--color-accent)_40%,transparent)] bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)]'
                         : 'text-text-secondary border-border-default bg-bg-elevated hover:bg-bg-card'
                     }`}
                   >
@@ -2403,7 +2404,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                       onClick={() => setDaysOfWeek(daysOfWeek ^ (1 << bit))}
                       className={`w-7 h-6 rounded text-[10px] font-medium border transition-colors ${
                         on
-                          ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
+                          ? 'text-accent border-[color-mix(in_srgb,var(--color-accent)_40%,transparent)] bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)]'
                           : 'text-text-tertiary border-border-subtle bg-bg-card hover:text-text-secondary'
                       }`}
                       data-tip={['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][bit]}
@@ -3712,7 +3713,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   onClick={() => setRestorePosition(!restorePosition)}
                   className={`h-6 px-2.5 rounded text-[10px] font-medium border transition-colors ${
                     restorePosition
-                      ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
+                      ? 'text-accent border-[color-mix(in_srgb,var(--color-accent)_40%,transparent)] bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)]'
                       : 'text-text-tertiary border-border-subtle bg-bg-card hover:text-text-secondary'
                   }`}
                 >
@@ -3723,7 +3724,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   onClick={() => setRestoreSize(!restoreSize)}
                   className={`h-6 px-2.5 rounded text-[10px] font-medium border transition-colors ${
                     restoreSize
-                      ? 'text-accent border-accent/30 bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)]'
+                      ? 'text-accent border-[color-mix(in_srgb,var(--color-accent)_40%,transparent)] bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)]'
                       : 'text-text-tertiary border-border-subtle bg-bg-card hover:text-text-secondary'
                   }`}
                 >
@@ -4012,8 +4013,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   <span
                     className="w-2 h-2 rounded-full block shrink-0 transition-colors"
                     style={jitterOn && repeatCount > 1
-                      ? { background: 'var(--color-accent-solid)' }
-                      : { background: 'transparent', border: '1.5px solid var(--color-text-tertiary)' }}
+                      ? chipDotOn
+                      : chipDotOff}
                   />
                 </button>
                 <NumberInput
@@ -4049,8 +4050,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   <span
                     className="w-2 h-2 rounded-full block shrink-0 transition-colors"
                     style={posJitterOn && repeatCount > 1
-                      ? { background: 'var(--color-accent-solid)' }
-                      : { background: 'transparent', border: '1.5px solid var(--color-text-tertiary)' }}
+                      ? chipDotOn
+                      : chipDotOff}
                   />
                 </button>
                 <NumberInput

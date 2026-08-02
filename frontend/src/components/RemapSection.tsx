@@ -4,6 +4,7 @@ import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
 import { useTt } from '../state/LanguageContext';
 import { Button } from './common/Button';
+import { chipOn, chipOff, chipDotOn, chipDotOff } from './common/chipStyles';
 
 type RemapEntry = { from: string; to: string; enabled: boolean };
 
@@ -166,9 +167,7 @@ export function RemapSection() {
           // "capslock" collide in a hand-edited file, which raw keys keep distinct.
           key={r.from}
           className="h-7 flex items-center rounded border overflow-hidden"
-          style={r.enabled
-            ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
-            : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
+          style={r.enabled ? chipOn : chipOff}
         >
           <button
             type="button"
@@ -179,9 +178,7 @@ export function RemapSection() {
           >
             <span
               className="w-2 h-2 rounded-full block shrink-0"
-              style={r.enabled
-                ? { background: 'var(--color-accent-solid)' }
-                : { background: 'transparent', border: '1.5px solid var(--color-text-tertiary)' }}
+              style={r.enabled ? chipDotOn : chipDotOff}
             />
           </button>
           <span className={`flex-1 min-w-0 flex items-center gap-1.5 text-[11px] font-mono ${r.enabled ? 'text-text-primary' : 'text-text-tertiary'}`}>

@@ -9,6 +9,7 @@ import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { Toggle } from './common/Toggle';
 import { SegmentedControl } from './common/SegmentedControl';
+import { chipOn, chipOff, chipDotOn, chipDotOff } from './common/chipStyles';
 import { formatMs } from '../utils/displayUtils';
 
 // Compact 28×16 switch — the redesigned Settings panel uses the smaller size for every
@@ -106,9 +107,7 @@ function EnableChip({ value, isOn, unit, format, max, width, onCommitValue, onTo
   return (
     <div
       className={`${width ?? FIELD_W} h-7 flex items-center rounded border overflow-hidden focus-within:!border-accent-solid`}
-      style={isOn
-        ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
-        : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
+      style={isOn ? chipOn : chipOff}
     >
       <button
         type="button"
@@ -118,9 +117,7 @@ function EnableChip({ value, isOn, unit, format, max, width, onCommitValue, onTo
       >
         <span
           className="w-2 h-2 rounded-full block shrink-0"
-          style={isOn
-            ? { background: 'var(--color-accent-solid)' }
-            : { background: 'transparent', border: '1.5px solid var(--color-text-tertiary)' }}
+          style={isOn ? chipDotOn : chipDotOff}
         />
       </button>
       <input
@@ -487,8 +484,8 @@ function ClickerSection({
             <div
               className={`${FIELD_W} h-7 flex items-center rounded border overflow-hidden group`}
               style={useArea
-                ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
-                : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
+                ? chipOn
+                : chipOff}
             >
               <button
                 type="button"
@@ -499,8 +496,8 @@ function ClickerSection({
                 <span
                   className="w-2 h-2 rounded-full block shrink-0"
                   style={useArea
-                    ? { background: 'var(--color-accent-solid)' }
-                    : { background: 'transparent', border: '1.5px solid var(--color-text-tertiary)' }}
+                    ? chipDotOn
+                    : chipDotOff}
                 />
               </button>
               <button
@@ -544,8 +541,8 @@ function ClickerSection({
             <div
               className={`${FIELD_W} h-7 flex items-center rounded border overflow-hidden group`}
               style={useFixed
-                ? { borderColor: 'var(--color-accent-solid)', background: 'color-mix(in srgb, var(--color-accent) 13%, transparent)' }
-                : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }}
+                ? chipOn
+                : chipOff}
             >
               <button
                 type="button"
@@ -556,8 +553,8 @@ function ClickerSection({
                 <span
                   className="w-2 h-2 rounded-full block shrink-0"
                   style={useFixed
-                    ? { background: 'var(--color-accent-solid)' }
-                    : { background: 'transparent', border: '1.5px solid var(--color-text-tertiary)' }}
+                    ? chipDotOn
+                    : chipDotOff}
                 />
               </button>
               <button
