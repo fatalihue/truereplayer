@@ -8120,6 +8120,11 @@ namespace TrueReplayer
                 BrowserSelectorEnabled = BrowserSelectorEnabled,
                 RunAsAdmin = AppSettingsManager.Load().RunAsAdmin,
                 AutomationEnabled = UserProfile.Current.AutomationEnabled,
+                // Disk-owned, like RunOnStartup/RunAsAdmin above: the bridge holds no field for it,
+                // so leaving it out of this initializer wrote the class default (false) back on every
+                // save — and this method runs on EVERY settings:change. The import security warning
+                // re-armed itself after the user had ticked "Don't show again".
+                HasAcknowledgedImportWarning = AppSettingsManager.Load().HasAcknowledgedImportWarning,
             };
             AppSettingsManager.Save(s);
         }
