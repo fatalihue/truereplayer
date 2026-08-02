@@ -31,6 +31,10 @@ frontend/dist/
 # Mockups (design reference only)
 mockup/
 
+# graphify knowledge graph (regenerated from the source tree by `graphify .`;
+# ~6 MB of JSON + a self-contained HTML viewer, plus an extraction cache)
+graphify-out/
+
 # Debug symbols. NativeHost/publish/*.exe IS tracked on purpose — the CopyNativeHost
 # target copies it into the output dir for the Chrome extension — but the .pdb only
 # carries a SourceLink map of the build machine's absolute paths.
