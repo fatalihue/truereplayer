@@ -388,10 +388,19 @@ namespace TrueReplayer.Controllers
                 .Where(f => !string.Equals(Path.GetFileName(f), "profile-order.json", StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
-            ProfileEntries.Clear();
-            _cachedWindowTargets.Clear();
-            _referencedImagesByProfile.Clear();
-            _loadFailures.Clear();
+            // Build into LOCALS, then swap in one synchronous block at the end of the loop.
+            // These four used to be cleared up front and filled inside the loop below, which
+            // awaits once per file — so for ~80 profiles the live collections sat empty, then
+            // partial, across ~80 yields to the message pump. Any reader that landed in that
+            // window saw a short list: the Automation panel polls automation:request every 2s
+            // and BuildAutomationStatePayload projects straight off ProfileEntries, which is
+            // why its list visibly vanished and came back whenever a save triggered a reload.
+            // Nothing may observe a partial rebuild, so the swap has to be atomic w.r.t. the
+            // pump — no await between Clear() and the last Add().
+            var loadedEntries = new List<ProfileEntry>();
+            var loadedTargets = new Dictionary<string, WindowTarget>();
+            var loadedImages = new Dictionary<string, HashSet<string>>();
+            var loadedFailures = new List<string>();
 
             foreach (var file in files)
             {
@@ -419,7 +428,7 @@ namespace TrueReplayer.Controllers
                             .Distinct(StringComparer.Ordinal)
                             .ToList();
 
-                        ProfileEntries.Add(new ProfileEntry
+                        loadedEntries.Add(new ProfileEntry
                         {
                             Name = name,
                             FilePath = file,
@@ -457,7 +466,7 @@ namespace TrueReplayer.Controllers
                         });
 
                         if (hasTarget)
-                            _cachedWindowTargets[name] = profile.TargetWindow!;
+                            loadedTargets[name] = profile.TargetWindow!;
 
                         // Collect referenced PNG filenames for orphan-cleanup at startup.
                         // IF rows with ConditionType="ImageFound" share the same per-profile
@@ -482,7 +491,7 @@ namespace TrueReplayer.Controllers
                         {
                             refs.Add(profile.Triggers!.ImagePath!);
                         }
-                        _referencedImagesByProfile[ImageStorageService.GetSanitizedProfileFolder(name)] = refs;
+                        loadedImages[ImageStorageService.GetSanitizedProfileFolder(name)] = refs;
                     }
                 }
                 catch (Exception ex)
@@ -493,10 +502,20 @@ namespace TrueReplayer.Controllers
                     // load: foo, bar, baz") instead of letting the user discover the loss
                     // by noticing missing entries.
                     var failedName = Path.GetFileNameWithoutExtension(file);
-                    if (!string.IsNullOrEmpty(failedName)) _loadFailures.Add(failedName);
+                    if (!string.IsNullOrEmpty(failedName)) loadedFailures.Add(failedName);
                     DiagnosticLog.Error($"Profile load failed: '{failedName}' ({Path.GetFileName(file)})", ex);
                 }
             }
+
+            // The swap. No await from here to the last Add(), so the pump never sees a
+            // half-built list. ProfileEntries is an ObservableCollection others bind to, so the
+            // instance is reused rather than replaced.
+            ProfileEntries.Clear();
+            foreach (var e in loadedEntries) ProfileEntries.Add(e);
+            _cachedWindowTargets = loadedTargets;
+            _referencedImagesByProfile = loadedImages;
+            _loadFailures.Clear();
+            _loadFailures.AddRange(loadedFailures);
 
             await LoadProfileOrderAsync();
             PopulateEffectiveTargets();
