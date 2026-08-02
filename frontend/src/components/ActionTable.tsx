@@ -2088,6 +2088,16 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                         // only now (editing is the hover pencil). data-tip still
                         // surfaces the full string for truncated content.
                         className="inline-flex items-center translate-y-[-2px] text-xs font-mono text-text-primary max-w-[220px] truncate"
+                        // Tighten the " + " separators of a combined keystroke ("Ctrl + Alt + A")
+                        // WITHOUT gluing the keys together, matching the ProfilePanel hotkey chips.
+                        // wordSpacing is the only lever that works here: this cell is font-mono, so
+                        // a Unicode thin/hair space would occupy the same cell as a normal one (the
+                        // same reason KbdTag's unified branch uses wordSpacing). The chips sit at
+                        // 10px where -1.5px leaves a ~4.5px gap; this cell is text-xs (12px), so the
+                        // equivalent shave is -2.5px. Keystroke only — every other action type puts
+                        // prose in this cell ("Maximize · notepad", "name = value") whose ordinary
+                        // spaces must stay ordinary.
+                        style={action.actionType === 'Keystroke' ? { wordSpacing: '-2.5px' } : undefined}
                         data-tip={
                           action.actionType === 'SendText' ? action.key
                           // Browser actions can have long CSS selectors / URLs that
