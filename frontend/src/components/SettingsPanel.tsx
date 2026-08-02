@@ -1056,28 +1056,35 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 <CompactToggle isOn={settings.smoothMovement} onChange={(v) => changeSetting('smoothMovement', v)} />
               </SettingRow>
               {settings.smoothMovement && (
-                <>
-                  <SettingRow label="Fast approach" tooltip={tt('Teleports long moves (e.g. across monitors), smoothing only the final stretch — far clicks become near-instant. Turn off if a game misclicks.', 'Teletransporta movimentos longos (ex.: entre monitores), suavizando só o trecho final — cliques distantes ficam quase instantâneos. Desligue se um jogo errar o clique.')}>
-                    <CompactToggle isOn={settings.fastApproach} onChange={(v) => changeSetting('fastApproach', v)} />
-                  </SettingRow>
-                  <Disclosure label="Tuning">
+                <SettingRow label="Fast approach" tooltip={tt('Teleports long moves (e.g. across monitors), smoothing only the final stretch — far clicks become near-instant. Turn off if a game misclicks.', 'Teletransporta movimentos longos (ex.: entre monitores), suavizando só o trecho final — cliques distantes ficam quase instantâneos. Desligue se um jogo errar o clique.')}>
+                  <CompactToggle isOn={settings.fastApproach} onChange={(v) => changeSetting('fastApproach', v)} />
+                </SettingRow>
+              )}
+              {/* Tuning is NOT gated on smoothMovement: Click delay (MoveClickDelayMs) is applied
+                  unconditionally by SimulateMouse — on BOTH halves of every click, smooth movement on
+                  or off — so hiding its editor behind the Smooth movement toggle left ~20ms per click
+                  that no visible control could reach. Only the path knobs, which genuinely do nothing
+                  without the smooth walk, stay gated. */}
+              <Disclosure label="Tuning">
+                {settings.smoothMovement && (
+                  <>
                     <SettingRow label="Path step" tooltip={tt('Max px per step. Lower = smoother, slower. ~20 for Roblox.', 'Máx. px por passo. Menor = mais suave, mais lento. ~20 para Roblox.')}>
                       <ValueField value={settings.moveStepPx} unit="px" onCommitValue={(v) => changeSetting('moveStepPx', v)} />
                     </SettingRow>
                     <SettingRow label="Step delay" tooltip={tt('Pause between path steps (ms).', 'Pausa entre passos do caminho (ms).')}>
                       <ValueField value={settings.moveStepDelay} unit="ms" onCommitValue={(v) => changeSetting('moveStepDelay', v)} />
                     </SettingRow>
-                    <SettingRow label="Click delay" tooltip={tt('Pause before the click after moving (ms).', 'Pausa antes do clique após mover (ms).')}>
-                      <ValueField value={settings.moveClickDelay} unit="ms" onCommitValue={(v) => changeSetting('moveClickDelay', v)} />
-                    </SettingRow>
-                    {settings.fastApproach && (
-                      <SettingRow label="Settle distance" tooltip={tt('Px smoothed before the target after a teleport. Higher = safer, slower. ~80.', 'Px suavizados antes do alvo após um teletransporte. Maior = mais seguro, mais lento. ~80.')}>
-                        <ValueField value={settings.settleDistance} unit="px" onCommitValue={(v) => changeSetting('settleDistance', v)} />
-                      </SettingRow>
-                    )}
-                  </Disclosure>
-                </>
-              )}
+                  </>
+                )}
+                <SettingRow label="Click delay" tooltip={tt('Gap before each button event (ms), applied twice per click. After a move it lets the app register the position; on release it is the press→release dwell. Applies with Smooth movement off too.', 'Pausa antes de cada evento de botão (ms), aplicada duas vezes por clique. Depois de um movimento, dá tempo do app registrar a posição; na soltura, é o dwell entre pressionar e soltar. Vale também com Smooth movement desligado.')}>
+                  <ValueField value={settings.moveClickDelay} unit="ms" onCommitValue={(v) => changeSetting('moveClickDelay', v)} />
+                </SettingRow>
+                {settings.smoothMovement && settings.fastApproach && (
+                  <SettingRow label="Settle distance" tooltip={tt('Px smoothed before the target after a teleport. Higher = safer, slower. ~80.', 'Px suavizados antes do alvo após um teletransporte. Maior = mais seguro, mais lento. ~80.')}>
+                    <ValueField value={settings.settleDistance} unit="px" onCommitValue={(v) => changeSetting('settleDistance', v)} />
+                  </SettingRow>
+                )}
+              </Disclosure>
             </Section>
 
             {/* Recording — switches, same as every other on/off row. Profile Keys keeps
