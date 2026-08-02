@@ -1318,6 +1318,11 @@ namespace TrueReplayer
                 profileController.GetProfileTriggers(),
                 profileController.ProfileEntries.Select(p => p.Name).ToList());
             PushAutomationState();
+            // The sidebar's armed dot is fed by triggerArmed, which only ships in the
+            // profiles:updated payload (see PushProfilesUpdate) — pushing only the automation
+            // state left the dot showing the PREVIOUS arm state until something unrelated
+            // happened to refresh the profile list. Arming is exactly when that dot matters.
+            PushProfilesUpdate();
             TrayIconService.UpdateTrayIcon();
         }
 
