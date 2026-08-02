@@ -257,6 +257,14 @@ function $inlinePlain(parent: ElementNode): string {
       const linkText = child.getTextContent();
       const url = child.getURL();
       out += url && linkText !== url && !linkText.includes(url) ? `${linkText} (${url})` : linkText;
+    } else if ($isTextNode(child)) {
+      // Raw text passes through UNTOUCHED — mirrors $inlineMarkdown's TextNode branch.
+      // A saved SendText with no formatting has no KeyHtml, so InitialContentPlugin
+      // rebuilds it as ONE paragraph holding the whole payload: its deliberate blank
+      // lines live INSIDE this TextNode. The \n\n collapse below targets Lexical's
+      // block separators on nested non-text nodes and would eat them (reopening
+      // "Olá,\n\nSegue" saved back "Olá,\nSegue").
+      out += child.getTextContent();
     } else {
       out += child.getTextContent().replace(/\n\n/g, '\n');
     }
