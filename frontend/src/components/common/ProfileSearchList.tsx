@@ -109,10 +109,15 @@ export function ProfileSearchList({
   // grew ~4.5px the moment a query stopped matching — a visible nudge of the whole dialog,
   // which is centred by the scrim. An exact height is immune in both directions.
   const [lockedHeight, setLockedHeight] = useState<number | null>(null);
+  // Re-lock only when the list LENGTH changes, never on the array's identity. Callers build
+  // this prop inline (RunProfileDialog does eligibleProfiles.map(p => p.name)), so the array
+  // is a new object on every render — depending on it re-ran this effect on every unrelated
+  // re-render, selecting a profile included. See the repo's react-effect-on-array-identity
+  // note; length is what actually moves the height, and a rename cannot change it.
+  const profileCount = profiles.length;
   useLayoutEffect(() => {
     // Only the unfiltered list is a valid measurement; while a query is active the last
-    // lock is what holds the box open. profiles is a dep because AutomationPanel rebuilds
-    // its list on a 2 s poll — a profile added/removed there should re-lock.
+    // lock is what holds the box open.
     if (query) return;
     const el = listRef.current;
     if (!el) return;
@@ -122,10 +127,15 @@ export function ProfileSearchList({
     // Same layout pass, restored before paint, so nothing flickers.
     const pinned = el.style.height;
     el.style.height = '';
-    const natural = Math.ceil(el.getBoundingClientRect().height);
+    // offsetHeight, NOT getBoundingClientRect(): the app runs under a root CSS `zoom`
+    // (themes.ts sets root.style.zoom, default 0.95). getBoundingClientRect returns the
+    // ZOOMED size while style.height is written back in LAYOUT px, so measuring with it
+    // rewrote a 190px box as 181px on every re-lock at 95% — and grew it above 100%.
+    // offsetHeight is layout px and border-box, exactly what style.height consumes.
+    const natural = el.offsetHeight;
     el.style.height = pinned;
     setLockedHeight(natural);
-  }, [query, profiles]);
+  }, [query, profileCount]);
 
   // Keep the highlighted row visible for both keyboard walking and the initial
   // "reopened on a profile that sits far down the list" case.
