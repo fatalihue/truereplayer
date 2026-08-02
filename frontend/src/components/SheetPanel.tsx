@@ -10,6 +10,7 @@ import { Checkbox } from './Checkbox';
 import { NumberInput } from './common/NumberInput';
 import { SegmentedControl } from './common/SegmentedControl';
 import { DurationChips } from './common/DurationChips';
+import { ProcessNameInput } from './common/ProcessNameInput';
 import { ImageCropper } from './ImageCropper';
 import { LexicalTokenEditor, type LexicalEditorHandle } from './lexical/LexicalTokenEditor';
 import { getDisplayKey } from '../utils/displayUtils';
@@ -2347,14 +2348,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
               label="Process Name"
               hint={tt('e.g. chrome.exe — ".exe" optional. TRUE when the process is running (with or without a window).', 'ex.: chrome.exe — ".exe" opcional. TRUE quando o processo está em execução (com ou sem janela).')}
             >
-              <input
-                type="text"
-                value={windowProcessName}
-                onChange={(e) => setWindowProcessName(e.target.value)}
-                placeholder="chrome.exe"
-                spellCheck={false}
-                className="w-full h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
-              />
+              <ProcessNameInput value={windowProcessName} onChange={setWindowProcessName} />
             </Field>
           )}
 
