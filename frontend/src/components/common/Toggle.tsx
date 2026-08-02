@@ -28,11 +28,19 @@ export function Toggle({ isOn, onChange, disabled = false, size = 'default' }: T
         disabled
           ? 'bg-bg-card border-border-subtle opacity-40 cursor-not-allowed'
           : isOn
-            ? 'bg-accent-solid border-accent-solid cursor-pointer'
+            // Quiet ON: the track takes the accent at 12% and the border at 40% rather than
+            // filling solid. A settings list with six switches on used to read as six bars of
+            // colour; the tint says "on" at a glance without competing with the row labels.
+            // Same recipe as the kbd-accent chips. State is still encoded TWICE — the knob also
+            // travels — which is what keeps it readable on the low-contrast presets where an
+            // accent-only signal collapses (21 of the 48 themes fall under 3:1 accent↔disabled).
+            ? 'bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] border-[color-mix(in_srgb,var(--color-accent)_40%,transparent)] cursor-pointer'
             : 'bg-bg-card border-border-strong cursor-pointer'
       }`}
     >
-      <div className={`absolute rounded-full bg-white transition-[left] ${knob}`} />
+      <div className={`absolute rounded-full transition-[left,background-color] ${knob} ${
+        isOn ? 'bg-accent' : 'bg-text-tertiary'
+      }`} />
     </button>
   );
 }

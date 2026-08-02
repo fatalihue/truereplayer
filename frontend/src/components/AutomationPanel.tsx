@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Zap, Plus, Trash2, Pipette, Camera, CircleDot, Frame, X, ScanSearch, Check, Play } from 'lucide-react';
+import { Zap, Plus, Trash2, Pipette, Camera, CircleDot, Frame, X, ScanSearch, Check, Play, Power } from 'lucide-react';
 import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
 import { useTt } from '../state/LanguageContext';
 import { DialogShell } from './common/DialogShell';
 import { Button } from './common/Button';
 import { Toggle } from './common/Toggle';
+import { IconToggle } from './common/IconToggle';
 import { SegmentedControl } from './common/SegmentedControl';
 import { NumberInput } from './common/NumberInput';
 import { ProfileSearchList } from './common/ProfileSearchList';
@@ -451,8 +452,10 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
       showClose
       footer={() => (
         <>
+          {/* IconToggle, not Toggle: this is the daemon's master enable, not a settings row —
+              the Power glyph says what it gates, which a generic switch can't. */}
           <div className="flex items-center gap-2 mr-auto">
-            <Toggle isOn={automation.enabled}
+            <IconToggle isOn={automation.enabled} icon={Power} ariaLabel="Automations enabled"
               onChange={(v) => send({ type: 'automation:setEnabled', payload: { enabled: v } })} />
             <span className="text-[12px] text-text-secondary">Automations enabled</span>
           </div>
