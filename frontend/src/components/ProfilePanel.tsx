@@ -1969,9 +1969,13 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                     >
                       <div
                         // px-1.5 / gap-1 matches the profile rows. The colour the user already
-                        // picked for this folder tints the header and dies out at 72 % of the
+                        // picked for this folder tints the header and dies out at 55 % of the
                         // width, so it identifies the group without fighting the label.
-                        style={{ background: `linear-gradient(90deg, color-mix(in srgb, ${folder.color} 18%, transparent), transparent 72%)` }}
+                        // "Leve" from mockup/profile-panel-gradient-intensity.html: half the ink
+                        // of the original 18 %/72 % recipe, so a column of ten folders reads as a
+                        // list with coloured anchors instead of ten stacked colour bands. The
+                        // 3 px bar and the chevron still carry the folder colour at full strength.
+                        style={{ background: `linear-gradient(90deg, color-mix(in srgb, ${folder.color} 10%, transparent), transparent 55%)` }}
                         className={`w-full flex items-center gap-1 px-1.5 py-1.5 text-left transition-colors group cursor-grab active:cursor-grabbing select-none ${folder.collapsed ? 'rounded-md' : 'rounded-t-md border-b border-border-subtle'} ${selectedFolder === folder.name ? 'ring-1 ring-accent-solid/30' : ''}`}
                         onMouseDown={(e) => handleFolderMouseDown(e, folder.name)}
                         onClick={() => { if (!folderDragActive.current) setSelectedFolder(prev => prev === folder.name ? null : folder.name); }}
