@@ -200,6 +200,12 @@ namespace TrueReplayer.Controllers
                     BringToFocus = UserProfile.Current.BringToFocus,
                     TriggerMode = UserProfile.Current.TriggerMode,
                     IsDisabled = UserProfile.Current.IsDisabled,
+                    // Per-profile loop — mirror CreateProfileFromState; without these four a
+                    // Save-As-New silently resets the copy to 1×.
+                    EnableLoop = UserProfile.Current.EnableLoop,
+                    LoopCount = UserProfile.Current.LoopCount,
+                    LoopIntervalEnabled = UserProfile.Current.LoopIntervalEnabled,
+                    LoopInterval = UserProfile.Current.LoopInterval,
                     // Data-loop table — mirror CreateProfileFromState so a "Save As New" /
                     // first-save doesn't silently drop the table.
                     Data = UserProfile.Current.Data,
@@ -746,11 +752,18 @@ namespace TrueReplayer.Controllers
             }
         }
 
-        public async Task<ContentDialogResult> ShowUnsavedChangesDialogAsync()
+        /// <param name="loopOnly">
+        /// True when the ONLY pending change is a Loops / Interval edit. "You have unsaved
+        /// actions" would be a lie there — the action list is untouched, and on a profile with
+        /// no actions at all it reads as a bug rather than a prompt.
+        /// </param>
+        public async Task<ContentDialogResult> ShowUnsavedChangesDialogAsync(bool loopOnly = false)
         {
             var messageBlock = new TextBlock
             {
-                Text = "You have unsaved actions. Save before closing?",
+                Text = loopOnly
+                    ? "You changed this profile's Loops settings. Save before closing?"
+                    : "You have unsaved actions. Save before closing?",
                 TextWrapping = TextWrapping.Wrap
             };
 
@@ -1337,6 +1350,12 @@ namespace TrueReplayer.Controllers
                     TriggerMode = profile.TriggerMode,
                     BatchDelay = profile.BatchDelay,
                     IsDisabled = profile.IsDisabled,
+                    // Per-profile loop travels with the export. Normalized here too so an
+                    // older profile.json still holding the 0 sentinel exports as 1×.
+                    EnableLoop = profile.EnableLoop,
+                    LoopCount = UserProfile.NormalizeLoopCount(profile.LoopCount),
+                    LoopIntervalEnabled = profile.LoopIntervalEnabled,
+                    LoopInterval = profile.LoopInterval >= 0 ? profile.LoopInterval : 0,
                     Actions = profile.Actions,
                     Images = images,
                     Data = profile.Data,
@@ -1663,6 +1682,15 @@ namespace TrueReplayer.Controllers
                     TriggerMode = entry.TriggerMode,
                     BatchDelay = entry.BatchDelay ?? "Delay (ms)",
                     IsDisabled = entry.IsDisabled,
+                    // Per-profile loop. Import is a TRUST BOUNDARY: a hand-crafted or
+                    // legacy .trprofile can carry 0 (the old "forever" sentinel), a negative,
+                    // or 99999. Normalize on the way in so the sentinel can never re-enter
+                    // through sharing — BuildLoopConfig clamps again at run time, but a bad
+                    // value written to disk here would show a wrong number in the UI.
+                    EnableLoop = entry.EnableLoop,
+                    LoopCount = UserProfile.NormalizeLoopCount(entry.LoopCount),
+                    LoopIntervalEnabled = entry.LoopIntervalEnabled,
+                    LoopInterval = entry.LoopInterval >= 0 ? entry.LoopInterval : 0,
                     // Round-trip sharing metadata. Pre-metadata .trprofile files leave these null
                     // (System.Text.Json default-inits when the property is missing in the JSON),
                     // which is exactly what we want — the Info tab will render "Unknown" / empty.

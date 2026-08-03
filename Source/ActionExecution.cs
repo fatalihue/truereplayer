@@ -1504,7 +1504,14 @@ namespace TrueReplayer.Services
 
         public void SetLoopOptions(int loopCount, int loopInterval)
         {
-            _loopCount = loopCount >= 0 ? loopCount : 0;
+            // A negative count folds to ONE pass, not zero. Zero is read as "infinite" by
+            // StartAsync, so the old `: 0` turned a corrupt/negative value into an endless run
+            // that owns the engine with no Stop reachable from the tray. Unreachable today
+            // (BuildLoopConfig clamps to 1..999 before this), but the rule that matters is:
+            // SetForceInfiniteLoop is the ONLY legal way to produce an infinite macro run.
+            // loopCount == 0 still arrives legitimately from loop-over-data with zero rows —
+            // StartReplay refuses that case before it gets here.
+            _loopCount = loopCount >= 0 ? loopCount : 1;
             _loopInterval = loopInterval >= 0 ? loopInterval : 0;
         }
 

@@ -566,6 +566,7 @@ namespace TrueReplayer
                     UserProfile.Current = defaultProfile;
                     AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
                     bridge.ApplyProfile(defaultProfile);
+                    bridge.PushProfileLoop();
                     TrayIconService.UpdateTrayIcon();
                 }
 
@@ -708,13 +709,16 @@ namespace TrueReplayer
             Services.DiagnosticLog.Info("Close requested — checking unsaved changes");
 
             bool canClose;
-            if (bridge == null || !bridge.HasUnsavedChanges || Actions.Count == 0)
+            // A pending Loops/Interval edit is unsaved work by itself — the Actions.Count == 0
+            // short-circuit must not swallow it. Mirrors WebViewBridge.CheckUnsavedChangesAsync.
+            if (bridge == null || (!bridge.HasUnsavedLoopChange && (!bridge.HasUnsavedChanges || Actions.Count == 0)))
             {
                 canClose = true;
             }
             else
             {
-                var result = await profileController.ShowUnsavedChangesDialogAsync();
+                bool loopOnly = bridge.HasUnsavedLoopChange && (!bridge.HasUnsavedChanges || Actions.Count == 0);
+                var result = await profileController.ShowUnsavedChangesDialogAsync(loopOnly);
 
                 if (result == ContentDialogResult.Primary) // Save
                 {
@@ -1000,11 +1004,17 @@ namespace TrueReplayer
                                 if (geom is null) { effGX = effGY = effW = effH = 0; effRestorePos = false; effRestoreSz = false; }
                                 else (effGX, effGY, effW, effH) = geom.Value;
                             }
+                            // Loop settings via the shared resolver — this path has no profile
+                            // instance of its own, so it resolves "whatever is loaded now"
+                            // (profile's own values, or the global fallback under No Profile).
+                            // Reading bridge.EnableLoop/LoopCount directly here is what made the
+                            // global Replay hotkey ignore the loaded profile's loop count.
+                            var globalLoop = bridge?.BuildLoopConfig() ?? new LoopRunConfig(false, "1", false, "0");
                             mainController.ToggleReplay(
-                                bridge?.EnableLoop ?? false,
-                                bridge?.LoopCount ?? "1",
-                                bridge?.LoopIntervalEnabled ?? false,
-                                bridge?.LoopInterval ?? "0",
+                                globalLoop.Enabled,
+                                globalLoop.Count,
+                                globalLoop.IntervalEnabled,
+                                globalLoop.Interval,
                                 bridge?.UseDelayVariation ?? false,
                                 int.TryParse(bridge?.DelayVariation ?? "20", out var hvp) ? hvp : 20,
                                 effRelCoords,
@@ -1179,6 +1189,10 @@ namespace TrueReplayer
             bridge.ApplyProfile(profile);
             bridge.CurrentProfilePath = entry?.FilePath;
             bridge.HasUnsavedChanges = false;
+            // A hotkey / hotstring / automation fire swaps the visible profile just like a click
+            // does, so the panel and the chip must hear about the new loop values here too. Any
+            // pending edit belonged to the profile we just left.
+            bridge.ClearLoopEdit();
 
             var effectiveTarget = profileController.GetEffectiveWindowTarget(profileName);
             var effectiveRelCoords = profileController.GetEffectiveRelativeCoordinates(profileName);
@@ -1195,31 +1209,23 @@ namespace TrueReplayer
             // zero rect: Restore Position is not size-gated, so (0,0) would be executed as a move.
             if (profGeom is null) { effectiveRestorePos = false; effectiveRestoreSz = false; }
             else (profGX, profGY, profW, profH) = profGeom.Value;
-            // Loop count for an AUTONOMOUS fire can never be infinite. Loops/LoopCount are global
-            // app settings, and LoopCount defaults to 0, which the engine reads as "forever" —
-            // so merely enabling the Loops chip and never touching its value turned every
-            // automation fire into a replay that never ends. That run then owns the single engine
-            // permanently: every other armed automation is skipped busy for good, and with the app
-            // in the tray there is no Stop button to reach. A user pressing a hotkey can press it
-            // again; a daemon firing at 3 a.m. cannot. Coerce to a single pass and say so.
-            // startOnly is exactly "this fire is autonomous" (the hotkey path passes false).
-            bool loopEnabled = bridge.EnableLoop;
-            // Only a literal 0 (or a negative) means "forever" — StartReplay already falls back to
-            // a single pass for a non-numeric LoopCount, so widening the guard to unparseable text
-            // would be coercing a value that was never infinite.
-            string loopCount = bridge.LoopCount;
-            if (startOnly && loopEnabled && int.TryParse(loopCount, out var lc) && lc <= 0)
-            {
-                loopCount = "1";
-                DiagnosticLog.Warn(
-                    $"Automation '{profileName}': global Loops is set to 0 (forever) — running ONCE instead. " +
-                    "An endless autonomous replay would block every other automation with no way to stop it from the tray.");
-            }
+            // Loop settings come from the profile we just loaded, not from the bridge's global
+            // mirrors — this method reloads the profile at the top and then used to read
+            // bridge.EnableLoop/LoopCount anyway, so every profile hotkey, hotstring, DoubleTap,
+            // Hold, OnRelease and automation fire ran the GLOBAL count. Passing the instance (not
+            // the name) keeps it correct regardless of when UserProfile.Current is assigned.
+            //
+            // The old "an autonomous fire can never be infinite" coercion that lived here is gone:
+            // BuildLoopConfig clamps to 1..999, so a macro loop count can no longer BE zero, and
+            // the only remaining source of an endless run is forceInfiniteLoop — which the daemon
+            // passes as false by construction. The guard also only ever covered this method, i.e.
+            // never the Replay button or the global Replay hotkey; the clamp covers all four.
+            var loop = bridge.BuildLoopConfig(profile);
             mainController.ToggleReplay(
-                loopEnabled,
-                loopCount,
-                bridge.LoopIntervalEnabled,
-                bridge.LoopInterval,
+                loop.Enabled,
+                loop.Count,
+                loop.IntervalEnabled,
+                loop.Interval,
                 bridge.UseDelayVariation,
                 int.TryParse(bridge.DelayVariation, out var pvp) ? pvp : 20,
                 effectiveRelCoords,
@@ -1246,6 +1252,7 @@ namespace TrueReplayer
             }
 
             profileController.UpdateProfileColors(profileName);
+            bridge.PushProfileLoop();
             bridge.PushProfilesUpdate();
             bridge.PushToolbarUpdate();
             bridge.PushStatusBarUpdate();

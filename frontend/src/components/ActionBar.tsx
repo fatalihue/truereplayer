@@ -3,6 +3,8 @@ import { SegmentedControl } from './common/SegmentedControl';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
+import { useTt } from '../state/LanguageContext';
+import { chipOn } from './common/chipStyles';
 
 // Shared min-width for the primary action buttons so the layout doesn't shift when
 // labels swap (Recording↔Pause, Replay↔Stop, Click↔Stop). Comfortably fits the longest
@@ -10,23 +12,19 @@ import { useSelectionRef } from '../state/SelectionContext';
 const PRIMARY_BTN = 'min-w-[120px] justify-center';
 
 export function ActionBar() {
-  const { buttonStates, settings, actions } = useAppState();
+  const { buttonStates, settings, actions, profileLoop, profiles, activeProfile, dataTable } = useAppState();
   const { send } = useBridge();
   const selectionRef = useSelectionRef();
+  const tt = useTt();
   const isClicker = settings.useCursorClick;
   const isReplaying = buttonStates.replayActive;
   const isRecording = buttonStates.recordingActive;
 
   const handleReplay = () => {
-    send({
-      type: 'replay:toggle',
-      payload: {
-        loopEnabled: settings.enableLoop,
-        loopCount: settings.loopCount,
-        intervalEnabled: settings.loopIntervalEnabled,
-        intervalText: settings.loopInterval,
-      },
-    });
+    // Empty payload on purpose — the backend resolves the loop settings itself. Sending
+    // React's `settings` slice back is what made this button run the previous profile's
+    // count: no profile-activation path refreshes that slice.
+    send({ type: 'replay:toggle', payload: {} });
   };
 
   const setMode = (clicker: boolean) => {
@@ -48,6 +46,43 @@ export function ActionBar() {
   const recordBtnClass = isRecording
     ? 'bg-accent-solid hover:bg-accent-solid/80 text-white'
     : 'bg-recording hover:bg-recording/80 text-white';
+
+  // ── Loop chip ──
+  // Loops moved out of Settings-as-a-global into the profile, and a value you can only see by
+  // opening a side panel is a value that surprises you mid-run. The chip answers "how many
+  // passes will this Replay do?" at the point of pressing it.
+  //
+  // The order below IS the engine's precedence chain (StartReplay + SetForceInfiniteLoop):
+  // loop-over-data > forced infinite > the profile's own count. Reporting the raw count while
+  // one of the first two is in effect would be a lie — a 40-row data profile showing "3x" is
+  // worse than no chip.
+  const activeEntry = activeProfile ? profiles.find(p => p.name === activeProfile) : undefined;
+  const forcedInfinite = activeEntry?.triggerMode === 'whilePressed' || activeEntry?.triggerMode === 'toggle';
+  const perRow = dataTable.loopOverData && dataTable.rows.length > 0;
+  // True only when the chip is actually reporting the Loops number. The other two branches
+  // report something that OVERRIDES it, and both the accent tint and the unsaved marker below
+  // are gated on this — an amber "unsaved Loops" outline around a chip reading "per row" would
+  // decorate a value that this run is not going to use.
+  const showsCount = !perRow && !forcedInfinite;
+  const loopLabel = perRow
+    ? tt('per row', 'por linha')
+    : forcedInfinite
+      ? '∞'
+      : profileLoop.enabled
+        ? `${profileLoop.count}×`
+        : '1×';
+  // Quiet by default: only an actual repeat earns the accent tint. A dashed amber outline
+  // marks an edit that Ctrl+S has not written yet — the value is live for this session but
+  // will not survive a profile switch.
+  const loopEmphasised = showsCount && profileLoop.enabled && profileLoop.count !== '1';
+  const loopDirty = showsCount && profileLoop.dirty;
+  const loopTip = perRow
+    ? tt('One run per data row.', 'Uma execução por linha de dados.')
+    : forcedInfinite
+      ? tt('Runs until you stop it.', 'Roda até você parar.')
+      : loopDirty
+        ? tt('Repeats per run. Not saved — press Ctrl+S.', 'Repetições por execução. Não salvo — aperte Ctrl+S.')
+        : tt('Repeats per run. Change in Settings → Execution.', 'Repetições por execução. Ajuste em Settings → Execution.');
 
   const replayBtnClass = isReplaying
     ? 'bg-accent-solid hover:bg-accent-solid/80 text-white'
@@ -124,6 +159,34 @@ export function ActionBar() {
               : <Play size={12} fill="white" className="shrink-0" />}
           {buttonStates.replayButtonText}
         </button>
+
+        {/* Loop chip — macro only. Clicker has its own loop control in the side panel
+            (ClickerSection), HandleReplayToggle returns before reading any of this in Clicker
+            mode, and Save/Load next to it are already disabled there — so showing a macro loop
+            count in Clicker mode would describe a number nothing is going to use. */}
+        {!isClicker && (
+          <span
+            data-tip={loopTip}
+            className={`h-7 px-2 flex items-center justify-center rounded border text-[11px] font-mono tabular-nums select-none ${
+              loopEmphasised ? 'text-accent-solid' : 'text-text-tertiary'
+            } ${loopDirty ? 'border-dashed' : ''}`}
+            style={
+              loopDirty
+                ? {
+                    // Amber, not the accent: "pending" must not read as "on". Dashed border
+                    // carries the state a second way, for the low-contrast themes where a hue
+                    // shift alone drops below readable (see the toggle-two-channel note).
+                    borderColor: 'color-mix(in srgb, var(--color-warning) 55%, transparent)',
+                    background: 'color-mix(in srgb, var(--color-warning) 12%, transparent)',
+                  }
+                : loopEmphasised
+                  ? chipOn
+                  : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }
+            }
+          >
+            {loopLabel}
+          </span>
+        )}
       </div>
 
       {/* Right: Save + Load — disabled in Clicker mode (profiles wrap recorded actions,

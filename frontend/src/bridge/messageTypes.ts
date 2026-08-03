@@ -259,6 +259,10 @@ export interface ImportPreviewProfile {
   actionCount: number;
   /** Number of embedded reference PNGs bundled for this profile. */
   imageCount?: number;
+  /** Per-profile loop, already normalized to 1..999. Rendered only when enableLoop is on and
+   *  the count is above 1 — a profile that repeats 500x should not be a surprise after import. */
+  loopCount?: number;
+  enableLoop?: boolean;
   hotkey: string | null;
   hotstring: string | null;
   targetProcessName: string | null;
@@ -516,6 +520,23 @@ export interface ButtonStates {
 
 // ── App State ──
 
+/**
+ * Per-profile loop settings, as resolved by WebViewBridge.BuildLoopConfig.
+ * `count` is already clamped to 1..999 — 0 ("forever") is not an authorable macro value; an
+ * endless run comes only from the WhilePressed / Toggle trigger modes.
+ */
+export interface ProfileLoopState {
+  /** Times to repeat, 1..999. Always a real number, never the old 0 sentinel. */
+  count: string;
+  enabled: boolean;
+  interval: string;
+  intervalEnabled: boolean;
+  /** An edit is pending that Ctrl+S / Save would persist. Drives the chip's dashed outline. */
+  dirty: boolean;
+  /** false = no profile loaded, so the Settings rows edit the app-level fallback instead. */
+  scoped: boolean;
+}
+
 export interface AppState {
   status: 'ready' | 'recording' | 'replaying';
   actions: ActionItem[];
@@ -528,6 +549,15 @@ export interface AppState {
   activeProfile: string | null;
   profileOrder: ProfileOrderData;
   settings: SettingsState;
+  /**
+   * Loop settings for the ACTIVE profile — the values a Replay will actually use.
+   * Deliberately a top-level slice and not part of `settings`: settings:loaded replaces that
+   * whole slice by merging over the defaults and has ~19 unrelated emitters (tray, ScrollLock,
+   * Pause, key remaps, every Clicker picker), so an unsaved loop edit parked in there would be
+   * wiped by, say, a mode toggle. Owned by the C# bridge; arrives via 'profile:loop' and in the
+   * state:init blob, never mutated locally.
+   */
+  profileLoop: ProfileLoopState;
   toolbar: {
     profileName: string;
     actionCount: number;
@@ -622,6 +652,11 @@ export type IncomingMessage =
   | { type: 'actions:highlight'; payload: { index: number } }
   | { type: 'profiles:updated'; payload: { profiles: ProfileEntry[]; activeProfile: string | null; profileOrder: ProfileOrderData } }
   | { type: 'settings:loaded'; payload: { settings: SettingsState } }
+  // Narrow push for the active profile's loop settings. Fired by EVERY profile-activation
+  // path (click, create, hotkey/hotstring, automation fire, import-overwrite reload, load,
+  // delete/deselect to No Profile, reset) plus each Loops/Interval edit. Narrow on purpose —
+  // see ProfileLoopState for why this cannot ride inside settings:loaded.
+  | { type: 'profile:loop'; payload: ProfileLoopState }
   | { type: 'button:states'; payload: ButtonStates }
   | { type: 'toolbar:updated'; payload: { profileName: string; actionCount: number } }
   | { type: 'statusbar:updated'; payload: { directory: string; profileName: string | null; actionCount: number } }
@@ -725,7 +760,11 @@ export type OutgoingMessage =
   // Whole-list save of the key remap layer (capped at 32 entries backend-side).
   | { type: 'remap:save'; payload: { enabled: boolean; remaps: { from: string; to: string; enabled: boolean }[] } }
   | { type: 'recording:toggle'; payload: { insertIndex?: number } }
-  | { type: 'replay:toggle'; payload: { loopEnabled: boolean; loopCount: string; intervalEnabled: boolean; intervalText: string } }
+  // No payload: the loop settings used to ride here, straight out of the React `settings`
+  // slice, which no profile-activation path refreshes — so after switching from a 3x profile
+  // to a 1x one the button sent the stale 3. The backend resolves them itself now
+  // (WebViewBridge.BuildLoopConfig), same as the hotkey and automation paths.
+  | { type: 'replay:toggle'; payload: Record<string, never> }
   | { type: 'replay:resume'; payload: Record<string, never> }
   // Answer to a replay:inputRequest. cancelled=true aborts the run; else `value` is substituted.
   | { type: 'replay:inputResult'; payload: { requestId: string; value: string; cancelled: boolean } }

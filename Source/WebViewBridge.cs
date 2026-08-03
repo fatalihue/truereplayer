@@ -62,7 +62,14 @@ namespace TrueReplayer
         public bool UseCustomDelay { get; set; } = true;
         public string DelayVariation { get; set; } = "1";
         public bool UseDelayVariation { get; set; } = false;
-        public string LoopCount { get; set; } = "0";
+        // ── "No Profile" loop fallback ──
+        // These four are the GLOBAL loop settings and nothing else: they are seeded from
+        // appsettings.json, persisted by SaveGlobalSettings, and consumed by BuildLoopConfig
+        // ONLY while CurrentProfileName == "No Profile". Loading a profile no longer copies
+        // anything into them (see AppSettingsManager.ApplyGlobalSettings), so they can never
+        // carry one profile's value into another's run. Default "1", not "0" — 0 means
+        // "forever" to the engine and is no longer an authorable macro value.
+        public string LoopCount { get; set; } = "1";
         public bool EnableLoop { get; set; } = false;
         public string LoopInterval { get; set; } = "200";
         public bool LoopIntervalEnabled { get; set; } = false;
@@ -167,8 +174,11 @@ namespace TrueReplayer
         // Clears ONLY the per-profile (serialized) window/target fields on the shared static
         // profile, so they don't leak across a "No Profile" transition (see the CurrentProfileName
         // setter for the full rationale). The [JsonIgnore] globals on UserProfile.Current —
-        // hotkeys, AlwaysOnTop, ProfileKeyEnabled, record toggles, loop/delay — are deliberately
+        // hotkeys, AlwaysOnTop, ProfileKeyEnabled, record toggles, delay — are deliberately
         // left untouched because that object doubles as the live global-settings holder.
+        // Loop/Interval are NOT in that list any more: they are per-profile serialized fields,
+        // and under "No Profile" BuildLoopConfig reads the bridge's own mirrors instead of this
+        // object, so a stale value here is never executed.
         private static void ResetCurrentProfileWindowContext()
         {
             var cur = UserProfile.Current;
@@ -633,7 +643,7 @@ namespace TrueReplayer
                 {
                     case "ui:ready": HandleUIReady(); break;
                     case "recording:toggle": HandleRecordingToggle(payload); break;
-                    case "replay:toggle": HandleReplayToggle(payload); break;
+                    case "replay:toggle": HandleReplayToggle(); break;
                     case "replay:resume": HandleReplayResume(payload); break;
                     case "replay:inputResult": HandleInputResult(payload); break;
                     case "replay:variablesRequest": replayService.RequestVariablesSnapshot(); break;
@@ -1843,6 +1853,113 @@ namespace TrueReplayer
                 recordingService.StopRecording();
         }
 
+        // ── Per-profile loop: the session edit ──
+        // Editing Loops in Settings mutates the LOADED PROFILE OBJECT (UserProfile.Current) and
+        // raises this flag; Ctrl+S / the Save button writes it to disk. It is deliberately NOT
+        // HasUnsavedChanges: that flag makes the automation daemon skip the profile
+        // (TriggerFireResult.SkippedDirty), so an armed automation would silently stop firing
+        // just because someone nudged a loop count. The unsaved-changes prompt and the window
+        // close guard honour this flag SEPARATELY, including on a profile with zero actions
+        // (both short-circuit on actions.Count == 0, which would otherwise drop the edit with
+        // no dialog at all).
+        //
+        // Name-scoped: the pending edit belongs to the profile that was loaded when it was made.
+        // Every activation path clears it explicitly (ClearLoopEdit), and the name check is the
+        // belt-and-braces so a missed call can never paint another profile's chip as dirty.
+        private bool _hasUnsavedLoopChange;
+        private string? _loopEditProfile;
+        public bool HasUnsavedLoopChange => _hasUnsavedLoopChange && _loopEditProfile == CurrentProfileName;
+        private void MarkLoopEdited()
+        {
+            _hasUnsavedLoopChange = true;
+            _loopEditProfile = CurrentProfileName;
+        }
+        public void ClearLoopEdit()
+        {
+            _hasUnsavedLoopChange = false;
+            _loopEditProfile = null;
+        }
+        /// <summary>Follow a rename: same loaded profile, new name, edit survives.</summary>
+        private void RetargetLoopEdit(string newName)
+        {
+            if (_hasUnsavedLoopChange) _loopEditProfile = newName;
+        }
+
+        /// <summary>
+        /// The ONE place a macro run's loop settings are resolved. Precedence:
+        ///   loop-over-data (rows) &gt; forceInfinite (WhilePressed/Toggle) &gt; profile &gt; global.
+        /// The first two are applied downstream (StartReplay overrides the count for
+        /// loop-over-data; forceInfinite is a separate boolean on the replayer), so what this
+        /// method owns is the bottom half: the loaded profile's own values, falling back to the
+        /// bridge's global mirrors only under "No Profile".
+        /// </summary>
+        /// <param name="profile">
+        /// The profile actually about to run. The hotkey/automation path already loaded a fresh
+        /// instance and MUST pass it — UserProfile.Current is assigned from it a few lines later,
+        /// but reading the parameter keeps this correct regardless of ordering. Null = "whatever
+        /// is loaded right now" (Replay button, global Replay hotkey).
+        /// Taking a UserProfile rather than a profile NAME is deliberate: ProfileEntry carries no
+        /// loop fields and LoadProfileByNameAsync is async I/O, so a name-based overload would
+        /// either lie or block. Same shape as BuildClickerConfig.
+        /// </param>
+        public LoopRunConfig BuildLoopConfig(UserProfile? profile = null)
+        {
+            // No profile loaded → the app-level fallback in appsettings.json, mirrored here.
+            if (profile == null && CurrentProfileName == "No Profile")
+            {
+                int globalCount = int.TryParse(LoopCount, out var gc) ? gc : UserProfile.MinLoopCount;
+                return new LoopRunConfig(
+                    EnableLoop,
+                    UserProfile.NormalizeLoopCount(globalCount).ToString(),
+                    LoopIntervalEnabled,
+                    LoopInterval);
+            }
+
+            var p = profile ?? UserProfile.Current;
+            // Clamp here and not only at the edges: this covers disk, import, and a hand-edited
+            // profile.json in one shot, and it is what guarantees a macro can never reach the
+            // engine with 0 (= forever). Interval has no such sentinel, only a negative guard.
+            return new LoopRunConfig(
+                p.EnableLoop,
+                UserProfile.NormalizeLoopCount(p.LoopCount).ToString(),
+                p.LoopIntervalEnabled,
+                (p.LoopInterval >= 0 ? p.LoopInterval : 0).ToString());
+        }
+
+        /// <summary>
+        /// Narrow push for the active profile's loop settings. Deliberately NOT PushSettingsLoaded:
+        /// that message replaces the whole React `settings` slice by merging over the DEFAULTS and
+        /// has ~19 emitters (tray, ScrollLock, Pause, remaps, the automation master, every Clicker
+        /// picker), so an unsaved loop edit living in that slice would be wiped by an unrelated
+        /// mode toggle. Must be called from EVERY profile-activation path — ApplyProfile only
+        /// pushes actions and button states, so without this the panel keeps showing the previous
+        /// profile's number.
+        /// </summary>
+        public void PushProfileLoop() => SendMessage("profile:loop", ProjectProfileLoop());
+
+        /// <summary>
+        /// The single projection behind BOTH emitters of this payload (profile:loop and the
+        /// state:init cold-start blob). Written as one helper because every other pair of
+        /// duplicated DTOs in this file has drifted at least once.
+        /// </summary>
+        private object ProjectProfileLoop()
+        {
+            var cfg = BuildLoopConfig();
+            return new
+            {
+                count = cfg.Count,
+                enabled = cfg.Enabled,
+                interval = cfg.Interval,
+                intervalEnabled = cfg.IntervalEnabled,
+                // "there is an edit that Ctrl+S would persist" — the chip renders it as a dashed
+                // amber outline. HasUnsavedChanges is never pushed to the frontend (~40 writes,
+                // zero pushes), so the chip cannot derive this itself.
+                dirty = HasUnsavedLoopChange,
+                // false = the Settings rows are editing the app-level "No Profile" fallback.
+                scoped = CurrentProfileName != "No Profile",
+            };
+        }
+
         // Build a Clicker run config from the current bridge mirror state. Single source of
         // truth so the Replay-hotkey path (MainWindow) and the toggle-replay message path
         // (HandleReplayToggle) stay in sync — both call this instead of duplicating the
@@ -1995,10 +2112,15 @@ namespace TrueReplayer
         /// </summary>
         private async Task<bool> CheckUnsavedChangesAsync()
         {
-            if (!HasUnsavedChanges || actions.Count == 0)
+            // A pending Loops/Interval edit counts as unsaved work on its OWN — including on a
+            // profile with zero actions, which the `actions.Count == 0` short-circuit below
+            // would otherwise wave through. Without this, editing the loop count and clicking
+            // another profile discarded the value with no dialog at all.
+            if (!HasUnsavedLoopChange && (!HasUnsavedChanges || actions.Count == 0))
                 return true;
 
-            var result = await profileController.ShowUnsavedChangesDialogAsync();
+            bool loopOnly = HasUnsavedLoopChange && (!HasUnsavedChanges || actions.Count == 0);
+            var result = await profileController.ShowUnsavedChangesDialogAsync(loopOnly);
 
             if (result == Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary) // Save
             {
@@ -2060,6 +2182,14 @@ namespace TrueReplayer
                 BringToFocus = UserProfile.Current.BringToFocus,
                 TriggerMode = UserProfile.Current.TriggerMode,
                 IsDisabled = UserProfile.Current.IsDisabled,
+                // Per-profile loop. This initializer is the ONLY gate: the serializer is generic,
+                // so a field left out here is simply never written and the on-disk value reverts
+                // to the class default on the next load. Source is the profile's own stored
+                // value (UserProfile.Current), never the bridge's global mirror.
+                EnableLoop = UserProfile.Current.EnableLoop,
+                LoopCount = UserProfile.Current.LoopCount,
+                LoopIntervalEnabled = UserProfile.Current.LoopIntervalEnabled,
+                LoopInterval = UserProfile.Current.LoopInterval,
                 // Data-loop table travels with the profile so a normal Save preserves it
                 // (data:save also persists immediately, but the main Save must not null it).
                 Data = UserProfile.Current.Data,
@@ -2149,6 +2279,12 @@ namespace TrueReplayer
                     runProfileTargets = p.RunProfileTargets
                 }).ToArray(),
                 activeProfile = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName,
+                // Cold-start mirror of the profile:loop push — MUST stay in sync with
+                // PushProfileLoop's payload. Top-level (not inside `settings`) on purpose: the
+                // settings slice is replaced wholesale by settings:loaded, which ~19 unrelated
+                // emitters fire, and an unsaved loop edit parked in there would vanish when the
+                // user pressed ScrollLock.
+                profileLoop = ProjectProfileLoop(),
                 profileOrder = new
                 {
                     pinned = profileController.GetProfileOrder().Pinned,
@@ -2470,7 +2606,9 @@ namespace TrueReplayer
             mainController.ToggleRecording();
         }
 
-        private void HandleReplayToggle(JsonElement payload)
+        // No payload: the loop settings that used to ride in it are now resolved backend-side
+        // (see BuildLoopConfig below), and nothing else in the message was ever read.
+        private void HandleReplayToggle()
         {
             if (UseCursorClick)
             {
@@ -2481,16 +2619,17 @@ namespace TrueReplayer
                 return;
             }
 
-            // Defensive reads — a hotkey-forwarded or older-frontend payload may omit these.
-            // GetProperty/GetBoolean would throw and the outer catch would only Debug.WriteLine,
-            // silently dropping the replay start. Fall back to the same defaults the *.GetString()
-            // calls already used (loop off, count "1", interval off, text "0").
-            bool loopEnabled = payload.TryGetProperty("loopEnabled", out var loopEnEl) && loopEnEl.ValueKind == JsonValueKind.True;
-            string loopCount = payload.TryGetProperty("loopCount", out var loopCntEl) && loopCntEl.ValueKind == JsonValueKind.String
-                ? loopCntEl.GetString() ?? "1" : "1";
-            bool intervalEnabled = payload.TryGetProperty("intervalEnabled", out var ivEnEl) && ivEnEl.ValueKind == JsonValueKind.True;
-            string intervalText = payload.TryGetProperty("intervalText", out var ivTxtEl) && ivTxtEl.ValueKind == JsonValueKind.String
-                ? ivTxtEl.GetString() ?? "0" : "0";
+            // Loop settings come from the backend, NOT from the payload. The button used to send
+            // React's `settings` slice back to us, and that slice is only refreshed by
+            // settings:loaded — which no profile-activation path emits. Switching from a 3×
+            // profile to a 1× one therefore left the stale 3 in the payload and the button ran
+            // the wrong number of passes while the hotkey ran the right one. One resolver, four
+            // entry points (button, global Replay hotkey, profile hotkey/hotstring, daemon).
+            var loop = BuildLoopConfig();
+            bool loopEnabled = loop.Enabled;
+            string loopCount = loop.Count;
+            bool intervalEnabled = loop.IntervalEnabled;
+            string intervalText = loop.Interval;
 
             bool useVariation = UseDelayVariation;
             int variationPercent = int.TryParse(DelayVariation, out var vp) ? vp : 20;
@@ -5253,6 +5392,10 @@ namespace TrueReplayer
                 HasUnsavedChanges = false;
                 actions.Clear();
                 profileController.UpdateProfileColors(null);
+                // Deselect lands on "No Profile", which switches the Loops row back to editing
+                // the app-level fallback — the chip and the panel both need to hear about it.
+                ClearLoopEdit();
+                PushProfileLoop();
                 PushProfilesUpdate();
                 PushActionsUpdate();
                 PushButtonStates();
@@ -5282,6 +5425,12 @@ namespace TrueReplayer
                 UserProfile.Current.BringToFocus = profileController.GetEffectiveBringToFocus(name);
                 ApplyProfile(profile);
                 profileController.UpdateProfileColors(name);
+                // The new profile's loop settings. ApplyProfile only pushes actions + button
+                // states, so without this the panel keeps rendering the PREVIOUS profile's
+                // number. The edit flag is reset explicitly — it is not tied to profile identity
+                // on the React side and would otherwise stay dirty across the swap.
+                ClearLoopEdit();
+                PushProfileLoop();
                 PushProfilesUpdate();
                 TrayIconService.UpdateTrayIcon();
             }
@@ -5376,6 +5525,8 @@ namespace TrueReplayer
                     UserProfile.Current.BringToFocus = profileController.GetEffectiveBringToFocus(profileName);
                     ApplyProfile(loaded);
                     profileController.UpdateProfileColors(profileName);
+                    ClearLoopEdit();
+                    PushProfileLoop();
                     TrayIconService.UpdateTrayIcon();
                 }
 
@@ -5559,6 +5710,10 @@ namespace TrueReplayer
                 {
                     CurrentProfileName = actualNewName;
                     CurrentProfilePath = newFilePath;
+                    // A rename keeps the same loaded profile — and so must a pending, unsaved
+                    // loop edit. Re-stamp the edit's owner name instead of clearing it, or the
+                    // name check in HasUnsavedLoopChange would silently drop the user's value.
+                    RetargetLoopEdit(actualNewName);
                 }
                 // Migrate the automation fire-stats BEFORE the refresh re-arms under the new
                 // name — otherwise cooldown/fire history restarts from zero on every rename.
@@ -5701,6 +5856,10 @@ namespace TrueReplayer
                     CurrentProfilePath = null;
                     HasUnsavedChanges = false;
                     actions.Clear();
+                    // Deleting the active profile drops to "No Profile" — same handoff back to
+                    // the global fallback as the deselect branch in HandleProfileClick.
+                    ClearLoopEdit();
+                    PushProfileLoop();
                 }
 
                 await profileController.RemoveProfileFromOrderAsync(name);
@@ -7478,6 +7637,12 @@ namespace TrueReplayer
                     compatible = ProfileCompatibility.IsCompatible(p.AppMinVersion, runningVersion),
                     actionCount = acts.Count,
                     imageCount = p.Images?.Count ?? 0,
+                    // Per-profile loop, so the preview doesn't hide a profile that will hammer
+                    // the receiver's machine 500 times per press. Normalized the same way the
+                    // import itself normalizes, so the preview can't promise a value the write
+                    // then clamps away.
+                    loopCount = UserProfile.NormalizeLoopCount(p.LoopCount),
+                    enableLoop = p.EnableLoop,
                     hotkey = p.CustomHotkey,
                     hotstring = p.CustomHotstring?.Sequence,
                     targetProcessName = p.TargetWindow?.ProcessName,
@@ -7623,6 +7788,11 @@ namespace TrueReplayer
                             UserProfile.Current.BringToFocus = profileController.GetEffectiveBringToFocus(CurrentProfileName);
                             ApplyProfile(reloaded);
                             profileController.UpdateProfileColors(CurrentProfileName);
+                            // The import overwrote the loaded profile on disk and we just re-read
+                            // it — its loop settings may differ from what the panel is showing,
+                            // and any pending edit belonged to the file that no longer exists.
+                            ClearLoopEdit();
+                            PushProfileLoop();
                             TrayIconService.UpdateTrayIcon();
                         }
                     }
@@ -7897,19 +8067,22 @@ namespace TrueReplayer
                     UserProfile.Current = profile;
                     AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
                     HasUnsavedChanges = false;
+                    // The pending loop edit is now on disk — the chip drops its dashed outline.
+                    ClearLoopEdit();
                 }
                 else if (choice == SaveDialogResult.SaveAsNew)
                 {
                     bool saved = await profileController.SaveProfileAsync();
-                    if (saved) HasUnsavedChanges = false;
+                    if (saved) { HasUnsavedChanges = false; ClearLoopEdit(); }
                 }
                 // Cancel = do nothing
             }
             else
             {
                 bool saved = await profileController.SaveProfileAsync();
-                if (saved) HasUnsavedChanges = false;
+                if (saved) { HasUnsavedChanges = false; ClearLoopEdit(); }
             }
+            PushProfileLoop();
             PushProfilesUpdate();
         }
 
@@ -7927,6 +8100,8 @@ namespace TrueReplayer
             HasUnsavedChanges = false;
             ApplyProfile(UserProfile.Current);
             profileController.UpdateProfileColors(name);
+            ClearLoopEdit();
+            PushProfileLoop();
             PushProfilesUpdate();
             TrayIconService.UpdateTrayIcon();
         }
@@ -8046,11 +8221,15 @@ namespace TrueReplayer
             CurrentProfileName = "No Profile";
             CurrentProfilePath = null;
             HasUnsavedChanges = false;
+            ClearLoopEdit();
+            PushProfileLoop();
             PushSettingsLoaded();
             // Distinct signal for "the user explicitly reset everything" — used by the
             // Clicker panel to bounce its local UI state (e.g. the /s ↔ ms unit toggle)
-            // back to its default. Plain settings:loaded fires too often (every profile
-            // switch, mode toggle, etc.) so a dedicated message keeps the protocol clear.
+            // back to its default. Plain settings:loaded fires too often (mode toggle, tray,
+            // every settings:change) so a dedicated message keeps the protocol clear.
+            // (It does NOT fire on a profile switch — that claim used to be here and was wrong;
+            // it is precisely why the per-profile loop needed its own profile:loop push.)
             SendMessage("settings:reset", new { });
             PushProfilesUpdate();
             PushToolbarUpdate();
@@ -8075,8 +8254,12 @@ namespace TrueReplayer
                 CustomDelay = int.TryParse(CustomDelay, out var d) ? d : 100,
                 UseDelayVariation = UseDelayVariation,
                 DelayVariation = int.TryParse(DelayVariation, out var dv) ? dv : 1,
+                // The mirrors are the "No Profile" fallback and nothing else — a loaded profile's
+                // value never reaches them (HandleProfileLoopSettingChange writes the profile
+                // object instead), so persisting them here cannot leak a profile value into the
+                // global. Fallback is 1, not 0: 0 is no longer an authorable macro loop count.
                 EnableLoop = EnableLoop,
-                LoopCount = int.TryParse(LoopCount, out var c) ? c : 0,
+                LoopCount = int.TryParse(LoopCount, out var c) ? UserProfile.NormalizeLoopCount(c) : UserProfile.MinLoopCount,
                 LoopIntervalEnabled = LoopIntervalEnabled,
                 LoopInterval = int.TryParse(LoopInterval, out var li) ? li : 200,
                 SmoothMovement = ActionReplayer.SmoothMovement,
@@ -8132,6 +8315,71 @@ namespace TrueReplayer
                 HasAcknowledgedImportWarning = AppSettingsManager.Load().HasAcknowledgedImportWarning,
             };
             AppSettingsManager.Save(s);
+        }
+
+        private static readonly HashSet<string> ProfileLoopSettingKeys = new()
+        {
+            "profileLoopCount", "profileEnableLoop", "profileLoopInterval", "profileLoopIntervalEnabled"
+        };
+
+        /// <summary>
+        /// Applies a Loops / Interval edit to whichever scope owns it: the loaded profile
+        /// (kept in memory, written by Ctrl+S / Save) or, under "No Profile", the app-level
+        /// fallback (written through immediately — it has no Save button of its own).
+        /// One handler for both scopes so the Settings row stays a single code path.
+        /// </summary>
+        private void HandleProfileLoopSettingChange(string key, JsonElement value)
+        {
+            bool scoped = CurrentProfileName != "No Profile";
+            var p = UserProfile.Current;
+
+            switch (key)
+            {
+                case "profileLoopCount":
+                {
+                    // The chip floors at 1 client-side; this is the backstop for a hand-sent or
+                    // version-skewed message. Non-numeric text (the field takes free text when
+                    // `format` is off) parses to nothing and must not become 0 = forever.
+                    int n = int.TryParse(value.GetString(), out var c) ? c : UserProfile.MinLoopCount;
+                    n = UserProfile.NormalizeLoopCount(n);
+                    if (scoped) p.LoopCount = n; else LoopCount = n.ToString();
+                    break;
+                }
+                case "profileEnableLoop":
+                {
+                    bool on = value.GetBoolean();
+                    if (scoped) p.EnableLoop = on; else EnableLoop = on;
+                    break;
+                }
+                case "profileLoopInterval":
+                {
+                    int n = int.TryParse(value.GetString(), out var i) && i >= 0 ? i : 0;
+                    if (scoped) p.LoopInterval = n; else LoopInterval = n.ToString();
+                    break;
+                }
+                case "profileLoopIntervalEnabled":
+                {
+                    bool on = value.GetBoolean();
+                    if (scoped) p.LoopIntervalEnabled = on; else LoopIntervalEnabled = on;
+                    break;
+                }
+            }
+
+            if (scoped)
+            {
+                // Deliberately NOT autosaved: D1 is "the normal Save owns this". An autosaving
+                // Loops row sitting next to an Interval row that waits for Ctrl+S would be the
+                // worst of both. HasUnsavedLoopChange (not HasUnsavedChanges) so an armed
+                // automation keeps firing — see the flag's declaration.
+                MarkLoopEdited();
+            }
+            else
+            {
+                // No profile loaded → the mirrors ARE the global, so write them straight through.
+                SaveGlobalSettings();
+            }
+
+            PushProfileLoop();
         }
 
         private static readonly HashSet<string> HotkeySettingKeys = new()
@@ -8227,6 +8475,19 @@ namespace TrueReplayer
             string key = payload.GetProperty("key").GetString() ?? "";
             var valueElement = payload.GetProperty("value");
 
+            // ── Per-profile loop, routed out before the switch ──
+            // Distinct message keys ("profileLoopCount", …) rather than the old global ones, and
+            // an EARLY RETURN, because this method ends with an unconditional SaveGlobalSettings()
+            // outside the switch (see the tail). Letting a profile-scoped edit fall through there
+            // would stamp the edited profile's loop count into appsettings.json — the "global"
+            // would silently become "whatever profile I touched last", breaking the No-Profile
+            // fallback and undoing the whole point of a per-profile value.
+            if (ProfileLoopSettingKeys.Contains(key))
+            {
+                HandleProfileLoopSettingChange(key, valueElement);
+                return;
+            }
+
             // Validate hotkey uniqueness before applying
             if (HotkeySettingKeys.Contains(key))
             {
@@ -8254,18 +8515,10 @@ namespace TrueReplayer
                 case "useDelayVariation":
                     UseDelayVariation = valueElement.GetBoolean();
                     break;
-                case "loopCount":
-                    LoopCount = valueElement.GetString() ?? "0";
-                    break;
-                case "enableLoop":
-                    EnableLoop = valueElement.GetBoolean();
-                    break;
-                case "loopInterval":
-                    LoopInterval = valueElement.GetString() ?? "200";
-                    break;
-                case "loopIntervalEnabled":
-                    LoopIntervalEnabled = valueElement.GetBoolean();
-                    break;
+                // The legacy loopCount / enableLoop / loopInterval / loopIntervalEnabled cases
+                // used to live here. They are gone on purpose: those four are per-profile now
+                // and are routed by HandleProfileLoopSettingChange above, which returns BEFORE
+                // this switch's unconditional SaveGlobalSettings() tail.
                 // Smooth mouse movement (interpolated cursor path). See ActionReplayer.SmoothMovement.
                 case "smoothMovement":
                     ActionReplayer.SmoothMovement = valueElement.GetBoolean();

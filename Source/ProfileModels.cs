@@ -69,14 +69,30 @@ namespace TrueReplayer.Models
         [JsonIgnore]
         public int CustomDelay { get; set; } = 100;
 
-        [JsonIgnore]
+        // ── Per-profile loop (serialized) ──
+        // These four used to be [JsonIgnore] global app settings, so profile A set to 3× made
+        // profile B's hotkey run 3× too. They now belong to the profile and travel with it
+        // (save / export / import). A profile.json written before this feature has no
+        // "loopCount" key, so System.Text.Json leaves the initializer below — which is why the
+        // default MUST be 1, not 0: the replay engine reads 0 as "run forever". Authored zero
+        // is gone entirely for macros (UI floors at 1, BuildLoopConfig clamps 1..999); only
+        // the WhilePressed / Toggle trigger modes still produce an infinite run, and they do it
+        // through a separate boolean that never touches this field.
         public bool EnableLoop { get; set; } = false;
-        [JsonIgnore]
-        public int LoopCount { get; set; } = 0;
-        [JsonIgnore]
+        public int LoopCount { get; set; } = 1;
         public bool LoopIntervalEnabled { get; set; } = false;
-        [JsonIgnore]
         public int LoopInterval { get; set; } = 200;
+
+        /// <summary>Inclusive bounds for a macro loop count. 0 is NOT a legal authored value.</summary>
+        public const int MinLoopCount = 1;
+        public const int MaxLoopCount = 999;
+
+        /// <summary>
+        /// Single normalizer for every untrusted source of a loop count — disk, .trprofile
+        /// import, and hand-edited JSON all funnel through here. Anything &lt;= 0 (including the
+        /// legacy "0 = forever" sentinel and a negative from a corrupt file) becomes one pass.
+        /// </summary>
+        public static int NormalizeLoopCount(int n) => Math.Clamp(n, MinLoopCount, MaxLoopCount);
 
         [JsonIgnore]
         public bool AlwaysOnTop { get; set; } = false;
@@ -168,7 +184,7 @@ namespace TrueReplayer.Models
             UseCustomDelay = true,
             CustomDelay = 100,
             EnableLoop = false,
-            LoopCount = 0,
+            LoopCount = 1,
             LoopIntervalEnabled = false,
             LoopInterval = 200,
             ProfileKeyEnabled = true,
@@ -406,6 +422,14 @@ namespace TrueReplayer.Models
         public TriggerMode TriggerMode { get; set; } = TriggerMode.OnPress;
         public string BatchDelay { get; set; } = "Delay (ms)";
         public bool IsDisabled { get; set; }
+        // Per-profile loop — mirrors UserProfile. The envelope maps field-by-field (it does NOT
+        // serialize UserProfile), so omitting these here would silently drop a 3× profile back
+        // to 1× on the receiver. Same 1-not-0 default rule as UserProfile: a pre-feature
+        // .trprofile has no key and must deserialize to a single pass, never to "forever".
+        public bool EnableLoop { get; set; } = false;
+        public int LoopCount { get; set; } = 1;
+        public bool LoopIntervalEnabled { get; set; } = false;
+        public int LoopInterval { get; set; } = 200;
         public ObservableCollection<ActionItem> Actions { get; set; } = new();
         /// <summary>
         /// Embedded WaitImage reference images: filename → base64 PNG data.

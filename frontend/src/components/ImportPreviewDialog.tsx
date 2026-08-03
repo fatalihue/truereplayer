@@ -256,6 +256,12 @@ export function ImportPreviewDialog({ preview, onConfirm, onCancel }: ImportPrev
                     {!!p.imageCount && (
                       <span>{p.imageCount} image{p.imageCount === 1 ? '' : 's'}</span>
                     )}
+                    {/* Loop count is per-profile and travels with the export. Shown only when it
+                        actually repeats: an incoming profile that fires 500 clicks per press
+                        should not be a surprise the receiver discovers by running it. */}
+                    {p.enableLoop && (p.loopCount ?? 1) > 1 && (
+                      <span>repeats {p.loopCount}×</span>
+                    )}
                     {p.hotkey && (
                       <span className="flex items-center gap-1">
                         <Keyboard size={10} />

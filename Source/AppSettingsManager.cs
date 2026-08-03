@@ -27,8 +27,15 @@ namespace TrueReplayer.Services
             public int CustomDelay { get; set; } = 100;
             public bool UseDelayVariation { get; set; } = false;
             public int DelayVariation { get; set; } = 1;
+            // Loop settings are the "No Profile" FALLBACK only — every real profile carries its
+            // own EnableLoop/LoopCount/LoopIntervalEnabled/LoopInterval (serialized in its
+            // profile.json). ApplyGlobalSettings deliberately does NOT stamp these onto the
+            // loaded profile; WebViewBridge's mirrors are their live home. LoopCount defaults to
+            // 1, not 0: the engine reads 0 as "forever", and an unattended forever-run owns the
+            // single replay engine with no reachable Stop. Infinite is now reachable ONLY via
+            // the WhilePressed / Toggle trigger modes.
             public bool EnableLoop { get; set; } = false;
-            public int LoopCount { get; set; } = 0;
+            public int LoopCount { get; set; } = 1;
             public bool LoopIntervalEnabled { get; set; } = false;
             public int LoopInterval { get; set; } = 200;
             // Smooth mouse movement — interpolated cursor path so games that reject a single
@@ -161,10 +168,11 @@ namespace TrueReplayer.Services
             profile.RecordKeyboard = s.RecordKeyboard;
             profile.UseCustomDelay = s.UseCustomDelay;
             profile.CustomDelay = s.CustomDelay;
-            profile.EnableLoop = s.EnableLoop;
-            profile.LoopCount = s.LoopCount;
-            profile.LoopIntervalEnabled = s.LoopIntervalEnabled;
-            profile.LoopInterval = s.LoopInterval;
+            // Loop/Interval are NOT stamped here. They used to be — which is why removing
+            // [JsonIgnore] from UserProfile.LoopCount alone was a no-op: this method runs after
+            // EVERY `UserProfile.Current = profile` (9 sites), so the global overwrote the value
+            // that had just been read off disk. The profile's own values now survive activation;
+            // the "No Profile" fallback lives in the WebViewBridge mirrors (see BuildLoopConfig).
             // Smooth-movement settings live on ActionReplayer statics (global runtime config),
             // not on the profile — load them straight into those statics.
             ActionReplayer.SmoothMovement = s.SmoothMovement;

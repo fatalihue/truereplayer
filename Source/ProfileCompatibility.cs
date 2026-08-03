@@ -354,6 +354,21 @@ namespace TrueReplayer.Services
             (p => p.Triggers is { PollIntervalMs: > 0 },
                 new Version(2, 9, 9), "Automation poll interval"),
 
+            // Per-profile loop count. Destroy-on-round-trip, same mechanism as the automation pins
+            // above: an older build has no LoopCount on UserProfile (it was [JsonIgnore]d there and
+            // absent from ProfileExportEntry entirely) and there is no [JsonExtensionData], so it
+            // does not merely ignore the key — it drops it, and its own next save rewrites the file
+            // without it. A profile the author set to 25× comes back as 1× with nothing saying so.
+            //
+            // GATED ON USE, deliberately. Every profile saved by this build now carries a loopCount,
+            // so a bare `p => true`-shaped predicate would pin all ~81 local profiles and make the
+            // Profile Info tab claim a 2.11.0 floor for a plain two-click macro. Only a profile that
+            // actually asks to repeat (loop ON and more than one pass) loses anything on an old
+            // build. Property-level precedents: the ROI and poll-interval pins above.
+            // Introduced after 2.10.0 — bump at release if the release number differs.
+            (p => p.EnableLoop && p.LoopCount > 1,
+                new Version(2, 11, 0), "Per-profile loop count"),
+
             // Restore Size split from Restore Position in 2.0.5; older builds only honour Position.
             (p => p.RestoreSize,
                 new Version(2, 0, 5), "RestoreSize"),

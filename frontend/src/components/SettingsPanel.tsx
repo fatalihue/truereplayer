@@ -75,11 +75,17 @@ function Section({ title, color, children }: {
 // FIELD_W as the plain value fields so the column stays aligned. The dot toggles enable;
 // editing the number commits on blur/Enter (Enter also runs onEnterActivate — e.g. flip the
 // setting on when the user types a value into a disabled chip).
-function EnableChip({ value, isOn, unit, format, max, width, onCommitValue, onToggle, onEnterActivate }: {
+function EnableChip({ value, isOn, unit, format, min, max, width, onCommitValue, onToggle, onEnterActivate }: {
   value: string;
   isOn: boolean;
   unit?: string;
   format?: boolean;
+  // Lower bound applied on commit. OPTIONAL and unset by default — 0 is a legitimate value
+  // for Interval and Jitter, so this must never become a component-wide floor. Only the macro
+  // Loops row passes min={1}, because 0 there used to mean "forever" and no longer does.
+  // It also catches empty / non-numeric input, which the row can produce: the free-text guard
+  // in onChange only strips non-digits when `format` is true, and the Loops row has no format.
+  min?: number;
   // Upper bound applied on commit (Loops 999, Jitter 100): typing a larger number
   // snaps back to max on blur/Enter.
   max?: number;
@@ -97,6 +103,12 @@ function EnableChip({ value, isOn, unit, format, max, width, onCommitValue, onTo
     ? formatMs(Number(local), language) : local;
   const commit = () => {
     let v = local;
+    if (min != null) {
+      // Empty / NaN falls back to min too — without a floor those committed as '' and the
+      // backend's int.TryParse turned them into 0, i.e. an infinite macro run from a typo.
+      const n = parseInt(local, 10);
+      if (local === '' || isNaN(n) || n < min) { v = String(min); setLocal(v); }
+    }
     if (max != null && local !== '') {
       const n = parseInt(local, 10);
       if (!isNaN(n) && n > max) { v = String(max); setLocal(v); }
@@ -751,7 +763,10 @@ interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsPanelProps) {
-  const { settings, settingsResetEpoch, status } = useAppState();
+  // profileLoop: the Execution section's Loops/Interval rows edit the LOADED PROFILE, not the
+  // app. `scoped` is what tells the tooltip whether it's describing a profile value or the
+  // no-profile fallback.
+  const { settings, settingsResetEpoch, status, profileLoop } = useAppState();
   const { language, setLanguage } = useLanguage();
   const tt = useTt();
   const { send, subscribe } = useBridge();
@@ -1013,24 +1028,39 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   }}
                 />
               </SettingRow>
-              <SettingRow label="Loops" tooltip={tt('Times to repeat. 0 = forever.', 'Vezes a repetir. 0 = infinito.')}>
+              {/* Loops + Interval belong to the ACTIVE PROFILE, not to the app. They render
+                  from the profileLoop slice and commit through the profile* message keys, which
+                  the bridge routes to the loaded profile (saved with Ctrl+S / Save) or, with no
+                  profile loaded, to the app-level fallback (written immediately). One code path
+                  for both scopes — the suffix below is the only thing that changes. */}
+              <SettingRow
+                label="Loops"
+                tooltip={profileLoop.scoped
+                  ? tt('Times to repeat (1–999). Saved with the profile.', 'Vezes a repetir (1–999). Salvo com o perfil.')
+                  : tt('Times to repeat (1–999). Used when no profile is loaded.', 'Vezes a repetir (1–999). Usado quando nenhum perfil está carregado.')}
+              >
                 <EnableChip
-                  value={settings.loopCount}
-                  isOn={settings.enableLoop}
-                  max={999}
-                  onCommitValue={(v) => changeSetting('loopCount', v)}
-                  onToggle={(v) => changeSetting('enableLoop', v)}
-                  onEnterActivate={() => { if (!settings.enableLoop) changeSetting('enableLoop', true); }}
+                  value={profileLoop.count}
+                  isOn={profileLoop.enabled}
+                  min={1} max={999}
+                  onCommitValue={(v) => changeSetting('profileLoopCount', v)}
+                  onToggle={(v) => changeSetting('profileEnableLoop', v)}
+                  onEnterActivate={() => { if (!profileLoop.enabled) changeSetting('profileEnableLoop', true); }}
                 />
               </SettingRow>
-              <SettingRow label="Interval" tooltip={tt('Pause between loops (ms).', 'Pausa entre loops (ms).')}>
+              <SettingRow
+                label="Interval"
+                tooltip={profileLoop.scoped
+                  ? tt('Pause between loops (ms). Saved with the profile.', 'Pausa entre loops (ms). Salvo com o perfil.')
+                  : tt('Pause between loops (ms). Used when no profile is loaded.', 'Pausa entre loops (ms). Usado quando nenhum perfil está carregado.')}
+              >
                 <EnableChip
-                  value={settings.loopInterval}
-                  isOn={settings.loopIntervalEnabled}
+                  value={profileLoop.interval}
+                  isOn={profileLoop.intervalEnabled}
                   unit="ms" format max={MAX_DELAY_MS}
-                  onCommitValue={(v) => changeSetting('loopInterval', v)}
-                  onToggle={(v) => changeSetting('loopIntervalEnabled', v)}
-                  onEnterActivate={() => { if (!settings.loopIntervalEnabled) changeSetting('loopIntervalEnabled', true); }}
+                  onCommitValue={(v) => changeSetting('profileLoopInterval', v)}
+                  onToggle={(v) => changeSetting('profileLoopIntervalEnabled', v)}
+                  onEnterActivate={() => { if (!profileLoop.intervalEnabled) changeSetting('profileLoopIntervalEnabled', true); }}
                 />
               </SettingRow>
               <SettingRow label="Jitter" tooltip={tt('Random ±% on each delay — less robotic.', 'Variação ±% aleatória em cada atraso — menos robótico.')}>

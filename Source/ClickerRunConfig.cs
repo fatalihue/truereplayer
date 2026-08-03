@@ -20,6 +20,20 @@ namespace TrueReplayer.Models
         bool UseFixed,
         ClickPoint? FixedPoint);
 
+    // Snapshot of the macro loop settings for one replay start. Built by
+    // WebViewBridge.BuildLoopConfig, which is the ONLY place allowed to decide whether a run
+    // takes its numbers from the loaded profile or from the "No Profile" global fallback.
+    // Count is already clamped to 1..999 — unlike ClickerRunConfig above, 0 is NOT infinite
+    // here and cannot be produced. An infinite macro run comes exclusively from the separate
+    // forceInfiniteLoop boolean (WhilePressed / Toggle trigger modes), which never round-trips
+    // through a profile field. Strings, not ints, because the whole ToggleReplay chain
+    // downstream is string-typed.
+    public sealed record LoopRunConfig(
+        bool Enabled,
+        string Count,
+        bool IntervalEnabled,
+        string Interval);
+
     public sealed record ClickArea(int X, int Y, int W, int H);
 
     public sealed record ClickPoint(int X, int Y);
