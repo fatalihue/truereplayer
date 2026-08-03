@@ -28,7 +28,7 @@ import { X } from 'lucide-react';
  *
  * 90 % of the window on BOTH axes. Divided by --ui-zoom because `zoom` on <html> scales what it
  * paints while viewport units keep resolving against the UNZOOMED viewport: a plain `90vh`
- * paints at 90 % x zoom, which is 85 % of the window at the default 95 % zoom and a clipped
+ * paints at 90 % x zoom, which is 81 % of the window at the default 90 % zoom and a clipped
  * 180 % at the 200 % the Theme Editor lets the user pick. Dividing cancels the zoom exactly, so
  * this reads 90 % at every setting (verified 50 / 80 / 95 / 130 / 200 %).
  *

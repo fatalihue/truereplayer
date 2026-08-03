@@ -78,7 +78,11 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   fontSize: 13,
   borderRadius: 3,
   rowHeight: 34,
-  zoom: 95,
+  // 90, lowered from 95 in 2026-08. Existing installs are moved by the v4 → v5 migration
+  // in loadThemeConfig, but ONLY when their stored value is still exactly 95 — a saved
+  // config always carries a zoom, so without that migration this constant would only ever
+  // reach fresh installs.
+  zoom: 90,
   recordingColor: '#ff6b6b',
   replayColor: '#6bcb77',
   clickerColor: '#c084fc',
@@ -136,7 +140,7 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   enableAnimations: true,
 };
 
-export const CURRENT_THEME_CONFIG_VERSION = 4;
+export const CURRENT_THEME_CONFIG_VERSION = 5;
 
 export interface ThemeConfig {
   // Schema version. v1 = original; v2 = palette pass (PixelColor / Scroll / Pause
@@ -1594,6 +1598,16 @@ export function loadThemeConfig(): ThemeConfig {
         if (ui.actionPixelColorColor === '#84cc16') ui.actionPixelColorColor = DEFAULT_UI_SETTINGS.actionPixelColorColor;
       }
 
+      // v4 → v5 migration: default zoom 95 % → 90 %. Unlike the colour migrations above this
+      // one is NOT optional cosmetics — a saved config always carries a zoom, so the spread
+      // over DEFAULT_UI_SETTINGS keeps the old 95 forever and the new default would only ever
+      // reach fresh installs. Same only-if-still-the-old-default rule, for the same reason:
+      // anyone who deliberately picked 120 % or 80 % keeps it.
+      if (parsed.version < 5) {
+        const ui = merged.uiSettings;
+        if (ui.zoom === 95) ui.zoom = DEFAULT_UI_SETTINGS.zoom;
+      }
+
       return merged;
     }
   } catch {
@@ -1721,7 +1735,7 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   // The zoom as a NUMBER, mirroring root.style.zoom below. `zoom` on <html> scales
   // everything it paints, but viewport units still resolve against the UNZOOMED viewport —
   // so `height: 100vh` paints at only `100vh * zoom` and can never fill the window (at the
-  // default 95 % it tops out at 95 % of it, and at zoom 200 % it would paint at DOUBLE the
+  // default 90 % it tops out at 90 % of it, and at zoom 200 % it would paint at DOUBLE the
   // window height and clip). Anything that wants a real fraction of the visible window has
   // to divide the viewport unit by this: `calc(90vh / var(--ui-zoom))`. Kept in sync here
   // rather than read back off the element so it can't drift.

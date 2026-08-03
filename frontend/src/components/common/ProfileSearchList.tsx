@@ -128,7 +128,7 @@ export function ProfileSearchList({
     const pinned = el.style.height;
     el.style.height = '';
     // offsetHeight, NOT getBoundingClientRect(): the app runs under a root CSS `zoom`
-    // (themes.ts sets root.style.zoom, default 0.95). getBoundingClientRect returns the
+    // (themes.ts sets root.style.zoom, default 0.90). getBoundingClientRect returns the
     // ZOOMED size while style.height is written back in LAYOUT px, so measuring with it
     // rewrote a 190px box as 181px on every re-lock at 95% — and grew it above 100%.
     // offsetHeight is layout px and border-box, exactly what style.height consumes.

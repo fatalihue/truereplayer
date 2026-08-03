@@ -232,7 +232,7 @@ function SettingRow({ label, tooltip, children, danger }: { label: string; toolt
 //   • picker   (Button): read-only — click the field or chevron to choose one of the options.
 // The input uses the SAME px-2 text-center font-mono box as SettingInput so the value is
 // centered identically across every row; the chevron floats over the right padding.
-// The menu uses plain absolute positioning (NOT a fixed portal): the page renders at a ~0.95
+// The menu uses plain absolute positioning (NOT a fixed portal): the page renders at a ~0.90
 // UI zoom, which double-scales fixed coords, and absolute shares the field's coordinate space
 // so it lands exactly under the input. These rows sit near the top of their group, so the
 // short menu stays within the inset and isn't clipped. Closes on outside-click / Escape.

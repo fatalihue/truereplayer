@@ -197,12 +197,14 @@ function AppShell() {
   // touches the persisted ui:settingsCollapsed preference.
   //
   // The threshold is expressed in LAYOUT px and scaled by the UI zoom setting
-  // (root.style.zoom, default 95%): zoom scales the layout, not innerWidth, so
+  // (root.style.zoom, default 90%): zoom scales the layout, not innerWidth, so
   // the same window width fits more/less UI depending on zoom. 1074 layout px
-  // ≈ both expanded panels + a usable grid (≡ 1020 device px at the 95% default).
+  // ≈ both expanded panels + a usable grid (≡ 967 device px at the 90% default,
+  // 1020 back when the default was 95% — a smaller zoom fits more UI in the same
+  // window, so the panels correctly hold out to a narrower window before folding).
   const NARROW_THRESHOLD_LAYOUT = 1074;
   const { config: themeConfig } = useTheme();
-  const zoomScale = (themeConfig.uiSettings.zoom ?? 95) / 100;
+  const zoomScale = (themeConfig.uiSettings.zoom ?? 90) / 100;
   const wasNarrowRef = useRef(false);
   const autoCollapsedRef = useRef({ sidebar: false, settings: false });
   useEffect(() => {
