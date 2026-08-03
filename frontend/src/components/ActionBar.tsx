@@ -108,7 +108,12 @@ export function ActionBar() {
               value: 'macro',
               label: 'Macro',
               icon: <List size={11} />,
-              activeClass: 'bg-replay/15 text-replay shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-replay)_35%,transparent)]',
+              // Accent at 12% fill / 40% border — the exact recipe the Settings switches and
+              // the field chips use for "on", so the app has ONE intensity for an active
+              // control instead of this pill shouting in replay-green next to a quiet switch.
+              // Clicker deliberately keeps its own purple: that one is a MODE identity, not an
+              // on/off state, and the two pills must stay tellable apart at a glance.
+              activeClass: 'bg-[color-mix(in_srgb,var(--color-accent)_12%,transparent)] text-accent shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-accent)_40%,transparent)]',
             },
             {
               value: 'clicker',
