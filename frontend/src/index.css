@@ -52,6 +52,12 @@
      text-warning / border-warning/N / bg-warning/N or color-mix derivations. */
   --color-warning: #FFC107;
 
+  /* Static fallback for the UI zoom, overwritten by applyTheme on every theme apply.
+     Must exist here too: a `calc(... / var(--ui-zoom))` with the var unset is an INVALID
+     declaration, so a panel sized that way would fall back to height:auto on the first
+     paint before the theme lands. Mirrors DEFAULT_UI_SETTINGS.zoom (95). */
+  --ui-zoom: 0.95;
+
   /* Action type pills — fg is the hue mixed toward text-primary (keeps ink legible
      on light presets); bg stays a TRANSLUCENT tint so pills composite over row
      hover/selection/highlight/block washes. Runtime values are re-derived per

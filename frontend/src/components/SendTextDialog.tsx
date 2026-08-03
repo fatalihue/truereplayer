@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import type { EmojiClickData } from 'emoji-picker-react';
-import { DialogShell } from './common/DialogShell';
+import { DialogShell, PANEL_SIZE, PANEL_MAX_WIDTH } from './common/DialogShell';
 import { Button } from './common/Button';
 import { SegmentedControl } from './common/SegmentedControl';
 import { useTt } from '../state/LanguageContext';
@@ -557,10 +557,8 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
     <DialogShell
       icon={<Type size={14} style={{ color: 'var(--color-action-sendtext-fg)' }} />}
       title={mode === 'add' ? 'Insert Text' : 'Edit Text'}
-      widthClass="w-[1080px] h-[90vh] max-h-[900px]"
-      // Space-hungry dialog: fill the window to a 12px gutter at the minimum app
-      // size (the default 90vw clamp left ~14% of the window unused).
-      maxWidthClass="max-w-[calc(100vw-24px)]"
+      widthClass={PANEL_SIZE}
+      maxWidthClass={PANEL_MAX_WIDTH}
       onClose={onClose}
       // Text-entry dialog: a stray scrim click must not discard typed text —
       // dismissal is Esc or Cancel only.

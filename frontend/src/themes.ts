@@ -1718,6 +1718,14 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   parts.push(`--color-action-if-border: color-mix(in srgb, ${uiSettings.actionIfColor} 35%, transparent);`);
   // Font
   parts.push(`--font-mono: '${uiSettings.fontMono}', 'Courier New', monospace;`);
+  // The zoom as a NUMBER, mirroring root.style.zoom below. `zoom` on <html> scales
+  // everything it paints, but viewport units still resolve against the UNZOOMED viewport —
+  // so `height: 100vh` paints at only `100vh * zoom` and can never fill the window (at the
+  // default 95 % it tops out at 95 % of it, and at zoom 200 % it would paint at DOUBLE the
+  // window height and clip). Anything that wants a real fraction of the visible window has
+  // to divide the viewport unit by this: `calc(90vh / var(--ui-zoom))`. Kept in sync here
+  // rather than read back off the element so it can't drift.
+  parts.push(`--ui-zoom: ${uiSettings.zoom / 100};`);
 
   root.style.cssText = parts.join(' ');
 

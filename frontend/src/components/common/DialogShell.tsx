@@ -20,6 +20,29 @@ import { X } from 'lucide-react';
  * shared shell must not own.
  */
 
+/**
+ * The one size for the app's four full-window panels — Automation, Insert Text, Data Loop and
+ * the Theme Editor. They used to be 880/1080/1080/920 px wide with heights of 82vh, 90vh, 90vh
+ * and a hardcoded 560px body, so four windows that do the same kind of job opened at four
+ * different sizes and all of them left scrim showing.
+ *
+ * 90 % of the window on BOTH axes. Divided by --ui-zoom because `zoom` on <html> scales what it
+ * paints while viewport units keep resolving against the UNZOOMED viewport: a plain `90vh`
+ * paints at 90 % x zoom, which is 85 % of the window at the default 95 % zoom and a clipped
+ * 180 % at the 200 % the Theme Editor lets the user pick. Dividing cancels the zoom exactly, so
+ * this reads 90 % at every setting (verified 50 / 80 / 95 / 130 / 200 %).
+ *
+ * Pair it with PANEL_MAX_WIDTH: the shell's default max-width clamp is itself in raw vw, so it
+ * would claw back the width this just gained.
+ *
+ * Panels using this must give their body `flex-1 min-h-0` — the card is `flex flex-col` and
+ * children are direct flex items, so a body with an intrinsic height ignores the extra space.
+ */
+export const PANEL_SIZE = 'w-[calc(90vw/var(--ui-zoom))] h-[calc(90vh/var(--ui-zoom))]';
+
+/** No clamp: PANEL_SIZE already leaves a 5 % gutter per side and is the single source of truth. */
+export const PANEL_MAX_WIDTH = 'max-w-none';
+
 export interface DialogShellProps {
   /** Icon rendered before the title (usually the action's Lucide icon, size 14). */
   icon?: ReactNode;

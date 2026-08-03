@@ -4,7 +4,7 @@ import {
   Table2, TriangleAlert, Repeat, Plus, Trash2, Wand2, Check, Copy,
   MoreHorizontal, ClipboardPaste, FileUp, Search, X, Bell,
 } from 'lucide-react';
-import { DialogShell } from './common/DialogShell';
+import { DialogShell, PANEL_SIZE, PANEL_MAX_WIDTH } from './common/DialogShell';
 import { Button } from './common/Button';
 import { SegmentedControl } from './common/SegmentedControl';
 import { CheckboxBox } from './Checkbox';
@@ -840,8 +840,8 @@ export function DataPanel({ onClose }: DataPanelProps) {
     <DialogShell
       icon={<Table2 size={14} className="text-accent-light" />}
       title="Data Loop"
-      widthClass="w-[1080px] h-[90vh] max-h-[900px]"
-      maxWidthClass="max-w-[calc(100vw-24px)]"
+      widthClass={PANEL_SIZE}
+      maxWidthClass={PANEL_MAX_WIDTH}
       onClose={onClose}
       closeOnBackdrop={false}
       showClose

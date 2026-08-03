@@ -3,7 +3,7 @@ import { Zap, Plus, Trash2, Pipette, Camera, CircleDot, Frame, X, ScanSearch, Ch
 import { useBridge } from '../bridge/BridgeContext';
 import { useAppState } from '../state/AppStateContext';
 import { useTt } from '../state/LanguageContext';
-import { DialogShell } from './common/DialogShell';
+import { DialogShell, PANEL_SIZE, PANEL_MAX_WIDTH } from './common/DialogShell';
 import { Button } from './common/Button';
 import { Toggle } from './common/Toggle';
 import { IconToggle } from './common/IconToggle';
@@ -437,8 +437,8 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
     <DialogShell
       icon={<Zap size={14} className="text-accent-light" />}
       title="Automation"
-      widthClass="w-[880px] h-[82vh] max-h-[780px]"
-      maxWidthClass="max-w-[calc(100vw-24px)]"
+      widthClass={PANEL_SIZE}
+      maxWidthClass={PANEL_MAX_WIDTH}
       onClose={onClose}
       // Pre-close veto, NOT an onClose that declines: DialogShell's onClose runs after it has
       // already committed to leaving, so refusing there fades the panel out and leaves it

@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { NumberInput } from './common/NumberInput';
 import { Toggle } from './common/Toggle';
-import { DialogShell } from './common/DialogShell';
+import { DialogShell, PANEL_SIZE, PANEL_MAX_WIDTH } from './common/DialogShell';
 import { Button } from './common/Button';
 import { SegmentedControl } from './common/SegmentedControl';
 import {
@@ -572,7 +572,8 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
     <DialogShell
       icon={<Palette size={14} style={{ color: 'var(--color-accent)' }} />}
       title="Theme Editor"
-      widthClass="w-[920px]"
+      widthClass={PANEL_SIZE}
+      maxWidthClass={PANEL_MAX_WIDTH}
       onClose={onClose}
       closeOnBackdrop
       showClose
@@ -582,7 +583,15 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
       footerHint={footerHint}
       footer={footer}
     >
-      <div className="grid grid-cols-[1fr_300px] h-[560px] min-h-0">
+      {/* flex-1, not the old hardcoded h-[560px]: the card is `flex flex-col` and this is a
+          direct flex item, so an intrinsic height here would ignore the shell's 90vh and leave
+          the panel short. min-h-0 keeps both columns' overflow-y-auto working. */}
+      {/* The rail was a FIXED 300px, so widening the panel handed every new pixel to the
+          settings column: the split drifted from 67/33 at the old 920px card to 73/27 at the
+          default window and 83/17 maximised — the preview got proportionally thinner the more
+          room there was. minmax lets it grow with the panel while keeping 320px as the floor
+          the mock needs to render at real font size. */}
+      <div className="grid grid-cols-[1fr_minmax(320px,34%)] flex-1 min-h-0">
         {/* ── Left column ── */}
         <div className="min-w-0 overflow-y-auto">
           {/* key={surface} remounts on surface change so the gated slide keyframe re-fires. */}
@@ -991,78 +1000,94 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
       { n: 12, pill: 'Pause', label: 'until F9', delay: '—', tone: ['--color-action-pause-bg', '--color-action-pause-fg'], bg: evenBg },
     ];
 
+    // Type scale, derived from --ui-font-size instead of the old hardcoded 7-10px literals.
+    // Those literals were why the Interface tab's Font Size slider changed NOTHING in the
+    // preview: you were tuning density blind. Same reason the rows below now use the real
+    // --ui-row-height rather than the old `* 0.6` — the preview showed 60 % of the height you
+    // were actually setting. Offsets (not ratios) so the small labels keep a readable floor at
+    // the 10px end of the slider instead of collapsing to 6px.
+    const fsBody = 'var(--ui-font-size)';
+    const fsMeta = 'calc(var(--ui-font-size) - 2px)';
+    const fsMicro = 'calc(var(--ui-font-size) - 4px)';
+
     return (
-      <div className="bg-bg-base border-l border-border-subtle p-3 select-none overflow-hidden [&_button]:pointer-events-none [&_input]:pointer-events-none">
-        <div className="label-micro text-text-tertiary mb-2">Live Preview</div>
-        <div className="flex flex-col border border-border-default overflow-hidden shadow-lg" style={{ borderRadius: 'calc(var(--ui-border-radius) + 4px)' }}>
+      <div className="bg-bg-base border-l border-border-subtle p-3 select-none overflow-hidden flex flex-col min-h-0 [&_button]:pointer-events-none [&_input]:pointer-events-none">
+        <div className="label-micro text-text-tertiary mb-2 shrink-0">Live Preview</div>
+        {/* flex-1: the mock window fills the rail, so the taller panel shows more real rows
+            instead of leaving dead space under a fixed-size mock. */}
+        <div className="flex flex-col flex-1 min-h-0 border border-border-default overflow-hidden shadow-lg" style={{ borderRadius: 'calc(var(--ui-border-radius) + 4px)' }}>
           {/* Title bar */}
           <div className="flex items-center gap-1.5 px-2 h-8 bg-bg-surface border-b border-border-subtle shrink-0" style={ckHover('bg-surface')} {...ckEvents('bg-surface')}>
             <span className="w-4 h-4 rounded bg-accent-solid shrink-0" style={ckHover('accent-solid')} {...ckEvents('accent-solid')} />
-            <span className="text-[10px] text-text-secondary">TrueReplayer</span>
+            <span className="text-text-secondary" style={{ fontSize: fsMeta }}>TrueReplayer</span>
             <span className="flex-1" />
-            <span className="inline-flex items-center gap-1 px-1.5 py-px rounded-full text-[9px]" style={{ background: 'var(--color-replay-bg)', color: 'var(--color-replay)' }}>
+            <span className="inline-flex items-center gap-1 px-1.5 py-px rounded-full" style={{ fontSize: fsMicro, background: 'var(--color-replay-bg)', color: 'var(--color-replay)' }}>
               <span className="w-1 h-1 rounded-full" style={{ background: 'var(--color-replay)' }} /> Ready
             </span>
-            <span className="px-1 py-px rounded font-mono text-[8px] border" style={{ background: 'var(--color-hotkey-bg)', color: 'var(--color-hotkey-fg)', borderColor: 'var(--color-hotkey-border)' }}>F8</span>
+            <span className="px-1 py-px rounded font-mono border" style={{ fontSize: fsMicro, background: 'var(--color-hotkey-bg)', color: 'var(--color-hotkey-fg)', borderColor: 'var(--color-hotkey-border)' }}>F8</span>
           </div>
           {/* Toolbar */}
           <div className="flex items-center gap-1.5 px-2 h-8 bg-bg-surface border-b border-border-subtle shrink-0" style={ckHover('bg-surface')} {...ckEvents('bg-surface')}>
-            <button className="px-2 py-0.5 text-[9px] text-white bg-accent-solid" style={{ borderRadius: 'var(--ui-border-radius)', ...ckHover('accent-solid') }} {...ckEvents('accent-solid')}>Save</button>
-            <button className="px-2 py-0.5 text-[9px] text-text-secondary bg-bg-elevated border border-border-default" style={{ borderRadius: 'var(--ui-border-radius)' }}>Load</button>
+            <button className="px-2 py-0.5 text-white bg-accent-solid" style={{ fontSize: fsMeta, borderRadius: 'var(--ui-border-radius)', ...ckHover('accent-solid') }} {...ckEvents('accent-solid')}>Save</button>
+            <button className="px-2 py-0.5 text-text-secondary bg-bg-elevated border border-border-default" style={{ fontSize: fsMeta, borderRadius: 'var(--ui-border-radius)' }}>Load</button>
           </div>
-          {/* Grid header */}
-          <div className="grid grid-cols-[14px_54px_1fr_30px] gap-1.5 items-center px-2 h-5 bg-bg-surface border-b border-border-subtle shrink-0">
-            <span className="text-[8px] font-semibold text-text-tertiary">#</span>
-            <span className="text-[8px] font-semibold text-text-tertiary">Type</span>
-            <span className="text-[8px] font-semibold text-text-tertiary">Details</span>
-            <span className="text-[8px] font-semibold text-text-tertiary text-right">Delay</span>
+          {/* Grid header — columns widened to fit real-size type; the old 14/54/30px track set
+              was sized for the 8px literals and clips a 13px (let alone 18px) pill. */}
+          <div className="grid grid-cols-[20px_76px_1fr_46px] gap-1.5 items-center px-2 py-1 bg-bg-surface border-b border-border-subtle shrink-0" style={{ fontSize: fsMicro }}>
+            <span className="font-semibold text-text-tertiary">#</span>
+            <span className="font-semibold text-text-tertiary">Type</span>
+            <span className="font-semibold text-text-tertiary">Details</span>
+            <span className="font-semibold text-text-tertiary text-right">Delay</span>
           </div>
-          {/* Body: rows + sheet pane */}
-          <div className="grid grid-cols-[1fr_104px]">
-            <div className="flex flex-col bg-bg-surface">
-              {rows.map(row => (
-                <div
-                  key={row.n}
-                  className="grid grid-cols-[14px_54px_1fr_30px] gap-1.5 items-center px-2 border-b border-border-subtle"
-                  style={{
-                    height: 'calc(var(--ui-row-height) * 0.6)',
-                    background: row.bg,
-                    boxShadow: row.selected ? 'inset 2px 0 0 var(--color-accent)'
-                      : row.rail ? `inset 2px 0 0 ${row.rail === 'strong' ? 'var(--color-action-if-fg)' : 'color-mix(in srgb, var(--color-action-if-fg) 35%, transparent)'}`
-                      : undefined,
-                  }}
-                >
-                  <span className="font-mono text-[8px] text-text-disabled text-right">{row.n}</span>
-                  <span className="px-1 py-px rounded font-mono text-[8px] text-center truncate border" style={{ background: `var(${row.tone[0]})`, color: `var(${row.tone[1]})`, borderColor: `color-mix(in srgb, var(${row.tone[1]}) 30%, transparent)` }}>{row.pill}</span>
-                  <span className="text-[9px] text-text-secondary truncate">{row.label}</span>
-                  <span className={`font-mono tabular-nums text-[8px] text-right ${row.delay === '—' ? 'text-text-disabled' : 'text-text-secondary'}`}>
-                    {row.delay}{row.delay !== '—' && <span className="text-[7px] text-text-tertiary ml-0.5">ms</span>}
-                  </span>
-                </div>
-              ))}
-            </div>
-            {/* Mock SheetPanel pane — folds the old text/input sample cards inside the window */}
-            <div className="bg-bg-card border-l border-border-subtle p-2 flex flex-col gap-1" style={ckHover('bg-card')} {...ckEvents('bg-card')}>
-              <div className="text-[10px] text-text-primary">Primary</div>
-              <div className="text-[10px] text-text-secondary">Secondary</div>
-              <div className="text-[10px] text-text-tertiary">Tertiary</div>
-              <div className="text-[10px] text-text-disabled">Disabled</div>
-              <div className="h-6 mt-1 px-1.5 flex items-center text-[9px] font-mono text-text-primary bg-bg-input border border-accent-solid" style={{ borderRadius: 'var(--ui-border-radius)' }}>1742, 388</div>
-              <div className="flex gap-1 mt-0.5">
-                <button className="px-2 py-0.5 text-[9px] text-white bg-accent-solid" style={{ borderRadius: 'var(--ui-border-radius)' }}>OK</button>
-                <button className="px-2 py-0.5 text-[9px] text-text-secondary bg-bg-elevated border border-border-default" style={{ borderRadius: 'var(--ui-border-radius)' }}>Cancel</button>
+          {/* Rows. flex-1 + overflow-hidden: at a 48px row height the 12 samples no longer fit,
+              and clipping them is the honest outcome — pushing the action/status bars out of
+              the mock would misrepresent the very chrome the preview exists to show. */}
+          <div className="flex flex-col bg-bg-surface flex-1 min-h-0 overflow-hidden">
+            {rows.map(row => (
+              <div
+                key={row.n}
+                className="grid grid-cols-[20px_76px_1fr_46px] gap-1.5 items-center px-2 border-b border-border-subtle shrink-0"
+                style={{
+                  // The REAL row height. Was `* 0.6`, which quietly showed a 34px setting as 20px.
+                  height: 'var(--ui-row-height)',
+                  background: row.bg,
+                  boxShadow: row.selected ? 'inset 2px 0 0 var(--color-accent)'
+                    : row.rail ? `inset 2px 0 0 ${row.rail === 'strong' ? 'var(--color-action-if-fg)' : 'color-mix(in srgb, var(--color-action-if-fg) 35%, transparent)'}`
+                    : undefined,
+                }}
+              >
+                <span className="font-mono text-text-disabled text-right" style={{ fontSize: fsMicro }}>{row.n}</span>
+                <span className="px-1 py-px rounded font-mono text-center truncate border" style={{ fontSize: fsMicro, background: `var(${row.tone[0]})`, color: `var(${row.tone[1]})`, borderColor: `color-mix(in srgb, var(${row.tone[1]}) 30%, transparent)` }}>{row.pill}</span>
+                <span className="text-text-secondary truncate" style={{ fontSize: fsBody }}>{row.label}</span>
+                <span className={`font-mono tabular-nums text-right ${row.delay === '—' ? 'text-text-disabled' : 'text-text-secondary'}`} style={{ fontSize: fsMicro }}>
+                  {row.delay}{row.delay !== '—' && <span className="text-text-tertiary ml-0.5" style={{ fontSize: `calc(var(--ui-font-size) - 5px)` }}>ms</span>}
+                </span>
               </div>
+            ))}
+          </div>
+          {/* Text-scale + control sample. Moved OUT of a 104px side column and under the rows:
+              at real font size that column clipped every label, and full width is what lets the
+              four text levels sit side by side where they can actually be compared. */}
+          <div className="bg-bg-card border-t border-border-subtle px-2 py-1.5 flex items-center gap-2 shrink-0" style={ckHover('bg-card')} {...ckEvents('bg-card')}>
+            <div className="flex items-baseline gap-2 min-w-0" style={{ fontSize: fsBody }}>
+              <span className="text-text-primary">Primary</span>
+              <span className="text-text-secondary">Secondary</span>
+              <span className="text-text-tertiary">Tertiary</span>
+              <span className="text-text-disabled">Disabled</span>
             </div>
+            <span className="flex-1" />
+            <div className="px-1.5 flex items-center font-mono text-text-primary bg-bg-input border border-accent-solid shrink-0" style={{ fontSize: fsMeta, height: 'calc(var(--ui-row-height) * 0.8)', borderRadius: 'var(--ui-border-radius)' }}>1742, 388</div>
+            <button className="px-2 py-0.5 text-white bg-accent-solid shrink-0" style={{ fontSize: fsMeta, borderRadius: 'var(--ui-border-radius)' }}>OK</button>
           </div>
           {/* Action bar */}
           <div className="flex items-center gap-1.5 px-2 h-9 bg-bg-surface border-t border-border-subtle shrink-0">
-            <button className="px-2 py-0.5 text-[9px] border" style={{ borderRadius: 'var(--ui-border-radius)', background: 'var(--color-recording-bg)', color: 'var(--color-recording)', borderColor: 'color-mix(in srgb, var(--color-recording) 30%, transparent)', ...ckHover('recordingColor') }} {...ckEvents('recordingColor')}>● Recording</button>
-            <button className="px-2 py-0.5 text-[9px] border" style={{ borderRadius: 'var(--ui-border-radius)', background: 'var(--color-replay-bg)', color: 'var(--color-replay)', borderColor: 'color-mix(in srgb, var(--color-replay) 30%, transparent)', ...ckHover('replayColor') }} {...ckEvents('replayColor')}>▶ Replay</button>
+            <button className="px-2 py-0.5 border" style={{ fontSize: fsMeta, borderRadius: 'var(--ui-border-radius)', background: 'var(--color-recording-bg)', color: 'var(--color-recording)', borderColor: 'color-mix(in srgb, var(--color-recording) 30%, transparent)', ...ckHover('recordingColor') }} {...ckEvents('recordingColor')}>● Recording</button>
+            <button className="px-2 py-0.5 border" style={{ fontSize: fsMeta, borderRadius: 'var(--ui-border-radius)', background: 'var(--color-replay-bg)', color: 'var(--color-replay)', borderColor: 'color-mix(in srgb, var(--color-replay) 30%, transparent)', ...ckHover('replayColor') }} {...ckEvents('replayColor')}>▶ Replay</button>
             <span className="flex-1" />
-            <button className="px-2 py-0.5 text-[9px] border" style={{ borderRadius: 'var(--ui-border-radius)', background: 'var(--color-clicker-bg)', color: 'var(--color-clicker)', borderColor: 'var(--color-clicker-border)', ...ckHover('clickerColor') }} {...ckEvents('clickerColor')}>Clicker</button>
+            <button className="px-2 py-0.5 border" style={{ fontSize: fsMeta, borderRadius: 'var(--ui-border-radius)', background: 'var(--color-clicker-bg)', color: 'var(--color-clicker)', borderColor: 'var(--color-clicker-border)', ...ckHover('clickerColor') }} {...ckEvents('clickerColor')}>Clicker</button>
           </div>
           {/* Status bar */}
-          <div className="flex items-center gap-1 px-2 h-6 bg-bg-base border-t border-border-subtle text-[9px] text-text-tertiary shrink-0">
+          <div className="flex items-center gap-1 px-2 h-6 bg-bg-base border-t border-border-subtle text-text-tertiary shrink-0" style={{ fontSize: fsMicro }}>
             <span style={{ color: 'var(--color-replay)' }}>Ready</span>
             <span className="flex-1" />
             <span>127 actions</span>
