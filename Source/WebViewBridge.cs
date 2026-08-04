@@ -146,7 +146,13 @@ namespace TrueReplayer
                 // and rename/delete can reuse the same filename under a new dir. Clearing on
                 // any change keeps the cache from serving a stale PNG and bounds its growth.
                 if (_currentProfileName != value)
+                {
                     _imageBase64Cache.Clear();
+                    // Same invalidation, one level up: anything captured against the OLD profile
+                    // (an overlay the user is still dragging, a picker still open) must not write
+                    // back into this one. The image dir is exactly what changes here.
+                    Services.ProfileEpoch.Bump($"active profile '{_currentProfileName}' -> '{value}'");
+                }
                 _currentProfileName = value;
                 // Propagate to the hook so the global Replay hotkey gate can look up the
                 // active profile's target in _windowTargets — same registry that powers the
@@ -1663,6 +1669,11 @@ namespace TrueReplayer
             var restored = JsonSerializer.Deserialize<List<ActionItem>>(snapshot, JsonOptions);
             if (restored == null) return;
 
+            // AFTER the null check: a snapshot that failed to deserialize changes nothing, so it
+            // must not invalidate anyone's scope. Undo/redo rebuilds every row from JSON, so the
+            // instances are all new — an anchor from before the undo is genuinely gone, not moved.
+            Services.ProfileEpoch.Bump("action list replaced (undo/redo)");
+
             // Suppress CollectionChanged to avoid flooding PushActionsUpdate on each Add
             actions.CollectionChanged -= OnActionsChanged;
             try
@@ -1690,6 +1701,8 @@ namespace TrueReplayer
         /// </summary>
         private void ReplaceActions(IReadOnlyList<ActionItem> newActions)
         {
+            // Structural rewrite: the row count itself changes and every stored index is void.
+            Services.ProfileEpoch.Bump("action list replaced (bulk rewrite)");
             actions.CollectionChanged -= OnActionsChanged;
             try
             {
@@ -2149,6 +2162,13 @@ namespace TrueReplayer
 
         public void ApplyProfile(UserProfile profile)
         {
+            // Bumps even though most callers set CurrentProfileName first (which already bumped).
+            // Two of them do NOT: the post-import reload (HandleProfileConfirmImport) and the
+            // reset-settings path both refill the list under the SAME name, and those are the
+            // swaps a name check cannot see. Double-bumping a normal switch is harmless — the
+            // epoch is only ever compared for equality, so over-invalidating fails CLOSED (an
+            // announced abort) while under-invalidating is what corrupts data.
+            Services.ProfileEpoch.Bump("action list replaced (profile applied)");
             actions.CollectionChanged -= OnActionsChanged;
             try
             {
@@ -2699,6 +2719,7 @@ namespace TrueReplayer
         private void HandleActionsClear()
         {
             PushUndoState();
+            Services.ProfileEpoch.Bump("action list cleared");
             actions.Clear();
             HasUnsavedChanges = false;
             mainController.UpdateButtonStates();
