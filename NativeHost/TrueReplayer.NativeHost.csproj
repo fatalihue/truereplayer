@@ -4,8 +4,20 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <RootNamespace>TrueReplayer.NativeHost</RootNamespace>
     <AssemblyName>TrueReplayer.NativeHost</AssemblyName>
-    <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!--
+      67 MB of self-contained runtime for a 220-line byte pump. This relay uses only
+      Stream / Encoding / Thread / Task / BitConverter — no reflection, no serialization, no
+      P/Invoke — so there is nothing here for trimming to break.
+      PublishAot would be smaller still (~2 MB) but needs the "Desktop development with C++"
+      workload; without it the publish fails with "Platform linker not found", which is exactly
+      what happened on this machine. Trimming needs no extra toolchain. If those build tools ever
+      get installed, swapping PublishTrimmed for PublishAot (and dropping PublishSingleFile,
+      which AOT makes redundant) is the whole change.
+    -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 </Project>

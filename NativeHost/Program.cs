@@ -19,20 +19,72 @@ class Program
     private static readonly object PipeLock = new();
     private static StreamWriter? _log;
 
+    /// <summary>Env-var name that turns the relay log on. Set it to anything non-empty.</summary>
+    private const string LogEnvVar = "TRUEREPLAYER_NATIVEHOST_LOG";
+    private const long MaxLogBytes = 4L * 1024 * 1024;
+
     private static void Log(string msg)
     {
-        try { _log?.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {msg}"); _log?.Flush(); } catch { }
+        if (_log == null) return;
+        try { _log.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {msg}"); _log.Flush(); } catch { }
+    }
+
+    /// <summary>
+    /// Describe a relay message by its ROUTING fields only — never its payload.
+    /// This log used to print the first 120 characters of the raw JSON, which on the recording
+    /// path (browser:typingCaptured) is far enough in to include the text the user typed, and on
+    /// the replay path can include the selector. A byte pump has no business keeping either on
+    /// disk. type + command + commandId is everything a "did the message get through" question
+    /// needs. Scanned rather than parsed on purpose: this binary handles JSON as opaque bytes
+    /// (the only other inspection is a Contains for the heartbeat), and adding a JSON stack just
+    /// to write a log line would be the tail wagging the dog.
+    /// </summary>
+    private static string Describe(string json)
+    {
+        var type = Field(json, "type") ?? "?";
+        var command = Field(json, "command");
+        var commandId = Field(json, "commandId");
+        if (command == null && commandId == null) return type;
+        return $"{type} {command} {commandId}".Replace("  ", " ").TrimEnd();
+    }
+
+    /// <summary>Pull a simple "key":"value" string out of raw JSON. Null when absent, not a
+    /// string, or implausibly long — every field this is used for is a short identifier.</summary>
+    private static string? Field(string json, string key)
+    {
+        var needle = $"\"{key}\":\"";
+        int i = json.IndexOf(needle, StringComparison.Ordinal);
+        if (i < 0) return null;
+        i += needle.Length;
+        int end = json.IndexOf('"', i);
+        if (end < 0 || end - i > 64) return null;
+        return json[i..end];
     }
 
     static async Task<int> Main(string[] args)
     {
-        try
+        // Off unless explicitly asked for. The log was unconditional and append-only, so it grew
+        // without bound and paid three flushed writes per browser command for a diagnostic nobody
+        // reads on a healthy machine. Nothing in the app consumes the file — it exists purely for
+        // debugging a relay that is otherwise opaque, so it belongs behind a switch.
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable(LogEnvVar)))
         {
-            var logPath = Path.Combine(Path.GetTempPath(), "TrueReplayerNativeHost.log");
-            _log = new StreamWriter(logPath, append: true, Utf8NoBom) { AutoFlush = true };
-            Log($"=== NativeHost started (PID {Environment.ProcessId}) ===");
+            try
+            {
+                var logPath = Path.Combine(Path.GetTempPath(), "TrueReplayerNativeHost.log");
+                // Chrome starts a fresh relay process per connection, so "truncate when too big"
+                // gets its chance often. Checked here because this is the only place the file is
+                // opened; a running process never grows past one session's worth on top of the cap.
+                var existing = new FileInfo(logPath);
+                if (existing.Exists && existing.Length > MaxLogBytes)
+                {
+                    try { existing.Delete(); } catch { }
+                }
+                _log = new StreamWriter(logPath, append: true, Utf8NoBom) { AutoFlush = true };
+                Log($"=== NativeHost started (PID {Environment.ProcessId}) ===");
+            }
+            catch { }
         }
-        catch { }
 
         using var cts = new CancellationTokenSource();
 
@@ -81,7 +133,7 @@ class Program
                     // Chrome can send messages during the up-to-3s pipe-connect window; invoking a
                     // null delegate here would silently drop the first commands of a session.
                     var msg = Encoding.UTF8.GetString(msgBuf);
-                    Log($"stdin→pipe: {msg[..Math.Min(msg.Length, 120)]}");
+                    if (_log != null) Log($"stdin→pipe: {Describe(msg)}");
                     Action<string> handler;
                     lock (StdinHandlerLock)
                     {
@@ -180,7 +232,7 @@ class Program
                     var line = await readTask.ConfigureAwait(false);
                     if (line == null) { Log("pipe→stdout: EOF (null)"); break; }
                     if (line.Contains("\"type\":\"heartbeat\"")) continue; // match the heartbeat TYPE, not any payload containing the word
-                    Log($"pipe→stdout: {line[..Math.Min(line.Length, 120)]}");
+                    if (_log != null) Log($"pipe→stdout: {Describe(line)}");
                     SendToStdout(line);
                 }
                 Log("pipe relay ended");
