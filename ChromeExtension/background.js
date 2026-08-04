@@ -118,6 +118,7 @@ function connect() {
               if (url && !/^[a-z][a-z0-9+.-]*:(\/\/|[^0-9])/i.test(url)) url = 'https://' + url;
 
               const navTimeout = Math.max(msg.timeout || 30000, 30000);
+
               const postSel = msg.postNavigateSelector || '';
               const urlPattern = msg.urlWaitPattern || '';
 
@@ -149,6 +150,25 @@ function connect() {
                 if (typeof usedTabId !== 'number') { send(null); return; }
                 chrome.tabs.get(usedTabId, (t) => send((!chrome.runtime.lastError && t && t.url) ? t.url : null));
               };
+
+              // Refuse the two schemes that execute in the page context, before handing them to
+              // tabs.update. content.js's own navigate fallback already refuses exactly these as an
+              // XSS sink; this path never did, and that was not only an inconsistency, it HUNG:
+              // measured, a data: URL is neither rejected by tabs.update (no lastError, so the
+              // callback below never fires) nor does it produce a loading→complete cycle, so the
+              // watcher runs the FULL navTimeout — floored at 30 s no matter how short a timeout the
+              // action asked for — and then reports it as a slow site. javascript: is refused by
+              // Chrome itself, fast and by name; it is listed here so this reads as one rule rather
+              // than an accident of which scheme Chrome happens to police.
+              // Placed after finishErr rather than beside the URL normalisation above because
+              // finishErr is a const arrow function — calling it earlier is a temporal-dead-zone
+              // ReferenceError, which would turn a clean refusal into a broken command.
+              if (/^\s*(javascript|data):/i.test(url || '')) {
+                const scheme = /^\s*javascript:/i.test(url) ? 'javascript:' : 'data:';
+                finishErr('INVALID_URL', `Refusing to navigate to a ${scheme} URL.`,
+                  'Use an http:// or https:// address.');
+                return;
+              }
 
               const runPostChecks = (tabId) => {
                 // If neither check is configured, return success immediately
