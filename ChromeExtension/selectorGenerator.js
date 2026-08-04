@@ -75,56 +75,71 @@ function generateSelector(el) {
  * was deduped away and the MOST stable elements ended up as the only ones with no fallback at all.
  * Backwards, since "the site renamed the id" is precisely what fallbacks are for.
  */
+/**
+ * One path segment that IDENTIFIES `node` among its parent's children — not merely describes it.
+ *
+ * That distinction is the whole point. getUniqueClassSelector ends with "return the best class even
+ * if not unique", which is genuinely useful for narrowing a long path but does NOT pin the node
+ * down: for three sibling rows sharing a class it yields `div.row` for all three. A path built from
+ * such segments matches every one of them, `querySelector` hands back the FIRST, and the replay
+ * clicks the wrong row with no error anywhere — the failure is silent and looks like the macro
+ * working. Appending the positional index closes it, and costs nothing when the class was already
+ * enough.
+ */
+function siblingSegment(node) {
+  const parent = node.parentElement;
+  const tag = node.tagName.toLowerCase();
+  const sameTag = parent
+    ? Array.from(parent.children).filter((s) => s.tagName === node.tagName)
+    : [];
+  // :nth-of-type counts among same-TAG siblings, and every candidate below starts with the tag,
+  // so the index stays consistent whether or not a class is present.
+  const nth = sameTag.length > 1 ? `:nth-of-type(${sameTag.indexOf(node) + 1})` : '';
+
+  const classSelector = getUniqueClassSelector(node);
+  if (!classSelector) return tag + nth;
+  if (!parent) return classSelector;
+
+  let sameClass = 0;
+  for (const s of parent.children) {
+    try { if (s.matches(classSelector)) sameClass++; } catch { /* exotic class name */ }
+  }
+  return sameClass === 1 ? classSelector : classSelector + nth;
+}
+
 function buildNthChildPath(el, skipOwnId) {
   const parts = [];
   let current = el;
 
   while (current && current !== document.body && current !== document.documentElement) {
-    // 1. Try ID — anchors the path immediately
+    // 1. An id ANCHORS the path — but only if it actually pins it down. This used to break
+    //    unconditionally, so a path whose lower segments were ambiguous inherited an anchor and
+    //    was returned as if it were exact: `#list > div.row` for three identical rows. Duplicate
+    //    ids are invalid HTML and common regardless, so verify rather than assume; when the anchor
+    //    does not settle it, drop it and describe this node structurally like any other.
     if (!(skipOwnId && current === el)
         && current.id && current.id !== 'null' && current.id !== 'undefined' && !/^\d/.test(current.id)) {
       parts.unshift(`#${CSS.escape(current.id)}`);
-      break;
+      if (isUnique(parts.join(' > '), el)) break;
+      parts.shift();
     }
 
-    // 2. Try unique class combination on this node
-    const classSelector = getUniqueClassSelector(current);
-    if (classSelector) {
-      parts.unshift(classSelector);
-      // Check if the path so far is already unique
-      const fullPath = parts.join(' > ');
-      if (isUnique(fullPath, el)) break;
-      // Even if not unique yet, a class anchor is better than nth-of-type — keep going up
-      current = current.parentElement;
-      if (parts.length > 6) break;
-      continue;
-    }
-
-    // 3. Fallback: tag + nth-of-type
-    let selector = current.tagName.toLowerCase();
-    const parent = current.parentElement;
-    if (parent) {
-      const siblings = Array.from(parent.children).filter(
-        (s) => s.tagName === current.tagName
-      );
-      if (siblings.length > 1) {
-        const index = siblings.indexOf(current) + 1;
-        selector += `:nth-of-type(${index})`;
-      }
-    }
-
-    parts.unshift(selector);
+    // 2. One self-disambiguating segment per level, so a path assembled from them is unique by
+    //    construction as soon as it reaches an anchor.
+    parts.unshift(siblingSegment(current));
     current = current.parentElement;
 
-    // Check if already unique
-    if (parts.length >= 2) {
-      const fullPath = parts.join(' > ');
-      if (isUnique(fullPath, el)) break;
-    }
+    if (isUnique(parts.join(' > '), el)) break;
 
     if (parts.length > 6) break;
   }
 
+  // Residual, stated rather than hidden: a path that hit the 6-level cap without reaching an
+  // anchor is relative, and a relative path can still repeat elsewhere in the document. Returning
+  // it anyway is deliberate — this is generateSelector's last resort, and the recorder drops the
+  // action entirely when it gets nothing back, which trades a rare wrong target for a guaranteed
+  // lost recording. Callers that can afford to be strict check for themselves:
+  // generateSelectorAlternatives gates its tier-C entry on isUnique.
   return parts.join(' > ');
 }
 
