@@ -293,8 +293,15 @@ function generateSelectorAlternatives(el) {
   // buildNthChildPath directly (not generateSelector, which re-runs the id/testid/name ladder
   // above and hands back a string already in `seen`), and with skipOwnId so an id-bearing element
   // gets a real path instead of its own id a second time.
+  // isUnique is NOT optional here. Every tier above goes through push(), which rejects an
+  // ambiguous candidate; this entry bypassed push() and so was the one candidate that could be
+  // ambiguous. buildNthChildPath gives up after 6 levels and returns whatever it has, so an
+  // element deep in a repetitive list yields a path matching several siblings — and a fallback is
+  // used precisely when the primary stopped matching, i.e. exactly when nobody is watching. An
+  // element with no unique structural path goes back to having no tier C at all, which is the
+  // correct outcome: ELEMENT_NOT_FOUND is a far better failure than silently clicking the wrong row.
   const path = buildNthChildPath(el, true);
-  if (path && !seen.has(path)) {
+  if (path && !seen.has(path) && isUnique(path, el)) {
     alts.push({ selector: path, tier: 'C', description: 'CSS path' });
   }
 

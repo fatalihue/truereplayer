@@ -398,9 +398,21 @@ function connect() {
             // 500 ms to several seconds after the navigation commits. A single 300 ms retry
             // therefore lost the race routinely — and the natural fix a user reaches for, putting
             // a BrowserWaitElement in front, does not help: the Wait travels through this same
-            // funnel and fails the same way. So keep retrying on a short cadence for as long as
-            // the command's own timeout budget says the caller is still waiting.
-            const injectDeadline = Date.now() + Math.max(1000, msg.timeout || 5000);
+            // funnel and fails the same way. So retry on a short cadence.
+            //
+            // The budget is CAPPED rather than taken from the action's timeout, for two reasons.
+            // (1) `timeout: 0` is the instant If probe declaring it wants an answer now, and
+            //     `msg.timeout || 5000` read that deliberate zero as "unset" and handed the one
+            //     command that must stay cheap the largest budget of all — past the 3 s pipe
+            //     timeout the C# probe gives itself, so its NO_CONTENT_SCRIPT reply arrived for a
+            //     commandId already dropped and could never be seen. isInstantProbe, computed
+            //     above for the frame decision, is the same question, so reuse it.
+            // (2) Retrying eats time BEFORE content.js arms its own timer, while the C# grace is a
+            //     flat 2 s. Let this window grow with the action timeout and the two clocks invert:
+            //     the C# side gives up first and reports "not found" for a step that then runs and
+            //     clicks. A ceiling well under that grace keeps the ordering the grace bought.
+            const injectBudget = isInstantProbe ? 750 : Math.min(1500, Math.max(1000, msg.timeout || 5000));
+            const injectDeadline = Date.now() + injectBudget;
             const attempt = () => {
               // Same frame targeting on every attempt — a retry that fanned out where the original
               // did not would reintroduce the race it was pinned to avoid.

@@ -428,8 +428,19 @@
   // automation daemon acting on a background tab is exactly that case).
   function nextFrame() {
     return new Promise((r) => {
-      if (document.visibilityState === 'hidden') { setTimeout(r, 16); return; }
-      requestAnimationFrame(() => r());
+      // Race rAF against a timer instead of committing to a branch on one synchronous read of
+      // visibilityState. The read happens when the promise is CREATED; if the tab goes hidden
+      // during the await — the user switches tabs, the daemon fronts another window, the next
+      // action's ActivateWindow steals focus — a pending rAF callback simply never runs, and this
+      // promise never settles. executeCommand then never returns, the content script never calls
+      // sendResponse, and the step dies only when the C# pipe gives up, reporting
+      // ELEMENT_NOT_FOUND about an element that was found and a click that got stuck.
+      // waitUncovered holds that window open for up to a second on every covered click.
+      // The timer also covers a throttled frame, which the top document's visibilityState cannot see.
+      let done = false;
+      const fire = () => { if (done) return; done = true; r(); };
+      requestAnimationFrame(fire);
+      setTimeout(fire, 50);
     });
   }
 
@@ -504,7 +515,22 @@
 
       const touched = (node) => {
         if (!node) return false;
-        if (node === el || el.contains(node) || (node.contains && node.contains(el))) return true;
+        // Our OWN overlays do not count. flashHighlight appends a div straight into body right
+        // before the click and removes it after, so the effect detector was reading TrueReplayer's
+        // own highlight as proof the page reacted — making the native-click fallback it guards
+        // unreachable for the very elements it exists to rescue.
+        if (node.dataset && node.dataset.trOverlay) return false;
+        // Mutation ON the element or inside it.
+        if (node === el || el.contains(node)) return true;
+        // A real ANCESTOR changed — a wrapper toggling a class, a row gaining aria-selected.
+        // body and <html> are excluded on purpose: they contain everything, so counting them made
+        // any childList mutation anywhere read as "the click worked". That was the actual reason
+        // the overlay registered — a childList record reports the PARENT as its target, so every
+        // insertion into body arrived here as touched(document.body) and short-circuited to true
+        // before the added node was ever examined.
+        if (node.contains && node !== document.body && node !== document.documentElement && node.contains(el)) return true;
+        // A fresh insertion directly into body — the portal / modal / menu case, which is what
+        // most clicks actually open.
         return node.parentNode === document.body;
       };
 
@@ -810,6 +836,14 @@
     };
   }
 
+  // Does this selector match ANYTHING at all, regardless of visibility or enabled state?
+  // Used only to tell "the primary is gone" apart from "the primary is here but not ready",
+  // which is what decides whether falling back to another candidate is legitimate.
+  function findExisting(parsed) {
+    if (parsed.kind === 'text') return findByParsedText(parsed);
+    try { return document.querySelector(parsed.value); } catch { return null; }
+  }
+
   // Set by waitForElement when a FALLBACK selector (not the primary) matched; cleared at
   // the start of every executeCommand. The command dispatcher attaches it to the success
   // response so the C# side can log which tier saved the run.
@@ -854,6 +888,17 @@
     }
 
     const checkPositive = () => {
+      // Fallbacks answer "the primary no longer FINDS anything" — never "the primary found the
+      // element and it is not ready yet". The distinction did not exist while click/type used
+      // 'appears', because a visible primary always won at i=0. Under 'enabled' a primary that is
+      // present but disabled returns null from findElementForMode, and without this guard the loop
+      // would walk on and act on whatever a tier-B/C fallback matched instead — a different
+      // element, chosen precisely because the intended one was not ready. Waiting for the real
+      // button to enable is the whole point; clicking a lookalike while it is disabled is the one
+      // outcome worse than timing out.
+      if (candidates.length > 1 && findExisting(candidates[0].parsed)) {
+        return findElementForMode(candidates[0].parsed, mode, textPattern);
+      }
       for (let i = 0; i < candidates.length; i++) {
         const el = findElementForMode(candidates[i].parsed, mode, textPattern);
         if (el) {
@@ -959,6 +1004,8 @@
     };
     const c = colors[status] || colors.active;
     const overlay = document.createElement('div');
+    // Marks this node as ours so waitForClickEffect can ignore it — see `touched` there.
+    overlay.dataset.trOverlay = '1';
     const rect = el.getBoundingClientRect();
     Object.assign(overlay.style, {
       position: 'fixed',

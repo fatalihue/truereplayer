@@ -5329,9 +5329,14 @@ namespace TrueReplayer
                     ActionType = "BrowserWaitElement",
                     Key = key,
                     WaitMode = waitMode,
-                    BrowserText = string.IsNullOrEmpty(browserText)
-                        ? browserText
-                        : await ActionReplayer.ResolveBrowserTextPlaceholdersAsync(browserText, dispatcherQueue),
+                    // RAW, deliberately. The replay's If probe (ProbeBrowserElementStateAsync ->
+                    // ProbeElementStateAsync) passes action.BrowserText through untouched — it
+                    // resolves no tokens at all. Resolving them here would make the button answer a
+                    // different question from the one the run asks: a text-match condition on
+                    // "{clipboard}" would report TRUE in the editor and branch FALSE at replay, or
+                    // the reverse, which is worse than having no button. If tokens should work in
+                    // If-Browser conditions, that belongs on the replay side first, never only here.
+                    BrowserText = browserText,
                     SelectorAlternatives = alternatives,
                 };
 

@@ -333,6 +333,14 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
 
   // #2 — picker alternatives popover
   const [alternatives, setAlternatives] = useState<SelectorAlternative[]>([]);
+  // Did THIS edit session produce the list above by picking, or was it seeded from disk?
+  // The two used to be the same question — `alternatives` was empty unless a pick had happened —
+  // and the save path still leans on that: a non-empty list means "persist it", an empty one plus a
+  // hand-edited selector means "the stored fallbacks now point at a different element, clear them".
+  // Seeding the list so Test action can use it made the first branch always true and the clearing
+  // branch unreachable, which is worse than the bug it fixed: a hand-edited selector kept stale
+  // fallbacks, and a fallback that matches the OLD element clicks the old element.
+  const [pickedThisSession, setPickedThisSession] = useState(false);
   const [showAlternatives, setShowAlternatives] = useState(false);
 
   // #3 — test action state
@@ -341,7 +349,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   // If-Browser-Element "check now". Separate state from testResult because the answer is a
   // branch (true/false), not a success/error — see HandleBrowserTestCondition.
   const [condRequestId, setCondRequestId] = useState<string | null>(null);
-  const [condResult, setCondResult] = useState<{ satisfied: boolean; raw: boolean; connected: boolean } | null>(null);
+  // `negate` is frozen INTO the result: the card explains the answer in terms of the Negate
+  // setting, and reading live state at render time meant flipping Negate after a check silently
+  // re-labelled a stale answer as the opposite branch.
+  const [condResult, setCondResult] = useState<{ satisfied: boolean; raw: boolean; connected: boolean; negate: boolean } | null>(null);
   // Safety timeout — if the bridge response is lost, recover the UI instead of hanging "Running…".
   // Backend pipeTimeout is the action timeout (~5s default); we double it plus 5s overhead.
   const testTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -376,6 +387,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const pickElementRequestIdRef = useRef(pickElementRequestId);
   const windowProbeRequestIdRef = useRef(windowProbeRequestId);
   const condRequestIdRef = useRef(condRequestId);
+  // The Negate the in-flight check asked about. The subscription below is a stable one-time
+  // handler and cannot see the handler's locals, and reading live state there would stamp the
+  // toggle's CURRENT value onto an answer about its previous one.
+  const condNegateAskedRef = useRef(false);
   // Correlates a dialog:pickFile round-trip (ActivateWindow Launch "Browse…") to its result.
   const browseLaunchReqRef = useRef<string | null>(null);
   // Correlates a window:captureGeometry round-trip (ActivateWindow "Capture") to its result.
@@ -417,6 +432,11 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
           setTextMatch('');
           // #2 — Show alternatives popover when there are 2+ candidates
           const alts = payload.alternatives || [];
+          // This is the ONE place a list becomes "picked this session" — which is what the save
+          // path keys its persist-vs-clear decision on. Set on both branches: a pick that yields
+          // fewer than two candidates still means the user re-specified the target, so any list
+          // seeded from disk is no longer about the element they just chose.
+          setPickedThisSession(true);
           if (alts.length > 1) {
             setAlternatives(alts);
             setShowAlternatives(true);
@@ -437,7 +457,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
         const r = msg.payload as { requestId: string; satisfied: boolean; raw: boolean; connected: boolean };
         if (condRequestIdRef.current && r.requestId === condRequestIdRef.current) {
           clearCondTimeout();
-          setCondResult({ satisfied: r.satisfied, raw: r.raw, connected: r.connected });
+          setCondResult({ satisfied: r.satisfied, raw: r.raw, connected: r.connected, negate: condNegateAskedRef.current });
           setCondRequestId(null);
         }
       } else if (msg.type === 'image:testMatchResult') {
@@ -616,6 +636,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       // No visual change: the popover below is gated on showAlternatives, which only ever
       // turns true right after a pick.
       setAlternatives(action.selectorAlternatives ?? []);
+      setPickedThisSession(false); // seeded from disk, not picked — see the state declaration
       setShowAlternatives(false);
       setTestResult(null);
       setCondResult(null);
@@ -721,7 +742,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // invalidates any stored list (it may point at a different element) — clear it.
     const isBrowserElementAction = isBrowserSelectorAction(actionType, action.conditionType);
     if (isBrowserElementAction) {
-      if (alternatives.length > 1) {
+      // pickedThisSession restores what `alternatives.length > 1` used to mean on its own, before
+      // the list started being seeded from disk. Without it this branch always won and the clear
+      // below became dead code.
+      if (pickedThisSession && alternatives.length > 1) {
         const nextJson = JSON.stringify(alternatives);
         if (nextJson !== JSON.stringify(action.selectorAlternatives ?? null)) {
           send({ type: 'actions:edit', payload: { index: actionIndex, field: 'selectorAlternatives', value: nextJson } });
@@ -1179,7 +1203,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // from actionType + action.conditionType which are already in the array, so the
     // callback rebinds whenever those change. Listing the derived flags would also
     // be a forward-reference error (they're declared further down the component body).
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, repeatCount, repeatGapMs, jitterOn, jitterPct, posJitterOn, posJitterPx, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, windowVerb, matchIndex, assertOnFail, alternatives, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, repeatCount, repeatGapMs, jitterOn, jitterPct, posJitterOn, posJitterPx, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, windowVerb, matchIndex, assertOnFail, alternatives, pickedThisSession, send, onClose]);
 
   // Are there edits the Save-Changes button would persist? MIRRORS handleSave's diffs
   // exactly (same guards/normalisation), returning true on the first field that differs —
@@ -1203,7 +1227,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
 
     const isBrowserElementAction = isBrowserSelectorAction(actionType, action.conditionType);
     if (isBrowserElementAction) {
-      if (alternatives.length > 1) {
+      if (pickedThisSession && alternatives.length > 1) {
         if (JSON.stringify(alternatives) !== JSON.stringify(action.selectorAlternatives ?? null)) return true;
       } else if (effectiveKey !== action.key && (action.selectorAlternatives?.length ?? 0) > 0) {
         return true;
@@ -1429,7 +1453,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     }
 
     return false;
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, repeatCount, repeatGapMs, jitterOn, jitterPct, posJitterOn, posJitterPx, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, windowVerb, matchIndex, assertOnFail, alternatives]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, repeatCount, repeatGapMs, jitterOn, jitterPct, posJitterOn, posJitterPx, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, windowVerb, matchIndex, assertOnFail, alternatives, pickedThisSession]);
 
   // Key capture handler — focusing the field switches it to capture mode (empty + "New
   // key..." + pulse), the next non-modifier key is stored, and the input auto-blurs so
@@ -1693,6 +1717,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   // replay's If uses (timeout=0, single evaluation, no wait loop), against the ACTIVE tab.
   const handleTestCondition = useCallback(() => {
     const requestId = Math.random().toString(36).slice(2, 10);
+    // Freeze the question being asked. Flipping Negate after a check must not silently re-label
+    // a stale answer as the opposite branch.
+    condNegateAskedRef.current = conditionNegate;
+    const askedNegate = conditionNegate;
     setCondRequestId(requestId);
     setCondResult(null);
     const effectiveKey = textMatch.trim() ? buildTextSelector(textMode, textMatch.trim()) : key;
@@ -1702,7 +1730,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       condTimeoutRef.current = null;
       setCondRequestId(prev => {
         if (prev !== requestId) return prev;
-        setCondResult({ satisfied: false, raw: false, connected: false });
+        setCondResult({ satisfied: false, raw: false, connected: false, negate: askedNegate });
         return null;
       });
     }, 6000);
@@ -2290,7 +2318,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
             <div>
               <button
                 onClick={handleTestWindowProbe}
-                disabled={windowProbeRequestId !== null || (!windowProcessName.trim() && !windowTitle.trim())}                className="w-full h-8 flex items-center justify-center gap-1.5 px-2.5 rounded text-xs font-medium border border-accent-solid/40 bg-accent-solid/10 hover:bg-accent-solid/20 text-accent-light transition-colors disabled:opacity-60"
+                disabled={windowProbeRequestId !== null || (!windowProcessName.trim() && !windowTitle.trim())}
+                className="w-full h-8 flex items-center justify-center gap-1.5 px-2.5 rounded text-xs font-medium border border-accent-solid/40 bg-accent-solid/10 hover:bg-accent-solid/20 text-accent-light transition-colors disabled:opacity-60"
               >
                 <PlayCircle size={13} />
                 {windowProbeRequestId ? 'Testing…' : 'Test'}
@@ -2627,7 +2656,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                     {!condResult.connected
                       ? tt('Could not ask the page. With the bridge down the replay reads this condition as NOT found instead of stopping.',
                            'Não foi possível perguntar à página. Com a ponte fora, a reprodução lê esta condição como NÃO encontrado em vez de parar.')
-                      : conditionNegate
+                      : condResult.negate
                         ? tt(`Element state: ${condResult.raw ? 'matched' : 'not matched'} · inverted by "Negate"`,
                              `Estado do elemento: ${condResult.raw ? 'casou' : 'não casou'} · invertido por "Negate"`)
                         : tt('The replay would take this branch right now.',
@@ -2960,7 +2989,8 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   return (
                     <span
                       className={`w-8 h-8 rounded border shrink-0 ${validHex ? 'border-border-default' : 'border-dashed border-border-default'}`}
-                      style={{ background: validHex ? (pixelColor.trim().startsWith('#') ? pixelColor.trim() : '#' + pixelColor.trim()) : 'transparent' }}                    />
+                      style={{ background: validHex ? (pixelColor.trim().startsWith('#') ? pixelColor.trim() : '#' + pixelColor.trim()) : 'transparent' }}
+                    />
                   );
                 })()}
                 <input
