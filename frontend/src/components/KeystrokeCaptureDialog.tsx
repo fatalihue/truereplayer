@@ -201,7 +201,11 @@ export function KeystrokeCaptureDialog({
     // autofocused input dead and Esc unable to close the dialog: the input's focusin
     // fired BEFORE this effect attached its listener, so nothing ever disabled the
     // hook. Keying the effect on manualEntry makes the toggle authoritative.
-    send({ type: 'hotkey:capture', payload: { enabled: !manualEntry, ownerId: ownerIdRef.current } });
+    // Read the ref ONCE here rather than in the cleanup. The id is assigned at mount and
+    // never reassigned, so this is behaviour-identical — but a ref read inside cleanup is
+    // the shape that releases the WRONG owner the day someone does make it reassignable.
+    const ownerId = ownerIdRef.current;
+    send({ type: 'hotkey:capture', payload: { enabled: !manualEntry, ownerId } });
     const isPureModifier = (combo: string) =>
       /^(Win|Ctrl|Alt|Shift)(\+(Win|Ctrl|Alt|Shift))*$/.test(combo);
 
@@ -221,21 +225,21 @@ export function KeystrokeCaptureDialog({
 
     const handleFocusIn = (e: FocusEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') {
-        send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } });
+        send({ type: 'hotkey:capture', payload: { enabled: false, ownerId } });
       }
     };
     const handleFocusOut = (e: FocusEvent) => {
       // Never re-arm on blur while manual mode is on — the hook must stay off for
       // the whole manual session, not just while the text input has focus.
       if ((e.target as HTMLElement)?.tagName === 'INPUT' && !manualEntryRef.current) {
-        send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } });
+        send({ type: 'hotkey:capture', payload: { enabled: true, ownerId } });
       }
     };
     document.addEventListener('focusin', handleFocusIn);
     document.addEventListener('focusout', handleFocusOut);
 
     return () => {
-      send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } });
+      send({ type: 'hotkey:capture', payload: { enabled: false, ownerId } });
       document.removeEventListener('focusin', handleFocusIn);
       document.removeEventListener('focusout', handleFocusOut);
       unsub();

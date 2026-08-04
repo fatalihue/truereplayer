@@ -651,8 +651,12 @@ function HotkeyInput({ value, settingKey, onChange, width = FIELD_W }: {
   // claimed and released a slot. HashSet.Remove is idempotent so this is a no-op
   // when the slot was never registered.
   useEffect(() => {
+    // Captured at effect time, not read in the cleanup: the id is assigned at mount and never
+    // reassigned, so this is behaviour-identical, and it keeps the release addressed to the
+    // owner this effect actually registered.
+    const ownerId = ownerIdRef.current;
     return () => {
-      send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } });
+      send({ type: 'hotkey:capture', payload: { enabled: false, ownerId } });
     };
   }, [send]);
 

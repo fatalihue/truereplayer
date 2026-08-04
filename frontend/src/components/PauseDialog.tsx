@@ -93,7 +93,9 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
   // dialog's lifetime; suspended while a numeric input is focused so typing into
   // the timeout doesn't re-capture digits as the resume key.
   useEffect(() => {
-    send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } });
+    // Read the ref ONCE here rather than in the cleanup — see KeystrokeCaptureDialog.
+    const ownerId = ownerIdRef.current;
+    send({ type: 'hotkey:capture', payload: { enabled: true, ownerId } });
     const isPureModifier = (combo: string) =>
       /^(Win|Ctrl|Alt|Shift)(\+(Win|Ctrl|Alt|Shift))*$/.test(combo);
 
@@ -107,19 +109,19 @@ export function PauseDialog({ initialKey, initialTimeoutMs, onConfirm, onClose }
 
     const handleFocusIn = (e: FocusEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') {
-        send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } });
+        send({ type: 'hotkey:capture', payload: { enabled: false, ownerId } });
       }
     };
     const handleFocusOut = (e: FocusEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') {
-        send({ type: 'hotkey:capture', payload: { enabled: true, ownerId: ownerIdRef.current } });
+        send({ type: 'hotkey:capture', payload: { enabled: true, ownerId } });
       }
     };
     document.addEventListener('focusin', handleFocusIn);
     document.addEventListener('focusout', handleFocusOut);
 
     return () => {
-      send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: ownerIdRef.current } });
+      send({ type: 'hotkey:capture', payload: { enabled: false, ownerId } });
       document.removeEventListener('focusin', handleFocusIn);
       document.removeEventListener('focusout', handleFocusOut);
       unsub();

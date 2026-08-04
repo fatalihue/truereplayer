@@ -73,7 +73,9 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
     });
   }, [send, subscribe]);
 
-  const steps = report?.steps ?? [];
+  // Memoised because `?? []` builds a NEW array on every render, which made the stats useMemo
+  // below recompute every time regardless of whether the report actually changed.
+  const steps = useMemo(() => report?.steps ?? [], [report]);
   const stats = useMemo(() => {
     const failed = steps.filter((s) => s.status === 'failed').length;
     const total = steps.reduce((a, s) => a + s.durationMs, 0);

@@ -1490,8 +1490,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   // both skip blur. HashSet.Remove is idempotent so this is a no-op when the
   // slot was never registered.
   useEffect(() => {
+    // Captured at effect time, not read in the cleanup — see SettingsPanel.
+    const ownerId = captureOwnerIdRef.current;
     return () => {
-      send({ type: 'hotkey:capture', payload: { enabled: false, ownerId: captureOwnerIdRef.current } });
+      send({ type: 'hotkey:capture', payload: { enabled: false, ownerId } });
     };
   }, [send]);
 
