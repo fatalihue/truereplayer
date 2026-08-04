@@ -352,8 +352,15 @@
   function stopPick(selector, alternatives) {
     picking = false;
     removeHighlight();
-    document.removeEventListener('mouseover', onMouseOver, true);
-    document.removeEventListener('mouseout', onMouseOut, true);
+    // The hover handlers are SHARED with recording, and a DOM listener is keyed by
+    // (type, function, capture) — startRecording and startPick register the very same function
+    // references, so there is only ever ONE registration. Removing it here while recording is
+    // still on took the element highlight away for the rest of the session: pick an element
+    // mid-recording and the blue outline never came back, with nothing to suggest why.
+    if (!recording) {
+      document.removeEventListener('mouseover', onMouseOver, true);
+      document.removeEventListener('mouseout', onMouseOut, true);
+    }
     document.removeEventListener('click', onPickClick, true);
     document.removeEventListener('contextmenu', onPickClick, true);
     document.removeEventListener('keydown', onPickKeydown, true);
@@ -400,7 +407,10 @@
     return top;
   }
 
-  // #4 — Smart scrollIntoView: skip if already in viewport
+  // #4 — Smart scrollIntoView: skip if already in viewport.
+  // Returns whether it actually scrolled, so the caller can settle only when there is something
+  // to settle. The click path used to sleep a flat 30 ms right after calling this, whether or not
+  // the page had moved a pixel.
   function scrollIntoViewIfNeeded(el) {
     const rect = el.getBoundingClientRect();
     const inView =
@@ -408,9 +418,108 @@
       rect.left >= 0 &&
       rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
       rect.right <= (window.innerWidth || document.documentElement.clientWidth);
-    if (!inView) {
-      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+    if (inView) return false;
+    el.scrollIntoView({ block: 'center', behavior: 'instant' });
+    return true;
+  }
+
+  // One animation frame — tied to real layout instead of guessing in milliseconds. Falls back to
+  // a timer in a hidden tab, where rAF never fires and the wait would otherwise hang (the
+  // automation daemon acting on a background tab is exactly that case).
+  function nextFrame() {
+    return new Promise((r) => {
+      if (document.visibilityState === 'hidden') { setTimeout(r, 16); return; }
+      requestAnimationFrame(() => r());
+    });
+  }
+
+  /**
+   * Is anything on top of the target? Retried for a short budget instead of sampled once.
+   *
+   * The single sample happened immediately after the scroll, which is precisely the moment a
+   * cookie banner, a toast or a spinner mid-fade is still over the element — elementFromPoint
+   * returns the overlay and the step died with ELEMENT_COVERED while its whole timeout budget sat
+   * unspent. Overlays clear in a few frames; a wait measured in frames costs nothing when the
+   * element is already clear (the first check answers and the loop never runs).
+   */
+  async function waitUncovered(el, budgetMs) {
+    const deadline = Date.now() + budgetMs;
+    let covering = getCoveringElement(el);
+    while (covering && Date.now() < deadline) {
+      await nextFrame();
+      covering = getCoveringElement(el);
     }
+    return covering;
+  }
+
+  const CLICK_STATE_ATTRS = ['aria-expanded', 'aria-pressed', 'aria-checked'];
+
+  // Snapshot of the signals that say "this click landed". getAttribute('class') rather than
+  // .className because on an SVG element .className is an SVGAnimatedString — the SAME object
+  // every time — so comparing it could never report a change.
+  function clickSnapshot(el) {
+    return {
+      href: location.href,
+      active: document.activeElement,
+      cls: el.getAttribute('class'),
+      aria: CLICK_STATE_ATTRS.map((a) => el.getAttribute(a)).join('|'),
+    };
+  }
+
+  function clickChanged(el, snap) {
+    return !el.isConnected
+      || location.href !== snap.href
+      || document.activeElement !== snap.active
+      || el.getAttribute('class') !== snap.cls
+      || CLICK_STATE_ATTRS.map((a) => el.getAttribute(a)).join('|') !== snap.aria;
+  }
+
+  /**
+   * Wait up to budgetMs for evidence the click had an effect, resolving the INSTANT one shows up.
+   *
+   * What this replaces: a flat 200 ms sleep followed by comparing three snapshots. That sleep was
+   * paid on every single BrowserClick and is most of the gap between it and BrowserRightClick,
+   * which does identical work in 80 ms. And the comparison could not do its job, because
+   * `el.focus()` ran BEFORE the "before" snapshot was compared — so for anything focusable
+   * (button, a, input — nearly every click target) the focus check always reported a change and
+   * the native fallback was unreachable. What remained was the non-focusable div/span, which also
+   * changes no class and no aria-*, so the fallback fired exactly THERE and el.click() re-ran a
+   * React onClick that had already fired: one click, two submissions.
+   *
+   * Scope is deliberately tight. A mutation anywhere on a live page — a ticker, a lazy image —
+   * would read as "the click worked" and suppress a fallback that was genuinely needed. Only
+   * mutations touching the element, an ancestor of it, or a fresh insertion directly into body
+   * count; that last one covers the modal / portal / menu case, which is what most clicks open.
+   */
+  function waitForClickEffect(el, snap, budgetMs) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (v) => {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        clearTimeout(timer);
+        resolve(v);
+      };
+
+      const touched = (node) => {
+        if (!node) return false;
+        if (node === el || el.contains(node) || (node.contains && node.contains(el))) return true;
+        return node.parentNode === document.body;
+      };
+
+      const observer = new MutationObserver((records) => {
+        for (const r of records) {
+          if (touched(r.target)) return finish(true);
+          for (const n of r.addedNodes) if (touched(n)) return finish(true);
+          for (const n of r.removedNodes) if (n === el) return finish(true);
+        }
+        if (clickChanged(el, snap)) finish(true);
+      });
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+
+      const timer = setTimeout(() => finish(clickChanged(el, snap)), budgetMs);
+    });
   }
 
   // #1 — Parse a selector into {kind, mode, value}.
@@ -439,35 +548,65 @@
     return { kind: 'css', value: selector };
   }
 
-  // #1 — Test if element text matches the parsed text selector
-  function elementTextMatches(el, parsed) {
-    const elText = (el.textContent || '').trim();
+  // An element's OWN text nodes, excluding descendants. Written as a plain sibling walk because
+  // it runs for every element in the document during a text search: the previous
+  // Array.from(childNodes).filter().map().join() allocated three intermediate arrays per node.
+  // Joining with ' ' between EVERY text node (empties included) before the final trim is not an
+  // accident — it reproduces the old join() exactly, down to the double space an empty node in
+  // the middle produces, so no existing text= selector changes what it matches.
+  function directTextOf(el) {
+    let out = '';
+    let first = true;
+    for (let n = el.firstChild; n; n = n.nextSibling) {
+      if (n.nodeType !== Node.TEXT_NODE) continue;
+      if (!first) out += ' ';
+      out += n.textContent.trim();
+      first = false;
+    }
+    return out.trim();
+  }
 
-    const directText = Array.from(el.childNodes)
-      .filter(n => n.nodeType === Node.TEXT_NODE)
-      .map(n => n.textContent.trim())
-      .join(' ').trim();
+  // Compile a regex selector ONCE per parse instead of once per element examined, and cache it on
+  // the parsed object (which lives for exactly one waitForElement call). `g` and `y` are stripped:
+  // they make .test() stateful via lastIndex, which a fresh-regex-per-call could ignore but a
+  // cached one cannot — with them a match would flip on and off between elements.
+  function ensureRegex(parsed) {
+    if (parsed._re === undefined) {
+      try {
+        parsed._re = new RegExp(parsed.value, (parsed.flags || '').replace(/[gy]/g, ''));
+      } catch {
+        parsed._re = null;
+      }
+    }
+    return parsed._re;
+  }
 
+  // #1 — Does one string satisfy the parsed text selector?
+  function matchesText(text, parsed) {
     switch (parsed.mode) {
       case 'exact':
-        return directText === parsed.value || elText === parsed.value;
+        return text === parsed.value;
       case 'contains':
-        return directText.includes(parsed.value) || elText.includes(parsed.value);
-      case 'icontains': {
-        const needle = parsed.value.toLowerCase();
-        return directText.toLowerCase().includes(needle) || elText.toLowerCase().includes(needle);
-      }
+        return text.includes(parsed.value);
+      case 'icontains':
+        return text.toLowerCase().includes(parsed.value.toLowerCase());
       case 'regex': {
-        try {
-          const re = new RegExp(parsed.value, parsed.flags || '');
-          return re.test(directText) || re.test(elText);
-        } catch {
-          return false;
-        }
+        const re = ensureRegex(parsed);
+        return re ? re.test(text) : false;
       }
       default:
         return false;
     }
+  }
+
+  // #1 — Test if element text matches the parsed text selector.
+  // elTextIn / directTextIn let a caller that ALREADY computed them (the document walk below) pass
+  // them in. textContent is O(subtree), and the walk used to read it twice per element and rebuild
+  // the direct text a third time for the ranking.
+  function elementTextMatches(el, parsed, elTextIn, directTextIn) {
+    const directText = directTextIn !== undefined ? directTextIn : directTextOf(el);
+    const elText = elTextIn !== undefined ? elTextIn : (el.textContent || '').trim();
+    return matchesText(directText, parsed) || matchesText(elText, parsed);
   }
 
   /**
@@ -479,27 +618,23 @@
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
     while (walker.nextNode()) {
       const el = walker.currentNode;
+      // Both strings computed ONCE and threaded through everything that needs them. This loop is
+      // the body of the check that re-runs on every DOM mutation while a text wait is pending, so
+      // the per-node cost is paid thousands of times per second on a live page.
       const elText = el.textContent?.trim();
       if (!elText) continue;
+      const directText = directTextOf(el);
 
-      if (!elementTextMatches(el, parsed)) continue;
+      if (!elementTextMatches(el, parsed, elText, directText)) continue;
       if (!isVisible(el)) continue;
 
-      // Direct-text match preference
-      const directText = Array.from(el.childNodes)
-        .filter(n => n.nodeType === Node.TEXT_NODE)
-        .map(n => n.textContent.trim())
-        .join(' ').trim();
-      // Re-test using only direct text to determine direct-match preference
-      const directMatch = directText && (
-        parsed.mode === 'exact' ? directText === parsed.value :
-        parsed.mode === 'contains' ? directText.includes(parsed.value) :
-        parsed.mode === 'icontains' ? directText.toLowerCase().includes(parsed.value.toLowerCase()) :
-        parsed.mode === 'regex' ? (() => { try { return new RegExp(parsed.value, parsed.flags || '').test(directText); } catch { return false; } })() :
-        false
-      );
-
-      candidates.push({ el, directMatch: !!directMatch, depth: getDepth(el) });
+      // Direct-text match preference — the same scalar test, on the direct text alone.
+      // getDepth stays per-CANDIDATE (not per-node): only elements that already matched reach it.
+      candidates.push({
+        el,
+        directMatch: !!directText && matchesText(directText, parsed),
+        depth: getDepth(el),
+      });
     }
     if (candidates.length === 0) return null;
     candidates.sort((a, b) => (b.directMatch - a.directMatch) || (b.depth - a.depth));
@@ -599,6 +734,82 @@
     }
   }
 
+  // Attributes that isVisible / isInteractable actually read. The observer used to watch EVERY
+  // attribute on every element under document.body, which on a live page means style recalcs,
+  // animation classes, progress bars and ad frames all waking a check that cannot possibly care.
+  const WATCHED_ATTRIBUTES = ['class', 'style', 'hidden', 'disabled', 'aria-disabled', 'aria-hidden', 'open'];
+
+  /**
+   * The engine behind every wait: run `check` when the page changes, and stop when it says so.
+   *
+   * Two things it fixes over the plain MutationObserver it replaces.
+   *
+   * CORRECTNESS — the observer was the ONLY thing that could wake a wait, so any state change
+   * that does not mutate anything under document.body was invisible. A stylesheet finishing its
+   * load (it lands in <head>), a class toggled on <html> (outside the observed root), a media
+   * query, a transition settling — in all of those the element becomes visible and the wait sits
+   * there until it times out, then reports "not found" about something plainly on screen. The
+   * user reads that as a broken selector and goes off to re-pick a selector that was fine. A
+   * 250 ms safety poll turns those from a full-timeout failure into a quarter-second delay.
+   *
+   * COST — the callback is coalesced to at most one check per frame. Uncoalesced, a React page
+   * fires it dozens of times a second and each call sweeps the whole candidate list, which for a
+   * text selector means a full-document TreeWalker. rAF deliberately falls back to a timer when
+   * the tab is hidden: rAF does not run there, and a hidden tab is exactly the automation-daemon
+   * case, so without the fallback the wait would stall precisely when nobody is watching.
+   */
+  function makeWatcher(candidates, check) {
+    let done = false;
+    let scheduled = false;
+    let observer = null;
+    let poll = null;
+    let timer = null;
+
+    const cleanup = () => {
+      done = true;
+      if (observer) { observer.disconnect(); observer = null; }
+      if (poll) { clearInterval(poll); poll = null; }
+      if (timer) { clearTimeout(timer); timer = null; }
+    };
+
+    const evaluate = () => {
+      if (done) return;
+      let satisfied = false;
+      try { satisfied = check(); } catch { satisfied = false; }
+      if (satisfied) cleanup();
+    };
+
+    const schedule = () => {
+      if (scheduled || done) return;
+      scheduled = true;
+      const run = () => { scheduled = false; evaluate(); };
+      if (document.visibilityState === 'hidden') setTimeout(run, 0);
+      else requestAnimationFrame(run);
+    };
+
+    return {
+      start(timeoutMs, onTimeout) {
+        timer = setTimeout(() => {
+          if (done) return;
+          cleanup();
+          onTimeout();
+        }, timeoutMs);
+
+        observer = new MutationObserver(schedule);
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: WATCHED_ATTRIBUTES,
+          // Text mutations only matter when something is actually matching on text.
+          characterData: candidates.some(c => c.parsed && c.parsed.kind === 'text'),
+        });
+
+        poll = setInterval(evaluate, 250);
+      },
+    };
+  }
+
   // Set by waitForElement when a FALLBACK selector (not the primary) matched; cleared at
   // the start of every executeCommand. The command dispatcher attaches it to the success
   // response so the C# side can log which tier saved the run.
@@ -675,29 +886,19 @@
       }
 
       return new Promise((resolve, reject) => {
-        let resolved = false;
-        const timer = setTimeout(() => {
-          if (resolved) return;
-          resolved = true;
-          observer.disconnect();
+        const w = makeWatcher(candidates, () => {
+          if (!checkDisappears()) return false;
+          resolve(null);
+          return true;
+        });
+        w.start(timeout, () => {
           const seconds = Math.round(timeout / 1000);
           reject(mkError(
             'ELEMENT_NOT_FOUND',
             `Element still present after ${seconds}s.`,
             'Element did not disappear in time. Increase the timeout or check selector.'
           ));
-        }, timeout);
-
-        const observer = new MutationObserver(() => {
-          if (resolved) return;
-          if (checkDisappears()) {
-            resolved = true;
-            clearTimeout(timer);
-            observer.disconnect();
-            resolve(null);
-          }
         });
-        observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
       });
     }
 
@@ -713,11 +914,13 @@
     }
 
     return new Promise((resolve, reject) => {
-      let resolved = false;
-      const timer = setTimeout(() => {
-        if (resolved) return;
-        resolved = true;
-        observer.disconnect();
+      const w = makeWatcher(candidates, () => {
+        const f = checkPositive();
+        if (!f) return false;
+        resolve(f);
+        return true;
+      });
+      w.start(timeout, () => {
         const seconds = Math.round(timeout / 1000);
 
         // Provide more specific error code if the element exists but doesn't satisfy mode
@@ -740,19 +943,7 @@
           reject(mkError('ELEMENT_NOT_FOUND', `Element not found after ${seconds}s.`,
             'Page might be loading slowly, or selector doesn\'t match anything. Try Pick again.'));
         }
-      }, timeout);
-
-      const observer = new MutationObserver(() => {
-        if (resolved) return;
-        const f = checkPositive();
-        if (f) {
-          resolved = true;
-          clearTimeout(timer);
-          observer.disconnect();
-          resolve(f);
-        }
       });
-      observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
     });
   }
 
@@ -789,6 +980,32 @@
     }, durationMs);
   }
 
+  /**
+   * Write a form control's value through the PROTOTYPE's setter instead of the instance property.
+   *
+   * React installs a value tracker on every controlled input. Assigning `el.value = x` updates the
+   * DOM but leaves that tracker holding the old string, so when the 'input' event arrives React
+   * compares the two, sees no change, and never fires onChange. On a controlled field the visible
+   * result is text that appears and is then wiped by the next render, or a submit button that
+   * stays disabled — while the extension cheerfully reports success:true. Most modern forms are
+   * controlled, so this was the quiet failure behind "the macro types but nothing happens".
+   *
+   * The contentEditable path never had the problem because it goes through execCommand, whose own
+   * comment says it "fires native input events that frameworks listen to". The native-input path
+   * was simply left out of that reasoning. Going through the prototype setter is exactly what the
+   * browser does when a human types.
+   */
+  function setNativeValue(el, value) {
+    try {
+      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
+        : el instanceof HTMLSelectElement ? HTMLSelectElement.prototype
+        : HTMLInputElement.prototype;
+      const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (desc && desc.set) { desc.set.call(el, value); return; }
+    } catch { /* fall through to the plain assignment */ }
+    el.value = value;
+  }
+
   // #5 — Type into a contentEditable element using execCommand or selection API
   function typeIntoContentEditable(el, text, append) {
     el.focus();
@@ -823,7 +1040,7 @@
     // Clear first if not appending, so paste replaces existing content
     if (!append) {
       if ('value' in el) {
-        el.value = '';
+        setNativeValue(el, '');
       } else if (el.isContentEditable) {
         el.textContent = '';
       }
@@ -859,7 +1076,7 @@
       if (el.isContentEditable) {
         el.textContent = text;
       } else {
-        el.value = text;
+        setNativeValue(el, text);
       }
       el.dispatchEvent(new Event('input', { bubbles: true }));
     }
@@ -977,7 +1194,7 @@
         return; // nothing to delete (caret at start for backspace, or at end for delete)
       }
 
-      el.value = newValue;
+      setNativeValue(el, newValue);
       try { el.setSelectionRange(newCaret, newCaret); } catch { /* unsupported on some types */ }
       el.dispatchEvent(new Event('input', { bubbles: true }));
       return;
@@ -1005,20 +1222,21 @@
     try {
       switch (command) {
         case 'click': {
-          const el = await waitForElement(selector, timeout, 'appears', null, alternatives);
+          // Wait for the element to be ENABLED, not merely present. waitForElement has had this
+          // mode all along and the click simply never used it: it checked isInteractable ONCE,
+          // microseconds after the element appeared, then failed with a tip literally instructing
+          // the user to go build a second action ("use Wait with mode=enabled"). A submit button
+          // that enables 300 ms after form validation therefore failed every time with its whole
+          // timeout budget unspent. ELEMENT_DISABLED is still reported — by waitForElement's
+          // timeout classifier, once the window is genuinely exhausted rather than at 0 ms.
+          const el = await waitForElement(selector, timeout, 'enabled', null, alternatives);
           actionEl = el;
 
-          // #4 — Reject early on disabled elements with specific code
-          if (!isInteractable(el)) {
-            throw mkError('ELEMENT_DISABLED', 'Element is disabled — cannot click.',
-              'Wait for the element to be enabled first (use Wait with mode=enabled).');
-          }
-
-          scrollIntoViewIfNeeded(el);
-          await new Promise(r => setTimeout(r, 30));
+          // Settle only if the page actually moved.
+          if (scrollIntoViewIfNeeded(el)) await nextFrame();
 
           // #4 — Reject if covered by another element (modal, sticky header, tooltip)
-          const coveredBy = getCoveringElement(el);
+          const coveredBy = await waitUncovered(el, Math.min(1000, timeout));
           if (coveredBy) {
             throw mkError('ELEMENT_COVERED', 'Element is covered by another element.',
               'Modal, tooltip, or sticky header is on top. Add a Wait or scroll before this action.');
@@ -1033,7 +1251,7 @@
             if (text) {
               const option = Array.from(el.options).find(o => o.value === text || o.textContent.trim() === text);
               if (option) {
-                el.value = option.value;
+                setNativeValue(el, option.value);
                 el.dispatchEvent(new Event('change', { bubbles: true }));
               }
             } else {
@@ -1060,38 +1278,32 @@
 
           el.dispatchEvent(new MouseEvent('mouseenter', { ...opts, buttons: 0 }));
           el.dispatchEvent(new MouseEvent('mouseover', { ...opts, buttons: 0 }));
-          await new Promise(r => setTimeout(r, 50));
-
-          // #4 — Smart fallback: snapshot toggle/state signals before click
-          const beforeClassList = el.className;
-          const beforeAriaExpanded = el.getAttribute('aria-expanded');
-          const beforeAriaPressed = el.getAttribute('aria-pressed');
-          const beforeAriaChecked = el.getAttribute('aria-checked');
-          const beforeFocused = document.activeElement;
+          await nextFrame();
 
           el.focus();
+          // Snapshot AFTER focus() — that call is OURS, and letting it count as "the page
+          // reacted" is what made the fallback below unreachable for every focusable element.
+          const snap = clickSnapshot(el);
+
           el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, pointerType: 'mouse' }));
           el.dispatchEvent(new MouseEvent('mousedown', opts));
+          // KEEP this one. Some sites measure how long the button was held to tell a click from
+          // the start of a drag, and an instantaneous down/up reads as neither.
           await new Promise(r => setTimeout(r, 30));
           el.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerId: 1, pointerType: 'mouse', buttons: 0 }));
           el.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0 }));
           el.dispatchEvent(new MouseEvent('click', { ...opts, buttons: 0 }));
 
-          await new Promise(r => setTimeout(r, 200));
+          // Synchronous handlers have already run by now, so check before waiting at all.
+          // Frameworks that batch (React) land a frame later, which the observer catches.
+          let landed = clickChanged(el, snap);
+          if (!landed) landed = await waitForClickEffect(el, snap, 200);
 
-          // #4 — Use native .click() only if synthetic events caused NO state change.
-          // Robust signals: classList change, aria-* toggles, focus change, element removal.
-          const stillInDom = document.body.contains(el);
-          if (stillInDom) {
-            const noClassChange = el.className === beforeClassList;
-            const noAriaChange = el.getAttribute('aria-expanded') === beforeAriaExpanded
-              && el.getAttribute('aria-pressed') === beforeAriaPressed
-              && el.getAttribute('aria-checked') === beforeAriaChecked;
-            const noFocusChange = document.activeElement === beforeFocused;
-
-            if (noClassChange && noAriaChange && noFocusChange) {
-              try { el.click(); } catch { /* swallow */ }
-            }
+          // #4 — Native .click() only when the synthetic sequence produced NO observable effect.
+          // Guarded on the element still being in the document: a click that removed its own
+          // target obviously worked, and re-clicking a detached node is meaningless.
+          if (!landed && el.isConnected) {
+            try { el.click(); } catch { /* swallow */ }
           }
 
           flashHighlight(el, 'success', 200);
@@ -1099,17 +1311,13 @@
         }
 
         case 'rightClick': {
-          const el = await waitForElement(selector, timeout, 'appears', null, alternatives);
+          // Same 'enabled' wait and same covered retry as click — see the notes there.
+          const el = await waitForElement(selector, timeout, 'enabled', null, alternatives);
           actionEl = el;
 
-          if (!isInteractable(el)) {
-            throw mkError('ELEMENT_DISABLED', 'Element is disabled — cannot right-click.',
-              'Wait for the element to be enabled first.');
-          }
+          if (scrollIntoViewIfNeeded(el)) await nextFrame();
 
-          scrollIntoViewIfNeeded(el);
-
-          const coveredBy = getCoveringElement(el);
+          const coveredBy = await waitUncovered(el, Math.min(1000, timeout));
           if (coveredBy) {
             throw mkError('ELEMENT_COVERED', 'Element is covered by another element.',
               'Modal, tooltip, or sticky header is on top.');
@@ -1134,11 +1342,13 @@
 
           el.dispatchEvent(new MouseEvent('mouseenter', { ...opts, buttons: 0 }));
           el.dispatchEvent(new MouseEvent('mouseover', { ...opts, buttons: 0 }));
-          await new Promise(r => setTimeout(r, 50));
+          // A frame, not a flat 50 ms — hover menus react on the next paint, and this keeps
+          // rightClick and click on the same clock.
+          await nextFrame();
 
           el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerId: 1, pointerType: 'mouse' }));
           el.dispatchEvent(new MouseEvent('mousedown', opts));
-          await new Promise(r => setTimeout(r, 30));
+          await new Promise(r => setTimeout(r, 30)); // held-duration signal, same as click
           el.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerId: 1, pointerType: 'mouse', buttons: 0 }));
           el.dispatchEvent(new MouseEvent('mouseup', { ...opts, buttons: 0 }));
           el.dispatchEvent(new MouseEvent('contextmenu', { ...opts, buttons: 0 }));
@@ -1148,13 +1358,10 @@
         }
 
         case 'type': {
-          const el = await waitForElement(selector, timeout, 'appears', null, alternatives);
+          // 'enabled' for the same reason as click: a field that a form enables a moment later is
+          // the normal case, not an error, and the old 0 ms check turned it into one.
+          const el = await waitForElement(selector, timeout, 'enabled', null, alternatives);
           actionEl = el;
-
-          if (!isInteractable(el)) {
-            throw mkError('ELEMENT_DISABLED', 'Field is disabled — cannot type.',
-              'Wait for the field to be enabled first.');
-          }
 
           scrollIntoViewIfNeeded(el);
           flashHighlight(el, 'active', 220);
@@ -1169,9 +1376,19 @@
           // re-applies the typeAppend rule — so non-append clears each new field too.
           let justTransitioned = true;
 
-          const charDelay = (typeof typeDelay === 'number' && typeDelay >= 0)
-            ? typeDelay
-            : (text.length > 20 ? 5 : 0);
+          // typeDelay arrives as JSON null whenever the user leaves "Delay per char" blank, and
+          // `typeof null === 'object'` — so the ternary fell straight through to the automatic
+          // branch and EVERY text over 20 characters silently paid 5 ms per character. 500
+          // characters is 2.5 s of pure sleep the user never asked for, and it is what pushed long
+          // BrowserType actions past the pipe timeout, making the C# side report "field not found"
+          // about a field it had already found and was busy filling.
+          // Default to 0 and keep ONE event per character: the compatibility that matters is the
+          // per-char event stream, not the pause between them. Anyone who needs a pause has an
+          // explicit field for it, and "Paste" remains the instant path for bulk text.
+          // Reading typeDelay rather than text.length also stops this line from being the one
+          // place that assumes `text` is a string — the segment parser above already tolerates it
+          // being absent.
+          const charDelay = (typeof typeDelay === 'number' && typeDelay >= 0) ? typeDelay : 0;
 
           for (const seg of segments) {
             if (seg.kind === 'key') {
@@ -1204,13 +1421,17 @@
 
             // Native input/textarea path
             if (shouldClear && 'value' in currentEl) {
-              currentEl.value = '';
+              setNativeValue(currentEl, '');
               currentEl.dispatchEvent(new Event('input', { bubbles: true }));
             }
             for (const char of value) {
-              if ('value' in currentEl) currentEl.value += char;
-              currentEl.dispatchEvent(new Event('input', { bubbles: true }));
+              // keydown → write → input → keyup, which is the order a real keystroke produces.
+              // This used to run write → input → keydown → keyup, i.e. the value had already
+              // changed by the time the page saw the key. A field with an input mask inserts the
+              // character itself in its keydown handler, so it received every character TWICE.
               currentEl.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
+              if ('value' in currentEl) setNativeValue(currentEl, currentEl.value + char);
+              currentEl.dispatchEvent(new Event('input', { bubbles: true }));
               currentEl.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true }));
               if (charDelay > 0) await new Promise(r => setTimeout(r, charDelay));
             }
@@ -1321,7 +1542,7 @@
               'Wait for the option to become enabled, or pick a different one.');
           }
 
-          el.value = option.value;
+          setNativeValue(el, option.value);
           // Dispatch both change and input — different libs / frameworks listen to one or the other.
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.dispatchEvent(new Event('change', { bubbles: true }));

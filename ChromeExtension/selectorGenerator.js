@@ -12,21 +12,21 @@ function generateSelector(el) {
   // 1. ID (if unique and valid)
   if (el.id && el.id !== 'null' && el.id !== 'undefined' && !/^\d/.test(el.id)) {
     const selector = `#${CSS.escape(el.id)}`;
-    if (isUnique(selector)) return selector;
+    if (isUnique(selector, el)) return selector;
   }
 
   // 2. data-testid
   const testId = el.getAttribute('data-testid');
   if (testId) {
     const selector = `[data-testid="${CSS.escape(testId)}"]`;
-    if (isUnique(selector)) return selector;
+    if (isUnique(selector, el)) return selector;
   }
 
   // 3. name attribute (common for form fields)
   const name = el.getAttribute('name');
   if (name) {
     const selector = `${el.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
-    if (isUnique(selector)) return selector;
+    if (isUnique(selector, el)) return selector;
   }
 
   // 4. type + specific attributes for inputs
@@ -35,11 +35,11 @@ function generateSelector(el) {
     const placeholder = el.getAttribute('placeholder');
     if (type && placeholder) {
       const selector = `${el.tagName.toLowerCase()}[type="${CSS.escape(type)}"][placeholder="${CSS.escape(placeholder)}"]`;
-      if (isUnique(selector)) return selector;
+      if (isUnique(selector, el)) return selector;
     }
     if (placeholder) {
       const selector = `${el.tagName.toLowerCase()}[placeholder="${CSS.escape(placeholder)}"]`;
-      if (isUnique(selector)) return selector;
+      if (isUnique(selector, el)) return selector;
     }
   }
 
@@ -47,7 +47,7 @@ function generateSelector(el) {
   const ariaLabel = el.getAttribute('aria-label');
   if (ariaLabel) {
     const selector = `${el.tagName.toLowerCase()}[aria-label="${CSS.escape(ariaLabel)}"]`;
-    if (isUnique(selector)) return selector;
+    if (isUnique(selector, el)) return selector;
   }
 
   // 6. Classes (if unique combination)
@@ -59,7 +59,7 @@ function generateSelector(el) {
       .join('');
     if (classes) {
       const selector = `${el.tagName.toLowerCase()}${classes}`;
-      if (isUnique(selector)) return selector;
+      if (isUnique(selector, el)) return selector;
     }
   }
 
@@ -67,13 +67,22 @@ function generateSelector(el) {
   return buildNthChildPath(el);
 }
 
-function buildNthChildPath(el) {
+/**
+ * `skipOwnId` ignores an id on the STARTING element (ancestors still anchor on theirs).
+ * Only generateSelectorAlternatives passes it, and only to get a genuinely structural fallback:
+ * without it, an element that has an id makes this function return "#thatId" on its first
+ * iteration, which is the exact string the S-tier candidate already claimed — so the tier-C entry
+ * was deduped away and the MOST stable elements ended up as the only ones with no fallback at all.
+ * Backwards, since "the site renamed the id" is precisely what fallbacks are for.
+ */
+function buildNthChildPath(el, skipOwnId) {
   const parts = [];
   let current = el;
 
   while (current && current !== document.body && current !== document.documentElement) {
     // 1. Try ID — anchors the path immediately
-    if (current.id && current.id !== 'null' && current.id !== 'undefined' && !/^\d/.test(current.id)) {
+    if (!(skipOwnId && current === el)
+        && current.id && current.id !== 'null' && current.id !== 'undefined' && !/^\d/.test(current.id)) {
       parts.unshift(`#${CSS.escape(current.id)}`);
       break;
     }
@@ -84,7 +93,7 @@ function buildNthChildPath(el) {
       parts.unshift(classSelector);
       // Check if the path so far is already unique
       const fullPath = parts.join(' > ');
-      if (isUnique(fullPath)) break;
+      if (isUnique(fullPath, el)) break;
       // Even if not unique yet, a class anchor is better than nth-of-type — keep going up
       current = current.parentElement;
       if (parts.length > 6) break;
@@ -110,7 +119,7 @@ function buildNthChildPath(el) {
     // Check if already unique
     if (parts.length >= 2) {
       const fullPath = parts.join(' > ');
-      if (isUnique(fullPath)) break;
+      if (isUnique(fullPath, el)) break;
     }
 
     if (parts.length > 6) break;
@@ -144,7 +153,7 @@ function getUniqueClassSelector(el) {
 
   for (const cls of tryOrder) {
     const selector = `${el.tagName.toLowerCase()}.${CSS.escape(cls)}`;
-    if (isUnique(selector)) return selector;
+    if (isUnique(selector, el)) return selector;
   }
 
   // Try two-class combo
@@ -152,7 +161,7 @@ function getUniqueClassSelector(el) {
     for (let i = 0; i < Math.min(validClasses.length, 3); i++) {
       for (let j = i + 1; j < Math.min(validClasses.length, 4); j++) {
         const selector = `${el.tagName.toLowerCase()}.${CSS.escape(validClasses[i])}.${CSS.escape(validClasses[j])}`;
-        if (isUnique(selector)) return selector;
+        if (isUnique(selector, el)) return selector;
       }
     }
   }
@@ -185,8 +194,20 @@ function bubbleToInteractive(el) {
   return el;
 }
 
-function isUnique(selector) {
+/**
+ * Is this selector unique on the page?
+ *
+ * `el` (optional) is a cheap early-out, not a different question. Every selector built in this
+ * file is derived FROM el, so el necessarily matches it — which means a first match that ISN'T el
+ * already proves there are at least two, with no need to count. querySelector stops at the first
+ * hit; querySelectorAll walks the whole document and materialises a NodeList. Since the generators
+ * below are mostly a sequence of REJECTED candidates (that is how they narrow), this turns the
+ * common path from "scan everything" into "stop at the first hit", and only the winner pays full
+ * price. Call sites without an element still get the original behaviour.
+ */
+function isUnique(selector, el) {
   try {
+    if (el && document.querySelector(selector) !== el) return false;
     return document.querySelectorAll(selector).length === 1;
   } catch {
     return false;
@@ -224,7 +245,7 @@ function generateSelectorAlternatives(el) {
   const seen = new Set();
   const push = (selector, tier, description) => {
     if (!selector || seen.has(selector)) return;
-    if (!isUnique(selector)) return; // Skip ambiguous selectors at S/A tiers
+    if (!isUnique(selector, el)) return; // Skip ambiguous selectors at S/A tiers
     seen.add(selector);
     alts.push({ selector, tier, description });
   };
@@ -268,8 +289,11 @@ function generateSelectorAlternatives(el) {
     }
   }
 
-  // Tier C — fallback CSS path (always include so user has a working option)
-  const path = generateSelector(el);
+  // Tier C — structural path, so there is ALWAYS something to fall back to.
+  // buildNthChildPath directly (not generateSelector, which re-runs the id/testid/name ladder
+  // above and hands back a string already in `seen`), and with skipOwnId so an id-bearing element
+  // gets a real path instead of its own id a second time.
+  const path = buildNthChildPath(el, true);
   if (path && !seen.has(path)) {
     alts.push({ selector: path, tier: 'C', description: 'CSS path' });
   }

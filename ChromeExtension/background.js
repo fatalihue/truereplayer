@@ -107,7 +107,15 @@ function connect() {
             // #7 — Optional postNavigateSelector and urlWaitPattern for richer wait semantics.
             if (msg.command === 'navigate') {
               let url = msg.url;
-              if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
+              // Only a BARE host gets the https:// courtesy. The old test was "does it start with
+              // http(s)://", so anything else was prefixed wholesale — "about:blank" became
+              // "https://about:blank" and "file:///C:/x.html" became "https://file:///C:/x.html",
+              // addresses Chrome rejects. Combined with the missing tabs.update callback below,
+              // the rejection was SILENT: nothing navigated, the load watcher sat there, and 30 s
+              // later the step blamed the network for what was a malformed URL field.
+              // The scheme test requires a non-digit after the colon so "localhost:3000" is still
+              // read as host:port and still gets prefixed.
+              if (url && !/^[a-z][a-z0-9+.-]*:(\/\/|[^0-9])/i.test(url)) url = 'https://' + url;
 
               const navTimeout = Math.max(msg.timeout || 30000, 30000);
               const postSel = msg.postNavigateSelector || '';
@@ -205,6 +213,11 @@ function connect() {
                   done = true;
                   if (onUpdated) chrome.tabs.onUpdated.removeListener(onUpdated);
                   if (fallback) clearTimeout(fallback);
+                  // The 300 ms is settle time for the NEW document's content script to come up,
+                  // which only matters when something is about to talk to it. With no post-checks
+                  // runPostChecks just calls finishOk and returns, so every plain BrowserNavigate
+                  // was sleeping 300 ms to do nothing.
+                  if (!postSel && !urlPattern) { runPostChecks(targetTabId); return; }
                   setTimeout(() => runPostChecks(targetTabId), 300);
                 };
 
@@ -232,6 +245,16 @@ function connect() {
                     'Site is slow or unreachable. Increase timeout or check connection.',
                     targetTabId);
                 }, navTimeout);
+
+                // Abort handle for the caller: when the navigation never even STARTS, the watcher
+                // has to be torn down or it would report its own NAVIGATION_TIMEOUT 30 s after the
+                // real error was already sent.
+                return () => {
+                  if (done) return;
+                  done = true;
+                  if (onUpdated) chrome.tabs.onUpdated.removeListener(onUpdated);
+                  if (fallback) clearTimeout(fallback);
+                };
               };
 
               if (msg.newTab) {
@@ -245,8 +268,20 @@ function connect() {
                   waitForLoad(tab.id);
                 });
               } else {
-                waitForLoad(tabs[0].id);
-                chrome.tabs.update(tabs[0].id, { url });
+                const targetId = tabs[0].id;
+                // Watcher armed BEFORE the update so the 'loading' status can't slip past it, and
+                // torn down by abortWait if the update itself is refused. chrome.tabs.create above
+                // already checks lastError this way; the same-tab branch simply never did, so an
+                // address Chrome would not accept produced no error at all — just a 30 s wait.
+                const abortWait = waitForLoad(targetId);
+                chrome.tabs.update(targetId, { url }, () => {
+                  if (!chrome.runtime.lastError) return;
+                  abortWait();
+                  finishErr('NAVIGATION_FAILED',
+                    `Couldn't navigate to "${url}": ${chrome.runtime.lastError.message}`,
+                    'Check the URL field — Chrome refused this address.',
+                    targetId);
+                });
               }
               return;
             }
@@ -276,28 +311,16 @@ function connect() {
               return;
             }
 
-            const relay = {
-              type: 'executeCommand',
-              commandId: msg.commandId,
-              command: msg.command,
-              selector: msg.selector,
-              text: msg.text,
-              url: msg.url,
-              timeout: msg.timeout,
-              // Forward new fields (extension 1.3.0)
-              waitMode: msg.waitMode,
-              urlWaitPattern: msg.urlWaitPattern,
-              postNavigateSelector: msg.postNavigateSelector,
-              typeAppend: msg.typeAppend,
-              typePaste: msg.typePaste,
-              typeDelay: msg.typeDelay,
-              // BrowserSelectOption — without this forward, content.js falls back to
-              // 'text' matching and "Match by Value/Index" silently misbehaves.
-              selectMatchMode: msg.selectMatchMode,
-              // Ranked fallback selectors — same forward-or-it-dies rule as selectMatchMode
-              // above: this relay rebuilds the message field by field.
-              alternatives: msg.alternatives,
-            };
+            // Forward EVERYTHING, then override the type. This used to be rebuilt field by field,
+            // 14 keys copied by hand, and that list is a standing trap: any new field added on the
+            // C# side arrives here, is silently dropped, and the command runs with a default nobody
+            // chose. It has already happened once — selectMatchMode was missing from this object
+            // from the day the field shipped, so "Match by Value/Index" quietly fell back to text
+            // matching, in a way that looks exactly like a wrong option label.
+            // Key order matters: the spread must come FIRST, or msg.type ('browser:executeCommand')
+            // would win and content.js's switch would fall through to its default. The extra keys
+            // that ride along (tabId, newTab) are inert — executeCommand destructures what it wants.
+            const relay = { ...msg, type: 'executeCommand' };
 
             const forward = (response) => {
               // Forward response — preserves response.success and response.error (object form).
@@ -313,40 +336,83 @@ function connect() {
               });
             };
             // "Receiving end does not exist" on an http(s) tab means the content script has not
-            // finished injecting — a race, not a dead end, so it is worth exactly one retry. Any
-            // other rejection is reported as-is; retrying it would only delay the real answer.
+            // finished injecting — a race, not a dead end, so it is worth retrying. Any other
+            // rejection is reported as-is; retrying it would only delay the real answer.
+            //
+            // Do NOT widen this regex. It is safe to retry PRECISELY because these two messages
+            // mean the message was never delivered. "The message port closed before a response was
+            // received" looks similar and is the opposite: the content script GOT it and may have
+            // already run it (a click that navigates does exactly this), so retrying would execute
+            // the action twice.
             const isInjectionRace = (err) =>
               /Receiving end does not exist|Could not establish connection/i.test(err?.message || '');
 
-            chrome.tabs.sendMessage(targetTab.id, relay)
-              .then(forward)
-              .catch((err) => {
-                if (!isInjectionRace(err)) {
+            // ── Fan-out vs. frame 0 ──────────────────────────────────────────────────────────
+            // A correctness switch, not an optimisation, and deliberately NARROW.
+            //
+            // tabs.sendMessage without frameId delivers to EVERY frame and the FIRST reply wins.
+            // For a normal positive wait that is not just harmless, it is load-bearing: a frame
+            // that does not match stays SILENT until its own timeout expires, so the frame that
+            // does match answers first, deterministically — and it is the only reason a
+            // hand-typed selector pointing inside an iframe works at all. Sending everything to
+            // frame 0 would turn those from "works" into ELEMENT_NOT_FOUND.
+            //
+            // Two shapes break that guarantee, because in them a NON-matching frame answers
+            // instantly and wins the race:
+            //   • timeout <= 0 (the If probe) — content.js short-circuits and rejects on the same
+            //     tick, so any iframe can beat the main frame's {success:true} and flip an
+            //     If BrowserElementState to the wrong branch, intermittently.
+            //   • waitMode 'disappears' — checkDisappears runs before any observer and returns
+            //     TRUE for a frame that never had the element, so "wait for the spinner to go"
+            //     passes while the spinner is still on screen. Any page with one content-script
+            //     iframe is enough.
+            // Only those two are pinned to the main frame.
+            const isInstantProbe = typeof msg.timeout === 'number' && msg.timeout <= 0;
+            const isDisappears = msg.waitMode === 'disappears';
+            const mainFrameOnly = isInstantProbe || isDisappears;
+            const sendRelay = () => mainFrameOnly
+              ? chrome.tabs.sendMessage(targetTab.id, relay, { frameId: 0 })
+              : chrome.tabs.sendMessage(targetTab.id, relay);
+
+            // Content scripts inject at document_idle, which on a real page lands anywhere from
+            // 500 ms to several seconds after the navigation commits. A single 300 ms retry
+            // therefore lost the race routinely — and the natural fix a user reaches for, putting
+            // a BrowserWaitElement in front, does not help: the Wait travels through this same
+            // funnel and fails the same way. So keep retrying on a short cadence for as long as
+            // the command's own timeout budget says the caller is still waiting.
+            const injectDeadline = Date.now() + Math.max(1000, msg.timeout || 5000);
+            const attempt = () => {
+              // Same frame targeting on every attempt — a retry that fanned out where the original
+              // did not would reintroduce the race it was pinned to avoid.
+              sendRelay()
+                .then(forward)
+                .catch((err) => {
+                  if (!isInjectionRace(err)) {
+                    sendToNative({
+                      type: 'browser:commandResult',
+                      commandId: msg.commandId,
+                      error: { code: 'EXTENSION_ERROR', message: err.message || 'Failed to execute command', tip: null },
+                      tabUrl: targetTab.url || null,
+                    });
+                    return;
+                  }
+                  if (Date.now() < injectDeadline) {
+                    setTimeout(attempt, 250);
+                    return;
+                  }
                   sendToNative({
                     type: 'browser:commandResult',
                     commandId: msg.commandId,
-                    error: { code: 'EXTENSION_ERROR', message: err.message || 'Failed to execute command', tip: null },
+                    error: {
+                      code: 'NO_CONTENT_SCRIPT',
+                      message: `No TrueReplayer content script on ${pageLabel}.`,
+                      tip: 'Reload that tab and try again. If it was just updated, the extension needs the page reloaded before it can act on it.',
+                    },
                     tabUrl: targetTab.url || null,
                   });
-                  return;
-                }
-                setTimeout(() => {
-                  chrome.tabs.sendMessage(targetTab.id, relay)
-                    .then(forward)
-                    .catch(() => {
-                      sendToNative({
-                        type: 'browser:commandResult',
-                        commandId: msg.commandId,
-                        error: {
-                          code: 'NO_CONTENT_SCRIPT',
-                          message: `No TrueReplayer content script on ${pageLabel}.`,
-                          tip: 'Reload that tab and try again. If it was just updated, the extension needs the page reloaded before it can act on it.',
-                        },
-                        tabUrl: targetTab.url || null,
-                      });
-                    });
-                }, 300);
-              });
+                });
+            };
+            attempt();
           });
           break;
 
@@ -361,7 +427,11 @@ function connect() {
               });
               return;
             }
-            chrome.tabs.sendMessage(tabs[0].id, { type: 'pickElement' }).then((response) => {
+            // frameId 0 because content.js's startPick already returns early outside the main
+            // frame (see its isMainFrame guard). Without this the sub-frames still received the
+            // request, set pickResolve, bailed out of startPick and returned true — leaving a
+            // message channel open per frame that nothing would ever answer.
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'pickElement' }, { frameId: 0 }).then((response) => {
               sendToNative({
                 type: 'browser:pickResult',
                 requestId: msg.requestId,
