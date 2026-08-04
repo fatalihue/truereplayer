@@ -173,6 +173,53 @@ namespace TrueReplayer.Controllers
 
             Directory.CreateDirectory(profileDir);
 
+            // SNAPSHOT BEFORE THE PICKER, not after.
+            //
+            // The file dialog is not modal — ShowFileDialogAsync runs ShowDialog() on a detached
+            // STA thread with no owner — so the app keeps living while it is open, for as long as
+            // the user takes to pick a folder and type a name. The automation daemon fires in that
+            // window, and a fire swaps UserProfile.Current and calls ApplyProfile, which clears and
+            // refills window.Actions. Building the profile AFTER the await therefore read whatever
+            // the daemon had just installed: the file came out with ANOTHER profile's actions,
+            // hotkey, window target and loop settings, under the name the user typed.
+            //
+            // Actions is COPIED rather than assigned. window.Actions is the live ObservableCollection
+            // the bridge mutates — CreateProfileFromState (WebViewBridge) already copies for exactly
+            // this reason, and assigning it here meant even a snapshot taken at the right moment
+            // could still be rewritten underneath us before SettingsManager serialised it.
+            var profile = new UserProfile
+            {
+                Actions = new System.Collections.ObjectModel.ObservableCollection<Models.ActionItem>(window.Actions),
+                BatchDelay = UserProfile.Current.BatchDelay,
+                LastProfileDirectory = string.Empty, // filled in below, once a path exists
+                CustomHotkey = UserProfile.Current.CustomHotkey,
+                CustomHotstring = UserProfile.Current.CustomHotstring,
+                TargetWindow = UserProfile.Current.TargetWindow,
+                UseRelativeCoordinates = UserProfile.Current.UseRelativeCoordinates,
+                WindowWidth = UserProfile.Current.WindowWidth,
+                WindowHeight = UserProfile.Current.WindowHeight,
+                WindowX = UserProfile.Current.WindowX,
+                WindowY = UserProfile.Current.WindowY,
+                RestorePosition = UserProfile.Current.RestorePosition,
+                RestoreSize = UserProfile.Current.RestoreSize,
+                BringToFocus = UserProfile.Current.BringToFocus,
+                TriggerMode = UserProfile.Current.TriggerMode,
+                IsDisabled = UserProfile.Current.IsDisabled,
+                // Per-profile loop — mirror CreateProfileFromState; without these four a
+                // Save-As-New silently resets the copy to 1×.
+                EnableLoop = UserProfile.Current.EnableLoop,
+                LoopCount = UserProfile.Current.LoopCount,
+                LoopIntervalEnabled = UserProfile.Current.LoopIntervalEnabled,
+                LoopInterval = UserProfile.Current.LoopInterval,
+                // Data-loop table — mirror CreateProfileFromState so a "Save As New" /
+                // first-save doesn't silently drop the table.
+                Data = UserProfile.Current.Data,
+                // Automation trigger travels too, but Armed is machine-LOCAL intent:
+                // a Save-As-New copy must not silently start self-firing next to the
+                // original (both would fire the same schedule).
+                Triggers = DisarmedTriggerClone(UserProfile.Current.Triggers),
+            };
+
             var fileName = await ShowFileDialogAsync(new WinForms.SaveFileDialog
             {
                 Filter = "JSON file (*.json)|*.json",
@@ -182,38 +229,8 @@ namespace TrueReplayer.Controllers
 
             if (fileName != null)
             {
-                var profile = new UserProfile
-                {
-                    Actions = window.Actions,
-                    BatchDelay = UserProfile.Current.BatchDelay,
-                    LastProfileDirectory = Path.GetDirectoryName(fileName)!,
-                    CustomHotkey = UserProfile.Current.CustomHotkey,
-                    CustomHotstring = UserProfile.Current.CustomHotstring,
-                    TargetWindow = UserProfile.Current.TargetWindow,
-                    UseRelativeCoordinates = UserProfile.Current.UseRelativeCoordinates,
-                    WindowWidth = UserProfile.Current.WindowWidth,
-                    WindowHeight = UserProfile.Current.WindowHeight,
-                    WindowX = UserProfile.Current.WindowX,
-                    WindowY = UserProfile.Current.WindowY,
-                    RestorePosition = UserProfile.Current.RestorePosition,
-                    RestoreSize = UserProfile.Current.RestoreSize,
-                    BringToFocus = UserProfile.Current.BringToFocus,
-                    TriggerMode = UserProfile.Current.TriggerMode,
-                    IsDisabled = UserProfile.Current.IsDisabled,
-                    // Per-profile loop — mirror CreateProfileFromState; without these four a
-                    // Save-As-New silently resets the copy to 1×.
-                    EnableLoop = UserProfile.Current.EnableLoop,
-                    LoopCount = UserProfile.Current.LoopCount,
-                    LoopIntervalEnabled = UserProfile.Current.LoopIntervalEnabled,
-                    LoopInterval = UserProfile.Current.LoopInterval,
-                    // Data-loop table — mirror CreateProfileFromState so a "Save As New" /
-                    // first-save doesn't silently drop the table.
-                    Data = UserProfile.Current.Data,
-                    // Automation trigger travels too, but Armed is machine-LOCAL intent:
-                    // a Save-As-New copy must not silently start self-firing next to the
-                    // original (both would fire the same schedule).
-                    Triggers = DisarmedTriggerClone(UserProfile.Current.Triggers),
-                };
+                // The one field that genuinely cannot be known before the picker returns.
+                profile.LastProfileDirectory = Path.GetDirectoryName(fileName)!;
 
                 try
                 {
@@ -763,13 +780,19 @@ namespace TrueReplayer.Controllers
         /// actions" would be a lie there — the action list is untouched, and on a profile with
         /// no actions at all it reads as a bug rather than a prompt.
         /// </param>
-        public async Task<ContentDialogResult> ShowUnsavedChangesDialogAsync(bool loopOnly = false)
+        /// <param name="beforeWhat">
+        /// What the user is about to do, completing "Save before ___?". The text used to say
+        /// "closing" for every caller, including the profile switch — so answering it looked like
+        /// it would close the app, and when it merely switched profiles the app staying open read
+        /// as the dialog having failed. Name the actual action instead.
+        /// </param>
+        public async Task<ContentDialogResult> ShowUnsavedChangesDialogAsync(bool loopOnly = false, string beforeWhat = "closing")
         {
             var messageBlock = new TextBlock
             {
                 Text = loopOnly
-                    ? "You changed this profile's Loops settings. Save before closing?"
-                    : "You have unsaved actions. Save before closing?",
+                    ? $"You changed this profile's Loops settings. Save before {beforeWhat}?"
+                    : $"You have unsaved actions. Save before {beforeWhat}?",
                 TextWrapping = TextWrapping.Wrap
             };
 

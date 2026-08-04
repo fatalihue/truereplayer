@@ -117,7 +117,11 @@ function connect() {
               // read as host:port and still gets prefixed.
               if (url && !/^[a-z][a-z0-9+.-]*:(\/\/|[^0-9])/i.test(url)) url = 'https://' + url;
 
-              const navTimeout = Math.max(msg.timeout || 30000, 30000);
+              // Honour a timeout the user actually set; only fall back to 30 s when the action
+              // carries none. The old floor of 30 s meant the Timeout field on a BrowserNavigate
+              // was a one-way promise: raising it worked, lowering it did nothing, so an action
+              // set to 3 s still sat for thirty. Measured while chasing the data: URL hang.
+              const navTimeout = msg.timeout > 0 ? msg.timeout : 30000;
 
               const postSel = msg.postNavigateSelector || '';
               const urlPattern = msg.urlWaitPattern || '';
@@ -184,7 +188,7 @@ function connect() {
                     commandId: msg.commandId + ':wu',
                     command: 'waitUrl',
                     urlPattern,
-                    timeout: msg.timeout || 30000, // navTimeout is always >= this, so the old Math.min was a no-op
+                    timeout: msg.timeout || 30000, // same budget as navTimeout above, so no clamp is needed here
                   }).then((response) => {
                     if (response?.success) cb();
                     else finishErr(
@@ -207,7 +211,7 @@ function connect() {
                     commandId: msg.commandId + ':ws',
                     command: 'waitElement',
                     selector: postSel,
-                    timeout: msg.timeout || 30000, // navTimeout is always >= this, so the old Math.min was a no-op
+                    timeout: msg.timeout || 30000, // same budget as navTimeout above, so no clamp is needed here
                   }).then((response) => {
                     if (response?.success) finishOk(tabId);
                     else finishErr(

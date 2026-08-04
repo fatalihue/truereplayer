@@ -2111,7 +2111,8 @@ namespace TrueReplayer
         /// Checks for unsaved changes and prompts Save/Discard/Cancel.
         /// Returns true if the caller should proceed, false to cancel.
         /// </summary>
-        private async Task<bool> CheckUnsavedChangesAsync()
+        /// <param name="beforeWhat">Completes "Save before ___?" — see ShowUnsavedChangesDialogAsync.</param>
+        private async Task<bool> CheckUnsavedChangesAsync(string beforeWhat = "continuing")
         {
             // A pending Loops/Interval edit counts as unsaved work on its OWN — including on a
             // profile with zero actions, which the `actions.Count == 0` short-circuit below
@@ -2121,7 +2122,7 @@ namespace TrueReplayer
                 return true;
 
             bool loopOnly = HasUnsavedLoopChange && (!HasUnsavedChanges || actions.Count == 0);
-            var result = await profileController.ShowUnsavedChangesDialogAsync(loopOnly);
+            var result = await profileController.ShowUnsavedChangesDialogAsync(loopOnly, beforeWhat);
 
             if (result == Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary) // Save
             {
@@ -5516,7 +5517,7 @@ namespace TrueReplayer
             if (string.IsNullOrEmpty(name)) return;
 
             // Guard: check for unsaved changes before switching
-            if (!await CheckUnsavedChangesAsync()) return;
+            if (!await CheckUnsavedChangesAsync("switching profiles")) return;
 
             // Deselect if clicking the already-active profile
             if (CurrentProfileName == name)
@@ -7633,7 +7634,7 @@ namespace TrueReplayer
                         var closure = await profileController.ExpandWithRunProfileDependenciesAsync(names);
                         activeInExport = closure.Any(n => string.Equals(n, CurrentProfileName, StringComparison.OrdinalIgnoreCase));
                     }
-                    if (activeInExport && !await CheckUnsavedChangesAsync()) return;
+                    if (activeInExport && !await CheckUnsavedChangesAsync("exporting")) return;
                 }
 
                 var (exported, missingImages, bundledDependencies) = await profileController.ExportProfilesAsync(names, includeOrganization, includeDependencies);
@@ -8236,7 +8237,7 @@ namespace TrueReplayer
         private async void HandleProfileLoad()
         {
             // Guard: check for unsaved changes before loading
-            if (!await CheckUnsavedChangesAsync()) return;
+            if (!await CheckUnsavedChangesAsync("loading another profile")) return;
 
             string? loadedPath = await profileController.LoadProfileAsync();
             if (loadedPath == null) return;
