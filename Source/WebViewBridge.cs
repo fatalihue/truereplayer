@@ -4025,8 +4025,34 @@ namespace TrueReplayer
             SendMessage("sheet:openIndex", new { index = insertIndex });
         }
 
+        /// <summary>
+        /// Per-profile image storage keys off this, and "No Profile" stores under "default".
+        /// Always derived from a SNAPSHOT name taken before the overlay opened — never from a
+        /// fresh read of CurrentProfileName, which is exactly how a capture ended up in another
+        /// profile's image directory.
+        /// </summary>
+        private static string StorageProfileName(string profileName)
+            => profileName != "No Profile" ? profileName : "default";
+
+        /// <summary>
+        /// Shared abort for a long capture whose scope no longer applies. NEVER silent: the user
+        /// has just watched the app minimise and dragged a rectangle across the screen, so a
+        /// wordless no-op is a worse outcome than the swallowed ArgumentOutOfRangeException this
+        /// replaces. Call on the UI thread — it reads CurrentProfileName and the action list.
+        /// </summary>
+        private bool CaptureStillApplies(in Services.EditScope scope, string what)
+        {
+            if (scope.TryResume(CurrentProfileName, out var why)) return true;
+            DiagnosticLog.Warn($"{what} discarded: {why}");
+            SendMessage("alert:show", new { message = why, type = "error" });
+            return false;
+        }
+
         private async Task HandleInsertConditionalImageAsync(int insertIndex)
         {
+            // Captured BEFORE the overlay: it does not block the app, so an automation fire can
+            // swap the profile and refill the action list while the user is still dragging.
+            var scope = Services.EditScope.Capture(CurrentProfileName);
             // Identical capture flow to HandleInsertWaitImageAsync above — same minimise,
             // screenshot, region-pick overlay, ImageStorageService.SaveReferenceImage path.
             // The only difference is what gets inserted at the end: {If, EndIf} pair
@@ -4066,14 +4092,22 @@ namespace TrueReplayer
 
                 if (selection?.CroppedImage == null) return;
 
-                string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
-                string imagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, profileName);
+                // Snapshot name, so the PNG can only land in the directory the user was looking
+                // at. If the scope turns out to be stale below, this file is simply orphaned and
+                // ImageStorageService.CleanupOrphanImages removes it at the next startup — far
+                // cheaper than holding the bitmap to write it on the UI thread.
+                string imagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, StorageProfileName(scope.ProfileName));
                 selection.CroppedImage.Dispose();
 
                 dispatcherQueue.TryEnqueue(() =>
                 {
+                    if (!CaptureStillApplies(scope, "Captured image")) return;
+                    // Cannot exceed Count once the epoch check passed, but clamping is free and
+                    // an out-of-range Insert here is the swallowed exception this flow was named
+                    // for in the modality audit.
+                    int at = Math.Min(insertIndex, actions.Count);
                     PushUndoState();
-                    actions.Insert(insertIndex, new ActionItem
+                    actions.Insert(at, new ActionItem
                     {
                         ActionType = "If",
                         ConditionType = "ImageFound",
@@ -4089,7 +4123,7 @@ namespace TrueReplayer
                         Key = "",
                         Comment = "",
                     });
-                    actions.Insert(insertIndex + 1, new ActionItem
+                    actions.Insert(at + 1, new ActionItem
                     {
                         ActionType = "EndIf",
                         Delay = 0,
@@ -4103,7 +4137,7 @@ namespace TrueReplayer
                     mainController.UpdateButtonStates();
                     // Auto-open the Sheet on the new IF row so the user can immediately
                     // adjust confidence / search region / negate / on-probe-error.
-                    SendMessage("sheet:openIndex", new { index = insertIndex });
+                    SendMessage("sheet:openIndex", new { index = at });
                 });
             }
             finally
@@ -4117,6 +4151,7 @@ namespace TrueReplayer
             // Mirror of HandleInsertWaitPixelColorAsync — same point-pick overlay, same
             // relative-coord translation. End result: {If(PixelColorMatch + coords + hex),
             // EndIf} pair inserted at insertIndex.
+            var scope = Services.EditScope.Capture(CurrentProfileName);
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -4165,8 +4200,10 @@ namespace TrueReplayer
 
                 dispatcherQueue.TryEnqueue(() =>
                 {
+                    if (!CaptureStillApplies(scope, "Picked pixel")) return;
+                    int at = Math.Min(insertIndex, actions.Count);
                     PushUndoState();
-                    actions.Insert(insertIndex, new ActionItem
+                    actions.Insert(at, new ActionItem
                     {
                         ActionType = "If",
                         ConditionType = "PixelColorMatch",
@@ -4179,7 +4216,7 @@ namespace TrueReplayer
                         Key = "",
                         Comment = "",
                     });
-                    actions.Insert(insertIndex + 1, new ActionItem
+                    actions.Insert(at + 1, new ActionItem
                     {
                         ActionType = "EndIf",
                         Delay = 0,
@@ -4191,7 +4228,7 @@ namespace TrueReplayer
                     HasUnsavedChanges = true;
                     PushActionsUpdate();
                     mainController.UpdateButtonStates();
-                    SendMessage("sheet:openIndex", new { index = insertIndex });
+                    SendMessage("sheet:openIndex", new { index = at });
                 });
             }
             finally
@@ -4369,6 +4406,7 @@ namespace TrueReplayer
 
         private async Task HandleInsertWaitImageAsync(int insertIndex)
         {
+            var scope = Services.EditScope.Capture(CurrentProfileName);
             // Minimize main window to get a clean screenshot
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
@@ -4410,16 +4448,17 @@ namespace TrueReplayer
 
                 if (selection?.CroppedImage == null) return; // Cancelled or region-only (no image)
 
-                // Save the cropped image
-                string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
-                string imagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, profileName);
+                // Save the cropped image under the SNAPSHOT profile (see the If-Image flow).
+                string imagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, StorageProfileName(scope.ProfileName));
                 selection.CroppedImage.Dispose();
 
                 // Insert the action
                 int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
                 dispatcherQueue.TryEnqueue(() =>
                 {
-                    actions.Insert(insertIndex, new ActionItem
+                    if (!CaptureStillApplies(scope, "Captured image")) return;
+                    int at = Math.Min(insertIndex, actions.Count);
+                    actions.Insert(at, new ActionItem
                     {
                         ActionType = "WaitImage",
                         ImagePath = imagePath,
@@ -4435,7 +4474,7 @@ namespace TrueReplayer
                     PushActionsUpdate();
                     mainController.UpdateButtonStates();
                     // Auto-open the editor for the freshly inserted row.
-                    SendMessage("sheet:openIndex", new { index = insertIndex });
+                    SendMessage("sheet:openIndex", new { index = at });
                 });
             }
             finally
@@ -4461,6 +4500,7 @@ namespace TrueReplayer
             // user hits Esc (selection == null), nothing is inserted — same "cancel
             // means cancel" rule WaitImage already follows, so the grid never grows a
             // half-configured row from a discarded capture.
+            var scope = Services.EditScope.Capture(CurrentProfileName);
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -4515,7 +4555,9 @@ namespace TrueReplayer
                 int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
                 dispatcherQueue.TryEnqueue(() =>
                 {
-                    actions.Insert(insertIndex, new ActionItem
+                    if (!CaptureStillApplies(scope, "Picked pixel")) return;
+                    int at = Math.Min(insertIndex, actions.Count);
+                    actions.Insert(at, new ActionItem
                     {
                         ActionType = "WaitPixelColor",
                         Key = "",
@@ -4531,7 +4573,7 @@ namespace TrueReplayer
                     PushActionsUpdate();
                     mainController.UpdateButtonStates();
                     // Match WaitImage's insert flow: open the editor on the new row.
-                    SendMessage("sheet:openIndex", new { index = insertIndex });
+                    SendMessage("sheet:openIndex", new { index = at });
                 });
             }
             finally
@@ -4553,10 +4595,13 @@ namespace TrueReplayer
             bool eligible = a.ActionType == "WaitImage"
                 || (a.ActionType == "If" && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
             if (!eligible) return;
-            _ = HandleWaitImageRecaptureAsync(index);
+            // Anchor on the ROW OBJECT, not on its index. The write-back lands after an overlay
+            // the user can sit in for a minute, and `index < actions.Count` is a bounds check,
+            // not an identity check — it passes happily while pointing at a different row.
+            _ = HandleWaitImageRecaptureAsync(Services.EditScope.Capture(CurrentProfileName, a));
         }
 
-        private async Task HandleWaitImageRecaptureAsync(int index)
+        private async Task HandleWaitImageRecaptureAsync(Services.EditScope scope)
         {
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
@@ -4597,18 +4642,21 @@ namespace TrueReplayer
 
                 // Keep the old PNG on disk so undo can restore the previous reference image.
                 // Orphan PNGs are cleaned at app startup by ImageStorageService.CleanupOrphanImages.
-                string profileName = CurrentProfileName != "No Profile" ? CurrentProfileName : "default";
-                string newImagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, profileName);
+                // Saved under the SNAPSHOT profile so it cannot land in another profile's dir.
+                string newImagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, StorageProfileName(scope.ProfileName));
                 selection.CroppedImage.Dispose();
 
                 dispatcherQueue.TryEnqueue(() =>
                 {
-                    if (index < actions.Count)
+                    if (!scope.TryResolveIndex(actions, CurrentProfileName, out int at, out var why))
                     {
-                        actions[index].ImagePath = newImagePath;
-                        HasUnsavedChanges = true;
-                        PushActionsUpdate();
+                        DiagnosticLog.Warn($"Recaptured image discarded: {why}");
+                        SendMessage("alert:show", new { message = why, type = "error" });
+                        return;
                     }
+                    actions[at].ImagePath = newImagePath;
+                    HasUnsavedChanges = true;
+                    PushActionsUpdate();
                 });
             }
             finally
