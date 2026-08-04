@@ -1478,9 +1478,15 @@
             }
             for (const char of value) {
               // keydown → write → input → keyup, which is the order a real keystroke produces.
-              // This used to run write → input → keydown → keyup, i.e. the value had already
-              // changed by the time the page saw the key. A field with an input mask inserts the
-              // character itself in its keydown handler, so it received every character TWICE.
+              // This used to run write → input → keydown → keyup, so a keydown handler inspecting
+              // the field saw a value that ALREADY contained the character it was being told about
+              // — the opposite of what every such handler is written against.
+              //
+              // What this does NOT do, despite an earlier version of this comment saying so: it
+              // does not stop an input mask from inserting the character a second time. A mask
+              // that writes in its own keydown handler still writes, and we still append after it.
+              // Fixing that needs the value to be compared across the dispatch and the append
+              // skipped when the page already did it — a real change, not a reordering.
               currentEl.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
               if ('value' in currentEl) setNativeValue(currentEl, currentEl.value + char);
               currentEl.dispatchEvent(new Event('input', { bubbles: true }));

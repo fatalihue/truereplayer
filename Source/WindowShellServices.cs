@@ -621,6 +621,22 @@ namespace TrueReplayer.Services
             if (((MainWindow)window).IsMinimizeToTrayEnabled())
             {
                 args.Cancel = true;
+
+                // ...but NOT while a modal dialog is waiting for an answer. The caption buttons and
+                // Alt+F4 are system surfaces: they sit outside the XamlRoot the ContentDialog dims,
+                // so they stay clickable with a prompt on screen. Hiding the window there strands
+                // the dialog — ShowAsync never completes, so its finally never runs and
+                // InputHookManager.SuppressAllHotkeys stays true, killing every hotkey, hotstring
+                // and automation fire while the tray tooltip still says "N automations armed". The
+                // dialog is invisible, so nothing tells the user what happened or how to undo it.
+                // Cancelling the hide leaves the window up with the question on it, which is the
+                // only state in which the user can actually resolve this.
+                if (Services.ModalGate.IsOpen)
+                {
+                    Services.DiagnosticLog.Info("Close-to-tray ignored: a dialog is waiting for an answer.");
+                    return;
+                }
+
                 TrayIconService.Initialize((MainWindow)window, hwnd);
                 TrayIconService.ShowMinimizeBalloon();
                 appWindow.Hide();

@@ -352,7 +352,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   // `negate` is frozen INTO the result: the card explains the answer in terms of the Negate
   // setting, and reading live state at render time meant flipping Negate after a check silently
   // re-labelled a stale answer as the opposite branch.
-  const [condResult, setCondResult] = useState<{ satisfied: boolean; raw: boolean; connected: boolean; negate: boolean } | null>(null);
+  const [condResult, setCondResult] = useState<{ satisfied: boolean; raw: boolean; connected: boolean; negate: boolean; lost?: boolean } | null>(null);
   // Safety timeout — if the bridge response is lost, recover the UI instead of hanging "Running…".
   // Backend pipeTimeout is the action timeout (~5s default); we double it plus 5s overhead.
   const testTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1730,7 +1730,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       condTimeoutRef.current = null;
       setCondRequestId(prev => {
         if (prev !== requestId) return prev;
-        setCondResult({ satisfied: false, raw: false, connected: false, negate: askedNegate });
+        setCondResult({ satisfied: false, raw: false, connected: false, negate: askedNegate, lost: true });
         return null;
       });
     }, 6000);
@@ -2647,13 +2647,18 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   <div className="flex items-center gap-1.5">
                     {condResult.connected ? (condResult.satisfied ? <Check size={11} /> : <X size={11} />) : <X size={11} />}
                     <span className="font-medium">
-                      {!condResult.connected
+                      {condResult.lost
+                        ? tt('No response from the browser extension', 'Sem resposta da extensão do navegador')
+                        : !condResult.connected
                         ? 'Extension not connected'
                         : condResult.satisfied ? 'Condition is TRUE now' : 'Condition is FALSE now'}
                     </span>
                   </div>
                   <div className="mt-0.5 text-text-tertiary">
-                    {!condResult.connected
+                    {condResult.lost
+                      ? tt('The check timed out waiting for a reply. Check that Chrome and the TrueReplayer extension are still running.',
+                           'A checagem expirou esperando resposta. Confira se o Chrome e a extensão do TrueReplayer continuam rodando.')
+                      : !condResult.connected
                       ? tt('Could not ask the page. With the bridge down the replay reads this condition as NOT found instead of stopping.',
                            'Não foi possível perguntar à página. Com a ponte fora, a reprodução lê esta condição como NÃO encontrado em vez de parar.')
                       : condResult.negate

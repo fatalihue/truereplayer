@@ -735,6 +735,12 @@ namespace TrueReplayer.Controllers
             };
             ApplyDialogTheme(dialog, messageBlock);
 
+            // A second ContentDialog while one is open is a process-killing stowed exception —
+            // see ModalGate. Refusing reads as Cancel, which is what a save prompt raised behind
+            // an already-open prompt should do anyway.
+            using var gate = Services.ModalGate.TryEnter("save profile");
+            if (gate == null) return SaveDialogResult.Cancel;
+
             InputHookManager.SuppressAllHotkeys = true;
             try
             {
@@ -780,6 +786,13 @@ namespace TrueReplayer.Controllers
                 Content = messageBlock
             };
             ApplyDialogTheme(dialog, messageBlock);
+
+            // See ModalGate. `None` is precisely "the user did not choose Save or Discard", which
+            // every caller already maps to "do not proceed with the switch/close" — so a switch
+            // requested while the unsaved-changes prompt is still up is simply dropped, and the
+            // prompt the user is looking at stays the one that matters.
+            using var gate = Services.ModalGate.TryEnter("unsaved changes");
+            if (gate == null) return ContentDialogResult.None;
 
             InputHookManager.SuppressAllHotkeys = true;
             try

@@ -7450,10 +7450,23 @@ namespace TrueReplayer
                 // Mirrors the pattern used by every other ContentDialog in the codebase.
                 profileController.ApplyDialogTheme(dialog, msgBlock);
 
-                InputHookManager.SuppressAllHotkeys = true;
+                // See ModalGate — a second ContentDialog while one is open kills the process.
+                // Refusing means the folder is not deleted, which is the right way to fail a
+                // destructive action nobody has confirmed.
+                // Scoped to the DIALOG, not to the whole handler: the deletion below awaits real
+                // I/O (rewriting profile-order, rescanning the profiles folder), and holding the
+                // gate across that would block unrelated dialogs for the duration while
+                // SuppressAllHotkeys — released by the finally right below — says the modal is
+                // already over. Two signals disagreeing about the same moment is how the next bug
+                // gets written.
                 Microsoft.UI.Xaml.Controls.ContentDialogResult result;
-                try { result = await dialog.ShowAsync(); }
-                finally { InputHookManager.SuppressAllHotkeys = false; }
+                using (var gate = Services.ModalGate.TryEnter("delete folder"))
+                {
+                    if (gate == null) return;
+                    InputHookManager.SuppressAllHotkeys = true;
+                    try { result = await dialog.ShowAsync(); }
+                    finally { InputHookManager.SuppressAllHotkeys = false; }
+                }
 
                 if (result == Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary)
                     await profileController.DeleteFolderAsync(name, deleteProfiles: false);
@@ -8260,6 +8273,11 @@ namespace TrueReplayer
                 Content = messageBlock
             };
             profileController.ApplyDialogTheme(dialog, messageBlock);
+
+            // See ModalGate. Refusing leaves settings untouched — the safe outcome for a
+            // confirmation the user never saw.
+            using var gate = Services.ModalGate.TryEnter("reset settings");
+            if (gate == null) return;
 
             InputHookManager.SuppressAllHotkeys = true;
             try
