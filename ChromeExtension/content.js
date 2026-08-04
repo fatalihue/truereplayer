@@ -12,9 +12,35 @@
   let _typingObserverInitial = '';  // value at time of focus
   let _typingObserverHandler = null;
   let _typingObserverBlur = null;
+  // G1 — the selector/alternatives computed for this field when it was CLICKED, not recomputed
+  // at flush time. See flushTypingObserver for why recomputing is not equivalent.
+  let _typingObserverSelector = '';
+  let _typingObserverAlternatives = [];
 
   const { generateSelector, generateSelectorAlternatives, getElementDescription } =
     window.__trueReplayerSelectorGenerator || {};
+
+  /**
+   * G1 — Ranked fallback selectors for a recorded element.
+   *
+   * Only the crosshair picker used to call this, so every RECORDED action shipped as a single
+   * candidate: when the page drifted there was nothing to fall back to, and the primary a
+   * recording produces is the WEAKEST kind (generateSelector ends at buildNthChildPath).
+   *
+   * The primary deliberately stays generateSelector's output rather than alternatives[0]. Two
+   * reasons: the C# recorder matches a later typingCaptured to the BrowserType row it created by
+   * exact `Key == selector` string equality, and the tier ranking depends on document-wide
+   * uniqueness (isTextUnique walks the whole DOM), so it can legitimately answer differently a
+   * few seconds apart on a live page. generateSelector is the stable choice for the identity
+   * string; the ranked list rides along purely as replay fallback, which is what G1 is about.
+   *
+   * Never throws — a recording that loses an action because the fallback generator tripped over
+   * an exotic DOM is strictly worse than an action with no fallbacks.
+   */
+  function selectorAlternativesFor(el) {
+    if (!generateSelectorAlternatives) return [];
+    try { return generateSelectorAlternatives(el) || []; } catch { return []; }
+  }
 
   // ── Recording Mode ──
 
@@ -80,6 +106,7 @@
     const selector = generateSelector?.(el);
     if (!selector) return;
 
+    const alternatives = selectorAlternativesFor(el);
     const description = getElementDescription?.(el) || '';
 
     // Detect input-like elements for auto BrowserType
@@ -91,6 +118,7 @@
     chrome.runtime.sendMessage({
       type: 'elementClicked',
       selector,
+      alternatives,
       description,
       tagName: tag,
       button: e.type === 'contextmenu' ? 'right' : 'left',
@@ -99,7 +127,7 @@
 
     // #10 — If user clicked into an input/contentEditable, start observing typing
     if (isInput) {
-      startTypingObserver(el);
+      startTypingObserver(el, selector, alternatives);
     } else {
       // Non-input click commits whatever was being typed
       flushTypingObserver();
@@ -147,6 +175,7 @@
     chrome.runtime.sendMessage({
       type: 'elementClicked',
       selector,
+      alternatives: selectorAlternativesFor(el),
       description,
       tagName: el.tagName.toLowerCase(),
       button: 'right',
@@ -164,11 +193,13 @@
 
   // #10 — Typing capture: when user focuses a field via recorded click,
   // observe input events. When focus leaves, send the typed text as a BrowserType action.
-  function startTypingObserver(el) {
+  function startTypingObserver(el, selector, alternatives) {
     flushTypingObserver(); // commit any pending observer first
 
     _typingObserver = el;
     _typingObserverInitial = el.isContentEditable ? (el.textContent || '') : (el.value || '');
+    _typingObserverSelector = selector || '';
+    _typingObserverAlternatives = alternatives || [];
 
     _typingObserverHandler = () => {
       // Just track changes; we'll commit on blur
@@ -186,6 +217,16 @@
 
     const el = _typingObserver;
     const initial = _typingObserverInitial;
+    // Captured before the reset below, and NOT recomputed. The C# recorder fills the
+    // BrowserType row created by the click that focused this field, and it finds that row by
+    // exact selector-string equality — so the two must be the same string by construction, not
+    // by two generator runs happening to agree. They can disagree: the page moves between the
+    // click and the blur (that is what the user was doing in between), and generateSelector's
+    // ladder is uniqueness-sensitive at every rung. When they disagreed the typing landed in a
+    // SECOND BrowserType row instead of the first, so replay clicked the field and then typed
+    // into it twice.
+    const selector = _typingObserverSelector || generateSelector?.(el);
+    const alternatives = _typingObserverAlternatives;
     const current = el.isContentEditable ? (el.textContent || '') : (el.value || '');
 
     // Detach listeners
@@ -195,6 +236,8 @@
     _typingObserverHandler = null;
     _typingObserverBlur = null;
     _typingObserverInitial = '';
+    _typingObserverSelector = '';
+    _typingObserverAlternatives = [];
 
     // Compute typed delta
     let typed = current;
@@ -205,13 +248,15 @@
     }
 
     if (typed.length === 0) return;
-
-    const selector = generateSelector?.(el);
     if (!selector) return;
 
     chrome.runtime.sendMessage({
       type: 'typingCaptured',
       selector,
+      // Only used when no BrowserType row matches (typing in a field the extension never saw
+      // clicked); the bridge creates a fresh action there and it deserves fallbacks like any
+      // other. When a row DOES match, the click already stored the same list on it.
+      alternatives,
       text: typed,
       isAppend,
     });
@@ -267,6 +312,7 @@
     chrome.runtime.sendMessage({
       type: 'selectChanged',
       selector,
+      alternatives: selectorAlternativesFor(el),
       description: getElementDescription?.(el) || '',
       selectedValue: opt.value,
       selectedText: (opt.text || '').trim(),

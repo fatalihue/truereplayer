@@ -229,16 +229,60 @@ function isUnique(selector, el) {
   }
 }
 
+/**
+ * A short human label for a recorded element — this becomes the action's Comment, the only
+ * column in the grid that says what the row DOES. Cosmetic: nothing matches on it.
+ *
+ * It used to be `el.textContent.trim().substring(0, 50)`, which produced the "giant name that
+ * doesn't even look like anything on screen". Three separate reasons, all fixed here:
+ *   • textContent is the whole SUBTREE, so clicking a wrapper concatenated every descendant's
+ *     text with no separator at all.
+ *   • trim() only touches the ends, so the source file's newlines and indentation survived in
+ *     the middle — half the 50 characters were whitespace.
+ *   • it described the RAW click target while the selector described the BUBBLED one, so
+ *     clicking the icon inside a button gave an action aimed at the button and labelled "svg".
+ *
+ * Order is deliberate: an authored label (aria-label/title/alt/placeholder) beats scraped text,
+ * because it is what the page's author chose to call the thing. Below that, the element's OWN
+ * text beats its descendants'.
+ */
 function getElementDescription(el) {
-  // Try to get a human-readable description
-  const text = el.textContent?.trim()?.substring(0, 50);
-  const placeholder = el.getAttribute('placeholder');
-  const ariaLabel = el.getAttribute('aria-label');
-  const title = el.getAttribute('title');
-  const alt = el.getAttribute('alt');
-  const value = el.tagName === 'INPUT' ? el.getAttribute('type') : null;
+  if (!el) return '';
+  // Same element the selector will point at.
+  el = bubbleToInteractive(el);
 
-  return ariaLabel || title || alt || placeholder || (text ? `"${text}"` : value || el.tagName.toLowerCase());
+  // Whitespace runs (including newlines) collapse to one space — this alone is most of the fix.
+  const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+  const MAX = 40;
+  const cap = (s) => (s.length > MAX ? s.slice(0, MAX).trimEnd() + '...' : s);
+
+  for (const attr of ['aria-label', 'title', 'alt', 'placeholder']) {
+    const v = clean(el.getAttribute(attr));
+    if (v) return cap(v);
+  }
+
+  // The element's own text nodes, not its descendants'.
+  const own = clean(Array.from(el.childNodes)
+    .filter((n) => n.nodeType === Node.TEXT_NODE)
+    .map((n) => n.textContent)
+    .join(' '));
+  if (own) return cap(own);
+
+  // No own text: a button wrapping a <span> is still fairly labelled by that span, so fall
+  // through to the subtree. Truncated like everything else — for a real container this is a
+  // paragraph rather than a name, and 40 collapsed characters of it is at least a usable hint
+  // instead of the bare tag name.
+  const subtree = clean(el.textContent);
+  if (subtree) return cap(subtree);
+
+  if (el.tagName === 'INPUT') {
+    const v = clean(el.getAttribute('value')) || clean(el.getAttribute('name'));
+    if (v) return cap(v);
+    const type = clean(el.getAttribute('type'));
+    return type ? `input ${type}` : 'input';
+  }
+
+  return el.tagName.toLowerCase();
 }
 
 /**

@@ -549,6 +549,32 @@ function sendToNative(msg) {
   }
 }
 
+/**
+ * G1 — Normalise a ranked selector list before it crosses the pipe.
+ *
+ * Every message that reaches this service worker has already been filtered to this extension's
+ * own content scripts, so this is not a trust boundary — it is a SHAPE boundary. The C# side
+ * parses the array field by field and silently drops malformed entries, which would turn "the
+ * generator produced something odd" into "the action recorded with no fallbacks and nobody
+ * said so". Dropping the noise here keeps that from looking like a recording bug later.
+ */
+function sanitizeAlternatives(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const alt of list) {
+    if (!alt || typeof alt.selector !== 'string' || !alt.selector) continue;
+    out.push({
+      selector: alt.selector,
+      tier: typeof alt.tier === 'string' && alt.tier ? alt.tier : 'C',
+      description: typeof alt.description === 'string' ? alt.description : '',
+    });
+    // Mirrors generateSelectorAlternatives' own cap, so a future generator change cannot
+    // quietly start writing 40-entry lists into every profile.
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+
 function updateBadge() {
   if (isOutdated && !isRecording) {
     chrome.action.setBadgeText({ text: '!' });
@@ -576,6 +602,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendToNative({
       type: 'browser:elementClicked',
       selector: msg.selector,
+      // G1 — ranked fallback selectors, same shape the pick path already relays. Absent from
+      // older content scripts (a stale service worker outliving a reload); the C# side reads a
+      // missing array as "no fallbacks", which is exactly the pre-G1 behaviour.
+      alternatives: sanitizeAlternatives(msg.alternatives),
       description: msg.description,
       tagName: msg.tagName,
       button: msg.button || 'left',
@@ -588,6 +618,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendToNative({
       type: 'browser:typingCaptured',
       selector: msg.selector,
+      alternatives: sanitizeAlternatives(msg.alternatives),
       text: msg.text || '',
       isAppend: !!msg.isAppend,
     });
@@ -606,6 +637,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendToNative({
       type: 'browser:selectChanged',
       selector: msg.selector,
+      alternatives: sanitizeAlternatives(msg.alternatives),
       description: msg.description || '',
       selectedValue: msg.selectedValue || '',
       selectedText: msg.selectedText || '',
@@ -637,6 +669,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // Ensure connection on all service worker lifecycle events
 chrome.runtime.onStartup.addListener(() => connect());
 chrome.runtime.onInstalled.addListener(() => connect());
+
+/**
+ * Completes the popup's "Reload extension" button.
+ *
+ * The flag is read at TOP LEVEL rather than from onInstalled/onStartup on purpose: neither of
+ * those fires on chrome.runtime.reload(), so a listener would never run and the tabs would
+ * silently keep their orphaned content scripts — the exact failure the button is meant to
+ * prevent, and an invisible one.
+ *
+ * Cleared BEFORE the refresh, so a tab that fails to reload cannot leave the flag armed and
+ * turn every future service-worker wake-up into a surprise refresh of the user's tabs.
+ * Only http(s) tabs: nothing else can host a content script, and reloading a pinned app tab or
+ * a chrome:// page would be an unrequested side effect.
+ */
+chrome.storage.local.get('reloadTabsOnStart', (state) => {
+  if (!state || !state.reloadTabsOnStart) return;
+  chrome.storage.local.remove('reloadTabsOnStart', () => {
+    chrome.tabs.query({}, (tabs) => {
+      for (const tab of tabs) {
+        if (tab.id != null && /^https?:/i.test(tab.url || '')) {
+          chrome.tabs.reload(tab.id).catch(() => {});
+        }
+      }
+    });
+  });
+});
 
 // Start connection immediately when script loads
 connect();

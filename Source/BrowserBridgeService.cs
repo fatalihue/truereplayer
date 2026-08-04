@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipes;
 using System.Linq;
@@ -17,9 +18,9 @@ namespace TrueReplayer.Services
         private const string PipeName = "TrueReplayerBridge";
         // Must move in lockstep with ChromeExtension/manifest.json's "version". Bumping one without
         // the other either fires the outdated banner against a current extension or hides a real
-        // mismatch. 1.4.9 = frame targeting for the two racing command shapes, native-setter typing,
-        // click effect detection, the wait-engine poll, and the relay/navigate fixes.
-        public const string ExpectedExtensionVersion = "1.4.9";
+        // mismatch. 1.4.10 = G1, recording ships the ranked selector alternatives (previously only
+        // the crosshair picker did, so every recorded action was a single candidate).
+        public const string ExpectedExtensionVersion = "1.4.10";
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
         private NamedPipeServerStream? _pipeServer;
         private StreamReader? _reader;
@@ -34,13 +35,17 @@ namespace TrueReplayer.Services
         public bool IsRecordingMode { get; private set; }
         public event Action<bool>? ConnectionChanged;
         public event Action<string, string>? ExtensionVersionMismatch; // currentVersion, expectedVersion
-        public event Action<string, string, string?, string?, string?, bool>? ElementClicked; // selector, description, url, tagName, button, isInput
-        // #10 — typingCaptured(selector, text, isAppend)
-        public event Action<string, string, bool>? TypingCaptured;
+        // G1 — the trailing alternatives list is the SAME ranked shape the crosshair pick returns.
+        // Empty (never null) when the extension sent none: a pre-1.4.10 content script, or an
+        // element the generator found no unique fallback for. Empty means "record it exactly as
+        // before", so the recording path degrades to its pre-G1 behaviour rather than failing.
+        public event Action<string, string, string?, string?, string?, bool, IReadOnlyList<SelectorAlternative>>? ElementClicked; // selector, description, url, tagName, button, isInput, alternatives
+        // #10 — typingCaptured(selector, text, isAppend, alternatives)
+        public event Action<string, string, bool, IReadOnlyList<SelectorAlternative>>? TypingCaptured;
         // Fired when a native <select>'s value changed during recording. Carries the
         // selector for the <select> and the picked option's text/value so the bridge
         // can create a BrowserSelectOption action.
-        public event Action<string, string, string, string>? SelectChanged; // selector, description, selectedText, selectedValue
+        public event Action<string, string, string, string, IReadOnlyList<SelectorAlternative>>? SelectChanged; // selector, description, selectedText, selectedValue, alternatives
         // Bracket events around a native <select> interaction: backend uses them to gate
         // the OS-level mouse hook so clicks during the dropdown's open/pick lifecycle
         // never reach the recorder. Started by mousedown on a <select>, ended by either
@@ -182,7 +187,11 @@ namespace TrueReplayer.Services
                             var tagName = root.TryGetProperty("tagName", out var tagEl) ? tagEl.GetString() : null;
                             var button = root.TryGetProperty("button", out var btnEl) ? btnEl.GetString() ?? "left" : "left";
                             var isInput = root.TryGetProperty("isInput", out var inputEl) && inputEl.GetBoolean();
-                            ElementClicked?.Invoke(selector, description, url, tagName, button, isInput);
+                            // Materialised here, inside the `using` that owns the JsonDocument's pooled
+                            // buffer, for the same reason the commandResult path Clone()s: the handler
+                            // runs through a dispatcher and reads this AFTER the buffer is recycled.
+                            // ReadAlternatives copies into strings, so the result is already independent.
+                            ElementClicked?.Invoke(selector, description, url, tagName, button, isInput, ReadAlternatives(root));
                             break;
 
                         case "browser:typingCaptured":
@@ -190,7 +199,7 @@ namespace TrueReplayer.Services
                             var typeSelector = root.GetProperty("selector").GetString() ?? "";
                             var typedText = root.TryGetProperty("text", out var ttEl) ? ttEl.GetString() ?? "" : "";
                             var typedAppend = root.TryGetProperty("isAppend", out var taEl) && taEl.GetBoolean();
-                            TypingCaptured?.Invoke(typeSelector, typedText, typedAppend);
+                            TypingCaptured?.Invoke(typeSelector, typedText, typedAppend, ReadAlternatives(root));
                             break;
 
                         case "browser:selectInteractionStart":
@@ -208,7 +217,7 @@ namespace TrueReplayer.Services
                             var selDescription = root.TryGetProperty("description", out var sdEl) ? sdEl.GetString() ?? "" : "";
                             var selText = root.TryGetProperty("selectedText", out var stEl) ? stEl.GetString() ?? "" : "";
                             var selValue = root.TryGetProperty("selectedValue", out var svEl) ? svEl.GetString() ?? "" : "";
-                            SelectChanged?.Invoke(selSelector, selDescription, selText, selValue);
+                            SelectChanged?.Invoke(selSelector, selDescription, selText, selValue, ReadAlternatives(root));
                             break;
 
                         case "browser:commandResult":
@@ -273,6 +282,32 @@ namespace TrueReplayer.Services
                     TrueReplayer.Services.DiagnosticLog.Warn($"[BrowserBridge] Parse error: {ex.Message}");
                 }
             }
+        }
+
+        /// <summary>
+        /// Reads the ranked "alternatives" array off any bridge message that carries one — the
+        /// crosshair pick result and, since G1, the three recording messages. Never null: a
+        /// missing, non-array or entirely malformed field yields an empty list, which every
+        /// consumer already treats as "single selector, behave exactly as before".
+        /// An entry with no selector is skipped rather than defaulted; there is no sensible
+        /// stand-in for the one field that IS the alternative.
+        /// </summary>
+        private static List<SelectorAlternative> ReadAlternatives(JsonElement root)
+        {
+            var alternatives = new List<SelectorAlternative>();
+            if (!root.TryGetProperty("alternatives", out var altEl) || altEl.ValueKind != JsonValueKind.Array)
+                return alternatives;
+
+            foreach (var alt in altEl.EnumerateArray())
+            {
+                if (alt.ValueKind != JsonValueKind.Object) continue;
+                var altSel = alt.TryGetProperty("selector", out var s) ? s.GetString() : null;
+                var altTier = alt.TryGetProperty("tier", out var t) ? t.GetString() : null;
+                var altDesc = alt.TryGetProperty("description", out var d) ? d.GetString() : null;
+                if (!string.IsNullOrEmpty(altSel))
+                    alternatives.Add(new SelectorAlternative(altSel!, altTier ?? "C", altDesc ?? ""));
+            }
+            return alternatives;
         }
 
         /// <summary>
@@ -347,21 +382,9 @@ namespace TrueReplayer.Services
                 {
                     var result = await tcs.Task;
                     string? primary = null;
-                    var alternatives = new System.Collections.Generic.List<SelectorAlternative>();
                     if (result.TryGetProperty("selector", out var selEl) && selEl.ValueKind == JsonValueKind.String)
                         primary = selEl.GetString();
-                    if (result.TryGetProperty("alternatives", out var altEl) && altEl.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var alt in altEl.EnumerateArray())
-                        {
-                            var altSel = alt.TryGetProperty("selector", out var s) ? s.GetString() : null;
-                            var altTier = alt.TryGetProperty("tier", out var t) ? t.GetString() : null;
-                            var altDesc = alt.TryGetProperty("description", out var d) ? d.GetString() : null;
-                            if (!string.IsNullOrEmpty(altSel))
-                                alternatives.Add(new SelectorAlternative(altSel!, altTier ?? "C", altDesc ?? ""));
-                        }
-                    }
-                    return new PickResult(primary, alternatives);
+                    return new PickResult(primary, ReadAlternatives(result));
                 }
             }
             catch
@@ -376,11 +399,11 @@ namespace TrueReplayer.Services
                 // flight is unaffected: stopPick resolves it through the normal path and the frontend's
                 // requestId guard drops it, and content.js's `if (picking)` makes the late cancel a no-op.
                 CancelPickElement();
-                return new PickResult(null, new System.Collections.Generic.List<SelectorAlternative>());
+                return new PickResult(null, new List<SelectorAlternative>());
             }
         }
 
-        public record PickResult(string? Selector, System.Collections.Generic.IReadOnlyList<SelectorAlternative> Alternatives);
+        public record PickResult(string? Selector, IReadOnlyList<SelectorAlternative> Alternatives);
         public record SelectorAlternative(string Selector, string Tier, string Description);
 
         /// <summary>

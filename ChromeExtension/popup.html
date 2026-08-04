@@ -59,6 +59,20 @@
       line-height: 1.4;
     }
     .update-notice strong { color: #fff; font-weight: 500; }
+    button.reload {
+      width: 100%;
+      margin-top: 10px;
+      padding: 7px 10px;
+      border: 1px solid #3a3a3a;
+      border-radius: 6px;
+      background: #2d2d2d;
+      color: #e0e0e0;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    button.reload:hover:not(:disabled) { background: #383838; border-color: #4a4a4a; }
+    button.reload:disabled { opacity: 0.45; cursor: default; }
   </style>
 </head>
 <body>
@@ -70,8 +84,10 @@
   <div class="hint" id="hint"></div>
   <div class="update-notice" id="updateNotice">
     <strong>Update available!</strong><br>
-    Reload this extension in chrome://extensions to get the latest version.
+    Reload below to pick up the version TrueReplayer expects.
   </div>
+  <button class="reload" id="reloadBtn" type="button">Reload extension</button>
+  <div class="hint" id="reloadHint">Also refreshes open tabs, so pages get the new content script.</div>
   <script src="popup.js"></script>
 </body>
 </html>

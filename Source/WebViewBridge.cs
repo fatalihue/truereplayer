@@ -207,11 +207,11 @@ namespace TrueReplayer
         // initialised once in the constructor if browserBridge is non-null.
         private Action<bool>? _onBrowserConnectionChanged;
         private Action<string, string>? _onBrowserExtensionVersionMismatch;
-        private Action<string, string, string?, string?, string?, bool>? _onBrowserElementClicked;
-        private Action<string, string, bool>? _onBrowserTypingCaptured;
+        private Action<string, string, string?, string?, string?, bool, IReadOnlyList<Services.BrowserBridgeService.SelectorAlternative>>? _onBrowserElementClicked;
+        private Action<string, string, bool, IReadOnlyList<Services.BrowserBridgeService.SelectorAlternative>>? _onBrowserTypingCaptured;
         private Action? _onBrowserSelectInteractionStarted;
         private Action? _onBrowserSelectInteractionEnded;
-        private Action<string, string, string, string>? _onBrowserSelectChanged;
+        private Action<string, string, string, string, IReadOnlyList<Services.BrowserBridgeService.SelectorAlternative>>? _onBrowserSelectChanged;
 
         // Promoted from a captured local in the browserBridge subscribe block. Lives on the
         // instance so Dispose can stop the timer (and the lambdas can read/clear it).
@@ -225,6 +225,30 @@ namespace TrueReplayer
         // deliberately NOT spared — their effect is already reflected in the captured value.
         private static readonly HashSet<string> PreservedTypingKeys =
             new(StringComparer.OrdinalIgnoreCase) { "Return", "Enter", "Tab", "Escape", "Esc" };
+
+        /// <summary>
+        /// G1 — bridge alternatives (pipe shape) → the persisted profile shape.
+        ///
+        /// Returns NULL for an empty list rather than an empty list, and that is load-bearing:
+        /// SelectorAlternatives is [JsonIgnore(WhenWritingNull)], so null keeps the key out of
+        /// profile.json entirely. An empty array would be written, would round-trip, and would make
+        /// every recorded action on a plain element look like it carries fallback data when it
+        /// carries none — visible in the editor's shield indicator and in every diff of a profile
+        /// that recorded nothing new.
+        /// </summary>
+        private static List<Models.SelectorAlternativeItem>? ToAlternativeItems(
+            IReadOnlyList<Services.BrowserBridgeService.SelectorAlternative>? alternatives)
+        {
+            if (alternatives == null || alternatives.Count == 0) return null;
+            return alternatives
+                .Select(a => new Models.SelectorAlternativeItem
+                {
+                    Selector = a.Selector,
+                    Tier = a.Tier,
+                    Description = string.IsNullOrEmpty(a.Description) ? null : a.Description,
+                })
+                .ToList();
+        }
 
         // Allowlist for the actions:edit "actionType" field — the exact canonical strings the
         // executor understands (ActionReplayer's combined- and paired-mode switches +
@@ -333,7 +357,7 @@ namespace TrueReplayer
                 };
                 browserBridge.ExtensionVersionMismatch += _onBrowserExtensionVersionMismatch;
 
-                _onBrowserElementClicked = (selector, description, url, tagName, button, isInput) =>
+                _onBrowserElementClicked = (selector, description, url, tagName, button, isInput, alternatives) =>
                 {
                     if (_disposed) return;
                     dispatcherQueue.TryEnqueue(() =>
@@ -361,7 +385,11 @@ namespace TrueReplayer
                             Key = selector,
                             Comment = description,
                             Delay = delay,
-                            Timeout = 5000
+                            Timeout = 5000,
+                            // G1 — recorded actions now carry the same ranked fallbacks a picked one
+                            // does. Before this, only the crosshair produced them, so a recording was
+                            // a single candidate resting on generateSelector's last resort.
+                            SelectorAlternatives = ToAlternativeItems(alternatives)
                         };
                         actions.Add(action);
                         HasUnsavedChanges = true;
@@ -372,7 +400,7 @@ namespace TrueReplayer
 
                 // #10 — Typing observed in a recorded input field. Locate the most recent
                 // matching BrowserType action for the same selector and fill its text.
-                _onBrowserTypingCaptured = (selector, text, isAppend) =>
+                _onBrowserTypingCaptured = (selector, text, isAppend, alternatives) =>
                 {
                     if (_disposed) return;
                     dispatcherQueue.TryEnqueue(() =>
@@ -418,6 +446,10 @@ namespace TrueReplayer
 
                         // No matching BrowserType found (e.g. user typed without clicking field via extension);
                         // append a fresh action so the keystrokes aren't lost.
+                        // The matched-row path above deliberately does NOT touch SelectorAlternatives:
+                        // the click that created that row already stored the list computed at the same
+                        // instant, and overwriting it here with a list computed after the user typed
+                        // (and after the page reacted) would be a downgrade, not a refresh.
                         int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
                         actions.Add(new ActionItem
                         {
@@ -426,7 +458,8 @@ namespace TrueReplayer
                             BrowserText = text,
                             TypeAppend = isAppend,
                             Delay = delay,
-                            Timeout = 5000
+                            Timeout = 5000,
+                            SelectorAlternatives = ToAlternativeItems(alternatives)
                         });
                         HasUnsavedChanges = true;
                         mainController.UpdateButtonStates();
@@ -480,7 +513,7 @@ namespace TrueReplayer
                 };
                 browserBridge.SelectInteractionEnded += _onBrowserSelectInteractionEnded;
 
-                _onBrowserSelectChanged = (selector, description, selectedText, _selectedValue) =>
+                _onBrowserSelectChanged = (selector, description, selectedText, _selectedValue, alternatives) =>
                 {
                     if (_disposed) return;
                     dispatcherQueue.TryEnqueue(() =>
@@ -519,7 +552,8 @@ namespace TrueReplayer
                             // SelectMatchMode stays null = "text" default (most readable; option
                             // text is what the user clicked on visually).
                             Delay = delay,
-                            Timeout = 5000
+                            Timeout = 5000,
+                            SelectorAlternatives = ToAlternativeItems(alternatives)
                         });
                         HasUnsavedChanges = true;
                         mainController.UpdateButtonStates();
