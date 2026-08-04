@@ -3108,11 +3108,11 @@ namespace TrueReplayer.Services
             }
             catch (OperationCanceledException)
             {
-                // A SPURIOUS OCE (token.None) — the extension pipe dropped mid-probe, whose
-                // cleanup cancels every in-flight TCS with no token. We couldn't verify, so
-                // it's a FAILURE routed through the policy (same rule as the pre-probe
-                // disconnect above) — NOT a silent stop. The If-Browser probe documents the
-                // same pipe-disconnect mechanism.
+                // Belt-and-braces for a cancellation with no token behind it. The pipe drop that
+                // used to arrive this way is now a BrowserActionException("EXTENSION_DISCONNECTED")
+                // and lands in the catch below instead, so this arm should no longer be reachable —
+                // it stays because the rule it encodes is the one that matters: we could not verify,
+                // therefore the assertion FAILED and goes through the policy. Never a silent stop.
                 HandleAssertFailure(action, "browser bridge disconnected");
             }
             catch (BrowserActionException ex)

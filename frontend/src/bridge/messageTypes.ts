@@ -184,6 +184,12 @@ export interface BrowserTestResult {
   success: boolean;
   durationMs?: number;
   error?: { code: string; message: string; tip: string | null };
+  // Present only when the PRIMARY selector failed and a pick-time fallback matched instead.
+  // That is the earliest visible sign the selector is drifting: the action still works today,
+  // and stops working the day the fallback drifts too. The signal was already produced by the
+  // extension and logged by the bridge, but nothing showed it anywhere the user looks on a
+  // SUCCESSFUL run — and Test action is exactly where they look when they care about a selector.
+  matchedVia?: { selector: string; tier: string } | null;
 }
 
 export interface ProfileEntry {
@@ -706,6 +712,10 @@ export type IncomingMessage =
   | { type: 'browser:status'; payload: { connected: boolean } }
   | { type: 'browser:pickResult'; payload: { requestId?: string; selector: string | null; alternatives?: SelectorAlternative[]; error?: string } }
   | { type: 'browser:testResult'; payload: BrowserTestResult }
+  // satisfied = which branch the If would take (negate already applied, same as InstantProbeAsync).
+  // raw = the element state before negate. connected = false means we could not ask at all, which
+  // must not be shown as a plain "false".
+  | { type: 'browser:testConditionResult'; payload: { requestId: string; satisfied: boolean; raw: boolean; connected: boolean } }
   | { type: 'browser:extensionOutdated'; payload: { currentVersion: string; expectedVersion: string } }
   | { type: 'image:testMatchResult'; payload: { requestId: string; found: boolean; score: number; x: number; y: number; w: number; h: number; error?: string } }
   | { type: 'waitimage:searchRegionSet'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; w?: number; h?: number } }
@@ -935,7 +945,11 @@ export type OutgoingMessage =
   | { type: 'browser:toggleRecording'; payload: { enabled: boolean } }
   | { type: 'browser:pickElement'; payload: { requestId: string } }
   | { type: 'browser:cancelPick'; payload: Record<string, never> }
-  | { type: 'browser:testAction'; payload: { requestId: string; actionType: string; key: string; browserText?: string; newTab?: boolean; timeout: number; waitMode?: string | null; urlWaitPattern?: string | null; postNavigateSelector?: string | null; typeAppend?: boolean; typePaste?: boolean; typeDelay?: number | null; selectMatchMode?: string | null } }
+  | { type: 'browser:testAction'; payload: { requestId: string; actionType: string; key: string; browserText?: string; newTab?: boolean; timeout: number; waitMode?: string | null; urlWaitPattern?: string | null; postNavigateSelector?: string | null; typeAppend?: boolean; typePaste?: boolean; typeDelay?: number | null; selectMatchMode?: string | null; alternatives?: SelectorAlternative[] | null } }
+  // "Is this condition true right now?" for the If-Browser-Element editor. Distinct from
+  // browser:testAction because a condition has no failure state — a not-found element is the
+  // answer, not an error — so the reply is a branch, not a success/error pair.
+  | { type: 'browser:testCondition'; payload: { requestId: string; key: string; waitMode?: string | null; browserText?: string | null; conditionNegate?: boolean; alternatives?: SelectorAlternative[] | null } }
   | { type: 'theme:colors'; payload: { bgSurface: string; bgCard: string; textPrimary: string; textSecondary: string; accentSolid: string; borderSubtle: string } }
   | { type: 'hotkey:suppress'; payload: { enabled: boolean } }
   // Activates the backend's low-level keyboard hook in capture mode: every keydown

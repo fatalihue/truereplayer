@@ -705,6 +705,7 @@ namespace TrueReplayer
                     case "browser:pickElement": HandlePickElement(payload); break;
                     case "browser:cancelPick": browserBridge?.CancelPickElement(); break;
                     case "browser:testAction": _ = HandleBrowserTestAction(payload); break;
+                    case "browser:testCondition": _ = HandleBrowserTestCondition(payload); break;
                     case "profile:click": HandleProfileClick(payload); break;
                     case "profile:create": HandleProfileCreate(payload); break;
                     case "profile:rename": HandleProfileRename(payload); break;
@@ -5273,6 +5274,85 @@ namespace TrueReplayer
             }
         }
 
+        /// <summary>
+        /// "Is this condition true RIGHT NOW?" for the If-Browser-Element editor.
+        ///
+        /// Deliberately NOT modelled on Test Action, because the two answer different questions. A
+        /// Test Action either works or fails, so success/error is the right shape. A condition has
+        /// no failure — "the element isn't there" IS the answer, and the whole point of an If is to
+        /// branch on it. Reporting a not-found as an error would tell the user their selector is
+        /// broken when the condition is simply false, which is exactly the confusion that made this
+        /// the one browser editor with no way to check anything.
+        ///
+        /// So the reply is a branch: satisfied = which way the If would go, negate applied, same as
+        /// InstantProbeAsync. `connected` is separate because a missing bridge also probes false,
+        /// and "false" and "couldn't ask" must not look alike here.
+        /// </summary>
+        private async Task HandleBrowserTestCondition(JsonElement payload)
+        {
+            string requestId = payload.TryGetProperty("requestId", out var idEl) ? idEl.GetString() ?? "" : "";
+
+            void Reply(bool satisfied, bool raw, bool connected)
+            {
+                try { SendMessage("browser:testConditionResult", new { requestId, satisfied, raw, connected }); }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[WebViewBridge] testConditionResult failed: {ex.Message}"); }
+            }
+
+            if (browserBridge == null || !browserBridge.IsConnected)
+            {
+                Reply(satisfied: false, raw: false, connected: false);
+                return;
+            }
+
+            try
+            {
+                var key = payload.TryGetProperty("key", out var kEl) ? kEl.GetString() ?? "" : "";
+                var waitMode = payload.TryGetProperty("waitMode", out var wmEl) ? wmEl.GetString() : null;
+                var browserText = payload.TryGetProperty("browserText", out var btEl) ? btEl.GetString() : null;
+                var negate = payload.TryGetProperty("conditionNegate", out var nEl) && nEl.ValueKind == JsonValueKind.True;
+
+                List<Models.SelectorAlternativeItem>? alternatives = null;
+                if (payload.TryGetProperty("alternatives", out var altEl) && altEl.ValueKind == JsonValueKind.Array)
+                {
+                    try
+                    {
+                        var parsed = JsonSerializer.Deserialize<List<Models.SelectorAlternativeItem>>(altEl.GetRawText(), JsonOptions);
+                        alternatives = parsed != null && parsed.Count > 0 ? parsed : null;
+                    }
+                    catch { alternatives = null; }
+                }
+
+                // The probe reuses BrowserWaitElement's fields, so the temp carries them under the
+                // same names the replay uses: Key = selector, WaitMode = state, BrowserText = pattern.
+                var temp = new ActionItem
+                {
+                    ActionType = "BrowserWaitElement",
+                    Key = key,
+                    WaitMode = waitMode,
+                    BrowserText = string.IsNullOrEmpty(browserText)
+                        ? browserText
+                        : await ActionReplayer.ResolveBrowserTextPlaceholdersAsync(browserText, dispatcherQueue),
+                    SelectorAlternatives = alternatives,
+                };
+
+                // ignoreTabPin: this is an editor probe, not a run. Without it the button would
+                // both ASK the run's pinned tab (possibly closed, possibly not the page the user is
+                // looking at) and WRITE the pin from the editor — the same defect that made Test
+                // Action report TAB_GONE with no run in sight.
+                bool raw = await browserBridge.ProbeElementStateAsync(
+                    temp, CancellationToken.None, ignoreTabPin: true);
+                Reply(satisfied: negate ? !raw : raw, raw: raw, connected: true);
+            }
+            catch (Exception ex)
+            {
+                // ProbeElementStateAsync swallows everything except a user stop, and there is no
+                // user to stop this one — so reaching here means something structural broke. Answer
+                // anyway: the editor must never be left waiting on a reply that never comes.
+                DiagnosticLog.Info($"[WebViewBridge] testCondition failed: {ex.Message}");
+                Reply(satisfied: false, raw: false, connected: true);
+            }
+        }
+
         // #3 — Test action: execute a one-shot browser command from the editor without saving the profile.
         // async Task (not async void) so the caller can observe failures and so unhandled exceptions
         // don't crash the SynchronizationContext. Caller discards the task with `_ = …`.
@@ -5307,11 +5387,35 @@ namespace TrueReplayer
                 // BrowserSelectOption match mode — null falls back to "text" inside the extension.
                 var selectMatchMode = payload.TryGetProperty("selectMatchMode", out var smEl) ? smEl.GetString() : null;
 
+                // Ranked fallbacks, forwarded so the test walks the SAME candidate list the replay
+                // walks. Parsed defensively: a malformed payload must degrade to "no fallbacks"
+                // (today's behaviour), never fail the test with a JSON error.
+                List<Models.SelectorAlternativeItem>? alternatives = null;
+                if (payload.TryGetProperty("alternatives", out var altEl) && altEl.ValueKind == JsonValueKind.Array)
+                {
+                    try
+                    {
+                        var parsed = JsonSerializer.Deserialize<List<Models.SelectorAlternativeItem>>(altEl.GetRawText(), JsonOptions);
+                        alternatives = parsed != null && parsed.Count > 0 ? parsed : null;
+                    }
+                    catch { alternatives = null; }
+                }
+
                 // Resolve {clipboard[:mods]}, {date}, {time}, {datetime} the same way the regular
                 // replay path does — without this, Test Action would type the literal placeholder
                 // instead of the substituted value.
+                //
+                // Mirror the replay EXACTLY, which resolves for three types and no others:
+                // BrowserType + BrowserSelectOption (ActionExecution's Browser arm) and
+                // BrowserAssert's text pattern (ExecuteBrowserAssert). Only BrowserType was listed
+                // here, so testing a Select Option or a text-match Assert matched against the
+                // LITERAL "{clipboard}" and reported a failure the replay would not have had.
+                // Click / RightClick / WaitElement stay unresolved ON PURPOSE — the replay does not
+                // resolve their Text Match either, and resolving here would just invent the same
+                // divergence pointing the other way.
                 string? resolvedText = browserText;
-                if (actionType == "BrowserType" && !string.IsNullOrEmpty(browserText))
+                if (!string.IsNullOrEmpty(browserText)
+                    && (actionType == "BrowserType" || actionType == "BrowserSelectOption" || actionType == "BrowserAssert"))
                     resolvedText = await ActionReplayer.ResolveBrowserTextPlaceholdersAsync(browserText, dispatcherQueue);
 
                 // The 1000 ms floor here mirrors the minimum the editor allows. The Timeout field
@@ -5330,13 +5434,30 @@ namespace TrueReplayer
                     TypePaste = typePaste,
                     TypeDelay = typeDelay,
                     SelectMatchMode = selectMatchMode,
+                    SelectorAlternatives = alternatives,
                 };
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                await browserBridge.TestActionAsync(temp, CancellationToken.None, resolvedText);
+                var testResult = await browserBridge.TestActionAsync(temp, CancellationToken.None, resolvedText);
                 sw.Stop();
 
-                TrySendTestResult(requestId, success: true, durationMs: sw.ElapsedMilliseconds, code: null, message: null, tip: null);
+                // The reply carries matchedVia when the PRIMARY selector failed and a pick-time
+                // fallback matched instead. It was being thrown away here — the return value went
+                // unused — so a test that only passed because a tier-B fallback caught it looked
+                // identical to one that matched on the first try. That is the single most useful
+                // thing to know about a selector, and Test action is where the user is standing
+                // when they want to know it.
+                string? matchedSelector = null, matchedTier = null;
+                if (testResult.ValueKind == JsonValueKind.Object
+                    && testResult.TryGetProperty("matchedVia", out var mvEl)
+                    && mvEl.ValueKind == JsonValueKind.Object)
+                {
+                    matchedSelector = mvEl.TryGetProperty("selector", out var mvS) ? mvS.GetString() : null;
+                    matchedTier = mvEl.TryGetProperty("tier", out var mvT) ? mvT.GetString() : null;
+                }
+
+                TrySendTestResult(requestId, success: true, durationMs: sw.ElapsedMilliseconds, code: null, message: null, tip: null,
+                    matchedSelector: matchedSelector, matchedTier: matchedTier);
             }
             catch (TrueReplayer.Services.BrowserActionException bex)
             {
@@ -5352,13 +5473,21 @@ namespace TrueReplayer
 
         // Wrapper that swallows exceptions thrown from SendMessage itself so a failed reply never
         // bubbles up and crashes the synchronization context.
-        private void TrySendTestResult(string requestId, bool success, long durationMs, string? code, string? message, string? tip)
+        private void TrySendTestResult(string requestId, bool success, long durationMs, string? code, string? message, string? tip,
+            string? matchedSelector = null, string? matchedTier = null)
         {
             try
             {
                 if (success)
                 {
-                    SendMessage("browser:testResult", new { requestId, success = true, durationMs });
+                    // matchedVia only rides along when a fallback actually saved the run; null on the
+                    // ordinary path keeps the success card unchanged for the common case.
+                    // Typed as object? because a ternary between null and an anonymous type has no
+                    // common type to infer.
+                    object? matchedVia = matchedSelector == null
+                        ? null
+                        : new { selector = matchedSelector, tier = matchedTier ?? "C" };
+                    SendMessage("browser:testResult", new { requestId, success = true, durationMs, matchedVia });
                 }
                 else
                 {

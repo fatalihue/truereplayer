@@ -15,7 +15,11 @@ namespace TrueReplayer.Services
     public class BrowserBridgeService : IDisposable
     {
         private const string PipeName = "TrueReplayerBridge";
-        public const string ExpectedExtensionVersion = "1.4.8";
+        // Must move in lockstep with ChromeExtension/manifest.json's "version". Bumping one without
+        // the other either fires the outdated banner against a current extension or hides a real
+        // mismatch. 1.4.9 = frame targeting for the two racing command shapes, native-setter typing,
+        // click effect detection, the wait-engine poll, and the relay/navigate fixes.
+        public const string ExpectedExtensionVersion = "1.4.9";
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
         private NamedPipeServerStream? _pipeServer;
         private StreamReader? _reader;
@@ -114,9 +118,22 @@ namespace TrueReplayer.Services
                     IsConnected = false;
                     ConnectionChanged?.Invoke(false);
 
+                    // NAME the disconnect instead of cancelling anonymously. TrySetCanceled() with no
+                    // token produced a BARE OperationCanceledException — indistinguishable from a user
+                    // Stop, so it slipped past ActionExecution's `when (token.IsCancellationRequested)`
+                    // filter and died in its catch-all OCE swallow: the run ENDED with no error, no
+                    // toast, the step logged as "skipped". A dropped bridge is a failure, not a stop.
+                    // BrowserActionException does not derive from OperationCanceledException, so every
+                    // consumer now routes it the same way it routes any other browser failure (the If
+                    // probe's generic catch → false, the Assert's catch → HandleAssertFailure, the
+                    // replay → OnReplayError). The two sites that already worked around the bare-OCE
+                    // shape become harmless redundancy.
                     foreach (var pending in _pendingCommands)
                     {
-                        pending.Value.TrySetCanceled();
+                        pending.Value.TrySetException(new BrowserActionException(
+                            "EXTENSION_DISCONNECTED",
+                            "The browser bridge disconnected while the action was running.",
+                            "Chrome or the TrueReplayer extension was closed, reloaded, or recycled. Reconnect and run again."));
                     }
                     _pendingCommands.Clear();
                 }
@@ -144,7 +161,15 @@ namespace TrueReplayer.Services
 
                 try
                 {
-                    var doc = JsonDocument.Parse(line);
+                    // JsonDocument rents its backing buffer from ArrayPool and only returns it on
+                    // Dispose. Not a leak — the GC reclaims it — but this loop parses one document
+                    // per pipe line, and the high-volume path is browser:typingCaptured during
+                    // RECORDING, which is one message per keystroke. Every JsonElement that escapes
+                    // this scope must be Clone()d: the handlers below only pass out strings (already
+                    // independent copies), but the three TrySetResult deliveries hand the element
+                    // itself to an awaiter that may resume on another thread, long after this
+                    // `using` has recycled the buffer underneath it.
+                    using var doc = JsonDocument.Parse(line);
                     var root = doc.RootElement;
                     var type = root.GetProperty("type").GetString() ?? "";
 
@@ -197,26 +222,30 @@ namespace TrueReplayer.Services
                                     // carrying onto the exception.
                                     var failedOn = root.TryGetProperty("tabUrl", out var tuEl)
                                         && tuEl.ValueKind == JsonValueKind.String ? tuEl.GetString() : null;
+                                    // Same rule as tabUrl, one field over: the extension stamps the tab on
+                                    // failures too, and only the success path was reading it — so a step
+                                    // that failed under a Continue policy left the run unbound.
+                                    var failedTab = ReadTabId(root);
                                     // Support legacy string format and new {code, message, tip} object format
                                     if (errEl.ValueKind == JsonValueKind.String)
                                     {
-                                        tcs.TrySetException(new BrowserActionException(null, errEl.GetString() ?? "Unknown error", null) { TabUrl = failedOn });
+                                        tcs.TrySetException(new BrowserActionException(null, errEl.GetString() ?? "Unknown error", null) { TabUrl = failedOn, TabId = failedTab });
                                     }
                                     else if (errEl.ValueKind == JsonValueKind.Object)
                                     {
                                         var code = errEl.TryGetProperty("code", out var c) ? c.GetString() : null;
                                         var msg = errEl.TryGetProperty("message", out var m) ? m.GetString() : null;
                                         var tip = errEl.TryGetProperty("tip", out var t) ? t.GetString() : null;
-                                        tcs.TrySetException(new BrowserActionException(code, msg ?? "Unknown error", tip) { TabUrl = failedOn });
+                                        tcs.TrySetException(new BrowserActionException(code, msg ?? "Unknown error", tip) { TabUrl = failedOn, TabId = failedTab });
                                     }
                                     else
                                     {
-                                        tcs.TrySetResult(root);
+                                        tcs.TrySetResult(root.Clone());
                                     }
                                 }
                                 else
                                 {
-                                    tcs.TrySetResult(root);
+                                    tcs.TrySetResult(root.Clone());
                                 }
                             }
                             break;
@@ -225,7 +254,7 @@ namespace TrueReplayer.Services
                             var pickId = root.GetProperty("requestId").GetString() ?? "";
                             if (_pendingCommands.TryRemove(pickId, out var pickTcs))
                             {
-                                pickTcs.TrySetResult(root);
+                                pickTcs.TrySetResult(root.Clone());
                             }
                             break;
 
@@ -338,6 +367,15 @@ namespace TrueReplayer.Services
             catch
             {
                 _pendingCommands.TryRemove(requestId, out _);
+                // Give up on THIS side only, and the page stays in crosshair mode forever: content.js
+                // keeps picking=true with its click/contextmenu handlers installed, and every click the
+                // user makes is eaten (preventDefault + stopImmediatePropagation) instead of reaching
+                // the page. Closing or switching the editor does not save them either — the frontend
+                // clears its requestId on the null result, which disarms the only two places that would
+                // still send a cancel. So tell the extension to stand down here. A pick reply already in
+                // flight is unaffected: stopPick resolves it through the normal path and the frontend's
+                // requestId guard drops it, and content.js's `if (picking)` makes the late cancel a no-op.
+                CancelPickElement();
                 return new PickResult(null, new System.Collections.Generic.List<SelectorAlternative>());
             }
         }
@@ -354,8 +392,13 @@ namespace TrueReplayer.Services
         /// User cancellation still propagates. The caller polls this when the IF carries a
         /// ConditionTimeout ("wait for condition"), so each call must stay cheap.
         /// </summary>
+        /// <param name="ignoreTabPin">
+        /// Same escape hatch as ExecuteBrowserCommandAsync: target the active tab and do not touch
+        /// the run-scoped pin. For the editor's "test this condition" button, which is not a run.
+        /// </param>
         public async Task<bool> ProbeElementStateAsync(
-            TrueReplayer.Models.ActionItem action, CancellationToken token, int pipeTimeoutMs = 3000)
+            TrueReplayer.Models.ActionItem action, CancellationToken token, int pipeTimeoutMs = 3000,
+            bool ignoreTabPin = false)
         {
             if (!IsConnected) return false;
 
@@ -380,7 +423,7 @@ namespace TrueReplayer.Services
                     : null,
                 // An If-Browser probe must ask the SAME page the run's actions act on, or a
                 // condition could pass on one tab while the click lands on another.
-                tabId = _pinnedTabId
+                tabId = ignoreTabPin ? (int?)null : _pinnedTabId
             });
 
             using var timeoutCts = new CancellationTokenSource(pipeTimeoutMs);
@@ -390,6 +433,13 @@ namespace TrueReplayer.Services
                 using (timeoutCts.Token.Register(() => tcs.TrySetException(new TimeoutException("probe pipe timeout"))))
                 {
                     var result = await tcs.Task;
+                    // The probe RESOLVES a page, so it also BINDS to it. Reading the pin without
+                    // ever setting it was the whole bug: an If that runs before any browser action
+                    // left the pin null, so it and the action after it each asked "which tab is
+                    // active?" independently. Note this must happen on the not-found reply too —
+                    // "the element is not there" is an answer ABOUT a specific page, and the run
+                    // belongs on that page either way.
+                    if (!ignoreTabPin) AdoptTabPin(ReadTabId(result));
                     return result.ValueKind == JsonValueKind.Object
                         && result.TryGetProperty("success", out var s)
                         && s.ValueKind == JsonValueKind.True;
@@ -399,14 +449,23 @@ namespace TrueReplayer.Services
             {
                 throw; // genuine user stop — propagate, never swallow into "false"
             }
+            catch (BrowserActionException bex) when (!ignoreTabPin && bex.TabId.HasValue)
+            {
+                // Same rule on the error reply. A probe that came back ELEMENT_NOT_FOUND from tab X
+                // has still told us the run lives on tab X; the caller polls this up to
+                // ConditionTimeout, and every one of those polls used to re-resolve the active tab.
+                AdoptTabPin(bex.TabId);
+                return false;
+            }
             catch
             {
-                // Also catches a pipe DISCONNECT: the reader's cleanup cancels every in-flight
-                // TCS with a parameterless TrySetCanceled (CancellationToken.None), so the await
-                // above throws an OCE whose token is NOT the replay token — token.IsCancellationRequested
-                // is false, so it falls through here. That is not a user stop; treat it like a
-                // timeout and return false so the If BRANCHES instead of halting the replay
-                // (matches the disconnected-extension contract in ProbeBrowserElementStateAsync).
+                // Also catches a pipe DISCONNECT, which the reader's cleanup now reports as a
+                // BrowserActionException("EXTENSION_DISCONNECTED") rather than a bare cancellation.
+                // Either way it lands here and reads as FALSE, which is the contract an If probe
+                // needs: a dropped bridge must make the condition BRANCH, not halt the replay
+                // (same rule as ProbeBrowserElementStateAsync's disconnected-extension check).
+                // The `when (token.IsCancellationRequested)` filter above still guards the one case
+                // that must never be swallowed — a genuine user Stop.
                 return false; // pipe timeout / disconnect / extension error → state not satisfied
             }
             finally
@@ -433,8 +492,38 @@ namespace TrueReplayer.Services
         /// resolve the page afresh rather than inherit whatever the last one was aimed at.</summary>
         public void ResetTabPin() => _pinnedTabId = null;
 
+        /// <summary>
+        /// Bind the run to the tab the extension actually used. Whoever resolves the page FIRST
+        /// establishes it, and that had to include the If probe: a profile shaped
+        /// [If BrowserElementState '#logout' → BrowserClick '#logout'] — the natural shape, and the
+        /// reason If-Browser exists — ran the probe with no pin, so the probe fell through to
+        /// chrome.tabs.query({active:true}) and the click then resolved the active tab AGAIN. Move
+        /// focus between the two (a daemon trigger while the user works is exactly that) and the
+        /// condition answers about tab A while the click lands on tab B, with nothing to detect it.
+        /// </summary>
+        private void AdoptTabPin(int? tabId)
+        {
+            if (tabId.HasValue) _pinnedTabId = tabId.Value;
+        }
+
+        /// <summary>The tab id the extension stamps on every relayed reply, success or failure.
+        /// Absent on TAB_GONE / NO_CONTENT_SCRIPT, which background.js answers itself without ever
+        /// reaching a tab — correctly, since there is no page there to bind to.</summary>
+        private static int? ReadTabId(JsonElement result)
+            => result.ValueKind == JsonValueKind.Object
+               && result.TryGetProperty("tabId", out var t)
+               && t.TryGetInt32(out var id)
+                ? id
+                : null;
+
+        /// <param name="ignoreTabPin">
+        /// Run the command outside the run-scoped pin entirely: send tabId=null (the extension falls
+        /// back to the active tab) and do NOT adopt the tab it used. For the editor's "Test action",
+        /// which is not a run and must not write to run state — see TestActionAsync.
+        /// </param>
         public async Task<JsonElement> ExecuteBrowserCommandAsync(
-            TrueReplayer.Models.ActionItem action, CancellationToken token, int timeoutMs = 5000, string? resolvedText = null)
+            TrueReplayer.Models.ActionItem action, CancellationToken token, int timeoutMs = 5000,
+            string? resolvedText = null, bool ignoreTabPin = false)
         {
             if (!IsConnected)
                 throw new InvalidOperationException("Browser extension is not connected.");
@@ -473,12 +562,31 @@ namespace TrueReplayer.Services
                     throw new ArgumentException($"Unknown browser action type: {action.ActionType}");
             }
 
-            var timeout = (action.ActionType == "BrowserWaitElement" || action.ActionType == "BrowserAssert" || action.ActionType == "BrowserClick" || action.ActionType == "BrowserRightClick" || action.ActionType == "BrowserSelectOption") && action.Timeout > 0
-                ? action.Timeout
-                : timeoutMs;
+            // The action's timeout budget arrives ALREADY DECIDED in timeoutMs — all three callers
+            // (the replay's Browser arm, ExecuteBrowserAssert, TestActionAsync) pass the same
+            // `action.Timeout > 0 ? action.Timeout : 5000`. There used to be a ternary here that
+            // re-derived it for five of the seven action types, announcing a policy ("these five
+            // honour action.Timeout, Type/Navigate don't") that it did not implement: on every
+            // reachable path both branches produced the identical value, so editing it to change
+            // the policy would have changed nothing at all. The decision has one home; this isn't it.
 
             // Navigation can take longer than action timeout; give it generous headroom (timeout * 6 or 30s).
-            var pipeTimeout = command == "navigate" ? Math.Max(timeout * 6, 30000) : timeout;
+            //
+            // Everything else gets the action's timeout PLUS a grace margin, because the two clocks are
+            // not the same clock. This CTS starts below, before the message has crossed the pipe, the
+            // NativeHost, the service worker and tabs.sendMessage; content.js only arms its own timer once
+            // it has the message. Same nominal value ⇒ this side always fires first, and that cost two
+            // real things: (1) content.js's timeout classifier (ELEMENT_HIDDEN / ELEMENT_DISABLED /
+            // "tried N selectors") could never win the race, so every timeout collapsed into the generic
+            // GetFriendlyTimeoutMessage below and the user lost the actual diagnosis; (2) content.js has
+            // no abort — an element found in the last moments still runs its ~310 ms of click sequence, so
+            // the click LANDED while this side had already reported ELEMENT_NOT_FOUND and halted the run.
+            // The margin makes the content script's timer the authority on "not found" (where the message
+            // has context) and leaves this one as the backstop for a pipe that never answers at all.
+            // Costs nothing on success, and the fast failures still answer fast: a closed tab replies
+            // TAB_GONE in ~0 ms and a page with no content script NO_CONTENT_SCRIPT in ~300 ms.
+            const int PipeGraceMs = 2000;
+            var pipeTimeout = command == "navigate" ? Math.Max(timeoutMs * 6, 30000) : timeoutMs + PipeGraceMs;
 
             SendMessage(new
             {
@@ -489,7 +597,7 @@ namespace TrueReplayer.Services
                 text = resolvedText ?? action.BrowserText ?? "",
                 url = action.Key ?? "",
                 newTab = action.NewTab,
-                timeout,
+                timeout = timeoutMs,
                 // New fields (extension 1.3.0) — older extensions ignore unknown keys
                 waitMode = action.WaitMode,
                 urlWaitPattern = action.UrlWaitPattern,
@@ -511,7 +619,9 @@ namespace TrueReplayer.Services
                 // The tab this run is bound to; null on the first command, after which the
                 // extension's reply tells us which one it used. An older extension ignores the key
                 // and keeps its per-command behaviour, which is exactly the pre-fix status quo.
-                tabId = _pinnedTabId
+                // ignoreTabPin sends null on purpose — the extension's documented fallback is
+                // chrome.tabs.query({active:true}), i.e. exactly what the picker already targets.
+                tabId = ignoreTabPin ? (int?)null : _pinnedTabId
             });
 
             using var timeoutCts = new CancellationTokenSource(pipeTimeout);
@@ -524,7 +634,7 @@ namespace TrueReplayer.Services
                 using (timeoutCts.Token.Register(() => tcs.TrySetException(
                     new BrowserActionException(
                         code: command == "navigate" ? "NAVIGATION_TIMEOUT" : "ELEMENT_NOT_FOUND",
-                        message: GetFriendlyTimeoutMessage(command, timeout),
+                        message: GetFriendlyTimeoutMessage(command, timeoutMs),
                         tip: GetFriendlyTimeoutTip(command)))))
                 {
                     var result = await tcs.Task;
@@ -532,12 +642,12 @@ namespace TrueReplayer.Services
                     // command carries it, so a focus change mid-run can no longer redirect the
                     // macro. A navigate re-pins by nature: it reports the tab it navigated, which
                     // is a NEW one when the action opened one.
-                    if (result.ValueKind == JsonValueKind.Object
-                        && result.TryGetProperty("tabId", out var tabEl)
-                        && tabEl.TryGetInt32(out var usedTabId))
-                    {
-                        _pinnedTabId = usedTabId;
-                    }
+                    // Skipped under ignoreTabPin: the pin is run state, and the only thing that
+                    // clears it is the start of the next replay. A Test action writing to it left a
+                    // stale tab id behind that outlived the editor — test once, close that tab, test
+                    // again and the second test failed with "the tab this RUN was acting on has been
+                    // closed" with no run anywhere in sight, or worse, silently ran in the old tab.
+                    if (!ignoreTabPin) AdoptTabPin(ReadTabId(result));
                     // Surface fallback usage in the session log — the primary selector is
                     // drifting and the user should re-pick before the fallbacks drift too.
                     if (result.ValueKind == JsonValueKind.Object
@@ -552,6 +662,17 @@ namespace TrueReplayer.Services
                     return result;
                 }
             }
+            catch (BrowserActionException bex) when (!ignoreTabPin && bex.TabId.HasValue)
+            {
+                // A step that FAILED still resolved a page. Under AssertOnFail=Continue the run
+                // carries on, and it must carry on WHERE IT WAS — dropping the binding here sent
+                // the next step back to "whatever tab is active now", which is the exact drift the
+                // pin exists to prevent, on the one path where the user is already distracted by
+                // an error. Adopt, then rethrow untouched: the failure policy above this frame is
+                // what decides whether the run halts, not this.
+                AdoptTabPin(bex.TabId);
+                throw;
+            }
             finally
             {
                 _pendingCommands.TryRemove(commandId, out _);
@@ -560,13 +681,16 @@ namespace TrueReplayer.Services
 
         /// <summary>
         /// One-shot browser action execution for the "Test action" button in the editor.
-        /// Same as ExecuteBrowserCommandAsync but does not require an existing replay context.
+        /// Same as ExecuteBrowserCommandAsync but does not require an existing replay context —
+        /// and, because there is no run, it neither reads nor writes the run-scoped tab pin. It
+        /// targets the active tab, which is what the user is looking at and what the crosshair
+        /// picker already aims at, so Test and Pick finally agree on "which page".
         /// </summary>
         public async Task<JsonElement> TestActionAsync(
             TrueReplayer.Models.ActionItem action, CancellationToken token, string? resolvedText = null)
         {
             return await ExecuteBrowserCommandAsync(action, token,
-                action.Timeout > 0 ? action.Timeout : 5000, resolvedText);
+                action.Timeout > 0 ? action.Timeout : 5000, resolvedText, ignoreTabPin: true);
         }
 
         public void SetRecordingMode(bool enabled)
@@ -632,6 +756,15 @@ namespace TrueReplayer.Services
         /// run was simply somewhere else entirely.
         /// </summary>
         public string? TabUrl { get; init; }
+
+        /// <summary>
+        /// The tab the step was acting on, carried for the SAME reason as TabUrl but consumed by
+        /// the run rather than by the reader: a first step that fails under a Continue policy still
+        /// resolved a page, and the steps after it must stay on it. Without this the failure path
+        /// dropped the binding and the next step re-resolved "whatever is active now".
+        /// Null when the extension never reached a tab (TAB_GONE, NO_CONTENT_SCRIPT, pipe timeout).
+        /// </summary>
+        public int? TabId { get; init; }
 
         public BrowserActionException(string? code, string message, string? tip)
             : base(BuildMessage(message, tip))

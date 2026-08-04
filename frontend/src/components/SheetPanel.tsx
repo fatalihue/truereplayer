@@ -338,6 +338,10 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   // #3 — test action state
   const [testRequestId, setTestRequestId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<BrowserTestResult | null>(null);
+  // If-Browser-Element "check now". Separate state from testResult because the answer is a
+  // branch (true/false), not a success/error — see HandleBrowserTestCondition.
+  const [condRequestId, setCondRequestId] = useState<string | null>(null);
+  const [condResult, setCondResult] = useState<{ satisfied: boolean; raw: boolean; connected: boolean } | null>(null);
   // Safety timeout — if the bridge response is lost, recover the UI instead of hanging "Running…".
   // Backend pipeTimeout is the action timeout (~5s default); we double it plus 5s overhead.
   const testTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -349,6 +353,18 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   }, []);
   useEffect(() => () => clearTestTimeout(), [clearTestTimeout]);
 
+  // Same safety net for the condition check. Its probe is an INSTANT one (timeout=0 short-circuits
+  // content.js before it allocates any observer) capped by a 3 s pipe timeout on the C# side, so a
+  // reply that has not arrived in 6 s is a lost reply, not a slow one.
+  const condTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearCondTimeout = useCallback(() => {
+    if (condTimeoutRef.current) {
+      clearTimeout(condTimeoutRef.current);
+      condTimeoutRef.current = null;
+    }
+  }, []);
+  useEffect(() => () => clearCondTimeout(), [clearCondTimeout]);
+
   // Latest-value refs for the in-flight request ids, so the bridge subscription below can be a
   // stable one-time subscription instead of re-subscribing on every requestId change — a churn
   // that could drop a bridge response arriving in the unsubscribed gap (Test/Pick stuck "…").
@@ -359,6 +375,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const testPixelRequestIdRef = useRef(testPixelRequestId);
   const pickElementRequestIdRef = useRef(pickElementRequestId);
   const windowProbeRequestIdRef = useRef(windowProbeRequestId);
+  const condRequestIdRef = useRef(condRequestId);
   // Correlates a dialog:pickFile round-trip (ActivateWindow Launch "Browse…") to its result.
   const browseLaunchReqRef = useRef<string | null>(null);
   // Correlates a window:captureGeometry round-trip (ActivateWindow "Capture") to its result.
@@ -375,6 +392,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     testPixelRequestIdRef.current = testPixelRequestId;
     pickElementRequestIdRef.current = pickElementRequestId;
     windowProbeRequestIdRef.current = windowProbeRequestId;
+    condRequestIdRef.current = condRequestId;
   });
 
   // Listen for pick element result + test result from extension. Subscribed once (stable deps);
@@ -414,6 +432,13 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
           clearTestTimeout();
           setTestResult(r);
           setTestRequestId(null);
+        }
+      } else if (msg.type === 'browser:testConditionResult') {
+        const r = msg.payload as { requestId: string; satisfied: boolean; raw: boolean; connected: boolean };
+        if (condRequestIdRef.current && r.requestId === condRequestIdRef.current) {
+          clearCondTimeout();
+          setCondResult({ satisfied: r.satisfied, raw: r.raw, connected: r.connected });
+          setCondRequestId(null);
         }
       } else if (msg.type === 'image:testMatchResult') {
         const r = msg.payload as { requestId: string; found: boolean; score: number; x: number; y: number; w: number; h: number; error?: string };
@@ -506,7 +531,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
         }
       }
     });
-  }, [subscribe, clearTestTimeout, clearTestMatchTimeout]);
+  }, [subscribe, clearTestTimeout, clearTestMatchTimeout, clearCondTimeout]);
 
   // Sync local state from action. This is intentionally an effect-driven seed: keeping
   // local state lets the user edit freely before saving, while the dependency on `action`
@@ -584,9 +609,17 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
       } else {
         setWaitImageSearchRegion(null);
       }
-      setAlternatives([]);
+      // Seed from what the action already carries instead of starting empty. The list was
+      // write-only before: the pick filled it, handleSave persisted it, and reopening the
+      // action dropped it — so "Test action" evaluated ONE candidate while the replay walked
+      // the whole ranked list, and an action saved by a tier-B fallback failed its own test.
+      // No visual change: the popover below is gated on showAlternatives, which only ever
+      // turns true right after a pick.
+      setAlternatives(action.selectorAlternatives ?? []);
       setShowAlternatives(false);
       setTestResult(null);
+      setCondResult(null);
+      setCondRequestId(null);
       setTestMatchResult(null);
       setTestMatchRequestId(null);
       // WaitPixelColor state seeding — null/undefined become empty strings so the
@@ -1146,7 +1179,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     // from actionType + action.conditionType which are already in the array, so the
     // callback rebinds whenever those change. Listing the derived flags would also
     // be a forward-reference error (they're declared further down the component body).
-  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, repeatCount, repeatGapMs, jitterOn, jitterPct, posJitterOn, posJitterPx, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, assertOnFail, alternatives, send, onClose]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, x, y, delay, comment, repeatCount, repeatGapMs, jitterOn, jitterPct, posJitterOn, posJitterPx, timeout, confidence, browserText, variableValue, variableMode, slotMode, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, waitImageOnTimeout, waitImageInvert, waitImageClickOnMatch, waitImageSearchRegion, pixelX, pixelY, pixelColor, pixelTolerance, pixelOnTimeout, pixelInvert, pixelClickOnMatch, conditionNegate, ifOnProbeError, conditionTimeout, windowProcessName, windowTitle, windowTitleMatchMode, windowMatchForegroundOnly, clipboardPatternType, clipboardPattern, randomPercent, conditionOperator, conditionOperand, filePath, timeStart, timeEnd, daysOfWeek, launchPath, launchArgs, activateOnTimeout, restorePosition, restoreSize, windowX, windowY, windowWidth, windowHeight, windowVerb, matchIndex, assertOnFail, alternatives, send, onClose]);
 
   // Are there edits the Save-Changes button would persist? MIRRORS handleSave's diffs
   // exactly (same guards/normalisation), returning true on the first field that differs —
@@ -1647,9 +1680,45 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
         // option the actual replay would. Without this, value/index modes silently fell
         // back to text on the test path.
         selectMatchMode: actionType === 'BrowserSelectOption' ? selectMatchMode : null,
+        // The ranked fallbacks the replay would try. Without them the test evaluates ONE
+        // candidate, so an action whose primary selector has drifted but which the replay
+        // still saves via a tier-B fallback failed the test with "Element not found — try
+        // Pick again", sending the user to re-pick something that works.
+        alternatives: alternatives.length > 0 ? alternatives : null,
       },
     });
-  }, [actionIndex, action, actionType, key, textMatch, textMode, timeout, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, send, clearTestTimeout]);
+  }, [actionIndex, action, actionType, key, textMatch, textMode, timeout, browserText, newTab, waitMode, urlWaitPattern, postNavigateSelector, typeAppend, typePaste, typeDelay, selectMatchMode, alternatives, send, clearTestTimeout]);
+
+  // If-Browser-Element — "is this condition true right now?". Uses the same instant probe the
+  // replay's If uses (timeout=0, single evaluation, no wait loop), against the ACTIVE tab.
+  const handleTestCondition = useCallback(() => {
+    const requestId = Math.random().toString(36).slice(2, 10);
+    setCondRequestId(requestId);
+    setCondResult(null);
+    const effectiveKey = textMatch.trim() ? buildTextSelector(textMode, textMatch.trim()) : key;
+
+    clearCondTimeout();
+    condTimeoutRef.current = setTimeout(() => {
+      condTimeoutRef.current = null;
+      setCondRequestId(prev => {
+        if (prev !== requestId) return prev;
+        setCondResult({ satisfied: false, raw: false, connected: false });
+        return null;
+      });
+    }, 6000);
+
+    send({
+      type: 'browser:testCondition',
+      payload: {
+        requestId,
+        key: effectiveKey,
+        waitMode: waitMode || 'appears',
+        browserText: browserText || null,
+        conditionNegate,
+        alternatives: alternatives.length > 0 ? alternatives : null,
+      },
+    });
+  }, [key, textMatch, textMode, waitMode, browserText, conditionNegate, alternatives, send, clearCondTimeout]);
 
   // ActivateWindow — exists-anywhere probe: "would this action find the window right
   // now?". Same matcher semantics the replay uses (".exe" auto-append, self-excluded).
@@ -2466,6 +2535,40 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   <Crosshair size={14} />
                 </button>
               </div>
+              {/* The ranked fallbacks. handleSave already PERSISTS these for the If (the
+                  isBrowserSelectorAction guard includes If + BrowserElementState), so the list was
+                  being written to disk on an editor that never rendered it — pick here, and the
+                  alternatives silently vanished from view while still driving the replay. */}
+              {showAlternatives && alternatives.length > 0 && (
+                <div className="mt-1.5 rounded border border-border-default bg-bg-elevated p-1.5 space-y-1">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="label-micro text-text-tertiary">Alternatives</span>
+                    <button
+                      onClick={() => setShowAlternatives(false)}
+                      className="flex items-center text-text-tertiary hover:text-text-primary"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                  {alternatives.map((alt, i) => {
+                    const m = TIER_META[alt.tier] || TIER_META.C;
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => { setKey(alt.selector); setTextMatch(''); setShowAlternatives(false); }}
+                        className="w-full text-left px-2 py-1 rounded text-[11px] hover:bg-bg-card transition-colors flex items-center gap-1.5"
+                        data-tip={alt.description}
+                      >
+                        <span style={{ color: m.color, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                          <m.Icon size={10} />
+                          <span className="text-[10px] font-bold">{alt.tier}</span>
+                        </span>
+                        <span className="font-mono text-text-secondary truncate">{alt.selector}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </Field>
             <Field label="State">
               <select
@@ -2493,6 +2596,46 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 />
               </Field>
             )}
+
+            {/* "Check now". Reports a BRANCH, not success/failure — a condition that reads false
+                is working correctly, and calling that an error is what would send the user off to
+                re-pick a selector that was fine. Runs the same instant probe the replay's If runs,
+                against the active tab. */}
+            <div>
+              <button
+                onClick={handleTestCondition}
+                disabled={condRequestId !== null}
+                className="w-full h-8 flex items-center justify-center gap-1.5 px-2.5 rounded text-xs font-medium border border-accent-solid/40 bg-accent-solid/10 hover:bg-accent-solid/20 text-accent-light transition-colors disabled:opacity-60"
+              >
+                <PlayCircle size={13} />
+                {condRequestId ? 'Checking…' : 'Check now'}
+              </button>
+              {condResult && (
+                <div
+                  className="mt-1.5 px-2 py-1.5 rounded text-[11px] border"
+                  style={resultCardStyle(condResult.connected && condResult.satisfied)}
+                >
+                  <div className="flex items-center gap-1.5">
+                    {condResult.connected ? (condResult.satisfied ? <Check size={11} /> : <X size={11} />) : <X size={11} />}
+                    <span className="font-medium">
+                      {!condResult.connected
+                        ? 'Extension not connected'
+                        : condResult.satisfied ? 'Condition is TRUE now' : 'Condition is FALSE now'}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 text-text-tertiary">
+                    {!condResult.connected
+                      ? tt('Could not ask the page. With the bridge down the replay reads this condition as NOT found instead of stopping.',
+                           'Não foi possível perguntar à página. Com a ponte fora, a reprodução lê esta condição como NÃO encontrado em vez de parar.')
+                      : conditionNegate
+                        ? tt(`Element state: ${condResult.raw ? 'matched' : 'not matched'} · inverted by "Negate"`,
+                             `Estado do elemento: ${condResult.raw ? 'casou' : 'não casou'} · invertido por "Negate"`)
+                        : tt('The replay would take this branch right now.',
+                             'A reprodução tomaria este ramo agora.')}
+                  </div>
+                </div>
+              )}
+            </div>
           </>
           )}
 
@@ -3401,6 +3544,35 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                         <div className="mt-0.5 text-text-tertiary italic">{testResult.error.tip}</div>
                       )}
                     </>
+                  )}
+                  {/* A PASS that only passed because a fallback caught it is not the same as a
+                      pass, and looked identical until now. Say which tier saved it and offer the
+                      one-click fix, while the action still works — the day the fallback drifts
+                      too there is nothing left to fall back to. */}
+                  {testResult.success && testResult.matchedVia && (
+                    <div className="mt-1 pt-1 border-t border-border-subtle">
+                      <div className="flex items-center gap-1.5 text-text-secondary">
+                        {(() => {
+                          // The tier crosses the bridge as a plain string; fall back to C rather
+                          // than trusting it to be one of the four.
+                          const m = TIER_META[testResult.matchedVia.tier as keyof typeof TIER_META] || TIER_META.C;
+                          return (
+                            <span style={{ color: m.color, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                              <m.Icon size={10} />
+                              <span className="text-[10px] font-bold">{testResult.matchedVia.tier}</span>
+                            </span>
+                          );
+                        })()}
+                        <span>{tt('Primary selector failed — matched via fallback', 'Seletor primário falhou — casou por um fallback')}</span>
+                      </div>
+                      <button
+                        onClick={() => { setKey(testResult.matchedVia!.selector); setTextMatch(''); }}
+                        className="mt-0.5 w-full text-left font-mono truncate text-text-tertiary hover:text-text-primary transition-colors"
+                        data-tip={tt('Use this selector as the primary', 'Usar este seletor como primário')}
+                      >
+                        {testResult.matchedVia.selector}
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
