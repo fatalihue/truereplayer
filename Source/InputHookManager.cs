@@ -359,7 +359,23 @@ namespace TrueReplayer
 
         /// When true, suppresses ALL hotkey matching and key/mouse event recording.
         /// Used when a UI dialog/modal is active (SendText, Rename, Hotkey Capture, ContentDialogs).
-        public static bool SuppressAllHotkeys { get; set; } = false;
+        ///
+        /// TWO independent sources, OR-ed, because they fail differently. The setter is the
+        /// FRONTEND's channel — a React modal opening and closing, one owner, strictly paired by
+        /// the same component. <see cref="Services.InteractionScope"/> is the BACKEND's, where the
+        /// owners are overlays and pickers on detached threads that historically leaked the flag or
+        /// cleared each other's; it refcounts and sweeps expired scopes so neither can happen.
+        ///
+        /// Read from both hook callbacks — the mouse one on every WM_MOUSEMOVE — so both halves are
+        /// bare field reads with no lock. Writing through the setter deliberately CANNOT clear a
+        /// scope: an owner that wants suppression released has to dispose the thing it opened.
+        public static bool SuppressAllHotkeys
+        {
+            get => _frontendSuppress || Services.InteractionScope.IsAnyOpen;
+            set => _frontendSuppress = value;
+        }
+
+        private static volatile bool _frontendSuppress;
 
         /// True while at least one owner has registered for capture mode (see
         /// RegisterCapture / UnregisterCapture below).
