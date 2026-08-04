@@ -497,10 +497,20 @@
    * changes no class and no aria-*, so the fallback fired exactly THERE and el.click() re-ran a
    * React onClick that had already fired: one click, two submissions.
    *
-   * Scope is deliberately tight. A mutation anywhere on a live page — a ticker, a lazy image —
-   * would read as "the click worked" and suppress a fallback that was genuinely needed. Only
-   * mutations touching the element, an ancestor of it, or a fresh insertion directly into body
-   * count; that last one covers the modal / portal / menu case, which is what most clicks open.
+   * SCOPE — ANY page mutation counts, except our own overlay. This was tried the other way first,
+   * restricted to the element, its ancestors and fresh body insertions, on the reasoning that a
+   * ticker or a lazy image should not suppress a fallback that was needed. A live run demolished
+   * it: the most ordinary handler there is — click a button, a counter ELSEWHERE on the page goes
+   * up — matches none of those, so the fallback fired on top of a click that had already worked
+   * and every action ran TWICE. Measured as exactly 2x, 6x and 2x against expected 1, 3 and 1.
+   *
+   * The two failure directions are not symmetric, which settles it:
+   *   too loose  → an unrelated mutation suppresses the fallback, so a click that did nothing is
+   *                reported as done. That is also what shipped for years, since the old heuristic
+   *                could never reach the fallback for focusable elements at all.
+   *   too tight  → a click that worked is dispatched a SECOND time. Duplicate orders, duplicate
+   *                messages, a counter that reads 2.
+   * Doing the action twice is far worse than not detecting that it worked, so err loose.
    */
   function waitForClickEffect(el, snap, budgetMs) {
     return new Promise((resolve) => {
@@ -513,32 +523,27 @@
         resolve(v);
       };
 
-      const touched = (node) => {
-        if (!node) return false;
-        // Our OWN overlays do not count. flashHighlight appends a div straight into body right
-        // before the click and removes it after, so the effect detector was reading TrueReplayer's
-        // own highlight as proof the page reacted — making the native-click fallback it guards
-        // unreachable for the very elements it exists to rescue.
-        if (node.dataset && node.dataset.trOverlay) return false;
-        // Mutation ON the element or inside it.
-        if (node === el || el.contains(node)) return true;
-        // A real ANCESTOR changed — a wrapper toggling a class, a row gaining aria-selected.
-        // body and <html> are excluded on purpose: they contain everything, so counting them made
-        // any childList mutation anywhere read as "the click worked". That was the actual reason
-        // the overlay registered — a childList record reports the PARENT as its target, so every
-        // insertion into body arrived here as touched(document.body) and short-circuited to true
-        // before the added node was ever examined.
-        if (node.contains && node !== document.body && node !== document.documentElement && node.contains(el)) return true;
-        // A fresh insertion directly into body — the portal / modal / menu case, which is what
-        // most clicks actually open.
-        return node.parentNode === document.body;
-      };
+      // flashHighlight appends a marked div straight into body right before the click and removes
+      // it after. Both the insertion AND the removal are mutations, and counting either made the
+      // detector read TrueReplayer's own highlight as proof the page reacted — which is how the
+      // fallback became unreachable for the very elements it exists to rescue. Note this cannot be
+      // done by filtering the record's TARGET: a childList record reports the PARENT, so an
+      // overlay appended to body arrives as a mutation on body. The added/removed nodes are what
+      // have to be inspected.
+      const isOurs = (n) => !!(n && n.dataset && n.dataset.trOverlay);
 
       const observer = new MutationObserver((records) => {
         for (const r of records) {
-          if (touched(r.target)) return finish(true);
-          for (const n of r.addedNodes) if (touched(n)) return finish(true);
-          for (const n of r.removedNodes) if (n === el) return finish(true);
+          if (r.type === 'childList') {
+            // A record whose ONLY added/removed nodes are our own overlay is our own doing.
+            let real = false;
+            for (const n of r.addedNodes) if (!isOurs(n)) { real = true; break; }
+            if (!real) for (const n of r.removedNodes) if (!isOurs(n)) { real = true; break; }
+            if (real) return finish(true);
+            continue;
+          }
+          // attributes / characterData: the target IS the changed node, so filtering it works here.
+          if (!isOurs(r.target)) return finish(true);
         }
         if (clickChanged(el, snap)) finish(true);
       });
