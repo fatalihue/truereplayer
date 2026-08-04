@@ -1516,10 +1516,12 @@ namespace TrueReplayer
         private async Task HandleAutomationCaptureImageAsync(string requestId, string profileName)
         {
             // Gate autonomous fires for the whole capture: the region overlay is exactly the
-            // "user mid-interaction" state the SkippedModal trigger gate exists for, but it
-            // never set the modal flag — a due interval trigger could swap profiles and start
-            // injecting input while the user drag-selects. Cleared in the finally below.
-            InputHookManager.SuppressAllHotkeys = true;
+            // "user mid-interaction" state the SkippedModal trigger gate exists for — a due
+            // interval trigger could otherwise swap profiles and start injecting input while the
+            // user drag-selects. This used to be a hand-managed bool that had to be cleared on
+            // every exit path, including the early return below (a comment there recorded what
+            // happened the time it was not). The scope releases itself.
+            using var interaction = Services.InteractionScope.Enter("automation capture overlay");
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -1534,9 +1536,6 @@ namespace TrueReplayer
                 DiagnosticLog.Error("Automation capture screenshot failed", ex);
                 NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
                 SendMessage("automation:imageCaptured", new { requestId, cancelled = true });
-                // The later finally never runs on this early return — a leaked flag here
-                // would leave EVERY hotkey dead for the rest of the session.
-                InputHookManager.SuppressAllHotkeys = false;
                 return;
             }
 
@@ -1574,7 +1573,6 @@ namespace TrueReplayer
             finally
             {
                 screenshot.Dispose();
-                InputHookManager.SuppressAllHotkeys = false;
             }
         }
 
@@ -4092,6 +4090,7 @@ namespace TrueReplayer
             // The only difference is what gets inserted at the end: {If, EndIf} pair
             // sharing the same ImagePath + Confidence the WaitImage flow stores, with
             // ConditionType set to "ImageFound" so the engine routes through InstantProbe.
+            using var interaction = Services.InteractionScope.Enter("insert If-Image overlay");
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -4186,6 +4185,7 @@ namespace TrueReplayer
             // relative-coord translation. End result: {If(PixelColorMatch + coords + hex),
             // EndIf} pair inserted at insertIndex.
             var scope = Services.EditScope.Capture(CurrentProfileName);
+            using var interaction = Services.InteractionScope.Enter("insert If-Pixel overlay");
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -4441,6 +4441,7 @@ namespace TrueReplayer
         private async Task HandleInsertWaitImageAsync(int insertIndex)
         {
             var scope = Services.EditScope.Capture(CurrentProfileName);
+            using var interaction = Services.InteractionScope.Enter("insert WaitImage overlay");
             // Minimize main window to get a clean screenshot
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
@@ -4535,6 +4536,7 @@ namespace TrueReplayer
             // means cancel" rule WaitImage already follows, so the grid never grows a
             // half-configured row from a discarded capture.
             var scope = Services.EditScope.Capture(CurrentProfileName);
+            using var interaction = Services.InteractionScope.Enter("insert WaitPixelColor overlay");
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -4637,6 +4639,7 @@ namespace TrueReplayer
 
         private async Task HandleWaitImageRecaptureAsync(Services.EditScope scope)
         {
+            using var interaction = Services.InteractionScope.Enter("WaitImage recapture overlay");
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -4856,6 +4859,7 @@ namespace TrueReplayer
         {
             string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
 
+            using var interaction = Services.InteractionScope.Enter("position pick overlay");
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -4925,6 +4929,7 @@ namespace TrueReplayer
             // translation the If/WaitPixelColor editors want.
             bool absolute = payload.TryGetProperty("absolute", out var absEl) && absEl.ValueKind == JsonValueKind.True;
 
+            using var interaction = Services.InteractionScope.Enter("pixel colour pick overlay");
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -5053,6 +5058,9 @@ namespace TrueReplayer
             System.Drawing.Rectangle? initialRect, string hintWhenSet, string hintWhenEmpty, string logPrefix,
             bool pointPick = false)
         {
+            // One scope covers all three callers (search region, click area, click point) —
+            // they reach the overlay only through here.
+            using var interaction = Services.InteractionScope.Enter($"{logPrefix} region overlay");
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -7559,17 +7567,14 @@ namespace TrueReplayer
                 // destructive action nobody has confirmed.
                 // Scoped to the DIALOG, not to the whole handler: the deletion below awaits real
                 // I/O (rewriting profile-order, rescanning the profiles folder), and holding the
-                // gate across that would block unrelated dialogs for the duration while
-                // SuppressAllHotkeys — released by the finally right below — says the modal is
-                // already over. Two signals disagreeing about the same moment is how the next bug
-                // gets written.
+                // gate across that would block unrelated dialogs for the duration. That used to be
+                // stated as two signals disagreeing about the same moment — the gate and the
+                // hotkey flag ending at different points; they are now one signal that ends here.
                 Microsoft.UI.Xaml.Controls.ContentDialogResult result;
                 using (var gate = Services.ModalGate.TryEnter("delete folder"))
                 {
                     if (gate == null) return;
-                    InputHookManager.SuppressAllHotkeys = true;
-                    try { result = await dialog.ShowAsync(); }
-                    finally { InputHookManager.SuppressAllHotkeys = false; }
+                    result = await dialog.ShowAsync();
                 }
 
                 if (result == Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary)
@@ -8383,17 +8388,9 @@ namespace TrueReplayer
             using var gate = Services.ModalGate.TryEnter("reset settings");
             if (gate == null) return;
 
-            InputHookManager.SuppressAllHotkeys = true;
-            try
-            {
-                var result = await dialog.ShowAsync();
-                if (result != Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary)
-                    return;
-            }
-            finally
-            {
-                InputHookManager.SuppressAllHotkeys = false;
-            }
+            var confirm = await dialog.ShowAsync();
+            if (confirm != Microsoft.UI.Xaml.Controls.ContentDialogResult.Primary)
+                return;
 
             // Reset ALL global settings to defaults and save.
             // — Preserve the current mode (Macro/Clicker): the reset is "restore values",

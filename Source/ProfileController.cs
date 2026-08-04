@@ -124,9 +124,31 @@ namespace TrueReplayer.Controllers
             if (messageBlock != null && _dialogForeground != null) messageBlock.Foreground = _dialogForeground;
         }
 
+        /// <summary>
         /// Run a WinForms file dialog on a dedicated STA thread so the UI thread stays responsive.
-        private static Task<string?> ShowFileDialogAsync(WinForms.FileDialog dialog)
+        ///
+        /// The dialog is NOT modal — it has no owner and lives on a detached thread — so the app
+        /// keeps running for as long as the user browses, which is precisely the window an
+        /// automation fire lands in. Every picker therefore holds an InteractionScope for its whole
+        /// life, and it is EXCLUSIVE: a second unowned picker stacked over the first is not merely
+        /// redundant, it is two dialogs writing to one flow with no way for the user to tell which
+        /// one their Enter answered.
+        ///
+        /// The TTL is generous on purpose. A picker legitimately stays open while someone walks a
+        /// network share; the sweep here is a leak backstop, not a policy.
+        /// </summary>
+        private static Task<string?> ShowFileDialogAsync(WinForms.FileDialog dialog, string what)
         {
+            var interaction = Services.InteractionScope.EnterExclusive($"file picker: {what}", TimeSpan.FromMinutes(20));
+            if (interaction == null)
+            {
+                // Disposing here is not tidiness — the dialog's usual disposal lives in the
+                // thread's finally, and that thread is never going to start. Skipping it leaks the
+                // native dialog's resources on every refusal.
+                dialog.Dispose();
+                return Task.FromResult<string?>(null);
+            }
+
             var tcs = new TaskCompletionSource<string?>();
             var thread = new Thread(() =>
             {
@@ -141,6 +163,9 @@ namespace TrueReplayer.Controllers
                 finally
                 {
                     dialog.Dispose();
+                    // Released on the STA thread, where the dialog actually ended — not by the
+                    // awaiting caller, which may already have been abandoned.
+                    interaction.Dispose();
                 }
             });
             thread.SetApartmentState(ApartmentState.STA);
@@ -160,7 +185,7 @@ namespace TrueReplayer.Controllers
                 Title = "Select a program to launch",
                 Filter = "Programs (*.exe;*.bat;*.cmd;*.com;*.lnk)|*.exe;*.bat;*.cmd;*.com;*.lnk|All files (*.*)|*.*",
                 CheckFileExists = true,
-            });
+            }, "launch target");
 
         #region Profile CRUD Operations
 
@@ -225,7 +250,7 @@ namespace TrueReplayer.Controllers
                 Filter = "JSON file (*.json)|*.json",
                 FileName = "profile",
                 InitialDirectory = profileDir
-            });
+            }, "save profile");
 
             if (fileName != null)
             {
@@ -257,7 +282,7 @@ namespace TrueReplayer.Controllers
             {
                 Filter = "JSON file (*.json)|*.json",
                 InitialDirectory = profileDir
-            });
+            }, "load profile");
 
             if (path != null)
             {
@@ -755,24 +780,18 @@ namespace TrueReplayer.Controllers
             // A second ContentDialog while one is open is a process-killing stowed exception —
             // see ModalGate. Refusing reads as Cancel, which is what a save prompt raised behind
             // an already-open prompt should do anyway.
+            // The gate now carries the hotkey suppression (it opens an InteractionScope), so the
+            // manual true/finally-false pair that used to wrap this is gone from all four dialogs.
             using var gate = Services.ModalGate.TryEnter("save profile");
             if (gate == null) return SaveDialogResult.Cancel;
 
-            InputHookManager.SuppressAllHotkeys = true;
-            try
+            var result = await dialog.ShowAsync();
+            return result switch
             {
-                var result = await dialog.ShowAsync();
-                return result switch
-                {
-                    ContentDialogResult.Primary => SaveDialogResult.Overwrite,
-                    ContentDialogResult.Secondary => SaveDialogResult.SaveAsNew,
-                    _ => SaveDialogResult.Cancel
-                };
-            }
-            finally
-            {
-                InputHookManager.SuppressAllHotkeys = false;
-            }
+                ContentDialogResult.Primary => SaveDialogResult.Overwrite,
+                ContentDialogResult.Secondary => SaveDialogResult.SaveAsNew,
+                _ => SaveDialogResult.Cancel
+            };
         }
 
         /// <param name="loopOnly">
@@ -817,15 +836,7 @@ namespace TrueReplayer.Controllers
             using var gate = Services.ModalGate.TryEnter("unsaved changes");
             if (gate == null) return ContentDialogResult.None;
 
-            InputHookManager.SuppressAllHotkeys = true;
-            try
-            {
-                return await dialog.ShowAsync();
-            }
-            finally
-            {
-                InputHookManager.SuppressAllHotkeys = false;
-            }
+            return await dialog.ShowAsync();
         }
 
         public void UpdateProfileColors(string? activeProfileName)
@@ -1296,7 +1307,7 @@ namespace TrueReplayer.Controllers
                 Filter = "TrueReplayer Profile (*.trprofile)|*.trprofile",
                 FileName = defaultName,
                 DefaultExt = "trprofile"
-            });
+            }, "export profiles");
             if (fileName == null) return (-1, 0, new List<string>());   // user cancelled the Save dialog — nothing built yet
 
             // Optionally pull in the sub-profiles this selection RunProfile-calls (transitive closure),
@@ -1475,7 +1486,7 @@ namespace TrueReplayer.Controllers
             {
                 Filter = "TrueReplayer Profile (*.trprofile)|*.trprofile",
                 DefaultExt = "trprofile"
-            });
+            }, "import profiles");
 
             if (fileName == null) return new ImportPrepareResult(ImportPrepareStatus.Cancelled, null, null, null);
 

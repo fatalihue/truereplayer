@@ -48,18 +48,33 @@ namespace TrueReplayer.Services
         /// </param>
         public static IDisposable? TryEnter(string what = "dialog")
         {
-            if (Interlocked.CompareExchange(ref _open, 1, 0) == 0) return new Token();
-            DiagnosticLog.Info($"Modal refused ('{what}'): another dialog is already open.");
-            return null;
+            if (Interlocked.CompareExchange(ref _open, 1, 0) != 0)
+            {
+                DiagnosticLog.Info($"Modal refused ('{what}'): another dialog is already open.");
+                return null;
+            }
+            // A guarded dialog IS an interaction in progress, so claiming the gate claims a scope
+            // too. Every caller here used to pair the gate with a manual
+            // `SuppressAllHotkeys = true/false`, by hand, in a finally — four copies of the same
+            // three lines, each of which had to be right on every early return. Folding it in
+            // means a caller cannot forget, and cannot release someone else's suppression by
+            // clearing a bool it does not own.
+            return new Token(InteractionScope.Enter($"dialog: {what}"));
         }
 
         private sealed class Token : IDisposable
         {
+            private readonly IDisposable _scope;
             private int _disposed;
+
+            public Token(IDisposable scope) => _scope = scope;
+
             public void Dispose()
             {
                 // Idempotent: a double dispose must not free the gate for someone else's dialog.
-                if (Interlocked.Exchange(ref _disposed, 1) == 0) Volatile.Write(ref _open, 0);
+                if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+                Volatile.Write(ref _open, 0);
+                _scope.Dispose();
             }
         }
     }

@@ -19,7 +19,7 @@ namespace TrueReplayer.Services
         Fired,
         SkippedBusy,     // replay / recording / clicker mode active — retriable
         SkippedDirty,    // unsaved edits in the grid — an autonomous fire must never discard them
-        SkippedModal,    // modal dialog open (SuppressAllHotkeys) or hotkey capture in progress
+        SkippedModal,    // user mid-interaction: dialog, overlay, file picker, or hotkey capture
         NotReady,        // WebView2/bridge not up yet (app boot) — retriable, NOT a failure
         Failed,          // profile missing or the start path threw — permanent for this edge
     }
@@ -848,7 +848,12 @@ namespace TrueReplayer.Services
                         break;
                     case TriggerFireResult.SkippedModal:
                         stats.SkippedModal++;
-                        stats.LastResult = "skipped (dialog open)";
+                        // Name WHAT blocked it. "skipped (dialog open)" on a screen that looks
+                        // idle — because the blocker was a full-screen overlay or a picker behind
+                        // the main window — reads as a bug in the automation engine, and steps 4-5
+                        // deliberately made this case more common. Falls back to the old literal
+                        // if the guard has no reason on record.
+                        stats.LastResult = AutomationGuard.LastReason ?? "skipped (dialog open)";
                         break;
                     case TriggerFireResult.NotReady:
                         stats.LastResult = "waiting (app starting)";
