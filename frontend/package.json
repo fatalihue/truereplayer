@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run lint:hooks && tsc -b && vite build",
     "lint": "eslint .",
+    "lint:hooks": "eslint -c eslint.hooks.config.js --suppressions-location eslint-hooks-suppressions.json .",
+    "lint:hooks:prune": "eslint -c eslint.hooks.config.js --suppressions-location eslint-hooks-suppressions.json --prune-suppressions .",
+    "lint:hooks:accept": "eslint -c eslint.hooks.config.js --suppressions-location eslint-hooks-suppressions.json --suppress-all .",
     "preview": "vite preview"
   },
   "dependencies": {
