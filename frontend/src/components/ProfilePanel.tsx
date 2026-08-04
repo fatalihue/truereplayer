@@ -57,6 +57,12 @@ const CONVERTIBLE_CLICK_TYPES = new Set([
   'LeftClick', 'RightClick', 'MiddleClick',
 ]);
 
+// Alphabetical section ordering. Module scope because it closes over nothing — as a function
+// declared inside the component it was a new identity every render, which is exactly the kind of
+// dependency the memos below could never list truthfully.
+const sortByName = (a: ProfileEntry, b: ProfileEntry) =>
+  a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+
 export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePanelProps) {
   const tt = useTt();
   const { profiles, profileOrder, actions, settings, buttonStates } = useAppState();
@@ -174,26 +180,29 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const isTagSearch = trimmedQuery.startsWith('#');
   const tagSearchTerm = isTagSearch ? trimmedQuery.slice(1).toLowerCase() : '';
 
-  const matchesSearch = (entry: ProfileEntry) => {
+  // useCallback, not a plain function, so the identity is STABLE while searchQuery is —
+  // which is what lets the memos below list it honestly. Listing a fresh-every-render
+  // function instead would satisfy the linter and destroy the memoization it is guarding,
+  // recomputing all three section lists on every drag, hover and dialog render.
+  // isTagSearch/tagSearchTerm are primitives derived from searchQuery, so they compare by
+  // value and add no churn.
+  const matchesSearch = useCallback((entry: ProfileEntry) => {
     if (!searchQuery) return true;
     if (isTagSearch) {
       if (tagSearchTerm === '') return true;
       return !!entry.tags?.some(t => t.toLowerCase().includes(tagSearchTerm));
     }
     return entry.name.toLowerCase().includes(searchQuery.toLowerCase());
-  };
-
-  // Build sectioned lists (alphabetically sorted)
-  const sortByName = (a: ProfileEntry, b: ProfileEntry) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+  }, [searchQuery, isTagSearch, tagSearchTerm]);
 
   // The three section lists all derive from profileMap + profileOrder + the search query.
   // Memoize so they only recompute when one of those changes — not on drag/dialog/hover
-  // re-renders. matchesSearch/sortByName/isTagSearch/tagSearchTerm are pure derivations of
-  // searchQuery, so searchQuery in the dep array covers them.
+  // re-renders. sortByName is hoisted to module scope: it closes over nothing, so it never
+  // needed to be a dependency at all.
   const pinnedProfiles = useMemo(() => (profileOrder?.pinned ?? [])
     .filter(n => profileMap.has(n) && matchesSearch(profileMap.get(n)!))
     .map(n => profileMap.get(n)!)
-    .sort(sortByName), [profileMap, profileOrder, searchQuery]);
+    .sort(sortByName), [profileMap, profileOrder, matchesSearch]);
 
   const folderSections = useMemo(() => (profileOrder?.folders ?? []).map(f => ({
     ...f,
@@ -201,7 +210,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       .filter(n => profileMap.has(n) && matchesSearch(profileMap.get(n)!))
       .map(n => profileMap.get(n)!)
       .sort(sortByName)
-  })), [profileMap, profileOrder, searchQuery]);
+  })), [profileMap, profileOrder, matchesSearch]);
 
   const ungroupedProfiles = useMemo(() => {
     // Collect all profiles referenced in profileOrder sections
@@ -221,7 +230,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       .filter(n => profileMap.has(n) && matchesSearch(profileMap.get(n)!))
       .map(n => profileMap.get(n)!)
       .sort(sortByName);
-  }, [profileMap, profileOrder, profiles, searchQuery]);
+  }, [profileMap, profileOrder, profiles, matchesSearch]);
 
   // If searching, show flat filtered list instead of sections. Reuses matchesSearch so
   // #tag mode works here too — was previously a separate name-only filter, which silently
@@ -229,7 +238,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   const isSearching = searchQuery.length > 0;
   const filtered = useMemo(() => isSearching
     ? profiles.filter(matchesSearch)
-    : profiles, [profiles, searchQuery, isSearching]);
+    : profiles, [profiles, isSearching, matchesSearch]);
 
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   // Same role as menuPos, but for the folder context menu. Kept separate so the two
