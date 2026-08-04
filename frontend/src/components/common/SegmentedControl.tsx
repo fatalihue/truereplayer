@@ -29,6 +29,9 @@ export interface SegmentedControlProps<T extends string> {
    *  blends into its surface — used by the SettingsPanel tabs, whose dark track
    *  read as "another input field". The active segment's own fill still shows. */
   plain?: boolean;
+  /** Trim the segment padding so the track lands on 28px instead of 32px — the
+   *  ActionBar rail's tier. Everywhere else the roomier default is right. */
+  dense?: boolean;
   className?: string;
 }
 
@@ -41,6 +44,7 @@ export function SegmentedControl<T extends string>({
   ariaLabel,
   grow = false,
   plain = false,
+  dense = false,
   className = '',
 }: SegmentedControlProps<T>) {
   return (
@@ -58,7 +62,7 @@ export function SegmentedControl<T extends string>({
             aria-selected={active}
             onClick={() => onChange(opt.value)}
             data-tip={opt.tip}
-            className={`flex items-center justify-center gap-1.5 px-2.5 py-1 rounded text-[12px] font-semibold transition-colors ${grow ? 'flex-1' : ''} ${
+            className={`flex items-center justify-center gap-1.5 px-2.5 ${dense ? 'py-0.5' : 'py-1'} rounded text-[12px] font-semibold transition-colors ${grow ? 'flex-1' : ''} ${
               active
                 ? (opt.activeClass ?? DEFAULT_ACTIVE)
                 : 'text-text-tertiary hover:text-text-secondary'

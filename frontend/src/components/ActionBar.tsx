@@ -1,15 +1,41 @@
+import type { CSSProperties } from 'react';
 import { Circle, Play, Square, Save, FolderOpen, MousePointerClick, List } from 'lucide-react';
 import { SegmentedControl } from './common/SegmentedControl';
+import { Button, BUTTON_VARIANT_CLASSES } from './common/Button';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { useTt } from '../state/LanguageContext';
-import { chipOn } from './common/chipStyles';
+import { chipOn, chipOff } from './common/chipStyles';
 
-// Shared min-width for the primary action buttons so the layout doesn't shift when
-// labels swap (Recording↔Pause, Replay↔Stop, Click↔Stop). Comfortably fits the longest
-// label ("Recording") with its icon and padding at text-[13px] font-semibold.
-const PRIMARY_BTN = 'min-w-[120px] justify-center';
+/**
+ * THE RAIL — "pilot light".
+ *
+ * The bar used to carry four control heights (32 / 35 / 28 / 34 px), two font
+ * weights that skipped the system's 500, five icon sizes, two disabled
+ * intensities and a Save/Load recipe that existed nowhere else in the app. It
+ * read as unplanned because it was: every element derived its metrics privately.
+ *
+ * Now every control on it is 28px, one radius, one icon size, one disabled
+ * intensity — and the colour doctrine is inverted to match the rest of the app:
+ * a RESTING primary is a tinted outline at the app-wide on-intensity (12% fill /
+ * 40% border, the .rail-tinted recipe in index.css), and a SOLID fill means one
+ * thing only — this is running, click to stop. Nothing else on the bar is ever
+ * solid, which is what makes the running button findable without dimming its
+ * neighbours (see the note on fileTip for why dimming them was rejected).
+ * See index.css .rail-tinted for the colour rationale.
+ */
+
+// Shared geometry for both primaries, so no label swap can move the bar.
+// 112px is measured against "Recording" — the longest string the BACKEND can
+// place in either slot (WebViewBridge.PushButtonStates owns these labels; the
+// frontend renders them verbatim) — at 12px/600 with a 12px glyph and px-3.
+// min-w rather than w: an unforeseen longer label grows the slot instead of
+// clipping. The transparent border keeps the busy and resting states on
+// identical geometry, since .rail-tinted paints a real 1px border.
+const RAIL_PRIMARY =
+  'inline-flex items-center justify-center gap-1.5 h-7 min-w-[112px] px-3 rounded border border-transparent ' +
+  'text-[12px] font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 
 export function ActionBar() {
   const { buttonStates, settings, actions, profileLoop, profiles, activeProfile, dataTable } = useAppState();
@@ -32,20 +58,10 @@ export function ActionBar() {
     send({ type: 'settings:change', payload: { key: 'useCursorClick', value: clicker } });
   };
 
-  // Color rules — "busy/stop" states all converge on the blue accent so the user has a
-  // single, unambiguous visual cue for "click here to stop":
-  //   Macro mode   Recording idle  → red       (start recording)
-  //                Pause (busy)    → blue      (stop recording)
-  //                Replay idle     → green     (start replay)
-  //                Stop (busy)     → blue      (stop replay)
-  //   Clicker mode Click idle      → purple    (start clicking)
-  //                Stop (busy)     → blue      (stop clicking)
-  // White text on all three primary fills (owner preference — the contrast-
-  // picked dark ink read as unattractive on the saturated Record/Replay/Click
-  // colours). The --color-*-ink tokens still drive the quieter confirm buttons.
-  const recordBtnClass = isRecording
-    ? 'bg-accent-solid hover:bg-accent-solid/80 text-white'
-    : 'bg-recording hover:bg-recording/80 text-white';
+  // Hotkeys are user-configurable and may be cleared entirely, so the suffix has
+  // to vanish gracefully rather than render an empty pair of brackets. The combo
+  // itself stays English inside the translated sentence (LanguageContext rule).
+  const withHotkey = (text: string, hotkey?: string) => (hotkey ? `${text} (${hotkey})` : text);
 
   // ── Loop chip ──
   // Loops moved out of Settings-as-a-global into the profile, and a value you can only see by
@@ -71,9 +87,11 @@ export function ActionBar() {
       : profileLoop.enabled
         ? `${profileLoop.count}×`
         : '1×';
-  // Quiet by default: only an actual repeat earns the accent tint. A dashed amber outline
-  // marks an edit that Ctrl+S has not written yet — the value is live for this session but
-  // will not survive a profile switch.
+  // Quiet by default: only an actual repeat earns the accent tint. A corner dot marks an
+  // edit that Ctrl+S has not written yet — the value is live for this session but will not
+  // survive a profile switch. The two are INDEPENDENT and now compose: a profile that
+  // repeats 12× with an unsaved count shows the accent skin and the dot together, where the
+  // previous amber treatment painted over the emphasis and reported only one of the facts.
   const loopEmphasised = showsCount && profileLoop.enabled && profileLoop.count !== '1';
   const loopDirty = showsCount && profileLoop.dirty;
   const loopTip = perRow
@@ -84,30 +102,55 @@ export function ActionBar() {
         ? tt('Repeats per run. Not saved — press Ctrl+S.', 'Repetições por execução. Não salvo — aperte Ctrl+S.')
         : tt('Repeats per run. Change in Settings → Execution.', 'Repetições por execução. Ajuste em Settings → Execution.');
 
-  const replayBtnClass = isReplaying
-    ? 'bg-accent-solid hover:bg-accent-solid/80 text-white'
-    : (isClicker
-        ? 'bg-[var(--color-clicker)] hover:opacity-85 text-white'
-        : 'bg-replay hover:bg-replay/80 text-white');
+  // ── Primary skins ──
+  // Resting: the semantic hue at the on-intensity, hue carried on border + icon
+  // (the icon's ink recipe lives in .rail-tinted svg — it is pulled toward the
+  // theme's text colour so it survives the light presets).
+  // Busy: the Button `primary` variant verbatim (accent-solid + the contrast-
+  // picked accent ink), which is what every other primary button in the app
+  // already is — so "running" looks the same wherever it appears. The glow
+  // classes are the shipped ones and keep the MODE hue (red halo for recording,
+  // accent halo for replay), so the two busy states stay tellable apart even
+  // though the fill converges. Both are gated on html[data-animations].
+  const restingStyle = (hue: string) => ({ '--rail-hue': hue } as CSSProperties);
+  const busyClass = `${RAIL_PRIMARY} ${BUTTON_VARIANT_CLASSES.primary}`;
+  const restingClass = `${RAIL_PRIMARY} rail-tinted`;
+
+  // Save/Load stay disabled in Clicker mode only (profiles wrap recorded actions,
+  // which Clicker doesn't use) — the same gate and the same sentence the Toolbar
+  // uses, so one explanation covers the whole column.
+  //
+  // Deliberately NOT also disabled while a run is live, even though the design
+  // sketch dimmed them: Ctrl+S is handled globally in App.tsx and is not gated on
+  // the run state, so a disabled Save button would claim something the keyboard
+  // would immediately disprove. Same reasoning keeps the mode switch and both
+  // primaries on their shipped, backend-owned enablement — every one of those has
+  // a global hotkey behind it. The "one thing is running" reading is carried by
+  // the fill instead: a solid button is the only solid thing on the bar.
+  const fileTip = (en: string, ptBr: string) =>
+    isClicker
+      ? tt('Not available in Clicker mode — switch to Macro', 'Indisponível no modo Clicker — mude para Macro')
+      : tt(en, ptBr);
 
   return (
-    <div className="flex items-center justify-between px-4 py-2.5 bg-bg-surface border border-border-subtle rounded-ui">
+    <div className="flex items-center justify-between px-3 py-1.5 bg-bg-surface border border-border-subtle rounded-ui">
       {/* Left: Mode toggle + Primary actions */}
       <div className="flex items-center gap-2">
         {/* Mode segmented control — shared primitive; the semantic active tints
-            (Macro = replay green, Clicker = clicker purple) ride in via
-            activeClass. The macro ring's old hardcoded rgba is now a token mix.
+            (Macro = accent, Clicker = clicker purple) ride in via activeClass.
             List (not Play) so the mode pill doesn't visually duplicate the
-            Replay action button. Glyphs match the redesign mockup. */}
+            Replay action button. `dense` drops it from 32px to the rail's 28. */}
         <SegmentedControl
           ariaLabel="Execution mode"
+          dense
           value={isClicker ? 'clicker' : 'macro'}
           onChange={(v) => setMode(v === 'clicker')}
           options={[
             {
               value: 'macro',
               label: 'Macro',
-              icon: <List size={11} />,
+              icon: <List size={12} />,
+              tip: tt('Record and replay a list of actions', 'Grave e execute uma lista de ações'),
               // Accent at 12% fill / 40% border — the exact recipe the Settings switches and
               // the field chips use for "on", so the app has ONE intensity for an active
               // control instead of this pill shouting in replay-green next to a quiet switch.
@@ -118,7 +161,8 @@ export function ActionBar() {
             {
               value: 'clicker',
               label: 'Clicker',
-              icon: <MousePointerClick size={11} />,
+              icon: <MousePointerClick size={12} />,
+              tip: tt('Auto-click at a fixed rate', 'Clique automático em ritmo fixo'),
               activeClass: 'bg-[var(--color-clicker-bg)] text-[var(--color-clicker)] shadow-[inset_0_0_0_1px_var(--color-clicker-border)]',
             },
           ]}
@@ -127,10 +171,12 @@ export function ActionBar() {
         {/* Button picker used to live here — moved to the ClickerSection in the side
             panel so the panel is the single source of truth for every Clicker setting. */}
 
-        {/* Divider */}
-        <div className="w-px h-6 bg-border-subtle mx-1" />
+        {/* Divider — the Toolbar's dimensions, so the top and bottom strips of the
+            centre column punctuate identically. */}
+        <div className="w-px h-4 bg-border-subtle mx-1" />
 
-        {/* Record button — hidden entirely in Clicker mode (the mode swap is the affordance) */}
+        {/* Record button — hidden entirely in Clicker mode (the mode swap is the
+            affordance), which lets Click land in exactly this slot. */}
         {!isClicker && (
           <button
             onClick={() => {
@@ -142,78 +188,95 @@ export function ActionBar() {
               send({ type: 'recording:toggle', payload: { insertIndex } });
             }}
             disabled={!buttonStates.recordEnabled}
-            className={`flex items-center gap-2 px-5 py-2 rounded text-[13px] font-semibold transition-colors ${recordBtnClass} ${PRIMARY_BTN} ${isRecording ? 'record-btn-glow' : ''} disabled:opacity-40 disabled:cursor-not-allowed`}
+            data-tip={
+              isRecording
+                ? withHotkey(tt('Stop recording', 'Parar a gravação'), settings.recordingHotkey)
+                : withHotkey(tt('Record what you do', 'Grave o que você faz'), settings.recordingHotkey)
+            }
+            className={`${isRecording ? `${busyClass} record-btn-glow` : restingClass}`}
+            style={isRecording ? undefined : restingStyle('var(--color-recording)')}
           >
             {isRecording
-              ? <Square size={11} fill="white" className="shrink-0" />
-              : <Circle size={8} fill="white" className="shrink-0" />}
+              ? <Square size={12} fill="currentColor" className="shrink-0" />
+              : <Circle size={12} fill="currentColor" className="shrink-0" />}
             {buttonStates.recordButtonText}
           </button>
         )}
 
-        {/* Replay/Click button */}
+        {/* Replay/Click button — one physical button for both modes. */}
         <button
           onClick={handleReplay}
           disabled={!buttonStates.replayEnabled}
-          className={`flex items-center gap-2 px-5 py-2 rounded text-[13px] font-semibold transition-colors ${replayBtnClass} ${PRIMARY_BTN} ${isReplaying ? 'replay-btn-glow' : ''} disabled:opacity-50 disabled:cursor-not-allowed`}
+          data-tip={
+            isReplaying
+              ? withHotkey(tt('Stop the run', 'Parar a execução'), isClicker ? settings.cursorClickStartHotkey : settings.replayHotkey)
+              : isClicker
+                ? withHotkey(tt('Start clicking', 'Começar a clicar'), settings.cursorClickStartHotkey)
+                : withHotkey(tt('Run the recorded actions', 'Executar as ações gravadas'), settings.replayHotkey)
+          }
+          className={`${isReplaying ? `${busyClass} replay-btn-glow` : restingClass}`}
+          style={isReplaying ? undefined : restingStyle(isClicker ? 'var(--color-clicker)' : 'var(--color-replay)')}
         >
           {isReplaying
-            ? <Square size={11} fill="white" className="shrink-0" />
+            ? <Square size={12} fill="currentColor" className="shrink-0" />
             : isClicker
               ? <MousePointerClick size={12} className="shrink-0" />
-              : <Play size={12} fill="white" className="shrink-0" />}
+              : <Play size={12} fill="currentColor" className="shrink-0" />}
           {buttonStates.replayButtonText}
         </button>
 
         {/* Loop chip — macro only. Clicker has its own loop control in the side panel
             (ClickerSection), HandleReplayToggle returns before reading any of this in Clicker
             mode, and Save/Load next to it are already disabled there — so showing a macro loop
-            count in Clicker mode would describe a number nothing is going to use. */}
+            count in Clicker mode would describe a number nothing is going to use.
+            It stays at full strength during a run, unlike every control around it: it is a
+            readout, not a control, and mid-run it names the count this very run is using. */}
         {!isClicker && (
           <span
             data-tip={loopTip}
-            className={`h-7 px-2 flex items-center justify-center rounded border text-[11px] font-mono tabular-nums select-none ${
+            // `relative` is explicit rather than inherited from the [data-tip] base rule,
+            // because the dot below anchors to it and that rule is not this file's to rely on.
+            className={`relative h-7 min-w-9 px-2 flex items-center justify-center rounded border text-[11px] font-mono tabular-nums select-none ${
               loopEmphasised ? 'text-accent-solid' : 'text-text-tertiary'
-            } ${loopDirty ? 'border-dashed' : ''}`}
-            style={
-              loopDirty
-                ? {
-                    // Amber, not the accent: "pending" must not read as "on". Dashed border
-                    // carries the state a second way, for the low-contrast themes where a hue
-                    // shift alone drops below readable (see the toggle-two-channel note).
-                    borderColor: 'color-mix(in srgb, var(--color-warning) 55%, transparent)',
-                    background: 'color-mix(in srgb, var(--color-warning) 12%, transparent)',
-                  }
-                : loopEmphasised
-                  ? chipOn
-                  : { borderColor: 'var(--color-border-default)', background: 'var(--color-bg-input)' }
-            }
+            }`}
+            // The unsaved edit does NOT touch the skin — see .loop-unsaved-dot in
+            // index.css. The chip answers one question ("how many passes?") and
+            // answers it the same way whether or not the value is written yet.
+            style={loopEmphasised ? chipOn : chipOff}
           >
             {loopLabel}
+            {loopDirty && <span className="loop-unsaved-dot" aria-hidden="true" />}
           </span>
         )}
       </div>
 
-      {/* Right: Save + Load — disabled in Clicker mode (profiles wrap recorded actions,
-          which Clicker doesn't use). Tooltip explains the disabled state.
-          Subtle bg + border so they read as real buttons next to Recording/Replay
-          instead of dissolving into ghost-text. Still much quieter than the
-          coloured Record/Replay so the visual hierarchy is preserved. */}
-      <div className="flex items-center gap-1.5">
-        <button
+      {/* Right: Save + Load. These used to carry a hand-rolled fill that existed
+          nowhere else in the app, added so they'd "read as real buttons instead of
+          dissolving into ghost-text" next to two loud solid primaries. Those solid
+          primaries are gone, so the exception goes with them: they are now the same
+          ghost vocabulary as the fourteen toolbar buttons at the top of this column,
+          which is what makes the column read as one instrument. */}
+      <div className="flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={() => send({ type: 'profile:save', payload: {} })}
-          disabled={isClicker}          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[13px] bg-bg-elevated/40 border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-bg-elevated/40 disabled:hover:text-text-secondary"
+          disabled={isClicker}
+          data-tip={fileTip('Save the current profile (Ctrl+S)', 'Salvar o perfil atual (Ctrl+S)')}
         >
-          <Save size={14} />
+          <Save size={12} />
           Save
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={() => send({ type: 'profile:load', payload: {} })}
-          disabled={isClicker}          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[13px] bg-bg-elevated/40 border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-bg-elevated/40 disabled:hover:text-text-secondary"
+          disabled={isClicker}
+          data-tip={fileTip('Load a profile from a file', 'Carregar um perfil de um arquivo')}
         >
-          <FolderOpen size={14} />
+          <FolderOpen size={12} />
           Load
-        </button>
+        </Button>
       </div>
     </div>
   );
