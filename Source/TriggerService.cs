@@ -72,6 +72,9 @@ namespace TrueReplayer.Services
         {
             this.dispatcherQueue = dispatcherQueue;
             Instance = this;
+            // One pump for the whole app — see the fire-queue region. Started here rather than
+            // lazily so there is exactly one, created before any watcher loop can exist.
+            _ = Task.Run(() => RunFirePumpAsync(_pumpCts.Token));
         }
 
         private sealed class TriggerRuntime
@@ -390,17 +393,14 @@ namespace TrueReplayer.Services
                 // seconds. Retry within a window bounded by the interval itself, so a retry can
                 // never collide with the following tick.
                 var graceEnd = next + TimeSpan.FromSeconds(Math.Min(seconds / 2.0, 180));
-                while (!ct.IsCancellationRequested)
+                var result = await RequestFireAsync(name, stats, ct, dueAt: next, expiresAt: graceEnd);
+                // Anything but Fired/Failed/dirty means the queue held it to the deadline.
+                // SkippedDirty is excluded because it comes back immediately and already set a
+                // truthful result line — calling that "missed the grace window" would be a lie.
+                if (result is not (TriggerFireResult.Fired or TriggerFireResult.Failed or TriggerFireResult.SkippedDirty))
                 {
-                    var result = await RequestFireAsync(name, stats, ct);
-                    if (result == TriggerFireResult.Fired || result == TriggerFireResult.Failed) break;
-                    if (DateTime.Now >= graceEnd)
-                    {
-                        SetLastResult(stats, "missed (busy past the grace window)");
-                        NotifyStateChanged();
-                        break;
-                    }
-                    await Task.Delay(TimeSpan.FromSeconds(5), ct);
+                    SetLastResult(stats, "missed (busy past the grace window)");
+                    NotifyStateChanged();
                 }
 
                 // Anchor the NEXT tick to the tick we just serviced, not to "now" — otherwise a
@@ -467,19 +467,15 @@ namespace TrueReplayer.Services
                 // next tick is tomorrow). Retry retriable skips within a bounded grace
                 // window; two same-time schedules then run back-to-back instead of one of
                 // them deterministically never executing.
+                // Queued on the OCCURRENCE time, so a schedule that landed on a busy minute keeps
+                // its place ahead of interval ticks that became due while it waited — the
+                // "deterministically never executes" case this grace window was written for.
                 var graceEnd = next.AddMinutes(3);
-                while (!ct.IsCancellationRequested)
+                var result = await RequestFireAsync(name, stats, ct, dueAt: next, expiresAt: graceEnd);
+                if (result is not (TriggerFireResult.Fired or TriggerFireResult.Failed or TriggerFireResult.SkippedDirty))
                 {
-                    var result = await RequestFireAsync(name, stats, ct);
-                    if (result == TriggerFireResult.Fired || result == TriggerFireResult.Failed)
-                        break;
-                    if (DateTime.Now >= graceEnd)
-                    {
-                        SetLastResult(stats, "missed (busy past the grace window)");
-                        NotifyStateChanged();
-                        break;
-                    }
-                    await Task.Delay(TimeSpan.FromSeconds(15), ct);
+                    SetLastResult(stats, "missed (busy past the grace window)");
+                    NotifyStateChanged();
                 }
             }
         }
@@ -567,13 +563,15 @@ namespace TrueReplayer.Services
                         wasTrue = isTrue;
                         if (isTrue && DateTime.Now >= CooldownUntil())
                         {
-                            var r = await RequestFireAsync(name, stats, ct);
+                            // Bounded so the loop gets back to PROBING: in level mode the condition
+                            // going false is meaningful, and a request parked at the head of the
+                            // queue for minutes would hide that.
+                            var r = await RequestFireAsync(name, stats, ct,
+                                dueAt: DateTime.Now, expiresAt: DateTime.Now.AddSeconds(30));
                             if (r == TriggerFireResult.Fired)
                                 StampCooldown();
                             else if (r == TriggerFireResult.Failed)
                                 await Task.Delay(30000, ct);   // permanent failure — don't spam the disk logger
-                            else
-                                await Task.Delay(5000, ct);    // busy backoff
                         }
                         continue;
                     }
@@ -597,7 +595,11 @@ namespace TrueReplayer.Services
                     }
                     if (DateTime.Now < CooldownUntil()) continue;
 
-                    var result = await RequestFireAsync(name, stats, ct);
+                    // The queue holds the edge for exactly the TTL the loop already enforced, so
+                    // the "stale edge" branch above keeps its meaning; dueAt is when the edge was
+                    // observed, not now, so an old edge outranks a fresh one.
+                    var result = await RequestFireAsync(name, stats, ct,
+                        dueAt: pendingSince, expiresAt: pendingSince + pendingTtl);
                     if (result == TriggerFireResult.Fired)
                     {
                         pending = false;
@@ -607,10 +609,8 @@ namespace TrueReplayer.Services
                     {
                         pending = false;
                     }
-                    else
-                    {
-                        await Task.Delay(5000, ct);   // busy/dirty/modal/not-ready — retry while the edge is fresh
-                    }
+                    // Otherwise the edge stays pending and the loop re-probes: the cause may have
+                    // vanished, which the branches above must still be allowed to notice.
                 }
             }
             finally
@@ -689,18 +689,11 @@ namespace TrueReplayer.Services
                 // on the first busy tick was too harsh: the engine is often busy for a second or
                 // two, and the copy the user just made is exactly what they wanted acted on.
                 // Retry briefly, bounded so a stale copy can never ambush them later.
-                var graceEnd = DateTime.Now + TimeSpan.FromSeconds(10);
-                while (!ct.IsCancellationRequested)
-                {
-                    var r = await RequestFireAsync(name, stats, ct);
-                    if (r == TriggerFireResult.Fired)
-                    {
-                        cooldownUntil = DateTime.Now.AddSeconds(cooldownSec);
-                        break;
-                    }
-                    if (r == TriggerFireResult.Failed || DateTime.Now >= graceEnd) break;
-                    await Task.Delay(TimeSpan.FromSeconds(2), ct);
-                }
+                var copiedAt = DateTime.Now;
+                var r = await RequestFireAsync(name, stats, ct,
+                    dueAt: copiedAt, expiresAt: copiedAt + TimeSpan.FromSeconds(10));
+                if (r == TriggerFireResult.Fired)
+                    cooldownUntil = DateTime.Now.AddSeconds(cooldownSec);
             }
         }
 
@@ -813,20 +806,177 @@ namespace TrueReplayer.Services
             }
         }
 
+        // ── Fire queue ──
+        //
+        // Every watcher loop used to retry on its own: call, get SkippedBusy, sleep 5 s, call
+        // again, until its grace window expired. Two problems that only show up with more than one
+        // armed automation, which is the normal case here.
+        //
+        // ORDER. Two triggers due while a replay runs each poll independently, so when the engine
+        // frees, whichever loop happens to wake first wins. Not first-due-first-served — arbitrary,
+        // and it changes run to run. A schedule that lands on a busy minute could lose to an
+        // interval tick that became due afterwards.
+        //
+        // LATENCY. The retry cadence was the wait: up to 5 s of dead time after the engine was
+        // already free, on every fire that had to wait at all.
+        //
+        // One ordered waiting room fixes both. It deliberately introduces NO new policy: each
+        // request carries the deadline its own loop already computed (the interval's half-period
+        // grace, the schedule's 3 minutes, the edge's TTL, the clipboard's 10 s), so lifetimes are
+        // exactly what they were. What changes is who goes first and how fast.
+        //
+        // A side effect worth knowing: the skip counters now count SKIPS, not retry attempts. One
+        // missed interval tick used to bump SkippedBusy up to 36 times (3 min of grace at a 5 s
+        // cadence, because the bookkeeping sat inside the polled call). It bumps once now.
+
+        private sealed class FireRequest
+        {
+            public string Name = "";
+            /// Ordering key: the moment this fire BECAME due, not when it was queued. A schedule
+            /// that has been waiting keeps its place ahead of an interval tick due later.
+            public DateTime DueAt;
+            /// The caller's own grace deadline. Past it the request is abandoned, unchanged from
+            /// the per-loop behaviour it replaces.
+            public DateTime ExpiresAt;
+            public long Seq;
+            /// Why the last attempt was refused — reported back if the deadline wins.
+            public TriggerFireResult LastRefusal = TriggerFireResult.SkippedBusy;
+            public readonly TaskCompletionSource<TriggerFireResult> Tcs =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        private readonly List<FireRequest> _fireQueue = new();
+        private readonly object _queueLock = new();
+        /// Wake signal, not a counter: capacity 1, released only when empty. The pump waits on it
+        /// solely while the queue is empty, so a spurious wake costs one re-check.
+        private readonly SemaphoreSlim _queueWake = new(0, 1);
+        private long _fireSeq;
+        private readonly CancellationTokenSource _pumpCts = new();
+
+        /// How fast a refused request is re-attempted. The old per-loop cadence was 5 s and was
+        /// pure latency; this is the queue's whole latency budget. An attempt is a dispatcher hop
+        /// plus a handful of bool reads, so 400 ms is affordable even during a long replay.
+        private const int FireRetryCadenceMs = 400;
+
+        private void WakePump()
+        {
+            try { if (_queueWake.CurrentCount == 0) _queueWake.Release(); }
+            catch (SemaphoreFullException) { /* another thread won the race — already awake */ }
+        }
+
+        /// <summary>
+        /// The single fire pump. Only this task calls <see cref="FireProfile"/> from a watcher, so
+        /// ordering is a property of the code rather than of who polls first.
+        ///
+        /// It attempts ONLY the head. Every refusal it can get is global — the engine is busy, a
+        /// modal is up, the grid is dirty — so walking the rest of the queue would just multiply
+        /// dispatcher hops to collect the same answer.
+        /// </summary>
+        private async Task RunFirePumpAsync(CancellationToken ct)
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                FireRequest? head;
+                List<FireRequest>? expired = null;
+                lock (_queueLock)
+                {
+                    var now = DateTime.Now;
+                    for (int i = _fireQueue.Count - 1; i >= 0; i--)
+                    {
+                        if (_fireQueue[i].ExpiresAt > now) continue;
+                        (expired ??= new()).Add(_fireQueue[i]);
+                        _fireQueue.RemoveAt(i);
+                    }
+                    head = null;
+                    foreach (var r in _fireQueue)
+                    {
+                        if (head == null || r.DueAt < head.DueAt || (r.DueAt == head.DueAt && r.Seq < head.Seq))
+                            head = r;
+                    }
+                }
+                // Completed OUTSIDE the lock: the continuation is the waiting loop, which takes
+                // _lock for its stats bookkeeping, and holding both is how a deadlock gets written.
+                if (expired != null)
+                    foreach (var r in expired) r.Tcs.TrySetResult(r.LastRefusal);
+
+                if (head == null)
+                {
+                    try { await _queueWake.WaitAsync(ct); }
+                    catch (OperationCanceledException) { break; }
+                    continue;
+                }
+
+                var fire = FireProfile;
+                TriggerFireResult result;
+                if (fire == null)
+                {
+                    // Bridge not wired yet. Retriable, same as NotReady — never a failure, or an
+                    // automation armed at boot would drop its first fire.
+                    result = TriggerFireResult.NotReady;
+                }
+                else
+                {
+                    try { result = await fire(head.Name); }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Error($"Automation fire '{head.Name}' failed", ex);
+                        result = TriggerFireResult.Failed;
+                    }
+                }
+
+                // SkippedDirty is terminal on purpose. Unsaved edits are not a moment of
+                // contention like a running replay — they can sit for hours, and a request holding
+                // the head of the queue that whole time would starve every other automation. The
+                // watcher's next tick asks again.
+                bool terminal = result is TriggerFireResult.Fired
+                                       or TriggerFireResult.Failed
+                                       or TriggerFireResult.SkippedDirty;
+                if (terminal)
+                {
+                    lock (_queueLock) _fireQueue.Remove(head);
+                    head.Tcs.TrySetResult(result);
+                    // No delay: on Fired the engine is now busy and the next attempt discovers
+                    // that in one cheap hop; on the other two the answer was immediate anyway.
+                    continue;
+                }
+
+                head.LastRefusal = result;
+                try { await Task.Delay(FireRetryCadenceMs, ct); }
+                catch (OperationCanceledException) { break; }
+            }
+        }
+
         // ── Fire plumbing ──
 
-        private async Task<TriggerFireResult> RequestFireAsync(string name, TriggerStats stats, CancellationToken ct)
+        /// <param name="dueAt">When this fire became due — the queue's ordering key.</param>
+        /// <param name="expiresAt">
+        /// The caller's grace deadline. Reaching it returns the last refusal reason, which is the
+        /// caller's signal that it waited the window out rather than being refused once.
+        /// </param>
+        private async Task<TriggerFireResult> RequestFireAsync(
+            string name, TriggerStats stats, CancellationToken ct, DateTime dueAt, DateTime expiresAt)
         {
-            var fire = FireProfile;
-            if (fire == null) return TriggerFireResult.Failed;
+            var req = new FireRequest { Name = name, DueAt = dueAt, ExpiresAt = expiresAt };
+            lock (_queueLock)
+            {
+                req.Seq = ++_fireSeq;
+                _fireQueue.Add(req);
+            }
+            WakePump();
 
             TriggerFireResult result;
-            try { result = await fire(name); }
-            catch (Exception ex)
+            // Disarming (Reload cancels the loop's CTS) must pull the request out, or the pump
+            // would keep attempting a fire for a watcher that no longer exists.
+            using (ct.Register(() =>
             {
-                DiagnosticLog.Error($"Automation fire '{name}' failed", ex);
-                result = TriggerFireResult.Failed;
+                lock (_queueLock) _fireQueue.Remove(req);
+                req.Tcs.TrySetCanceled();
+            }))
+            {
+                // OperationCanceledException on disarm — RunLoopSafeAsync catches it as a clean stop.
+                result = await req.Tcs.Task.ConfigureAwait(false);
             }
+
             if (ct.IsCancellationRequested) return result;
 
             lock (_lock)
