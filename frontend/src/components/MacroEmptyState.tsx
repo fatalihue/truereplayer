@@ -14,8 +14,8 @@ export function MacroEmptyState() {
 
   return (
     <div className="flex flex-col items-center justify-center gap-2 h-full min-h-[200px] select-none">
-      <List size={32} style={{ color: 'var(--color-replay)', opacity: 0.7 }} />
-      <div className="text-[14px] font-semibold" style={{ color: 'var(--color-replay)' }}>
+      <List size={32} style={{ color: 'var(--color-replay-fg)', opacity: 0.7 }} />
+      <div className="text-[14px] font-semibold" style={{ color: 'var(--color-replay-fg)' }}>
         Macro mode
       </div>
       <div className="text-[12px] text-text-tertiary text-center max-w-[420px] px-4">

@@ -806,7 +806,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
     <span className="text-[11px] text-text-tertiary tabular-nums whitespace-nowrap">
       {grid.headers.length} {tt('columns', 'colunas')} · {grid.rows.length} {tt('rows', 'linhas')}
       {loopOverData && grid.rows.length > 0 && (
-        <span style={{ color: 'var(--color-replay)' }}> · {grid.rows.length} {tt('iterations/run', 'iterações/execução')}</span>
+        <span style={{ color: 'var(--color-replay-fg)' }}> · {grid.rows.length} {tt('iterations/run', 'iterações/execução')}</span>
       )}
       {dirty && <span className="text-warning"> · {tt('unsaved', 'não salvo')}</span>}
       {invalidCount > 0 && <span className="text-warning"> · {invalidCount} {tt('invalid', 'inválido(s)')}</span>}
@@ -934,7 +934,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
                       className="sticky top-0 left-0 z-20 bg-bg-surface shadow-[inset_-1px_0_0_var(--color-border-subtle),inset_0_-1px_0_var(--color-border-subtle)] h-row text-[10px] text-text-tertiary text-right pr-2 select-none cursor-pointer"
                       data-tip={tt('{row} = the current row number (1-based) during the loop — click to copy', '{row} = o número da linha atual (base 1) durante o loop — clique para copiar')}
                     >
-                      {copiedKey === '__rownum' ? <Check size={11} className="inline text-[color:var(--color-replay)]" /> : '#'}
+                      {copiedKey === '__rownum' ? <Check size={11} className="inline text-[color:var(--color-replay-fg)]" /> : '#'}
                     </th>
                     {grid.headers.map((h, c) => {
                       const meta = headerMeta[c];
@@ -1055,8 +1055,8 @@ export function DataPanel({ onClose }: DataPanelProps) {
                 className="border-l-2 rounded px-2.5 py-2 text-[11px] leading-relaxed"
                 style={{
                   background: 'color-mix(in srgb, var(--color-replay) 8%, transparent)',
-                  borderColor: 'var(--color-replay)',
-                  color: 'var(--color-replay)',
+                  borderColor: 'var(--color-replay-fg)',
+                  color: 'var(--color-replay-fg)',
                 }}
               >
                 {tt(
@@ -1069,8 +1069,8 @@ export function DataPanel({ onClose }: DataPanelProps) {
                 className="border-l-2 rounded px-2.5 py-2 text-[11px] leading-relaxed"
                 style={{
                   background: 'color-mix(in srgb, var(--color-recording) 8%, transparent)',
-                  borderColor: 'var(--color-recording)',
-                  color: 'var(--color-recording)',
+                  borderColor: 'var(--color-recording-fg)',
+                  color: 'var(--color-recording-fg)',
                 }}
               >
                 {tt('Replay will refuse to start: the table has no rows.', 'O replay vai se recusar a iniciar: a tabela não tem linhas.')}
@@ -1145,7 +1145,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
                             )}
                           >
                             {copiedKey === `h${c}` ? (
-                              <span className="flex items-center gap-1" style={{ color: 'var(--color-replay)' }}>
+                              <span className="flex items-center gap-1" style={{ color: 'var(--color-replay-fg)' }}>
                                 <Check size={11} /> {tt('Copied', 'Copiado')}
                               </span>
                             ) : (
@@ -1279,7 +1279,7 @@ export function DataPanel({ onClose }: DataPanelProps) {
               }}
               disabled={emptyGrid}
               className="flex items-center gap-2 px-3 h-7 text-[11px] text-text-secondary hover:text-text-primary hover:bg-bg-card transition-colors disabled:opacity-40 disabled:cursor-not-allowed"            >
-              {copiedKey === '__table' ? <Check size={12} className="shrink-0" style={{ color: 'var(--color-replay)' }} /> : <Copy size={12} className="shrink-0" />}
+              {copiedKey === '__table' ? <Check size={12} className="shrink-0" style={{ color: 'var(--color-replay-fg)' }} /> : <Copy size={12} className="shrink-0" />}
               {tt('Copy table (TSV)', 'Copiar tabela (TSV)')}
             </button>
             <button

@@ -49,9 +49,9 @@ function explainCode(code: string | null, tt: (en: string, pt: string) => string
 const fmtMs = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
 
 function StatusIcon({ status }: { status: RunStep['status'] }) {
-  if (status === 'failed') return <XCircle size={13} style={{ color: 'var(--color-recording)' }} />;
+  if (status === 'failed') return <XCircle size={13} style={{ color: 'var(--color-recording-fg)' }} />;
   if (status === 'skipped') return <MinusCircle size={13} className="text-text-disabled" />;
-  return <CheckCircle2 size={13} style={{ color: 'var(--color-replay)' }} />;
+  return <CheckCircle2 size={13} style={{ color: 'var(--color-replay-fg)' }} />;
 }
 
 /**
@@ -122,7 +122,7 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
             {stats.drifting > 0 && (
               <div className="mb-2 rounded border px-3 py-2 text-[11px] leading-relaxed"
                 style={{
-                  color: 'var(--color-recording)',
+                  color: 'var(--color-recording-fg)',
                   borderColor: 'color-mix(in srgb, var(--color-recording) 40%, transparent)',
                   backgroundColor: 'color-mix(in srgb, var(--color-recording) 10%, transparent)',
                 }}>
@@ -162,7 +162,7 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
                   )}
 
                   {s.matchedTier && (
-                    <div className="ml-[52px] mt-0.5 text-[10px] leading-snug" style={{ color: 'var(--color-recording)' }}>
+                    <div className="ml-[52px] mt-0.5 text-[10px] leading-snug" style={{ color: 'var(--color-recording-fg)' }}>
                       {tt('matched via fallback', 'casou por reserva')} <b>tier {s.matchedTier}</b>
                       {s.matchedSelector && <span className="font-mono"> · {s.matchedSelector}</span>}
                     </div>
@@ -173,7 +173,7 @@ export function RunReportPanel({ onClose }: { onClose: () => void }) {
                       {s.errorCode && (
                         <div className="text-[10px] font-mono text-text-tertiary">{s.errorCode}</div>
                       )}
-                      <div className="text-[11px] leading-snug" style={{ color: 'var(--color-recording)' }}>
+                      <div className="text-[11px] leading-snug" style={{ color: 'var(--color-recording-fg)' }}>
                         {explainCode(s.errorCode, tt) ?? s.errorMessage}
                       </div>
                       {s.tip && (

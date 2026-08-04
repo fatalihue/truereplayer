@@ -1497,6 +1497,48 @@ export function pickInk(fillHex: string): string {
     : '#1c1c1c';
 }
 
+/**
+ * A semantic hue that survives the theme it lands on, for use as INK — text,
+ * icons, hairline borders — as opposed to a fill (fills keep the raw colour and
+ * get their ink from pickInk above).
+ *
+ * recordingColor/replayColor/clickerColor live in ThemeUISettings, not in the
+ * preset, so all 48 presets receive the same three values — and the defaults
+ * were picked against a dark canvas. On the 11 light presets the raw hues wash
+ * out: replay green measures 1.77:1 as text on GitHub Light's bar, recording red
+ * 2.16:1, clicker purple 2.13:1, all under the 3:1 floor for non-text UI.
+ *
+ * A fixed mix percentage cannot fix that. It has to be large enough for the
+ * worst light preset, which then needlessly desaturates all 36 dark ones. So
+ * walk the hue toward the theme's own text colour and STOP at the first step
+ * that clears `target`. Measured across every preset x hue: the dark presets
+ * clear at 100% (they keep the user's colour untouched, all 108 combinations),
+ * and the light ones keep 70% of it on average.
+ *
+ * `target` is 3.0 — the WCAG 1.4.11 floor for graphics and UI boundaries, which
+ * is what these are. 4.5 was measured too and gutted the hue on light presets
+ * (41% retained, some down to 10%), trading the identity this colour exists to
+ * carry for a threshold that belongs to body text.
+ */
+export function adaptHueForInk(hueHex: string, textPrimary: string, bgHex: string, target = 3): string {
+  const hue = hexToRGB(toHex(hueHex));
+  const text = hexToRGB(toHex(textPrimary));
+  // Coarse 5% steps: finer buys no visible accuracy and this runs on every
+  // theme change, including every drag of a colour picker.
+  for (let keep = 100; keep > 0; keep -= 5) {
+    const p = keep / 100;
+    const candidate = rgbToHex(
+      hue.r * p + text.r * (1 - p),
+      hue.g * p + text.g * (1 - p),
+      hue.b * p + text.b * (1 - p),
+    );
+    if (contrastRatio(candidate, bgHex) >= target) return candidate;
+  }
+  // Nothing cleared: the theme's own text is the last resort, and it clears by
+  // construction. Reached only if a user picks a hue that matches their surface.
+  return toHex(textPrimary);
+}
+
 // ── Accent Derivation ──
 
 export function deriveAccentVariants(accentHex: string): Pick<ThemeColors, 'accent' | 'accent-solid' | 'accent-hover'> {
@@ -1687,7 +1729,20 @@ export function applyThemeConfig(colors: ThemeColors, uiSettings: ThemeUISetting
   parts.push(`--color-replay-bg: color-mix(in srgb, ${uiSettings.replayColor} 10%, transparent);`);
   parts.push(`--color-clicker: ${uiSettings.clickerColor};`);
   parts.push(`--color-clicker-bg: color-mix(in srgb, ${uiSettings.clickerColor} 12%, transparent);`);
-  parts.push(`--color-clicker-border: color-mix(in srgb, ${uiSettings.clickerColor} 30%, transparent);`);
+  // INK variants of the three semantic hues, adapted per theme (see
+  // adaptHueForInk). The raw tokens above stay the user's literal choice and go
+  // on FILLS; anything that paints the hue as text, an icon or a hairline uses
+  // these instead, or it disappears on the 11 light presets. Dark presets get
+  // the raw colour back unchanged, so this is invisible there by construction.
+  const surface = colors['bg-surface'];
+  const ink = colors['text-primary'];
+  parts.push(`--color-recording-fg: ${adaptHueForInk(uiSettings.recordingColor, ink, surface)};`);
+  parts.push(`--color-replay-fg: ${adaptHueForInk(uiSettings.replayColor, ink, surface)};`);
+  const clickerFg = adaptHueForInk(uiSettings.clickerColor, ink, surface);
+  parts.push(`--color-clicker-fg: ${clickerFg};`);
+  // The Clicker pill's border is a hairline on the bar, so it rides the adapted
+  // hue too — at 30% of the raw purple it was 1.2:1 against a light bar.
+  parts.push(`--color-clicker-border: color-mix(in srgb, ${clickerFg} 30%, transparent);`);
   // Ink for solid semantic fills (Recording/Replay/Clicker buttons + accent "Stop"
   // state) — contrast-picked per fill so no user color choice can produce the old
   // white-on-mid-green ≈ 2:1 pairing.

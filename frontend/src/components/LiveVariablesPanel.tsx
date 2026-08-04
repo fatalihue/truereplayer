@@ -85,7 +85,7 @@ export function LiveVariablesHost() {
   return (
     <div className="fixed bottom-10 right-3 z-[40] w-[264px] max-h-[45vh] flex flex-col rounded-lg border border-border-subtle bg-bg-elevated shadow-[0_12px_32px_rgba(0,0,0,0.45)] overflow-hidden">
       <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-border-subtle shrink-0">
-        <Activity size={12} className={status === 'replaying' ? '' : 'text-text-tertiary'} style={status === 'replaying' ? { color: 'var(--color-replay)' } : undefined} />
+        <Activity size={12} className={status === 'replaying' ? '' : 'text-text-tertiary'} style={status === 'replaying' ? { color: 'var(--color-replay-fg)' } : undefined} />
         <span className="label-micro text-text-secondary flex-1">Live Variables</span>
         <button
           type="button"

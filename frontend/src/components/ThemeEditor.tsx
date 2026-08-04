@@ -1021,7 +1021,7 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
             <span className="w-4 h-4 rounded bg-accent-solid shrink-0" style={ckHover('accent-solid')} {...ckEvents('accent-solid')} />
             <span className="text-text-secondary" style={{ fontSize: fsMeta }}>TrueReplayer</span>
             <span className="flex-1" />
-            <span className="inline-flex items-center gap-1 px-1.5 py-px rounded-full" style={{ fontSize: fsMicro, background: 'var(--color-replay-bg)', color: 'var(--color-replay)' }}>
+            <span className="inline-flex items-center gap-1 px-1.5 py-px rounded-full" style={{ fontSize: fsMicro, background: 'var(--color-replay-bg)', color: 'var(--color-replay-fg)' }}>
               <span className="w-1 h-1 rounded-full" style={{ background: 'var(--color-replay)' }} /> Ready
             </span>
             <span className="px-1 py-px rounded font-mono border" style={{ fontSize: fsMicro, background: 'var(--color-hotkey-bg)', color: 'var(--color-hotkey-fg)', borderColor: 'var(--color-hotkey-border)' }}>F8</span>
@@ -1081,14 +1081,14 @@ export function ThemeEditor({ onClose }: ThemeEditorProps) {
           </div>
           {/* Action bar */}
           <div className="flex items-center gap-1.5 px-2 h-9 bg-bg-surface border-t border-border-subtle shrink-0">
-            <button className="px-2 py-0.5 border" style={{ fontSize: fsMeta, borderRadius: 'var(--ui-border-radius)', background: 'var(--color-recording-bg)', color: 'var(--color-recording)', borderColor: 'color-mix(in srgb, var(--color-recording) 30%, transparent)', ...ckHover('recordingColor') }} {...ckEvents('recordingColor')}>● Recording</button>
-            <button className="px-2 py-0.5 border" style={{ fontSize: fsMeta, borderRadius: 'var(--ui-border-radius)', background: 'var(--color-replay-bg)', color: 'var(--color-replay)', borderColor: 'color-mix(in srgb, var(--color-replay) 30%, transparent)', ...ckHover('replayColor') }} {...ckEvents('replayColor')}>▶ Replay</button>
+            <button className="px-2 py-0.5 border" style={{ fontSize: fsMeta, borderRadius: 'var(--ui-border-radius)', background: 'var(--color-recording-bg)', color: 'var(--color-recording-fg)', borderColor: 'color-mix(in srgb, var(--color-recording) 30%, transparent)', ...ckHover('recordingColor') }} {...ckEvents('recordingColor')}>● Recording</button>
+            <button className="px-2 py-0.5 border" style={{ fontSize: fsMeta, borderRadius: 'var(--ui-border-radius)', background: 'var(--color-replay-bg)', color: 'var(--color-replay-fg)', borderColor: 'color-mix(in srgb, var(--color-replay) 30%, transparent)', ...ckHover('replayColor') }} {...ckEvents('replayColor')}>▶ Replay</button>
             <span className="flex-1" />
-            <button className="px-2 py-0.5 border" style={{ fontSize: fsMeta, borderRadius: 'var(--ui-border-radius)', background: 'var(--color-clicker-bg)', color: 'var(--color-clicker)', borderColor: 'var(--color-clicker-border)', ...ckHover('clickerColor') }} {...ckEvents('clickerColor')}>Clicker</button>
+            <button className="px-2 py-0.5 border" style={{ fontSize: fsMeta, borderRadius: 'var(--ui-border-radius)', background: 'var(--color-clicker-bg)', color: 'var(--color-clicker-fg)', borderColor: 'var(--color-clicker-border)', ...ckHover('clickerColor') }} {...ckEvents('clickerColor')}>Clicker</button>
           </div>
           {/* Status bar */}
           <div className="flex items-center gap-1 px-2 h-6 bg-bg-base border-t border-border-subtle text-text-tertiary shrink-0" style={{ fontSize: fsMicro }}>
-            <span style={{ color: 'var(--color-replay)' }}>Ready</span>
+            <span style={{ color: 'var(--color-replay-fg)' }}>Ready</span>
             <span className="flex-1" />
             <span>127 actions</span>
           </div>

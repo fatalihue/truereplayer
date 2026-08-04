@@ -854,7 +854,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
   type RailEntry = { tab: 'profile' | 'keys' | 'app'; title: string; icon: React.ElementType; color?: string };
   const railProfile: RailEntry[] =
     settings.useCursorClick
-      ? [{ tab: 'profile', title: 'Clicker', icon: MousePointerClick, color: 'var(--color-clicker)' }]
+      ? [{ tab: 'profile', title: 'Clicker', icon: MousePointerClick, color: 'var(--color-clicker-fg)' }]
       : [
           { tab: 'profile', title: 'Execution', icon: Timer },
           { tab: 'profile', title: 'Game Mode', icon: Gamepad2 },

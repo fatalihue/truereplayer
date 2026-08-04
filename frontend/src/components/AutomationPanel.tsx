@@ -562,7 +562,7 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                   <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-text-tertiary">
                     {entry?.running && (
                       <CircleDot size={10}
-                        className={entry.conditionTrue ? 'text-[var(--color-replay)]' : 'text-accent-light'}
+                        className={entry.conditionTrue ? 'text-[var(--color-replay-fg)]' : 'text-accent-light'}
                         data-tip={entry.conditionTrue
                           ? tt('Watching — the condition is TRUE right now', 'Vigiando — a condição está VERDADEIRA agora')
                           : tt('Watching — the condition is false right now', 'Vigiando — a condição está falsa agora')} />
@@ -579,7 +579,7 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
                       loop stopped itself (missing reference image, unfillable condition). Name it,
                       instead of conveying it by the absence of a small unlabelled dot. */}
                   {entry?.trigger.armed && !entry.running && (
-                    <div className="text-[10px] mt-0.5 truncate" style={{ color: 'var(--color-recording)' }}>
+                    <div className="text-[10px] mt-0.5 truncate" style={{ color: 'var(--color-recording-fg)' }}>
                       {!automation.enabled
                         ? tt('armed, but all automations are paused', 'armada, mas todas as automações estão pausadas')
                         : entry.isDisabled
@@ -671,7 +671,7 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
               {cannotFire && (
                 <div className="rounded border px-3 py-2 text-[11px] leading-relaxed"
                   style={{
-                    color: 'var(--color-recording)',
+                    color: 'var(--color-recording-fg)',
                     borderColor: 'color-mix(in srgb, var(--color-recording) 40%, transparent)',
                     backgroundColor: 'color-mix(in srgb, var(--color-recording) 10%, transparent)',
                   }}>
@@ -683,7 +683,7 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
               {selectedEntry?.isDisabled && (
                 <div className="rounded border px-3 py-2 text-[11px] leading-relaxed"
                   style={{
-                    color: 'var(--color-recording)',
+                    color: 'var(--color-recording-fg)',
                     borderColor: 'color-mix(in srgb, var(--color-recording) 40%, transparent)',
                     backgroundColor: 'color-mix(in srgb, var(--color-recording) 10%, transparent)',
                   }}>
@@ -695,7 +695,7 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
               {noTarget && (
                 <div className="rounded border px-3 py-2 text-[11px] leading-relaxed"
                   style={{
-                    color: 'var(--color-recording)',
+                    color: 'var(--color-recording-fg)',
                     borderColor: 'color-mix(in srgb, var(--color-recording) 40%, transparent)',
                     backgroundColor: 'color-mix(in srgb, var(--color-recording) 10%, transparent)',
                   }}>

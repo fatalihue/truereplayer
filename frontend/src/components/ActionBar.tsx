@@ -103,16 +103,17 @@ export function ActionBar() {
         : tt('Repeats per run. Change in Settings → Execution.', 'Repetições por execução. Ajuste em Settings → Execution.');
 
   // ── Primary skins ──
-  // Resting: the semantic hue at the on-intensity, hue carried on border + icon
-  // (the icon's ink recipe lives in .rail-tinted svg — it is pulled toward the
-  // theme's text colour so it survives the light presets).
+  // Resting: the semantic hue at the on-intensity, carried on border + icon. Two
+  // tokens go in — the raw hue for the 12% fill, and its per-theme adapted -fg
+  // variant for anything that has to stay legible (see adaptHueForInk).
   // Busy: the Button `primary` variant verbatim (accent-solid + the contrast-
   // picked accent ink), which is what every other primary button in the app
   // already is — so "running" looks the same wherever it appears. The glow
   // classes are the shipped ones and keep the MODE hue (red halo for recording,
   // accent halo for replay), so the two busy states stay tellable apart even
   // though the fill converges. Both are gated on html[data-animations].
-  const restingStyle = (hue: string) => ({ '--rail-hue': hue } as CSSProperties);
+  const restingStyle = (hue: string, ink: string) =>
+    ({ '--rail-hue': hue, '--rail-ink': ink } as CSSProperties);
   const busyClass = `${RAIL_PRIMARY} ${BUTTON_VARIANT_CLASSES.primary}`;
   const restingClass = `${RAIL_PRIMARY} rail-tinted`;
 
@@ -163,7 +164,7 @@ export function ActionBar() {
               label: 'Clicker',
               icon: <MousePointerClick size={12} />,
               tip: tt('Auto-click at a fixed rate', 'Clique automático em ritmo fixo'),
-              activeClass: 'bg-[var(--color-clicker-bg)] text-[var(--color-clicker)] shadow-[inset_0_0_0_1px_var(--color-clicker-border)]',
+              activeClass: 'bg-[var(--color-clicker-bg)] text-[var(--color-clicker-fg)] shadow-[inset_0_0_0_1px_var(--color-clicker-border)]',
             },
           ]}
         />
@@ -194,7 +195,7 @@ export function ActionBar() {
                 : withHotkey(tt('Record what you do', 'Grave o que você faz'), settings.recordingHotkey)
             }
             className={`${isRecording ? `${busyClass} record-btn-glow` : restingClass}`}
-            style={isRecording ? undefined : restingStyle('var(--color-recording)')}
+            style={isRecording ? undefined : restingStyle('var(--color-recording)', 'var(--color-recording-fg)')}
           >
             {isRecording
               ? <Square size={12} fill="currentColor" className="shrink-0" />
@@ -215,7 +216,11 @@ export function ActionBar() {
                 : withHotkey(tt('Run the recorded actions', 'Executar as ações gravadas'), settings.replayHotkey)
           }
           className={`${isReplaying ? `${busyClass} replay-btn-glow` : restingClass}`}
-          style={isReplaying ? undefined : restingStyle(isClicker ? 'var(--color-clicker)' : 'var(--color-replay)')}
+          style={isReplaying
+            ? undefined
+            : isClicker
+              ? restingStyle('var(--color-clicker)', 'var(--color-clicker-fg)')
+              : restingStyle('var(--color-replay)', 'var(--color-replay-fg)')}
         >
           {isReplaying
             ? <Square size={12} fill="currentColor" className="shrink-0" />

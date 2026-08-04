@@ -115,7 +115,7 @@ export function StatusBar() {
         clickerRunning ? (() => {
           const { elapsed: clickerElapsed, rateLabel } = formatClickerStats(clickerStats.count, clickerStats.elapsedMs);
           return (
-            <span className="flex items-center gap-2 font-mono" style={{ color: 'var(--color-clicker)' }}>
+            <span className="flex items-center gap-2 font-mono" style={{ color: 'var(--color-clicker-fg)' }}>
               <MousePointerClick size={11} className="shrink-0" />
               <span className="text-text-secondary">Clicked</span>
               <strong className="text-text-primary">{clickerStats.count.toLocaleString()}</strong>
@@ -127,7 +127,7 @@ export function StatusBar() {
           );
         })() : (
           <>
-            <span className="flex items-center gap-1.5 font-medium" style={{ color: 'var(--color-clicker)' }}>
+            <span className="flex items-center gap-1.5 font-medium" style={{ color: 'var(--color-clicker-fg)' }}>
               <MousePointerClick size={11} />
               Clicker
             </span>

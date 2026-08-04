@@ -127,7 +127,7 @@ export function DataPasteSurface({
                 return (
                   <div key={`${h}-${i}`} className="flex items-center gap-1.5 text-[11px] font-mono">
                     {ok ? (
-                      <Check size={11} className="text-[color:var(--color-replay)] shrink-0" />
+                      <Check size={11} className="text-[color:var(--color-replay-fg)] shrink-0" />
                     ) : (
                       <TriangleAlert size={11} className="text-warning shrink-0" />
                     )}

@@ -86,7 +86,7 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset, origin
         <div className="flex-1 p-4 space-y-3">
           <div className="rounded border px-3 py-2 text-[11px] leading-relaxed"
             style={{
-              color: 'var(--color-recording)',
+              color: 'var(--color-recording-fg)',
               borderColor: 'color-mix(in srgb, var(--color-recording) 40%, transparent)',
               backgroundColor: 'color-mix(in srgb, var(--color-recording) 10%, transparent)',
             }}>
@@ -349,12 +349,12 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset, origin
               style={{
                 background: 'color-mix(in srgb, var(--color-replay) 8%, transparent)',
                 borderColor: 'color-mix(in srgb, var(--color-replay) 40%, transparent)',
-                color: 'var(--color-replay)',
+                color: 'var(--color-replay-fg)',
               }}
             >
               {/* Unfinished FIRST — see the note in ClipboardModifierBody. */}
               {refUnfinished
-                ? <span className="italic" style={{ color: 'var(--color-recording)' }}>
+                ? <span className="italic" style={{ color: 'var(--color-recording-fg)' }}>
                     {tt('Finish the name after @ — until then the token keeps the fixed number.',
                         'Complete o nome depois do @ — até lá o token mantém o número fixo.')}
                   </span>

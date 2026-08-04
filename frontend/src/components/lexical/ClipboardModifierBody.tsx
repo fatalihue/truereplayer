@@ -79,7 +79,7 @@ export function ClipboardModifierBody({
       <div className="p-1 space-y-2">
         <div className="rounded border px-2.5 py-2 text-[11px] leading-relaxed"
           style={{
-            color: 'var(--color-recording)',
+            color: 'var(--color-recording-fg)',
             borderColor: 'color-mix(in srgb, var(--color-recording) 40%, transparent)',
             backgroundColor: 'color-mix(in srgb, var(--color-recording) 10%, transparent)',
           }}>
@@ -370,13 +370,13 @@ export function ClipboardModifierBody({
           style={{
             background: 'color-mix(in srgb, var(--color-replay) 8%, transparent)',
             borderColor: 'color-mix(in srgb, var(--color-replay) 50%, transparent)',
-            color: 'var(--color-replay)',
+            color: 'var(--color-replay-fg)',
           }}
         >
           {/* Unfinished FIRST: with one good reference and one half-typed "@", the actionable
               message is the one about the field still waiting on a name. */}
           {refUnfinished
-            ? <span className="italic" style={{ color: 'var(--color-recording)' }}>
+            ? <span className="italic" style={{ color: 'var(--color-recording-fg)' }}>
                 {tt('Finish the name after @ — until then the token keeps the fixed number.',
                     'Complete o nome depois do @ — até lá o token mantém o número fixo.')}
               </span>

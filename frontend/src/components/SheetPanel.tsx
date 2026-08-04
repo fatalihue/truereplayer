@@ -147,10 +147,10 @@ function estimateTier(selector: string): 'S' | 'A' | 'B' | 'C' {
 // Theme tokens only (S=replay green, A=accent, B=warning, C=recording red) — the old
 // hardcoded hexes broke on light themes. labelPtBr feeds the bilingual shield tip.
 const TIER_META: Record<'S' | 'A' | 'B' | 'C', { color: string; label: string; labelPtBr: string; Icon: typeof ShieldCheck }> = {
-  S: { color: 'var(--color-replay)', label: 'Stable', labelPtBr: 'Estável', Icon: ShieldCheck },
+  S: { color: 'var(--color-replay-fg)', label: 'Stable', labelPtBr: 'Estável', Icon: ShieldCheck },
   A: { color: 'var(--color-accent)', label: 'Strong', labelPtBr: 'Forte', Icon: ShieldCheck },
   B: { color: 'var(--color-warning)', label: 'Decent', labelPtBr: 'Razoável', Icon: ShieldQuestion },
-  C: { color: 'var(--color-recording)', label: 'Fragile', labelPtBr: 'Frágil', Icon: ShieldAlert },
+  C: { color: 'var(--color-recording-fg)', label: 'Fragile', labelPtBr: 'Frágil', Icon: ShieldAlert },
 };
 
 
@@ -2808,7 +2808,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 {waitImageSearchRegion && (
                   <button
                     onClick={() => setWaitImageSearchRegion(null)}
-                    className="h-8 px-2 flex items-center rounded text-xs text-text-tertiary hover:text-[var(--color-recording)] hover:bg-bg-card transition-colors"
+                    className="h-8 px-2 flex items-center rounded text-xs text-text-tertiary hover:text-[var(--color-recording-fg)] hover:bg-bg-card transition-colors"
                   >
                     <X size={12} />
                   </button>
@@ -3298,7 +3298,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 />
               </div>
               {regexError && (
-                <p className="text-[10px] mt-1 font-mono" style={{ color: 'var(--color-recording)' }}>Invalid regex: {regexError}</p>
+                <p className="text-[10px] mt-1 font-mono" style={{ color: 'var(--color-recording-fg)' }}>Invalid regex: {regexError}</p>
               )}
             </div>
             )}
@@ -4131,7 +4131,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   <button
                     type="button"
                     onClick={handleCopyCoords}
-                    style={coordCopyFlash ? { borderColor: 'var(--color-replay)', color: 'var(--color-replay)', backgroundColor: 'var(--color-replay-bg)' } : undefined}
+                    style={coordCopyFlash ? { borderColor: 'var(--color-replay-fg)', color: 'var(--color-replay-fg)', backgroundColor: 'var(--color-replay-bg)' } : undefined}
                     className={`h-8 shrink-0 flex items-center justify-center gap-1.5 px-2.5 text-xs font-medium border rounded transition-colors ${
                       coordCopyFlash
                         ? ''
@@ -4143,7 +4143,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   <button
                     type="button"
                     onClick={handlePasteCoords}
-                    style={coordPasteError ? { borderColor: 'var(--color-recording)', color: 'var(--color-recording)', backgroundColor: 'var(--color-recording-bg)' } : undefined}
+                    style={coordPasteError ? { borderColor: 'var(--color-recording-fg)', color: 'var(--color-recording-fg)', backgroundColor: 'var(--color-recording-bg)' } : undefined}
                     className={`h-8 shrink-0 flex items-center justify-center gap-1.5 px-2.5 text-xs font-medium border rounded transition-colors ${
                       coordPasteError
                         ? ''

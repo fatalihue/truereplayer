@@ -214,19 +214,19 @@ export function RemapSection() {
               onChange={(e) => { setDisableMode(e.target.checked); if (capturing === 'to') stopCapture(); }} />
             {tt('Just disable the key', 'Só desativar a tecla')}
           </label>
-          {captureError && <div className="text-[10px]" style={{ color: 'var(--color-recording)' }}>{captureError}</div>}
+          {captureError && <div className="text-[10px]" style={{ color: 'var(--color-recording-fg)' }}>{captureError}</div>}
           {duplicateFrom && (
-            <div className="text-[10px]" style={{ color: 'var(--color-recording)' }}>
+            <div className="text-[10px]" style={{ color: 'var(--color-recording-fg)' }}>
               {tt('That key is already remapped.', 'Essa tecla já está remapeada.')}
             </div>
           )}
           {selfRemap && (
-            <div className="text-[10px]" style={{ color: 'var(--color-recording)' }}>
+            <div className="text-[10px]" style={{ color: 'var(--color-recording-fg)' }}>
               {tt('Source and target are the same key.', 'Origem e destino são a mesma tecla.')}
             </div>
           )}
           {hotkeyCollision && (
-            <div className="text-[10px]" style={{ color: 'var(--color-recording)' }}>
+            <div className="text-[10px]" style={{ color: 'var(--color-recording-fg)' }}>
               {tt(`This key is also the ${hotkeyCollision} — the remap will override it and that hotkey will stop firing.`,
                 `Essa tecla também é ${hotkeyCollision} — o remap vai sobrepor e essa hotkey deixará de disparar.`)}
             </div>

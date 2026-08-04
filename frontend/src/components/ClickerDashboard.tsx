@@ -72,7 +72,7 @@ export function ClickerDashboard() {
           className="font-mono font-bold tabular-nums"
           style={{
             fontSize: 'clamp(56px, 10vw, 112px)',
-            color: 'var(--color-clicker)',
+            color: 'var(--color-clicker-fg)',
             lineHeight: 1,
             letterSpacing: '-0.02em',
           }}
@@ -81,7 +81,7 @@ export function ClickerDashboard() {
         </div>
         <div
           className="text-[11px] uppercase tracking-[0.2em] mt-2 flex items-center gap-2"
-          style={{ color: 'var(--color-clicker)', opacity: 0.7 }}
+          style={{ color: 'var(--color-clicker-fg)', opacity: 0.7 }}
         >
           clicks
           {!isReplaying && (
@@ -132,7 +132,7 @@ export function ClickerDashboard() {
         <button
           onClick={() => send({ type: 'clicker:pause', payload: {} })}
           className="flex items-center gap-1.5 px-4 py-1.5 rounded-ui border border-border-default text-[12px] font-medium transition-colors hover:bg-bg-elevated"
-          style={{ color: 'var(--color-clicker)' }}
+          style={{ color: 'var(--color-clicker-fg)' }}
         >
           <PauseIcon size={13} fill="currentColor" /> Pause
         </button>

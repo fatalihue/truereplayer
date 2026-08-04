@@ -468,25 +468,18 @@ html[data-animations="true"] .replay-btn-glow {
    "running", and nothing else does.
    Unlayered on purpose: it must out-cascade the Tailwind border/bg utilities on
    the same element (see the [data-tip] note above for the same mechanism). */
-/* The hue is used through --rail-ink, not raw: pulled 72% toward the theme's own
-   text colour, the way buildThemeCss derives --color-action-*-fg. The three rail
-   hues (--color-recording/-replay/-clicker) come from ThemeUISettings, NOT from
-   the preset, so they are the same three pastels on all 48 themes — tuned for a
-   dark canvas. Raw, they wash out on the 11 light presets; derived, they track
-   the surface in both directions. */
+/* Two hues come in, not one. --rail-hue is the user's literal colour and paints
+   the 12% fill; --rail-ink is the per-theme adapted variant (--color-*-fg, see
+   adaptHueForInk in themes.ts) and paints the border and the glyph. They differ
+   only on the light presets, where the raw hue is too pale to draw a line with —
+   on the dark ones adaptHueForInk hands back the raw colour unchanged. */
 .rail-tinted {
-  --rail-ink: color-mix(in srgb, var(--rail-hue) 72%, var(--color-text-primary));
   border: 1px solid color-mix(in srgb, var(--rail-ink) 40%, transparent);
   background: color-mix(in srgb, var(--rail-hue) 12%, transparent);
   color: var(--color-text-primary);
 }
-/* The glyph is the hue's second channel. Measured full-strength: 1.33:1 against
-   its own 12% tint on Tokyo Night Light; derived: 2.01:1, and 3.95-8.89:1 across
-   the dark presets. KNOWN RESIDUAL: on those 11 light presets the border still
-   lands at ~1.3-1.5:1 and the 12% fill at ~1.1:1, so a resting primary reads as a
-   label more than as a button there — the shipped solid fill was 1.9-2.6:1. The
-   real repair is a per-theme rail hue emitted from buildThemeCss; that is a
-   themes.ts change, deliberately not folded into this rework. */
+/* The glyph is the hue's second channel, so it takes the adapted ink at full
+   strength — 3:1 against the bar on every preset, by construction. */
 .rail-tinted svg {
   color: var(--rail-ink);
 }

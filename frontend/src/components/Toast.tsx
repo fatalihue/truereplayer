@@ -2,8 +2,8 @@ import { CheckCircle2, XCircle, Info, X } from 'lucide-react';
 import { useToast, type ToastType } from '../state/ToastContext';
 
 const iconMap: Record<ToastType, { Icon: React.ElementType; color: string }> = {
-  success: { Icon: CheckCircle2, color: 'var(--color-replay)' },
-  error:   { Icon: XCircle,      color: 'var(--color-recording)' },
+  success: { Icon: CheckCircle2, color: 'var(--color-replay-fg)' },
+  error:   { Icon: XCircle,      color: 'var(--color-recording-fg)' },
   info:    { Icon: Info,          color: 'var(--color-accent)' },
 };
 

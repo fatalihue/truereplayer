@@ -156,7 +156,7 @@ export function UpdateOverlay() {
         <div
           style={{
             ...titleStyle,
-            ...(isComplete || isInstalling ? { color: 'var(--color-replay)' } : {}),
+            ...(isComplete || isInstalling ? { color: 'var(--color-replay-fg)' } : {}),
           }}
         >
           {phase.step === 'available' && 'Atualização disponível'}

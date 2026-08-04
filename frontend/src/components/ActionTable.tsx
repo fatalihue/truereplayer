@@ -1947,7 +1947,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     {isHighlighted ? (
                       isPausedHere
                         ? <Pause size={10} className="inline-block translate-y-[-1px]" style={{ color: 'var(--color-action-pause-fg)' }} fill="currentColor" />
-                        : <Play size={10} className="inline-block translate-y-[-1px]" style={{ color: 'var(--color-replay)' }} fill="currentColor" />
+                        : <Play size={10} className="inline-block translate-y-[-1px]" style={{ color: 'var(--color-replay-fg)' }} fill="currentColor" />
                     ) : (
                       <span className="inline-block text-[11px] font-mono text-text-disabled leading-none translate-y-[-2px]">{action.rowNumber}</span>
                     )}
