@@ -2759,68 +2759,10 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
             return null;
           })()}
 
-          {/* Focus click — combined clicks only. Toggles the per-action flag that replays the
-              click TWICE a few pixels apart so a small target (e.g. a Roblox text field at the
-              window's minimum size) actually receives focus. The state shows as a small icon in
-              the Action pill (no grid column). Acts on the effective selection (the right-clicked
-              row, or the whole multi-selection when the row is part of it), filtered to clicks. */}
-          {(() => {
-            const row = actions[contextMenu.rowIndex];
-            if (!row || !/^(Left|Right|Middle)Click$/.test(row.actionType ?? '')) return null;
-            const eff = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
-              ? Array.from(selectedIndices).sort((a, b) => a - b)
-              : [contextMenu.rowIndex];
-            const clickIdx = eff.filter(i => /^(Left|Right|Middle)Click$/.test(actions[i]?.actionType ?? ''));
-            const allOn = clickIdx.length > 0 && clickIdx.every(i => actions[i]?.isFocusClick);
-            return (
-              <button
-                onMouseEnter={() => setActiveSubmenu(null)}
-                onClick={() => {
-                  send({ type: 'actions:toggleFocusClick', payload: { indices: clickIdx } });
-                  closeContextMenu();
-                }}
-                className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-              >
-                <span className="flex items-center gap-2.5">
-                  <Focus size={13} className="text-text-tertiary" />
-                  Focus click
-                </span>
-                {allOn && <Check size={12} className="text-accent-light" />}
-              </button>
-            );
-          })()}
-
-          {/* Convert Left Click ↔ Double Click — quick toggle for combined left clicks,
-              so a recorded LeftClick can become a DoubleClick (and back) without opening
-              the Sheet. Acts on the effective selection filtered to the convertible type.
-              Backend-wise it's just an actionType field edit. */}
-          {(() => {
-            const row = actions[contextMenu.rowIndex];
-            if (!row || (row.actionType !== 'LeftClick' && row.actionType !== 'DoubleClick')) return null;
-            const fromType = row.actionType;
-            const toType = fromType === 'LeftClick' ? 'DoubleClick' : 'LeftClick';
-            const eff = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
-              ? Array.from(selectedIndices).sort((a, b) => a - b)
-              : [contextMenu.rowIndex];
-            const convertIdx = eff.filter(i => actions[i]?.actionType === fromType);
-            if (convertIdx.length === 0) return null;
-            return (
-              <button
-                onMouseEnter={() => setActiveSubmenu(null)}
-                onClick={() => {
-                  for (const i of convertIdx) {
-                    send({ type: 'actions:edit', payload: { index: i, field: 'actionType', value: toType } });
-                  }
-                  closeContextMenu();
-                }}
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
-              >
-                <MousePointerClick size={13} className="text-text-tertiary" />
-                Convert to {toType === 'DoubleClick' ? 'Double Click' : 'Left Click'}
-                {convertIdx.length > 1 && <span className="text-text-disabled">({convertIdx.length})</span>}
-              </button>
-            );
-          })()}
+          {/* Focus click and Convert to Double/Left Click used to sit here at top level.
+              Both are click-only tools and both are rarer than Edit / Copy Coordinates /
+              Duplicate, so they moved into More ▸ to keep the top level at five entries
+              (Edit · Copy Coordinates · Duplicate · More · Delete) for click rows. */}
 
           {/* Duplicate */}
           <button
@@ -2869,6 +2811,71 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     <CheckCheck size={13} className="text-text-tertiary" />
                     Select Similar
                   </button>
+
+                  {/* Focus click — combined clicks only. Toggles the per-action flag that replays the
+                      click TWICE a few pixels apart so a small target (e.g. a Roblox text field at the
+                      window's minimum size) actually receives focus. The state shows as a small icon in
+                      the Action pill (no grid column). Acts on the effective selection (the right-clicked
+                      row, or the whole multi-selection when the row is part of it), filtered to clicks.
+                      NOTE: no onMouseEnter={() => setActiveSubmenu(null)} on this or any sibling below —
+                      inside the flyout that handler would close the very submenu they live in. */}
+                  {(() => {
+                    const row = actions[contextMenu.rowIndex];
+                    if (!row || !/^(Left|Right|Middle)Click$/.test(row.actionType ?? '')) return null;
+                    const eff = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
+                      ? Array.from(selectedIndices).sort((a, b) => a - b)
+                      : [contextMenu.rowIndex];
+                    const clickIdx = eff.filter(i => /^(Left|Right|Middle)Click$/.test(actions[i]?.actionType ?? ''));
+                    const allOn = clickIdx.length > 0 && clickIdx.every(i => actions[i]?.isFocusClick);
+                    return (
+                      <button
+                        onClick={() => {
+                          send({ type: 'actions:toggleFocusClick', payload: { indices: clickIdx } });
+                          closeContextMenu();
+                        }}
+                        className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                      >
+                        <span className="flex items-center gap-2.5">
+                          <Focus size={13} className="text-text-tertiary" />
+                          Focus click
+                        </span>
+                        {allOn && <Check size={12} className="text-accent-light" />}
+                      </button>
+                    );
+                  })()}
+
+                  {/* Convert Left Click ↔ Double Click — quick toggle for combined left clicks,
+                      so a recorded LeftClick can become a DoubleClick (and back) without opening
+                      the Sheet. Acts on the effective selection filtered to the convertible type.
+                      Backend-wise it's just an actionType field edit. Only ONE direction ever
+                      renders (whichever the right-clicked row is not), so the two entries are
+                      mutually exclusive rather than stacked. */}
+                  {(() => {
+                    const row = actions[contextMenu.rowIndex];
+                    if (!row || (row.actionType !== 'LeftClick' && row.actionType !== 'DoubleClick')) return null;
+                    const fromType = row.actionType;
+                    const toType = fromType === 'LeftClick' ? 'DoubleClick' : 'LeftClick';
+                    const eff = selectedIndices.size > 0 && selectedIndices.has(contextMenu.rowIndex)
+                      ? Array.from(selectedIndices).sort((a, b) => a - b)
+                      : [contextMenu.rowIndex];
+                    const convertIdx = eff.filter(i => actions[i]?.actionType === fromType);
+                    if (convertIdx.length === 0) return null;
+                    return (
+                      <button
+                        onClick={() => {
+                          for (const i of convertIdx) {
+                            send({ type: 'actions:edit', payload: { index: i, field: 'actionType', value: toType } });
+                          }
+                          closeContextMenu();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated transition-colors"
+                      >
+                        <MousePointerClick size={13} className="text-text-tertiary" />
+                        Convert to {toType === 'DoubleClick' ? 'Double Click' : 'Left Click'}
+                        {convertIdx.length > 1 && <span className="text-text-disabled">({convertIdx.length})</span>}
+                      </button>
+                    );
+                  })()}
 
                   <div className="my-1 border-t border-border-subtle" />
 
