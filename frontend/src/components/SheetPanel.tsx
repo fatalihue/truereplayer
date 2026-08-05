@@ -159,6 +159,15 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   const { send, subscribe } = useBridge();
   const tt = useTt();
 
+  // Which space this profile's X/Y live in. Nothing on this panel used to say, and the
+  // fields read "X" / "Y" either way — so a relative profile's 40,60 looks exactly like an
+  // absolute 40,60. Uses the EFFECTIVE flag: a profile inheriting target + mode from its
+  // folder has its own useRelativeCoordinates set to false while replaying relative.
+  const activeEntry = activeProfile ? profiles.find(p => p.name === activeProfile) : undefined;
+  const coordsAreRelative = activeEntry?.effectiveUseRelativeCoordinates ?? false;
+  const relativeTargetLabel =
+    activeEntry?.effectiveTargetProcessName || activeEntry?.effectiveTargetWindowTitle || null;
+
   // Exit fallback — mirrors DialogShell: if the slide-out's animationend never
   // fires (occluded window pauses CSS animations), unstick the unmount.
   useEffect(() => {
@@ -4115,6 +4124,21 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                   />
                 </Field>
               </div>
+              {/* Which space those two numbers are in. Only shown when it is NOT the obvious
+                  one — an absolute profile needs no caption, a relative one very much does,
+                  because 40,60 looks identical either way. */}
+              {coordsAreRelative && (
+                <div className="text-[11px] text-text-tertiary flex items-center gap-1.5 flex-wrap">
+                  <Crosshair size={11} className="shrink-0 opacity-70" />
+                  <span>
+                    {relativeTargetLabel
+                      ? tt(`Relative to ${relativeTargetLabel}'s top-left corner`,
+                           `Relativo ao canto superior esquerdo de ${relativeTargetLabel}`)
+                      : tt('Relative to the target window\'s top-left corner',
+                           'Relativo ao canto superior esquerdo da janela-alvo')}
+                  </span>
+                </div>
+              )}
               {/* Row 2: coordinate tools — "Pick from screen" gets the room to read clearly;
                   Copy / Paste stay as compact icon buttons on the right. */}
               {isClickHalf && (

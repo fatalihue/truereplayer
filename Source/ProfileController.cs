@@ -631,6 +631,10 @@ namespace TrueReplayer.Controllers
                     entry.EffectiveTargetProcessName = entry.WindowTargetProcessName;
                     entry.EffectiveTargetWindowTitle = entry.WindowTargetWindowTitle;
                     entry.EffectiveTargetTitleMatchMode = entry.WindowTargetTitleMatchMode;
+                    // Rel-coords travels WITH the target, exactly like the switches above: a
+                    // profile that owns its target owns this flag too. UseRelativeCoordinates on
+                    // the entry is the profile's OWN value, which is only the effective one here.
+                    entry.EffectiveUseRelativeCoordinates = entry.UseRelativeCoordinates;
                     continue;
                 }
 
@@ -647,6 +651,9 @@ namespace TrueReplayer.Controllers
                     entry.EffectiveTargetProcessName = folderTarget!.ProcessName;
                     entry.EffectiveTargetWindowTitle = folderTarget.WindowTitle;
                     entry.EffectiveTargetTitleMatchMode = folderTarget.TitleMatchMode;
+                    // Inherited target → inherited flag, matching GetEffectiveRelativeCoordinates
+                    // (and what profile activation writes into UserProfile.Current).
+                    entry.EffectiveUseRelativeCoordinates = folder.UseRelativeCoordinates;
                 }
                 else
                 {
@@ -656,6 +663,9 @@ namespace TrueReplayer.Controllers
                     entry.EffectiveTargetProcessName = null;
                     entry.EffectiveTargetWindowTitle = null;
                     entry.EffectiveTargetTitleMatchMode = "contains";
+                    // No target anywhere → nothing to be relative TO. Replay agrees: with a null
+                    // target TryResolveRelativeOffset yields a zero offset, i.e. plain absolute.
+                    entry.EffectiveUseRelativeCoordinates = false;
                 }
             }
         }

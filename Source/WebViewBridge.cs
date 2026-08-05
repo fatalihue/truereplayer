@@ -1824,6 +1824,7 @@ namespace TrueReplayer
                 effectiveTargetProcessName = p.EffectiveTargetProcessName,
                 effectiveTargetWindowTitle = p.EffectiveTargetWindowTitle,
                 effectiveTargetTitleMatchMode = p.EffectiveTargetTitleMatchMode,
+                effectiveUseRelativeCoordinates = p.EffectiveUseRelativeCoordinates,
                 // Icon of the effective WindowTarget's .exe, base64 PNG. Pure UI augmentation
                 // — not persisted, not in the typed ProfileEntry model. The frontend uses
                 // effectiveTargetSource to decide opacity (own = 100 %, folder-inherited = 55 %).
@@ -2300,6 +2301,7 @@ namespace TrueReplayer
                     effectiveTargetProcessName = p.EffectiveTargetProcessName,
                     effectiveTargetWindowTitle = p.EffectiveTargetWindowTitle,
                     effectiveTargetTitleMatchMode = p.EffectiveTargetTitleMatchMode,
+                    effectiveUseRelativeCoordinates = p.EffectiveUseRelativeCoordinates,
                     // Keep in sync with PushProfilesUpdate — without this, the first paint
                     // after launch renders the crosshair fallback for every targeted profile
                     // even though the on-disk icon cache has the PNG ready. The icon only
@@ -4859,6 +4861,48 @@ namespace TrueReplayer
         {
             string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
 
+            // A relative profile has to have something to be relative TO, and this is the one
+            // capture path where degrading to absolute produces the exact bug this fix exists to
+            // kill. Replay already refuses rather than degrades (ReportMissingTargetWindow), and
+            // the panel now tells the user the number is relative — storing an absolute one
+            // behind that caption would be worse than not picking at all. Checked BEFORE the
+            // minimise so a refusal costs no window dance.
+            //
+            // IsIconic is not paranoia: FindWindow only filters on IsWindowVisible, which a
+            // MINIMISED window still passes, and GetWindowRect then answers with the
+            // (-32000,-32000) parking rect — the hazard NativeMethods.GetWindowPlacement and
+            // ScreenOverlayWindow's banner placement are both already written to dodge. Ungated
+            // it would store a coordinate ~32000 px out.
+            //
+            // Rel-coords with NO target is deliberately allowed through: replay treats that as a
+            // zero offset (TryResolveRelativeOffset), i.e. plain absolute, and the caption stays
+            // hidden for it, so all three agree.
+            if (UserProfile.Current.UseRelativeCoordinates)
+            {
+                var relTarget = CurrentProfileName != "No Profile"
+                    ? profileController.GetEffectiveWindowTarget(CurrentProfileName)
+                    : UserProfile.Current.TargetWindow;
+                if (TrueReplayer.Helpers.WindowMatcher.IsUsable(relTarget))
+                {
+                    var label = !string.IsNullOrEmpty(relTarget!.ProcessName)
+                        ? relTarget.ProcessName
+                        : relTarget.WindowTitle;
+                    IntPtr relHwnd = TrueReplayer.Helpers.WindowMatcher.FindWindow(relTarget);
+                    string? refusal = relHwnd == IntPtr.Zero
+                        ? $"Target window not open: {label}. Open it and pick again."
+                        : NativeMethods.IsIconic(relHwnd)
+                            ? $"Target window is minimised: {label}. Restore it and pick again."
+                            : null;
+                    if (refusal != null)
+                    {
+                        DiagnosticLog.Warn($"Position pick refused: {refusal} [profile='{CurrentProfileName}']");
+                        SendMessage("alert:show", new { message = refusal });
+                        SendMessage("mouse:positionPicked", new { requestId, cancelled = true });
+                        return;
+                    }
+                }
+            }
+
             using var interaction = Services.InteractionScope.Enter("position pick overlay");
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
@@ -4903,12 +4947,31 @@ namespace TrueReplayer
                     return;
                 }
 
+                // Store in the SAME space the profile replays in. Every other capture path in this
+                // file already does this through TryGetRelativeCaptureOffset — pixel pick, WaitImage
+                // capture, the region reports, seven call sites — and this one was the single
+                // holdout, handing back raw virtual-desktop coords. On a relative profile that value
+                // is in the wrong space, and SimulateMouse then ADDS the target window's origin to
+                // it, so the click lands roughly twice as far out as intended. The workaround users
+                // found (re-record the click and stop recording) worked precisely because the
+                // recorder DOES convert.
+                int pickedX = selection.ScreenX;
+                int pickedY = selection.ScreenY;
+                if (TryGetRelativeCaptureOffset(out var winRect))
+                {
+                    pickedX -= winRect.Left;
+                    pickedY -= winRect.Top;
+                    DiagnosticLog.Info(
+                        $"Position pick: screen ({selection.ScreenX},{selection.ScreenY}) -> " +
+                        $"window-relative ({pickedX},{pickedY}) [origin {winRect.Left},{winRect.Top}]");
+                }
+
                 SendMessage("mouse:positionPicked", new
                 {
                     requestId,
                     cancelled = false,
-                    x = selection.ScreenX,
-                    y = selection.ScreenY
+                    x = pickedX,
+                    y = pickedY
                 });
             }
             finally

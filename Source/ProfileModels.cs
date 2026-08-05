@@ -351,6 +351,11 @@ namespace TrueReplayer.Models
         public string? EffectiveTargetProcessName { get; set; }
         public string? EffectiveTargetWindowTitle { get; set; }
         public string EffectiveTargetTitleMatchMode { get; set; } = "contains";
+        // Whether coordinates for this profile are window-relative once inheritance is applied —
+        // UseRelativeCoordinates above is the profile's OWN flag and reads false on a profile that
+        // inherits both target and mode from its folder. The UI needs the effective one to say
+        // which space an action's X/Y is in.
+        public bool EffectiveUseRelativeCoordinates { get; set; }
         public TriggerMode TriggerMode { get; set; } = TriggerMode.OnPress;
         public bool IsDisabled { get; set; }
         // Automation trigger mirror (full config, in-memory only — ProfileEntry is never

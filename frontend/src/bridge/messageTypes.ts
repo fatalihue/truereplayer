@@ -215,6 +215,11 @@ export interface ProfileEntry {
   effectiveTargetProcessName: string | null;
   effectiveTargetWindowTitle: string | null;
   effectiveTargetTitleMatchMode: string;
+  // Whether this profile's coordinates are window-relative AFTER inheritance.
+  // `useRelativeCoordinates` below is the profile's OWN flag and reads false on a profile
+  // that inherits both target and mode from its folder — use this one to tell the user
+  // which space an action's X/Y lives in.
+  effectiveUseRelativeCoordinates: boolean;
   // Base64-encoded PNG of the effective-target .exe's icon, or null when no target
   // is set / icon extraction failed. Backend-resolved from process name via running
   // processes + App Paths registry; not persisted to disk. UI uses
