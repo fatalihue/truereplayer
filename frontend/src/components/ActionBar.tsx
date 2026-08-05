@@ -22,7 +22,7 @@ import { chipOn, chipOff } from './common/chipStyles';
  * 40% border, the .rail-tinted recipe in index.css), and a SOLID fill means one
  * thing only — this is running, click to stop. Nothing else on the bar is ever
  * solid, which is what makes the running button findable without dimming its
- * neighbours (see the note on fileTip for why dimming them was rejected).
+ * neighbours (see the note above the return for why dimming them was rejected).
  * See index.css .rail-tinted for the colour rationale.
  */
 
@@ -57,11 +57,6 @@ export function ActionBar() {
     if (clicker === isClicker) return;
     send({ type: 'settings:change', payload: { key: 'useCursorClick', value: clicker } });
   };
-
-  // Hotkeys are user-configurable and may be cleared entirely, so the suffix has
-  // to vanish gracefully rather than render an empty pair of brackets. The combo
-  // itself stays English inside the translated sentence (LanguageContext rule).
-  const withHotkey = (text: string, hotkey?: string) => (hotkey ? `${text} (${hotkey})` : text);
 
   // ── Loop chip ──
   // Loops moved out of Settings-as-a-global into the profile, and a value you can only see by
@@ -118,8 +113,7 @@ export function ActionBar() {
   const restingClass = `${RAIL_PRIMARY} rail-tinted`;
 
   // Save/Load stay disabled in Clicker mode only (profiles wrap recorded actions,
-  // which Clicker doesn't use) — the same gate and the same sentence the Toolbar
-  // uses, so one explanation covers the whole column.
+  // which Clicker doesn't use).
   //
   // Deliberately NOT also disabled while a run is live, even though the design
   // sketch dimmed them: Ctrl+S is handled globally in App.tsx and is not gated on
@@ -128,10 +122,12 @@ export function ActionBar() {
   // primaries on their shipped, backend-owned enablement — every one of those has
   // a global hotkey behind it. The "one thing is running" reading is carried by
   // the fill instead: a solid button is the only solid thing on the bar.
-  const fileTip = (en: string, ptBr: string) =>
-    isClicker
-      ? tt('Not available in Clicker mode — switch to Macro', 'Indisponível no modo Clicker — mude para Macro')
-      : tt(en, ptBr);
+  //
+  // The bar is tooltip-free by request, save for the loop chip: that one is the
+  // only control here whose label ("3×", "per row", "∞") names a value rather than
+  // an action, so it is the only one a hover still has something to add to. The
+  // rest — Record, Replay, Save, Load, and the two mode pills — carry their own
+  // text labels and needed no gloss.
 
   return (
     <div className="flex items-center justify-between px-3 py-1.5 bg-bg-surface border border-border-subtle rounded-ui">
@@ -151,7 +147,6 @@ export function ActionBar() {
               value: 'macro',
               label: 'Macro',
               icon: <List size={12} />,
-              tip: tt('Record and replay a list of actions', 'Grave e execute uma lista de ações'),
               // Accent at 12% fill / 40% border — the exact recipe the Settings switches and
               // the field chips use for "on", so the app has ONE intensity for an active
               // control instead of this pill shouting in replay-green next to a quiet switch.
@@ -163,7 +158,6 @@ export function ActionBar() {
               value: 'clicker',
               label: 'Clicker',
               icon: <MousePointerClick size={12} />,
-              tip: tt('Auto-click at a fixed rate', 'Clique automático em ritmo fixo'),
               activeClass: 'bg-[var(--color-clicker-bg)] text-[var(--color-clicker-fg)] shadow-[inset_0_0_0_1px_var(--color-clicker-border)]',
             },
           ]}
@@ -189,11 +183,6 @@ export function ActionBar() {
               send({ type: 'recording:toggle', payload: { insertIndex } });
             }}
             disabled={!buttonStates.recordEnabled}
-            data-tip={
-              isRecording
-                ? withHotkey(tt('Stop recording', 'Parar a gravação'), settings.recordingHotkey)
-                : withHotkey(tt('Record what you do', 'Grave o que você faz'), settings.recordingHotkey)
-            }
             className={`${isRecording ? `${busyClass} record-btn-glow` : restingClass}`}
             style={isRecording ? undefined : restingStyle('var(--color-recording)', 'var(--color-recording-fg)')}
           >
@@ -208,13 +197,6 @@ export function ActionBar() {
         <button
           onClick={handleReplay}
           disabled={!buttonStates.replayEnabled}
-          data-tip={
-            isReplaying
-              ? withHotkey(tt('Stop the run', 'Parar a execução'), isClicker ? settings.cursorClickStartHotkey : settings.replayHotkey)
-              : isClicker
-                ? withHotkey(tt('Start clicking', 'Começar a clicar'), settings.cursorClickStartHotkey)
-                : withHotkey(tt('Run the recorded actions', 'Executar as ações gravadas'), settings.replayHotkey)
-          }
           className={`${isReplaying ? `${busyClass} replay-btn-glow` : restingClass}`}
           style={isReplaying
             ? undefined
@@ -267,7 +249,6 @@ export function ActionBar() {
           size="xs"
           onClick={() => send({ type: 'profile:save', payload: {} })}
           disabled={isClicker}
-          data-tip={fileTip('Save the current profile (Ctrl+S)', 'Salvar o perfil atual (Ctrl+S)')}
         >
           <Save size={12} />
           Save
@@ -277,7 +258,6 @@ export function ActionBar() {
           size="xs"
           onClick={() => send({ type: 'profile:load', payload: {} })}
           disabled={isClicker}
-          data-tip={fileTip('Load a profile from a file', 'Carregar um perfil de um arquivo')}
         >
           <FolderOpen size={12} />
           Load
