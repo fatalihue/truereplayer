@@ -15,6 +15,7 @@ import { ProfileInfoDialog } from './ProfileInfoDialog';
 import { useToast } from '../state/ToastContext';
 import { useTt } from '../state/LanguageContext';
 import { useFlyoutFlip } from '../hooks/useFlyoutFlip';
+import { uiZoom, rectToLayout, toLayout, viewportInLayout } from '../utils/zoomSpace';
 
 interface ContextMenuState {
   x: number;
@@ -284,16 +285,21 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       requestAnimationFrame(() => {
         const el = contextMenuRef.current;
         if (!el) return;
-        const rect = el.getBoundingClientRect();
-        let x = contextMenu.x;
-        let y = contextMenu.y;
+        // The click coords, the rect and the viewport are all VISUAL; the x/y below are
+        // written as inline left/top, which are LAYOUT and get multiplied by `zoom` again.
+        // Convert the inputs once — see utils/zoomSpace.
+        const zoom = uiZoom();
+        const rect = rectToLayout(el.getBoundingClientRect(), zoom);
+        const vp = viewportInLayout(zoom);
+        let x = toLayout(contextMenu.x, zoom);
+        let y = toLayout(contextMenu.y, zoom);
         // If menu would overflow bottom, move it up
-        if (y + rect.height > window.innerHeight - 8) {
-          y = Math.max(8, contextMenu.y - rect.height);
+        if (y + rect.height > vp.height - 8) {
+          y = Math.max(8, y - rect.height);
         }
         // If menu would overflow right, move it left
-        if (x + rect.width > window.innerWidth - 8) {
-          x = Math.max(8, window.innerWidth - rect.width - 8);
+        if (x + rect.width > vp.width - 8) {
+          x = Math.max(8, vp.width - rect.width - 8);
         }
         setMenuPos({ x, y });
       });
@@ -314,16 +320,19 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       requestAnimationFrame(() => {
         const el = folderMenuRef.current;
         if (!el) return;
-        const rect = el.getBoundingClientRect();
-        let x = folderContextMenu.x;
-        let y = folderContextMenu.y;
+        // Same visual→layout conversion as the profile menu above.
+        const zoom = uiZoom();
+        const rect = rectToLayout(el.getBoundingClientRect(), zoom);
+        const vp = viewportInLayout(zoom);
+        let x = toLayout(folderContextMenu.x, zoom);
+        let y = toLayout(folderContextMenu.y, zoom);
         // If menu would overflow bottom, move it up
-        if (y + rect.height > window.innerHeight - 8) {
-          y = Math.max(8, folderContextMenu.y - rect.height);
+        if (y + rect.height > vp.height - 8) {
+          y = Math.max(8, y - rect.height);
         }
         // If menu would overflow right, move it left
-        if (x + rect.width > window.innerWidth - 8) {
-          x = Math.max(8, window.innerWidth - rect.width - 8);
+        if (x + rect.width > vp.width - 8) {
+          x = Math.max(8, vp.width - rect.width - 8);
         }
         setFolderMenuPos({ x, y });
       });
@@ -1209,6 +1218,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     if (performance.now() - pending.at > 800) return;
     const view = container.getBoundingClientRect();
     const maxFly = view.height || 600;
+    const zoom = uiZoom();
     container.querySelectorAll<HTMLElement>(pending.selector).forEach(el => {
       const id = el.getAttribute('data-drag-item');
       if (!id) return;
@@ -1218,8 +1228,11 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       if (rect.bottom < view.top || rect.top > view.bottom) return; // offscreen → no animation
       const delta = oldTop - rect.top;
       if (Math.abs(delta) < 2 || Math.abs(delta) > maxFly) return; // unchanged or too far → snap
+      // delta is VISUAL (both tops are rects); a translate length is LAYOUT and gets zoomed
+      // again, so the row would start short of where it actually was. The comparisons above
+      // stay visual, matching view.height.
       el.animate(
-        [{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' }],
+        [{ transform: `translateY(${delta / zoom}px)` }, { transform: 'translateY(0)' }],
         { duration: 180, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
       );
     });
@@ -1249,7 +1262,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       }
       dragActive.current = true;
       cursorY.current = e.clientY;
-      setDragCursorPos({ x: e.clientX, y: e.clientY });
+      // Store the ghost's position in LAYOUT space: clientX/Y are VISUAL, and the transform
+      // that consumes them is a CSS length that `zoom` multiplies again — left raw, the ghost
+      // trails the cursor by (1 − zoom) × distance from the origin (~120 px at x=1200 on the
+      // default 0.90). Converting here keeps the per-mousemove render free of measurement.
+      const gz = uiZoom();
+      setDragCursorPos({ x: e.clientX / gz, y: e.clientY / gz });
 
       // Hit-test which folder or ungrouped area the mouse is over
       let foundTarget: string | null = null;
@@ -1359,7 +1377,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       if (!folderDragActive.current) document.body.style.cursor = 'grabbing';
       folderDragActive.current = true;
       cursorY.current = e.clientY;
-      setDragCursorPos({ x: e.clientX, y: e.clientY });
+      // Store the ghost's position in LAYOUT space: clientX/Y are VISUAL, and the transform
+      // that consumes them is a CSS length that `zoom` multiplies again — left raw, the ghost
+      // trails the cursor by (1 − zoom) × distance from the origin (~120 px at x=1200 on the
+      // default 0.90). Converting here keeps the per-mousemove render free of measurement.
+      const gz = uiZoom();
+      setDragCursorPos({ x: e.clientX / gz, y: e.clientY / gz });
 
       // Map the cursor Y to an insertion slot (0..N) CONTINUOUSLY: the first folder
       // whose vertical midpoint is below the cursor wins; past all of them → the end.
@@ -3213,6 +3236,9 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
           style={{
             top: 0,
             left: 0,
+            // dragCursorPos is already in LAYOUT space — converted where it is captured, so
+            // this runs no measurement on a path that re-renders on every mousemove. The
+            // percentage translate is unaffected: it resolves against the ghost's own size.
             transform: `translate3d(${dragCursorPos.x}px, ${dragCursorPos.y}px, 0) translate(-50%, -50%) rotate(1.5deg)`,
             willChange: 'transform',
           }}

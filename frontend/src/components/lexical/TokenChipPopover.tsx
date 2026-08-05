@@ -15,6 +15,7 @@ import {
 import { NumInput, Section } from './popoverAtoms';
 import { normalizeToken } from './tokenNormalize';
 import { useAppState } from '../../state/AppStateContext';
+import { uiZoom, rectToLayout, viewportInLayout } from '../../utils/zoomSpace';
 
 // Tokens that accept a `:N` repeat count (e.g. {enter:5}).
 const REPEATABLE_TOKEN_NAMES = new Set([
@@ -136,11 +137,13 @@ export function TokenChipPopover({
   useLayoutEffect(() => {
     if (!anchor || !popRef.current) return;
     const place = () => {
-      const r = anchor.getBoundingClientRect();
+      // Visual reads (rect, viewport) converted to the LAYOUT space that left/top are written
+      // in; offsetHeight/offsetWidth are layout already. See utils/zoomSpace.
+      const zoom = uiZoom();
+      const r = rectToLayout(anchor.getBoundingClientRect(), zoom);
       const popH = popRef.current!.offsetHeight;
       const popW = popRef.current!.offsetWidth;
-      const vh = window.innerHeight;
-      const vw = window.innerWidth;
+      const { width: vw, height: vh } = viewportInLayout(zoom);
       let left = r.left;
       let top = r.bottom + 6;
       if (top + popH > vh - 8) top = Math.max(8, r.top - popH - 6);

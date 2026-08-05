@@ -22,6 +22,7 @@ import {
   DEFAULT_TRANSFORM,
   type TransformState,
 } from './lexical/clipboardModifiers';
+import { uiZoom, rectToLayout, viewportInLayout } from '../utils/zoomSpace';
 
 interface SendTextDialogProps {
   mode: 'add' | 'edit';
@@ -240,13 +241,17 @@ function NamePromptPopover({
   useLayoutEffect(() => {
     if (!anchor || !popRef.current) return;
     const place = () => {
-      const r = anchor.getBoundingClientRect();
+      // Visual reads (rect, viewport) converted to the LAYOUT space that left/top are written
+      // in; offsetHeight/offsetWidth are layout already. See utils/zoomSpace.
+      const zoom = uiZoom();
+      const r = rectToLayout(anchor.getBoundingClientRect(), zoom);
+      const vp = viewportInLayout(zoom);
       const popH = popRef.current!.offsetHeight;
       const popW = popRef.current!.offsetWidth;
       let left = r.left;
       let top = r.bottom + 6;
-      if (top + popH > window.innerHeight - 8) top = Math.max(8, r.top - popH - 6);
-      if (left + popW > window.innerWidth - 8) left = window.innerWidth - popW - 8;
+      if (top + popH > vp.height - 8) top = Math.max(8, r.top - popH - 6);
+      if (left + popW > vp.width - 8) left = vp.width - popW - 8;
       if (left < 8) left = 8;
       setPos({ left, top });
     };

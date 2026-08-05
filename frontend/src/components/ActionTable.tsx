@@ -17,6 +17,7 @@ import { useSelectionRef } from '../state/SelectionContext';
 import { useToast } from '../state/ToastContext';
 import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors, formatKeyCombo, formatMs } from '../utils/displayUtils';
 import { snapIndicesToBlocks } from '../utils/conditionalBlocks';
+import { uiZoom, rectToLayout, toLayout, viewportInLayout } from '../utils/zoomSpace';
 import { SendTextDialog } from './SendTextDialog';
 import { SendTextPreview } from './SendTextPreview';
 import { RunProfileDialog } from './RunProfileDialog';
@@ -676,14 +677,19 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       requestAnimationFrame(() => {
         const el = contextMenuRef.current;
         if (!el) return;
-        const rect = el.getBoundingClientRect();
-        let x = contextMenu.x;
-        let y = contextMenu.y;
-        if (y + rect.height > window.innerHeight - 8) {
-          y = Math.max(8, contextMenu.y - rect.height);
+        // contextMenu.x/y are clientX/clientY, the rect and the viewport are measured — all
+        // three are VISUAL, while the left/top this feeds are LAYOUT and get multiplied by
+        // `zoom` again. Convert the inputs once; see utils/zoomSpace.
+        const zoom = uiZoom();
+        const rect = rectToLayout(el.getBoundingClientRect(), zoom);
+        const vp = viewportInLayout(zoom);
+        let x = toLayout(contextMenu.x, zoom);
+        let y = toLayout(contextMenu.y, zoom);
+        if (y + rect.height > vp.height - 8) {
+          y = Math.max(8, y - rect.height);
         }
-        if (x + rect.width > window.innerWidth - 8) {
-          x = Math.max(8, window.innerWidth - rect.width - 8);
+        if (x + rect.width > vp.width - 8) {
+          x = Math.max(8, vp.width - rect.width - 8);
         }
         setMenuPos({ x, y });
       });
@@ -1079,6 +1085,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
     // exceeds the viewport height snap into place instead of flying across it.
     const view = scrollRef.current?.getBoundingClientRect();
     const maxFly = view ? view.height : 600;
+    const zoom = uiZoom();
     tbodyRef.current.querySelectorAll<HTMLTableRowElement>('tr[data-row-id]').forEach(tr => {
       const id = tr.getAttribute('data-row-id');
       if (!id) return;
@@ -1088,8 +1095,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       if (view && (rect.bottom < view.top || rect.top > view.bottom)) return;
       const delta = oldTop - rect.top;
       if (Math.abs(delta) < 2 || Math.abs(delta) > maxFly) return;
+      // delta is a VISUAL distance (both tops come from getBoundingClientRect), but a
+      // translate length is LAYOUT and `zoom` scales it again — writing delta straight in
+      // starts the row short of where it actually was (10 % short at the default 0.90,
+      // double the distance at zoom 2), so the settle ends with a visible jump. The
+      // comparisons above stay in visual space, where view.height already is.
       tr.animate(
-        [{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' }],
+        [{ transform: `translateY(${delta / zoom}px)` }, { transform: 'translateY(0)' }],
         { duration: 180, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
       );
     });

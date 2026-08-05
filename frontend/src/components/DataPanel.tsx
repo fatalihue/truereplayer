@@ -13,6 +13,7 @@ import { useAppState } from '../state/AppStateContext';
 import { useTt } from '../state/LanguageContext';
 import { DataPasteSurface, type PasteMode } from './DataPasteSurface';
 import { parseTsv, encodeTsv, deepEqualGrid, tokenizeTsvGrid, sniffDelimiter, type Grid } from '../lib/tsv';
+import { uiZoom, rectToLayout, viewportInLayout } from '../utils/zoomSpace';
 
 interface DataPanelProps {
   onClose: () => void;
@@ -144,13 +145,19 @@ function HeaderMenu({
   useLayoutEffect(() => {
     if (!anchor || !popRef.current) return;
     const place = () => {
-      const r = anchor.getBoundingClientRect();
+      // The anchor rect and the viewport are VISUAL; offsetHeight/offsetWidth are already
+      // LAYOUT, which is also the space left/top are written in. Convert only the visual
+      // half — see utils/zoomSpace — or the popover detaches from its column as the zoom
+      // moves away from 100 %, and the flip/clamp thresholds compare across two spaces.
+      const zoom = uiZoom();
+      const r = rectToLayout(anchor.getBoundingClientRect(), zoom);
+      const vp = viewportInLayout(zoom);
       const popH = popRef.current!.offsetHeight;
       const popW = popRef.current!.offsetWidth;
       let left = r.left;
       let top = r.bottom + 6;
-      if (top + popH > window.innerHeight - 8) top = Math.max(8, r.top - popH - 6);
-      if (left + popW > window.innerWidth - 8) left = window.innerWidth - popW - 8;
+      if (top + popH > vp.height - 8) top = Math.max(8, r.top - popH - 6);
+      if (left + popW > vp.width - 8) left = vp.width - popW - 8;
       if (left < 8) left = 8;
       setPos({ left, top });
     };

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { uiZoom, rectToLayout } from '../../utils/zoomSpace';
 
 type Pending = { text: string; rect: DOMRect; pos: string; mx: number; my: number };
 
@@ -62,10 +63,15 @@ export function TooltipLayer() {
   // flipping up if there's no room below and clamping to the viewport so it never goes off-screen.
   useLayoutEffect(() => {
     if (!pending || !tipRef.current) return;
-    const a = pending.rect;
-    const t = tipRef.current.getBoundingClientRect();
+    // Everything measured below arrives in visual space; the coordinates we emit are consumed
+    // in layout space. Convert the inputs ONCE here (see utils/zoomSpace) so the placement maths
+    // and its px constants all mean the same thing, and the result can be written out as-is.
+    const zoom = uiZoom();
+    const a = rectToLayout(pending.rect, zoom);
+    const t = rectToLayout(tipRef.current.getBoundingClientRect(), zoom);
     const gap = 10, m = 8, CURSOR = 24; // CURSOR: keep below/above tooltips clear of the pointer
-    const vw = window.innerWidth, vh = window.innerHeight;
+    const vw = window.innerWidth / zoom, vh = window.innerHeight / zoom;
+    const my = pending.my / zoom; // clientY is visual too
     let left: number, top: number;
     let flippedAbove = false; // default placement had to flip above the anchor
     switch (pending.pos) {
@@ -85,9 +91,9 @@ export function TooltipLayer() {
     // Cursor clearance for the below/above placements: push the tooltip past the pointer so it
     // never covers the cursor (the anchor is under the cursor, and a tight below-gap would land the
     // tooltip right on the pointer tip). Side placements (left/right) already sit clear of it.
-    if (Number.isFinite(pending.my) && (pending.pos === 'auto' || pending.pos === 'below-start' || pending.pos === 'end')) {
-      if (flippedAbove) top = Math.min(top, pending.my - CURSOR - t.height);
-      else top = Math.max(top, pending.my + CURSOR);
+    if (Number.isFinite(my) && (pending.pos === 'auto' || pending.pos === 'below-start' || pending.pos === 'end')) {
+      if (flippedAbove) top = Math.min(top, my - CURSOR - t.height);
+      else top = Math.max(top, my + CURSOR);
     }
     // Clamp so the top-left corner is never < m, even when space is tight (max wins outermost).
     left = Math.max(m, Math.min(left, vw - t.width - m));

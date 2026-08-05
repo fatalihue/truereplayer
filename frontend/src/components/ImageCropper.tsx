@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTt } from '../state/LanguageContext';
+import { uiZoom } from '../utils/zoomSpace';
 
 interface CropRect {
   x: number;
@@ -38,7 +39,9 @@ export function ImageCropper({ imageBase64, onSave, onCancel }: ImageCropperProp
   const imgRef = useRef<HTMLImageElement>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [crop, setCrop] = useState<CropRect>({ x: 0, y: 0, w: 0, h: 0 });
-  const dragRef = useRef<{ mode: DragMode; startX: number; startY: number; startCrop: CropRect } | null>(null);
+  // `zoom` is captured at drag start rather than read per mousemove: it cannot change
+  // mid-drag, and this path runs on every pointer move.
+  const dragRef = useRef<{ mode: DragMode; startX: number; startY: number; startCrop: CropRect; zoom: number } | null>(null);
 
   const onImageLoad = useCallback(() => {
     if (!imgRef.current) return;
@@ -84,8 +87,13 @@ export function ImageCropper({ imageBase64, onSave, onCancel }: ImageCropperProp
     const onMove = (e: MouseEvent) => {
       const d = dragRef.current;
       if (!d || !natural) return;
-      const dx = (e.clientX - d.startX) / displayScale;
-      const dy = (e.clientY - d.startY) / displayScale;
+      // clientX/Y are VISUAL, so their delta is a distance on SCREEN. displayScale converts
+      // LAYOUT px to image px, so the visual delta has to be divided by the zoom first or the
+      // crop outruns the cursor — 11 % too far at the default 0.90, double at zoom 0.5. The
+      // rest of this file is already consistent: displayScale is built from layout constants
+      // and dispCrop's outputs are written straight back as layout lengths.
+      const dx = (e.clientX - d.startX) / (displayScale * d.zoom);
+      const dy = (e.clientY - d.startY) / (displayScale * d.zoom);
       let { x, y, w, h } = d.startCrop;
       const right = d.startCrop.x + d.startCrop.w;
       const bottom = d.startCrop.y + d.startCrop.h;
@@ -155,6 +163,7 @@ export function ImageCropper({ imageBase64, onSave, onCancel }: ImageCropperProp
       startX: e.clientX,
       startY: e.clientY,
       startCrop: { ...crop },
+      zoom: uiZoom(),
     };
   };
 
