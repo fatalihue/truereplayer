@@ -148,8 +148,11 @@ function SnippetEditForm({
 
 // ── Insert palette data ─────────────────────────────────────────────────────
 //
-// Four real sections (no breakAfter hacks): CLIPBOARD (chip + Advanced…),
-// VALUES, KEYS & TIMING (+ collapsed More keys), RUN STATE (the 2.8.0 tokens).
+// Four real sections (no breakAfter hacks), ordered by how often they get used:
+// KEYS & TIMING, VALUES, CLIPBOARD (chip + Advanced…), RUN STATE (the 2.8.0
+// tokens). Each section keeps its everyday chips inline and parks the rare ones
+// behind a collapsed "More …" row; VALUES is one line either way, so it has none
+// and sits second where a fixed-height section costs nothing.
 // Direct chips insert their seed string; prompt chips ({Variable…}/{Row
 // column…}) open a name prompt first — never insert a literal placeholder.
 
@@ -190,19 +193,32 @@ const MORE_KEY_CHIPS: PaletteChip[] = [
 
 // Clipboard-sourced tokens — grouped under the Clipboard section next to {clipboard}
 // itself. {clip:N} is an in-app capture slot; {winclip:N} is the Windows Win+V history.
+// Clip slot stays inline: it is the consumer end of the Copy to Slot action and the
+// capture hotkey, so hiding it here would hide half of that feature.
 const CLIPBOARD_CHIPS: PaletteChip[] = [
-  { label: 'Clipboard line (next)', insert: '{clipboard:next}', tip: ['Auto-advancing: each use takes the NEXT line of the clipboard instead of the whole thing (1st use → line 1, 2nd → line 2…). Copy something new and it starts over; past the last line it resolves empty. Blank lines are skipped. Click the chip after inserting to add transforms.', 'Auto-avança: cada uso pega a PRÓXIMA linha do clipboard em vez do conteúdo inteiro (1º uso → linha 1, 2º → linha 2…). Copiou algo novo, recomeça; depois da última linha resolve vazio. Linhas em branco são puladas. Clique no chip depois de inserir para adicionar transformações.'] },
   { label: 'Clip slot…', prompt: 'clip', tip: ['Selection captured by a Copy to Slot action or the capture hotkey', 'Seleção capturada por uma action Copy to Slot ou pelo hotkey de captura'] },
+];
+
+// Collapsed: {clipboard:next} is a niche auto-advancing read, and {winclip:N} depends
+// on a Windows setting being on and can surface anything recently copied.
+const MORE_CLIPBOARD_CHIPS: PaletteChip[] = [
+  { label: 'Clipboard line (next)', insert: '{clipboard:next}', tip: ['Auto-advancing: each use takes the NEXT line of the clipboard instead of the whole thing (1st use → line 1, 2nd → line 2…). Copy something new and it starts over; past the last line it resolves empty. Blank lines are skipped. Click the chip after inserting to add transforms.', 'Auto-avança: cada uso pega a PRÓXIMA linha do clipboard em vez do conteúdo inteiro (1º uso → linha 1, 2º → linha 2…). Copiou algo novo, recomeça; depois da última linha resolve vazio. Linhas em branco são puladas. Clique no chip depois de inserir para adicionar transformações.'] },
   { label: 'Clipboard history', insert: '{winclip:1}', tip: ['Windows Win+V history — {winclip:1} is the last thing copied (click the chip to change which item). Needs clipboard history on; may hold anything recently copied, including passwords.', 'Histórico do Windows (Win+V) — {winclip:1} é a última coisa copiada (clique no chip para trocar o item). Precisa do histórico ligado; pode conter qualquer coisa copiada recentemente, inclusive senhas.'] },
 ];
 
 const RUN_STATE_CHIPS: PaletteChip[] = [
   { label: 'Variable…', prompt: 'var', tip: ['Value stored by a Set Variable action', 'Valor gravado por uma action Set Variable'] },
   { label: 'Counter', insert: '{counter}', tip: ['Current loop iteration (1, 2, 3…)', 'Iteração atual do loop (1, 2, 3…)'] },
+  { label: 'Ask input…', prompt: 'input', tip: ['Prompt for a value at replay time (pauses the run)', 'Pergunta um valor durante a execução (pausa o replay)'] },
+];
+
+// Collapsed: every one of these is row-addressed, and the two data-table ones only
+// resolve to anything in a profile that loops over data. They also carry the longest
+// labels in the palette, so parking them keeps Run state to a single line.
+const MORE_ROW_CHIPS: PaletteChip[] = [
   { label: 'Action row #', insert: '{row}', tip: ["Current action's grid row number (not the data table)", 'Número da linha da action na grade (não é a tabela de dados)'] },
   { label: 'Row column…', prompt: 'row', tip: ["Data table column of the current row (loop over data) — click the chip after inserting to add transforms (trim, UPPERCASE…)", 'Coluna da tabela de dados na linha atual (loop over data) — clique no chip depois de inserir para adicionar transformações (trim, MAIÚSCULAS…)'] },
   { label: 'Row column (next)…', prompt: 'rownext', tip: ["Auto-advancing: each use pulls the NEXT data row for the column (1st action → row 1, 2nd → row 2…). Resets each run — swap the list, keep the fields. Click the chip after inserting to add transforms.", 'Auto-avança: cada uso pega a PRÓXIMA linha da tabela para a coluna (1ª action → linha 1, 2ª → linha 2…). Reinicia a cada execução — troque a lista, mantenha os campos. Clique no chip depois de inserir para adicionar transformações.'] },
-  { label: 'Ask input…', prompt: 'input', tip: ['Prompt for a value at replay time (pauses the run)', 'Pergunta um valor durante a execução (pausa o replay)'] },
 ];
 
 // One chip recipe everywhere (SheetPanel parity): neutral surface, gold hover.
@@ -362,8 +378,11 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
   const [editingSnippetId, setEditingSnippetId] = useState<string | null>(null);
   const [deletingSnippetId, setDeletingSnippetId] = useState<string | null>(null);
   const [snippetFilter, setSnippetFilter] = useState('');
-  // "More keys" starts collapsed — rare keys only show on demand.
+  // Every "More …" row starts collapsed — rare chips only show on demand, and the
+  // state is per-open (no persistence), same as "More keys" has always been.
   const [moreKeysOpen, setMoreKeysOpen] = useState(false);
+  const [moreClipboardOpen, setMoreClipboardOpen] = useState(false);
+  const [moreRowsOpen, setMoreRowsOpen] = useState(false);
   // Clipboard Surface (full-body overlay). TransformState is lifted HERE so the
   // DialogShell footer (swapped while the surface is open) can build the token.
   const [surface, setSurface] = useState<SurfaceSession | null>(null);
@@ -558,6 +577,19 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
     <div className="label-micro text-text-tertiary px-3 pt-2.5 pb-1">{label}</div>
   );
 
+  // Disclosure row for a section's rare chips. Reads like a section label so an
+  // unopened one is quiet, and the chevron is the only affordance that moves.
+  const moreRow = (label: string, open: boolean, toggle: () => void) => (
+    <button
+      type="button"
+      onClick={toggle}
+      className="w-full flex items-center gap-1 px-3 py-1 text-[10px] font-semibold text-text-tertiary uppercase tracking-wide hover:text-text-primary transition-colors"
+    >
+      <ChevronRight size={11} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
+      {label}
+    </button>
+  );
+
   return (
     <DialogShell
       icon={<Type size={14} style={{ color: 'var(--color-action-sendtext-fg)' }} />}
@@ -710,10 +742,28 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
             </div>
           ) : (
             <div className="flex-1 min-h-0 flex flex-col">
-              {/* Palette — four real sections. */}
-              <div className="shrink-0 overflow-y-auto">
-                {sectionLabel('Clipboard')}
+              {/* Palette — four real sections, most-used first. Values carries no
+                  disclosure, so the two fixed-height sections sit above the two that
+                  can grow and expanding one never displaces a chip you were aiming at. */}
+              <div className="shrink-0 overflow-y-auto pb-1">
+                {sectionLabel('Keys & timing')}
+                <div className="flex flex-wrap gap-1 px-3 pb-1">
+                  {KEY_CHIPS.map((c) => renderChip(c))}
+                </div>
+                {moreRow('More keys', moreKeysOpen, () => setMoreKeysOpen((v) => !v))}
+                {moreKeysOpen && (
+                  <div className="grid grid-cols-3 gap-1 px-3 pb-2">
+                    {MORE_KEY_CHIPS.map((c) => renderChip(c, 'justify-center'))}
+                  </div>
+                )}
+
+                {sectionLabel('Values')}
                 <div className="flex flex-wrap gap-1 px-3 pb-2">
+                  {VALUE_CHIPS.map((c) => renderChip(c))}
+                </div>
+
+                {sectionLabel('Clipboard')}
+                <div className="flex flex-wrap gap-1 px-3 pb-1">
                   {renderChip({
                     label: 'Clipboard',
                     insert: '{clipboard}',
@@ -730,34 +780,23 @@ export function SendTextDialog({ mode, initialText = '', initialHtml = null, ini
                   </button>
                   {CLIPBOARD_CHIPS.map((c) => renderChip(c))}
                 </div>
-
-                {sectionLabel('Values')}
-                <div className="flex flex-wrap gap-1 px-3 pb-2">
-                  {VALUE_CHIPS.map((c) => renderChip(c))}
-                </div>
-
-                {sectionLabel('Keys & timing')}
-                <div className="flex flex-wrap gap-1 px-3 pb-1">
-                  {KEY_CHIPS.map((c) => renderChip(c))}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setMoreKeysOpen((v) => !v)}
-                  className="w-full flex items-center gap-1 px-3 py-1 text-[10px] font-semibold text-text-tertiary uppercase tracking-wide hover:text-text-primary transition-colors"
-                >
-                  <ChevronRight size={11} className={`transition-transform ${moreKeysOpen ? 'rotate-90' : ''}`} />
-                  More keys
-                </button>
-                {moreKeysOpen && (
-                  <div className="grid grid-cols-3 gap-1 px-3 pb-2">
-                    {MORE_KEY_CHIPS.map((c) => renderChip(c, 'justify-center'))}
+                {moreRow('More clipboard', moreClipboardOpen, () => setMoreClipboardOpen((v) => !v))}
+                {moreClipboardOpen && (
+                  <div className="flex flex-wrap gap-1 px-3 pb-2">
+                    {MORE_CLIPBOARD_CHIPS.map((c) => renderChip(c))}
                   </div>
                 )}
 
                 {sectionLabel('Run state')}
-                <div className="flex flex-wrap gap-1 px-3 pb-2.5">
+                <div className="flex flex-wrap gap-1 px-3 pb-1">
                   {RUN_STATE_CHIPS.map((c) => renderChip(c))}
                 </div>
+                {moreRow('More rows', moreRowsOpen, () => setMoreRowsOpen((v) => !v))}
+                {moreRowsOpen && (
+                  <div className="flex flex-wrap gap-1 px-3 pb-2">
+                    {MORE_ROW_CHIPS.map((c) => renderChip(c))}
+                  </div>
+                )}
               </div>
 
               {/* Snippets — permanently visible below the palette. */}
