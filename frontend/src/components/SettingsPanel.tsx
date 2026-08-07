@@ -53,10 +53,16 @@ const FilterContext = createContext('');
 // and the collapse chevrons — every section is always open; the only hue that survives
 // is semantic, passed via `color` (the Clicker purple mode cue). data-section still
 // drives the collapsed rail's expand-and-scroll targeting.
-function Section({ title, color, children }: {
+function Section({ title, color, action, children }: {
   title: string;
   // Optional title tint for sections whose hue IS information (Clicker purple).
   color?: string;
+  // Optional control pinned to the right end of the header rule. Game Mode uses it for its
+  // master switch, and a master belongs HERE rather than in a first row: a row would have to
+  // repeat the section title as its own label, and the section could then never shrink below
+  // one row. This is not the deleted chevron coming back — it's a switch, the vocabulary the
+  // panel already speaks, and its state is information rather than a view preference.
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -64,6 +70,11 @@ function Section({ title, color, children }: {
       <div className="flex items-center gap-2 px-1.5 pt-3 pb-0.5">
         <span className="label-micro text-text-tertiary" style={color ? { color } : undefined}>{title}</span>
         <span className="flex-1 h-px bg-border-subtle" />
+        {/* pr-1 lands the control on the SAME right edge as the rows below: this header is
+            px-1.5 (6px) but SettingRow is px-2.5 (10px), and both sit inside this one box.
+            flex is load-bearing too — a bare <button> is inline-block and would drag its
+            baseline descender into the header height. */}
+        {action && <span className="shrink-0 flex items-center pr-1">{action}</span>}
       </div>
       <div>{children}</div>
     </div>
@@ -177,6 +188,54 @@ function ValueField({ value, unit, onCommitValue }: {
           was doing double duty for informative content at ~2:1). */}
       {unit && <span className="text-[10px] shrink-0 text-text-tertiary">{unit}</span>}
     </div>
+  );
+}
+
+// Aligned with SettingRow's px-2.5 so the sentence sits inside the same gutter as the labels
+// it summarises; text-right puts it under the value column it is derived from.
+const STEPS_READOUT_CLASS = 'px-2.5 pb-1 text-[11px] text-text-tertiary text-right';
+
+// Derived readout under the Game-mode tuning knobs — no state, no setting of its own. It exists
+// because the hop count is the thing users mean by "the click steps" and it appeared nowhere in
+// the UI, so nothing said that Path step ≥ Settle distance is what collapses the walk.
+//
+// It reports a RANGE, not a single number, and that is the whole subtlety. The walk left after a
+// fast-approach teleport is NOT exactly SettleDistancePx: SimulateMouse builds the settle point by
+// rounding each axis independently (`originX = x - Round(fullDx/fullDist * SettleDistancePx)`, same
+// for Y) and then measures `dist` from those two integers — so the real length lands anywhere in
+// SettleDistancePx ± √½, depending on the approach angle. ActionExecution says as much itself:
+// "the settle point lands on the nearest integer pixel, so it can sit ~1px off the exact ring".
+// Harmless for where the cursor ENDS UP, which is what that comment is about — but not harmless
+// for a Ceiling whose boundary sits exactly on the ring. At the shipped 80/20 the two ends of that
+// interval straddle the boundary, so the walk is 4 hops for some directions and 5 for others; a
+// bare "4" would be wrong more often than right. Whenever settle/step is NOT a whole number the
+// slop cannot cross a boundary and both ends agree, which is why one number is printed then.
+//
+// Path step 0 is called out instead of counted, and deliberately OUTSIDE the fast-approach branch:
+// SimulateMouse short-circuits on `stepPx > 0` alone (FastApproach is not in that condition), so
+// with Path step 0 the master reads ON while the engine takes the single jump — with or without
+// fast approach. The hop count itself is fast-approach-only: without the teleport the walk spans
+// the whole displacement, whose length is unknown until the click happens.
+function StepsReadout({ step, settle, fastApproach }: { step: string; settle: string; fastApproach: boolean }) {
+  const tt = useTt();
+  const s = parseInt(step, 10);
+  if (Number.isFinite(s) && s <= 0) {
+    return (
+      <div className={STEPS_READOUT_CLASS}>
+        {tt('Path step 0 — no walk, single jump', 'Path step 0 — sem caminho, salto único')}
+      </div>
+    );
+  }
+  const d = parseInt(settle, 10);
+  if (!fastApproach || !Number.isFinite(s) || !Number.isFinite(d) || d <= 0) return null;
+  // √½ is the largest magnitude the two per-axis roundings can add to (or take from) the ring.
+  const lo = Math.max(1, Math.ceil((d - Math.SQRT1_2) / s));
+  const hi = Math.max(1, Math.ceil((d + Math.SQRT1_2) / s));
+  const n = lo === hi
+    ? (lo === 1 ? tt('1 step', '1 passo') : tt(`${lo} steps`, `${lo} passos`))
+    : tt(`${lo}–${hi} steps`, `${lo}–${hi} passos`);
+  return (
+    <div className={STEPS_READOUT_CLASS}>{tt(`${n} per far click`, `${n} por clique distante`)}</div>
   );
 }
 
@@ -1080,41 +1139,62 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
             </Section>
 
             {/* Game Mode — interpolated cursor path so games (e.g. Roblox) that ignore a single
-                large jump follow the cursor. Off = instant jumps, perfect for normal apps. Fast
-                approach speeds far moves on top of that; the numeric knobs live under Tuning. */}
-            <Section title="Game Mode">
-              <SettingRow label="Smooth movement" tooltip={tt('Cursor follows a path so games (e.g. Roblox) accept it. Off = instant jumps, fine for normal apps.', 'O cursor segue um caminho para que jogos (ex.: Roblox) o aceitem. Off = saltos instantâneos, ideal para apps normais.')}>
-                <CompactToggle isOn={settings.smoothMovement} onChange={(v) => changeSetting('smoothMovement', v)} />
-              </SettingRow>
+                large jump follow the cursor. The header switch IS `smoothMovement`, not a second
+                flag on top of it: with it off SimulateMouse takes the single-jump branch and every
+                control below is inert, so the section collapses to its header instead of showing
+                knobs that change nothing. (A separate gameModeEnabled that didn't also gate that
+                single jump would be a pure synonym for this switch; one that did would fold the
+                move into the click INPUT and break hover/dwell hit-testing in Win32 menus and WinUI
+                flyouts, to save two syscalls.) Tuning is deliberately NOT inside the gate — see its
+                own comment. */}
+            <Section
+              title="Game Mode"
+              action={
+                // The Section header carries no data-tip of its own, so the switch brings its own
+                // wrapper — without it the only text explaining what this control does is gone.
+                <span
+                  className="flex items-center"
+                  data-tip={tt('Cursor walks a path to each target so games (e.g. Roblox) accept the move. Off = one instant jump, right for normal apps — Fast approach and the Tuning knobs stop applying. Click delay applies either way.', 'O cursor percorre um caminho até cada alvo para que jogos (ex.: Roblox) aceitem o movimento. Off = um salto instantâneo, ideal para apps normais — o Fast approach e os ajustes do Tuning deixam de valer. O Click delay vale nos dois casos.')}
+                  data-tip-pos="left"
+                >
+                  <CompactToggle isOn={settings.smoothMovement} onChange={(v) => changeSetting('smoothMovement', v)} />
+                </span>
+              }
+            >
               {settings.smoothMovement && (
                 <SettingRow label="Fast approach" tooltip={tt('Teleports long moves (e.g. across monitors), smoothing only the final stretch — far clicks become near-instant. Turn off if a game misclicks.', 'Teletransporta movimentos longos (ex.: entre monitores), suavizando só o trecho final — cliques distantes ficam quase instantâneos. Desligue se um jogo errar o clique.')}>
                   <CompactToggle isOn={settings.fastApproach} onChange={(v) => changeSetting('fastApproach', v)} />
                 </SettingRow>
               )}
-              {/* Tuning is NOT gated on smoothMovement: Click delay (MoveClickDelayMs) is applied
-                  unconditionally by SimulateMouse — on BOTH halves of every click, smooth movement on
-                  or off — so hiding its editor behind the Smooth movement toggle left ~20ms per click
-                  that no visible control could reach. Only the path knobs, which genuinely do nothing
-                  without the smooth walk, stay gated. */}
+              {/* Tuning sits OUTSIDE the master gate so Click delay survives it. SimulateMouse
+                  applies MoveClickDelayMs unconditionally — on BOTH halves of every click, Game
+                  Mode on or off — so letting it disappear with the section would leave ~20ms per
+                  click that no visible control could reach. That bug was found and fixed once
+                  already, and putting the knob back under the gate is how it returns. Everything
+                  else in here genuinely does nothing without the smooth walk, so it stays gated.
+                  With the master off this collapses to a lone "Tuning" caret holding Click delay. */}
               <Disclosure label="Tuning">
                 {settings.smoothMovement && (
                   <>
-                    <SettingRow label="Path step" tooltip={tt('Max px per step. Lower = smoother, slower. ~20 for Roblox.', 'Máx. px por passo. Menor = mais suave, mais lento. ~20 para Roblox.')}>
+                    <SettingRow label="Path step" tooltip={tt('Max px per step. Lower = smoother, slower. ~20 for Roblox. Raise it to the Settle distance to cut the walk to a hop or two.', 'Máx. px por passo. Menor = mais suave, mais lento. ~20 para Roblox. Suba até o Settle distance para reduzir o caminho a um ou dois passos.')}>
                       <ValueField value={settings.moveStepPx} unit="px" onCommitValue={(v) => changeSetting('moveStepPx', v)} />
                     </SettingRow>
                     <SettingRow label="Step delay" tooltip={tt('Pause between path steps (ms).', 'Pausa entre passos do caminho (ms).')}>
                       <ValueField value={settings.moveStepDelay} unit="ms" onCommitValue={(v) => changeSetting('moveStepDelay', v)} />
                     </SettingRow>
+                    {settings.fastApproach && (
+                      <SettingRow label="Settle distance" tooltip={tt('Px smoothed before the target after a teleport. Higher = safer, slower. ~80.', 'Px suavizados antes do alvo após um teletransporte. Maior = mais seguro, mais lento. ~80.')}>
+                        <ValueField value={settings.settleDistance} unit="px" onCommitValue={(v) => changeSetting('settleDistance', v)} />
+                      </SettingRow>
+                    )}
+                    {/* Outside the fast-approach gate on purpose — the Path step 0 warning must
+                        show in both branches; see the component. */}
+                    <StepsReadout step={settings.moveStepPx} settle={settings.settleDistance} fastApproach={settings.fastApproach} />
                   </>
                 )}
-                <SettingRow label="Click delay" tooltip={tt('Gap before each button event (ms), applied twice per click. After a move it lets the app register the position; on release it is the press→release dwell. Applies with Smooth movement off too.', 'Pausa antes de cada evento de botão (ms), aplicada duas vezes por clique. Depois de um movimento, dá tempo do app registrar a posição; na soltura, é o dwell entre pressionar e soltar. Vale também com Smooth movement desligado.')}>
+                <SettingRow label="Click delay" tooltip={tt('Gap before each button event (ms), applied twice per click. After a move it lets the app register the position; on release it is the press→release dwell. Applies with Game Mode off too.', 'Pausa antes de cada evento de botão (ms), aplicada duas vezes por clique. Depois de um movimento, dá tempo do app registrar a posição; na soltura, é o dwell entre pressionar e soltar. Vale também com o Game Mode desligado.')}>
                   <ValueField value={settings.moveClickDelay} unit="ms" onCommitValue={(v) => changeSetting('moveClickDelay', v)} />
                 </SettingRow>
-                {settings.smoothMovement && settings.fastApproach && (
-                  <SettingRow label="Settle distance" tooltip={tt('Px smoothed before the target after a teleport. Higher = safer, slower. ~80.', 'Px suavizados antes do alvo após um teletransporte. Maior = mais seguro, mais lento. ~80.')}>
-                    <ValueField value={settings.settleDistance} unit="px" onCommitValue={(v) => changeSetting('settleDistance', v)} />
-                  </SettingRow>
-                )}
               </Disclosure>
             </Section>
 
