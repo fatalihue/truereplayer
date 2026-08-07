@@ -321,13 +321,15 @@ export function ClipboardSurface({ state, onStateChange, onBack, onReset, origin
           <div className="shrink-0">
             <div className="flex items-center justify-between mb-1">
               <div className="label-micro text-text-tertiary">Clipboard now</div>
+              {/* Labelled, not a bare icon: the surface has no other refresh affordance,
+                  so the action names itself instead of hiding behind a tooltip. */}
               <button
                 type="button"
                 onClick={refresh}
-                className="w-5 h-5 flex items-center justify-center rounded text-text-tertiary hover:text-text-primary hover:bg-bg-card transition-colors"
-                data-tip={tt('Re-read the clipboard', 'Reler a área de transferência')}
+                className="h-5 px-1.5 inline-flex items-center gap-1 rounded label-micro text-text-tertiary hover:text-text-primary hover:bg-bg-card transition-colors"
               >
-                <RefreshCw size={11} />
+                <RefreshCw size={11} className="shrink-0" />
+                Refresh
               </button>
             </div>
             <div
