@@ -191,51 +191,19 @@ function ValueField({ value, unit, onCommitValue }: {
   );
 }
 
-// Aligned with SettingRow's px-2.5 so the sentence sits inside the same gutter as the labels
-// it summarises; text-right puts it under the value column it is derived from.
-const STEPS_READOUT_CLASS = 'px-2.5 pb-1 text-[11px] text-text-tertiary text-right';
-
-// Derived readout under the Game-mode tuning knobs — no state, no setting of its own. It exists
-// because the hop count is the thing users mean by "the click steps" and it appeared nowhere in
-// the UI, so nothing said that Path step ≥ Settle distance is what collapses the walk.
-//
-// It reports a RANGE, not a single number, and that is the whole subtlety. The walk left after a
-// fast-approach teleport is NOT exactly SettleDistancePx: SimulateMouse builds the settle point by
-// rounding each axis independently (`originX = x - Round(fullDx/fullDist * SettleDistancePx)`, same
-// for Y) and then measures `dist` from those two integers — so the real length lands anywhere in
-// SettleDistancePx ± √½, depending on the approach angle. ActionExecution says as much itself:
-// "the settle point lands on the nearest integer pixel, so it can sit ~1px off the exact ring".
-// Harmless for where the cursor ENDS UP, which is what that comment is about — but not harmless
-// for a Ceiling whose boundary sits exactly on the ring. At the shipped 80/20 the two ends of that
-// interval straddle the boundary, so the walk is 4 hops for some directions and 5 for others; a
-// bare "4" would be wrong more often than right. Whenever settle/step is NOT a whole number the
-// slop cannot cross a boundary and both ends agree, which is why one number is printed then.
-//
-// Path step 0 is called out instead of counted, and deliberately OUTSIDE the fast-approach branch:
-// SimulateMouse short-circuits on `stepPx > 0` alone (FastApproach is not in that condition), so
-// with Path step 0 the master reads ON while the engine takes the single jump — with or without
-// fast approach. The hop count itself is fast-approach-only: without the teleport the walk spans
-// the whole displacement, whose length is unknown until the click happens.
-function StepsReadout({ step, settle, fastApproach }: { step: string; settle: string; fastApproach: boolean }) {
+// Path step 0 is the one state where the header switch lies, so it is the one state worth a line:
+// SimulateMouse gates the whole walk on `stepPx > 0` alone (FastApproach is NOT in that condition,
+// so this holds in both branches), and falls through to the single jump. Game Mode reads ON while
+// the engine behaves exactly as if it were OFF, and nothing else in the panel would say so. Aligned
+// with SettingRow's px-2.5 and right-aligned so it reads as an annotation on the field above it.
+function PathStepZeroNote({ step }: { step: string }) {
   const tt = useTt();
   const s = parseInt(step, 10);
-  if (Number.isFinite(s) && s <= 0) {
-    return (
-      <div className={STEPS_READOUT_CLASS}>
-        {tt('Path step 0 — no walk, single jump', 'Path step 0 — sem caminho, salto único')}
-      </div>
-    );
-  }
-  const d = parseInt(settle, 10);
-  if (!fastApproach || !Number.isFinite(s) || !Number.isFinite(d) || d <= 0) return null;
-  // √½ is the largest magnitude the two per-axis roundings can add to (or take from) the ring.
-  const lo = Math.max(1, Math.ceil((d - Math.SQRT1_2) / s));
-  const hi = Math.max(1, Math.ceil((d + Math.SQRT1_2) / s));
-  const n = lo === hi
-    ? (lo === 1 ? tt('1 step', '1 passo') : tt(`${lo} steps`, `${lo} passos`))
-    : tt(`${lo}–${hi} steps`, `${lo}–${hi} passos`);
+  if (!Number.isFinite(s) || s > 0) return null;
   return (
-    <div className={STEPS_READOUT_CLASS}>{tt(`${n} per far click`, `${n} por clique distante`)}</div>
+    <div className="px-2.5 pb-1 text-[11px] text-text-tertiary text-right">
+      {tt('No walk — single jump', 'Sem caminho — salto único')}
+    </div>
   );
 }
 
@@ -1174,27 +1142,25 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                   else in here genuinely does nothing without the smooth walk, so it stays gated.
                   With the master off this collapses to a lone "Tuning" caret holding Click delay. */}
               <Disclosure label="Tuning">
+                <SettingRow label="Click delay" tooltip={tt('Gap before each button event (ms), applied twice per click. After a move it lets the app register the position; on release it is the press→release dwell. Applies with Game Mode off too.', 'Pausa antes de cada evento de botão (ms), aplicada duas vezes por clique. Depois de um movimento, dá tempo do app registrar a posição; na soltura, é o dwell entre pressionar e soltar. Vale também com o Game Mode desligado.')}>
+                  <ValueField value={settings.moveClickDelay} unit="ms" onCommitValue={(v) => changeSetting('moveClickDelay', v)} />
+                </SettingRow>
                 {settings.smoothMovement && (
                   <>
-                    <SettingRow label="Path step" tooltip={tt('Max px per step. Lower = smoother, slower. ~20 for Roblox. Raise it to the Settle distance to cut the walk to a hop or two.', 'Máx. px por passo. Menor = mais suave, mais lento. ~20 para Roblox. Suba até o Settle distance para reduzir o caminho a um ou dois passos.')}>
+                    <SettingRow label="Path step" tooltip={tt('Max px per step. Lower = smoother, slower. ~20 for Roblox. Raise it to match Distance to cut the walk to a hop or two.', 'Máx. px por passo. Menor = mais suave, mais lento. ~20 para Roblox. Suba até igualar o Distance para reduzir o caminho a um ou dois passos.')}>
                       <ValueField value={settings.moveStepPx} unit="px" onCommitValue={(v) => changeSetting('moveStepPx', v)} />
                     </SettingRow>
+                    <PathStepZeroNote step={settings.moveStepPx} />
                     <SettingRow label="Step delay" tooltip={tt('Pause between path steps (ms).', 'Pausa entre passos do caminho (ms).')}>
                       <ValueField value={settings.moveStepDelay} unit="ms" onCommitValue={(v) => changeSetting('moveStepDelay', v)} />
                     </SettingRow>
                     {settings.fastApproach && (
-                      <SettingRow label="Settle distance" tooltip={tt('Px smoothed before the target after a teleport. Higher = safer, slower. ~80.', 'Px suavizados antes do alvo após um teletransporte. Maior = mais seguro, mais lento. ~80.')}>
+                      <SettingRow label="Distance" tooltip={tt('Px smoothed before the target after a teleport. Higher = safer, slower. ~80.', 'Px suavizados antes do alvo após um teletransporte. Maior = mais seguro, mais lento. ~80.')}>
                         <ValueField value={settings.settleDistance} unit="px" onCommitValue={(v) => changeSetting('settleDistance', v)} />
                       </SettingRow>
                     )}
-                    {/* Outside the fast-approach gate on purpose — the Path step 0 warning must
-                        show in both branches; see the component. */}
-                    <StepsReadout step={settings.moveStepPx} settle={settings.settleDistance} fastApproach={settings.fastApproach} />
                   </>
                 )}
-                <SettingRow label="Click delay" tooltip={tt('Gap before each button event (ms), applied twice per click. After a move it lets the app register the position; on release it is the press→release dwell. Applies with Game Mode off too.', 'Pausa antes de cada evento de botão (ms), aplicada duas vezes por clique. Depois de um movimento, dá tempo do app registrar a posição; na soltura, é o dwell entre pressionar e soltar. Vale também com o Game Mode desligado.')}>
-                  <ValueField value={settings.moveClickDelay} unit="ms" onCommitValue={(v) => changeSetting('moveClickDelay', v)} />
-                </SettingRow>
               </Disclosure>
             </Section>
 
