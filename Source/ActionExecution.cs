@@ -2752,6 +2752,20 @@ namespace TrueReplayer.Services
             NotifyChainChanged();
 
             var savedContext = SaveWindowContext();
+
+            // A chained sub-profile gets its OWN KeyDown/KeyUp pairing map, restored in the finally
+            // below — same reasoning as the {rownext} cursor swap in RunSubProfileOverDataAsync.
+            // The map is keyed by RAW token text, so a parent and a sub both using the literal
+            // "{var:K}" collided in one shared dictionary: the sub's KeyDown overwrote the parent's
+            // recorded resolution, the sub's KeyUp then REMOVED the entry entirely, and the parent's
+            // later KeyUp fell through to a fresh resolve — releasing whatever the token means by
+            // then and leaving the key the parent actually pressed stuck down past the end of the run.
+            //
+            // Whatever the sub leaves pending is discarded with its map, which is the right call: an
+            // unpaired KeyDown inside the sub is the sub's own defect, and the stuck-key safety net
+            // is _simulatedKeysDown / ResetKeyState, not this pairing table.
+            var savedPendingKeyDowns = _pendingTokenKeyDowns;
+            _pendingTokenKeyDowns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             try
             {
                 // Resolve sub's effective context: own target wins, otherwise fall back to the
@@ -2847,6 +2861,7 @@ namespace TrueReplayer.Services
             }
             finally
             {
+                _pendingTokenKeyDowns = savedPendingKeyDowns;   // restore the caller's pending down/up pairs verbatim
                 RestoreWindowContext(savedContext);
 
                 // After returning to the caller's context, re-bring its window to focus so the
@@ -6363,7 +6378,13 @@ namespace TrueReplayer.Services
         // KeyDown resolutions awaiting their KeyUp, keyed by the RAW (token) key text.
         // Guarantees a down/up pair with identical token text presses and releases the
         // SAME key even when the token would resolve differently by the KeyUp row.
-        private readonly Dictionary<string, string> _pendingTokenKeyDowns = new(StringComparer.OrdinalIgnoreCase);
+        //
+        // NOT readonly: HandleRunProfile swaps in a fresh map for the duration of a chained
+        // sub-profile and restores the caller's afterwards — the same save/replace/restore the
+        // {rownext} cursors already use. Keying by RAW token text is what makes the isolation
+        // necessary: parent and sub writing the same literal "{var:K}" collided in one shared
+        // dictionary across call levels.
+        private Dictionary<string, string> _pendingTokenKeyDowns = new(StringComparer.OrdinalIgnoreCase);
 
         // Last key SimulateKey warned about — dedupes the unrecognizable-key warning so
         // a misspelled key inside a tight/infinite loop logs once, not once per press
