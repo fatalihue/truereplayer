@@ -1123,10 +1123,19 @@ namespace TrueReplayer
                     // Bare scroll stays valid for PROFILE hotkeys (the case that works today,
                     // and additionally limited by the foreground-window match below).
                     bool hasModifier = winHeld || ctrlHeld || altHeld || shiftHeld;
-                    if (hasModifier && TryDispatchGlobalHotkey(combo))
+                    if (hasModifier)
                     {
-                        LastTriggerHotkey = combo;
-                        return (IntPtr)1;
+                        var wheelGlobal = TryDispatchGlobalHotkey(combo);
+                        if (wheelGlobal == GlobalHotkeyResult.Handled)
+                        {
+                            LastTriggerHotkey = combo;
+                            return (IntPtr)1;
+                        }
+                        // Declined: a global hotkey owns this combo but its window gate said no.
+                        // Pass the scroll through and do NOT let a profile hotkey claim it — the
+                        // same precedence the X-button path has always had.
+                        if (wheelGlobal == GlobalHotkeyResult.Declined)
+                            return NativeMethods.CallNextHookEx(_mouseHookId, nCode, wParam, lParam);
                     }
 
                     if (!IsReplayingAction && UserProfile.Current.ProfileKeyEnabled && ProfileHotkeys.Count > 0)
@@ -1278,8 +1287,11 @@ namespace TrueReplayer
             // Pause-action resume + global hotkeys (mode-aware) — the Settings chips can
             // capture mouse combos, so they must actually fire from the mouse hook too
             // (the keyboard hook's global checks never see mouse events).
-            if (TryDispatchGlobalHotkey(combo))
-                return true;
+            // Declined short-circuits WITHOUT trying profile hotkeys — that is what the inline
+            // `return false` did before this ladder was extracted.
+            var globalResult = TryDispatchGlobalHotkey(combo);
+            if (globalResult == GlobalHotkeyResult.Handled) return true;
+            if (globalResult == GlobalHotkeyResult.Declined) return false;
 
             return HandleXButtonProfileHotkeys(combo, vk, isDown);
         }
@@ -1299,25 +1311,44 @@ namespace TrueReplayer
         /// and gating here would kill a Stop hotkey exactly when it is needed. It is also not
         /// gated on ProfileKeyEnabled/ProfileHotkeys.Count — those govern PROFILE hotkeys, and
         /// nesting the global ladder inside them is precisely what left it dead on the wheel.
+        ///
+        /// THREE outcomes, not two. The Replay hotkey can MATCH and still decline (its target
+        /// window is not in front), and before this was extracted that decline `return false`d
+        /// out of the whole handler — so the combo never reached the profile-hotkey matching
+        /// below it. Collapsing that into a plain bool silently changed macro behaviour: an
+        /// X-button bound to both Replay and a profile would start firing the profile whenever
+        /// the target window was not focused. Declined is distinct from NotMatched for exactly
+        /// that reason.
         /// </remarks>
-        private static bool TryDispatchGlobalHotkey(string combo)
+        private enum GlobalHotkeyResult
+        {
+            /// No global hotkey owns this combo — the caller may keep looking.
+            NotMatched,
+            /// Dispatched; the caller must swallow the event.
+            Handled,
+            /// A global hotkey owns this combo but declined to fire. Pass the event through
+            /// and do NOT fall through to profile hotkeys.
+            Declined,
+        }
+
+        private static GlobalHotkeyResult TryDispatchGlobalHotkey(string combo)
         {
             if (_pauseResumeHotkey != null && combo == _pauseResumeHotkey)
             {
                 _pauseResumeCallback?.Invoke();
-                return true;
+                return GlobalHotkeyResult.Handled;
             }
             if (IsCursorClickMode)
             {
                 if (combo == CursorClickStartHotkey)
                 {
                     OnHotkeyPressed?.Invoke("CLICKER_START");
-                    return true;
+                    return GlobalHotkeyResult.Handled;
                 }
                 if (combo == CursorClickPauseHotkey)
                 {
                     OnHotkeyPressed?.Invoke("CLICKER_PAUSE");
-                    return true;
+                    return GlobalHotkeyResult.Handled;
                 }
             }
             else
@@ -1325,7 +1356,7 @@ namespace TrueReplayer
                 if (combo == UserProfile.Current.RecordingHotkey)
                 {
                     OnHotkeyPressed?.Invoke(combo);
-                    return true;
+                    return GlobalHotkeyResult.Handled;
                 }
                 if (combo == UserProfile.Current.ReplayHotkey)
                 {
@@ -1333,10 +1364,10 @@ namespace TrueReplayer
                     // active profile's target isn't in front.
                     var activeName = ActiveProfileName;
                     if (!string.IsNullOrEmpty(activeName) && !IsForegroundWindowMatch(activeName))
-                        return false;
+                        return GlobalHotkeyResult.Declined;
                     LastTriggerHotkey = combo;
                     OnHotkeyPressed?.Invoke(combo);
-                    return true;
+                    return GlobalHotkeyResult.Handled;
                 }
             }
             if (combo == UserProfile.Current.ProfileKeyToggleHotkey
@@ -1346,9 +1377,9 @@ namespace TrueReplayer
                     && combo == UserProfile.Current.CaptureSlotHotkey))
             {
                 OnHotkeyPressed?.Invoke(combo);
-                return true;
+                return GlobalHotkeyResult.Handled;
             }
-            return false;
+            return GlobalHotkeyResult.NotMatched;
         }
 
         // Profile-hotkey half of the X-button dispatch. Split out from HandleXButtonTriggerCore

@@ -640,7 +640,10 @@ namespace TrueReplayer
             CursorClickUseInterval = saved.CursorClickUseInterval;
             // 24 h ceiling: past that the cap is indistinguishable from unbounded, and it keeps
             // a typo from parking the number somewhere meaningless.
-            CursorClickMaxDuration = ClampNumeric(saved.CursorClickMaxDurationMs.ToString(), 0, 86400000, 60000);
+            // Floor 1000, same as the settings:change handler. A stored 0 with the toggle ON
+            // would run unbounded while the panel displayed 60s (its `|| 60000` fallback turns
+            // 0 into 60) — "no limit" is expressed by the toggle, never by the value.
+            CursorClickMaxDuration = ClampNumeric(saved.CursorClickMaxDurationMs.ToString(), 1000, 86400000, 60000);
             CursorClickUseMaxDuration = saved.CursorClickUseMaxDuration;
             CursorClickGameMove = saved.CursorClickGameMove;
             RecordMouse = saved.RecordMouse;

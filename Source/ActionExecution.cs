@@ -502,12 +502,17 @@ namespace TrueReplayer.Services
             // letting the run drift and calling the schedule a liar — the B3 mistake, one layer
             // down. FastApproach caps the walked stretch at SettleDistancePx whatever the
             // distance, so the estimate is bounded by the settle ring, not by the rect size.
-            if (gameMove && useArea && ActionReplayer.SmoothMovement && ActionReplayer.MoveStepPx > 0)
+            // No SmoothMovement gate: the Clicker's Game move forces the walk regardless of the
+            // macro master, so the cost applies whenever this switch is on in Area mode.
+            if (gameMove && useArea)
             {
+                int stepPx = ActionReplayer.MoveStepPx > 0
+                    ? ActionReplayer.MoveStepPx
+                    : ActionReplayer.DefaultMoveStepPx;
                 int walkPx = ActionReplayer.FastApproach && ActionReplayer.SettleDistancePx > 0
                     ? ActionReplayer.SettleDistancePx
                     : Math.Max(areaW, areaH);
-                int steps = Math.Max(1, (int)Math.Ceiling((double)walkPx / ActionReplayer.MoveStepPx));
+                int steps = Math.Max(1, (int)Math.Ceiling((double)walkPx / stepPx));
                 int moveCostMs = (steps - 1) * ActionReplayer.MoveStepDelayMs;
                 // Reports the ADDED cost, not a resulting rate. Measured 2026-08-08 in Area at a
                 // 10 ms period: this estimate said 6 ms and the observed per-tick difference was
@@ -1380,6 +1385,9 @@ namespace TrueReplayer.Services
         // moveStepDelay / moveClickDelay.
         public static bool SmoothMovement = true;
         public static int MoveStepPx = 20;
+        // Fallback step for a FORCED walk (Clicker "Game move") when MoveStepPx is 0 — legal for
+        // macro, meaningless for a walk. Mirrors the shipped MoveStepPx default.
+        public const int DefaultMoveStepPx = 20;
         public static int MoveStepDelayMs = 2;
         public static int MoveClickDelayMs = 10;
 
@@ -3672,7 +3680,12 @@ namespace TrueReplayer.Services
         //
         // Extracted from SimulateMouse so the Clicker loop can reach the same machinery. The
         // body is unchanged; SimulateMouse calls it in exactly the place the block used to sit.
-        private void MoveCursorTo(int x, int y, bool allowFastApproach)
+        // forceSmooth: walk the path even when the macro Game Mode master (SmoothMovement) is
+        // off. The Clicker has its own "Game move" switch, and in Clicker mode the Game Mode
+        // section is not even rendered — so without this the clicker toggle silently did
+        // nothing whenever the macro master happened to be off, with no way for the user to
+        // see what was cancelling it. Macro callers never pass it and keep honouring the master.
+        private void MoveCursorTo(int x, int y, bool allowFastApproach, bool forceSmooth = false)
         {
             var (vx, vy, vw, vh) = NativeMethods.VirtualScreen.Bounds;
             uint posFlags = NativeMethods.MOUSEEVENTF_MOVE
@@ -3699,7 +3712,12 @@ namespace TrueReplayer.Services
             // SimulateMouse is KEPT on both halves so press→release retains a small, realistic
             // dwell (some games / anti-cheat reject a zero-dwell synthetic click).
             int stepPx = MoveStepPx;
-            if (SmoothMovement && stepPx > 0 && NativeMethods.GetCursorPos(out var start) && (start.x != x || start.y != y))
+            bool smooth = SmoothMovement || forceSmooth;
+            // MoveStepPx is a macro tuning value and 0 is a legal setting there (PathStepZeroNote
+            // exists for it). A forced walk with no step size would divide the path into nothing,
+            // so fall back to the shipped default rather than silently degrade to a jump.
+            if (forceSmooth && stepPx <= 0) stepPx = DefaultMoveStepPx;
+            if (smooth && stepPx > 0 && NativeMethods.GetCursorPos(out var start) && (start.x != x || start.y != y))
             {
                 int originX = start.x, originY = start.y;
 
@@ -3734,7 +3752,7 @@ namespace TrueReplayer.Services
                     if (i < steps && MoveStepDelayMs > 0) Thread.Sleep(MoveStepDelayMs);
                 }
             }
-            else if (SmoothMovement && stepPx > 0 && NativeMethods.GetCursorPos(out var atTarget) && atTarget.x == x && atTarget.y == y)
+            else if (smooth && stepPx > 0 && NativeMethods.GetCursorPos(out var atTarget) && atTarget.x == x && atTarget.y == y)
             {
                 // Already exactly on target (typical UP half of a click) — skip the redundant move.
             }
@@ -3744,8 +3762,11 @@ namespace TrueReplayer.Services
             }
         }
 
-        // Clicker seam for the move half. gameAware routes through the interpolated path above
-        // (honouring SmoothMovement / FastApproach / MoveStepPx / SettleDistancePx); otherwise it
+        // Clicker seam for the move half. gameAware routes through the interpolated path above,
+        // FORCING the walk (forceSmooth) so the Clicker's own switch governs the Clicker — the
+        // macro Game Mode master is not reachable from Clicker mode, so inheriting it would mean
+        // a toggle that silently does nothing. It still reads the macro TUNING values
+        // (FastApproach / MoveStepPx / MoveStepDelayMs / SettleDistancePx); otherwise it
         // is the plain dual write — SetCursorPos for GetCursorPos readers, one move INPUT for
         // Raw Input readers. Either way the move is its OWN event, emitted BEFORE the button,
         // which is what the clicker never did: it folded position into the click INPUT and sent
@@ -3759,7 +3780,7 @@ namespace TrueReplayer.Services
             if (NativeMethods.GetCursorPos(out var cur) && cur.x == x && cur.y == y) return false;
             if (gameAware)
             {
-                MoveCursorTo(x, y, allowFastApproach: true);
+                MoveCursorTo(x, y, allowFastApproach: true, forceSmooth: true);
             }
             else
             {
@@ -3841,7 +3862,10 @@ namespace TrueReplayer.Services
             lock (_simInputLock)
             {
                 uint sent = NativeMethods.SendInput(1, ref input, NativeMethods.InputSize);
-                TrackButtonState(mouseEvent);
+                // Only record a press the OS actually accepted. Tracking a rejected DOWN would
+                // make ResetMouseState emit an UP for a button that was never pressed — an
+                // orphan release that some apps read as a click.
+                if (sent == 1) TrackButtonState(mouseEvent);
                 return sent;
             }
         }

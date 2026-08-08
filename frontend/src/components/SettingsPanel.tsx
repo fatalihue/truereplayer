@@ -810,9 +810,12 @@ function ClickerSection({
               onEnterActivate={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
             />
           </SettingRow>
-          {/* Deliberately NOT wired to the macro Game Mode switch: this costs real time inside
-              every tick that moves, and silently inheriting a global toggle into a rate-critical
-              loop is exactly how the rate came to lie in the first place. */}
+          {/* Independent of the macro Game Mode switch, in BOTH directions. It is not auto-on
+              from that master (this costs real time inside every tick that moves, and silently
+              inheriting a global toggle into a rate-critical loop is how the rate came to lie in
+              the first place) — and it is not cancelled by it either: the engine forces the walk
+              for the Clicker. That second half was a defect until 2026-08-08; the master is not
+              rendered in Clicker mode, so a user could not have seen what was silencing this. */}
           <SettingRow label="Game move" tooltip={tt('Moves the cursor along a path instead of teleporting, for games that ignore instant jumps (Roblox). Only affects Area and Fixed — in cursor mode nothing moves. Costs a few ms per click.', 'Move o cursor por um caminho em vez de teletransportar, para jogos que ignoram saltos instantâneos (Roblox). Só afeta Area e Fixed — no modo cursor nada se move. Custa alguns ms por clique.')}>
             <div className={`${FIELD_W} flex justify-end`}>
               <CompactToggle isOn={gameMove} onChange={(v) => onChange('cursorClickGameMove', v)} />
