@@ -1,6 +1,48 @@
 (() => {
   const isMainFrame = window === window.top;
 
+  /**
+   * Which frame am I?
+   *
+   * A content script cannot ask Chrome for its own frameId — MV3 has no API for it — but the
+   * service worker sees it as `sender.frameId` on anything we send. So the answer is fetched
+   * once, lazily, and cached for the life of this document. A frameId is stable while the frame
+   * lives, and a new document gets a new content script and therefore a fresh cache.
+   *
+   * This exists for the frame election in background.js: a browser action still fans out to
+   * every frame to FIND its element, so the frame that matched has to be able to NAME itself,
+   * or the half of the command that actually mutates the page cannot be aimed at it alone.
+   *
+   * The main frame is 0 by definition and answers without a round trip, so the handshake only
+   * ever costs anything on a page whose target really is inside an iframe, and only on that
+   * frame's first action. A failure resolves to null and is deliberately NOT cached as an
+   * answer: the background then falls back to probing the main frame, which is where every
+   * RECORDED selector points anyway, and the next action tries the handshake again.
+   */
+  let myFrameId = isMainFrame ? 0 : null;
+  let frameIdPending = null;
+  function ensureFrameId() {
+    if (myFrameId !== null) return Promise.resolve(myFrameId);
+    if (frameIdPending) return frameIdPending;
+    const pending = new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage({ type: 'whichFrame' }, (reply) => {
+          if (!chrome.runtime.lastError && reply && typeof reply.frameId === 'number') {
+            myFrameId = reply.frameId;
+          }
+          resolve(myFrameId);
+        });
+      } catch {
+        resolve(null); // extension context invalidated (extension reloaded) — page must reload
+      }
+    }).then((id) => {
+      if (id === null) frameIdPending = null; // let the next action retry instead of remembering "unknown"
+      return id;
+    });
+    frameIdPending = pending;
+    return pending;
+  }
+
   let recording = false;
   let picking = false;
   let highlightEl = null;
@@ -689,8 +731,17 @@
   /**
    * #1 — Find element by parsed text selector, ranking direct-text matches and
    * deeper (more specific) elements higher.
+   *
+   * `includeHidden` opts OUT of the visibility filter below, and exists for exactly one caller:
+   * findExisting, which asks "does this match anything AT ALL". It is a parameter rather than a
+   * change of meaning for everyone because the filter is not a courtesy to the other callers —
+   * it decides which element wins the ranking. A hidden twin of the same label (the mobile copy
+   * of a nav, a collapsed menu, a modal pre-rendered as display:none) is usually DEEPER than the
+   * on-screen one, so it outranks it. Drop the filter globally and findElementForMode gets handed
+   * that twin and reports "not found" about a control plainly on screen, while checkDisappears
+   * reads the same twin as proof the element has gone.
    */
-  function findByParsedText(parsed) {
+  function findByParsedText(parsed, includeHidden = false) {
     const candidates = [];
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
     while (walker.nextNode()) {
@@ -703,7 +754,7 @@
       const directText = directTextOf(el);
 
       if (!elementTextMatches(el, parsed, elText, directText)) continue;
-      if (!isVisible(el)) continue;
+      if (!includeHidden && !isVisible(el)) continue;
 
       // Direct-text match preference — the same scalar test, on the direct text alone.
       // getDepth stays per-CANDIDATE (not per-node): only elements that already matched reach it.
@@ -890,8 +941,21 @@
   // Does this selector match ANYTHING at all, regardless of visibility or enabled state?
   // Used only to tell "the primary is gone" apart from "the primary is here but not ready",
   // which is what decides whether falling back to another candidate is legitimate.
+  //
+  // "Regardless of visibility" has to hold for BOTH kinds, or the guard below answers a different
+  // question depending on which kind of selector the recorder happened to produce for the same
+  // element. The CSS branch is a raw querySelector and already ignores visibility; the text branch
+  // filters to visible by default and has to be told not to here. Agreeing the other way — making
+  // CSS visibility-aware — would be the wrong direction: a present-but-hidden primary (a modal
+  // that has not opened yet, a control still display:none) is the "here but not ready" case, and
+  // waiting for it is precisely what the guard is for. Treating it as gone lets a tier-B/C
+  // fallback act on a lookalike while the intended element is sitting right there.
+  //
+  // Only truthiness is read at the call site, so it does not matter that includeHidden can change
+  // WHICH of several matches wins the ranking, or that promoteToInteractive will decline to climb
+  // to a hidden interactive ancestor.
   function findExisting(parsed) {
-    if (parsed.kind === 'text') return findByParsedText(parsed);
+    if (parsed.kind === 'text') return findByParsedText(parsed, true);
     try { return document.querySelector(parsed.value); } catch { return null; }
   }
 
@@ -1659,6 +1723,38 @@
           };
         }
 
+        /**
+         * Phase 1 of the frame election — see the fan-out note in background.js for the why.
+         *
+         * The read-only twin of the four mutating commands above. It asks the SAME question they
+         * ask — does THIS frame have the element, in the state that command needs it in — and
+         * answers with nothing but the id of the frame it ran in. The background then sends the
+         * real command to that frame alone, so an element that exists in two frames (Stripe's
+         * card field, a duplicated #email, a login iframe) is acted on in exactly one.
+         *
+         * It never touches the page: no focus, no highlight, no events. That is what makes it
+         * safe to broadcast, and it is also why the background may re-run it against the main
+         * frame as a tie-break without any risk of acting twice.
+         *
+         * It carries no `text`. The background strips the payload before broadcasting, because
+         * the probe reaches EVERY frame and a BrowserType's text can be a password, a token, or
+         * resolved {clipboard} content. Nothing here needs it: all four mutating commands locate
+         * by `selector`/`alternatives` and pass a null textPattern to waitForElement, so dropping
+         * it cannot change WHICH element is found. Keep it that way — if a command ever starts
+         * matching on `text` (the way waitElement's 'text-match' mode does), this probe has to be
+         * given the same criterion or it will elect a frame that then finds nothing.
+         */
+        case 'locateFrame': {
+          // click / rightClick / type wait for 'enabled'; selectOption only waits for 'appears'.
+          // Must be the same mode the real command uses, or the elected frame can lose in phase 2
+          // a race it just won in phase 1.
+          const mode = msg.locateFor === 'selectOption' ? 'appears' : 'enabled';
+          await waitForElement(selector, timeout, mode, null, alternatives);
+          // A frame that cannot name itself answers null rather than guessing 0: guessing would
+          // aim the click at the main frame when a SUBFRAME is what matched.
+          return { success: true, frameId: await ensureFrameId() };
+        }
+
         default:
           throw mkError('UNKNOWN_COMMAND', `Unknown command: ${command}`, null);
       }
@@ -1699,6 +1795,13 @@
         break;
 
       case 'executeCommand':
+        // No isMainFrame guard here, unlike startRecording and startPick — and that is deliberate.
+        // A command may legitimately target an element inside an iframe (a hand-typed selector),
+        // so a frame that has the element must be allowed to run it. What must NOT happen is
+        // SEVERAL frames running it, and that is decided one level up: background.js elects a
+        // single frame with the read-only 'locateFrame' probe and sends the mutating command
+        // there with an explicit frameId. Adding a guard here would break subframe selectors
+        // without adding any safety the election does not already provide.
         executeCommand(msg).then((result) => {
           // Attach which fallback selector saved the run (if any) so the C# side can log
           // it — a used fallback means the primary selector is drifting.

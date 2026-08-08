@@ -183,13 +183,19 @@ function connect() {
                 // Sequential post-checks: urlWaitPattern first (cheap), then postNavigateSelector
                 const checkUrl = (cb) => {
                   if (!urlPattern) return cb();
+                  // frameId 0: this asks whether the TAB finished navigating, and only the main
+                  // frame's location is the tab's location. Fanned out, an iframe whose own URL
+                  // happens to match the pattern — a same-site widget, an analytics frame — answers
+                  // first and reports the navigation done while the page is still on the old URL.
+                  // Unlike postNavigateSelector below, there is no reading of this field where an
+                  // iframe's URL is the intended answer, so nothing legitimate is lost by pinning.
                   chrome.tabs.sendMessage(tabId, {
                     type: 'executeCommand',
                     commandId: msg.commandId + ':wu',
                     command: 'waitUrl',
                     urlPattern,
                     timeout: msg.timeout || 30000, // same budget as navTimeout above, so no clamp is needed here
-                  }).then((response) => {
+                  }, { frameId: 0 }).then((response) => {
                     if (response?.success) cb();
                     else finishErr(
                       response?.error?.code || 'NAVIGATION_TIMEOUT',
@@ -394,9 +400,48 @@ function connect() {
             const isInstantProbe = typeof msg.timeout === 'number' && msg.timeout <= 0;
             const isDisappears = msg.waitMode === 'disappears';
             const mainFrameOnly = isInstantProbe || isDisappears;
-            const sendRelay = () => mainFrameOnly
-              ? chrome.tabs.sendMessage(targetTab.id, relay, { frameId: 0 })
-              : chrome.tabs.sendMessage(targetTab.id, relay);
+
+            // ── …and the half the note above does not cover: two frames that BOTH match ──────
+            // Everything above reasons about frames that do NOT match, where the reply race is
+            // sound. What it cannot fix is that a frame receiving a command does not merely
+            // REPLY to it — it EXECUTES it. One reply wins the race and gets reported; the click
+            // already happened in every frame that matched, and the macro looks like it worked.
+            //
+            // This needs no attacker and no exotic page. Stripe Elements' card field is
+            // input[name="cardnumber"]; embedded forms, chat widgets and login iframes routinely
+            // carry #email, #username, button[type=submit]. A BrowserType then types its text —
+            // which may be a password, a token, or resolved {clipboard} content — into every one
+            // of those fields. Typing a secret into N frames is not a degraded version of the
+            // intent; it is never the intent.
+            //
+            // Pinning the mutating commands to frame 0 would fix it and would break exactly the
+            // subframe selectors the note above exists to protect. So the command is split in
+            // two instead:
+            //   1. LOCATE — content.js's read-only 'locateFrame' probe fans out precisely as
+            //      before, keeps the silence property (a frame that does not match stays quiet
+            //      until its own timeout), and replies with nothing but its own frameId.
+            //   2. EXECUTE — the real command, unchanged, sent to that ONE frame.
+            // The added cost is a single message hop AFTER the element is already found, not a
+            // fixed delay: the probe answers on the same tick the old fan-out would have started
+            // acting. What it buys is that "which frame acts" stops being whichever frame's reply
+            // happened to arrive first, and becomes a decision this code makes on purpose.
+            //
+            // The list below is a DENYLIST of the commands known not to touch the page, so a
+            // command added later is treated as mutating by default. Being wrong that way costs
+            // one extra message hop; being wrong the other way puts a password in three frames.
+            // ('navigate' never reaches here — it returns above — but it belongs on the list as
+            // the statement of which commands are reads, not as a live branch.)
+            const READ_ONLY_COMMANDS = ['waitElement', 'waitUrl', 'navigate'];
+            const needsElection = !mainFrameOnly && !READ_ONLY_COMMANDS.includes(msg.command);
+
+            // Tie-break toward frame 0 when a SUBFRAME answers the probe. Silence settles ties
+            // only while at most one frame matches; when two match they both answer on the same
+            // tick and the winner is Chrome's frame dispatch order, which is not a decision
+            // either. Frame 0 is the right default because recording is guarded by isMainFrame:
+            // every RECORDED selector was captured in the main frame, so a subframe match on one
+            // is a lookalike, not the target. A hand-typed subframe selector still wins — frame 0
+            // simply does not match — and pays this grace once, only on the actions that use it.
+            const FRAME0_GRACE_MS = 150;
 
             // Content scripts inject at document_idle, which on a real page lands anywhere from
             // 500 ms to several seconds after the navigation commits. A single 300 ms retry
@@ -416,39 +461,118 @@ function connect() {
             //     the C# side gives up first and reports "not found" for a step that then runs and
             //     clicks. A ceiling well under that grace keeps the ordering the grace bought.
             const injectBudget = isInstantProbe ? 750 : Math.min(1500, Math.max(1000, msg.timeout || 5000));
-            const injectDeadline = Date.now() + injectBudget;
-            const attempt = () => {
-              // Same frame targeting on every attempt — a retry that fanned out where the original
-              // did not would reintroduce the race it was pinned to avoid.
-              sendRelay()
-                .then(forward)
-                .catch((err) => {
-                  if (!isInjectionRace(err)) {
+            // One send, with that retry window around it. `frameId` undefined fans out, a number
+            // targets that frame alone; targeting is fixed for the life of a dispatch, because a
+            // retry that fanned out where the original did not would reintroduce the race it was
+            // pinned to avoid. Each dispatch opens its own window — the second half of an elected
+            // command talks to a frame that answered a millisecond ago, so in practice it never
+            // spends any of it, and it must not inherit a window the first half already burned.
+            const dispatch = (message, frameId, onResponse) => {
+              const deadline = Date.now() + injectBudget;
+              const attempt = () => {
+                const sent = typeof frameId === 'number'
+                  ? chrome.tabs.sendMessage(targetTab.id, message, { frameId })
+                  : chrome.tabs.sendMessage(targetTab.id, message);
+                sent
+                  .then(onResponse)
+                  .catch((err) => {
+                    if (!isInjectionRace(err)) {
+                      sendToNative({
+                        type: 'browser:commandResult',
+                        commandId: msg.commandId,
+                        error: { code: 'EXTENSION_ERROR', message: err.message || 'Failed to execute command', tip: null },
+                        tabUrl: targetTab.url || null,
+                      });
+                      return;
+                    }
+                    if (Date.now() < deadline) {
+                      setTimeout(attempt, 250);
+                      return;
+                    }
                     sendToNative({
                       type: 'browser:commandResult',
                       commandId: msg.commandId,
-                      error: { code: 'EXTENSION_ERROR', message: err.message || 'Failed to execute command', tip: null },
+                      error: {
+                        code: 'NO_CONTENT_SCRIPT',
+                        message: `No TrueReplayer content script on ${pageLabel}.`,
+                        tip: 'Reload that tab and try again. If it was just updated, the extension needs the page reloaded before it can act on it.',
+                      },
                       tabUrl: targetTab.url || null,
                     });
-                    return;
-                  }
-                  if (Date.now() < injectDeadline) {
-                    setTimeout(attempt, 250);
-                    return;
-                  }
-                  sendToNative({
-                    type: 'browser:commandResult',
-                    commandId: msg.commandId,
-                    error: {
-                      code: 'NO_CONTENT_SCRIPT',
-                      message: `No TrueReplayer content script on ${pageLabel}.`,
-                      tip: 'Reload that tab and try again. If it was just updated, the extension needs the page reloaded before it can act on it.',
-                    },
-                    tabUrl: targetTab.url || null,
                   });
-                });
+              };
+              attempt();
             };
-            attempt();
+
+            if (!needsElection) {
+              dispatch(relay, mainFrameOnly ? 0 : undefined, forward);
+              return;
+            }
+
+            // Phase 1 — LOCATE. Derived from the relay by REMOVAL, never rebuilt field by field:
+            // the hand-copied-object trap the relay comment above describes applies here twice
+            // over, because a probe that reads a different field set than the command locates a
+            // different element than the command then acts on. `text` is the one deliberate
+            // subtraction — it is the payload, no mutating command matches on it, and it is the
+            // field that must not be broadcast to frames that are not going to be used.
+            const { text: _payload, ...probeBase } = relay;
+            const probe = {
+              ...probeBase,
+              command: 'locateFrame',
+              locateFor: relay.command,
+              commandId: msg.commandId + ':lf', // same tagging as the navigate post-checks above
+            };
+            const electionStart = Date.now();
+
+            const execIn = (frameId) => {
+              // Phase 2 — EXECUTE, in one frame. The timeout is what is LEFT of the action's
+              // budget: the waiting already happened during the probe, and handing this half a
+              // fresh full timeout would let a 30 s action run for 60 s — past the flat 2 s grace
+              // the C# side allows itself over the timeout it asked for, which is what keeps
+              // content.js's timeout classifier the authority on "not found".
+              // The floor leaves room to re-acquire the element if the page re-rendered between
+              // the halves. That window is the one case where the split can fail where the
+              // fan-out would not have, and it fails LOUDLY with ELEMENT_NOT_FOUND rather than
+              // quietly acting in two places.
+              const asked = typeof msg.timeout === 'number' ? msg.timeout : 30000;
+              const left = Math.max(1000, asked - (Date.now() - electionStart));
+              dispatch({ ...relay, timeout: left }, frameId, forward);
+            };
+
+            const noFrameId = () => forward({
+              success: false,
+              error: {
+                code: 'EXTENSION_ERROR',
+                message: 'The frame that matched this selector could not identify itself.',
+                tip: 'Reload the page and run again. The action was NOT performed — running it in every frame that matched is exactly what this refuses to do.',
+              },
+            });
+
+            dispatch(probe, undefined, (located) => {
+              // A failed probe already carries the error the real command would have produced
+              // (ELEMENT_NOT_FOUND / ELEMENT_HIDDEN / ELEMENT_DISABLED / SELECTOR_INVALID), from
+              // the same classifier, so it is forwarded verbatim — the split must not change what
+              // the user reads when nothing matched.
+              if (!located || !located.success) {
+                forward(located || { success: false, error: { code: 'EXTENSION_ERROR', message: 'No frame answered the locate probe.', tip: null } });
+                return;
+              }
+              if (located.frameId === 0) { execIn(0); return; }
+              // A subframe answered, or a frame that could not name itself. Re-run the same
+              // read-only probe against the main frame with the short grace, then prefer it if it
+              // also has the element. Safe to repeat precisely because the probe mutates nothing.
+              chrome.tabs.sendMessage(targetTab.id, { ...probe, timeout: FRAME0_GRACE_MS }, { frameId: 0 })
+                .then((mainFrame) => {
+                  if (mainFrame && mainFrame.success) execIn(0);
+                  else if (typeof located.frameId === 'number') execIn(located.frameId);
+                  else noFrameId();
+                })
+                .catch(() => {
+                  // No content script in frame 0 at all (or it went away) — nothing to prefer.
+                  if (typeof located.frameId === 'number') execIn(located.frameId);
+                  else noFrameId();
+                });
+            });
           });
           break;
 
@@ -656,6 +780,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       tabUrl: sender.tab?.url || null,
     });
     sendResponse({ ok: true });
+  } else if (msg.type === 'whichFrame') {
+    // The other half of ensureFrameId in content.js: a content script has no way to read its own
+    // frameId, and this listener is the only place it is visible. Answering null rather than a
+    // guess matters — the frame election uses this id to aim a mutating command at ONE frame, and
+    // a wrong id would aim it at the wrong page. Anything without a tab context (the popup) has
+    // no frame to name.
+    sendResponse({ frameId: sender.tab && typeof sender.frameId === 'number' ? sender.frameId : null });
   } else if (msg.type === 'getStatus') {
     sendResponse({
       connected: isBridgeReady,

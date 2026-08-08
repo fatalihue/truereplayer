@@ -171,8 +171,23 @@ class Program
 
         try
         {
-            // Try to connect to pipe — if TrueReplayer isn't running, retry a few times
-            using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            // Try to connect to pipe — if TrueReplayer isn't running, retry a few times.
+            //
+            // CurrentUserOnly is the CLIENT half of the pipe's security, and it was missing while
+            // the server half (the SID-restricted DACL in BrowserBridgeService) was already in
+            // place. A DACL controls who may connect to OUR pipe; it says nothing about whose pipe
+            // we just connected TO. Pipe names live in a machine-wide namespace and creating one
+            // needs no privilege, so any local process can publish \\.\pipe\TrueReplayerBridge —
+            // and it does not even have to win a boot race, because the server tears the pipe down
+            // and sleeps a second between reconnects, freeing the name on every cycle. Connected to
+            // an impostor, this host would hand it every recorded keystroke and URL, and accept
+            // browser:executeCommand back, driving the user's logged-in browser.
+            //
+            // With the flag, .NET compares the pipe's owner against ours after connecting and
+            // throws instead. See BrowserBridgeService for why the server pins that owner
+            // explicitly — the default differs under elevation and would reject the real app.
+            using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut,
+                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
 
             for (int attempt = 0; attempt < 3; attempt++) // Try for ~3 seconds
             {
@@ -183,6 +198,15 @@ class Program
                     break;
                 }
                 catch (TimeoutException) { }
+                catch (UnauthorizedAccessException ex)
+                {
+                    // Not "app not running" — something IS serving this name and it is not owned by
+                    // us. Retrying is pointless (the validation runs post-connect and leaves this
+                    // stream closed) and would only reconnect to the same impostor, so fail loudly
+                    // and distinctly rather than degrading into the ordinary timeout path.
+                    Log($"pipe: REFUSED — server is not owned by the current user ({ex.Message})");
+                    return 1;
+                }
             }
 
             if (!pipe.IsConnected) { Log("pipe: failed to connect after 3 attempts"); return 1; }

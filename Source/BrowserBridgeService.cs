@@ -20,7 +20,16 @@ namespace TrueReplayer.Services
         // the other either fires the outdated banner against a current extension or hides a real
         // mismatch. 1.4.10 = G1, recording ships the ranked selector alternatives (previously only
         // the crosshair picker did, so every recorded action was a single candidate).
-        public const string ExpectedExtensionVersion = "1.4.10";
+        // 1.4.11 = findExisting's existence probe stopped filtering hidden elements for text=
+        // selectors, so the anti-premature-fallback guard now treats a present-but-hidden primary
+        // the same way for both selector kinds instead of letting a fallback act on a lookalike.
+        // 1.4.12 = the popup's "Reload extension" button is disabled in markup and re-enabled only
+        // by a getStatus response that confirms nothing is recording, so an unanswered status
+        // query can no longer leave a click able to tear down an in-progress session.
+        // 1.4.13 = mutating browser commands (click/rightClick/type/selectOption) no longer fan out
+        // to every frame. A read-only locateFrame probe elects ONE frame and the command is sent
+        // there alone, so an element that exists in both the page and an iframe is acted on once.
+        public const string ExpectedExtensionVersion = "1.4.13";
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
         private NamedPipeServerStream? _pipeServer;
         private StreamReader? _reader;
@@ -78,6 +87,16 @@ namespace TrueReplayer.Services
                             currentUserSid,
                             PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
                             AccessControlType.Allow));
+                        // Pin the OWNER to the user SID as well, not just the DACL. The NativeHost
+                        // connects with PipeOptions.CurrentUserOnly, and that check compares the
+                        // pipe's owner against WindowsIdentity.Owner — which is NOT the user SID for
+                        // an elevated process, it is BUILTIN\Administrators. Left at the default,
+                        // running TrueReplayer with RunAsAdmin would create an Administrators-owned
+                        // pipe that the (non-elevated, Chrome-launched) host then refuses, breaking
+                        // the browser bridge for exactly the users who opted into elevation.
+                        // Setting it explicitly makes the owner the same value in both elevations,
+                        // so the host's check answers identically either way.
+                        pipeSecurity.SetOwner(currentUserSid);
                     }
                     _pipeServer = NamedPipeServerStreamAcl.Create(PipeName, PipeDirection.InOut, 1,
                         PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 0, 0, pipeSecurity);
