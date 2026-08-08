@@ -34,12 +34,83 @@ namespace TrueReplayer
         private System.Threading.Timer? _uiReadyWatchdog;
         private int _uiReloadAttempts = 0;
         private const int MaxReloadAttempts = 5;
+        // Recoveries spent on FAILED navigations, capped separately from the watchdog's. A dead
+        // wwwroot (quarantined by AV, virtual-host mapping refused) fails every single time, and
+        // RecoverWebView's level 3 restarts the process — which resets every counter, fails again
+        // and restarts again, forever. Two is exactly RecoverWebView's Reload + Navigate: the two
+        // levels that can plausibly fix a transient load failure. Past that we stop and tell the
+        // user, because a process restart cannot conjure back missing files. UI-thread-only
+        // (NavigationCompleted), so unlike _uiReloadAttempts it needs no marshalling.
+        private int _navFailureRecoveries = 0;
+        private const int MaxNavFailureRecoveries = 2;
         // Navigation target is stored on first init so recovery doesn't depend on
         // CoreWebView2.Source, which can return an empty string after the renderer crashes.
         private string _targetUrl = "";
         // Tracks how many recovery attempts happened since the last successful ui:ready.
         // If we exhaust levels 1 → 2 repeatedly, level 3 (process restart) is triggered.
         private int _consecutiveRecoveryAttempts = 0;
+
+        // ---- ui:ready watchdog policy ------------------------------------------------------
+        // This was a flat 5000 ms one-shot, and blowing it walked Reload → Navigate → process
+        // restart in about fifteen seconds. A cold start can legitimately cost more than that:
+        // the startup path loads every profile on this same dispatcher (~81 of them for a real
+        // user, serially), and the first run after an update is also the run where antivirus
+        // scans the app-X.Y.Z folder Velopack just extracted. A merely slow machine was being
+        // diagnosed as a hung one and killed mid-load — the user sees an app that "won't open".
+        //
+        // Two changes make the deadline honest rather than merely bigger:
+        //   1. The FIRST ui:ready of a process gets a cold-start allowance. Every load after one
+        //      has already succeeded is warm — WebView2 processes spawned, profiles in memory,
+        //      files scanned — so it gets the short budget. 20 s is chosen against the cost of
+        //      being wrong in each direction: too long means the user waits a few extra seconds
+        //      for an automatic reload they never asked for; too short means we kill a load that
+        //      was going to finish. Only the second one is unrecoverable, so we err long.
+        //   2. Time in which OUR dispatcher was blocked does not count against the page. The
+        //      timer ticks on the pool and marshals to the UI thread; the gap between the two is
+        //      exactly how long the UI thread was unavailable, and during that gap WebView2's
+        //      handshake message could not have been serviced anyway. Crediting it back is what
+        //      makes this "fires when nothing is progressing" instead of "fires on a clock".
+        //      (Startup's profile load is async and yields between files, so it shows up as many
+        //      small lags rather than one big one — hence the generous base grace as well.)
+        private const int WatchdogTickMs = 1000;
+        private const int FirstLoadReadyGraceMs = 20000;
+        private const int ReloadReadyGraceMs = 8000;
+        // A tick that lands within half a period of when it fired means the UI thread was free;
+        // anything beyond that is starvation and gets credited back, capped per tick so one
+        // pathological stall can't buy an unbounded extension in a single step.
+        private const int StarvationLagFloorMs = 500;
+        private const int StarvationCreditPerTickMs = 3000;
+        // Total credit ceiling per load. Past a minute of accumulated starvation the app is
+        // broken in a way no reload fixes, and letting the ladder run gets the user to the
+        // actionable dialog instead of to a window that waits forever in silence.
+        private const int MaxStarvationCreditMs = 60000;
+        private long _uiReadyDeadlineTicks = 0;
+        private long _starvationCreditUsedMs = 0;
+        // Bumped on every arm and every cancel. Timer.Dispose() cannot recall a tick that has
+        // already marshalled itself onto the dispatcher, so without this stamp a watchdog that
+        // fired microseconds before ui:ready would reload a UI that had just come up fine.
+        private int _watchdogEpoch = 0;
+        private bool _uiReadyEverReceived = false;
+
+        // Level 3 (process restart) is the one recovery step that outlives the process, so its
+        // budget has to outlive the process too. Every counter above is an instance field the
+        // replacement cannot see — which is exactly how a slow start became an endless relaunch
+        // loop: restart, reset to zero, be slow again, restart again. The generation rides in on
+        // the command line rather than in a marker file because it is scoped to the relaunch
+        // chain by construction: a launch the user started themselves cannot inherit it, a crash
+        // or a kill cannot leave one behind stale, and there is no disk write on the one code
+        // path where the disk is already the prime suspect. Cleared on ui:ready — see
+        // CancelUIWatchdog — so a renderer crash hours into a healthy session still gets the
+        // full budget, restart included.
+        //
+        // One relaunch, because one is what a relaunch can actually fix: a wedged WebView2
+        // user-data folder or a zombie renderer that survived Reload and Navigate. A second
+        // relaunch has no new information to act on; it is just the loop.
+        private const string RelaunchArgPrefix = "--ui-recovery-relaunch=";
+        private const int MaxWatchdogRelaunches = 1;
+        private int _uiRelaunchGeneration = ReadRelaunchGeneration();
+        // Terminal state: the actionable dialog is shown once, not once per retry.
+        private bool _uiRecoveryExhausted = false;
 
         private IntPtr hwnd;
 
@@ -250,6 +321,10 @@ namespace TrueReplayer
             this.Closed += (_, _) =>
             {
                 Services.DiagnosticLog.Info("Window closing — disposing bridge and controllers");
+                // Bump before disposing: Dispose can't recall a tick already queued to the
+                // dispatcher, and a watchdog escalation firing mid-shutdown could reach level 3
+                // and Process.Start a replacement for a window the user just closed.
+                _watchdogEpoch++;
                 _uiReadyWatchdog?.Dispose();
                 _uiReadyWatchdog = null;
                 bridge?.Dispose();
@@ -473,40 +548,61 @@ namespace TrueReplayer
             // Reveal WebView and push state after page load (covers initial load + crash recovery)
             WebView.CoreWebView2.NavigationCompleted += (s, e) =>
             {
-                WebView.Opacity = 1;
                 // Frontend mount is fresh — zero out any hotkey-capture owner IDs left over
                 // from the previous mount (refcount slots are tied to React refs / dialog
                 // instances, both gone after navigation). Without this, a reload during an
                 // active capture would leave immortal owners that keep the hook armed forever.
+                // Runs before the failure guard below: a failed navigation replaced the old
+                // document with an error page, so those owners are just as gone.
                 InputHookManager.ClearAllCaptures();
-                if (e.IsSuccess && bridge != null)
+
+                // A FAILED navigation used to fall straight through to Opacity = 1 while the
+                // watchdog — the only thing that calls RecoverWebView from here — was armed
+                // inside the success branch only. The user was shown WebView2's blank error page
+                // and nothing ever tried again: no reload, no navigate, no log line naming the
+                // cause. Recover instead, and keep the WebView hidden while we do, so a dead page
+                // is never what gets revealed.
+                if (!e.IsSuccess)
+                {
+                    Services.DiagnosticLog.Error(
+                        $"Navigation to '{_targetUrl}' failed: {e.WebErrorStatus} " +
+                        $"(recovery {_navFailureRecoveries + 1}/{MaxNavFailureRecoveries})");
+
+                    if (_navFailureRecoveries >= MaxNavFailureRecoveries)
+                    {
+                        // Out of attempts: this install is broken, not glitching. Reveal the
+                        // error page — a visible failure the user can screenshot beats a blank
+                        // window — and say what to do about it.
+                        Services.DiagnosticLog.Error("Navigation recovery exhausted — leaving the error page visible");
+                        WebView.Opacity = 1;
+                        NativeMethods.MessageBoxW(hwnd,
+                            "TrueReplayer couldn't load its UI files.\n\nThey may have been removed or " +
+                            "quarantined by antivirus. Reinstall or repair TrueReplayer, and allow-list " +
+                            "its install folder if your antivirus flagged it.",
+                            "TrueReplayer", NativeMethods.MB_ICONERROR);
+                        return;
+                    }
+
+                    _navFailureRecoveries++;
+                    RecoverWebView($"navigation failed: {e.WebErrorStatus}");
+                    return;
+                }
+
+                // The page loaded — the install is intact, so a LATER transient failure gets a
+                // fresh budget rather than inheriting this run's spent attempts.
+                _navFailureRecoveries = 0;
+                WebView.Opacity = 1;
+                if (bridge != null)
                 {
                     DispatcherQueue.TryEnqueue(() =>
                     {
                         bridge.PushFullState();
                     });
 
-                    // Start watchdog: if UI doesn't send ui:ready within 5s, escalate via the
-                    // shared recovery path (Reload → Navigate → process restart).
-                    _uiReadyWatchdog?.Dispose();
-                    _uiReadyWatchdog = new System.Threading.Timer(_ =>
-                    {
-                        // Timer callback runs on a thread-pool thread. Marshal the counter
-                        // read/increment onto the UI thread so all access to _uiReloadAttempts
-                        // (also reset by CancelUIWatchdog and read by RecoverWebView) stays
-                        // single-threaded — no data race on the non-volatile int.
-                        DispatcherQueue.TryEnqueue(() =>
-                        {
-                            if (_uiReloadAttempts >= MaxReloadAttempts)
-                            {
-                                // Exhausted watchdog attempts without a ui:ready — go nuclear.
-                                RecoverWebView("watchdog max attempts — forcing restart");
-                                return;
-                            }
-                            _uiReloadAttempts++;
-                            RecoverWebView($"watchdog ({_uiReloadAttempts}/{MaxReloadAttempts})");
-                        });
-                    }, null, 5000, System.Threading.Timeout.Infinite);
+                    // Start the ui:ready watchdog: if the UI doesn't report in before its
+                    // deadline, escalate via the shared recovery path (Reload → Navigate →
+                    // one process restart → actionable dialog).
+                    ArmUIReadyWatchdog();
                 }
             };
 
@@ -724,10 +820,28 @@ namespace TrueReplayer
                 {
                     if (bridge.CurrentProfilePath != null)
                     {
-                        var profile = bridge.CreateProfileFromState();
-                        profile.CustomHotkey = UserProfile.Current.CustomHotkey;
-                        await SettingsManager.SaveProfileAsync(bridge.CurrentProfilePath, profile);
-                        canClose = true;
+                        // The save has to be guarded exactly like its sibling below. Writes fail
+                        // for reasons that have nothing to do with us — the file locked by an
+                        // antivirus scan or a OneDrive sync, a full disk, a folder that lost its
+                        // permissions. Unguarded, the exception escaped an async Task on the close
+                        // path: the user asked to save, was told nothing, and the app shut down and
+                        // destroyed the work anyway. Report it and refuse to close, so the user
+                        // still has the window (and the unsaved actions) in front of them.
+                        try
+                        {
+                            var profile = bridge.CreateProfileFromState();
+                            profile.CustomHotkey = UserProfile.Current.CustomHotkey;
+                            await SettingsManager.SaveProfileAsync(bridge.CurrentProfilePath, profile);
+                            canClose = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            Services.DiagnosticLog.Error($"Close-guard save to '{bridge.CurrentProfilePath}' failed", ex);
+                            NativeMethods.MessageBoxW(hwnd,
+                                $"Error saving profile:\n{ex.Message}\n\nTrueReplayer stayed open so your changes aren't lost.",
+                                "TrueReplayer", NativeMethods.MB_ICONERROR);
+                            canClose = false;
+                        }
                     }
                     else
                     {
@@ -1330,11 +1444,101 @@ namespace TrueReplayer
 
         public void CancelUIWatchdog()
         {
+            // Bump first: a tick may already be sitting on the dispatcher queue behind us, and
+            // disposing the timer does nothing about that one. The stamp is what makes it a
+            // no-op instead of a reload of the UI that just finished coming up.
+            _watchdogEpoch++;
             _uiReadyWatchdog?.Dispose();
             _uiReadyWatchdog = null;
             _uiReloadAttempts = 0;
+            _starvationCreditUsedMs = 0;
+            // Every later load in this process is a warm one — see FirstLoadReadyGraceMs.
+            _uiReadyEverReceived = true;
             // UI is alive — reset the escalation counter so future crashes start back at level 1
             _consecutiveRecoveryAttempts = 0;
+            _uiRecoveryExhausted = false;
+            // ...and the counter that outlives the process. This chain of relaunches ended in a
+            // working UI, so whatever goes wrong next is a new failure and deserves a full
+            // budget rather than inheriting the spent one from an unrelated slow start.
+            if (_uiRelaunchGeneration != 0)
+            {
+                Services.DiagnosticLog.Info(
+                    $"UI ready after recovery relaunch #{_uiRelaunchGeneration} — restart budget restored");
+                _uiRelaunchGeneration = 0;
+            }
+        }
+
+        /// <summary>
+        /// Arms (or re-arms) the ui:ready watchdog for the load that just completed. Periodic
+        /// rather than one-shot: a tick that finds the deadline intact costs one enqueue, and
+        /// keeping the heartbeat means a recovery level that never produces a NavigationCompleted
+        /// still gets re-examined instead of leaving the app with no watchdog at all.
+        /// </summary>
+        private void ArmUIReadyWatchdog()
+        {
+            _uiReadyWatchdog?.Dispose();
+
+            int epoch = ++_watchdogEpoch;
+            int grace = _uiReadyEverReceived ? ReloadReadyGraceMs : FirstLoadReadyGraceMs;
+            _uiReadyDeadlineTicks = Environment.TickCount64 + grace;
+            _starvationCreditUsedMs = 0;
+
+            _uiReadyWatchdog = new System.Threading.Timer(_ =>
+            {
+                // Pool thread. Stamp the moment the tick fired; the difference against the
+                // dispatcher's clock below is the UI thread's unavailability, which is the
+                // whole starvation measurement.
+                long firedAtTicks = Environment.TickCount64;
+
+                // Marshal onto the UI thread so every counter here (also touched by
+                // CancelUIWatchdog and RecoverWebView) stays single-threaded — no data race
+                // on the non-volatile fields.
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    // Superseded by a newer arm, or cancelled by ui:ready, after this tick was
+                    // already queued. Nothing to do.
+                    if (epoch != _watchdogEpoch) return;
+
+                    long nowTicks = Environment.TickCount64;
+                    long lagMs = nowTicks - firedAtTicks;
+                    if (lagMs >= StarvationLagFloorMs && _starvationCreditUsedMs < MaxStarvationCreditMs)
+                    {
+                        long credit = Math.Min(lagMs, StarvationCreditPerTickMs);
+                        credit = Math.Min(credit, MaxStarvationCreditMs - _starvationCreditUsedMs);
+                        long extended = nowTicks + credit;
+                        // Max, not +=: when a backlog of stale ticks drains at once they all
+                        // compute nearly the same target, so the extension collapses to one
+                        // instead of compounding once per queued tick.
+                        if (extended > _uiReadyDeadlineTicks)
+                        {
+                            _starvationCreditUsedMs += credit;
+                            _uiReadyDeadlineTicks = extended;
+                            Services.DiagnosticLog.Info(
+                                $"ui:ready watchdog extended {credit} ms — UI thread was blocked " +
+                                $"(total credit {_starvationCreditUsedMs}/{MaxStarvationCreditMs} ms)");
+                        }
+                    }
+
+                    if (nowTicks < _uiReadyDeadlineTicks) return;
+
+                    // Deadline blown with the app responsive. Re-arm the deadline BEFORE
+                    // escalating: the timer is periodic, so without this the next tick one
+                    // second later would escalate again and race straight down the ladder.
+                    // A recovery level that does produce a NavigationCompleted re-arms with a
+                    // fresh epoch anyway; this only bounds the case where it doesn't.
+                    _uiReadyDeadlineTicks = nowTicks + (_uiReadyEverReceived ? ReloadReadyGraceMs : FirstLoadReadyGraceMs);
+                    _starvationCreditUsedMs = 0;
+
+                    if (_uiReloadAttempts >= MaxReloadAttempts)
+                    {
+                        // Exhausted watchdog attempts without a ui:ready — go nuclear.
+                        RecoverWebView("watchdog max attempts — forcing restart");
+                        return;
+                    }
+                    _uiReloadAttempts++;
+                    RecoverWebView($"watchdog ({_uiReloadAttempts}/{MaxReloadAttempts}, {grace} ms grace)");
+                });
+            }, null, WatchdogTickMs, WatchdogTickMs);
         }
 
         /// <summary>
@@ -1370,9 +1574,89 @@ namespace TrueReplayer
 
                 // Level 3: Restart the entire process. The user's profile is already on disk,
                 // so a fresh process reopens to the same state.
+                if (_uiRelaunchGeneration >= MaxWatchdogRelaunches)
+                {
+                    // The replacement would inherit the same machine, the same install and the
+                    // same slow disk, and it would come up with every counter in this class
+                    // zeroed — which is precisely how "restart once more" becomes a relaunch
+                    // loop the user experiences as an app that never opens. Stop restarting;
+                    // say something the user can act on, then keep retrying the one step that
+                    // costs nothing. Navigate churns no process and loses no state (the UI
+                    // never came up, so there is nothing to lose), and the watchdog only lets
+                    // us back here once per grace window — so this is a paced retry, not a
+                    // spin, and it heals by itself if the cause clears (AV finishes its scan,
+                    // a network share comes back).
+                    ReportRecoveryExhausted(reason);
+                    if (TryNavigate())
+                        Services.DiagnosticLog.Info("Recovery: re-navigating instead of restarting (restart budget spent)");
+                    return;
+                }
+
                 Services.DiagnosticLog.Warn("Recovery level 3: restarting process");
                 TryRestartProcess();
             });
+        }
+
+        /// <summary>
+        /// Terminal state for UI recovery: the ladder is spent and we will not restart the
+        /// process again this session. Shown once — every later exhausted escalation just logs,
+        /// so an automatic source such as ProcessFailed can't turn this into modal spam.
+        /// </summary>
+        private void ReportRecoveryExhausted(string reason)
+        {
+            if (_uiRecoveryExhausted) return;
+            _uiRecoveryExhausted = true;
+
+            Services.DiagnosticLog.Error(
+                $"UI recovery exhausted (relaunch generation {_uiRelaunchGeneration}) — reason='{reason}'. " +
+                "No further automatic process restarts this session.");
+
+            // Whatever the page did manage to render beats an invisible window: a visible
+            // failure is something the user can describe or screenshot.
+            try { if (WebView != null) WebView.Opacity = 1; }
+            catch (Exception ex) { Services.DiagnosticLog.Warn($"Reveal-on-exhaustion failed: {ex.Message}"); }
+
+            var logsLine = string.IsNullOrEmpty(Services.DiagnosticLog.LogDirectory)
+                ? ""
+                : $"\n\nLogs: {Services.DiagnosticLog.LogDirectory}";
+
+            // Native box, matching the navigation-failure path above: at this point the React
+            // UI is exactly the thing that isn't working, so it can't be asked to render this.
+            NativeMethods.MessageBoxW(hwnd,
+                "TrueReplayer's interface didn't finish loading, and restarting the app didn't help.\n\n" +
+                "The app is still running — right-click its tray icon and choose \"Reload UI\" to try " +
+                "again, or \"Open Logs Folder\" to see what failed.\n\n" +
+                "If it keeps happening, allow-list TrueReplayer's install folder in your antivirus, " +
+                "then reinstall or repair the app." + logsLine,
+                "TrueReplayer", NativeMethods.MB_ICONERROR);
+        }
+
+        /// <summary>
+        /// Reads the relaunch generation this process was started with, if any. Zero means a
+        /// normal launch — user, autostart, or Velopack after an update — and therefore a full
+        /// recovery budget. See the RelaunchArgPrefix declaration for why the command line.
+        /// </summary>
+        private static int ReadRelaunchGeneration()
+        {
+            try
+            {
+                foreach (var arg in Environment.GetCommandLineArgs())
+                {
+                    if (!arg.StartsWith(RelaunchArgPrefix, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (int.TryParse(arg.Substring(RelaunchArgPrefix.Length), out var generation) && generation > 0)
+                    {
+                        Services.DiagnosticLog.Warn(
+                            $"Started as UI-recovery relaunch #{generation} — " +
+                            $"{(generation >= MaxWatchdogRelaunches ? "no further automatic restarts" : "restart budget remaining")}");
+                        return generation;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Services.DiagnosticLog.Warn($"Relaunch-generation parse failed: {ex.Message}");
+            }
+            return 0;
         }
 
         private bool TryReload()
@@ -1426,18 +1710,35 @@ namespace TrueReplayer
                     return;
                 }
 
+                // Hand the recovery generation to the replacement. Nothing else survives this
+                // boundary: every attempt counter in this class is an instance field, so without
+                // the argument the new process starts its ladder at zero, meets the same
+                // slowness, and relaunches again — forever.
+                int nextGeneration = _uiRelaunchGeneration + 1;
                 var startInfo = new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = exePath,
+                    Arguments = RelaunchArgPrefix + nextGeneration.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     UseShellExecute = true,
                 };
                 System.Diagnostics.Process.Start(startInfo);
-                Services.DiagnosticLog.Info("Launched replacement process, exiting current");
+                Services.DiagnosticLog.Info($"Launched replacement process (recovery relaunch #{nextGeneration}), exiting current");
                 // Bypasses ForceExit — flush the debounced run cursors before the process dies,
                 // and BEFORE the replacement gets far enough to read the sidecar. Same for the
                 // debounced automation stats.
                 RunCursorService.Flush();
                 TriggerService.Instance?.Flush();
+                // The remap layer has been live since the constructor, and Stop() is the only
+                // caller of its release-the-held-keys path. Exit without it and any pairing
+                // still open leaves the injected TO key logically DOWN system-wide with no
+                // process left to release it — with Ctrl/Shift/Alt every later keystroke turns
+                // into a shortcut, and with a key the keyboard doesn't have, only a logoff
+                // clears it. Deliberately AFTER Process.Start: if the launch throws we return
+                // without exiting and this process keeps running, and it needs its hooks. Its
+                // own try/catch because the outer one would swallow a throw here and skip
+                // Environment.Exit(0), leaving two live processes.
+                try { InputHookManager.Stop(); }
+                catch (Exception hookEx) { Services.DiagnosticLog.Error("InputHookManager.Stop() threw during restart", hookEx); }
                 Environment.Exit(0);
             }
             catch (Exception ex)

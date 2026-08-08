@@ -231,17 +231,21 @@ namespace TrueReplayer.Services
             // an update must not cost the user their place in a list, nor its automation history.
             RunCursorService.Flush();
             TriggerService.Instance?.Flush();
+            // Same reason ForceExit does it: Stop() is the only caller of the remap layer's
+            // release path, and the remap layer has been live since the MainWindow constructor.
+            // Exit with a pairing still open and the injected TO key stays logically DOWN
+            // system-wide with no process left to release it — with Ctrl/Shift/Alt that turns
+            // every subsequent keystroke into a shortcut, and with a key the user's keyboard
+            // lacks, only a logoff clears it. The updated app relaunches into a fresh process
+            // that installs its own hooks, so unhooking here costs nothing.
+            //
+            // Before WaitExitThenApplyUpdates, and guarded: a throw after the apply is queued
+            // would skip Environment.Exit(0) and leave Update.exe waiting on a process that
+            // never leaves, which stalls the update instead of applying it.
+            try { TrueReplayer.InputHookManager.Stop(); }
+            catch (Exception ex) { DiagnosticLog.Error($"[UpdateService] InputHookManager.Stop() threw before update restart: {ex.Message}"); }
             _manager.WaitExitThenApplyUpdates(_pendingUpdate.TargetFullRelease, silent: true, restart: true);
             Environment.Exit(0);
-        }
-
-        /// <summary>
-        /// Applies the downloaded update on next app exit (non-disruptive).
-        /// </summary>
-        public static void ApplyOnExit()
-        {
-            if (_pendingUpdate?.TargetFullRelease != null)
-                _manager.WaitExitThenApplyUpdates(_pendingUpdate.TargetFullRelease);
         }
     }
 }
