@@ -509,10 +509,17 @@ namespace TrueReplayer.Services
                     : Math.Max(areaW, areaH);
                 int steps = Math.Max(1, (int)Math.Ceiling((double)walkPx / ActionReplayer.MoveStepPx));
                 int moveCostMs = (steps - 1) * ActionReplayer.MoveStepDelayMs;
+                // Reports the ADDED cost, not a resulting rate. Measured 2026-08-08 in Area at a
+                // 10 ms period: this estimate said 6 ms and the observed per-tick difference was
+                // 6.2 ms — the delta is sound. The absolute ceiling is not: it can only count the
+                // walk's own sleeps, and the run also pays syscall + low-level-hook overhead that
+                // varies by machine and load (measured ~7 ms, which turned a predicted 62/s into
+                // an actual 43/s). Stating a ceiling this cannot compute would be the same lie
+                // the rate itself used to tell. The dashboard's measured Rate is the ground truth.
                 if (moveCostMs + safeHold >= nominalPeriod)
                     DiagnosticLog.Info(
-                        $"Clicker: gameMove walk costs ~{moveCostMs}ms/tick (+{safeHold}ms hold) vs period " +
-                        $"{nominalPeriod}ms — effective rate limited to ~{1000.0 / Math.Max(1, moveCostMs + safeHold):0.#}/s.");
+                        $"Clicker: gameMove adds ~{moveCostMs}ms/tick of cursor travel; with the {safeHold}ms hold " +
+                        $"that already exceeds the {nominalPeriod}ms period, so the run will be slower than configured.");
             }
             if (loopCount == 0 && maxDurationMs == 0)
                 DiagnosticLog.Info("Clicker: unbounded run — stop with the Clicker hotkey, the Stop button or the tray.");
