@@ -274,7 +274,14 @@ namespace TrueReplayer
                 "KeyDown", "KeyUp", "HoldKey", "Keystroke",
                 "SendText", "SetVariable", "CopyToSlot", "ActivateWindow",
                 "WaitImage", "WaitPixelColor", "Pause", "RunProfile",
-                "If", "Else", "EndIf",
+                // "Assert" is a LEAF condition row (ActionExecution's `case "Assert"` →
+                // ExecuteAssert), not a block type, which is how it came to be missed here while
+                // If/Else/EndIf were listed. Omitting it made this allowlist reject a real
+                // executor type: an actions:edit switching a row to Assert was dropped with only a
+                // DiagnosticLog.Warn, no alert, and the grid silently snapping back. The set is a
+                // MIRROR of the executor's dispatch, so it is wrong whenever it is a subset —
+                // a new case in ActionExecution has to be added here in the same commit.
+                "If", "Else", "EndIf", "Assert",
                 "BrowserClick", "BrowserRightClick", "BrowserType",
                 "BrowserWaitElement", "BrowserNavigate", "BrowserSelectOption", "BrowserAssert",
             };
@@ -2173,6 +2180,11 @@ namespace TrueReplayer
                 copiedCount = _copiedActions?.Count ?? 0,
                 canRedo = CanRedo
             });
+
+            // Recording/replay start+stop both land here, which makes this the cheapest honest
+            // signal that a run has ENDED — and the end of a run is when an update the run
+            // refused becomes applicable again. Returns immediately unless one is parked.
+            MaybeResumeDeferredUpdate();
         }
 
         public void PushToolbarUpdate()
@@ -2235,11 +2247,29 @@ namespace TrueReplayer
                 {
                     var profile = CreateProfileFromState();
                     await SettingsManager.SaveProfileAsync(CurrentProfilePath, profile);
+                    // Every other successful-save path in this file clears the dirty flags right
+                    // where the write lands. This call site used to skip that and lean on the
+                    // caller loading a different profile afterward to reset state as a side
+                    // effect — true for HandleProfileClick/HandleProfileLoad, but
+                    // HandleProfileExport just continues on to export after Save, so
+                    // HasUnsavedChanges stayed true forever. A profile stuck "dirty" parks its
+                    // automation trigger in SkippedDirty, which is terminal (never retried) —
+                    // the trigger would silently never fire again.
+                    HasUnsavedChanges = false;
+                    ClearLoopEdit();
                     return true;
                 }
                 else
                 {
                     bool saved = await profileController.SaveProfileAsync();
+                    // Only clear on an actual success — SaveProfileAsync returns false when the
+                    // user cancels its own Save-As picker, and clearing here would tell every
+                    // caller "proceed, nothing to save" even though nothing was written.
+                    if (saved)
+                    {
+                        HasUnsavedChanges = false;
+                        ClearLoopEdit();
+                    }
                     return saved;
                 }
             }
@@ -2521,11 +2551,52 @@ namespace TrueReplayer
         }
 
         // Master switch for silent auto-update.
-        //   true  → after detection, immediately download + apply + restart with no UI gate.
+        //   true  → after detection, download + apply + restart with no UI gate — but only when
+        //           the app is idle, see EvaluateUpdateGate below.
         //   false → only notify the frontend (legacy "Update available" overlay decides).
-        // Frontend overlay is currently disabled (see UpdateOverlay.tsx UPDATE_OVERLAY_ENABLED);
-        // flipping this to false alone would leave updates undetectable to the user.
+        // The overlay is live (UpdateOverlay.tsx UPDATE_OVERLAY_ENABLED = true), which is what
+        // makes the notify path a real fallback rather than a black hole: an update the gate
+        // refuses to apply silently is still shown, it just waits for a click.
         private const bool AutoApplyUpdates = true;
+
+        // What an unattended restart would COST right now. ApplyAndRestart ends in
+        // Environment.Exit(0): no close guard, no Save prompt, no undo. The auto path has to
+        // answer this before it fires, and the three answers are deliberately not equal.
+        //
+        //   Busy    — a recording or replay is live. Recorded actions exist only in the in-memory
+        //             `actions` collection until an explicit Save, so exiting mid-recording
+        //             destroys the take with no prompt and no trace; exiting mid-replay abandons
+        //             whatever the macro was driving, half-done. This is the same bar
+        //             HandleProfileExport / HandleProfileImport already hold their work to — and
+        //             they only rewrite files, where this kills the process.
+        //   Unsaved — an idle profile carrying an edit. Real work, but work the app already knows
+        //             how to rescue by ASKING. So it does not block the update; it only downgrades
+        //             the SILENT apply to the user-confirmed overlay. A stray edit nobody ever
+        //             saves must not pin the install on an old version forever.
+        //   Clear   — nothing to lose; restart away.
+        //
+        // The Unsaved test is CheckUnsavedChangesAsync's own short-circuit, inverted. Anything
+        // looser would report "unsaved" in a state where that prompt declines to appear, and the
+        // apply path would then have no dialog to resolve the block with — a permanent stall.
+        private enum UpdateGate { Clear, Busy, Unsaved }
+
+        private UpdateGate EvaluateUpdateGate(out string reason)
+        {
+            if (recordingService.IsRecording) { reason = "a recording is in progress"; return UpdateGate.Busy; }
+            if (replayService.IsReplaying) { reason = "a replay is running"; return UpdateGate.Busy; }
+            if (HasUnsavedLoopChange || (HasUnsavedChanges && actions.Count > 0)) { reason = "the profile has unsaved changes"; return UpdateGate.Unsaved; }
+            reason = string.Empty;
+            return UpdateGate.Clear;
+        }
+
+        /// <summary>An update that was found but not applied, held so the retry can re-offer it
+        /// without a second GitHub round-trip.</summary>
+        private sealed record PendingUpdate(string Version, string CurrentVersion, List<string> Notes);
+
+        // Armed ONLY by CheckForUpdateAsync, and only when a live run refused the apply. Taken and
+        // cleared by MaybeResumeDeferredUpdate before it does anything else, and re-armed nowhere:
+        // one deferral gets exactly one retry, so it cannot spin into a download loop.
+        private PendingUpdate? _deferredUpdate;
 
         // Re-entrancy guard for HandleUpdateApply. It's reachable from three places that can
         // overlap: the auto-apply branch of CheckForUpdateAsync (fired on startup AND on every
@@ -2533,6 +2604,56 @@ namespace TrueReplayer
         // message. Without the guard a second invocation kicks off a parallel download +
         // ApplyAndRestart, racing the Velopack apply against itself.
         private bool _updateInProgress;
+
+        // One voice for "an update exists and was not installed". Two channels, because neither
+        // is sufficient alone: `update:error` is the only terminal update:* message that both
+        // dismisses the splash and releases the Settings panel's "Checking..." button from its
+        // disabled state, but the frontend never renders its payload text — so the toast beside it
+        // is the only thing that actually tells the user WHY. Skipping the toast is how a blocked
+        // update turns into an update the user never learns about.
+        private void ReportUpdatePostponed(string reason)
+        {
+            DiagnosticLog.Info($"[Update] Apply postponed — {reason}");
+            SendMessage("update:error", new { message = $"Update postponed: {reason}" });
+            SendMessage("alert:show", new
+            {
+                message = $"An update is ready but was not installed because {reason}. It will be offered again once the app is idle — or apply it any time from Settings → Check for Updates.",
+                type = "info"
+            });
+        }
+
+        // Second half of the deferral. Hung off PushButtonStates because that is the ONE callback
+        // both RecordingService and ReplayService raise on every start/stop (MainWindow wires all
+        // three service constructors to it), so it is precisely the "a run just ended" edge —
+        // no timer, no poll. Everything below no-ops unless an update is actually parked.
+        private void MaybeResumeDeferredUpdate()
+        {
+            var pending = _deferredUpdate;
+            if (pending == null || _updateInProgress) return;
+
+            var gate = EvaluateUpdateGate(out _);
+            if (gate == UpdateGate.Busy) return;   // still running — leave the slot armed
+            _deferredUpdate = null;                // one shot: taken before anything can re-enter
+
+            if (gate == UpdateGate.Clear)
+            {
+                _ = HandleUpdateApply();
+                return;
+            }
+
+            // Unsaved. Stopping a recording is the usual way out of Busy and it leaves the take
+            // dirty by definition, so this is the COMMON landing, not the edge case. Restarting
+            // out from under a fresh recording is the exact failure this whole gate exists to
+            // prevent — raise the confirm overlay instead and let the apply happen on a click,
+            // behind the Save/Discard prompt that click triggers.
+            SendMessage("update:available", new
+            {
+                version = pending.Version,
+                currentVersion = pending.CurrentVersion,
+                notes = pending.Notes,
+                autoApply = false,
+            });
+        }
 
         private async Task CheckForUpdateAsync()
         {
@@ -2544,24 +2665,48 @@ namespace TrueReplayer
             try
             {
                 var newVersion = await UpdateService.CheckForUpdateAsync();
+
+                // A completed check supersedes any parked deferral — the release could have been
+                // pulled, or superseded, or this check is about to re-park it with fresher notes.
+                // Leaving the old slot armed would let a stale offer fire on a later idle edge
+                // alongside whatever this check decides. The Busy branch below re-arms it.
+                _deferredUpdate = null;
+
                 if (newVersion != null)
                 {
                     // Fetch release notes in parallel — best-effort, may be empty
                     var notes = await UpdateService.GetPendingReleaseNotesAsync();
+                    var currentVersion = UpdateService.CurrentVersion ?? "unknown";
+                    var gate = EvaluateUpdateGate(out var reason);
+
+                    // A live run gets NO overlay at all. The splash is position:fixed/inset:0 over
+                    // the entire app and its "available" phase has no dismiss control — raising it
+                    // mid-replay would bury the Stop button under a card whose only button we are
+                    // about to refuse anyway. Announce it as a toast, park it, and let the idle
+                    // transition (PushButtonStates → MaybeResumeDeferredUpdate) carry it forward.
+                    if (gate == UpdateGate.Busy)
+                    {
+                        _deferredUpdate = new PendingUpdate(newVersion, currentVersion, notes);
+                        ReportUpdatePostponed(reason);
+                        return;
+                    }
 
                     // autoApply tells the frontend to skip the "Download" confirmation gate
                     // and transition straight to the downloading splash — matches the mockup
                     // (no confirmation button). The legacy gate flow stays available when
-                    // AutoApplyUpdates is flipped off in code.
+                    // AutoApplyUpdates is flipped off in code, and is ALSO what an unsaved
+                    // profile degrades to: claiming autoApply for a download we are not about to
+                    // start would strand the overlay on "Baixando... 0 %" with nothing behind it.
+                    bool autoApply = AutoApplyUpdates && gate == UpdateGate.Clear;
                     SendMessage("update:available", new
                     {
                         version = newVersion,
-                        currentVersion = UpdateService.CurrentVersion ?? "unknown",
+                        currentVersion = currentVersion,
                         notes = notes,
-                        autoApply = AutoApplyUpdates,
+                        autoApply = autoApply,
                     });
 
-                    if (AutoApplyUpdates)
+                    if (autoApply)
                     {
                         // Silent auto-update: kick off download + apply + restart immediately,
                         // skipping the user-confirmation overlay. Fire-and-forget — failures
@@ -2589,11 +2734,34 @@ namespace TrueReplayer
             // Short-circuit re-entrant calls (auto-apply + manual update:check/update:apply can
             // overlap). The flag stays set through the success path so the 1.8 s pre-restart
             // delay can't be interrupted by a second apply; ApplyAndRestart exits the process,
-            // so the finally only runs (clearing the flag) on the download-failure path.
+            // so the finally only runs (clearing the flag) when we back out instead of restarting.
             if (_updateInProgress) return;
+
+            // Entry gate, BEFORE the guard flag: this method is the "update:apply" button as well
+            // as the auto path, so the user can perfectly well click Install with a replay
+            // running. Refuse it exactly like the auto path does, and say why — a silent no-op on
+            // a button the user just pressed reads as a broken button.
+            var gate = EvaluateUpdateGate(out var reason);
+            if (gate == UpdateGate.Busy)
+            {
+                ReportUpdatePostponed(reason);
+                return;
+            }
+
             _updateInProgress = true;
             try
             {
+                // Unsaved work only reaches here on a DELIBERATE apply — the auto path stops at
+                // the confirm overlay instead — so prompting is expected rather than an ambush.
+                // It runs before the download so a Cancel doesn't cost a pointless transfer, and
+                // it is the same Save/Discard/Cancel the window close guard runs: an update IS a
+                // close, it just comes back afterwards. Cancel means "not now", not "lose it".
+                if (gate == UpdateGate.Unsaved && !await CheckUnsavedChangesAsync("updating"))
+                {
+                    ReportUpdatePostponed("the unsaved-changes prompt was cancelled");
+                    return;
+                }
+
                 SendMessage("update:progress", new { percent = 0 });
 
                 var success = await UpdateService.DownloadUpdateAsync(progress =>
@@ -2606,6 +2774,18 @@ namespace TrueReplayer
 
                 if (success)
                 {
+                    // Re-check AFTER the download and BEFORE update:ready. The transfer takes
+                    // seconds, and a hotkey needs one — the entry gate above proves nothing about
+                    // the state of the app at the moment the NEXT statement exits the process.
+                    // Nothing is re-armed here on purpose: the package stays staged, so the next
+                    // check (startup, or the Settings button) applies it without downloading
+                    // again, and one detection can never fan out into repeated transfers.
+                    if (EvaluateUpdateGate(out var lateReason) != UpdateGate.Clear)
+                    {
+                        ReportUpdatePostponed(lateReason);
+                        return;
+                    }
+
                     SendMessage("update:ready", new { });
                     // Give the React overlay a beat to render the 'installing' phase before
                     // we tear down the process. Without the pause, Environment.Exit(0) inside
@@ -2618,8 +2798,34 @@ namespace TrueReplayer
                 }
                 else
                 {
+                    // The overlay just hides on update:error without rendering the message, so the
+                    // download failure would otherwise be a splash that silently vanishes.
                     SendMessage("update:error", new { message = "Download failed" });
+                    SendMessage("alert:show", new
+                    {
+                        message = "The update could not be downloaded. It will be retried on the next check.",
+                        type = "error"
+                    });
                 }
+            }
+            catch (Exception ex)
+            {
+                // update:ready fires 1.8 s BEFORE ApplyAndRestart, and by then the overlay is
+                // already painting "Atualizado com sucesso!". ApplyAndRestart is the one call on
+                // this path that can throw WITHOUT ending the process — a corrupt staged package,
+                // antivirus holding the file, a permissions failure on the install directory —
+                // and there was no catch here at all. The exception landed in the global
+                // UnobservedTaskException handler, which only logs, so the user was left staring
+                // at a success splash on top of the version they already had, with no update:error
+                // ever sent and nothing in the UI to contradict it. update:error is what dismisses
+                // that splash; the toast is what replaces the lie with the truth.
+                DiagnosticLog.Error("[Update] Apply failed", ex);
+                SendMessage("update:error", new { message = $"Update failed: {ex.Message}" });
+                SendMessage("alert:show", new
+                {
+                    message = $"The update could not be applied: {ex.Message}. TrueReplayer is still running the current version.",
+                    type = "error"
+                });
             }
             finally
             {
@@ -3339,39 +3545,64 @@ namespace TrueReplayer
 
         private void HandleBulkUpdateCoord(JsonElement payload)
         {
-            PushUndoState();
             var indices = payload.GetProperty("indices").EnumerateArray()
                 .Select(e => e.GetInt32()).ToList();
             string axis = payload.GetProperty("axis").GetString() ?? "x"; // "x" or "y"
-            string valueStr = payload.GetProperty("value").GetString() ?? "0";
+            string valueStr = (payload.GetProperty("value").GetString() ?? "").Trim();
             bool isOffset = valueStr.StartsWith("+") || valueStr.StartsWith("-");
-            int val = int.TryParse(valueStr, out var v) ? v : 0;
 
-            int updated = 0;
-            foreach (var idx in indices)
+            // A FAILED int.TryParse used to fall through to 0 — and 0 is a legal coordinate, so a
+            // typo ("5oo", "500.5", anything past int range) silently drove every selected click
+            // to X=0 in the absolute form, indistinguishable from a deliberate "set them all to
+            // zero", and the toast below confirmed success either way. The frontend now rejects
+            // the same shapes, but this is the enforcing side: the bridge dispatches by string
+            // name, so a stale frontend build or any other caller arrives here directly.
+            //
+            // Placed BEFORE PushUndoState so a rejection touches neither the undo nor the redo
+            // stack, the same reason the empty-target guard below is resolved before the push.
+            if (!int.TryParse(valueStr, out var val))
             {
-                if (idx >= 0 && idx < actions.Count)
-                {
-                    var a = actions[idx];
-                    // Only apply X/Y to mouse click actions (paired halves + combined single clicks)
-                    if (a.ActionType is not ("LeftClickDown" or "LeftClickUp" or "RightClickDown" or "RightClickUp" or "MiddleClickDown" or "MiddleClickUp"
-                        or "LeftClick" or "RightClick" or "MiddleClick" or "DoubleClick"))
-                        continue;
-                    if (axis == "x")
-                        a.X = isOffset ? a.X + val : val;
-                    else
-                        a.Y = isOffset ? a.Y + val : val;
-                    updated++;
-                }
-            }
-            if (updated == 0)
-            {
-                SendMessage("alert:show", new { message = "X/Y can only be set on mouse click actions." });
-                _undoStack.TryPop(out _); // Remove undo state since nothing changed
+                SendMessage("alert:show", new { message = $"\"{valueStr}\" is not a valid {axis.ToUpper()} value. Use a whole number to set (500), or a signed one to offset (+10, -5)." });
                 return;
             }
+
+            // Resolve the rows that will actually move BEFORE snapshotting. X/Y only mean anything
+            // on a mouse click (paired halves + combined single clicks), so a selection holding
+            // none of those is a pure no-op — and a no-op must not reach PushUndoState, because
+            // that call CLEARS the redo stack. The old shape pushed first and then popped the undo
+            // entry back off here; the pop cannot un-clear the redo stack, so a bulk X/Y aimed at,
+            // say, a run of SendText rows destroyed the user's whole redo history while changing
+            // nothing and saying so. Deciding first is the only shape where that cannot happen.
+            //
+            // Duplicate indices are deliberately NOT collapsed: the same row listed twice was
+            // offset twice (and counted twice) before, and the frontend never sends duplicates
+            // anyway — de-duplicating here would be a silent behaviour change smuggled in
+            // alongside the fix.
+            var targets = indices
+                .Where(idx => idx >= 0 && idx < actions.Count)
+                .Select(idx => actions[idx])
+                .Where(a => a.ActionType is "LeftClickDown" or "LeftClickUp" or "RightClickDown" or "RightClickUp" or "MiddleClickDown" or "MiddleClickUp"
+                    or "LeftClick" or "RightClick" or "MiddleClick" or "DoubleClick")
+                .ToList();
+
+            if (targets.Count == 0)
+            {
+                SendMessage("alert:show", new { message = "X/Y can only be set on mouse click actions." });
+                return;
+            }
+
+            PushUndoState();
+
+            foreach (var a in targets)
+            {
+                if (axis == "x")
+                    a.X = isOffset ? a.X + val : val;
+                else
+                    a.Y = isOffset ? a.Y + val : val;
+            }
+
             var label = isOffset ? valueStr : $"= {val}";
-            SendMessage("alert:show", new { message = $"Set {axis.ToUpper()} {label} for {updated} action(s)" });
+            SendMessage("alert:show", new { message = $"Set {axis.ToUpper()} {label} for {targets.Count} action(s)" });
             HasUnsavedChanges = true;
             PushActionsUpdate();
         }
@@ -3754,11 +3985,18 @@ namespace TrueReplayer
             int insertIndex = payload.GetProperty("insertIndex").GetInt32();
             if (string.IsNullOrEmpty(actionType)) return;
 
-            // Snapshot after the empty-actionType guard. The unrecognized-type tail below
-            // (the final `else`) pops this back off, mirroring HandleBulkUpdateCoord, so an
-            // unhandled type also leaves the undo/redo stacks untouched. The WaitImage and
-            // capture (LeftClick/KeyPress) branches keep this push — it's their only undo
-            // step since their async insert paths don't push one of their own.
+            // Snapshot after the empty-actionType guard. Whether the type is one this method
+            // handles at all is only knowable at the bottom (every branch owns its own type
+            // test), so unlike HandleBulkUpdateCoord — which can decide up front and therefore
+            // never pushes on a no-op — this one has to push first and unwind in the
+            // unrecognized-type tail. Unwinding means BOTH stacks: PushUndoState also clears the
+            // redo stack, so the redo entries are captured here and handed back by that tail.
+            // The array is empty on the overwhelmingly common path (nothing to redo) and this
+            // runs once per Insert click, so the allocation is not worth engineering around.
+            //
+            // The WaitImage and capture (LeftClick/KeyPress) branches keep this push — it's
+            // their only undo step since their async insert paths don't push one of their own.
+            var discardedRedo = _redoStack.ToArray();
             PushUndoState();
 
             insertIndex = Math.Max(0, Math.Min(insertIndex, actions.Count));
@@ -3916,9 +4154,17 @@ namespace TrueReplayer
             }
             else
             {
-                // Unrecognized type — nothing was inserted, so drop the snapshot pushed above
-                // (which also restores the redo stack it cleared). Mirrors HandleBulkUpdateCoord.
+                // Unrecognized type — nothing was inserted, so undo the bookkeeping the snapshot
+                // above did. Popping the undo entry is only half of it: PushUndoState CLEARS the
+                // redo stack, and until this restore existed a stale caller dispatching a type
+                // this method does not handle silently wiped the user's redo history while
+                // inserting nothing. Stack<T>.ToArray hands back top-first, so pushing in reverse
+                // rebuilds the original order. UpdateButtonStates re-runs because PushUndoState
+                // last computed the button states against the pushed-and-cleared stacks.
                 _undoStack.TryPop(out _);
+                for (int i = discardedRedo.Length - 1; i >= 0; i--)
+                    _redoStack.Push(discardedRedo[i]);
+                mainController.UpdateButtonStates();
                 return;
             }
 
@@ -4405,6 +4651,11 @@ namespace TrueReplayer
             }
 
             int delay = int.TryParse(CustomDelay, out var pd) ? pd : 100;
+            // Snapshot after the guards above (empty keystroke already returned) so the
+            // insert below is guaranteed to land. Every sibling insert handler in this file
+            // pushes undo state before mutating; this one didn't, so Ctrl+Z after inserting
+            // a keystroke either did nothing or undid an unrelated earlier edit instead.
+            PushUndoState();
             // ONE row with the whole combo. ExecuteKeystroke in ActionExecution parses
             // the "+"-joined string at replay time and emits the proper modifier-down →
             // key-down → key-up → modifier-up sequence. Keeping the combo atomic in
@@ -4444,6 +4695,10 @@ namespace TrueReplayer
                 holdDuration = Math.Max(10, Math.Min(60000, hd.GetInt32()));
 
             int delay = int.TryParse(CustomDelay, out var pd) ? pd : 100;
+            // Same gap as HandleInsertKeystroke just above: snapshot after the guards, right
+            // before the mutation, so Ctrl+Z can undo this insert instead of silently
+            // no-op'ing or reaching past it to an unrelated earlier edit.
+            PushUndoState();
             // Single atomic HoldKey row. Replay engine treats this as: SimulateKey(key, true),
             // wait holdDuration, SimulateKey(key, false). Compact alternative to the legacy
             // 2-row KeyDown + KeyUp (delay = hold) representation.
@@ -4557,6 +4812,13 @@ namespace TrueReplayer
                 {
                     if (!CaptureStillApplies(scope, "Captured image")) return;
                     int at = Math.Min(insertIndex, actions.Count);
+                    // Snapshot HERE, inside the enqueued callback and right before the mutation
+                    // — not at the top of this async method. PushUndoState snapshots the live
+                    // `actions` collection, so it has to run on this thread at this instant; done
+                    // any earlier it would record state before the user even picked a region, and
+                    // would leave a stray undo entry on the cancel path above (selection == null),
+                    // which returns before this callback is ever scheduled.
+                    PushUndoState();
                     actions.Insert(at, new ActionItem
                     {
                         ActionType = "WaitImage",
@@ -4657,6 +4919,11 @@ namespace TrueReplayer
                 {
                     if (!CaptureStillApplies(scope, "Picked pixel")) return;
                     int at = Math.Min(insertIndex, actions.Count);
+                    // Same reasoning as HandleInsertWaitImageAsync: push here, inside the
+                    // enqueued callback and immediately before the insert, so a cancelled
+                    // capture (selection == null, returned above before this callback was ever
+                    // enqueued) leaves the undo stack untouched.
+                    PushUndoState();
                     actions.Insert(at, new ActionItem
                     {
                         ActionType = "WaitPixelColor",
@@ -4755,6 +5022,14 @@ namespace TrueReplayer
                         SendMessage("alert:show", new { message = why, type = "error" });
                         return;
                     }
+                    // Snapshot here, inside the enqueued callback and right before the write —
+                    // the comment above (on newImagePath) promises "undo can restore the
+                    // previous reference image" but nothing ever pushed the state that promise
+                    // depends on. Pushing at the top of the async method instead would snapshot
+                    // before the user even opened the overlay, and would leave a stray undo
+                    // entry on the cancel/stale-row paths above, both of which return before
+                    // reaching here.
+                    PushUndoState();
                     actions[at].ImagePath = newImagePath;
                     HasUnsavedChanges = true;
                     PushActionsUpdate();
@@ -6375,6 +6650,65 @@ namespace TrueReplayer
             return null;
         }
 
+        /// <summary>
+        /// How an attempt to resolve a <see cref="WindowTarget"/> to a live window rect ended.
+        /// Deliberately a status rather than a message: the callers say different things
+        /// ("…and convert again" vs "…then try Apply target &amp; convert again" vs "…to the size
+        /// and position you want captured"), and one of them says nothing at all and just falls
+        /// back to absolute coordinates. Flattening them to one generic sentence would throw away
+        /// the only part of each error that tells the user which button to press next.
+        /// </summary>
+        private enum WindowRectStatus
+        {
+            Ok,
+            // No visible window matched the target — it is closed, or the matcher is wrong.
+            NotFound,
+            // Matched, but minimised: its rect is the parking rect, not geometry. See TryGetWindowRect.
+            Minimised,
+            // Matched and on screen, but GetWindowRect itself failed. Rare; usually a dead hwnd.
+            RectUnavailable,
+        }
+
+        /// <summary>
+        /// The single door through which this file turns a <see cref="WindowTarget"/> into a live
+        /// window rect: FindWindow, then IsIconic, then GetWindowRect — always in that order and
+        /// always all three.
+        /// </summary>
+        /// <remarks>
+        /// The IsIconic step is the reason this exists rather than four hand-copied sequences.
+        /// FindWindow only filters on IsWindowVisible, which a MINIMISED window still passes, and
+        /// GetWindowRect then answers with the off-screen (-32000,-32000) parking rect — the same
+        /// hazard NativeMethods.GetWindowPlacement and ScreenOverlayWindow's banner placement are
+        /// already written to dodge. Every consumer downstream treats that answer as real
+        /// geometry: the coordinate converter shifts every click, WaitImage region and WaitPixel
+        /// coord in the profile by ~32000 px and reports "Converted N action(s)"; "Update Window
+        /// Size &amp; Position" writes the parking rect to disk as the restore geometry; the capture
+        /// paths store a pick ~32000 px away from where the user clicked.
+        ///
+        /// Three call sites each grew their own copy of the guard and the fourth
+        /// (TryGetRelativeCaptureOffset) never did — which is precisely the failure this replaces:
+        /// the guard now holds by construction instead of by everyone remembering it.
+        ///
+        /// Callers map the status to their own wording; see <see cref="WindowRectStatus"/>. On any
+        /// non-Ok status <paramref name="rect"/> is <c>default</c>, never the parking rect, so a
+        /// caller that ignores the status still cannot spend a poisoned value.
+        /// </remarks>
+        private static WindowRectStatus TryGetWindowRect(WindowTarget? target, out NativeMethods.RECT rect)
+        {
+            rect = default;
+            IntPtr hwnd = TrueReplayer.Helpers.WindowMatcher.FindWindow(target);
+            if (hwnd == IntPtr.Zero) return WindowRectStatus.NotFound;
+            if (NativeMethods.IsIconic(hwnd)) return WindowRectStatus.Minimised;
+            if (!NativeMethods.GetWindowRect(hwnd, out rect))
+            {
+                // GetWindowRect writes to the out param even when it fails; blank it so the
+                // "never the parking rect, never garbage" promise above holds on this path too.
+                rect = default;
+                return WindowRectStatus.RectUnavailable;
+            }
+            return WindowRectStatus.Ok;
+        }
+
         private async void HandleProfileSetWindowTarget(JsonElement payload)
         {
             string name = payload.GetProperty("name").GetString() ?? "";
@@ -6442,15 +6776,22 @@ namespace TrueReplayer
                     WindowTitle = string.IsNullOrWhiteSpace(windowTitle) ? null : windowTitle.Trim(),
                     TitleMatchMode = titleMatchMode,
                 };
-                IntPtr hwnd = TrueReplayer.Helpers.WindowMatcher.FindWindow(tentativeTarget);
-                if (hwnd == IntPtr.Zero)
+                // The minimised case is the worst of the four TryGetWindowRect callers: the rect
+                // cached here is spent AFTER the target save has already committed, so a parking
+                // rect would leave the profile saved-and-corrupted rather than merely corrupted.
+                // Refused up front, while the refusal is still atomic.
+                var preflightStatus = TryGetWindowRect(tentativeTarget, out var rect);
+                if (preflightStatus != WindowRectStatus.Ok)
                 {
-                    SendMessage("alert:show", new { message = "Target window not found. Open it first, then try Apply target & convert again." });
-                    return;
-                }
-                if (!NativeMethods.GetWindowRect(hwnd, out var rect))
-                {
-                    SendMessage("alert:show", new { message = "Could not read the target window's position. Try again." });
+                    SendMessage("alert:show", new
+                    {
+                        message = preflightStatus switch
+                        {
+                            WindowRectStatus.NotFound => "Target window not found. Open it first, then try Apply target & convert again.",
+                            WindowRectStatus.Minimised => "Target window is minimised. Restore it, then try Apply target & convert again.",
+                            _ => "Could not read the target window's position. Try again.",
+                        }
+                    });
                     return;
                 }
                 preflightRect = rect;
@@ -6631,17 +6972,23 @@ namespace TrueReplayer
                 return;
             }
 
-            IntPtr hwnd = TrueReplayer.Helpers.WindowMatcher.FindWindow(target);
-
-            if (hwnd == IntPtr.Zero)
+            // Minimised is refused rather than degraded because the loop in
+            // ExecuteConvertCoordinatesWithRect would shift EVERY click, WaitImage region and
+            // WaitPixel coord in this profile by ~32000 px on a parking rect — a whole-profile
+            // corruption reported as "Converted N action(s)", with only the undo stack standing
+            // between the user and permanent damage. Same call the position pick makes.
+            var convertStatus = TryGetWindowRect(target, out var rect);
+            if (convertStatus != WindowRectStatus.Ok)
             {
-                SendMessage("alert:show", new { message = "Target window not found. Make sure it is open and visible." });
-                return;
-            }
-
-            if (!NativeMethods.GetWindowRect(hwnd, out var rect))
-            {
-                SendMessage("alert:show", new { message = "Could not get window position." });
+                SendMessage("alert:show", new
+                {
+                    message = convertStatus switch
+                    {
+                        WindowRectStatus.NotFound => "Target window not found. Make sure it is open and visible.",
+                        WindowRectStatus.Minimised => "Target window is minimised. Restore it and convert again.",
+                        _ => "Could not get window position.",
+                    }
+                });
                 return;
             }
 
@@ -6879,17 +7226,23 @@ namespace TrueReplayer
                 return;
             }
 
-            IntPtr hwnd = TrueReplayer.Helpers.WindowMatcher.FindWindow(target);
-
-            if (hwnd == IntPtr.Zero)
+            // Minimised matters more here than anywhere else TryGetWindowRect is called: this rect
+            // is WRITTEN TO DISK as the profile's / folder's restore geometry, so a capture taken
+            // while the target was parked makes every later replay push the window off-screen —
+            // and absolute coordinates, which depend on the window coming back to where they were
+            // measured, stop landing anywhere real. Refuse rather than capture garbage.
+            var geometryStatus = TryGetWindowRect(target, out var rect);
+            if (geometryStatus != WindowRectStatus.Ok)
             {
-                SendMessage("alert:show", new { message = "Target window not found. Make sure it is open and visible." });
-                return;
-            }
-
-            if (!NativeMethods.GetWindowRect(hwnd, out var rect))
-            {
-                SendMessage("alert:show", new { message = "Could not get window dimensions." });
+                SendMessage("alert:show", new
+                {
+                    message = geometryStatus switch
+                    {
+                        WindowRectStatus.NotFound => "Target window not found. Make sure it is open and visible.",
+                        WindowRectStatus.Minimised => "Target window is minimised. Restore it to the size and position you want captured, then click Update again.",
+                        _ => "Could not get window dimensions.",
+                    }
+                });
                 return;
             }
 
@@ -7391,6 +7744,14 @@ namespace TrueReplayer
 
             IntPtr hwnd = TrueReplayer.Services.ActionReplayer.FindWindowExcludingSelf(target, regex);
             if (hwnd == IntPtr.Zero) { Fail("No window matches — open and position it first."); return; }
+            // The fifth resolve-and-rect site, and the one TryGetWindowRect cannot serve: it
+            // resolves through FindWindowExcludingSelf (pre-compiled regex, skips TrueReplayer's
+            // own window) rather than WindowMatcher.FindWindow. The IsIconic guard still has to be
+            // here, for the same reason it is there — a minimised window passes IsWindowVisible and
+            // GetWindowRect answers with the (-32000,-32000) parking rect. This rect is written
+            // into an ActivateWindow row's geometry, so capturing it minimised makes every later
+            // replay park the target off-screen. Refuse and say what to do, like the siblings.
+            if (NativeMethods.IsIconic(hwnd)) { Fail("Window is minimised — restore it to the size and position you want captured."); return; }
             if (!NativeMethods.GetWindowRect(hwnd, out var rect)) { Fail("Could not read the window rect."); return; }
 
             SendMessage("window:captureGeometryResult", new
@@ -7794,8 +8155,23 @@ namespace TrueReplayer
         /// (what the overlay returns) to profile-relative (what we store when UseRelativeCoordinates
         /// is on). Returns true with rect populated only when ALL of these hold: the profile uses
         /// relative coords, a WindowTarget is configured, and the target window is currently
-        /// running. False otherwise — caller stores absolute coords as fallback.
+        /// running AND NOT MINIMISED. False otherwise — caller stores absolute coords as fallback.
         /// </summary>
+        /// <remarks>
+        /// The minimised clause arrived with TryGetWindowRect and closes a real bug. This helper
+        /// used to call FindWindow + GetWindowRect raw, which is the one sequence in this file
+        /// that must never be written by hand: a minimised target passes IsWindowVisible and
+        /// GetWindowRect answers with the (-32000,-32000) parking rect, so every capture path
+        /// feeding through here — pixel pick, position pick, WaitImage / WaitPixel inserts, the
+        /// search-region round-trip — subtracted ~-32000 and stored a coordinate ~32000 px out.
+        /// Three sibling call sites had each grown their own IsIconic guard; this one had not.
+        ///
+        /// Degrading to absolute (rather than refusing, the way the position pick does before it
+        /// even minimises the app) is the right answer HERE because that is already this method's
+        /// contract for every other unusable-target case, and every caller is written for it. A
+        /// user cannot meaningfully pick inside a window that is not on screen anyway, so the
+        /// realistic effect is that a stray pick is stored as what it literally is.
+        /// </remarks>
         private bool TryGetRelativeCaptureOffset(out NativeMethods.RECT rect)
         {
             rect = default;
@@ -7805,9 +8181,7 @@ namespace TrueReplayer
                 : UserProfile.Current.TargetWindow;
             if (target == null || (string.IsNullOrEmpty(target.ProcessName) && string.IsNullOrEmpty(target.WindowTitle)))
                 return false;
-            IntPtr hwnd = TrueReplayer.Helpers.WindowMatcher.FindWindow(target);
-            if (hwnd == IntPtr.Zero) return false;
-            return NativeMethods.GetWindowRect(hwnd, out rect);
+            return TryGetWindowRect(target, out rect) == WindowRectStatus.Ok;
         }
 
         private async void HandleProfileExport(JsonElement payload)
