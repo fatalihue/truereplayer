@@ -66,12 +66,16 @@ namespace TrueReplayer
         // replay/F15-menu-cancel injections so they don't feed back into hotkey/hotstring logic.
         private const uint LLKHF_INJECTED = 0x10;
 
-        // Monotonic tick timestamp (Environment.TickCount64) for the AltGr (right-Alt → right-Ctrl)
-        // debounce — DateTime.Now is non-monotonic (NTP/manual/DST shifts could make the delta
-        // negative or huge and wrongly suppress/leak the synthetic Ctrl). 0 means "never seen a
-        // right-Alt" (TickCount64 is ms-since-boot, so a real timestamp is effectively never 0,
-        // and the <100ms window bounds it regardless). Matches the MainController tick fix.
-        private static long lastAltRightPressTicks = 0;
+        // Scan code win32k stamps on the LEFT CONTROL it synthesises for AltGr, instead of the
+        // 0x1D a physical left Ctrl carries. Undocumented, but it is the only per-event marker
+        // that separates the two (see the AltGr block in KeyboardHookCallbackCore), and hardware
+        // cannot produce it — the 0x200 bit is win32k's own. KBDLLHOOKSTRUCT.scanCode is offset 4.
+        private const uint ScanCodeAltGrPhantomCtrl = 0x21D;
+
+        // True between the synthetic Ctrl's down and its up. Only used to catch a release that
+        // arrives WITHOUT the 0x21D marker; the down is always identified by the scan code alone.
+        // Hook-thread-only, and cleared alongside _vkCodesCurrentlyDown on Stop().
+        private static bool _altGrPhantomCtrlHeld = false;
 
         public static volatile Dictionary<string, string> ProfileHotkeys = new();
         public static volatile Dictionary<string, HotstringConfig> ProfileHotstrings = new();
@@ -148,6 +152,19 @@ namespace TrueReplayer
         // an entry the user's PHYSICAL key put there (CapsLock→A while A is physically held),
         // and two FROM keys sharing one TO only remove the mirror when the LAST one lifts.
         private static readonly HashSet<int> _remapMirroredVks = new();
+
+        // FROM keys whose DOWN escaped RAW because a gate (a modal scope, IgnoreProfileHotkeys)
+        // was up when it arrived: the foreground app is holding that key itself, so no pairing may
+        // open on top of it — the pairing would swallow the release the app is waiting for and
+        // leave the key held forever. The branch below already refuses to start a pairing mid-hold,
+        // but it decides that from _vkCodesCurrentlyDown, and a gated event never reaches the line
+        // that maintains it; this set is the same guard for the keys those gates hid.
+        // Deliberately NOT folded into _vkCodesCurrentlyDown, whose five other consumers all read
+        // it as "modifier/repeat state we tracked ourselves".
+        // Hook-thread-only, exactly four sites: added in the bypass block, removed on the physical
+        // up at the very top of the keyboard callback (above every gate, so no path can strand it),
+        // tested by the new-pairing guard, cleared by Stop().
+        private static readonly HashSet<int> _remapBypassedDowns = new();
 
         // X-button downs we swallowed (trigger dispatch, remap, capture). Their paired UP
         // must be consumed too: Windows synthesizes WM_APPCOMMAND Back/Forward from a
@@ -227,6 +244,18 @@ namespace TrueReplayer
             if (_remapMirroredVks.Remove(toVk)) _vkCodesCurrentlyDown.Remove(toVk);
             InjectRemappedKey(toVk, down: false);
         }
+
+        // The AltGr phantom left Ctrl (full story in the filter inside KeyboardHookCallbackCore)
+        // is win32k's, not the user's finger: it is NOT LLKHF_INJECTED, and both its halves are
+        // handed to the foreground app because the app needs that Ctrl to compose the character.
+        // Both remap-pairing halves that run ABOVE that filter have to recognise it, or a user who
+        // remaps LEFT CTRL breaks in two ways on every AltGr press: the pairing would answer the
+        // phantom DOWN with a TO injection (a remapped Ctrl firing on every @ or €), and it would
+        // swallow the phantom UP as if it were the physical release — tearing the pairing down
+        // while the real key is still held AND leaving the app holding a Ctrl that never comes up.
+        // Reads the scan code only for vk 0xA2, so it costs nothing on any other key.
+        private static bool IsAltGrPhantomCtrl(int vkCode, IntPtr lParam) =>
+            vkCode == 0xA2 && (uint)Marshal.ReadInt32(lParam, 4) == ScanCodeAltGrPhantomCtrl;
 
         // DoubleTap: last swallowed tap, keyed by composed key + monotonic tick. A second tap
         // of the SAME combo within the window fires; anything else restarts the window.
@@ -540,11 +569,18 @@ namespace TrueReplayer
             ClearActiveHold();
             ClearPendingHoldFire();
             ReleaseActiveRemapDowns();
+            // Paired with _vkCodesCurrentlyDown below: a key held across Stop()/Start() must not
+            // stay marked as "the app is holding this one raw", or the remap layer would refuse
+            // to ever pair it again in the new session.
+            _remapBypassedDowns.Clear();
             _swallowedXDowns.Clear();
             _captureSwallowedXDowns.Clear();
             _lastTapKey = null;
             _lastTapTicks = 0;
             _vkCodesCurrentlyDown.Clear();
+            // Paired with the line above: the AltGr up-side backstop reads that set, so leaving
+            // this armed across a Stop()/Start() would let it swallow the next real Ctrl release.
+            _altGrPhantomCtrlHeld = false;
             _hotstringBufferLen = 0;
             _pendingReleaseProfile = null;
             _pendingReleaseVkCode = 0;
@@ -1610,15 +1646,26 @@ namespace TrueReplayer
                 // stays logically DOWN system-wide (a stuck Ctrl turns all typing into
                 // shortcuts) until the user presses the FROM key again. Physical ups only:
                 // injected events keep their normal gates.
-                if (_activeRemapDowns.Count > 0)
+                //
+                // The bypass marks are cleared here for the same reason they are set at all: this
+                // is the one point every physical up passes through, whatever gate is up behind
+                // it, so a mark can never be stranded and lock a key out of the remap layer.
+                // A marked key never has a pairing (the mark is what stops one opening), so the
+                // two arms below are mutually exclusive and the release falls through to the app.
+                if (_activeRemapDowns.Count > 0 || _remapBypassedDowns.Count > 0)
                 {
                     int remapVk = Marshal.ReadInt32(lParam);
                     bool remapIsDown = wParam == (IntPtr)NativeMethods.WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN;
                     uint remapFlags = (uint)Marshal.ReadInt32(lParam, 8);
-                    if (!remapIsDown && (remapFlags & LLKHF_INJECTED) == 0 && _activeRemapDowns.ContainsKey(remapVk))
+                    if (!remapIsDown && (remapFlags & LLKHF_INJECTED) == 0
+                        && !IsAltGrPhantomCtrl(remapVk, lParam))
                     {
-                        CloseRemapPairing(remapVk);
-                        return (IntPtr)1;
+                        _remapBypassedDowns.Remove(remapVk);
+                        if (_activeRemapDowns.ContainsKey(remapVk))
+                        {
+                            CloseRemapPairing(remapVk);
+                            return (IntPtr)1;
+                        }
                     }
                 }
 
@@ -1660,12 +1707,71 @@ namespace TrueReplayer
                     return (IntPtr)1; // swallow every keydown AND keyup while capturing
                 }
 
-                if (SuppressAllHotkeys)
+                // Read ONCE, then use the snapshots for both the pairing block below and the gates
+                // themselves. The two must reach the same verdict: re-reading them would let a
+                // modal scope that opens between the two reads take the pairing block's "no" and
+                // the gate's "yes", which is exactly the split the block exists to make impossible.
+                bool suppressAll = SuppressAllHotkeys;
+                bool ignoreProfileKeys = IgnoreProfileHotkeys;
+                var remaps = _remapMap;
+
+                // ── Remap pairing: the DOWN half, brought up to meet the UP half ──
+                // The remap DOWN branch lives far below, UNDER these gates, while the pairing
+                // release was hoisted to the top of this method (see there). Hoisting one half and
+                // not the other let a pairing straddle the gate. With a modal scope open — any
+                // React modal, ModalGate, an overlay pick, or the native file picker, whose scope
+                // the user can leave sitting there for twenty minutes — every auto-repeat of an
+                // ALREADY-HELD remapped key escaped raw to the foreground app, and then the
+                // physical release still matched at the top, closed the pairing and swallowed the
+                // KEYUP. The app was left with the FROM key logically held down system-wide (in a
+                // game: a character that keeps walking or attacking), and it never healed by
+                // itself — the next press opened a fresh pairing and swallowed both halves again,
+                // so the up the app was waiting for never arrived.
+                //
+                // While any gate is up we therefore keep serving an ALREADY-OPEN pairing exactly as
+                // the branch below would: swallow the FROM repeat, echo the TO down (dropping the
+                // echo instead would stall the auto-repeat of a key the app already sees as held).
+                // Nothing the gates exist to stop happens here — no hotkey match, no hotstring, no
+                // recording, no _vkCodesCurrentlyDown write, and above all no NEW pairing: a key
+                // first pressed while the scope is open still passes through raw, unchanged.
+                //
+                // The gate list is every reason the branch below can decline the down, not just
+                // suppression: an empty map (the tray kill switch flipped mid-hold) and a null
+                // MainController (shutdown) leak the same way. Recording is deliberately absent —
+                // it does not bypass the pairing, it CLOSES it, which is already balanced.
+                //
+                // Second duty, for the same asymmetry running the other way: a key FIRST pressed
+                // while the gate is up goes out raw and the app is now holding it. If the scope
+                // closes while the key is still down, the branch below would read the repeat as a
+                // genuine first press — its "is it already held?" test is _vkCodesCurrentlyDown,
+                // which a gated event never reaches — open a pairing halfway through the hold and
+                // swallow the release the app was waiting for. Marking the key here is what makes
+                // that test see the hold.
+                bool remapDownBypassed = suppressAll || ignoreProfileKeys
+                    || remaps == null || MainController.Instance == null;
+                if (remapDownBypassed && (_activeRemapDowns.Count > 0 || remaps != null))
+                {
+                    int heldVk = Marshal.ReadInt32(lParam);
+                    bool heldIsDown = wParam == (IntPtr)NativeMethods.WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN;
+                    uint heldFlags = (uint)Marshal.ReadInt32(lParam, 8);
+                    if (heldIsDown && (heldFlags & LLKHF_INJECTED) == 0
+                        && !IsAltGrPhantomCtrl(heldVk, lParam))
+                    {
+                        if (_activeRemapDowns.TryGetValue(heldVk, out var heldToVk))
+                        {
+                            if (heldToVk != 0) InjectRemappedKey(heldToVk, down: true);
+                            return (IntPtr)1;
+                        }
+                        if (remaps != null && remaps.ContainsKey(heldVk)) _remapBypassedDowns.Add(heldVk);
+                    }
+                }
+
+                if (suppressAll)
                 {
                     return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
                 }
 
-                if (IgnoreProfileHotkeys)
+                if (ignoreProfileKeys)
                 {
                     return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
                 }
@@ -1685,15 +1791,56 @@ namespace TrueReplayer
                     return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
                 }
 
-                if (vkCode == 165 && isDown)
+                // ── AltGr phantom Ctrl ──
+                // On any layout that has an AltGr key (ABNT2 and most European layouts) Windows
+                // does not deliver AltGr as one keystroke: win32k synthesises a LEFT CONTROL and
+                // brackets the right Alt with it — LCtrl↓ RAlt↓ … RAlt↑ LCtrl↑ — because at the
+                // VK level AltGr *is* Ctrl+Alt. That phantom is NOT LLKHF_INJECTED (it is born
+                // inside the keyboard stack, not SendInput), so the gate above waves it through:
+                // it landed in _vkCodesCurrentlyDown and reached the recorder as a real key. Every
+                // AltGr press while recording — @ € \ { } [ ] | ¬ ² ³ on those layouts — buried a
+                // spurious Ctrl KeyDown/KeyUp pair in the macro, and left the chord state reading
+                // "Ctrl held" for everything typed with AltGr.
+                //
+                // The code this replaces armed a timestamp on RAlt↓ and then looked for LCtrl↓
+                // after it — the reverse of the real order, so it never matched once. Order aside,
+                // no timestamp scheme can work here: the phantom Ctrl arrives BEFORE the RAlt that
+                // would identify it, and a low-level hook must return a verdict for every event
+                // synchronously, with nothing to look ahead at. The scan code is what identifies
+                // it per-event: 0x21D rather than a physical left Ctrl's 0x1D.
+                //
+                // Both directions are filtered. Dropping only the down would trade one asymmetry
+                // for another: an unpaired Ctrl KeyUp in the recording, plus a Remove(0xA2) for an
+                // entry the set never gained — so a Ctrl the user is physically holding across an
+                // AltGr press would read as released. The release therefore has a second net for
+                // the case where it arrives without the 0x21D marker; that net is armed only while
+                // 0xA2 is absent from the set, i.e. only for an up whose down we never processed,
+                // which is the definition of an orphan and never a real Ctrl's release.
+                //
+                // CallNextHookEx, never (IntPtr)1: the target app NEEDS this Ctrl to compose the
+                // AltGr character. It is dropped from OUR bookkeeping only, and returning early
+                // also keeps it out of the remap layer below, which would otherwise fire a
+                // remapped-LeftCtrl injection on every AltGr press.
+                if (vkCode == 0xA2)
                 {
-                    lastAltRightPressTicks = Environment.TickCount64;
-                }
+                    uint scanCode = (uint)Marshal.ReadInt32(lParam, 4);
+                    bool isPhantomScan = scanCode == ScanCodeAltGrPhantomCtrl;
 
-                if (vkCode == 162 && isDown && lastAltRightPressTicks != 0)
-                {
-                    if (Environment.TickCount64 - lastAltRightPressTicks < 100)
+                    if (isDown)
                     {
+                        if (isPhantomScan)
+                        {
+                            _altGrPhantomCtrlHeld = true;
+                            return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
+                        }
+                        // A genuine physical Ctrl↓ supersedes any phantom still being tracked:
+                        // from here 0xA2 is legitimately in the set and its up must be honoured.
+                        _altGrPhantomCtrlHeld = false;
+                    }
+                    else if (isPhantomScan
+                        || (_altGrPhantomCtrlHeld && !_vkCodesCurrentlyDown.Contains(0xA2)))
+                    {
+                        _altGrPhantomCtrlHeld = false;
                         return NativeMethods.CallNextHookEx(_keyboardHookId, nCode, wParam, lParam);
                     }
                 }
@@ -1708,8 +1855,9 @@ namespace TrueReplayer
                 // recording (the recorder must see raw physical keys — a remapped key would
                 // otherwise vanish from recordings entirely); UP-side pairing release is
                 // hoisted ABOVE the capture/suppress early-returns (top of this method) so an
-                // injected TO key can never be left stuck down by a dialog opening mid-hold.
-                var remaps = _remapMap;
+                // injected TO key can never be left stuck down by a dialog opening mid-hold, and
+                // the continuation of an open pairing sits just above those gates for the same
+                // reason. `remaps` is the snapshot taken there — one read, one verdict.
                 if (isDown && remaps != null && MainController.Instance != null)
                 {
                     if (MainController.Instance.IsRecording())
@@ -1726,9 +1874,13 @@ namespace TrueReplayer
                     // of a key that went down RAW (e.g. pressed during a recording that just
                     // stopped) must not begin remapping halfway through the hold — its
                     // eventual physical up would be swallowed and the app that saw the raw
-                    // down would never see the up.
+                    // down would never see the up. Two records of "already held raw", because
+                    // one of them cannot see the other's case: _vkCodesCurrentlyDown for downs
+                    // this method processed, _remapBypassedDowns for downs a gate waved past
+                    // before this method could track them (see the bypass block above).
                     else if (_activeRemapDowns.ContainsKey(vkCode)
-                        || (remaps.ContainsKey(vkCode) && !_vkCodesCurrentlyDown.Contains(vkCode)))
+                        || (remaps.ContainsKey(vkCode) && !_vkCodesCurrentlyDown.Contains(vkCode)
+                            && !_remapBypassedDowns.Contains(vkCode)))
                     {
                         if (!_activeRemapDowns.TryGetValue(vkCode, out var toVk))
                         {
