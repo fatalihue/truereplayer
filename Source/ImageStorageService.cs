@@ -106,17 +106,6 @@ namespace TrueReplayer.Services
         }
 
         /// <summary>
-        /// Deletes a reference image file.
-        /// </summary>
-        public static void DeleteReferenceImage(string profileName, string imagePath)
-        {
-            if (!TryResolveImageFile(profileName, imagePath, out string fullPath)) return;
-
-            try { if (File.Exists(fullPath)) File.Delete(fullPath); }
-            catch { /* best effort */ }
-        }
-
-        /// <summary>
         /// Reads a reference image as base64 (for embedding in export).
         /// </summary>
         public static string? ReadAsBase64(string profileName, string imagePath)
@@ -148,33 +137,6 @@ namespace TrueReplayer.Services
         /// </summary>
         public static bool ReferenceImageExists(string profileName, string untrustedName)
             => TryResolveImageFile(profileName, untrustedName, out var fullPath) && File.Exists(fullPath);
-
-        /// <summary>
-        /// Saves a base64-encoded image to the profile directory (for import).
-        /// </summary>
-        public static string? SaveFromBase64(string base64Data, string profileName)
-        {
-            string dir = GetImageDirectory(profileName);
-            Directory.CreateDirectory(dir);
-
-            string filename = $"wait-{Guid.NewGuid():N}.png";
-            string fullPath = Path.Combine(dir, filename);
-            // base64Data is untrusted import data: a malformed string throws FormatException
-            // out of Convert.FromBase64String. Swallow it (returning null) so a single bad
-            // payload can't crash the caller.
-            try
-            {
-                var bytes = Convert.FromBase64String(base64Data);
-                if (!IsValidPng(bytes)) { try { DiagnosticLog.Info("[Images] Rejected image: not a valid PNG or out of size bounds."); } catch { } return null; }
-                File.WriteAllBytes(fullPath, bytes);
-            }
-            catch (Exception ex)
-            {
-                try { DiagnosticLog.Info($"[Images] Skipped image with invalid base64 data: {ex.Message}"); } catch { }
-                return null;
-            }
-            return filename;
-        }
 
         /// <summary>
         /// Saves a base64-encoded image with a specific filename (for import with original name).

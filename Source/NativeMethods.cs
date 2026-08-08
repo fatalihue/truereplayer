@@ -300,35 +300,7 @@ namespace TrueReplayer.Interop
         public static extern short VkKeyScanEx(char ch, IntPtr dwhkl);
 
         [DllImport("user32.dll")]
-        public static extern bool GetKeyboardState(byte[] lpKeyState);
-
-        [DllImport("user32.dll")]
         public static extern uint MapVirtualKeyEx(uint uCode, uint uMapType, IntPtr dwhkl);
-
-        // GDI screen capture
-        public const int SRCCOPY = 0x00CC0020;
-
-        [DllImport("gdi32.dll")]
-        public static extern IntPtr CreateDC(string lpszDriver, string? lpszDevice, string? lpszOutput, IntPtr lpInitData);
-
-        [DllImport("gdi32.dll")]
-        public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
-
-        [DllImport("gdi32.dll")]
-        public static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int nWidth, int nHeight);
-
-        [DllImport("gdi32.dll")]
-        public static extern IntPtr SelectObject(IntPtr hdc, IntPtr hgdiobj);
-
-        [DllImport("gdi32.dll")]
-        public static extern bool BitBlt(IntPtr hdcDest, int xDest, int yDest, int wDest, int hDest,
-            IntPtr hdcSrc, int xSrc, int ySrc, int dwRop);
-
-        [DllImport("gdi32.dll")]
-        public static extern bool DeleteObject(IntPtr hObject);
-
-        [DllImport("gdi32.dll")]
-        public static extern bool DeleteDC(IntPtr hdc);
 
         // GetDC(NULL) returns a DC for the entire virtual screen (all monitors), letting
         // GetPixel sample any visible pixel without per-monitor handling. ReleaseDC must

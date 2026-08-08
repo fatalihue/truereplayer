@@ -65,6 +65,13 @@ namespace TrueReplayer.Controllers
         // .CleanupOrphanImages at startup to delete unreferenced PNGs.
         private Dictionary<string, HashSet<string>> _referencedImagesByProfile = new();
         private string? _activeProfileName;
+        // Reference PNGs are stored per profile, and while none is loaded they go to a literal
+        // "default" folder: WebViewBridge.StorageProfileName is that mapping ("No Profile" →
+        // "default"), and because every capture AND every read in that state resolves against the
+        // same key, a No-Profile session works perfectly even though no profile on disk claims
+        // those images. Duplicated here because that helper is private to the bridge; the two
+        // spellings of "default" must stay in step.
+        private const string NoProfileImageFolder = "default";
         private ProfileOrderData _profileOrder = new();
         private readonly SemaphoreSlim _profileOrderLock = new(1, 1);
 
@@ -245,6 +252,18 @@ namespace TrueReplayer.Controllers
                 Triggers = DisarmedTriggerClone(UserProfile.Current.Triggers),
             };
 
+            // The image folder key belongs to the same snapshot, for the same reason. Reference
+            // PNGs are stored per profile, so carrying them into the file the user is about to
+            // name (below) requires knowing which folder the ones on screen RIGHT NOW came from —
+            // and an automation fire during the picker changes that: MainWindow's fire path calls
+            // UpdateProfileColors, which is exactly what _activeProfileName tracks. Read after the
+            // await it would name whatever the daemon just activated, and the save would copy THAT
+            // profile's images into the user's new file.
+            //
+            // No active profile means the app is in "No Profile" (UpdateProfileColors(null)), whose
+            // captures live in NoProfileImageFolder.
+            string sourceImageKey = string.IsNullOrEmpty(_activeProfileName) ? NoProfileImageFolder : _activeProfileName!;
+
             var fileName = await ShowFileDialogAsync(new WinForms.SaveFileDialog
             {
                 Filter = "JSON file (*.json)|*.json",
@@ -257,10 +276,36 @@ namespace TrueReplayer.Controllers
                 // The one field that genuinely cannot be known before the picker returns.
                 profile.LastProfileDirectory = Path.GetDirectoryName(fileName)!;
 
+                // The images have to travel with the profile, BEFORE the JSON is written — see
+                // TryCarryReferenceImages for what writing the paths verbatim used to cost. The
+                // destination folder key is the file's bare name, the same derivation
+                // LoadProfileListAsync uses to key the reference map it hands the orphan sweep.
+                string newProfileName = Path.GetFileNameWithoutExtension(fileName);
+                if (!TryCarryReferenceImages(profile, sourceImageKey, newProfileName, out int droppedImages, out string? failedImage))
+                {
+                    // Deliberately no write. The user keeps a profile whose images are all still
+                    // in their original folder and a grid that still has every action in it, which
+                    // is a far better place to be than holding a file that looks saved and has
+                    // half its references pointing at PNGs that do not exist. Returning false also
+                    // keeps HasUnsavedChanges set at every call site, so the close guard will ask
+                    // again instead of letting the work go.
+                    WinForms.MessageBox.Show(
+                        $"Could not copy this profile's reference image \"{failedImage}\" into \"{newProfileName}\".\n\n" +
+                        "Nothing was saved, so the images you have are untouched. Free up some disk space (or close whatever has the file open) and save again.",
+                        "Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
+                    return false;
+                }
+
                 try
                 {
                     await SettingsManager.SaveProfileAsync(fileName, profile);
                     await RefreshProfileListAsync(true);
+                    // Source PNGs that were already gone are not a save failure — the file is on
+                    // disk and correct — but the new profile has rows that will never match, and
+                    // the user is the only one who can recapture them. Say so instead of letting
+                    // them find out at the next replay.
+                    if (droppedImages > 0)
+                        OnAlert?.Invoke($"Saved \"{newProfileName}\", but {droppedImages} reference image(s) were missing on disk and could not be carried over — recapture them in the new profile.");
                     return true;
                 }
                 catch (Exception ex)
@@ -268,6 +313,162 @@ namespace TrueReplayer.Controllers
                     WinForms.MessageBox.Show($"Error saving profile:\n{ex.Message}", "Error", WinForms.MessageBoxButtons.OK, WinForms.MessageBoxIcon.Error);
                 }
             }
+            return false;
+        }
+
+        // WHY THE SAVE HAS TO CARRY THE IMAGES
+        //
+        // Reference images — WaitImage, IF-ImageFound, and the automation image watcher — are the
+        // only asset a profile keeps outside its JSON, and they are stored PER PROFILE, keyed by
+        // the profile name (NoProfileImageFolder while none is loaded). Writing the new file with
+        // the ImagePath values verbatim, which is what this path did, produced a profile whose
+        // every image row pointed into somebody else's folder. It failed in two different ways:
+        //
+        //   Save-As-New from a loaded profile: the PNGs stay in the ORIGINAL profile's folder,
+        //   where that profile still references them, so nothing is deleted — but the new profile
+        //   only ever reads its own folder, so every image row is dead from birth.
+        //
+        //   First save out of "No Profile": the PNGs sit in Images\default and NOTHING references
+        //   that folder. CleanupOrphanImages builds its keep-set from the real Profiles\*.json
+        //   names, so "default" has no entry: at the next app start every PNG in it is deleted and
+        //   the folder removed. The user saved, was told nothing, and lost the images on launch.
+        //
+        // The four sibling copy paths in WebViewBridge (paste, duplicate row, duplicate profile ×2)
+        // have always cloned. This one simply never did.
+        //
+        // COPY, NOT MOVE. Moving out of Images\default would be tidier — the copies left behind are
+        // swept at the next start anyway — but saving does not change what the app is looking at:
+        // CurrentProfileName stays "No Profile" (nothing on the save path reassigns it) and the LIVE
+        // ActionItems keep their original filenames, so the session keeps resolving against
+        // "default". A move would blank every thumbnail and break every WaitImage in the session the
+        // user is still working in, and would break a second Save-As under a different name. The
+        // same argument is stronger for Save-As-New, where a move would gut the ORIGINAL profile.
+        // Worst case of a copy is a duplicate PNG the orphan sweep collects; worst case of a move is
+        // destroying the images of a profile the user never asked to touch.
+        //
+        // ABORT, DON'T HALF-SAVE. When a copy that should have worked fails, the caller writes
+        // nothing: the user is left exactly where they were, free to retry. Writing anyway would
+        // recreate the defect this whole fix closes — a profile the user believes is saved, holding
+        // a mix of live and dangling references, whose dangling half disappears at the next start.
+        // A source PNG that is ALREADY gone is the one case that does not abort: there is nothing to
+        // carry and nothing to lose, so the row is saved without its reference (empty thumbnail +
+        // "recapture" hint, matching HandleActionsPaste) and the user is told afterwards.
+        /// <summary>
+        /// Copies every reference PNG the snapshot points at into <paramref name="dstKey"/>'s image
+        /// folder and repoints the snapshot at the copies. <paramref name="dropped"/> counts
+        /// references whose source PNG was already missing. Returns false — with the offending name
+        /// in <paramref name="failedImage"/> — when a PNG that exists could not be copied, in which
+        /// case the caller must not write the profile.
+        /// </summary>
+        private static bool TryCarryReferenceImages(UserProfile profile, string srcKey, string dstKey, out int dropped, out string? failedImage)
+        {
+            dropped = 0;
+            failedImage = null;
+
+            // Same folder on both ends: a No-Profile session saved under the name "default", or a
+            // Save-As-New that overwrites the very profile that is loaded. The PNGs are already
+            // exactly where the file being written will look for them, so cloning would do nothing
+            // but orphan the originals. Compared sanitized, because that is the name the directory
+            // actually has on disk.
+            if (string.Equals(ImageStorageService.GetSanitizedProfileFolder(srcKey),
+                              ImageStorageService.GetSanitizedProfileFolder(dstKey),
+                              StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            int carried = 0;
+
+            for (int i = 0; i < profile.Actions.Count; i++)
+            {
+                var action = profile.Actions[i];
+                if (string.IsNullOrEmpty(action.ImagePath)) continue;
+                // Same predicate as the paste / duplicate / import sites: an IF row with
+                // ConditionType "ImageFound" shares WaitImage's per-profile PNG storage.
+                bool refsImage = action.ActionType == "WaitImage"
+                    || (action.ActionType == "If" && string.Equals(action.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase));
+                if (!refsImage) continue;
+
+                if (!TryCarryOneImage(srcKey, dstKey, action.ImagePath!, out string? carriedName))
+                {
+                    failedImage = action.ImagePath;
+                    return false;
+                }
+
+                // The snapshot's collection is a SHALLOW copy of window.Actions — the items in it
+                // are the very objects the grid is bound to. Repointing ImagePath in place would
+                // rewrite the LIVE row to a filename that exists only in the new profile's folder,
+                // and the session (still resolving under the old key) would lose the image it is
+                // showing. Swap in a detached Clone and leave the live row alone; RowNumber is
+                // [JsonIgnore] and UI-only, which is why Clone deliberately omits it.
+                var detached = action.Clone();
+                detached.ImagePath = carriedName;
+                profile.Actions[i] = detached;
+
+                if (carriedName == null) dropped++; else carried++;
+            }
+
+            // The automation image-watcher PNG lives OUTSIDE Actions and rides along in the
+            // snapshot, so it needs the same treatment — HandleProfileDuplicate clones it
+            // separately for exactly this reason. DisarmedTriggerClone already handed us a detached
+            // config, so this one can be repointed in place.
+            if (profile.Triggers != null
+                && string.Equals(profile.Triggers.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrEmpty(profile.Triggers.ImagePath))
+            {
+                if (!TryCarryOneImage(srcKey, dstKey, profile.Triggers.ImagePath!, out string? carriedName))
+                {
+                    failedImage = profile.Triggers.ImagePath;
+                    return false;
+                }
+                profile.Triggers.ImagePath = carriedName;
+                if (carriedName == null) dropped++; else carried++;
+            }
+
+            if (carried > 0 || dropped > 0)
+                DiagnosticLog.Info($"[Save] Carried {carried} reference image(s) '{srcKey}' → '{dstKey}'"
+                    + (dropped > 0 ? $"; {dropped} source PNG(s) were already missing." : "."));
+            return true;
+        }
+
+        /// <summary>
+        /// Copies one reference PNG into <paramref name="dstKey"/>'s image folder under a fresh GUID
+        /// name. True with a non-null <paramref name="carriedName"/> on success; true with null when
+        /// the source PNG is already gone (nothing to carry — the caller drops the reference and
+        /// counts it); false only when a PNG that exists could not be copied, which aborts the save.
+        /// </summary>
+        private static bool TryCarryOneImage(string srcKey, string dstKey, string imagePath, out string? carriedName)
+        {
+            carriedName = null;
+
+            // Which folder the PNG is ACTUALLY in is a question about the disk, not about what this
+            // controller believes is active. _activeProfileName and the bridge's CurrentProfileName
+            // are maintained by different call sites and can disagree — deleting the active profile
+            // drops the bridge to "No Profile" (new captures go to "default") while the controller
+            // still names the profile that was deleted. Probing both candidates costs one
+            // File.Exists and turns that disagreement from "the image is silently dropped" into a
+            // correct copy. Filenames are fresh GUIDs, so the wrong folder cannot answer for the
+            // right one; the active profile is tried first regardless.
+            string? foundIn = ImageStorageService.ReferenceImageExists(srcKey, imagePath) ? srcKey
+                : ImageStorageService.ReferenceImageExists(NoProfileImageFolder, imagePath) ? NoProfileImageFolder
+                : null;
+
+            if (foundIn == null)
+            {
+                // Dangling BEFORE the save — the user deleted the PNG by hand, or an earlier failure
+                // left the row pointing at nothing. Carrying the name over would hand the new profile
+                // a reference that resolves into its own empty folder; dropping it makes the Sheet
+                // show "no image captured", which is the same choice HandleActionsPaste makes.
+                DiagnosticLog.Info($"[Save] Reference image '{imagePath}' is not on disk under '{srcKey}' or '{NoProfileImageFolder}'; '{dstKey}' saved without it.");
+                return true;
+            }
+
+            carriedName = ImageStorageService.CloneReferenceImage(foundIn, imagePath, dstKey);
+            if (carriedName != null) return true;
+
+            // The file is there and the copy still failed: disk full, locked by an AV scan or a
+            // sync client, destination not writable. CloneReferenceImage swallows the exception, so
+            // this is everything we know — the caller turns it into a refusal to save rather than a
+            // half-written profile.
+            DiagnosticLog.Error($"[Save] Copy of reference image '{imagePath}' from '{foundIn}' to '{dstKey}' failed; save aborted.");
             return false;
         }
 

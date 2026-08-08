@@ -190,11 +190,35 @@ namespace TrueReplayer.Services
 
         // Allow relative/anchor URLs (no scheme); for absolute URLs, permit only the allowlisted
         // schemes. Whitespace/control chars are stripped from the scheme before the check so
-        // "java\tscript:" can't slip past as a relative URL.
+        // "java\tscript:" can't slip past as a relative URL. Protocol-relative URLs are refused
+        // outright — see below, they are not "relative" in any sense that makes them safe.
         private static string? SanitizeUrl(string? url)
         {
             if (string.IsNullOrWhiteSpace(url)) return null;
             var trimmed = url.Trim();
+
+            // A leading "//" is PROTOCOL-RELATIVE, not relative: "//host/path" names an arbitrary
+            // host and merely borrows the scheme from the base document. It carries no colon, so
+            // the "no colon → relative, safe" test below waved it straight through without the
+            // allowlist ever seeing it.
+            //
+            // What makes that dangerous here rather than merely sloppy: this sanitiser's output
+            // goes onto the clipboard as CF_HTML, and a clipboard fragment HAS no base document.
+            // The receiving app (Word, Outlook, a mail client) resolves the reference however it
+            // pleases, and resolving against file: turns "//host/share" into a UNC path pointing
+            // at an attacker-controlled SMB server — the exact file: scheme AllowedSchemes exists
+            // to block, reached by a route that never presents a scheme to check.
+            //
+            // Backslashes count too: Windows apps and browsers normalise "\\" and the mixed forms
+            // to "//". Whitespace and control characters are stripped first, the same way they are
+            // for the scheme below, so "/\t/host" cannot dodge the test either.
+            // Rejection drops the href and keeps the link text, like every other refusal here.
+            var structural = new string(trimmed
+                .Where(c => !char.IsWhiteSpace(c) && !char.IsControl(c)).ToArray());
+            if (structural.Length >= 2
+                && (structural[0] == '/' || structural[0] == '\\')
+                && (structural[1] == '/' || structural[1] == '\\'))
+                return null;
 
             var colon = trimmed.IndexOf(':');
             var slash = trimmed.IndexOf('/');

@@ -37,9 +37,20 @@ namespace TrueReplayer.Services
             (p => p.Actions.Any(a => string.Equals(a.ActionType, "WaitImage", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 0, 0), "WaitImage"),
 
-            // Relative coordinates require the window-tracking pipeline shipped in 2.0.5.
+            // Relative coordinates require the window-tracking pipeline, first released in 2.1.0.
+            //
+            // Was 2.0.5, a version that NEVER EXISTED: sweeping every <Version> this csproj has
+            // ever held shows the 2.x line going straight from 2.0.0 to 2.1.0. Behaviour is
+            // unchanged for every build that can actually run — no release falls in [2.0.5,
+            // 2.1.0), so "running >= 2.0.5" and "running >= 2.1.0" answer identically — but the
+            // number is user-visible in the Info tab and in import diagnostics, and quoting a
+            // version nobody can install or upgrade to is a dead end for whoever reads it.
+            //
+            // Raised to 2.1.0 rather than lowered to 2.0.0 deliberately: 2.0.5 already rejected
+            // 2.0.0, so 2.1.0 preserves that verdict, while 2.0.0 would LOOSEN the gate and let a
+            // 2.0.0 build import a profile the old pin deliberately kept away from it.
             (p => p.UseRelativeCoordinates,
-                new Version(2, 0, 5), "UseRelativeCoordinates"),
+                new Version(2, 1, 0), "UseRelativeCoordinates"),
 
             // WhilePressed / Toggle trigger modes landed in 2.1.0; older builds only handle OnPress/OnRelease.
             (p => p.TriggerMode == TriggerMode.WhilePressed || p.TriggerMode == TriggerMode.Toggle,
@@ -232,6 +243,26 @@ namespace TrueReplayer.Services
                                       string.Equals(a.ActionType, "MiddleClick", StringComparison.OrdinalIgnoreCase)),
                 new Version(2, 4, 0), "Combined clicks (LeftClick/RightClick/MiddleClick)"),
 
+            // Focus click (IsFocusClick — the click is replayed a SECOND time a few pixels away so a
+            // small target actually takes focus; see ActionReplayer.FocusTap) shipped in 2.5.2. The
+            // 2.4.0 combined-click pin above only covers the click's EXISTENCE, which is why this
+            // needs its own row: a 2.4.0-2.5.1 build HAS the replay case, so the row runs and the
+            // profile looks fine, but it drops the unknown property and never fires the focus tap.
+            // The small target (a Roblox chat box, a narrow form field) gets clicked WITHOUT taking
+            // focus, and everything the macro types next goes to whatever was focused before —
+            // silent divergence, exactly what this matrix exists to catch. There is no
+            // [JsonExtensionData] anywhere in this repo, so that older build also ERASES the flag
+            // on its next save of the profile.
+            //
+            // Property-level Detect gated on the three combined types, because the engine reads the
+            // flag ONLY in those cases — on any other row it is runtime-inert and must not raise the
+            // floor. Same reasoning as the data-loop skip-on-error pin above.
+            (p => p.Actions.Any(a => a.IsFocusClick &&
+                (string.Equals(a.ActionType, "LeftClick", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(a.ActionType, "RightClick", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(a.ActionType, "MiddleClick", StringComparison.OrdinalIgnoreCase))),
+                new Version(2, 5, 2), "Focus click"),
+
             // Click × N inline repeat (RepeatCount > 1 on a LeftClick/RightClick/MiddleClick/
             // DoubleClick) — the 2.4.0 (combined) and 2.5.4 (double) pins above only cover the
             // click's EXISTENCE. An older build that HAS the click's replay case but predates this
@@ -369,9 +400,13 @@ namespace TrueReplayer.Services
             (p => p.EnableLoop && p.LoopCount > 1,
                 new Version(2, 11, 0), "Per-profile loop count"),
 
-            // Restore Size split from Restore Position in 2.0.5; older builds only honour Position.
+            // Restore Size split from Restore Position; older builds only honour Position. Same
+            // correction as the UseRelativeCoordinates pin above — the 2.0.5 this used to name
+            // was never a real release (the 2.x line runs 2.0.0 then 2.1.0), so it is now 2.1.0.
+            // Identical verdict for every installable build; only the number the user is shown
+            // changes, from unreachable to real.
             (p => p.RestoreSize,
-                new Version(2, 0, 5), "RestoreSize"),
+                new Version(2, 1, 0), "RestoreSize"),
 
             // Sharing-metadata round-trip itself is a 2.2 feature — anything carrying tags/description
             // came from a 2.2+ build. Older builds will ignore the metadata but load the actions fine,
