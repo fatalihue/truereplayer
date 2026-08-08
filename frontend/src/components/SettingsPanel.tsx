@@ -244,21 +244,22 @@ function PathStepZeroNote({ step }: { step: string }) {
 // the requested rate was out of reach, in which case it names the ceiling and the reason.
 // Deliberately does NOT model the Windows timer granularity — that would replace one wrong
 // number with a differently wrong one. The dashboard's measured Rate cell is ground truth.
-function ClickerRateNote({ unit, cps, ceiling, clamped, holdMs }: {
-  unit: 'ms' | 'cps';
-  cps: number;
-  ceiling: number;
+// The clamp warning only — a validation message, so it keeps the full-width strip where a
+// warning wants to be. The ms→clicks/second conversion is NOT here: that one is a readout of
+// the field beside it, so it rides in the row's own label (SettingRow.labelSuffix). As a
+// strip it read as an orphan row — ~250px of empty space with six characters on the far edge.
+function ClickerRateClampNote({ clamped, ceiling, holdMs }: {
   clamped: boolean;
+  ceiling: number;
   holdMs: number;
 }) {
   const tt = useTt();
-  if (unit === 'cps' && !clamped) return null;
-  const text = unit === 'ms'
-    ? `≈ ${formatRate(cps)}/s`
-    : tt(`max ≈ ${formatRate(ceiling)}/s (hold ${holdMs} ms)`,
-         `máx ≈ ${formatRate(ceiling)}/s (hold ${holdMs} ms)`);
+  if (!clamped) return null;
   return (
-    <div className="px-2.5 pb-1 text-[11px] text-text-tertiary text-right">{text}</div>
+    <div className="px-2.5 pb-1 text-[11px] text-text-tertiary text-right">
+      {tt(`max ≈ ${formatRate(ceiling)}/s (hold ${holdMs} ms)`,
+          `máx ≈ ${formatRate(ceiling)}/s (hold ${holdMs} ms)`)}
+    </div>
   );
 }
 
@@ -290,7 +291,16 @@ function Disclosure({ label, children }: { label: string; children: React.ReactN
   );
 }
 
-function SettingRow({ label, tooltip, children, danger }: { label: string; tooltip?: string; children: React.ReactNode; danger?: boolean }) {
+function SettingRow({ label, labelSuffix, tooltip, children, danger }: {
+  label: string;
+  // Quiet readout rendered after the label — for a value DERIVED from this row's own field
+  // (the Clicker rate's ≈ clicks/second). Kept separate from `label` because that stays a
+  // plain string: the settings filter matches on it.
+  labelSuffix?: React.ReactNode;
+  tooltip?: string;
+  children: React.ReactNode;
+  danger?: boolean;
+}) {
   // `danger` paints the row in a loud red so a disabled-but-critical toggle
   // (e.g. Profile Keys OFF) is impossible to miss when glancing at the panel.
   const filter = useContext(FilterContext);
@@ -313,6 +323,7 @@ function SettingRow({ label, tooltip, children, danger }: { label: string; toolt
       <span className={`text-ui flex items-center gap-1.5 min-w-0 ${danger ? 'text-recording' : 'text-text-secondary'}`}>
         {danger && <AlertTriangle size={12} className="shrink-0" />}
         {label}
+        {labelSuffix}
       </span>
       <div className="flex items-center gap-2.5 shrink-0">
         {children}
@@ -542,7 +553,16 @@ function ClickerSection({
               ]}
             />
           </SettingRow>
-          <SettingRow label="Rate" tooltip={tt('Click rate: /s or delay (ms). Type or pick a preset.', 'Taxa de clique: /s ou atraso (ms). Digite ou escolha um preset.')}>
+          {/* The ≈ rides in the label: it is a readout of the field on this same row, and the
+              conversion is NOT 1000/ms — the Gap is part of the period, so it cannot be done in
+              the head. Only shown in ms mode; in /s mode the field already states the rate. */}
+          <SettingRow
+            label="Rate"
+            labelSuffix={unit === 'ms'
+              ? <span className="text-[11px] font-mono text-text-tertiary">≈ {formatRate(targetCps(localDelayMs, gapMs))}/s</span>
+              : undefined}
+            tooltip={tt('Click rate: /s or delay (ms). Type or pick a preset.', 'Taxa de clique: /s ou atraso (ms). Digite ou escolha um preset.')}
+          >
             {/* Combo + /s↔ms unit toggle share one FIELD_W slot so the row aligns with the chips. */}
             <div className={`${FIELD_W} flex items-center gap-1`}>
               <ComboInput
@@ -575,13 +595,7 @@ function ClickerSection({
               thing the field itself cannot. In ms mode it is the conversion the user cannot
               do in their head (the interval is part of the period); in /s mode it appears
               only when the request was out of reach. */}
-          <ClickerRateNote
-            unit={unit}
-            cps={targetCps(localDelayMs, gapMs)}
-            ceiling={rateCeiling}
-            clamped={rateClamped}
-            holdMs={holdMs}
-          />
+          <ClickerRateClampNote clamped={rateClamped} ceiling={rateCeiling} holdMs={holdMs} />
         </Section>
 
         {/* The three "where" modes are a mutex the engine enforces in three places, but as
