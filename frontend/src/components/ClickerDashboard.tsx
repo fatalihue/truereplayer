@@ -52,8 +52,15 @@ export function ClickerDashboard() {
   const delayMs = parseInt(settings.cursorClickDelay, 10) || 0;
   const configBits: string[] = [settings.cursorClickButton];
   if (delayMs > 0) configBits.push(`${formatRate(targetCps(delayMs, gapMs))}/s`);
-  configBits.push(settings.cursorClickUseLoops
-    ? `${parseInt(settings.cursorClickLoops, 10) || 0} clicks`
+  // Both limits are optional and independent — say which ones are armed, and that the run is
+  // unbounded when neither is.
+  const limitBits: string[] = [];
+  if (settings.cursorClickUseLoops) limitBits.push(`${parseInt(settings.cursorClickLoops, 10) || 0} clicks`);
+  if (settings.cursorClickUseMaxDuration) {
+    limitBits.push(`${Math.round((parseInt(settings.cursorClickMaxDuration, 10) || 0) / 1000)}s`);
+  }
+  configBits.push(limitBits.length
+    ? limitBits.join(tt(' or ', ' ou '))
     : tt('no limit', 'sem limite'));
   if (settings.cursorClickUseArea && settings.cursorClickArea) {
     configBits.push(`Area ${settings.cursorClickArea.w}×${settings.cursorClickArea.h}`);

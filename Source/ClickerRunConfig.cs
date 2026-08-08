@@ -18,7 +18,10 @@ namespace TrueReplayer.Models
         int PositionJitter,
         ClickArea? Area,
         bool UseFixed,
-        ClickPoint? FixedPoint)
+        ClickPoint? FixedPoint,
+        // Wall-clock cap in ms; 0 = unbounded. Independent of LoopCount — whichever limit
+        // is reached first ends the run, and both may be unset.
+        int MaxDurationMs)
     {
         // Fallback for the hotkey paths, used only when the bridge isn't up yet. Exists so the
         // shape lives in ONE place: the two hotkey call sites in MainWindow each carried their
@@ -26,7 +29,7 @@ namespace TrueReplayer.Models
         // LoopCount to 1 (a single click), which stopped matching the engine's convention once
         // "no explicit limit" became unbounded.
         public static ClickerRunConfig Default { get; } =
-            new(100, false, 0, 0, 0, "Left", 10, 0, null, false, null);
+            new(100, false, 0, 0, 0, "Left", 10, 0, null, false, null, 0);
     }
 
     // Snapshot of the macro loop settings for one replay start. Built by

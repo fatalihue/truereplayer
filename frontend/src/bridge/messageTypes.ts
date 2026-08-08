@@ -401,6 +401,9 @@ export interface SettingsState {
   cursorClickUseLoops: boolean;
   cursorClickInterval: string;
   cursorClickUseInterval: boolean;
+  /** Wall-clock cap in MS on the wire; the panel edits it in seconds. */
+  cursorClickMaxDuration: string;
+  cursorClickUseMaxDuration: boolean;
   recordMouse: boolean;
   recordScroll: boolean;
   recordKeyboard: boolean;

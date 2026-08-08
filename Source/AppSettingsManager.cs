@@ -80,6 +80,12 @@ namespace TrueReplayer.Services
             public bool CursorClickUseLoops { get; set; } = false;
             public int CursorClickIntervalMs { get; set; } = 200;
             public bool CursorClickUseInterval { get; set; } = false;
+            // Wall-clock cap on a run, paired with its own enable like every other clicker
+            // limit. Stored in MS for consistency with the rate; the panel shows seconds.
+            // 0 (or the toggle off) means no cap. An absent property on an older
+            // appsettings.json falls through to these initializers, so no migration.
+            public int CursorClickMaxDurationMs { get; set; } = 60000;
+            public bool CursorClickUseMaxDuration { get; set; } = false;
             // Clicker-exclusive hotkeys — fully decoupled from the global macro hotkeys.
             // Default PageDown = Start/Stop, PageUp = Pause/Resume. Active only in Clicker mode.
             public string CursorClickStartHotkey { get; set; } = "PageDown";

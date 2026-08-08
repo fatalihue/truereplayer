@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useContext, createContext } from 'react';
-import { Timer, TimerReset, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, MousePointerClick, Palette, Gamepad2, AlertTriangle, Power, BellRing, X, ArrowLeftRight } from 'lucide-react';
+import { Timer, TimerReset, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, MousePointerClick, Palette, Gamepad2, AlertTriangle, Power, BellRing, X, ArrowLeftRight, Crosshair, Hourglass } from 'lucide-react';
 import { APP_VERSION } from '../appVersion';
 import { RemapSection } from './RemapSection';
 import { useLanguage, useTt } from '../state/LanguageContext';
@@ -12,7 +12,7 @@ import { Toggle } from './common/Toggle';
 import { SegmentedControl } from './common/SegmentedControl';
 import { chipOn, chipOff, chipDotOn, chipDotOff } from './common/chipStyles';
 import { formatMs } from '../utils/displayUtils';
-import { CLICK_PERIOD_FLOOR_MS, delayForCps, formatRate, maxCps, targetCps } from '../utils/clickerFormat';
+import { CLICK_HOLD_MAX_MS, CLICK_PERIOD_FLOOR_MS, delayForCps, formatRate, maxCps, targetCps } from '../utils/clickerFormat';
 
 // Compact 28×16 switch — the redesigned Settings panel uses the smaller size for every
 // on/off control; other surfaces (dialogs) keep the default 40×20 Toggle.
@@ -181,14 +181,29 @@ function EnableChip({ value, isOn, unit, format, min, max, width, offDisplay, on
 // Plain value field — same box/size as EnableChip but with no enable dot (always applies),
 // for numbers that have no on/off (the Game-mode tuning knobs). Unit sits inside so it lines
 // up with the chips above it.
-function ValueField({ value, unit, onCommitValue }: {
+function ValueField({ value, unit, min, max, onCommitValue }: {
   value: string;
   unit?: string;
+  // Optional bounds applied on commit. Unset by default so the existing Game Mode knobs,
+  // which clamp on the C# side, keep their exact behaviour.
+  min?: number;
+  max?: number;
   onCommitValue: (v: string) => void;
 }) {
   const [local, setLocal] = useState(value);
   const focused = useRef(false);
   useEffect(() => { if (!focused.current) setLocal(value); }, [value]);
+  const commit = (raw: string) => {
+    let v = raw;
+    if (min != null || max != null) {
+      const n = parseInt(raw, 10);
+      if (raw === '' || isNaN(n)) v = String(min ?? 0);
+      else if (min != null && n < min) v = String(min);
+      else if (max != null && n > max) v = String(max);
+    }
+    if (v !== raw) setLocal(v);
+    onCommitValue(v);
+  };
   return (
     <div className={`${FIELD_W} h-7 flex items-center gap-1.5 px-2 rounded border border-border-default bg-bg-input focus-within:border-accent-solid`}>
       <input
@@ -196,8 +211,8 @@ function ValueField({ value, unit, onCommitValue }: {
         value={local}
         onChange={(e) => setLocal(e.target.value)}
         onFocus={() => { focused.current = true; }}
-        onBlur={() => { focused.current = false; onCommitValue(local); }}
-        onKeyDown={(e) => { if (e.key === 'Enter') { onCommitValue(local); (e.target as HTMLInputElement).blur(); } }}
+        onBlur={() => { focused.current = false; commit(local); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') { commit(local); (e.target as HTMLInputElement).blur(); } }}
         className="flex-1 min-w-0 bg-transparent outline-none text-ui font-mono text-right text-text-primary"
       />
       {/* tertiary, not disabled — the unit is real information (audit: text-disabled
@@ -249,8 +264,11 @@ function ClickerRateNote({ unit, cps, ceiling, clamped, holdMs }: {
 
 // Inline disclosure for a handful of secondary rows (e.g. the Game-mode tuning knobs) so the
 // numbers users rarely touch don't clutter the group. One small caret toggle, no card.
-function Disclosure({ label, children }: { label: string; children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
+function Disclosure({ label, defaultOpen, children }: { label: string; defaultOpen?: boolean; children: React.ReactNode }) {
+  // Initial state only — once open, later prop changes must not fight the user. Callers pass
+  // true when something inside is already enabled: hiding an ACTIVE setting behind a caret is
+  // worse than the clutter the caret removes.
+  const [open, setOpen] = useState(!!defaultOpen);
   return (
     <>
       <button onClick={() => setOpen(o => !o)} className="group w-full flex items-center gap-1 px-2.5 py-1 text-[11px] text-accent-solid hover:underline transition-colors">
@@ -394,7 +412,7 @@ function ClickerSection({
   unit, onUnitChange,
   button, rate, rateJitter, useRateJitter, hold, positionJitter, usePositionJitter,
   useArea, area, useFixed, fixedPoint,
-  loops, useLoops, interval, useInterval, onChange,
+  loops, useLoops, interval, useInterval, maxDuration, useMaxDuration, onChange,
 }: {
   unit: 'ms' | 'cps';
   onUnitChange: (u: 'ms' | 'cps') => void;
@@ -413,6 +431,8 @@ function ClickerSection({
   useLoops: boolean;
   interval: string;
   useInterval: boolean;
+  maxDuration: string;
+  useMaxDuration: boolean;
   onChange: (key: string, value: string | boolean | number | object | null) => void;
 }) {
   const { send } = useBridge();
@@ -443,6 +463,8 @@ function ClickerSection({
   // pause between bursts — it is part of the cadence); the hold sets the floor.
   const gapMs = useInterval ? (parseInt(interval, 10) || 0) : 0;
   const holdMs = parseInt(hold, 10) || 0;
+  // ms on the wire, seconds in the field.
+  const durationSec = String(Math.max(1, Math.round((parseInt(maxDuration, 10) || 60000) / 1000)));
 
   // Strip trailing ".0" so whole-number CPS shows as "1" not "1.0", "5" not "5.0", etc.
   const trimCps = (cps: number) => cps.toFixed(1).replace(/\.0$/, '');
@@ -484,9 +506,13 @@ function ClickerSection({
   };
 
   return (
-    // Uses the shared Section so it matches macro mode exactly (header above a single
-    // inset group, same row layout). The purple title keeps the "you're in Clicker" cue.
-    <Section color="var(--color-clicker)" title="Clicker">
+      // Three groups, not one flat list of eight rows: "how it clicks" (Clicker), "where"
+      // (Target — a mutex that needed to look like one) and "when it stops" (Stop after).
+      // Only the first keeps the purple title: that hue is the mode cue, and repeating it
+      // three times would spend it. Also gives the collapsed rail three targets instead of
+      // one, matching what macro mode already has.
+      <>
+        <Section color="var(--color-clicker)" title="Clicker">
           {/* Flat/chip layout: every settings control is one FIELD_W (100px) box, flush right,
               so chips, combos and the area control all line up — and match the macro Execution
               chips' width across a mode switch. Value+enable rows are a single EnableChip;
@@ -545,48 +571,48 @@ function ClickerSection({
             clamped={rateClamped}
             holdMs={holdMs}
           />
-          <SettingRow label="Loops" tooltip={tt('Stop after N clicks. Off = runs until you stop it.', 'Parar após N cliques. Desligado = roda até você parar.')}>
-            <EnableChip
-              value={loops}
-              isOn={useLoops}
-              min={1}
-              max={MAX_CLICK_LIMIT}
-              /* Off means unbounded, so show ∞ rather than a stored number that will not be
-                 used — the chip used to display "0" beside a tooltip promising "0 = forever"
-                 while the backend quietly substituted a single click. */
-              offDisplay="∞"
-              onCommitValue={(v) => onChange('cursorClickLoops', v)}
-              onToggle={(v) => {
-                onChange('cursorClickUseLoops', v);
-                // Seed a real limit when switching ON. Toggling the dot never runs commit(),
-                // so a stored "0" would otherwise mean "limit enabled" and still run forever
-                // — with the chip now showing 0. Same seed-on-enable pattern the SheetPanel
-                // jitter chip uses.
-                if (v && (parseInt(loops, 10) || 0) < 1) onChange('cursorClickLoops', '100');
-              }}
-              onEnterActivate={() => activateIfOff(useLoops, 'cursorClickUseLoops')}
-            />
-          </SettingRow>
-          <SettingRow label="Interval" tooltip={tt('Extra gap added to every click (ms) — it adds to the rate, it is not a pause between bursts.', 'Intervalo extra somado a cada clique (ms) — soma à taxa, não é pausa entre rajadas.')}>
-            <EnableChip
-              value={interval}
-              isOn={useInterval}
-              unit="ms" format min={0} max={MAX_DELAY_MS}
-              onCommitValue={(v) => onChange('cursorClickInterval', v)}
-              onToggle={(v) => onChange('cursorClickUseInterval', v)}
-              onEnterActivate={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
-            />
-          </SettingRow>
-          <SettingRow label="Jitter" tooltip={tt('Random ±% on each delay — less robotic.', 'Variação ±% aleatória em cada atraso — menos robótico.')}>
-            <EnableChip
-              value={rateJitter}
-              isOn={useRateJitter}
-              unit="%" min={0} max={100}
-              onCommitValue={(v) => onChange('cursorClickDelayJitter', v)}
-              onToggle={(v) => onChange('cursorClickUseJitter', v)}
-              onEnterActivate={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
-            />
-          </SettingRow>
+          {/* Tuning lives behind a caret: three knobs a routine run never touches. Opens by
+              itself when any of them is already active — hiding an ENABLED setting is worse
+              than the clutter the caret removes. */}
+          <Disclosure
+            label="Advanced"
+            defaultOpen={useRateJitter || useInterval || holdMs !== 10}
+          >
+            <SettingRow label="Jitter" tooltip={tt('Random ±% on each delay — less robotic.', 'Variação ±% aleatória em cada atraso — menos robótico.')}>
+              <EnableChip
+                value={rateJitter}
+                isOn={useRateJitter}
+                unit="%" min={0} max={100}
+                onCommitValue={(v) => onChange('cursorClickDelayJitter', v)}
+                onToggle={(v) => onChange('cursorClickUseJitter', v)}
+                onEnterActivate={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
+              />
+            </SettingRow>
+            {/* Hold is back. It was pulled from the panel while it silently STOLE from the
+                rate (it used to stack on top of the delay), which made it a trap. Now that the
+                hold lives inside the period, raising it does not change the rate until it
+                becomes the ceiling — and the ≈ note above says so when it does. */}
+            <SettingRow label="Hold" tooltip={tt('How long the button stays pressed (ms). 10 = a normal click; 50-200 for apps that miss short clicks.', 'Quanto tempo o botão fica pressionado (ms). 10 = clique normal; 50-200 para apps que perdem cliques curtos.')}>
+              <ValueField value={hold} unit="ms" min={0} max={CLICK_HOLD_MAX_MS} onCommitValue={(v) => onChange('cursorClickHold', v)} />
+            </SettingRow>
+            {/* "Gap", not "Interval": in Clicker mode one iteration is one click, so this is
+                not a pause between bursts — it is added to every click's period. */}
+            <SettingRow label="Gap" tooltip={tt('Extra time added to every click (ms) — it adds to the rate, it is not a pause between bursts.', 'Tempo extra somado a cada clique (ms) — soma à taxa, não é pausa entre rajadas.')}>
+              <EnableChip
+                value={interval}
+                isOn={useInterval}
+                unit="ms" format min={0} max={MAX_DELAY_MS}
+                onCommitValue={(v) => onChange('cursorClickInterval', v)}
+                onToggle={(v) => onChange('cursorClickUseInterval', v)}
+                onEnterActivate={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
+              />
+            </SettingRow>
+          </Disclosure>
+        </Section>
+
+        {/* The three "where" modes are a mutex the engine enforces in three places, but as
+            three loose rows they read as independent switches. A group says "pick one". */}
+        <Section title="Target">
           <SettingRow label="Position" tooltip={tt('Random ±px around the cursor. Exclusive with Area / Fixed.', 'Variação ±px aleatória ao redor do cursor. Exclusivo com Area / Fixed.')}>
             <EnableChip
               value={positionJitter}
@@ -707,14 +733,57 @@ function ClickerSection({
               )}
             </div>
           </SettingRow>
-          {/* Hold — removed from the panel per request; the default of 10 ms
-              (defaultSettings.cursorClickHold) still applies at replay. To show it again,
-              re-add `hold` to the ClickerSection destructuring and uncomment this row:
-          <SettingRow label="Hold" tooltip="How long button stays pressed (ms). 10 = normal click; 50-200 = slow click">
-            <ValueField value={hold} unit="ms" onCommitValue={(v) => onChange('cursorClickHold', v)} />
+        </Section>
+
+        {/* Both limits are optional and independent; whichever is reached first ends the run.
+            Grouping them separates "how it clicks" from "when it stops", which is what made
+            Loops and Interval — one a bound, one part of the cadence — confusing as neighbours. */}
+        <Section title="Stop after">
+          <SettingRow label="Clicks" tooltip={tt('Stop after N clicks. Off = no limit.', 'Parar após N cliques. Desligado = sem limite.')}>
+            <EnableChip
+              value={loops}
+              isOn={useLoops}
+              min={1}
+              max={MAX_CLICK_LIMIT}
+              /* Off means unbounded, so show ∞ rather than a stored number that will not be
+                 used — the chip used to display "0" beside a tooltip promising "0 = forever"
+                 while the backend quietly substituted a single click. */
+              offDisplay="∞"
+              onCommitValue={(v) => onChange('cursorClickLoops', v)}
+              onToggle={(v) => {
+                onChange('cursorClickUseLoops', v);
+                // Seed a real limit when switching ON. Toggling the dot never runs commit(),
+                // so a stored "0" would otherwise mean "limit enabled" and still run forever
+                // — with the chip now showing 0. Same seed-on-enable pattern the SheetPanel
+                // jitter chip uses.
+                if (v && (parseInt(loops, 10) || 0) < 1) onChange('cursorClickLoops', '100');
+              }}
+              onEnterActivate={() => activateIfOff(useLoops, 'cursorClickUseLoops')}
+            />
           </SettingRow>
-          */}
-    </Section>
+          {/* Seconds here, milliseconds on the wire. This is the one clicker field a human
+              states in human units, and the backend keeps ms for consistency with Rate. */}
+          <SettingRow label="Time" tooltip={tt('Stop after N seconds of clicking. Paused time does not count. Off = no limit.', 'Parar após N segundos clicando. Tempo pausado não conta. Desligado = sem limite.')}>
+            <EnableChip
+              value={durationSec}
+              isOn={useMaxDuration}
+              unit="s" min={1} max={86400}
+              offDisplay="∞"
+              onCommitValue={(v) => {
+                const s = Math.max(1, Math.min(86400, parseInt(v, 10) || 60));
+                onChange('cursorClickMaxDuration', String(s * 1000));
+              }}
+              onToggle={(v) => onChange('cursorClickUseMaxDuration', v)}
+              onEnterActivate={() => activateIfOff(useMaxDuration, 'cursorClickUseMaxDuration')}
+            />
+          </SettingRow>
+          {useLoops && useMaxDuration && (
+            <div className="px-2.5 pb-1 text-[11px] text-text-tertiary text-right">
+              {tt('whichever comes first', 'o que vier primeiro')}
+            </div>
+          )}
+        </Section>
+      </>
   );
 }
 
@@ -986,7 +1055,14 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
   type RailEntry = { tab: 'profile' | 'keys' | 'app'; title: string; icon: React.ElementType; color?: string };
   const railProfile: RailEntry[] =
     settings.useCursorClick
-      ? [{ tab: 'profile', title: 'Clicker', icon: MousePointerClick, color: 'var(--color-clicker-fg)' }]
+      /* Three entries, matching the three Sections — and matching macro mode's three, so a
+         mode switch with the panel collapsed no longer swaps three icons for one. Purple
+         stays on Clicker alone: the hue is the mode cue, not a per-section decoration. */
+      ? [
+          { tab: 'profile', title: 'Clicker', icon: MousePointerClick, color: 'var(--color-clicker-fg)' },
+          { tab: 'profile', title: 'Target', icon: Crosshair },
+          { tab: 'profile', title: 'Stop after', icon: Hourglass },
+        ]
       : [
           { tab: 'profile', title: 'Execution', icon: Timer },
           { tab: 'profile', title: 'Game Mode', icon: Gamepad2 },
@@ -1145,6 +1221,8 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 useLoops={settings.cursorClickUseLoops}
                 interval={settings.cursorClickInterval}
                 useInterval={settings.cursorClickUseInterval}
+                maxDuration={settings.cursorClickMaxDuration}
+                useMaxDuration={settings.cursorClickUseMaxDuration}
                 onChange={changeSetting}
               />
             ) : (

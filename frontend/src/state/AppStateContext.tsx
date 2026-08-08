@@ -45,6 +45,8 @@ const defaultSettings = {
   cursorClickUseLoops: false,
   cursorClickInterval: '200',
   cursorClickUseInterval: false,
+  cursorClickMaxDuration: '60000',
+  cursorClickUseMaxDuration: false,
   recordMouse: true,
   recordScroll: true,
   recordKeyboard: true,

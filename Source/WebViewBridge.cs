@@ -123,6 +123,9 @@ namespace TrueReplayer
         public bool CursorClickUseLoops { get; set; } = false;
         public string CursorClickInterval { get; set; } = "0";
         public bool CursorClickUseInterval { get; set; } = false;
+        // Wall-clock cap, in MS on the wire (the panel converts to seconds for display).
+        public string CursorClickMaxDuration { get; set; } = "60000";
+        public bool CursorClickUseMaxDuration { get; set; } = false;
         public bool RecordMouse { get; set; } = true;
         public bool RecordScroll { get; set; } = true;
         public bool RecordKeyboard { get; set; } = true;
@@ -633,6 +636,10 @@ namespace TrueReplayer
             CursorClickUseLoops = saved.CursorClickUseLoops;
             CursorClickInterval = ClampNumeric(saved.CursorClickIntervalMs.ToString(), 0, 60000, 0);
             CursorClickUseInterval = saved.CursorClickUseInterval;
+            // 24 h ceiling: past that the cap is indistinguishable from unbounded, and it keeps
+            // a typo from parking the number somewhere meaningless.
+            CursorClickMaxDuration = ClampNumeric(saved.CursorClickMaxDurationMs.ToString(), 0, 86400000, 60000);
+            CursorClickUseMaxDuration = saved.CursorClickUseMaxDuration;
             RecordMouse = saved.RecordMouse;
             RecordScroll = saved.RecordScroll;
             RecordKeyboard = saved.RecordKeyboard;
@@ -2065,8 +2072,11 @@ namespace TrueReplayer
             // be defensive). FixedPoint may be null while UseFixed is on = lock-on-start.
             bool useFixed = CursorClickUseFixed && !CursorClickUseArea;
             ClickPoint? fixedPoint = useFixed ? CursorClickFixedPoint : null;
+            // Same convention as loops: toggle off resolves to 0 = no cap.
+            int maxDuration = CursorClickUseMaxDuration && int.TryParse(CursorClickMaxDuration, out var md) && md > 0
+                ? Math.Clamp(md, 1000, 86400000) : 0;
             return new ClickerRunConfig(delay, CursorClickUseJitter, jitterPercent, loops, interval,
-                CursorClickButton, holdMs, positionJitter, area, useFixed, fixedPoint);
+                CursorClickButton, holdMs, positionJitter, area, useFixed, fixedPoint, maxDuration);
         }
 
         public void PushSettingsLoaded()
@@ -2112,6 +2122,8 @@ namespace TrueReplayer
                     cursorClickUseLoops = CursorClickUseLoops,
                     cursorClickInterval = CursorClickInterval,
                     cursorClickUseInterval = CursorClickUseInterval,
+                    cursorClickMaxDuration = CursorClickMaxDuration,
+                    cursorClickUseMaxDuration = CursorClickUseMaxDuration,
                     recordMouse = RecordMouse,
                     recordScroll = RecordScroll,
                     recordKeyboard = RecordKeyboard,
@@ -2443,6 +2455,8 @@ namespace TrueReplayer
                     cursorClickUseLoops = CursorClickUseLoops,
                     cursorClickInterval = CursorClickInterval,
                     cursorClickUseInterval = CursorClickUseInterval,
+                    cursorClickMaxDuration = CursorClickMaxDuration,
+                    cursorClickUseMaxDuration = CursorClickUseMaxDuration,
                     recordMouse = RecordMouse,
                     recordScroll = RecordScroll,
                     recordKeyboard = RecordKeyboard,
@@ -8493,6 +8507,8 @@ namespace TrueReplayer
                 CursorClickUseLoops = false,
                 CursorClickIntervalMs = 200,
                 CursorClickUseInterval = false,
+                CursorClickMaxDurationMs = 60000,
+                CursorClickUseMaxDuration = false,
             };
             AppSettingsManager.Save(defaults);
 
@@ -8531,6 +8547,8 @@ namespace TrueReplayer
             CursorClickUseLoops = defaults.CursorClickUseLoops;
             CursorClickInterval = defaults.CursorClickIntervalMs.ToString();
             CursorClickUseInterval = defaults.CursorClickUseInterval;
+            CursorClickMaxDuration = defaults.CursorClickMaxDurationMs.ToString();
+            CursorClickUseMaxDuration = defaults.CursorClickUseMaxDuration;
             // Area and Fixed were written to DISK as cleared by the `defaults` object above but
             // never mirrored back into the bridge, so PushSettingsLoaded kept showing the old
             // rect/point and the next SaveGlobalSettings wrote them straight back — the reset
@@ -8633,6 +8651,8 @@ namespace TrueReplayer
                 CursorClickUseLoops = CursorClickUseLoops,
                 CursorClickIntervalMs = int.TryParse(CursorClickInterval, out var cci) ? cci : 0,
                 CursorClickUseInterval = CursorClickUseInterval,
+                CursorClickMaxDurationMs = int.TryParse(CursorClickMaxDuration, out var mdSave) ? mdSave : 60000,
+                CursorClickUseMaxDuration = CursorClickUseMaxDuration,
                 RecordMouse = RecordMouse,
                 RecordScroll = RecordScroll,
                 RecordKeyboard = RecordKeyboard,
@@ -8978,6 +8998,14 @@ namespace TrueReplayer
                     break;
                 case "cursorClickUseInterval":
                     CursorClickUseInterval = valueElement.GetBoolean();
+                    break;
+                case "cursorClickMaxDuration":
+                    // Floor 1000: a sub-second cap would end the run before the 200 ms
+                    // hotkey-release grace, which reads as "the clicker did nothing".
+                    CursorClickMaxDuration = ClampNumeric(valueElement.GetString(), 1000, 86400000, 60000);
+                    break;
+                case "cursorClickUseMaxDuration":
+                    CursorClickUseMaxDuration = valueElement.GetBoolean();
                     break;
                 case "recordMouse":
                     RecordMouse = valueElement.GetBoolean();

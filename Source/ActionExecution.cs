@@ -445,6 +445,9 @@ namespace TrueReplayer.Services
             int jitterRadius = Math.Clamp(config.PositionJitter, 0, 500);
             int loopInterval = Math.Clamp(config.LoopIntervalMs, 0, MaxClickPeriodMs);
             int loopCount = Math.Max(0, config.LoopCount);
+            // 0 = no cap. Independent of loopCount: either, both or neither may bound the run,
+            // and whichever is reached first ends it.
+            long maxDurationMs = Math.Max(0, config.MaxDurationMs);
             bool useJitter = config.UseJitter;
             string button = config.Button;
 
@@ -490,8 +493,9 @@ namespace TrueReplayer.Services
             DiagnosticLog.Info(
                 $"Clicker start: button={button}, period={nominalPeriod}ms (~{1000.0 / Math.Max(1, nominalPeriod):0.#}/s){rateNote}, " +
                 $"loops={(loopCount == 0 ? "unbounded" : loopCount.ToString())}, interval={loopInterval}ms, " +
+                $"maxDuration={(maxDurationMs == 0 ? "unbounded" : maxDurationMs + "ms")}, " +
                 $"hold={safeHold}ms, jitter={(useJitter ? jitterPercent + "%" : "off")}, where={whereDesc}");
-            if (loopCount == 0)
+            if (loopCount == 0 && maxDurationMs == 0)
                 DiagnosticLog.Info("Clicker: unbounded run — stop with the Clicker hotkey, the Stop button or the tray.");
 
             // Dispose the previous run's source before replacing it. StopReplay swallows the
@@ -565,9 +569,20 @@ namespace TrueReplayer.Services
                     // makes the real cycle hold + delay + interval + syscall cost, which is why
                     // the UI's 1000/delay never matched reality; and it accumulates drift.
                     long nextTickMs = 0;
+                    bool durationCapped = false;
 
                     while (!token.IsCancellationRequested && (isInfinite || iteration < loopCount))
                     {
+                        // Duration cap, checked before committing to another click. The elapsed
+                        // it compares against EXCLUDES paused time (pausedAccumMs), so "stop
+                        // after 5 minutes" means five minutes of clicking, not five minutes of
+                        // wall clock with a pause in the middle.
+                        if (maxDurationMs > 0 && (sw.ElapsedMilliseconds - pausedAccumMs) >= maxDurationMs)
+                        {
+                            durationCapped = true;
+                            break;
+                        }
+
                         // Pause can also land mid-wait; this catches a pause that arrived exactly
                         // between the wait returning and the next tick.
                         if (_clickerPaused)
@@ -722,6 +737,15 @@ namespace TrueReplayer.Services
 
                         nextTickMs += period;
                         long wait = nextTickMs - (sw.ElapsedMilliseconds - pausedAccumMs);
+                        // Never wait PAST the cap. Without this a 60 s gap would sit through a
+                        // 5 s limit and only notice at the top of the next iteration, so the run
+                        // would overshoot by most of a minute. Truncating here makes the cap land
+                        // on time whatever the period is.
+                        if (maxDurationMs > 0)
+                        {
+                            long remaining = maxDurationMs - (sw.ElapsedMilliseconds - pausedAccumMs);
+                            if (remaining < wait) wait = remaining;
+                        }
                         if (wait > 0)
                         {
                             long pausedDuringWait = await ClickerWaitAsync(wait, sw, token);
@@ -735,7 +759,9 @@ namespace TrueReplayer.Services
                             nextTickMs = sw.ElapsedMilliseconds - pausedAccumMs;
                         }
                     }
-                    endReason = token.IsCancellationRequested ? "cancelled" : "loop count reached";
+                    endReason = token.IsCancellationRequested ? "cancelled"
+                        : durationCapped ? "duration limit reached"
+                        : "loop count reached";
                 }
                 catch (OperationCanceledException) { endReason = "cancelled"; }
                 finally
