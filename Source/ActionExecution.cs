@@ -370,8 +370,17 @@ namespace TrueReplayer.Services
         private void StopReplay()
         {
             _userStopped = true;
+            // Cancel BEFORE replayer.Stop(). Stop() runs ResetMouseState, and now that the
+            // clicker records its presses in the SAME _simLeftDown/_simRightDown/_simMiddleDown
+            // state, releasing while the click loop is still live could be followed immediately
+            // by a fresh DOWN from the next tick — re-sticking the button we just released.
+            // Cancelling first closes that window; the loop's own finally is the backstop for
+            // the sub-millisecond remainder.
+            // ObjectDisposedException: the loop's finally disposes the CTS, so a Stop racing a
+            // run that just ended can find it gone. The intent ("stop whatever is running") is
+            // satisfied either way — same swallow as ActionReplayer.Stop.
+            try { _cursorClickCts?.Cancel(); } catch (ObjectDisposedException) { /* already gone */ }
             replayer.Stop();
-            _cursorClickCts?.Cancel();
         }
 
         /// <summary>
@@ -401,17 +410,44 @@ namespace TrueReplayer.Services
         // last row. Arg = the table's row count.
         public Action<int>? OnDataLapCompleted;
 
+        // Clicker scheduling bounds. MinClickPeriodMs is the floor the engine will honour;
+        // anything below it is unreachable anyway (Task.Delay quantises to the system timer
+        // period, which we raise to 1 ms for fast runs — see TimeBeginPeriod in the loop).
+        private const int MinClickPeriodMs = 5;
+        private const int MaxClickPeriodMs = 60000;
+        // Slack when deciding whether the cursor moved because the USER moved it, versus because
+        // our own click moved it. Our emitted position round-trips through the lossy 0-65535
+        // normalisation, so the physical pixel can land ~1 px off what we asked for.
+        private const int AnchorTolerancePx = 2;
+
         public void ToggleCursorClickReplay(ClickerRunConfig config)
         {
-            // Locals mirror the old method parameters so the loop body below stays unchanged.
-            int delay = config.DelayMs;
+            if (IsReplaying)
+            {
+                // Stop whatever's running — could be either a regular replay (started by a profile
+                // hotkey before the user switched to Clicker mode) or our own click loop. StopReplay
+                // cancels both, so the Replay hotkey reliably acts as "stop" regardless of source.
+                StopReplay();
+                return;
+            }
+
+            // ── Resolve and CLAMP the run config once, up front ──────────────────────────────
+            // Clamping here rather than deep inside the loop means the start banner reports what
+            // will actually run, and it is the engine's own guarantee: appsettings.json is
+            // hand-editable and never passes through the settings:change handler, so nothing
+            // upstream can be assumed to have validated these.
+            int basePeriod = Math.Clamp(config.DelayMs, MinClickPeriodMs, MaxClickPeriodMs);
+            int safeHold = Math.Clamp(config.HoldMs, 0, 2000);
+            // 0..100 mirrors the identical jitter formula on the macro repeat path. Unclamped,
+            // basePeriod * jitterPercent overflows int and yields a NEGATIVE variation, which
+            // makes Random.Shared.Next(min > max) throw.
+            int jitterPercent = Math.Clamp(config.JitterPercent, 0, 100);
+            int jitterRadius = Math.Clamp(config.PositionJitter, 0, 500);
+            int loopInterval = Math.Clamp(config.LoopIntervalMs, 0, MaxClickPeriodMs);
+            int loopCount = Math.Max(0, config.LoopCount);
             bool useJitter = config.UseJitter;
-            int jitterPercent = config.JitterPercent;
-            int loopCount = config.LoopCount;
-            int loopInterval = config.LoopIntervalMs;
             string button = config.Button;
-            int holdMs = config.HoldMs;
-            int positionJitter = config.PositionJitter;
+
             // Decompose the optional Area record into the booleans + 4 ints the engine expects.
             bool useArea = config.Area is not null;
             int areaX = config.Area?.X ?? 0;
@@ -427,15 +463,6 @@ namespace TrueReplayer.Services
             int fixedY = config.FixedPoint?.Y ?? 0;
             bool fixedCaptured = config.FixedPoint is not null;
 
-            if (IsReplaying)
-            {
-                // Stop whatever's running — could be either a regular replay (started by a profile
-                // hotkey before the user switched to Clicker mode) or our own click loop. StopReplay
-                // cancels both, so the Replay hotkey reliably acts as "stop" regardless of source.
-                StopReplay();
-                return;
-            }
-
             IsReplaying = true;
             _userStopped = false;
             _clickerLoopActive = true;
@@ -444,31 +471,73 @@ namespace TrueReplayer.Services
             onButtonStateChanged?.Invoke("Stop", true);
             onStatusChanged?.Invoke("replaying");
 
-            // Start banner for the clicker loop — records the resolved run config so "clicker does
-            // nothing / wrong rate / wrong place" is diagnosable. (Smooth-movement does NOT apply
-            // here — the loop clicks at the live cursor via SendInput, not the macro mouse path.)
+            // Start banner — records the RESOLVED (post-clamp) run config so "clicker does
+            // nothing / wrong rate / wrong place" is diagnosable from the session log alone.
+            // "where" is spelled out because that is the whole point of the banner and Fixed
+            // mode used to be missing from it entirely.
+            // (Smooth-movement does NOT apply here — the loop clicks via SendInput directly,
+            // not the macro mouse path.)
+            string whereDesc = useArea ? $"area {areaW}x{areaH}@{areaX},{areaY}"
+                : useFixed ? (fixedCaptured ? $"fixed {fixedX},{fixedY}" : "fixed (lock on start)")
+                : jitterRadius > 0 ? $"cursor ±{jitterRadius}px" : "cursor";
+            // The period is the whole cycle: hold and interval live INSIDE it, so this rate is
+            // what the user actually gets. A hold at or above the period is the one case the
+            // schedule cannot honour, so say so rather than drifting silently.
+            int nominalPeriod = basePeriod + loopInterval;
+            string rateNote = safeHold >= nominalPeriod
+                ? $" (hold {safeHold}ms >= period {nominalPeriod}ms — rate limited to ~{1000.0 / Math.Max(1, safeHold + 1):0.#}/s)"
+                : "";
             DiagnosticLog.Info(
-                $"Clicker start: button={button}, rate={delay}ms, " +
-                $"loops={(loopCount == 0 ? "infinite" : loopCount.ToString())}, interval={loopInterval}ms, " +
-                $"hold={holdMs}ms, jitter={(useJitter ? jitterPercent + "%" : "off")}, posJitter={positionJitter}px, " +
-                $"area={(useArea ? $"{areaW}x{areaH}@{areaX},{areaY}" : "off")}");
+                $"Clicker start: button={button}, period={nominalPeriod}ms (~{1000.0 / Math.Max(1, nominalPeriod):0.#}/s){rateNote}, " +
+                $"loops={(loopCount == 0 ? "unbounded" : loopCount.ToString())}, interval={loopInterval}ms, " +
+                $"hold={safeHold}ms, jitter={(useJitter ? jitterPercent + "%" : "off")}, where={whereDesc}");
+            if (loopCount == 0)
+                DiagnosticLog.Info("Clicker: unbounded run — stop with the Clicker hotkey, the Stop button or the tray.");
 
+            // Dispose the previous run's source before replacing it. StopReplay swallows the
+            // ObjectDisposedException this can produce if it races a run that just ended.
+            _cursorClickCts?.Dispose();
             _cursorClickCts = new CancellationTokenSource();
             var token = _cursorClickCts.Token;
 
-            _ = Task.Factory.StartNew(async () =>
+            // Task.Run, not Task.Factory.StartNew(..., LongRunning, ...): LongRunning spawns a
+            // dedicated non-pool thread that exits at the first await (200 ms in), so every
+            // continuation ran on the pool anyway — the thread was created and thrown away.
+            // The OnlyOnFaulted continuation is what makes a non-cancellation fault visible:
+            // previously the unwrapped task was discarded and only the process-wide
+            // UnobservedTaskException handler saw it, whenever the GC got round to it, with no
+            // hint that the clicker was involved.
+            var clickerTask = Task.Run(async () =>
             {
                 long clickCount = 0;
-                var startedAt = DateTime.UtcNow;
+                long blockedCount = 0;
+                // Monotonic clock. DateTime.UtcNow is not monotonic — an NTP step correction
+                // mid-run would corrupt elapsed/CPS — and the project already committed to
+                // tick-based timing elsewhere for exactly this reason.
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                long pausedAccumMs = 0;
                 long lastStatsPushMs = 0;
                 // Read by the finally block for the final loop-progress flush.
                 int iteration = 0;
                 bool isInfinite = loopCount == 0;
+                bool raisedTimerRes = false;
+                string endReason = "cancelled";
                 try
                 {
                     // Wait for hotkey release
                     await Task.Delay(200, token);
-                    startedAt = DateTime.UtcNow;  // reset after the grace delay so CPS isn't skewed
+                    sw.Restart();  // reset after the grace delay so CPS isn't skewed
+
+                    // Ask for a 1 ms system timer while a fast run is live. Task.Delay quantises
+                    // to the timer period (~15.6 ms by default), so without this a configured
+                    // 10 ms period silently becomes ~15.6 ms. Skipped for slow runs so an idle
+                    // 1-click-per-second job doesn't hold the whole system at high resolution.
+                    // Released in the finally — the setting is process-wide and sticky.
+                    if (nominalPeriod < 30)
+                    {
+                        NativeMethods.TimeBeginPeriod(1);
+                        raisedTimerRes = true;
+                    }
 
                     // Resolve button flags
                     uint downFlag = button switch
@@ -484,40 +553,41 @@ namespace TrueReplayer.Services
                         _ => NativeMethods.MOUSEEVENTF_LEFTUP,
                     };
 
-                    // Clamp hold to a reasonable range so a typo can't lock things up.
-                    int safeHold = Math.Clamp(holdMs, 0, 2000);
-                    // Position jitter is treated as a radius in px on each axis. Stored value
-                    // is already validated >= 0 by the UI, but defensive-clamp anyway.
-                    int jitterRadius = Math.Max(0, positionJitter);
                     // Area mode: each click picks a uniformly-random pixel inside (x,y,w,h).
                     // Requires positive dimensions — defensive against stale/empty state.
                     bool areaActive = useArea && areaW > 0 && areaH > 0;
 
+                    // Anchor for position jitter — see the re-detect comment in the loop.
+                    int anchorX = 0, anchorY = 0;
+                    bool anchorSet = false;
+
+                    // Schedule against a monotonic deadline rather than chaining sleeps. Chaining
+                    // makes the real cycle hold + delay + interval + syscall cost, which is why
+                    // the UI's 1000/delay never matched reality; and it accumulates drift.
+                    long nextTickMs = 0;
+
                     while (!token.IsCancellationRequested && (isInfinite || iteration < loopCount))
                     {
-                        // Pause: stop clicking and wait for resume (or cancellation). Shift
-                        // startedAt forward by the paused span so CPS/elapsed exclude the pause.
+                        // Pause can also land mid-wait; this catches a pause that arrived exactly
+                        // between the wait returning and the next tick.
                         if (_clickerPaused)
                         {
-                            var pauseBegan = DateTime.UtcNow;
-                            var resumeTask = _clickerResumeTcs;
-                            if (resumeTask != null)
-                            {
-                                await Task.WhenAny(resumeTask.Task, Task.Delay(Timeout.Infinite, token));
-                                token.ThrowIfCancellationRequested();
-                            }
-                            startedAt = startedAt.Add(DateTime.UtcNow - pauseBegan);
+                            long pauseBegan = sw.ElapsedMilliseconds;
+                            await AwaitClickerResumeAsync(token);
+                            long pausedFor = sw.ElapsedMilliseconds - pauseBegan;
+                            pausedAccumMs += pausedFor;
+                            nextTickMs += pausedFor;
                         }
                         iteration++;
 
-                        int jitteredX, jitteredY;
+                        int targetX, targetY;
                         if (areaActive)
                         {
                             // Sample inclusive on both axes (Next's upper bound is exclusive, so
                             // we pass areaW directly to get [0, areaW-1], which when added to
                             // areaX covers [areaX, areaX+areaW-1] — the full rect interior.
-                            jitteredX = areaX + Random.Shared.Next(0, areaW);
-                            jitteredY = areaY + Random.Shared.Next(0, areaH);
+                            targetX = areaX + Random.Shared.Next(0, areaW);
+                            targetY = areaY + Random.Shared.Next(0, areaH);
                         }
                         else if (useFixed)
                         {
@@ -531,71 +601,85 @@ namespace TrueReplayer.Services
                                 fixedY = fp.y;
                                 fixedCaptured = true;
                             }
-                            jitteredX = fixedX;
-                            jitteredY = fixedY;
+                            targetX = fixedX;
+                            targetY = fixedY;
+                        }
+                        else if (jitterRadius > 0)
+                        {
+                            NativeMethods.GetCursorPos(out var live);
+                            // ANCHORED jitter. The previous version re-read the LIVE cursor every
+                            // tick and jittered from there — but the click carries MOUSEEVENTF_MOVE,
+                            // so it MOVES the cursor to the jittered point, and the next tick then
+                            // started from the already-displaced position. That is a random walk:
+                            // displacement grows as sqrt(N), so the cursor wandered off the target
+                            // and eventually off the monitor.
+                            //
+                            // Re-detect a genuine user move by TOLERANCE, not by exact compare: our
+                            // own emitted position round-trips through the lossy 0-65535
+                            // normalisation, so the physical pixel can land ~1 px off what we asked
+                            // for. An exact test would re-anchor on our own click and reproduce the
+                            // walk one pixel at a time. With the tolerance, our emissions are inside
+                            // the window by construction and never re-anchor, while a real user move
+                            // does — so jitter still "follows your mouse" and displacement stays
+                            // permanently bounded by the radius.
+                            if (!anchorSet
+                                || Math.Abs(live.x - anchorX) > jitterRadius + AnchorTolerancePx
+                                || Math.Abs(live.y - anchorY) > jitterRadius + AnchorTolerancePx)
+                            {
+                                anchorX = live.x;
+                                anchorY = live.y;
+                                anchorSet = true;
+                            }
+                            targetX = anchorX + Random.Shared.Next(-jitterRadius, jitterRadius + 1);
+                            targetY = anchorY + Random.Shared.Next(-jitterRadius, jitterRadius + 1);
                         }
                         else
                         {
-                            NativeMethods.GetCursorPos(out var pos);
-                            // Apply position jitter to the raw cursor coords, BEFORE normalising
-                            // to the virtual-desktop 0-65535 range. Keeps the jitter measured in
-                            // pixels (what the user dialled in) rather than abstract 0-65535 units.
-                            jitteredX = pos.x;
-                            jitteredY = pos.y;
-                            if (jitterRadius > 0)
-                            {
-                                jitteredX += Random.Shared.Next(-jitterRadius, jitterRadius + 1);
-                                jitteredY += Random.Shared.Next(-jitterRadius, jitterRadius + 1);
-                            }
+                            NativeMethods.GetCursorPos(out var live);
+                            targetX = live.x;
+                            targetY = live.y;
                         }
 
-                        // Cached virtual-screen bounds — same call signature minus 4
-                        // P/Invokes per clicker tick. See NativeMethods.VirtualScreen.
+                        // Cached virtual-screen bounds — saves 4 P/Invokes per clicker tick.
+                        // See NativeMethods.VirtualScreen.
                         var (vx, vy, vw, vh) = NativeMethods.VirtualScreen.Bounds;
-                        int absX = (int)(((double)(jitteredX - vx) * 65535) / Math.Max(1, vw - 1));
-                        int absY = (int)(((double)(jitteredY - vy) * 65535) / Math.Max(1, vh - 1));
-                        uint posFlags = NativeMethods.MOUSEEVENTF_MOVE | NativeMethods.MOUSEEVENTF_ABSOLUTE | NativeMethods.MOUSEEVENTF_VIRTUALDESK;
-                        int inputSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.INPUT));
+                        // Keep the click on a real pixel: a saved area rect or picked point can
+                        // outlive the display arrangement that produced it.
+                        targetX = Math.Clamp(targetX, vx, vx + Math.Max(1, vw) - 1);
+                        targetY = Math.Clamp(targetY, vy, vy + Math.Max(1, vh) - 1);
+                        int absX = (int)(((double)(targetX - vx) * 65535) / Math.Max(1, vw - 1));
+                        int absY = (int)(((double)(targetY - vy) * 65535) / Math.Max(1, vh - 1));
 
-                        var downInput = new NativeMethods.INPUT
+                        // ── The click. The UP is guaranteed. ────────────────────────────────
+                        // Cancelling inside the hold used to skip the UP entirely and leave the
+                        // button physically latched down system-wide, for up to HoldMs (2 s max).
+                        // Three layers now prevent it: this finally; ClickerButton recording the
+                        // press in the shared _simLeftDown/... state so ResetMouseState can
+                        // release it; and ReleaseHeldMouseButtons in the outer finally.
+                        uint downRc = replayer.ClickerButton(downFlag, absX, absY);
+                        bool downSent = downRc == 1;
+                        try
                         {
-                            type = NativeMethods.INPUT_MOUSE,
-                            U = new NativeMethods.InputUnion
-                            {
-                                mi = new NativeMethods.MOUSEINPUT
-                                {
-                                    dx = absX, dy = absY,
-                                    dwFlags = downFlag | posFlags,
-                                }
-                            }
-                        };
-                        NativeMethods.SendInput(1, new[] { downInput }, inputSize);
-
-                        // Hold duration — was hardcoded 10ms; now user-configurable. Skipped
-                        // when 0 (some apps need it to register a click cleanly though, hence
-                        // the default of 10).
-                        if (safeHold > 0) await Task.Delay(safeHold, token);
-
-                        var upInput = new NativeMethods.INPUT
+                            // Keeps the token so Stop stays prompt; the finally covers the throw.
+                            if (safeHold > 0) await Task.Delay(safeHold, token);
+                        }
+                        finally
                         {
-                            type = NativeMethods.INPUT_MOUSE,
-                            U = new NativeMethods.InputUnion
-                            {
-                                mi = new NativeMethods.MOUSEINPUT
-                                {
-                                    dx = absX, dy = absY,
-                                    dwFlags = upFlag | posFlags,
-                                }
-                            }
-                        };
-                        NativeMethods.SendInput(1, new[] { upInput }, inputSize);
+                            // NOT conditional on the token — that is the whole point.
+                            if (downSent) replayer.ClickerButton(upFlag, absX, absY);
+                        }
 
-                        clickCount++;
+                        // SendInput returns the number of events actually inserted. 0 means the
+                        // injection was blocked — typically UIPI, i.e. an elevated foreground
+                        // window while we run unelevated. Counting those as clicks made the
+                        // dashboard report a healthy CPS for clicks that never happened.
+                        if (downSent) clickCount++;
+                        else blockedCount++;
 
                         // Push click stats to the UI every ~250ms. Comparing against elapsed
                         // (not iteration count) makes the cadence stable across slow/fast
                         // configurations.
-                        var elapsedMs = (long)(DateTime.UtcNow - startedAt).TotalMilliseconds;
+                        var elapsedMs = sw.ElapsedMilliseconds - pausedAccumMs;
                         if (elapsedMs - lastStatsPushMs >= 250)
                         {
                             lastStatsPushMs = elapsedMs;
@@ -613,22 +697,38 @@ namespace TrueReplayer.Services
                             }
                         }
 
-                        // Apply delay + jitter
-                        int safeDelay = Math.Max(10, delay);
+                        // ── Next deadline ───────────────────────────────────────────────────
+                        // Jitter is a symmetric scatter (Next(-v, v+1)), so it perturbs individual
+                        // periods without changing the mean — which is why it is applied here and
+                        // deliberately NOT modelled in the rate the UI reports.
+                        int period = basePeriod;
                         if (useJitter && jitterPercent > 0)
                         {
-                            int variation = safeDelay * jitterPercent / 100;
-                            safeDelay += Random.Shared.Next(-variation, variation + 1);
-                            safeDelay = Math.Max(10, safeDelay);
+                            int variation = period * jitterPercent / 100;   // clamped 0..100 above
+                            period = Math.Max(MinClickPeriodMs, period + Random.Shared.Next(-variation, variation + 1));
                         }
-                        await Task.Delay(safeDelay, token);
-
-                        // Loop interval (between iterations when looping)
+                        // Interval applies only between iterations, never after the last one.
                         if (loopInterval > 0 && (isInfinite || iteration < loopCount))
-                            await Task.Delay(loopInterval, token);
+                            period += loopInterval;
+
+                        nextTickMs += period;
+                        long wait = nextTickMs - (sw.ElapsedMilliseconds - pausedAccumMs);
+                        if (wait > 0)
+                        {
+                            long pausedDuringWait = await ClickerWaitAsync(wait, sw, token);
+                            pausedAccumMs += pausedDuringWait;
+                        }
+                        else
+                        {
+                            // Behind schedule (slow tick, a stall, a hold longer than the period).
+                            // Resync instead of banking the debt — otherwise the loop "catches up"
+                            // with a no-delay salvo, which at a 5 ms setting is hundreds of clicks.
+                            nextTickMs = sw.ElapsedMilliseconds - pausedAccumMs;
+                        }
                     }
+                    endReason = token.IsCancellationRequested ? "cancelled" : "loop count reached";
                 }
-                catch (OperationCanceledException) { }
+                catch (OperationCanceledException) { endReason = "cancelled"; }
                 finally
                 {
                     // Clear pause state so a stop-while-paused doesn't leave the loop "armed"
@@ -638,10 +738,26 @@ namespace TrueReplayer.Services
                     _clickerPaused = false;
                     _clickerResumeTcs?.TrySetResult(true);
 
+                    // Layer 3 of the stuck-button guard: the authoritative last word, once the
+                    // loop is definitively over. No-ops when nothing is down.
+                    replayer.ReleaseHeldMouseButtons();
+
+                    // Always paired with TimeBeginPeriod — the resolution is process-wide.
+                    if (raisedTimerRes) NativeMethods.TimeEndPeriod(1);
+
+                    var finalElapsed = sw.ElapsedMilliseconds - pausedAccumMs;
+                    // End-of-run line — the clicker had no equivalent of the macro engine's
+                    // "Replay finished", so a run that stopped early was invisible in the log.
+                    DiagnosticLog.Info(
+                        $"Clicker end: {clickCount} click(s)" +
+                        (blockedCount > 0 ? $", {blockedCount} BLOCKED (elevated target? see Run as admin)" : "") +
+                        $", {finalElapsed}ms elapsed" +
+                        (finalElapsed > 0 ? $" (~{clickCount * 1000.0 / finalElapsed:0.#}/s)" : "") +
+                        $", reason={endReason}");
+
                     // Final flush so the UI lands on the exact end-state (e.g. "100/100" not
                     // "97/100") even if the loop ended between throttled pushes.
                     var finalCount = clickCount;
-                    var finalElapsed = (long)(DateTime.UtcNow - startedAt).TotalMilliseconds;
                     var finalIteration = iteration;
                     var finalLoopTotal = isInfinite ? 0 : loopCount;
                     var emitFinalLoop = isInfinite || loopCount > 1;
@@ -654,7 +770,66 @@ namespace TrueReplayer.Services
                         ResetReplayState();
                     });
                 }
-            }, token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+            });
+
+            _ = clickerTask.ContinueWith(
+                t => DiagnosticLog.Error("Clicker loop faulted", t.Exception!),
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted,
+                TaskScheduler.Default);
+        }
+
+        // Waits `ms`, staying responsive to BOTH cancellation and pause.
+        //
+        // The old loop only checked _clickerPaused at the top of each iteration, so a pause
+        // could take a whole cycle to land (up to a minute with a long interval) while the
+        // dashboard already showed PAUSED — and a pause+resume inside one cycle was a complete
+        // no-op that the UI nonetheless animated.
+        //
+        // Returns the milliseconds spent paused so the caller can shift both its schedule and
+        // its elapsed-time baseline, keeping the reported CPS free of paused time.
+        private async Task<long> ClickerWaitAsync(long ms, System.Diagnostics.Stopwatch sw, CancellationToken token)
+        {
+            long pausedTotal = 0;
+            while (ms > 0)
+            {
+                token.ThrowIfCancellationRequested();
+                if (_clickerPaused)
+                {
+                    long pauseBegan = sw.ElapsedMilliseconds;
+                    await AwaitClickerResumeAsync(token);
+                    pausedTotal += sw.ElapsedMilliseconds - pauseBegan;
+                    continue;
+                }
+                // Slice only LONG waits. A fast run keeps a single Task.Delay (one quantisation
+                // error per tick, not one per slice), while a 60 s interval still notices a
+                // pause within 25 ms instead of a minute.
+                int slice = ms > 50 ? 25 : (int)ms;
+                long before = sw.ElapsedMilliseconds;
+                await Task.Delay(slice, token);
+                ms -= sw.ElapsedMilliseconds - before;
+            }
+            return pausedTotal;
+        }
+
+        // Blocks until ResumeClicker fires or the run is cancelled.
+        // Loops on the flag: a spurious completion (or a pause that re-arms while we were
+        // waking) must re-wait rather than fall through and click while the UI shows PAUSED.
+        private async Task AwaitClickerResumeAsync(CancellationToken token)
+        {
+            while (_clickerPaused)
+            {
+                token.ThrowIfCancellationRequested();
+                var resumeTcs = _clickerResumeTcs;
+                if (resumeTcs == null) break;   // resumed between the flag read and the field read
+                // A linked TCS + a disposed registration, rather than
+                // Task.WhenAny(resume, Task.Delay(Infinite, token)): the abandoned Delay would
+                // leave a live timer and token registration behind on every single resume.
+                var cancelTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                using (token.Register(static s => ((TaskCompletionSource<bool>)s!).TrySetResult(true), cancelTcs))
+                    await Task.WhenAny(resumeTcs.Task, cancelTcs.Task);
+                token.ThrowIfCancellationRequested();
+            }
         }
 
         private void ResetReplayState()
@@ -2773,7 +2948,7 @@ namespace TrueReplayer.Services
             if (inputs.Count > 0)
             {
                 NativeMethods.SendInput((uint)inputs.Count, inputs.ToArray(),
-                    Marshal.SizeOf(typeof(NativeMethods.INPUT)));
+                    NativeMethods.InputSize);
             }
         }
 
@@ -2880,7 +3055,7 @@ namespace TrueReplayer.Services
 
         private void SimulateScroll(int delta)
         {
-            int inputSize = Marshal.SizeOf(typeof(NativeMethods.INPUT));
+            int inputSize = NativeMethods.InputSize;
             var scrollInput = new NativeMethods.INPUT
             {
                 type = NativeMethods.INPUT_MOUSE,
@@ -3382,7 +3557,7 @@ namespace TrueReplayer.Services
                 | NativeMethods.MOUSEEVENTF_ABSOLUTE
                 | NativeMethods.MOUSEEVENTF_VIRTUALDESK;
 
-            int inputSize = Marshal.SizeOf(typeof(NativeMethods.INPUT));
+            int inputSize = NativeMethods.InputSize;
 
             // ── Move the cursor to (x,y), then build the click event. ──────────────────────
             // Roblox (and similar) reject a single large "teleport" move — they only follow
@@ -3400,7 +3575,7 @@ namespace TrueReplayer.Services
                     type = NativeMethods.INPUT_MOUSE,
                     U = new NativeMethods.InputUnion { mi = new NativeMethods.MOUSEINPUT { dx = nx, dy = ny, dwFlags = posFlags } }
                 };
-                NativeMethods.SendInput(1, new[] { mv }, inputSize); // for apps reading Raw Input
+                NativeMethods.SendInput(1, ref mv, inputSize); // for apps reading Raw Input
             }
 
             // A click is split across separate SimulateMouse calls (DOWN then UP at the same
@@ -3468,20 +3643,79 @@ namespace TrueReplayer.Services
             Thread.Sleep(Math.Max(0, MoveClickDelayMs));
             lock (_simInputLock)
             {
-                NativeMethods.SendInput(1, new[] { clickInput }, inputSize);
+                NativeMethods.SendInput(1, ref clickInput, inputSize);
 
                 // Track currently-pressed buttons here (atomic with the SendInput) so
                 // ResetMouseState releases exactly what's down. Living inside SimulateMouse
                 // means the missing-target early-return above never leaves a flag set — which
                 // previously caused a spurious UP on Stop — and Stop can't observe a torn state.
-                if ((mouseEvent & NativeMethods.MOUSEEVENTF_LEFTDOWN) != 0) _simLeftDown = true;
-                else if ((mouseEvent & NativeMethods.MOUSEEVENTF_LEFTUP) != 0) _simLeftDown = false;
-                if ((mouseEvent & NativeMethods.MOUSEEVENTF_RIGHTDOWN) != 0) _simRightDown = true;
-                else if ((mouseEvent & NativeMethods.MOUSEEVENTF_RIGHTUP) != 0) _simRightDown = false;
-                if ((mouseEvent & NativeMethods.MOUSEEVENTF_MIDDLEDOWN) != 0) _simMiddleDown = true;
-                else if ((mouseEvent & NativeMethods.MOUSEEVENTF_MIDDLEUP) != 0) _simMiddleDown = false;
+                TrackButtonState(mouseEvent);
             }
         }
+
+        // Updates the "currently pressed" flags from a mouse event's button bits.
+        //
+        // CALLER MUST ALREADY HOLD _simInputLock. It is split out (rather than inlined at the
+        // one call site it used to have) so the clicker loop can share it: the clicker injects
+        // its own INPUTs and, before this existed, never set these flags at all — so
+        // ResetMouseState early-returned and a Stop landing inside the clicker's hold window
+        // left the button physically latched down system-wide.
+        private void TrackButtonState(uint mouseEvent)
+        {
+            if ((mouseEvent & NativeMethods.MOUSEEVENTF_LEFTDOWN) != 0) _simLeftDown = true;
+            else if ((mouseEvent & NativeMethods.MOUSEEVENTF_LEFTUP) != 0) _simLeftDown = false;
+            if ((mouseEvent & NativeMethods.MOUSEEVENTF_RIGHTDOWN) != 0) _simRightDown = true;
+            else if ((mouseEvent & NativeMethods.MOUSEEVENTF_RIGHTUP) != 0) _simRightDown = false;
+            if ((mouseEvent & NativeMethods.MOUSEEVENTF_MIDDLEDOWN) != 0) _simMiddleDown = true;
+            else if ((mouseEvent & NativeMethods.MOUSEEVENTF_MIDDLEUP) != 0) _simMiddleDown = false;
+        }
+
+        // ── Clicker seam ────────────────────────────────────────────────────────────────────
+        //
+        // The Clicker loop (ReplayService.ToggleCursorClickReplay) builds and sends its own
+        // INPUTs. These two members let it do that through the same button-tracking and the
+        // same lock the macro engine uses, so Stop/ResetMouseState can release a clicker-held
+        // button. Macro replay and the clicker can never run concurrently (ToggleCursorClick-
+        // Replay stops any live replay first, and StartReplay is gated on !IsReplaying), so
+        // sharing _simLeftDown/_simRightDown/_simMiddleDown between them is safe — that is the
+        // invariant this whole seam rests on.
+        //
+        // Deliberately NOT routed through SimulateMouse: that method sleeps MoveClickDelayMs
+        // (default 10 ms) on every call, which would be 20 ms per clicker tick and would cap
+        // the achievable rate at ~50/s regardless of what the user configured. The clicker has
+        // its own HoldMs for the press→release dwell.
+        //
+        // Returns SendInput's result: 0 means the event was blocked (UIPI — an elevated
+        // foreground window while we run unelevated), which the caller must not count as a click.
+        public uint ClickerButton(uint mouseEvent, int absX, int absY)
+        {
+            var input = new NativeMethods.INPUT
+            {
+                type = NativeMethods.INPUT_MOUSE,
+                U = new NativeMethods.InputUnion
+                {
+                    mi = new NativeMethods.MOUSEINPUT
+                    {
+                        dx = absX,
+                        dy = absY,
+                        dwFlags = mouseEvent
+                            | NativeMethods.MOUSEEVENTF_MOVE
+                            | NativeMethods.MOUSEEVENTF_ABSOLUTE
+                            | NativeMethods.MOUSEEVENTF_VIRTUALDESK,
+                    }
+                }
+            };
+            lock (_simInputLock)
+            {
+                uint sent = NativeMethods.SendInput(1, ref input, NativeMethods.InputSize);
+                TrackButtonState(mouseEvent);
+                return sent;
+            }
+        }
+
+        // Authoritative last word for the clicker's outer finally: releases whatever the loop
+        // left pressed. No-ops when nothing is down.
+        public void ReleaseHeldMouseButtons() => ResetMouseState();
 
         // Matches {clipboard} or {clipboard:modifier[:arg]...}
         // Group 1 captures the modifier chain (without the leading colon); empty when no modifiers.
@@ -5871,7 +6105,7 @@ namespace TrueReplayer.Services
                 new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = effectiveVk, wScan = scan, dwFlags = downFlags } } },
                 new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = effectiveVk, wScan = scan, dwFlags = upFlags } } },
             };
-            NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
+            NativeMethods.SendInput((uint)inputs.Length, inputs, NativeMethods.InputSize);
         }
 
         private async Task PasteTextViaClipboard(string text, string? html, CancellationToken token)
@@ -5938,7 +6172,7 @@ namespace TrueReplayer.Services
                 new() { type = NativeMethods.INPUT_KEYBOARD, U = new NativeMethods.InputUnion { ki = new NativeMethods.KEYBDINPUT { wVk = vkCtrl, wScan = scanCtrl, dwFlags = NativeMethods.KEYEVENTF_KEYUP | NativeMethods.KEYEVENTF_SCANCODE } } },
             };
 
-            NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
+            NativeMethods.SendInput((uint)inputs.Length, inputs, NativeMethods.InputSize);
             await Task.Delay(50, token);
         }
 
@@ -6072,7 +6306,7 @@ namespace TrueReplayer.Services
 
             lock (_simInputLock)
             {
-                NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
+                NativeMethods.SendInput(1, new[] { input }, NativeMethods.InputSize);
 
                 // Track pressed-but-not-released keys (atomic with the SendInput) so
                 // ResetKeyState (called from Stop, on another thread) sees a consistent set

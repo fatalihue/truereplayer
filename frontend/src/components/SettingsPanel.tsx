@@ -7,10 +7,12 @@ import { useLanguage, useTt } from '../state/LanguageContext';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
+import { useToast } from '../state/ToastContext';
 import { Toggle } from './common/Toggle';
 import { SegmentedControl } from './common/SegmentedControl';
 import { chipOn, chipOff, chipDotOn, chipDotOff } from './common/chipStyles';
 import { formatMs } from '../utils/displayUtils';
+import { CLICK_PERIOD_FLOOR_MS, delayForCps, formatRate, maxCps, targetCps } from '../utils/clickerFormat';
 
 // Compact 28×16 switch — the redesigned Settings panel uses the smaller size for every
 // on/off control; other surfaces (dialogs) keep the default 40×20 Toggle.
@@ -32,6 +34,10 @@ const FIELD_W = 'w-[100px]';
 // Area tool handles bigger regions. Loops (999) and Jitter (100) keep their own inline caps.
 const MAX_DELAY_MS = 60000;
 const MAX_POSITION_PX = 500;
+// Clicker click-count cap. Raised from the old 999: with the Loops chip off now meaning
+// "unbounded", the chip is the only way to bound a run, and 999 clicks is under two minutes
+// at the default rate.
+const MAX_CLICK_LIMIT = 100000;
 
 // Auto-focus knobs — both OFF by request (2026-07-19): the panel never changes tab on its
 // own, so whichever tab the user left open stays open. The logic is kept intact behind
@@ -86,11 +92,15 @@ function Section({ title, color, action, children }: {
 // FIELD_W as the plain value fields so the column stays aligned. The dot toggles enable;
 // editing the number commits on blur/Enter (Enter also runs onEnterActivate — e.g. flip the
 // setting on when the user types a value into a disabled chip).
-function EnableChip({ value, isOn, unit, format, min, max, width, onCommitValue, onToggle, onEnterActivate }: {
+function EnableChip({ value, isOn, unit, format, min, max, width, offDisplay, onCommitValue, onToggle, onEnterActivate }: {
   value: string;
   isOn: boolean;
   unit?: string;
   format?: boolean;
+  // Text to render INSTEAD of the number while the chip is off and unfocused. Used by the
+  // clicker Loops row, where "off" means unbounded — showing the stored number there
+  // announces a limit that is not going to be applied. Focusing restores the real value.
+  offDisplay?: string;
   // Lower bound applied on commit. OPTIONAL and unset by default — 0 is a legitimate value
   // for Interval and Jitter, so this must never become a component-wide floor. Only the macro
   // Loops row passes min={1}, because 0 there used to mean "forever" and no longer does.
@@ -110,8 +120,10 @@ function EnableChip({ value, isOn, unit, format, min, max, width, onCommitValue,
   const [local, setLocal] = useState(value);
   const [isFocused, setIsFocused] = useState(false);
   useEffect(() => { if (!isFocused) setLocal(value); }, [value, isFocused]);
-  const display = !isFocused && format && local !== '' && Number.isFinite(Number(local))
-    ? formatMs(Number(local), language) : local;
+  const display = !isFocused && offDisplay != null && !isOn
+    ? offDisplay
+    : !isFocused && format && local !== '' && Number.isFinite(Number(local))
+      ? formatMs(Number(local), language) : local;
   const commit = () => {
     let v = local;
     if (min != null) {
@@ -147,7 +159,11 @@ function EnableChip({ value, isOn, unit, format, min, max, width, onCommitValue,
         type="text"
         inputMode="numeric"
         value={display}
-        onChange={(e) => setLocal(format ? e.target.value.replace(/[^\d-]/g, '') : e.target.value)}
+        // Digits only, ALWAYS. This used to run only when `format` was set, and it kept the
+        // minus sign — so four of the five clicker fields accepted "-5"/"abc" verbatim and
+        // then degraded silently in the engine (a negative Loops became one click, a negative
+        // Jitter switched jitter off). None of the eight call sites takes a negative value.
+        onChange={(e) => setLocal(e.target.value.replace(/[^\d]/g, ''))}
         onFocus={() => setIsFocused(true)}
         onBlur={() => { setIsFocused(false); commit(); }}
         onKeyDown={(e) => {
@@ -204,6 +220,30 @@ function PathStepZeroNote({ step }: { step: string }) {
     <div className="px-2.5 pb-1 text-[11px] text-text-tertiary text-right">
       {tt('No walk — single jump', 'Sem caminho — salto único')}
     </div>
+  );
+}
+
+// Annotation under the Clicker Rate row — same shape and placement as PathStepZeroNote.
+// In ms mode it always shows the resulting clicks/second, because that conversion is NOT
+// 1000/ms: the interval is part of the engine's period. In /s mode it stays silent unless
+// the requested rate was out of reach, in which case it names the ceiling and the reason.
+// Deliberately does NOT model the Windows timer granularity — that would replace one wrong
+// number with a differently wrong one. The dashboard's measured Rate cell is ground truth.
+function ClickerRateNote({ unit, cps, ceiling, clamped, holdMs }: {
+  unit: 'ms' | 'cps';
+  cps: number;
+  ceiling: number;
+  clamped: boolean;
+  holdMs: number;
+}) {
+  const tt = useTt();
+  if (unit === 'cps' && !clamped) return null;
+  const text = unit === 'ms'
+    ? `≈ ${formatRate(cps)}/s`
+    : tt(`max ≈ ${formatRate(ceiling)}/s (hold ${holdMs} ms)`,
+         `máx ≈ ${formatRate(ceiling)}/s (hold ${holdMs} ms)`);
+  return (
+    <div className="px-2.5 pb-1 text-[11px] text-text-tertiary text-right">{text}</div>
   );
 }
 
@@ -351,10 +391,13 @@ function ComboInput({ value, onCommit, options, width = FIELD_W, editable = true
 // identity: the purple section title so the user immediately sees "I'm configuring
 // Clicker, not the macro profile".
 function ClickerSection({
-  button, rate, rateJitter, useRateJitter, positionJitter, usePositionJitter,
+  unit, onUnitChange,
+  button, rate, rateJitter, useRateJitter, hold, positionJitter, usePositionJitter,
   useArea, area, useFixed, fixedPoint,
   loops, useLoops, interval, useInterval, onChange,
 }: {
+  unit: 'ms' | 'cps';
+  onUnitChange: (u: 'ms' | 'cps') => void;
   button: string;
   rate: string;
   rateJitter: string;
@@ -374,11 +417,9 @@ function ClickerSection({
 }) {
   const { send } = useBridge();
   const tt = useTt();
-  // Unit toggle for the Rate row: 'ms' shows the raw delay; '/s' shows clicks per second
-  // computed from delay (1000 / ms). Backend always stores ms — the toggle is display-only.
-  // Default is 'ms' (more conventional for typical users); reset bounces this back to 'ms'
-  // via a React remount triggered by settingsResetEpoch in SettingsPanel.
-  const [unit, setUnit] = useState<'ms' | 'cps'>('ms');
+  // Unit toggle for the Rate row: 'ms' shows the raw delay; '/s' shows the clicks per second
+  // the engine will actually produce. Backend always stores ms — the toggle is display-only.
+  // State lives in SettingsPanel (this component remounts on tab change and panel collapse).
 
   // Optimistic local copy of the current delay (ms). Updated immediately on commit so the
   // Rate input doesn't flicker while waiting for the bridge to echo back the new value via
@@ -397,20 +438,33 @@ function ClickerSection({
     setLocalDelayMs(Math.max(1, parseInt(rate, 10) || 100));
   }, [rate]);
 
+  // The two values that make the ENGINE's period differ from the raw delay. The interval
+  // is added to every cycle (in Clicker mode one iteration is one click, so it is not a
+  // pause between bursts — it is part of the cadence); the hold sets the floor.
+  const gapMs = useInterval ? (parseInt(interval, 10) || 0) : 0;
+  const holdMs = parseInt(hold, 10) || 0;
+
   // Strip trailing ".0" so whole-number CPS shows as "1" not "1.0", "5" not "5.0", etc.
-  // Non-integer rates (e.g. 6.99/s when delay = 143 ms) keep one decimal: "7.0" → "7"
-  // after rounding, "6.5" stays "6.5".
-  const cpsFromMs = (ms: number) => (1000 / ms).toFixed(1).replace(/\.0$/, '');
-  const displayValue = unit === 'cps' ? cpsFromMs(localDelayMs) : String(localDelayMs);
+  const trimCps = (cps: number) => cps.toFixed(1).replace(/\.0$/, '');
+  const displayValue = unit === 'cps' ? trimCps(targetCps(localDelayMs, gapMs)) : String(localDelayMs);
+  const rateCeiling = maxCps(holdMs, gapMs);
+  // Non-null only when there is something the user cannot work out from the field itself.
+  const [rateClamped, setRateClamped] = useState(false);
   const commitRate = (raw: string) => {
     const num = parseFloat(raw);
     if (isNaN(num) || num <= 0) return;
-    // Clamp to [1, MAX_DELAY_MS]. In /s mode a tiny cps (e.g. 0.001) maps to a huge delay, so
-    // the cap applies to the resulting ms either way — a typo can't leave the clicker idle for
-    // minutes. Whole clicks-per-second stay well under the cap (1/s = 1000 ms).
-    const ms = Math.min(MAX_DELAY_MS, unit === 'cps'
-      ? Math.max(1, Math.round(1000 / num))
-      : Math.max(1, Math.round(num)));
+    let ms: number;
+    let clamped: boolean;
+    if (unit === 'cps') {
+      // Inverse of the engine's period, so the round-trip is stable and an unreachable
+      // request lands honestly instead of silently storing a different rate.
+      ({ ms, clamped } = delayForCps(num, holdMs, gapMs));
+    } else {
+      const raw2 = Math.round(num);
+      ms = Math.min(MAX_DELAY_MS, Math.max(CLICK_PERIOD_FLOOR_MS, raw2));
+      clamped = ms !== raw2;
+    }
+    setRateClamped(clamped);
     setLocalDelayMs(ms);              // optimistic — keeps the input stable on next render
     onChange('cursorClickDelay', String(ms));
   };
@@ -463,12 +517,16 @@ function ClickerSection({
                 onCommit={commitRate}
                 width="flex-1 min-w-0"
                 options={unit === 'cps'
-                  ? [10, 25, 50, 100, 200].map((c) => ({ value: String(c), label: `${c}/s` }))
-                  : [100, 40, 20, 10, 5].map((m) => ({ value: String(m), label: `${m} ms` }))}
+                  /* Filtered by the achievable ceiling: the list used to offer 100/s and
+                     200/s unconditionally, which the engine could never produce. */
+                  ? [1, 2, 5, 10, 20, 50].filter((c) => c <= rateCeiling)
+                      .map((c) => ({ value: String(c), label: `${c}/s` }))
+                  /* 5 ms dropped — below the engine floor, so it was a second lie in ms form. */
+                  : [200, 100, 50, 25, 10].map((m) => ({ value: String(m), label: `${m} ms` }))}
               />
               <select
                 value={unit}
-                onChange={(e) => setUnit(e.target.value as 'ms' | 'cps')}
+                onChange={(e) => onUnitChange(e.target.value as 'ms' | 'cps')}
                 className="w-6 h-7 text-center text-[10px] text-text-secondary bg-bg-input border border-border-default rounded outline-none focus:border-accent-solid font-mono cursor-pointer appearance-none shrink-0"
               >
                 <option value="cps">/s</option>
@@ -476,21 +534,44 @@ function ClickerSection({
               </select>
             </div>
           </SettingRow>
-          <SettingRow label="Loops" tooltip={tt('Clicks per run. 0 = forever.', 'Cliques por execução. 0 = infinito.')}>
+          {/* Same shape as PathStepZeroNote: a quiet right-aligned line that says the one
+              thing the field itself cannot. In ms mode it is the conversion the user cannot
+              do in their head (the interval is part of the period); in /s mode it appears
+              only when the request was out of reach. */}
+          <ClickerRateNote
+            unit={unit}
+            cps={targetCps(localDelayMs, gapMs)}
+            ceiling={rateCeiling}
+            clamped={rateClamped}
+            holdMs={holdMs}
+          />
+          <SettingRow label="Loops" tooltip={tt('Stop after N clicks. Off = runs until you stop it.', 'Parar após N cliques. Desligado = roda até você parar.')}>
             <EnableChip
               value={loops}
               isOn={useLoops}
-              max={999}
+              min={1}
+              max={MAX_CLICK_LIMIT}
+              /* Off means unbounded, so show ∞ rather than a stored number that will not be
+                 used — the chip used to display "0" beside a tooltip promising "0 = forever"
+                 while the backend quietly substituted a single click. */
+              offDisplay="∞"
               onCommitValue={(v) => onChange('cursorClickLoops', v)}
-              onToggle={(v) => onChange('cursorClickUseLoops', v)}
+              onToggle={(v) => {
+                onChange('cursorClickUseLoops', v);
+                // Seed a real limit when switching ON. Toggling the dot never runs commit(),
+                // so a stored "0" would otherwise mean "limit enabled" and still run forever
+                // — with the chip now showing 0. Same seed-on-enable pattern the SheetPanel
+                // jitter chip uses.
+                if (v && (parseInt(loops, 10) || 0) < 1) onChange('cursorClickLoops', '100');
+              }}
               onEnterActivate={() => activateIfOff(useLoops, 'cursorClickUseLoops')}
             />
           </SettingRow>
-          <SettingRow label="Interval" tooltip={tt('Pause between loops (ms).', 'Pausa entre loops (ms).')}>
+          <SettingRow label="Interval" tooltip={tt('Extra gap added to every click (ms) — it adds to the rate, it is not a pause between bursts.', 'Intervalo extra somado a cada clique (ms) — soma à taxa, não é pausa entre rajadas.')}>
             <EnableChip
               value={interval}
               isOn={useInterval}
-              unit="ms" format max={MAX_DELAY_MS}
+              unit="ms" format min={0} max={MAX_DELAY_MS}
               onCommitValue={(v) => onChange('cursorClickInterval', v)}
               onToggle={(v) => onChange('cursorClickUseInterval', v)}
               onEnterActivate={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
@@ -500,7 +581,7 @@ function ClickerSection({
             <EnableChip
               value={rateJitter}
               isOn={useRateJitter}
-              unit="%" max={100}
+              unit="%" min={0} max={100}
               onCommitValue={(v) => onChange('cursorClickDelayJitter', v)}
               onToggle={(v) => onChange('cursorClickUseJitter', v)}
               onEnterActivate={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
@@ -510,7 +591,7 @@ function ClickerSection({
             <EnableChip
               value={positionJitter}
               isOn={usePositionJitter}
-              max={MAX_POSITION_PX}
+              min={0} max={MAX_POSITION_PX}
               onCommitValue={(v) => onChange('cursorClickPositionJitter', v)}
               onToggle={(v) => setClickMode('cursorClickUsePositionJitter', v)}
               onEnterActivate={() => setClickMode('cursorClickUsePositionJitter', true)}
@@ -644,6 +725,8 @@ function HotkeyInput({ value, settingKey, onChange, width = FIELD_W }: {
   width?: string;
 }) {
   const { send, subscribe } = useBridge();
+  const { showToast } = useToast();
+  const tt = useTt();
   const [localValue, setLocalValue] = useState(value);
   const [isFocused, setIsFocused] = useState(false);
   // Idle-cancel timer — without an explicit Esc-to-cancel rule (so users can capture
@@ -705,6 +788,19 @@ function HotkeyInput({ value, settingKey, onChange, width = FIELD_W }: {
       // this guard it would be set as the field value and committed, and the
       // only backstop is BridgeContext's per-handler try/catch (which just logs).
       if (typeof combo !== 'string' || combo.length === 0) return;
+      // Bare wheel is not bindable as a GLOBAL hotkey. Firing one means swallowing the
+      // event, and swallowing a bare wheel event kills that scroll direction system-wide
+      // for as long as the binding is live — so the hook only dispatches modified wheel
+      // combos, and accepting a bare one here would just store a key that never fires.
+      // (Profile hotkeys keep bare scroll: they are additionally foreground-gated, so
+      // their blast radius is one app. Same reasoning shape as RemapSection's guard.)
+      if (combo === 'ScrollUp' || combo === 'ScrollDown') {
+        showToast(
+          tt('Use a modifier with the scroll wheel (e.g. Ctrl+ScrollDown) — a bare wheel hotkey would block scrolling everywhere.',
+             'Use um modificador com a roda (ex.: Ctrl+ScrollDown) — uma hotkey de roda pura bloquearia a rolagem em todo lugar.'),
+          'error');
+        return;
+      }
       setLocalValue(combo);
       armCaptureTimer();
       // A pure modifier press ("Win", "Ctrl") shouldn't commit — wait for the real key.
@@ -716,7 +812,7 @@ function HotkeyInput({ value, settingKey, onChange, width = FIELD_W }: {
         inputRef.current?.blur();
       }
     });
-  }, [isFocused, subscribe, settingKey, onChange, armCaptureTimer, disarmCaptureTimer]);
+  }, [isFocused, subscribe, settingKey, onChange, armCaptureTimer, disarmCaptureTimer, showToast, tt]);
 
   // Unified "capture mode" UX — same as the grid Key column edit and the SheetPanel /
   // ProfilePanel hotkey inputs. While focused, the field shows the live combo (or empty +
@@ -798,6 +894,15 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
   // app. `scoped` is what tells the tooltip whether it's describing a profile value or the
   // no-profile fallback.
   const { settings, settingsResetEpoch, status, profileLoop } = useAppState();
+  // Clicker Rate unit — lifted out of ClickerSection so it survives that component's
+  // remounts. settingsResetEpoch still bounces it back to the default, which was its only
+  // documented job; it just does it through an effect now instead of a remount key.
+  const [clickerUnit, setClickerUnit] = useState<'ms' | 'cps'>('ms');
+  const firstEpochRef = useRef(true);
+  useEffect(() => {
+    if (firstEpochRef.current) { firstEpochRef.current = false; return; }
+    setClickerUnit('ms');
+  }, [settingsResetEpoch]);
   const { language, setLanguage } = useLanguage();
   const tt = useTt();
   const { send, subscribe } = useBridge();
@@ -1017,9 +1122,14 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 hotkeys moved to the Keys tab (2026-07 reorg: every key in one place). */}
             {settings.useCursorClick ? (
               <ClickerSection
-                /* Remount on reset so the local /s ↔ ms unit toggle goes back to its
-                   default ('ms'). Backend stays the source of truth for everything else. */
-                key={settingsResetEpoch}
+                /* The /s ↔ ms unit now lives in SettingsPanel (see clickerUnit): this
+                   component gets remounted by far more than a settings reset — the tab
+                   content div is keyed on activeTab, the collapsed rail is a different
+                   tree, and the layout auto-collapses below 1074 px — so keeping the
+                   toggle here meant it silently snapped back to 'ms' whenever the user
+                   visited another tab or narrowed the window. */
+                unit={clickerUnit}
+                onUnitChange={setClickerUnit}
                 button={settings.cursorClickButton}
                 rate={settings.cursorClickDelay}
                 rateJitter={settings.cursorClickDelayJitter}

@@ -123,11 +123,24 @@ export function ActionBar() {
   // a global hotkey behind it. The "one thing is running" reading is carried by
   // the fill instead: a solid button is the only solid thing on the bar.
   //
-  // The bar is tooltip-free by request, save for the loop chip: that one is the
-  // only control here whose label ("3×", "per row", "∞") names a value rather than
-  // an action, so it is the only one a hover still has something to add to. The
-  // rest — Record, Replay, Save, Load, and the two mode pills — carry their own
-  // text labels and needed no gloss.
+  // The same sentence Toolbar, CommandPalette and ProfilePanel already use for this gate —
+  // four surfaces, one string.
+  const clickerTip = tt('Not available in Clicker mode — switch to Macro', 'Indisponível no modo Clicker — mude para Macro');
+
+  // The bar is tooltip-free by request, with two exceptions, both of which are cases
+  // where the control's own label genuinely cannot carry the message:
+  //
+  //  - the loop chip, whose label ("3×", "per row", "∞") names a VALUE rather than an
+  //    action, so a hover still has something to add;
+  //  - Save/Load while DISABLED. A live control is explained by its label; a greyed one
+  //    is not explained by anything, and this bar was the only one of four surfaces that
+  //    gated on Clicker mode without saying so (Toolbar, CommandPalette and ProfilePanel
+  //    all state it). index.css restores pointer-events on [data-tip][disabled] precisely
+  //    so a disabled control can still answer "why".
+  //
+  // The reasoning below about Ctrl+S cuts the other way once you follow it through: a
+  // disabled Save button must not claim something the keyboard immediately disproves —
+  // which is exactly why the Ctrl+S handler in Toolbar now carries the same Clicker gate.
 
   return (
     <div className="flex items-center justify-between px-3 py-1.5 bg-bg-surface border border-border-subtle rounded-ui">
@@ -137,6 +150,11 @@ export function ActionBar() {
             (Macro = accent, Clicker = clicker purple) ride in via activeClass.
             List (not Play) so the mode pill doesn't visually duplicate the
             Replay action button. `dense` drops it from 32px to the rail's 28. */}
+        {/* Switching modes stops whatever is running (SetCursorClickMode calls
+            StopReplayIfRunning), and the pills carry no other warning. Say so — but only
+            while there IS a run to lose, and do NOT disable: the mode has a global hotkey
+            (ScrollLock) and a tray item behind it, so a greyed pill would claim something
+            the keyboard disproves. */}
         <SegmentedControl
           ariaLabel="Execution mode"
           dense
@@ -147,6 +165,9 @@ export function ActionBar() {
               value: 'macro',
               label: 'Macro',
               icon: <List size={12} />,
+              tip: isReplaying || isRecording
+                ? tt('Switching stops the current run', 'Trocar de modo interrompe a execução atual')
+                : undefined,
               // Accent at 12% fill / 40% border — the exact recipe the Settings switches and
               // the field chips use for "on", so the app has ONE intensity for an active
               // control instead of this pill shouting in replay-green next to a quiet switch.
@@ -158,6 +179,9 @@ export function ActionBar() {
               value: 'clicker',
               label: 'Clicker',
               icon: <MousePointerClick size={12} />,
+              tip: isReplaying || isRecording
+                ? tt('Switching stops the current run', 'Trocar de modo interrompe a execução atual')
+                : undefined,
               activeClass: 'bg-[var(--color-clicker-bg)] text-[var(--color-clicker-fg)] shadow-[inset_0_0_0_1px_var(--color-clicker-border)]',
             },
           ]}
@@ -249,6 +273,7 @@ export function ActionBar() {
           size="xs"
           onClick={() => send({ type: 'profile:save', payload: {} })}
           disabled={isClicker}
+          data-tip={isClicker ? clickerTip : undefined}
         >
           <Save size={12} />
           Save
@@ -258,6 +283,7 @@ export function ActionBar() {
           size="xs"
           onClick={() => send({ type: 'profile:load', payload: {} })}
           disabled={isClicker}
+          data-tip={isClicker ? clickerTip : undefined}
         >
           <FolderOpen size={12} />
           Load

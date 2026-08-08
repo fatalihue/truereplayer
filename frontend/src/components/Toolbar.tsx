@@ -4,6 +4,7 @@ import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { useTt } from '../state/LanguageContext';
+import { useToast } from '../state/ToastContext';
 import { SendTextDialog } from './SendTextDialog';
 import { RunProfileDialog } from './RunProfileDialog';
 import { NavigateDialog } from './NavigateDialog';
@@ -105,6 +106,7 @@ export function Toolbar(_props: ToolbarProps) {
   const { toolbar, buttonStates, actions, activeProfile, settings } = useAppState();
   const { send } = useBridge();
   const tt = useTt();
+  const { showToast } = useToast();
   // Clicker-mode coherence: the macro action list is invisible in Clicker mode,
   // yet these buttons used to stay live and silently mutate it. Every mutating
   // toolbar control now shares one gate + one explanation. (ActionBar already
@@ -257,8 +259,23 @@ export function Toolbar(_props: ToolbarProps) {
   // in Clicker mode it would mutate the invisible macro list.
   const insertsDisabledRef = useRef(insertsDisabled);
   insertsDisabledRef.current = insertsDisabled;
+  // Save takes its OWN ref, not insertsDisabledRef: that one also covers an active
+  // replay/recording, and saving during a live macro run is deliberately allowed. Only
+  // Clicker mode gates Save — the ActionBar's Save button disables on exactly this, and
+  // until now Ctrl+S sailed straight past it, so the button was dead while the keyboard
+  // saved fine. A toast rather than silence: Ctrl+S is muscle memory with an expectation
+  // of durability, and silent no-op there reads as "saved".
+  const isClickerRef = useRef(isClicker);
+  isClickerRef.current = isClicker;
   useEffect(() => {
-    const onSave = () => send({ type: 'profile:save', payload: {} });
+    const onSave = () => {
+      if (isClickerRef.current) {
+        showToast(tt('Profiles are unavailable in Clicker mode — switch to Macro to save.',
+                     'Perfis estão indisponíveis no modo Clicker — mude para Macro para salvar.'), 'error');
+        return;
+      }
+      send({ type: 'profile:save', payload: {} });
+    };
     const onUndo = () => { if (!insertsDisabledRef.current) send({ type: 'actions:undo', payload: {} }); };
     const onRedo = () => { if (!insertsDisabledRef.current) send({ type: 'actions:redo', payload: {} }); };
     window.addEventListener('cmd:save', onSave);
@@ -269,7 +286,7 @@ export function Toolbar(_props: ToolbarProps) {
       window.removeEventListener('cmd:undo', onUndo);
       window.removeEventListener('cmd:redo', onRedo);
     };
-  }, [send]);
+  }, [send, showToast, tt]);
 
   // Close Browser dropdown on outside click or Escape. The columns + add-actions
   // dropdowns that used to share this handler are gone (columns moved to the grid

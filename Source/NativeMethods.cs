@@ -117,6 +117,27 @@ namespace TrueReplayer.Interop
         [DllImport("user32.dll", SetLastError = true)]
         public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
+        // Single-event overload: INPUT is blittable, so `ref` marshals as a direct pointer
+        // and the caller skips the one-element array allocation. Every injection site in the
+        // app sends exactly one event, and the clicker loop does it twice per tick — at 100/s
+        // that is 200 arrays a second that never needed to exist.
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern uint SendInput(uint nInputs, ref INPUT pInputs, int cbSize);
+
+        // Cached INPUT size. Marshal.SizeOf is reflection-backed and was being recomputed on
+        // every single injected event (three separate sites did it per call).
+        public static readonly int InputSize = Marshal.SizeOf<INPUT>();
+
+        // System timer resolution. Task.Delay quantises to the current timer period — ~15.6 ms
+        // by default — so a clicker configured for 10 ms cannot be honoured without asking for
+        // 1 ms first. Always pair Begin with End: the setting is process-wide and persists
+        // until released, and holding 1 ms costs battery on idle machines.
+        [DllImport("winmm.dll", EntryPoint = "timeBeginPeriod")]
+        public static extern uint TimeBeginPeriod(uint uMilliseconds);
+
+        [DllImport("winmm.dll", EntryPoint = "timeEndPeriod")]
+        public static extern uint TimeEndPeriod(uint uMilliseconds);
+
         [DllImport("user32.dll")]
         public static extern bool GetCursorPos(out POINT lpPoint);
 

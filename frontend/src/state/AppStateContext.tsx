@@ -166,10 +166,29 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
       return { ...state, highlightedActionIndex: message.payload.index };
     case 'profiles:updated':
       return { ...state, profiles: message.payload.profiles, activeProfile: message.payload.activeProfile, profileOrder: message.payload.profileOrder ?? state.profileOrder };
-    case 'settings:loaded':
+    case 'settings:loaded': {
       // Deep-merge over defaults (mirrors state:init) so a partial/version-skewed payload
       // that drops a field can't make settings.* undefined and crash downstream reads.
-      return { ...state, settings: { ...initialState.settings, ...(message.payload.settings ?? {}) } };
+      const nextSettings = { ...initialState.settings, ...(message.payload.settings ?? {}) };
+      // Wipe the clicker run slice when the MODE actually flips. Those stats were previously
+      // cleared only on status → 'replaying', so Clicker → Macro → Clicker came back showing
+      // the previous run's count, elapsed, full progress bar and "✓ finished" badge —
+      // indistinguishable from a run that had just ended.
+      //
+      // Gated on the flip, not on every settings:loaded: this message has ~19 emitters, and
+      // wiping live stats on an unrelated change (a theme switch mid-run) would be a new bug.
+      // All three mode-flip paths — the ActionBar pills, the tray item and the ScrollLock
+      // hotkey — push this message, so one branch covers them. SetCursorClickMode stops any
+      // live run first, so there is never a run in flight to lose.
+      const modeFlipped = nextSettings.useCursorClick !== state.settings.useCursorClick;
+      if (!modeFlipped) return { ...state, settings: nextSettings };
+      return {
+        ...state,
+        settings: nextSettings,
+        clickerStats: { active: false, count: 0, elapsedMs: 0 },
+        loopProgress: { active: false, current: 0, total: 0 },
+      };
+    }
     case 'profile:loop':
       // Whole-slice replace: the C# bridge is the sole owner of these values (it resolves
       // profile-vs-global and does the 1..999 clamp), so there is no local state to preserve.
@@ -216,9 +235,11 @@ function appStateReducer(state: AppState, message: IncomingMessage): AppState {
         loopProgress: { active: true, current: message.payload.current, total: message.payload.total },
       };
     case 'settings:reset':
-      // Increments on every explicit reset. SettingsPanel uses this as a `key` on
-      // ClickerSection so its non-persistent UI state (e.g. /s ↔ ms unit toggle) goes
-      // back to default by way of a React remount.
+      // Increments on every explicit reset. SettingsPanel watches it in an effect to send
+      // its non-persistent UI state (the clicker /s ↔ ms unit toggle) back to default.
+      // It used to be a `key` on ClickerSection instead, but that component remounts for
+      // several unrelated reasons — tab change, panel collapse — so the toggle it was meant
+      // to preserve was being reset constantly; the state moved up and the epoch stayed.
       return { ...state, settingsResetEpoch: state.settingsResetEpoch + 1 };
     default:
       return state;

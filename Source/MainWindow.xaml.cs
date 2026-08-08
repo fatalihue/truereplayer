@@ -904,8 +904,7 @@ namespace TrueReplayer
                     {
                         mainController.SetLastHotkeyPressed(key);
                         mainController.ToggleCursorClickReplay(
-                            bridge?.BuildClickerConfig() ?? new ClickerRunConfig(
-                                100, false, 0, 1, 0, "Left", 10, 0, null, false, null));
+                            bridge?.BuildClickerConfig() ?? ClickerRunConfig.Default);
                         return;
                     }
                     if (key == "CLICKER_PAUSE")
@@ -979,8 +978,7 @@ namespace TrueReplayer
                             // Hotkey entry — defer to the bridge's BuildClickerConfig so the
                             // parsing rules + Area/loop conventions stay in one place.
                             mainController.ToggleCursorClickReplay(
-                                bridge?.BuildClickerConfig() ?? new ClickerRunConfig(
-                                    100, false, 0, 1, 0, "Left", 10, 0, null, false, null));
+                                bridge?.BuildClickerConfig() ?? ClickerRunConfig.Default);
                         }
                         else
                         {

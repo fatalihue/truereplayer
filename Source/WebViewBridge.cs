@@ -581,8 +581,13 @@ namespace TrueReplayer
             UseCursorClick = false;
             CursorClickButton = saved.CursorClickButton;
             // Mirror the saved clicker hotkeys into the hook (the property setters do the mirror).
-            CursorClickStartHotkey = saved.CursorClickStartHotkey;
-            CursorClickPauseHotkey = saved.CursorClickPauseHotkey;
+            // DropBareWheelHotkey: a bare ScrollUp/ScrollDown could be captured and saved by
+            // older builds, but the hook only dispatches MODIFIED wheel combos as global
+            // hotkeys (swallowing a bare wheel event would kill that scroll direction
+            // system-wide). Such a value has never fired; clearing it stops the panel from
+            // displaying a key that does nothing.
+            CursorClickStartHotkey = DropBareWheelHotkey(saved.CursorClickStartHotkey, nameof(saved.CursorClickStartHotkey));
+            CursorClickPauseHotkey = DropBareWheelHotkey(saved.CursorClickPauseHotkey, nameof(saved.CursorClickPauseHotkey));
             // Clicker v2 — migrate from the legacy "Clicker reuses profile settings" behaviour
             // on first launch after upgrade. The sentinel CursorClickDelayMs == -1 means
             // "fresh appsettings.json or freshly upgraded from v1.9.53 or earlier" — copy the
@@ -2011,15 +2016,35 @@ namespace TrueReplayer
         // truth so the Replay-hotkey path (MainWindow) and the toggle-replay message path
         // (HandleReplayToggle) stay in sync — both call this instead of duplicating the
         // string→int parsing and the Area/loop convention logic.
-        // Loop convention: cursorClickUseLoops=false → 1 iteration; true + count=0 → infinite (0).
+        // Loop convention: 0 means unbounded, and cursorClickUseLoops=false resolves to 0 —
+        // "no limit set" and "limit of zero" are the same statement for a clicker.
         // Area gate: requires positive W/H — defensive against stale all-zero state.
+        // Returns "" for a bare wheel binding, the value untouched otherwise. See the call site
+        // in the settings load for why bare wheel can never be a global hotkey.
+        private static string DropBareWheelHotkey(string? stored, string label)
+        {
+            if (stored != "ScrollUp" && stored != "ScrollDown") return stored ?? "";
+            DiagnosticLog.Info($"Settings: cleared {label}='{stored}' — a bare wheel binding is not dispatchable as a global hotkey.");
+            return "";
+        }
+
         public ClickerRunConfig BuildClickerConfig()
         {
-            int delay = int.TryParse(CursorClickDelay, out var d) ? d : 100;
-            int jitterPercent = int.TryParse(CursorClickDelayJitter, out var jp) ? jp : 0;
-            int holdMs = int.TryParse(CursorClickHold, out var h) ? h : 10;
-            int positionJitter = CursorClickUsePositionJitter && int.TryParse(CursorClickPositionJitter, out var pj) ? pj : 0;
-            int loops = CursorClickUseLoops && int.TryParse(CursorClickLoops, out var lc) && lc >= 0 ? lc : 1;
+            // Clamped on the way out as well as inside the engine. appsettings.json is
+            // hand-editable and never passes through HandleSettingsChange, so an out-of-range
+            // value reaches here untouched — and an unclamped jitter percent overflows the
+            // engine's `period * jitterPercent` into a negative variation, which throws.
+            int delay = Math.Clamp(int.TryParse(CursorClickDelay, out var d) ? d : 100, 1, 60000);
+            int jitterPercent = Math.Clamp(int.TryParse(CursorClickDelayJitter, out var jp) ? jp : 0, 0, 100);
+            int holdMs = Math.Clamp(int.TryParse(CursorClickHold, out var h) ? h : 10, 0, 2000);
+            int positionJitter = CursorClickUsePositionJitter && int.TryParse(CursorClickPositionJitter, out var pj)
+                ? Math.Clamp(pj, 0, 500) : 0;
+            // Loops chip OFF (the shipped default) now means UNBOUNDED, not one click.
+            // It used to substitute 1, which made the factory default "press the hotkey, get a
+            // single click and stop" while the chip visibly displayed 0 and its own tooltip
+            // promised "0 = forever". An auto-clicker's default is to keep clicking; the UI
+            // renders the off state as ∞ so the two finally agree.
+            int loops = CursorClickUseLoops && int.TryParse(CursorClickLoops, out var lc) && lc >= 0 ? lc : 0;
             int interval = CursorClickUseInterval && int.TryParse(CursorClickInterval, out var li) ? li : 0;
             ClickArea? area = CursorClickUseArea ? CursorClickArea : null;
             // Area takes precedence over Fixed if both are somehow on (UI enforces mutex, but
@@ -8516,6 +8541,14 @@ namespace TrueReplayer
             CursorClickUseLoops = defaults.CursorClickUseLoops;
             CursorClickInterval = defaults.CursorClickIntervalMs.ToString();
             CursorClickUseInterval = defaults.CursorClickUseInterval;
+            // Area and Fixed were written to DISK as cleared by the `defaults` object above but
+            // never mirrored back into the bridge, so PushSettingsLoaded kept showing the old
+            // rect/point and the next SaveGlobalSettings wrote them straight back — the reset
+            // silently failed for exactly the two settings a user most wants cleared.
+            CursorClickUseArea = defaults.CursorClickUseArea;
+            CursorClickArea = null;
+            CursorClickUseFixed = defaults.CursorClickUseFixed;
+            CursorClickFixedPoint = null;
             RecordMouse = defaults.RecordMouse;
             RecordScroll = defaults.RecordScroll;
             RecordKeyboard = defaults.RecordKeyboard;

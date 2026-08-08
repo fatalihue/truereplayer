@@ -3,7 +3,7 @@ import { Play, Pause as PauseIcon, MousePointerClick, Folder, List, Gauge, Clock
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { usePauseTick } from '../hooks/usePauseTick';
-import { formatClickerStats } from '../utils/clickerFormat';
+import { formatClickerStats, formatRate, targetCps } from '../utils/clickerFormat';
 import { APP_VERSION } from '../appVersion';
 
 // Thin vertical divider between status segments.
@@ -99,11 +99,14 @@ export function StatusBar() {
 
   // Clicker mode shows whether it's mid-run (live stats) or idle (config summary).
   const clickerRunning = isReplaying || clickerStats.count > 0;
-  // Target rate from the per-click delay (the configured cadence, not the measured
-  // one which the live stats below already report). Falls back to 0 on a bad value.
-  const targetCps = (() => {
+  // Target rate — the cadence the ENGINE will produce, not 1000/delay. The interval is
+  // part of the period, so leaving it out made this disagree with the measured rate the
+  // live stats report a second later. See clickerFormat.targetCps.
+  const clickerTargetCps = (() => {
     const d = parseInt(settings.cursorClickDelay, 10);
-    return d > 0 ? Math.round(1000 / d) : 0;
+    if (!(d > 0)) return 0;
+    const gap = settings.cursorClickUseInterval ? parseInt(settings.cursorClickInterval, 10) || 0 : 0;
+    return targetCps(d, gap);
   })();
 
   return (
@@ -123,6 +126,24 @@ export function StatusBar() {
               <strong className="text-text-primary">{rateLabel}/s</strong>
               <span className="text-text-disabled">·</span>
               <span className="flex items-center gap-1 text-text-secondary"><Clock size={10} />{clickerElapsed}</span>
+              {/* Pause was drawn only in the macro branch, so a paused clicker showed frozen
+                  stats with nothing saying why — and this bar is usually the only part of the
+                  window visible behind a game. */}
+              {pauseState.isPaused && (
+                <>
+                  <div className="w-px h-3 bg-border-subtle shrink-0" />
+                  <PauseIcon size={10} className="shrink-0" style={{ color: 'var(--color-action-pause-fg)' }} fill="currentColor" />
+                  <span className="text-[11px] font-medium whitespace-nowrap" style={{ color: 'var(--color-action-pause-fg)' }}>
+                    PAUSED{settings.cursorClickPauseHotkey && ` — ${settings.cursorClickPauseHotkey}`}
+                  </span>
+                  <button
+                    onClick={() => send({ type: 'replay:resume', payload: {} })}
+                    className="px-2 py-0.5 text-[10px] font-medium rounded border border-border-default text-text-secondary hover:text-text-primary hover:bg-bg-elevated transition-colors shrink-0"
+                  >
+                    Resume
+                  </button>
+                </>
+              )}
             </span>
           );
         })() : (
@@ -133,12 +154,12 @@ export function StatusBar() {
             </span>
             <Sep />
             <span className="text-text-secondary">{settings.cursorClickButton} button</span>
-            {targetCps > 0 && (
+            {clickerTargetCps > 0 && (
               <>
                 <Sep />
                 <span className="flex items-center gap-1.5 text-text-tertiary">
                   <Gauge size={11} />
-                  <span className="text-text-secondary font-mono">~{targetCps}/s</span>
+                  <span className="text-text-secondary font-mono">~{formatRate(clickerTargetCps)}/s</span>
                 </span>
               </>
             )}

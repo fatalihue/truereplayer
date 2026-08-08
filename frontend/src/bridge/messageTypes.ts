@@ -619,10 +619,12 @@ export interface AppState {
     total: number;
   };
   /**
-   * Increments on every explicit "reset to defaults" action. Used as a `key` prop on
-   * settings panels that hold non-persistent local UI state (e.g. ClickerSection's
-   * /s ↔ ms unit toggle), forcing a remount so the local state goes back to its
-   * default. Cheap signal that doesn't bloat AppSettings with display-only prefs.
+   * Increments on every explicit "reset to defaults" action. SettingsPanel watches it to
+   * return its non-persistent local UI state (the clicker /s ↔ ms unit toggle) to default.
+   * Cheap signal that doesn't bloat AppSettings with display-only prefs.
+   * NOT a remount key any more — ClickerSection remounts for several unrelated reasons
+   * (tab change, panel collapse, responsive auto-collapse), which reset the toggle far more
+   * often than intended, so the state was lifted into SettingsPanel.
    */
   settingsResetEpoch: number;
 }

@@ -649,7 +649,7 @@ namespace TrueReplayer
                     }
                 }
             };
-            NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(NativeMethods.INPUT)));
+            NativeMethods.SendInput((uint)inputs.Length, inputs, NativeMethods.InputSize);
         }
 
         private static bool ShouldCancelMenuFor(string key)
@@ -882,7 +882,7 @@ namespace TrueReplayer
             // redundant and racy — it runs on the hook thread, and if the replay worker thread set
             // the flag true between the snapshot and the finally, the restore would clobber it back
             // to false and silently disable the replay-injection guard.
-            int inputSize = Marshal.SizeOf(typeof(NativeMethods.INPUT));
+            int inputSize = NativeMethods.InputSize;
             ushort vkBack = 0x08;
             ushort scanBack = (ushort)NativeMethods.MapVirtualKey(vkBack, 0);
 
@@ -1070,9 +1070,15 @@ namespace TrueReplayer
                         break;
                 }
 
-                // Check scroll events against profile hotkeys
-                if ((int)wParam == NativeMethods.WM_MOUSEWHEEL && !IgnoreProfileHotkeys && !IsReplayingAction &&
-                    UserProfile.Current.ProfileKeyEnabled && ProfileHotkeys.Count > 0 &&
+                // Wheel dispatch: global hotkeys first, then profile hotkeys.
+                //
+                // Injected wheel events are dropped up front — the X-button branch above has had
+                // this gate (LLMHF_INJECTED, bit 0) since it was written, but the wheel branch
+                // never did. Its only protection was !IsReplayingAction, which is set solely by
+                // the macro action loop, so a macro Scroll action could re-trigger a scroll-bound
+                // profile hotkey and feed back into the hook.
+                if ((int)wParam == NativeMethods.WM_MOUSEWHEEL && (hookStruct.flags & 0x1) == 0 &&
+                    !IgnoreProfileHotkeys &&
                     MainController.Instance != null && !MainController.Instance.IsRecording())
                 {
                     string scrollKey = scrollDelta > 0 ? "ScrollUp" : "ScrollDown";
@@ -1106,20 +1112,40 @@ namespace TrueReplayer
                     _scrollComboBuilder.Append(scrollKey);
                     string combo = _scrollComboBuilder.ToString();
 
-                    string? matchedProfile = null;
-                    foreach (var p in ProfileHotkeys)
-                    {
-                        if (p.Value == combo && IsForegroundWindowMatch(p.Key))
-                        {
-                            matchedProfile = p.Key;
-                            break;
-                        }
-                    }
-                    if (matchedProfile != null)
+                    // Global hotkeys — OUTSIDE the ProfileKeyEnabled/ProfileHotkeys.Count gate
+                    // below, which is what kept them dead: a user with no profile hotkeys (or
+                    // with profile keys switched off) never even reached the comparison.
+                    //
+                    // Modified combos only. Swallowing a wheel event by returning 1 kills that
+                    // scroll SYSTEM-WIDE, so a bare ScrollUp/ScrollDown bound as a global hotkey
+                    // would cost the user scrolling everywhere for as long as the binding is
+                    // live. X-buttons have no such cost, which is why they take bare combos.
+                    // Bare scroll stays valid for PROFILE hotkeys (the case that works today,
+                    // and additionally limited by the foreground-window match below).
+                    bool hasModifier = winHeld || ctrlHeld || altHeld || shiftHeld;
+                    if (hasModifier && TryDispatchGlobalHotkey(combo))
                     {
                         LastTriggerHotkey = combo;
-                        OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
                         return (IntPtr)1;
+                    }
+
+                    if (!IsReplayingAction && UserProfile.Current.ProfileKeyEnabled && ProfileHotkeys.Count > 0)
+                    {
+                        string? matchedProfile = null;
+                        foreach (var p in ProfileHotkeys)
+                        {
+                            if (p.Value == combo && IsForegroundWindowMatch(p.Key))
+                            {
+                                matchedProfile = p.Key;
+                                break;
+                            }
+                        }
+                        if (matchedProfile != null)
+                        {
+                            LastTriggerHotkey = combo;
+                            OnHotkeyPressed?.Invoke($"PROFILE::{matchedProfile}");
+                            return (IntPtr)1;
+                        }
                     }
                 }
 
@@ -1250,8 +1276,32 @@ namespace TrueReplayer
             string combo = ComposeMouseCombo(xName);
 
             // Pause-action resume + global hotkeys (mode-aware) — the Settings chips can
-            // capture X-buttons, so they must actually fire from the mouse hook too
+            // capture mouse combos, so they must actually fire from the mouse hook too
             // (the keyboard hook's global checks never see mouse events).
+            if (TryDispatchGlobalHotkey(combo))
+                return true;
+
+            return HandleXButtonProfileHotkeys(combo, vk, isDown);
+        }
+
+        /// <summary>
+        /// The mode-aware global-hotkey ladder, shared by every mouse dispatch path.
+        /// Returns true when the combo was consumed (caller must swallow the event).
+        /// </summary>
+        /// <remarks>
+        /// Extracted from the X-button path so the WHEEL path can use it too. The wheel branch
+        /// only ever compared against ProfileHotkeys, which meant every global hotkey bound to
+        /// a scroll combo — Clicker start/pause, Recording, Replay, ProfileKeyToggle,
+        /// Foreground, ModeToggle, CaptureSlot — captured fine, saved fine, displayed fine, and
+        /// then silently never fired.
+        ///
+        /// Deliberately NOT gated on IsReplayingAction: that flag is set during macro replay,
+        /// and gating here would kill a Stop hotkey exactly when it is needed. It is also not
+        /// gated on ProfileKeyEnabled/ProfileHotkeys.Count — those govern PROFILE hotkeys, and
+        /// nesting the global ladder inside them is precisely what left it dead on the wheel.
+        /// </remarks>
+        private static bool TryDispatchGlobalHotkey(string combo)
+        {
             if (_pauseResumeHotkey != null && combo == _pauseResumeHotkey)
             {
                 _pauseResumeCallback?.Invoke();
@@ -1298,7 +1348,14 @@ namespace TrueReplayer
                 OnHotkeyPressed?.Invoke(combo);
                 return true;
             }
+            return false;
+        }
 
+        // Profile-hotkey half of the X-button dispatch. Split out from HandleXButtonTriggerCore
+        // purely so the global ladder above could be shared with the wheel path; the body is
+        // unchanged and still uses only these three values.
+        private static bool HandleXButtonProfileHotkeys(string combo, int vk, bool isDown)
+        {
             if (!UserProfile.Current.ProfileKeyEnabled || ProfileHotkeys.Count == 0)
                 return false;
 

@@ -2,7 +2,8 @@ import { Pause as PauseIcon, Check } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { usePauseTick } from '../hooks/usePauseTick';
-import { formatClickerStats, formatEta } from '../utils/clickerFormat';
+import { formatClickerStats, formatEta, formatRate, targetCps } from '../utils/clickerFormat';
+import { useTt } from '../state/LanguageContext';
 import { ClickerEmptyState } from './ClickerEmptyState';
 
 // Live dashboard for Clicker runs. Three visual states:
@@ -12,6 +13,7 @@ import { ClickerEmptyState } from './ClickerEmptyState';
 export function ClickerDashboard() {
   const { status, clickerStats, loopProgress, pauseState, settings } = useAppState();
   const { send } = useBridge();
+  const tt = useTt();
   usePauseTick(pauseState);
 
   const isReplaying = status === 'replaying';
@@ -43,23 +45,32 @@ export function ClickerDashboard() {
 
   // Compact recall — only enabled bits. The three "where" modes are mutually exclusive
   // (enforced upstream); surface them in the engine's precedence order Area > Fixed > Position.
+  //
+  // The RATE leads, because it is the single most important setting and this line used to
+  // omit it entirely while printing Hold — a value with no control anywhere in the UI.
+  const gapMs = settings.cursorClickUseInterval ? (parseInt(settings.cursorClickInterval, 10) || 0) : 0;
+  const delayMs = parseInt(settings.cursorClickDelay, 10) || 0;
   const configBits: string[] = [settings.cursorClickButton];
+  if (delayMs > 0) configBits.push(`${formatRate(targetCps(delayMs, gapMs))}/s`);
+  configBits.push(settings.cursorClickUseLoops
+    ? `${parseInt(settings.cursorClickLoops, 10) || 0} clicks`
+    : tt('no limit', 'sem limite'));
   if (settings.cursorClickUseArea && settings.cursorClickArea) {
     configBits.push(`Area ${settings.cursorClickArea.w}×${settings.cursorClickArea.h}`);
   } else if (settings.cursorClickUseFixed) {
     configBits.push(settings.cursorClickFixedPoint
       ? `Fixed ${settings.cursorClickFixedPoint.x},${settings.cursorClickFixedPoint.y}`
-      : 'Fixed at start');
+      : tt('Fixed at start', 'Fixo no início'));
   } else if (settings.cursorClickUsePositionJitter && parseInt(settings.cursorClickPositionJitter, 10) > 0) {
     configBits.push(`±${settings.cursorClickPositionJitter} px`);
   }
-  configBits.push(`Hold ${settings.cursorClickHold} ms`);
   if (settings.cursorClickUseJitter && parseInt(settings.cursorClickDelayJitter, 10) > 0) {
     configBits.push(`±${settings.cursorClickDelayJitter}% rate`);
   }
-  if (settings.cursorClickUseInterval && parseInt(settings.cursorClickInterval, 10) > 0) {
-    configBits.push(`every ${settings.cursorClickInterval} ms`);
-  }
+  // "+N ms gap", not "every N ms": in Clicker mode one iteration is one click, so this
+  // number is not a cadence — it is ADDED to the cadence, and the rate above already
+  // includes it.
+  if (gapMs > 0) configBits.push(`+${gapMs} ms gap`);
 
   return (
     // Standard theme surface (same as the macro ActionTable) — no purple glass gradient or
@@ -139,14 +150,14 @@ export function ClickerDashboard() {
       )}
 
       <div className="text-[11px] text-text-tertiary flex items-center gap-1.5">
-        Press
+        {tt('Press', 'Pressione')}
         <kbd className="kbd kbd-accent">{settings.cursorClickStartHotkey}</kbd>
-        to {isReplaying ? 'stop' : 'run again'}
+        {isReplaying ? tt('to stop', 'para parar') : tt('to run again', 'para rodar de novo')}
         {isReplaying && (
           <>
             <span className="opacity-40">·</span>
             <kbd className="kbd kbd-accent">{settings.cursorClickPauseHotkey}</kbd>
-            to pause
+            {tt('to pause', 'para pausar')}
           </>
         )}
       </div>
@@ -154,7 +165,10 @@ export function ClickerDashboard() {
       {pauseState.isPaused && (
         <div
           className="absolute inset-0 flex items-center justify-center backdrop-blur-sm"
-          style={{ background: 'rgba(0,0,0,0.45)' }}
+          // Dim toward the theme's own base, not to black. This is an in-panel state overlay
+          // on a themed surface, not a modal over the whole app (DialogShell's bg-black/50
+          // stays as it is) — and a black wash over the 11 light presets read as a bug.
+          style={{ background: 'color-mix(in srgb, var(--color-bg-base) 82%, transparent)' }}
         >
           <div
             className="flex flex-col items-center gap-3 px-6 py-5 rounded-ui border"
@@ -167,13 +181,25 @@ export function ClickerDashboard() {
             <div className="text-[16px] font-semibold tracking-wider" style={{ color: 'var(--color-action-pause-fg)' }}>
               PAUSED
             </div>
-            {(pauseState.hotkey || pauseState.timeoutMs > 0) && (
-              <div className="text-[11px] text-text-secondary text-center">
-                {pauseState.hotkey && <>Press <kbd className="kbd kbd-accent">{pauseState.hotkey}</kbd></>}
-                {pauseState.hotkey && pauseState.timeoutMs > 0 ? ' or ' : ''}
-                {pauseState.timeoutMs > 0 && <>wait <span className="font-mono">{pauseRemainingSec}s</span></>}
-              </div>
-            )}
+            {/* The clicker fires OnReplayPaused("", 0), so both of these are always falsy for
+                a clicker pause and this line never rendered — the overlay showed PAUSED and a
+                button, and never named the hotkey that also resumes. Fall back to the
+                configured pause key: this component only mounts in Clicker mode, so that is
+                always the right one. */}
+            <div className="text-[11px] text-text-secondary text-center">
+              {pauseState.hotkey || pauseState.timeoutMs > 0 ? (
+                <>
+                  {pauseState.hotkey && <>{tt('Press', 'Pressione')} <kbd className="kbd kbd-accent">{pauseState.hotkey}</kbd></>}
+                  {pauseState.hotkey && pauseState.timeoutMs > 0 ? tt(' or ', ' ou ') : ''}
+                  {pauseState.timeoutMs > 0 && <>{tt('wait', 'aguarde')} <span className="font-mono">{pauseRemainingSec}s</span></>}
+                </>
+              ) : (
+                <>
+                  {tt('Press', 'Pressione')} <kbd className="kbd kbd-accent">{settings.cursorClickPauseHotkey}</kbd>
+                  {tt(' or click Resume', ' ou clique em Resume')}
+                </>
+              )}
+            </div>
             <button
               onClick={() => send({ type: 'replay:resume', payload: {} })}
               className="px-3 py-1 text-[12px] font-medium rounded border border-border-default text-text-primary hover:bg-bg-elevated transition-colors"
