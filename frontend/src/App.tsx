@@ -25,6 +25,7 @@ import { ExtensionUpdateBanner } from './components/ExtensionUpdateBanner';
 import { ClickerDashboard } from './components/ClickerDashboard';
 import { CommandPalette } from './components/CommandPalette';
 import { SheetPanel } from './components/SheetPanel';
+import { useCommandToggle } from './hooks/useCommandToggle';
 import { ThemeEditor } from './components/ThemeEditor';
 import { DataPanel } from './components/DataPanel';
 import { AutomationPanel } from './components/AutomationPanel';
@@ -64,48 +65,32 @@ function AppShell() {
   // columnVisibility right now. Keep the state pair intact so re-enabling the
   // button later is a one-line rename rather than re-introducing the state.
   const [columnVisibility, _setColumnVisibility] = useState<ColumnVisibility>(defaultColumnVisibility);
-  // Theme Editor is mounted at the App level (not inside Toolbar) because its
-  // open/close trigger now comes from multiple surfaces (Settings panel's
-  // Interface section, Command Palette, future shortcuts). Listens to the
-  // shared cmd:themeeditor event so every caller stays decoupled.
-  const [showThemeEditor, setShowThemeEditor] = useState(false);
-  useEffect(() => {
-    const handler = () => setShowThemeEditor(prev => !prev);
-    window.addEventListener('cmd:themeeditor', handler);
-    return () => window.removeEventListener('cmd:themeeditor', handler);
-  }, []);
+  // Four overlays, one wiring: each is mounted at the App level (not inside the
+  // surface that opens it) because its trigger comes from several places at once, so
+  // each listens for a shared `cmd:*` window event and every caller stays decoupled.
+  // useCommandToggle is that listener; the event names are the contract with the
+  // dispatch sites and must not drift.
+  //
+  //   themeeditor  Settings → Interface, Command Palette
+  //   dataeditor   Toolbar button, Command Palette
+  //   automation   Settings → App → Automation row (plus the backend push below)
+  //   runreport    palette-only (Ctrl+K → "Run report"), same doctrine as Live
+  //                Variables: a diagnostic you reach for after something failed,
+  //                not a permanent control.
+  const [showThemeEditor, setShowThemeEditor] = useCommandToggle('cmd:themeeditor');
+  const [showDataEditor, setShowDataEditor] = useCommandToggle('cmd:dataeditor');
+  const [showAutomation, setShowAutomation] = useCommandToggle('cmd:automation');
+  const [showRunReport, setShowRunReport] = useCommandToggle('cmd:runreport');
 
-  // Data Loop panel — App-level like the Theme Editor, opened via the shared
-  // cmd:dataeditor event (Toolbar button + Command Palette).
-  const [showDataEditor, setShowDataEditor] = useState(false);
-  useEffect(() => {
-    const handler = () => setShowDataEditor(prev => !prev);
-    window.addEventListener('cmd:dataeditor', handler);
-    return () => window.removeEventListener('cmd:dataeditor', handler);
-  }, []);
-
-  // Automation panel — openers: Settings → App → Automation row (cmd:automation)
-  // and the tray "Automations…" item (backend automation:open push).
-  const [showAutomation, setShowAutomation] = useState(false);
-  useEffect(() => {
-    const handler = () => setShowAutomation(prev => !prev);
-    window.addEventListener('cmd:automation', handler);
-    return () => window.removeEventListener('cmd:automation', handler);
-  }, []);
+  // The Automation panel has a second opener the others don't: the tray
+  // "Automations…" item, which arrives as a backend push. It OPENS rather than
+  // toggles — a tray click asking for the panel must never be the click that
+  // closes it.
   useEffect(() => {
     return subscribe((msg) => {
       if (msg.type === 'automation:open') setShowAutomation(true);
     });
-  }, [subscribe]);
-
-  // Run report — palette-only (Ctrl+K → "Run report"), same doctrine as Live Variables:
-  // a diagnostic you reach for after something failed, not a permanent control.
-  const [showRunReport, setShowRunReport] = useState(false);
-  useEffect(() => {
-    const handler = () => setShowRunReport(prev => !prev);
-    window.addEventListener('cmd:runreport', handler);
-    return () => window.removeEventListener('cmd:runreport', handler);
-  }, []);
+  }, [subscribe, setShowAutomation]);
 
   // Global keyboard handler: Ctrl+K for command palette, Ctrl+S to save profile,
   // Ctrl+Z/Y for undo/redo + block UI interaction keys.

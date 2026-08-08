@@ -35,6 +35,16 @@ const REPEATABLE_TOKEN_NAMES = new Set([
   'right',
 ]);
 
+// The ceiling for that `:N`, ported from the parser that will actually run the token instead of
+// restated from its intent. ActionExecution.ParseSendTextSegments, after `int.TryParse(...) && n > 0`
+// has decided whether N is usable at all, does:
+//     int count = hasValidParam ? Math.Min(paramValue, 100) : 1;
+// It CLAMPS rather than rejects — {enter:500} presses a hundred times and says nothing — so a
+// field that accepts 500 is showing the user a number the run will not honour. Both of the
+// backend's gates are mirrored below, in parseRepeatable (what an existing token really means)
+// and in the editor's update (what a new value may become).
+const MAX_KEY_REPEAT = 100;
+
 type TokenKind = 'clipboard' | 'delay' | 'repeatable' | 'random' | 'var' | 'rowcol' | 'rownextcol' | 'clip' | 'winclip' | 'input' | 'static';
 
 function getTokenKind(token: string): TokenKind {
@@ -67,9 +77,21 @@ function parseNameArg(token: string): string {
 
 function parseRepeatable(token: string): { name: string; n: number } {
   const inner = token.slice(1, -1);
-  const [name, modN] = inner.split(':');
-  const parsed = modN !== undefined ? parseInt(modN, 10) : 1;
-  return { name, n: !Number.isFinite(parsed) || parsed < 1 ? 1 : parsed };
+  // Split at the FIRST ':' and keep the whole remainder as the argument, the way the backend
+  // does (`inner.Substring(colonIdx + 1)`) — splitting on every ':' would read {enter:5:junk}
+  // as 5, while the parser that runs it hands "5:junk" to TryParse and presses once.
+  const colonIdx = inner.indexOf(':');
+  const name = colonIdx >= 0 ? inner.slice(0, colonIdx) : inner;
+  const arg = colonIdx >= 0 ? inner.slice(colonIdx + 1) : undefined;
+  // Gate 1 — `int.TryParse(...) && n > 0`. Whatever the backend cannot read as a positive int32
+  // is ONE press there, so it has to read as 1 here: parseInt is looser than TryParse (it takes
+  // "5abc" as 5 and has no int32 range), which would put a number in the field that the run
+  // never sees. The regex is the gate; parseInt then does the conversion.
+  const parsed = arg !== undefined && /^[+-]?\d+$/.test(arg.trim()) ? parseInt(arg, 10) : NaN;
+  const usable = Number.isFinite(parsed) && parsed >= 1 && parsed <= 2147483647 ? parsed : 1;
+  // Gate 2 — Math.Min(paramValue, 100): an existing {enter:500} already runs as 100, so that is
+  // the honest number to show. Nothing is emitted from here, so this cannot rewrite the token.
+  return { name, n: Math.min(usable, MAX_KEY_REPEAT) };
 }
 
 function parseDelay(token: string): { ms: number } {
@@ -371,7 +393,14 @@ function RepeatableEditor({
 
   // Report changes only on real user input — NOT from a mount-time effect, which would emit a
   // canonicalized token (e.g. {enter:1} → {enter}) and make opening then closing the chip rewrite it.
-  const update = (v: number) => { setN(v); onChange(v > 1 ? `{${initial.name}:${v}}` : `{${initial.name}}`); };
+  // Clamp to MAX_KEY_REPEAT here since the local NumInput has no max prop (same as DelayEditor's
+  // 60000 ms cap): the parent-side clamp flows back through NumberInput's value sync, so typing
+  // 500 leaves 100 standing in the field rather than a number the engine will quietly cut down.
+  const update = (v: number) => {
+    const c = Math.min(MAX_KEY_REPEAT, v);
+    setN(c);
+    onChange(c > 1 ? `{${initial.name}:${c}}` : `{${initial.name}}`);
+  };
 
   return (
     <Section label="Repeat">
@@ -383,6 +412,7 @@ function RepeatableEditor({
       </div>
       <div className="text-[10px] text-text-tertiary mt-1">
         Press <code className="text-accent-light">{`{${initial.name}}`}</code> {n}× when this action runs.
+        {n >= MAX_KEY_REPEAT && ` ${MAX_KEY_REPEAT} presses is the engine's limit for one token.`}
       </div>
     </Section>
   );
@@ -535,6 +565,13 @@ function RowColEditor({ token, onChange, head = 'row' }: { token: string; onChan
   };
 
   const updateColumn = (raw: string) => {
+    // The refusal above covers the column too, and this is where it used to leak: `emit` drops an
+    // unmodeled token, but the field stayed editable, so a typed column moved on screen and then
+    // evaporated on commit. The column is not separable from the refusal — writing it means
+    // rebuilding the whole token, which is exactly where the modifier the parser could not
+    // represent disappears. The input is readOnly in that case; this guard is the state's own
+    // copy of that rule, so re-enabling the field can never silently resurrect the discard.
+    if (state.unmodeled) return;
     // Same charset the typing grammar chips ([A-Za-z0-9_]) — anything else
     // would produce a token the editor immediately un-chips on round-trip.
     const clean = raw.replace(/[^A-Za-z0-9_]/g, '');
@@ -559,16 +596,24 @@ function RowColEditor({ token, onChange, head = 'row' }: { token: string; onChan
             type="text"
             value={column}
             onChange={(e) => updateColumn(e.target.value)}
-            autoFocus
+            // Read-only for a token this editor refuses to rebuild, matching the body below —
+            // an editable field whose edits are thrown away is worse than no field. Not
+            // autofocused then either: focus invites the typing that cannot land.
+            readOnly={state.unmodeled}
+            autoFocus={!state.unmodeled}
             spellCheck={false}
             placeholder="column"
-            className="h-7 w-full px-2 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid placeholder:text-text-disabled"
+            className={`h-7 w-full px-2 text-xs font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none placeholder:text-text-disabled ${
+              state.unmodeled ? 'opacity-60 cursor-not-allowed' : 'focus:border-accent-solid'
+            }`}
           />
         </div>
         <div className="text-[10px] text-text-tertiary mt-1">
-          {isNext
-            ? 'Each use pulls the NEXT data row for this column — 1st use → row 1, 2nd → row 2… Resets each run.'
-            : "Replaced with this column's cell of the current data row (loop over data)."}
+          {state.unmodeled
+            ? 'Read-only — this token carries a modifier chain the editor cannot rebuild (see below).'
+            : isNext
+              ? 'Each use pulls the NEXT data row for this column — 1st use → row 1, 2nd → row 2… Resets each run.'
+              : "Replaced with this column's cell of the current data row (loop over data)."}
         </div>
       </Section>
       <ClipboardModifierBody

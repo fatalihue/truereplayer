@@ -351,6 +351,24 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
   // fallbacks, and a fallback that matches the OLD element clicks the old element.
   const [pickedThisSession, setPickedThisSession] = useState(false);
   const [showAlternatives, setShowAlternatives] = useState(false);
+  // The other half of the invariant described just above. `pickedThisSession` was set by the
+  // picker and never unset, so typing a selector by hand — the exact case the clearing branch
+  // exists for — kept the flag true and re-persisted the PICKED element's fallbacks under the
+  // TYPED selector. At replay that is the worst possible pairing: the typed primary misses, the
+  // engine walks the ranked list (extension: primary first, then the fallbacks), a fallback for
+  // the element the user rejected still matches, and the click lands on that element.
+  // Every hand edit of the EFFECTIVE selector routes through here — the CSS field and the Text
+  // Match field, which takes priority over it — so the flag drops and handleSave falls into its
+  // "clear the stored list" branch.
+  // Deliberately DROPS the list instead of re-deriving a primary from it: the primary is always
+  // generateSelector's output, never alternatives[0] (the recorder pairs a later typingCaptured
+  // to its row by exact Key == selector equality), so promoting a fallback here would invent a
+  // pairing neither side has.
+  const invalidatePickedAlternatives = useCallback(() => {
+    setAlternatives([]);
+    setPickedThisSession(false);
+    setShowAlternatives(false);
+  }, []);
 
   // #3 — test action state
   const [testRequestId, setTestRequestId] = useState<string | null>(null);
@@ -483,10 +501,18 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
           // re-running Test with a manual region keeps overwriting it (intentional:
           // Test is the source of truth for "where the image actually is").
           if (r.found) {
+            // No Math.max(0,…): these are ABSOLUTE virtual-screen coordinates and go NEGATIVE on a
+            // monitor placed left of / above the primary. Clamping to 0 there does not "protect" the
+            // value, it relocates the ROI to the left edge of the PRIMARY monitor, and the wrong
+            // number is then persisted by the actions:edit below — the WaitImage silently stops
+            // matching, or matches something else entirely. The backend's MatchOnce already clamps
+            // the ROI against the captured bitmap, which is the only place that can do it correctly.
+            // AutomationPanel's handler for this same message carries the same note; the two must
+            // stay in step.
             const margin = 80;
             setWaitImageSearchRegion({
-              x: Math.max(0, r.x - margin),
-              y: Math.max(0, r.y - margin),
+              x: r.x - margin,
+              y: r.y - margin,
               w: r.w + margin * 2,
               h: r.h + margin * 2,
             });
@@ -1635,6 +1661,20 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
     if (pickElementRequestIdRef.current) send({ type: 'browser:cancelPick', payload: {} });
     setPickElementRequestId(null);
     setIsPicking(false);
+    // The round-trips correlated by a plain REF (no request-id state of their own) need the
+    // same drop as the ids above, and they were the ones missed: each handler gates on its
+    // ref, so a ref that survives the switch makes a late reply look current and it writes
+    // action A's answer into action B. Nulling the ref is the whole fix — the reply handlers
+    // already bail when the ref is null, and none of the three has a "…in progress" control
+    // that could stick (the Capture button's state is re-seeded per action).
+    //   window:captureGeometry is the sharp one: it is an OS query that does NOT minimise the
+    //   app, so the grid stays clickable for the entire round-trip and switching rows mid-flight
+    //   is an ordinary thing to do. The file dialog is modal and the region overlay covers the
+    //   screen, so those two are far harder to trigger — reset together anyway, because a ref
+    //   that is cleared in only one of its two exits is a trap for whoever edits this next.
+    browseLaunchReqRef.current = null;
+    captureGeoReqRef.current = null;
+    searchRegionRequestIdRef.current = null;
   }, [actionIndex, disarmKeyCaptureTimer, clearTestTimeout, send]);
 
   // Unmount cleanup — any pending timers must be torn down so they don't fire against
@@ -2552,7 +2592,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 <input
                   type="text"
                   value={textMatch.trim() ? buildTextSelector(textMode, textMatch.trim()) : key}
-                  onChange={(e) => { setKey(e.target.value); setTextMatch(''); }}
+                  onChange={(e) => { setKey(e.target.value); setTextMatch(''); invalidatePickedAlternatives(); }}
                   placeholder=".btn-save"
                   spellCheck={false}
                   className="flex-1 h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
@@ -3219,7 +3259,7 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 <input
                   type="text"
                   value={key}
-                  onChange={(e) => setKey(e.target.value)}
+                  onChange={(e) => { setKey(e.target.value); invalidatePickedAlternatives(); }}
                   className="flex-1 h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
                   placeholder={isBrowserNavigate ? 'https://example.com' : '.btn-save'}
                 />
@@ -3301,7 +3341,11 @@ export function SheetPanel({ actionIndex, onClose, leaving = false, onExited }: 
                 <input
                   type="text"
                   value={textMatch}
-                  onChange={(e) => setTextMatch(e.target.value)}
+                  // Same invalidation as the CSS field above: a non-empty Text Match BECOMES the
+                  // effective selector (handleSave: textMatch wins over key), so the picked
+                  // element's fallbacks would ride along behind a primary generated for nothing
+                  // like them.
+                  onChange={(e) => { setTextMatch(e.target.value); invalidatePickedAlternatives(); }}
                   className="flex-1 h-8 px-2 text-ui font-mono bg-bg-input border border-border-default rounded text-text-primary outline-none focus:border-accent-solid"
                   placeholder={textMode === 'regex' ? 'e.g. ^Sign in$' : 'e.g. Sign in'}
                 />

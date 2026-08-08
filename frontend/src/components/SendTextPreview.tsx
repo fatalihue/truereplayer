@@ -6,6 +6,14 @@
 // long sequences still clip at the cell's max-width with the title attribute
 // showing the full raw text on hover.
 
+// A chip here is a PROMISE that replay will substitute the thing. This file used to chip
+// every `{...}` it found, with no whitelist at all, so a literal `{xpto}` — text the engine
+// leaves exactly as typed — was drawn identically to a live {clipboard}, and nothing on
+// screen told the two apart until the macro ran and pasted the braces. The preview and the
+// Insert Text editor now ask the SAME walker (grammar ported from the engine's own matchers)
+// instead of each keeping a private copy of the rule.
+import { splitTokenSegments } from './lexical/tokenNormalize';
+
 interface SendTextPreviewProps {
   text: string;
   /** Tiny delivery badge ("rich" / "md") shown before the text so the grid signals
@@ -13,35 +21,12 @@ interface SendTextPreviewProps {
   badge?: string | null;
 }
 
-interface Segment {
-  kind: 'text' | 'token';
-  value: string;
-}
-
-// Splits "Hello{Enter}World" into [text "Hello", token "{Enter}", text "World"].
-// Malformed input (unclosed `{`) falls through as literal text because the regex
-// requires a matching `}`.
-function parseSegments(text: string): Segment[] {
-  const segments: Segment[] = [];
-  const regex = /\{[^}]+\}/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      segments.push({ kind: 'text', value: text.slice(lastIndex, match.index) });
-    }
-    segments.push({ kind: 'token', value: match[0] });
-    lastIndex = match.index + match[0].length;
-  }
-  if (lastIndex < text.length) {
-    segments.push({ kind: 'text', value: text.slice(lastIndex) });
-  }
-  return segments;
-}
-
 export function SendTextPreview({ text, badge = null }: SendTextPreviewProps) {
   if (!text) return null;
-  const segments = parseSegments(text);
+  // "Hello{Enter}World" → [text "Hello", token "{Enter}", text "World"]. Unclosed `{`
+  // and unknown names both fall through as literal text, matching what replay does
+  // with them.
+  const segments = splitTokenSegments(text);
   return (
     <>
       {badge && (

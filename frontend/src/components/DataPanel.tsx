@@ -734,10 +734,36 @@ export function DataPanel({ onClose }: DataPanelProps) {
       updateGrid((g) => {
         const headers = [...g.headers];
         const keyOf = (h: string) => h.trim().toLowerCase();
+        // `headers` is mutated (push) INSIDE this same map, over the pasted headers it is
+        // also being matched against. That's fine the FIRST time a given key is seen — but
+        // without tracking claimed keys, a SECOND pasted column sharing that key (two "Nome"
+        // columns, or "Nome" + "nome") would findIndex its way onto the slot the first one
+        // just claimed, existing or freshly pushed. out[idxMap[i]] = cell below then lets
+        // whichever row runs last silently overwrite the earlier column's data — not even
+        // merged under a visible duplicate header, just gone, no warning.
+        //
+        // Fix: only the FIRST pasted occurrence of a key may match/reuse a header slot;
+        // every repeat is disambiguated with the same "_2", "_3", … suffix fixHeader (above)
+        // already uses, so it always lands in its OWN new column. That keeps the outcome
+        // self-evident in the grid itself (you see "Nome" and "Nome_2" right after pasting)
+        // instead of relying on the quieter dup-underline+tooltip this file uses for headers
+        // a user created some other way — no data is ever dropped silently.
+        const claimedKeys = new Set<string>();
         const idxMap = parsed.headers.map((h) => {
-          const i = headers.findIndex((eh) => keyOf(eh) === keyOf(h));
-          if (i >= 0) return i;
-          headers.push(h.trim());
+          const key = keyOf(h);
+          if (!claimedKeys.has(key)) {
+            claimedKeys.add(key);
+            const i = headers.findIndex((eh) => keyOf(eh) === key);
+            if (i >= 0) return i;
+          }
+          let name = h.trim();
+          if (headers.some((eh) => keyOf(eh) === keyOf(name))) {
+            const base = name;
+            let n = 2;
+            while (headers.some((eh) => keyOf(eh) === keyOf(`${base}_${n}`))) n++;
+            name = `${base}_${n}`;
+          }
+          headers.push(name);
           return headers.length - 1;
         });
         const newRows = parsed.rows.map((r) => {

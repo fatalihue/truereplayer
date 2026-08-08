@@ -57,7 +57,9 @@ export function BridgeProvider({ children }: { children: ReactNode }) {
         console.error('[Bridge] Ignoring malformed message:', message);
         return;
       }
-      console.log('[Bridge] ← C#:', message.type);
+      // DEV-only: several message types (clicker:stats, macro:loopProgress) arrive at
+      // ~4 Hz during a run, so logging every one in production builds is pure noise/overhead.
+      if (import.meta.env.DEV) console.log('[Bridge] ← C#:', message.type);
       // Isolate handlers: a thrown exception in one must not block others
       handlersRef.current.forEach(handler => {
         try {

@@ -48,72 +48,34 @@ import {
 } from 'lucide-react';
 import { TokenNode, $createTokenNode, $isTokenNode } from './TokenNode';
 import { ClipboardChipEditContext, type ClipboardChipEditRequest } from './TokenChip';
+// The whitelist of names the backend resolves, and the walker that finds them the way the
+// ENGINE does, both live in tokenNormalize — see the "What the ENGINE calls a token" banner
+// there. They are imported rather than restated because the grid's SendTextPreview needs the
+// identical answer and a second copy of a list is how the two drifted in the first place.
+import { KNOWN_TOKEN_NAMES, splitTokenSegments } from './tokenNormalize';
 
-// Tokens recognised by the backend at runtime. Anything outside this set stays
-// as plain text — typo'd `{xpto}` shouldn't masquerade as a real token chip.
-// {esc} (SendText's literal-brace escape) is deliberately NOT here — chipping
-// it would hide the escape mechanism it exists to expose.
-const KNOWN_TOKEN_NAMES: ReadonlySet<string> = new Set([
-  'clipboard',
-  'date',
-  'time',
-  'datetime',
-  'enter',
-  'tab',
-  'space',
-  'backspace',
-  'delete',
-  'escape',
-  'home',
-  'end',
-  'pageup',
-  'pagedown',
-  'up',
-  'down',
-  'left',
-  'right',
-  'delay',
-  'random',
-  // Run-state tokens (2.8.0): first-class chips like everything else the
-  // backend resolves — {var:name}, {counter}, {row}, {row:column} (which also
-  // takes the clipboard-style modifier chain: {row:column:trim:upper}).
-  'var',
-  'counter',
-  'row',
-  // {rownext:column} — like {row:column} but auto-advancing: each use pulls the NEXT
-  // data row for that column (1st use → row 1, 2nd → row 2…), resetting each run.
-  'rownext',
-  // Clipboard slots: {clip:name} reads a selection captured by Copy to Slot /
-  // the capture hotkey. Disjoint from {clipboard} (different name).
-  'clip',
-  // Windows clipboard history: {winclip:N} reads item N of the Win+V history
-  // (1 = most recent). Distinct from {clip:name} (in-app slots) and {clipboard}.
-  'winclip',
-  // Ask-Input (Text Blaze style): {input:Label} / {input:Label|menu:a,b,c} prompts the user at
-  // replay time. A spaced label or the |menu: variant falls outside TOKEN_REGEX, so those chip
-  // only via insertToken (the palette prompt); a bare {input:Name} chips when typed.
-  'input',
-]);
-
-// Modifier segments allow digits/letters plus ',', '-' and '_' so {Random:1-10},
-// {Clipboard:lines:3,1,2} and {var:my_name} chip correctly. Separators with
-// other characters (e.g. join:" - ") stay plain text when typed — they still
-// work at runtime; chips built via the popover keep chip-ness regardless.
+// The TYPING grammar — narrower than what the engine resolves, on purpose. Modifier segments
+// allow digits/letters plus ',', '-' and '_' so {Random:1-10}, {Clipboard:lines:3,1,2} and
+// {var:my_name} chip as you type. Separators with other characters (e.g. join:" - ") stay
+// plain text when typed — they still work at runtime, and chips built via the popover keep
+// chip-ness regardless (insertToken bypasses this gate).
+//
+// Only auto-chipping uses this. Anything that reports on a FINISHED payload — the token count
+// below, the grid preview — must instead ask splitTokenSegments, whose grammar is the engine's:
+// gating those on this regex is what made a payload holding {clipboard:join: - } report "0 tokens".
 const TOKEN_REGEX = /\{[a-zA-Z]+(?::[a-zA-Z0-9,_-]+)*\}/g;
 // Non-global form for single-match .exec() — stateless, so safe to share across calls.
 const TOKEN_REGEX_SINGLE = new RegExp(TOKEN_REGEX.source);
 
-// Counts the known-token chips a serialized payload contains — powers the
-// "N tokens" figure in the Insert Text status strip. Same regex + whitelist as
-// the chipping pipeline so the count always matches what the user sees as chips.
+// Counts the tokens a serialized payload contains — powers the "N tokens" figure in the
+// Insert Text status strip. Asks splitTokenSegments, i.e. the engine's grammar, so the figure
+// answers the question the user is actually asking ("how many of these will be substituted?")
+// rather than "how many would auto-chip if I retyped them".
 export function countKnownTokens(text: string): number {
-  if (!text.includes('{')) return 0;
+  if (!text.includes('{') || !text.includes('}')) return 0;
   let count = 0;
-  const regex = new RegExp(TOKEN_REGEX.source, 'g');
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(text)) !== null) {
-    const name = match[0].slice(1, -1).split(':')[0].toLowerCase();
-    if (KNOWN_TOKEN_NAMES.has(name)) count++;
+  for (const segment of splitTokenSegments(text)) {
+    if (segment.kind === 'token') count++;
   }
   return count;
 }

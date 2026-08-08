@@ -847,7 +847,17 @@ function HotkeyInput({ value, settingKey, onChange, width = FIELD_W }: {
   // Stable refcount slot — each HotkeyInput instance owns its own slot in the backend
   // HashSet so cleaning up one field (e.g. Profile-key toggle) doesn't disable the hook
   // out from under another (Recording hotkey field). See InputHookManager.RegisterCapture.
-  const ownerIdRef = useRef(`settings-hotkey-${crypto.randomUUID()}`);
+  // Lazy-initialized (checked on every render, assigned only once) rather than passed as
+  // useRef's initial-value argument: that argument is still evaluated on every render even
+  // though React only keeps the first one, so it was calling crypto.randomUUID() and
+  // discarding the result on every keystroke into this field. ownerIdRef.current itself
+  // never changed identity across renders — only the wasted computation did.
+  // Explicit `undefined` argument, not a bare useRef<string>(): React 19's types dropped the
+  // zero-argument overload, so omitting it is a compile error rather than an implicit undefined.
+  const ownerIdRef = useRef<string | undefined>(undefined);
+  if (ownerIdRef.current === undefined) {
+    ownerIdRef.current = `settings-hotkey-${crypto.randomUUID()}`;
+  }
   const KEY_CAPTURE_TIMEOUT_MS = 4000;
   const armCaptureTimer = useCallback(() => {
     if (captureTimerRef.current) clearTimeout(captureTimerRef.current);

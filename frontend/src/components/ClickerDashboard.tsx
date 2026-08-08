@@ -1,5 +1,5 @@
 import { Pause as PauseIcon, Check } from 'lucide-react';
-import { useAppState } from '../state/AppStateContext';
+import { useAppState, useClickerLive } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { usePauseTick } from '../hooks/usePauseTick';
 import { formatClickerStats, formatEta, formatRate, targetCps } from '../utils/clickerFormat';
@@ -11,7 +11,10 @@ import { ClickerEmptyState } from './ClickerEmptyState';
 //   replaying       → bright clicker color, optional progress bar + ETA
 //   ready + count>0 → same layout, dimmed
 export function ClickerDashboard() {
-  const { status, clickerStats, loopProgress, pauseState, settings } = useAppState();
+  const { status, pauseState, settings } = useAppState();
+  // Separate context on purpose: these two update ~4×/s during a run, and keeping them out of
+  // AppState is what stops every other panel re-rendering at that cadence.
+  const { clickerStats, loopProgress } = useClickerLive();
   const { send } = useBridge();
   const tt = useTt();
   usePauseTick(pauseState);

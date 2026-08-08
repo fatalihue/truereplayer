@@ -52,14 +52,23 @@ export function targetCps(delayMs: number, intervalMs: number): number {
 }
 
 /**
- * Ceiling for the current hold/interval. The hold lives inside the period, so a period
- * shorter than the hold cannot be honoured — that is the real cap, and it is why the
- * old "/s" preset list could offer rates the engine would never reach.
+ * Ceiling for the current hold/interval: the fastest the engine can go once the delay is
+ * pushed down to its own floor.
+ *
+ * The hold does NOT stack on top of the interval, which is what this used to assume. In the
+ * engine the period is `basePeriod + loopInterval` and the hold is spent INSIDE the tick; when
+ * the hold outlasts that period the scheduler's `wait` goes non-positive and it RESYNCS
+ * (`nextTickMs = elapsed`) instead of banking the debt, so the hold replaces the period rather
+ * than adding to it. Two competing floors, whichever is larger — exactly the `safeHold >=
+ * nominalPeriod` branch of the engine's own start banner, including its `hold + 1`.
+ *
+ * The old form added the hold to the floor AND the interval on top, understating the ceiling
+ * whenever both were set: at hold 200 / gap 300 it reported 2.0/s for a config the engine runs
+ * at ~3.3/s, and delayForCps then stored a delay meaning something the user never asked for.
  */
 export function maxCps(holdMs: number, intervalMs: number): number {
   const hold = Math.min(CLICK_HOLD_MAX_MS, Math.max(0, Number.isFinite(holdMs) ? holdMs : 0));
-  const floor = Math.max(CLICK_PERIOD_FLOOR_MS, hold + 1);
-  return 1000 / clickPeriodMs(floor, intervalMs);
+  return 1000 / Math.max(clickPeriodMs(CLICK_PERIOD_FLOOR_MS, intervalMs), hold + 1);
 }
 
 /**
@@ -73,12 +82,19 @@ export function delayForCps(
   intervalMs: number,
 ): { ms: number; clamped: boolean } {
   if (!Number.isFinite(cps) || cps <= 0) return { ms: 100, clamped: true };
-  const hold = Math.min(CLICK_HOLD_MAX_MS, Math.max(0, Number.isFinite(holdMs) ? holdMs : 0));
   const interval = Math.max(0, Number.isFinite(intervalMs) ? intervalMs : 0);
   const raw = Math.round(1000 / cps) - interval;
-  const floor = Math.max(CLICK_PERIOD_FLOOR_MS, hold + 1);
-  const ms = Math.min(60000, Math.max(floor, raw));
-  return { ms, clamped: ms !== raw };
+  // The engine floors the DELAY at MinClickPeriodMs and nothing else — Math.Clamp(config.DelayMs,
+  // MinClickPeriodMs, MaxClickPeriodMs). The hold never raises that floor; it caps the achieved
+  // RATE, which is what maxCps models. Flooring the delay at hold + 1 here (the old form) stored a
+  // needlessly large delay whenever a gap was set: asking for 3/s at hold 200 / gap 300 stored
+  // 201ms and delivered 2.0/s, when 33ms delivers exactly the 3/s requested.
+  const ms = Math.min(60000, Math.max(CLICK_PERIOD_FLOOR_MS, raw));
+  // Two independent ways to be out of reach, and the caller needs to hear about both: the delay
+  // itself had to be clamped, or the hold caps the rate below the request even at this delay.
+  // Epsilon so asking for exactly the ceiling does not read as clamped on a float compare.
+  const clamped = ms !== raw || cps > maxCps(holdMs, intervalMs) + 1e-9;
+  return { ms, clamped };
 }
 
 // Estimated time-to-finish, in "~Ns" or "~M:SS" form. Returns "—" when the run is

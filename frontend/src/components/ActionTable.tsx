@@ -17,7 +17,7 @@ import { useSelectionRef } from '../state/SelectionContext';
 import { useToast } from '../state/ToastContext';
 import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors, formatKeyCombo, formatMs } from '../utils/displayUtils';
 import { snapIndicesToBlocks } from '../utils/conditionalBlocks';
-import { uiZoom, rectToLayout, toLayout, viewportInLayout } from '../utils/zoomSpace';
+import { uiZoom } from '../utils/zoomSpace';
 import { SendTextDialog } from './SendTextDialog';
 import { SendTextPreview } from './SendTextPreview';
 import { RunProfileDialog } from './RunProfileDialog';
@@ -28,6 +28,7 @@ import { MacroEmptyState } from './MacroEmptyState';
 import { Checkbox, CheckboxBox } from './Checkbox';
 import type { ColumnVisibility } from './Toolbar';
 import { useFlyoutFlip } from '../hooks/useFlyoutFlip';
+import { useContextMenuPosition } from '../hooks/useContextMenuPosition';
 
 // ELSE / ENDIF are pure jump markers with NO delay — the grid hides their Delay cell, the validator
 // keeps it 0, and bulk "set delay" skips them. The opening IF is deliberately NOT here: it runs a
@@ -295,6 +296,40 @@ function isConditionAction(action: ActionItem): boolean {
       || action.conditionType === 'TimeWindow');
 }
 
+// "Select Similar" (More ▸ in the row context menu) groups every row whose actionType AND
+// this key match the right-clicked row. key/x/y alone — the old comparator — only identifies
+// the plain click/keypress types; several action families keep their REAL identity in other
+// fields entirely, and those fields are typically blank/zero across the board (a Wait Image
+// row has no meaningful key/x/y), so comparing just key/x/y silently grouped every row of
+// that family together: two Wait Image rows probing DIFFERENT reference screenshots, or two
+// If-Window checks against different processes, all fell into one selection, and a bulk
+// edit/delete aimed at one hit the other too. Dispatches the same way isProbeAction /
+// isConditionAction above do (actionType, then conditionType for If/Assert) so every probe/
+// condition family stays in sync with those; the string prefixes keep the sub-families apart
+// since actionType alone doesn't distinguish them (an If-ImageFound and an If-ClipboardMatch
+// share actionType 'If').
+function similarActionKey(action: ActionItem): string {
+  const conditionType = (action.actionType === 'If' || action.actionType === 'Assert') ? action.conditionType : null;
+  if (action.actionType === 'WaitImage' || conditionType === 'ImageFound') {
+    return `image:${action.imagePath ?? ''}`;
+  }
+  if (action.actionType === 'WaitPixelColor' || conditionType === 'PixelColorMatch') {
+    return `pixel:${action.pixelX ?? ''}:${action.pixelY ?? ''}:${action.pixelColor ?? ''}`;
+  }
+  // ActivateWindow, If/Assert-WindowOpen and If/Assert-ProcessRunning all key off the same
+  // windowProcessName field (ConditionDetails above reads ProcessRunning's value from it too)
+  // — windowTitle is simply blank for ProcessRunning rows, which still compares fine.
+  if (action.actionType === 'ActivateWindow' || conditionType === 'WindowOpen' || conditionType === 'ProcessRunning') {
+    return `window:${action.windowProcessName ?? ''}:${action.windowTitle ?? ''}`;
+  }
+  if (conditionType === 'ClipboardMatch') {
+    return `clipboard:${action.clipboardPattern ?? ''}`;
+  }
+  // Every other action type — combined clicks, keys, SendText, RunProfile, etc. — is still
+  // identified by key/x/y, exactly as before this fix.
+  return `default:${action.key}:${action.x}:${action.y}`;
+}
+
 // Compact "Mon–Fri 09:00–17:00" style label for an If-Time row (mirrors the C#
 // DisplayKey). Days bitmask Sun=1<<0 … Sat=1<<6; 0/all = every day (blank).
 function formatTimeWindow(action: ActionItem): string {
@@ -501,13 +536,17 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number } | null>(null);
-  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [activeSubmenu, setActiveSubmenu] = useState<'more' | null>(null);
   // The "More ▸" submenu opens to the side; flip it left/up when the context menu sits
   // near the right/bottom edge so it isn't clipped. Measured on open by useFlyoutFlip,
   // which replaced an earlier right-edge-only heuristic computed in the menu-position pass.
   const moreFlyout = useFlyoutFlip(activeSubmenu === 'more', 'side');
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  // Two-pass off-screen-measure-then-reposition, shared with ProfilePanel's two menus
+  // (declared after the ref it measures, which the hook reads). The hook owns the
+  // position state, so closing the menu means clearing the anchor and nothing else —
+  // the position follows on the same commit.
+  const menuPos = useContextMenuPosition(contextMenu, contextMenuRef);
   // Drives the RunProfile insert dialog. Opened by dragging a profile onto the grid
   // (the 'profiledrag:dropOnGrid' handler) — pre-filled with the dropped profile's name.
   const [runProfileInsert, setRunProfileInsert] = useState<{ insertIndex: number; profileName?: string } | null>(null);
@@ -644,7 +683,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)
       ) {
         setContextMenu(null);
-        setMenuPos(null);
         setActiveSubmenu(null);
       }
     };
@@ -653,7 +691,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         e.preventDefault();
         e.stopPropagation();
         setContextMenu(null);
-        setMenuPos(null);
         setActiveSubmenu(null);
       }
     };
@@ -664,37 +701,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       document.removeEventListener('keydown', handleKey, true);
     };
   }, [contextMenu]);
-
-  // Two-pass context menu positioning (same pattern as ProfilePanel)
-  useEffect(() => {
-    if (!contextMenu) { setMenuPos(null); return; }
-    setMenuPos({ x: -9999, y: -9999 });
-  }, [contextMenu]);
-
-  useEffect(() => {
-    if (!contextMenu || !menuPos) return;
-    if (menuPos.x === -9999) {
-      requestAnimationFrame(() => {
-        const el = contextMenuRef.current;
-        if (!el) return;
-        // contextMenu.x/y are clientX/clientY, the rect and the viewport are measured — all
-        // three are VISUAL, while the left/top this feeds are LAYOUT and get multiplied by
-        // `zoom` again. Convert the inputs once; see utils/zoomSpace.
-        const zoom = uiZoom();
-        const rect = rectToLayout(el.getBoundingClientRect(), zoom);
-        const vp = viewportInLayout(zoom);
-        let x = toLayout(contextMenu.x, zoom);
-        let y = toLayout(contextMenu.y, zoom);
-        if (y + rect.height > vp.height - 8) {
-          y = Math.max(8, y - rect.height);
-        }
-        if (x + rect.width > vp.width - 8) {
-          x = Math.max(8, vp.width - rect.width - 8);
-        }
-        setMenuPos({ x, y });
-      });
-    }
-  }, [contextMenu, menuPos]);
 
   // Handle row click with selection logic
   const handleRowClick = useCallback((idx: number, e: React.MouseEvent) => {
@@ -1343,7 +1349,6 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
 
   const closeContextMenu = useCallback(() => {
     setContextMenu(null);
-    setMenuPos(null);
     setActiveSubmenu(null);
   }, []);
 
@@ -2797,9 +2802,13 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
                     onClick={() => {
                       const ref = actions[contextMenu.rowIndex];
                       if (!ref) { closeContextMenu(); return; }
+                      // See similarActionKey above for why actionType+key+x+y alone
+                      // over-selects probe/condition rows (WaitImage, WaitPixelColor,
+                      // ActivateWindow, If/Assert) whose real identity lives elsewhere.
+                      const refKey = similarActionKey(ref);
                       const similar = new Set<number>();
                       actions.forEach((a, i) => {
-                        if (a.actionType === ref.actionType && a.key === ref.key && a.x === ref.x && a.y === ref.y)
+                        if (a.actionType === ref.actionType && similarActionKey(a) === refKey)
                           similar.add(i);
                       });
                       setSelectedIndices(similar);

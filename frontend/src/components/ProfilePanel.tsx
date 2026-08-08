@@ -15,7 +15,8 @@ import { ProfileInfoDialog } from './ProfileInfoDialog';
 import { useToast } from '../state/ToastContext';
 import { useTt } from '../state/LanguageContext';
 import { useFlyoutFlip } from '../hooks/useFlyoutFlip';
-import { uiZoom, rectToLayout, toLayout, viewportInLayout } from '../utils/zoomSpace';
+import { useContextMenuPosition } from '../hooks/useContextMenuPosition';
+import { uiZoom } from '../utils/zoomSpace';
 
 interface ContextMenuState {
   x: number;
@@ -241,10 +242,13 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     ? profiles.filter(matchesSearch)
     : profiles, [profiles, isSearching, matchesSearch]);
 
-  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
-  // Same role as menuPos, but for the folder context menu. Kept separate so the two
-  // menus can be open-measured independently.
-  const [folderMenuPos, setFolderMenuPos] = useState<{ x: number; y: number } | null>(null);
+  // Off-screen-measure-then-reposition for both menus, one hook call each — the two
+  // stay independent, so a folder menu opening never disturbs a profile menu's
+  // measurement pass. The hook owns the position state, which is why the dismiss
+  // handler below only clears the anchor: with no anchor there is no menu to render,
+  // and the hook drops the position on the same commit.
+  const menuPos = useContextMenuPosition(contextMenu, contextMenuRef);
+  const folderMenuPos = useContextMenuPosition(folderContextMenu, folderMenuRef);
 
   // Close context menu on click outside or Escape
   useEffect(() => {
@@ -252,14 +256,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     const handleClick = (e: MouseEvent) => {
       if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
         setContextMenu(null);
-        setMenuPos(null);
       }
     };
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         setContextMenu(null);
-        setMenuPos(null);
       }
     };
     document.addEventListener('mousedown', handleClick);
@@ -269,75 +271,6 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       document.removeEventListener('keydown', handleKey);
     };
   }, [contextMenu]);
-
-  // Adjust context menu position to stay within viewport
-  // Renders off-screen first to measure full (unclipped) size, then repositions
-  useEffect(() => {
-    if (!contextMenu) { setMenuPos(null); return; }
-    // Place off-screen so the menu renders at full size without being clipped
-    setMenuPos({ x: -9999, y: -9999 });
-  }, [contextMenu]);
-
-  useEffect(() => {
-    if (!contextMenu || !menuPos) return;
-    // Skip the measurement pass (off-screen render)
-    if (menuPos.x === -9999) {
-      requestAnimationFrame(() => {
-        const el = contextMenuRef.current;
-        if (!el) return;
-        // The click coords, the rect and the viewport are all VISUAL; the x/y below are
-        // written as inline left/top, which are LAYOUT and get multiplied by `zoom` again.
-        // Convert the inputs once — see utils/zoomSpace.
-        const zoom = uiZoom();
-        const rect = rectToLayout(el.getBoundingClientRect(), zoom);
-        const vp = viewportInLayout(zoom);
-        let x = toLayout(contextMenu.x, zoom);
-        let y = toLayout(contextMenu.y, zoom);
-        // If menu would overflow bottom, move it up
-        if (y + rect.height > vp.height - 8) {
-          y = Math.max(8, y - rect.height);
-        }
-        // If menu would overflow right, move it left
-        if (x + rect.width > vp.width - 8) {
-          x = Math.max(8, vp.width - rect.width - 8);
-        }
-        setMenuPos({ x, y });
-      });
-    }
-  }, [contextMenu, menuPos]);
-
-  // Folder context menu positioning — same off-screen-measure-then-reposition dance
-  // as the profile menu above, so right-clicking a folder near the bottom (or right
-  // edge) doesn't leave the menu clipped by the viewport.
-  useEffect(() => {
-    if (!folderContextMenu) { setFolderMenuPos(null); return; }
-    setFolderMenuPos({ x: -9999, y: -9999 });
-  }, [folderContextMenu]);
-
-  useEffect(() => {
-    if (!folderContextMenu || !folderMenuPos) return;
-    if (folderMenuPos.x === -9999) {
-      requestAnimationFrame(() => {
-        const el = folderMenuRef.current;
-        if (!el) return;
-        // Same visual→layout conversion as the profile menu above.
-        const zoom = uiZoom();
-        const rect = rectToLayout(el.getBoundingClientRect(), zoom);
-        const vp = viewportInLayout(zoom);
-        let x = toLayout(folderContextMenu.x, zoom);
-        let y = toLayout(folderContextMenu.y, zoom);
-        // If menu would overflow bottom, move it up
-        if (y + rect.height > vp.height - 8) {
-          y = Math.max(8, y - rect.height);
-        }
-        // If menu would overflow right, move it left
-        if (x + rect.width > vp.width - 8) {
-          x = Math.max(8, vp.width - rect.width - 8);
-        }
-        setFolderMenuPos({ x, y });
-      });
-    }
-  }, [folderContextMenu, folderMenuPos]);
 
   // Submenu flip — each of the three context-menu submenus (Move to folder, More,
   // and the folder Color picker) opens to the side with `left-full top-0`, which
@@ -1110,7 +1043,17 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     const ro = new ResizeObserver(measure);
     ro.observe(root);
     return () => ro.disconnect();
-  });
+    // profiles/profileOrder/searchQuery are NOT read inside this effect — querySelectorAll
+    // walks whatever is in the DOM right now — but they are exactly what CHANGES that DOM:
+    // a rename, a new/removed profile, a folder collapse/expand/reorder, or a search filter
+    // all swap which `[data-name-cell]` nodes exist (or widen/narrow a row's hotkey gutter),
+    // and none of that resizes `root` itself, so the ResizeObserver above would miss it.
+    // Same pattern as the railCapacity effect above ([collapsed], also unread in its body).
+    // Without ANY array (the previous state of this effect), it instead reran after EVERY
+    // render — including every `mousemove` while dragging a profile or folder — which tore
+    // down and rebuilt the ResizeObserver and rescanned every row in the list on each pixel
+    // of movement.
+  }, [profiles, profileOrder, searchQuery]);
 
   const AUTOSCROLL_ZONE = 40;
   const AUTOSCROLL_MAX_SPEED = 14;

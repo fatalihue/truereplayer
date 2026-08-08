@@ -33,7 +33,7 @@ export function RemovableChip({
 }: RemovableChipProps) {
   const btnClass = variant === 'edge'
     ? 'absolute top-0 right-0 bottom-0 w-4 rounded-r flex items-center justify-center text-[7px] font-bold text-white bg-recording/80 hover:bg-recording transition-colors'
-    : 'absolute inset-0 rounded-full flex items-center justify-center text-[9px] font-bold text-white bg-recording hover:bg-red-500 transition-colors';
+    : 'absolute inset-0 rounded-full flex items-center justify-center text-[9px] font-bold text-white bg-recording hover:bg-recording/80 transition-colors';
 
   return (
     // The optional tooltip lives on the OUTER span, never on the ✕ button: the

@@ -602,6 +602,26 @@ export interface AppState {
     startedAt: number;
   };
   /**
+   * Increments on every explicit "reset to defaults" action. SettingsPanel watches it to
+   * return its non-persistent local UI state (the clicker /s ↔ ms unit toggle) to default.
+   * Cheap signal that doesn't bloat AppSettings with display-only prefs.
+   * NOT a remount key any more — ClickerSection remounts for several unrelated reasons
+   * (tab change, panel collapse, responsive auto-collapse), which reset the toggle far more
+   * often than intended, so the state was lifted into SettingsPanel.
+   */
+  settingsResetEpoch: number;
+}
+
+/**
+ * The two slices the backend pushes on a ~4 Hz cadence during a run. They are deliberately
+ * NOT part of AppState: every dispatch into the AppState reducer produces a new state object
+ * and re-renders every useAppState() consumer, so leaving these in it meant a live Clicker
+ * run re-rendered SettingsPanel, ProfilePanel and ActionTable four times a second to update
+ * a counter only StatusBar and ClickerDashboard display. They live in their own provider and
+ * their own hook (useClickerLive) so the cost lands only on the two components that read them.
+ */
+export interface ClickerLiveState {
+  /**
    * Clicker v2 — live click counter pushed from the backend during a Clicker run
    * (~4 Hz cadence, throttled in the loop). StatusBar renders "Clicked X · Y/s ·
    * MM:SS" from these. `active` flips on first push, off on status:changed (any
@@ -623,15 +643,6 @@ export interface AppState {
     current: number;
     total: number;
   };
-  /**
-   * Increments on every explicit "reset to defaults" action. SettingsPanel watches it to
-   * return its non-persistent local UI state (the clicker /s ↔ ms unit toggle) to default.
-   * Cheap signal that doesn't bloat AppSettings with display-only prefs.
-   * NOT a remount key any more — ClickerSection remounts for several unrelated reasons
-   * (tab change, panel collapse, responsive auto-collapse), which reset the toggle far more
-   * often than intended, so the state was lifted into SettingsPanel.
-   */
-  settingsResetEpoch: number;
 }
 
 // ── Messages C# → JS ──

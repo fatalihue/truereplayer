@@ -11,6 +11,7 @@ import { NavigateDialog } from './NavigateDialog';
 import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
 import { PauseDialog } from './PauseDialog';
 import { useFlyoutFlip } from '../hooks/useFlyoutFlip';
+import { useDismissOnOutside } from '../hooks/useDismissOnOutside';
 import { snapIndicesToBlocks } from '../utils/conditionalBlocks';
 
 export interface ColumnVisibility {
@@ -288,77 +289,17 @@ export function Toolbar(_props: ToolbarProps) {
     };
   }, [send, showToast, tt]);
 
-  // Close Browser dropdown on outside click or Escape. The columns + add-actions
-  // dropdowns that used to share this handler are gone (columns moved to the grid
-  // header, individual inserts are now direct toolbar buttons).
-  useEffect(() => {
-    if (!showBrowserMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (browserMenuRef.current && !browserMenuRef.current.contains(e.target as Node)) {
-        setShowBrowserMenu(false);
-      }
-    };
-    const keyHandler = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      setShowBrowserMenu(false);
-    };
-    document.addEventListener('mousedown', handler);
-    document.addEventListener('keydown', keyHandler, true);
-    return () => {
-      document.removeEventListener('mousedown', handler);
-      document.removeEventListener('keydown', keyHandler, true);
-    };
-  }, [showBrowserMenu]);
-
-  // Same outside-click + Escape dismiss for the Conditional dropdown. Separate
-  // effect so the two menus close independently (clicking inside Browser doesn't
-  // close Conditional and vice versa).
-  useEffect(() => {
-    if (!showConditionalMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (conditionalMenuRef.current && !conditionalMenuRef.current.contains(e.target as Node)) {
-        setShowConditionalMenu(false);
-      }
-    };
-    const keyHandler = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      setShowConditionalMenu(false);
-    };
-    document.addEventListener('mousedown', handler);
-    document.addEventListener('keydown', keyHandler, true);
-    return () => {
-      document.removeEventListener('mousedown', handler);
-      document.removeEventListener('keydown', keyHandler, true);
-    };
-  }, [showConditionalMenu]);
-
-  // Same outside-click + Escape dismiss for the Wait dropdown. Kept as its own
-  // effect (rather than folded with Conditional) so opening one doesn't close the
-  // other unexpectedly if they overlap.
-  useEffect(() => {
-    if (!showWaitMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (waitMenuRef.current && !waitMenuRef.current.contains(e.target as Node)) {
-        setShowWaitMenu(false);
-      }
-    };
-    const keyHandler = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      setShowWaitMenu(false);
-    };
-    document.addEventListener('mousedown', handler);
-    document.addEventListener('keydown', keyHandler, true);
-    return () => {
-      document.removeEventListener('mousedown', handler);
-      document.removeEventListener('keydown', keyHandler, true);
-    };
-  }, [showWaitMenu]);
+  // Outside-press + Escape dismissal for the three insert dropdowns. One CALL per
+  // menu, not one call for all three: each keeps its own pair of listeners, bound
+  // only while that menu is open, which is what makes them close independently
+  // (clicking inside Browser doesn't close Conditional, and vice versa). The
+  // mousedown-not-click and capture-phase-Escape choices, and why they matter, are
+  // documented on the hook. The columns + add-actions dropdowns that used to share
+  // this handler are gone (columns moved to the grid header, individual inserts are
+  // now direct toolbar buttons).
+  useDismissOnOutside(showBrowserMenu, browserMenuRef, setShowBrowserMenu);
+  useDismissOnOutside(showConditionalMenu, conditionalMenuRef, setShowConditionalMenu);
+  useDismissOnOutside(showWaitMenu, waitMenuRef, setShowWaitMenu);
 
   // Close the Clear-All confirm if a run starts (or the list empties) while it's
   // open — runs are usually started by global hotkeys, which produce no mousedown,
@@ -371,27 +312,10 @@ export function Toolbar(_props: ToolbarProps) {
     }
   }, [showClearConfirm, buttonStates.recordingActive, buttonStates.replayActive, actions.length]);
 
-  // Same outside-click + Escape dismiss for the Clear All confirm popover.
-  useEffect(() => {
-    if (!showClearConfirm) return;
-    const handler = (e: MouseEvent) => {
-      if (clearMenuRef.current && !clearMenuRef.current.contains(e.target as Node)) {
-        setShowClearConfirm(false);
-      }
-    };
-    const keyHandler = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      setShowClearConfirm(false);
-    };
-    document.addEventListener('mousedown', handler);
-    document.addEventListener('keydown', keyHandler, true);
-    return () => {
-      document.removeEventListener('mousedown', handler);
-      document.removeEventListener('keydown', keyHandler, true);
-    };
-  }, [showClearConfirm]);
+  // Same outside-press + Escape dismiss for the Clear All confirm popover. (The
+  // effect above covers the case the pointer can't: a run started by a global
+  // hotkey, which produces no mousedown at all.)
+  useDismissOnOutside(showClearConfirm, clearMenuRef, setShowClearConfirm);
 
   // Toolbar-owned keyboard shortcuts: Ctrl+C copy, Ctrl+V paste, Alt+↑/↓ reorder.
   // (Undo/redo are intentionally NOT here — App.tsx owns Ctrl+Z/Ctrl+Y; see below.)

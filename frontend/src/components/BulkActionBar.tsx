@@ -19,6 +19,19 @@ interface BulkActionBarProps {
   onToggleSkip: () => void;
 }
 
+// Range of the C# `int` that HandleBulkUpdateCoord parses into. Overflow is not a rounding
+// concern here — int.TryParse REJECTS an out-of-range number, and that rejection is what used
+// to fall through to 0, so the bound is part of the accepted grammar rather than a nicety.
+const INT32_MIN = -2147483648;
+const INT32_MAX = 2147483647;
+
+// Line-by-line port of the backend's accepted shape, not a restatement of its intent: a leading
+// ASCII +/- marks an offset (matched with StartsWith there), and the whole string then goes
+// through int.TryParse, whose NumberStyles.Integer allows a sign and digits only — no decimal
+// point, no thousands separator. Anything else parses to 0 on the far side.
+const isValidCoordValue = (v: string) =>
+  /^[+-]?\d+$/.test(v) && Number(v) >= INT32_MIN && Number(v) <= INT32_MAX;
+
 export function BulkActionBar({
   selectedCount,
   allSelectedSkipped,
@@ -48,6 +61,18 @@ export function BulkActionBar({
     inputValue.trim() !== '' &&
     !(parseInt(inputValue, 10) >= 0);
 
+  // X/Y had NO validation at all — the field accepted any text and handed it straight to the
+  // bridge, where a failed int.TryParse falls through to 0. A typo like "5oo" therefore drove
+  // every selected click to X=0 across the whole selection, with no red border here and a
+  // success toast there. Same contract as delayInvalid: empty stays valid so OK/Enter on a
+  // blank field is still a clean cancel.
+  const coordInvalid =
+    (activeInput === 'x' || activeInput === 'y') &&
+    inputValue.trim() !== '' &&
+    !isValidCoordValue(inputValue.trim());
+
+  const inputInvalid = delayInvalid || coordInvalid;
+
   const handleConfirm = () => {
     if (!activeInput) return;
     if (activeInput === 'delay') {
@@ -56,6 +81,9 @@ export function BulkActionBar({
       const delay = parseInt(inputValue, 10);
       if (!isNaN(delay) && delay >= 0) onSetDelay(delay);
     } else if (activeInput === 'x' || activeInput === 'y') {
+      // Same treatment: hold the field open rather than send a value the backend would
+      // silently coerce to 0.
+      if (coordInvalid) return;
       if (inputValue.trim()) onSetCoord(activeInput, inputValue.trim());
     } else if (activeInput === 'notes') {
       onSetComment(inputValue);
@@ -111,7 +139,7 @@ export function BulkActionBar({
               autoFocus
               placeholder={inputPlaceholder}
               className={`${inputWidth} h-6 px-2 text-[11px] font-mono bg-bg-input border rounded text-center text-text-primary outline-none ${
-                delayInvalid ? 'border-recording/60 focus:border-recording' : 'border-border-default focus:border-accent-solid'
+                inputInvalid ? 'border-recording/60 focus:border-recording' : 'border-border-default focus:border-accent-solid'
               }`}
             />
             <button
