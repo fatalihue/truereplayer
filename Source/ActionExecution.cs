@@ -669,10 +669,19 @@ namespace TrueReplayer.Services
                             if (downSent) replayer.ClickerButton(upFlag, absX, absY);
                         }
 
-                        // SendInput returns the number of events actually inserted. 0 means the
-                        // injection was blocked — typically UIPI, i.e. an elevated foreground
-                        // window while we run unelevated. Counting those as clicks made the
-                        // dashboard report a healthy CPS for clicks that never happened.
+                        // SendInput returns the number of events actually inserted; 0 means the
+                        // call was rejected outright (a bad cbSize, or another thread holding
+                        // BlockInput). Not counting those keeps the dashboard from reporting a
+                        // healthy CPS for clicks that never happened.
+                        //
+                        // This does NOT catch UIPI. Measured 2026-08-08 with a medium-integrity
+                        // probe against an elevated foreground window: SendInput returned 1 and
+                        // GetAsyncKeyState confirmed the event never entered the input stream —
+                        // matching the SendInput docs, which say neither the return value nor
+                        // GetLastError reveal UIPI blocking. So an unelevated TrueReplayer
+                        // clicking at an elevated target still reports a full, healthy run while
+                        // nothing lands. Detecting that needs an explicit integrity comparison
+                        // against the foreground window, which this counter is not.
                         if (downSent) clickCount++;
                         else blockedCount++;
 
@@ -750,7 +759,7 @@ namespace TrueReplayer.Services
                     // "Replay finished", so a run that stopped early was invisible in the log.
                     DiagnosticLog.Info(
                         $"Clicker end: {clickCount} click(s)" +
-                        (blockedCount > 0 ? $", {blockedCount} BLOCKED (elevated target? see Run as admin)" : "") +
+                        (blockedCount > 0 ? $", {blockedCount} REJECTED by SendInput" : "") +
                         $", {finalElapsed}ms elapsed" +
                         (finalElapsed > 0 ? $" (~{clickCount * 1000.0 / finalElapsed:0.#}/s)" : "") +
                         $", reason={endReason}");
