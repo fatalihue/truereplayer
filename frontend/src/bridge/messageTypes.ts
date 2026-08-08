@@ -726,8 +726,10 @@ export type IncomingMessage =
   | { type: 'browser:extensionOutdated'; payload: { currentVersion: string; expectedVersion: string } }
   | { type: 'image:testMatchResult'; payload: { requestId: string; found: boolean; score: number; x: number; y: number; w: number; h: number; error?: string } }
   | { type: 'waitimage:searchRegionSet'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; w?: number; h?: number } }
-  | { type: 'clicker:areaSet'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; w?: number; h?: number } }
-  | { type: 'clicker:pointSet'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number } }
+  // clicker:areaSet / clicker:pointSet used to live here. Removed with their emitters: the
+  // Clicker pickers repaint through settings:loaded like every other settings write, so the
+  // reply was never subscribed to on either branch. The sibling pickers below DO have
+  // subscribers (SheetPanel) and stay.
   | { type: 'mouse:positionPicked'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number } }
   | { type: 'pixel:colorPicked'; payload: { requestId: string; cancelled: boolean; x?: number; y?: number; hex?: string } }
   | { type: 'pixel:testMatchResult'; payload: { requestId: string; matches: boolean; sampledHex?: string | null; error?: string } }
@@ -925,8 +927,9 @@ export type OutgoingMessage =
   | { type: 'actions:editRunProfile'; payload: { index: number; profileName: string; repeatCount: number; runOverData?: boolean } }
   | { type: 'waitimage:recapture'; payload: { index: number } }
   | { type: 'waitimage:configureSearchRegion'; payload: { requestId: string; absolute?: boolean; x?: number; y?: number; w?: number; h?: number } }
-  | { type: 'clicker:configureArea'; payload: { requestId: string } }
-  | { type: 'clicker:configurePoint'; payload: { requestId: string } }
+  // No requestId: there is no reply to correlate it with (see the note above).
+  | { type: 'clicker:configureArea'; payload: Record<string, never> }
+  | { type: 'clicker:configurePoint'; payload: Record<string, never> }
   | { type: 'waitimage:cropReference'; payload: { index: number; x: number; y: number; w: number; h: number } }
   | { type: 'image:testMatch'; payload: { requestId: string; imagePath: string; confidence: number; searchRegion?: { x: number; y: number; w: number; h: number }; absolute?: boolean; profile?: string } }
   | { type: 'mouse:pickPosition'; payload: { requestId: string } }

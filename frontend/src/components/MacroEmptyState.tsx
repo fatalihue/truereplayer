@@ -1,5 +1,6 @@
 import { List } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
+import { useTt } from '../state/LanguageContext';
 
 // Shown inside the ActionTable when the grid has zero actions (Macro mode only —
 // Clicker mode swaps the whole table for ClickerDashboard / ClickerEmptyState).
@@ -10,6 +11,7 @@ import { useAppState } from '../state/AppStateContext';
 // mirrored ClickerEmptyState read as a stain on the grid).
 export function MacroEmptyState() {
   const { settings, status } = useAppState();
+  const tt = useTt();
   const isRecording = status === 'recording';
 
   return (
@@ -19,14 +21,18 @@ export function MacroEmptyState() {
         Macro mode
       </div>
       <div className="text-[12px] text-text-tertiary text-center max-w-[420px] px-4">
+        {/* Instructional prose is bilingual (the app defaults to pt-BR); "Macro mode"
+            above stays English because it is a label. Same split as ClickerEmptyState. */}
         {isRecording ? (
-          <span className="font-medium text-recording">Recording — waiting for input…</span>
+          <span className="font-medium text-recording">
+            {tt('Recording — waiting for input…', 'Gravando — aguardando entrada…')}
+          </span>
         ) : (
           <>
-            No actions recorded.
-            {' '}Press{' '}
+            {tt('No actions recorded.', 'Nenhuma ação gravada.')}
+            {' '}{tt('Press', 'Pressione')}{' '}
             <kbd className="kbd kbd-accent">{settings.recordingHotkey}</kbd>
-            {' '}to start recording.
+            {' '}{tt('to start recording.', 'para começar a gravar.')}
           </>
         )}
       </div>

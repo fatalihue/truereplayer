@@ -608,11 +608,15 @@ namespace TrueReplayer
                 // until their companion switch is turned ON.
                 AppSettingsManager.Save(saved);
             }
-            CursorClickDelay = saved.CursorClickDelayMs.ToString();
-            CursorClickDelayJitter = saved.CursorClickDelayJitterPct.ToString();
+            // Clamped on the way IN, not just on the way out. appsettings.json is hand-editable
+            // and never passes through HandleSettingsChange, so this is the only place an
+            // out-of-range value can be corrected before it reaches the UI — otherwise the panel
+            // displays a number every run silently ignores.
+            CursorClickDelay = ClampNumeric(saved.CursorClickDelayMs.ToString(), 1, 60000, 100);
+            CursorClickDelayJitter = ClampNumeric(saved.CursorClickDelayJitterPct.ToString(), 0, 100, 1);
             CursorClickUseJitter = saved.CursorClickUseJitter;
-            CursorClickHold = saved.CursorClickHoldMs.ToString();
-            CursorClickPositionJitter = saved.CursorClickPositionJitter.ToString();
+            CursorClickHold = ClampNumeric(saved.CursorClickHoldMs.ToString(), 0, 2000, 10);
+            CursorClickPositionJitter = ClampNumeric(saved.CursorClickPositionJitter.ToString(), 0, 500, 1);
             CursorClickUsePositionJitter = saved.CursorClickUsePositionJitter;
             CursorClickUseArea = saved.CursorClickUseArea;
             // Project the 5 on-disk fields into the in-memory ClickArea record. Null when
@@ -625,9 +629,9 @@ namespace TrueReplayer
             CursorClickFixedPoint = saved.CursorClickFixedPointSet
                 ? new ClickPoint(saved.CursorClickFixedX, saved.CursorClickFixedY)
                 : null;
-            CursorClickLoops = saved.CursorClickLoops.ToString();
+            CursorClickLoops = ClampNumeric(saved.CursorClickLoops.ToString(), 0, 100000, 0);
             CursorClickUseLoops = saved.CursorClickUseLoops;
-            CursorClickInterval = saved.CursorClickIntervalMs.ToString();
+            CursorClickInterval = ClampNumeric(saved.CursorClickIntervalMs.ToString(), 0, 60000, 0);
             CursorClickUseInterval = saved.CursorClickUseInterval;
             RecordMouse = saved.RecordMouse;
             RecordScroll = saved.RecordScroll;
@@ -2019,6 +2023,16 @@ namespace TrueReplayer
         // Loop convention: 0 means unbounded, and cursorClickUseLoops=false resolves to 0 —
         // "no limit set" and "limit of zero" are the same statement for a clicker.
         // Area gate: requires positive W/H — defensive against stale all-zero state.
+        // Clamps a numeric setting arriving as a string, keeping the STORED value in range
+        // instead of only correcting it on the way out to the engine. Without this a bad value
+        // survives in appsettings.json and the panel keeps displaying it, even though every
+        // run silently uses the clamped one.
+        private static string ClampNumeric(string? raw, int min, int max, int fallback)
+        {
+            if (!int.TryParse(raw, out int n)) n = fallback;
+            return Math.Clamp(n, min, max).ToString();
+        }
+
         // Returns "" for a bare wheel binding, the value untouched otherwise. See the call site
         // in the settings load for why bare wheel can never be a global hotkey.
         private static string DropBareWheelHotkey(string? stored, string label)
@@ -5269,9 +5283,12 @@ namespace TrueReplayer
 
         // Lets the user draw the Clicker click-area rectangle. Pre-draws the existing rect
         // when one is set so the user can tweak instead of restarting from blank.
+        // No reply message: the UI repaints from the PushSettingsLoaded below, and cancelling
+        // correctly changes nothing (the overlay's own hint says "ESC to cancel"). This used to
+        // echo a clicker:areaSet carrying a requestId, but nothing on the other side ever
+        // subscribed to it — dead protocol surface plus a vestigial correlation id.
         private async Task HandleConfigureClickAreaAsync(JsonElement payload)
         {
-            string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
 
             // Pre-draw the saved rect (when there is one + the toggle is on, signalling intent).
             System.Drawing.Rectangle? initialRect = (CursorClickUseArea && CursorClickArea is { } cur)
@@ -5284,11 +5301,7 @@ namespace TrueReplayer
                 hintWhenEmpty: "Drag to set the click area  •  ESC to cancel",
                 logPrefix: "Clicker");
 
-            if (selection == null)
-            {
-                SendMessage("clicker:areaSet", new { requestId, cancelled = true });
-                return;
-            }
+            if (selection == null) return;
 
             // Persist + auto-enable useArea + disable the other two "where" modes (Position
             // jitter AND Fixed) — the three are mutually exclusive, same as the Fixed picker does.
@@ -5298,25 +5311,14 @@ namespace TrueReplayer
             CursorClickUseFixed = false;
             SaveGlobalSettings();
             PushSettingsLoaded();
-
-            SendMessage("clicker:areaSet", new
-            {
-                requestId,
-                cancelled = false,
-                x = selection.ScreenX,
-                y = selection.ScreenY,
-                w = selection.Width,
-                h = selection.Height
-            });
         }
 
         // Lets the user pick the single Fixed click point via a one-click screen overlay
         // (mirrors HandleConfigureClickAreaAsync). On success: store the point, auto-enable
         // Fixed and disable Area + Position jitter (the three "where" modes are exclusive).
+        // No reply message, for the same reason as the area picker above.
         private async Task HandleConfigureClickPointAsync(JsonElement payload)
         {
-            string requestId = payload.TryGetProperty("requestId", out var ridEl) ? (ridEl.GetString() ?? "") : "";
-
             var selection = await RunRegionPickerAsync(
                 null,
                 hintWhenSet: "Click to set the fixed click point  •  ESC to cancel",
@@ -5324,11 +5326,7 @@ namespace TrueReplayer
                 logPrefix: "Clicker",
                 pointPick: true);
 
-            if (selection == null)
-            {
-                SendMessage("clicker:pointSet", new { requestId, cancelled = true });
-                return;
-            }
+            if (selection == null) return;
 
             CursorClickFixedPoint = new ClickPoint(selection.ScreenX, selection.ScreenY);
             CursorClickUseFixed = true;
@@ -5336,14 +5334,6 @@ namespace TrueReplayer
             CursorClickUsePositionJitter = false;
             SaveGlobalSettings();
             PushSettingsLoaded();
-
-            SendMessage("clicker:pointSet", new
-            {
-                requestId,
-                cancelled = false,
-                x = selection.ScreenX,
-                y = selection.ScreenY
-            });
         }
 
         private void HandleDuplicateActions(JsonElement payload)
@@ -8901,27 +8891,35 @@ namespace TrueReplayer
                 // Clicker hotkeys — intentionally NOT in HotkeySettingKeys, so they skip the
                 // global-conflict check: the user may deliberately reuse a global hotkey (the two
                 // are mode-gated and never both fire). Setters mirror the value into the hook.
+                // DropBareWheelHotkey: the hook only dispatches MODIFIED wheel combos as global
+                // hotkeys — swallowing a bare wheel event would kill that scroll direction
+                // system-wide — so a bare ScrollUp/ScrollDown here would store a binding that
+                // can never fire. The capture UI already refuses it; this is the same guard on
+                // the message boundary, for a payload that did not come from that UI.
                 case "cursorClickStartHotkey":
-                    CursorClickStartHotkey = valueElement.GetString() ?? "PageDown";
+                    CursorClickStartHotkey = DropBareWheelHotkey(valueElement.GetString() ?? "PageDown", key);
                     break;
                 case "cursorClickPauseHotkey":
-                    CursorClickPauseHotkey = valueElement.GetString() ?? "PageUp";
+                    CursorClickPauseHotkey = DropBareWheelHotkey(valueElement.GetString() ?? "PageUp", key);
                     break;
                 // ── Clicker v2 settings (dedicated, decoupled from profile) ──
+                // Every numeric goes through ClampNumeric so the value that lands on disk is
+                // already in range — matching the clamping the macro knobs above already do.
+                // Ranges mirror the engine (ActionExecution.ToggleCursorClickReplay).
                 case "cursorClickDelay":
-                    CursorClickDelay = valueElement.GetString() ?? "100";
+                    CursorClickDelay = ClampNumeric(valueElement.GetString(), 1, 60000, 100);
                     break;
                 case "cursorClickDelayJitter":
-                    CursorClickDelayJitter = valueElement.GetString() ?? "1";
+                    CursorClickDelayJitter = ClampNumeric(valueElement.GetString(), 0, 100, 1);
                     break;
                 case "cursorClickUseJitter":
                     CursorClickUseJitter = valueElement.GetBoolean();
                     break;
                 case "cursorClickHold":
-                    CursorClickHold = valueElement.GetString() ?? "10";
+                    CursorClickHold = ClampNumeric(valueElement.GetString(), 0, 2000, 10);
                     break;
                 case "cursorClickPositionJitter":
-                    CursorClickPositionJitter = valueElement.GetString() ?? "1";
+                    CursorClickPositionJitter = ClampNumeric(valueElement.GetString(), 0, 500, 1);
                     break;
                 case "cursorClickUsePositionJitter":
                     CursorClickUsePositionJitter = valueElement.GetBoolean();
@@ -8969,13 +8967,14 @@ namespace TrueReplayer
                     }
                     break;
                 case "cursorClickLoops":
-                    CursorClickLoops = valueElement.GetString() ?? "0";
+                    // 0 is legal and means unbounded, so the floor is 0, not 1.
+                    CursorClickLoops = ClampNumeric(valueElement.GetString(), 0, 100000, 0);
                     break;
                 case "cursorClickUseLoops":
                     CursorClickUseLoops = valueElement.GetBoolean();
                     break;
                 case "cursorClickInterval":
-                    CursorClickInterval = valueElement.GetString() ?? "0";
+                    CursorClickInterval = ClampNumeric(valueElement.GetString(), 0, 60000, 0);
                     break;
                 case "cursorClickUseInterval":
                     CursorClickUseInterval = valueElement.GetBoolean();

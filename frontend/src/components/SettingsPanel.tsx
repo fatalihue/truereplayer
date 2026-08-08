@@ -621,7 +621,7 @@ function ClickerSection({
                 />
               </button>
               <button
-                onClick={() => send({ type: 'clicker:configureArea', payload: { requestId: `clicker-area-${Date.now()}` } })}
+                onClick={() => send({ type: 'clicker:configureArea', payload: {} })}
                 className={`flex-1 min-w-0 h-full flex items-center justify-end font-mono cursor-pointer hover:underline ${area ? 'pr-1' : 'pr-2'}`}
                 // pos="left" opens the tip into the work area (like the SettingRow labels)
                 // instead of the default auto placement that lands on top of the field.
@@ -678,7 +678,7 @@ function ClickerSection({
                 />
               </button>
               <button
-                onClick={() => send({ type: 'clicker:configurePoint', payload: { requestId: `clicker-point-${Date.now()}` } })}
+                onClick={() => send({ type: 'clicker:configurePoint', payload: {} })}
                 className={`flex-1 min-w-0 h-full flex items-center justify-end font-mono cursor-pointer hover:underline ${fixedPoint ? 'pr-1' : 'pr-2'}`}
                 // pos="left" — same as the Area chip / SettingRow labels; opens into the work
                 // area instead of on top of the field.
