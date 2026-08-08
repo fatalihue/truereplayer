@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useContext, createContext } from 'react';
-import { Timer, TimerReset, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, MousePointerClick, Palette, Gamepad2, AlertTriangle, Power, BellRing, X, ArrowLeftRight, Crosshair, Hourglass } from 'lucide-react';
+import { Timer, TimerReset, Mic, Zap, Monitor, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, MousePointerClick, Palette, Gamepad2, AlertTriangle, Power, BellRing, X, ArrowLeftRight, Crosshair, Hourglass, SlidersHorizontal } from 'lucide-react';
 import { APP_VERSION } from '../appVersion';
 import { RemapSection } from './RemapSection';
 import { useLanguage, useTt } from '../state/LanguageContext';
@@ -264,11 +264,8 @@ function ClickerRateNote({ unit, cps, ceiling, clamped, holdMs }: {
 
 // Inline disclosure for a handful of secondary rows (e.g. the Game-mode tuning knobs) so the
 // numbers users rarely touch don't clutter the group. One small caret toggle, no card.
-function Disclosure({ label, defaultOpen, children }: { label: string; defaultOpen?: boolean; children: React.ReactNode }) {
-  // Initial state only — once open, later prop changes must not fight the user. Callers pass
-  // true when something inside is already enabled: hiding an ACTIVE setting behind a caret is
-  // worse than the clutter the caret removes.
-  const [open, setOpen] = useState(!!defaultOpen);
+function Disclosure({ label, children }: { label: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
   return (
     <>
       <button onClick={() => setOpen(o => !o)} className="group w-full flex items-center gap-1 px-2.5 py-1 text-[11px] text-accent-solid hover:underline transition-colors">
@@ -571,43 +568,6 @@ function ClickerSection({
             clamped={rateClamped}
             holdMs={holdMs}
           />
-          {/* Tuning lives behind a caret: three knobs a routine run never touches. Opens by
-              itself when any of them is already active — hiding an ENABLED setting is worse
-              than the clutter the caret removes. */}
-          <Disclosure
-            label="Advanced"
-            defaultOpen={useRateJitter || useInterval || holdMs !== 10}
-          >
-            <SettingRow label="Jitter" tooltip={tt('Random ±% on each delay — less robotic.', 'Variação ±% aleatória em cada atraso — menos robótico.')}>
-              <EnableChip
-                value={rateJitter}
-                isOn={useRateJitter}
-                unit="%" min={0} max={100}
-                onCommitValue={(v) => onChange('cursorClickDelayJitter', v)}
-                onToggle={(v) => onChange('cursorClickUseJitter', v)}
-                onEnterActivate={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
-              />
-            </SettingRow>
-            {/* Hold is back. It was pulled from the panel while it silently STOLE from the
-                rate (it used to stack on top of the delay), which made it a trap. Now that the
-                hold lives inside the period, raising it does not change the rate until it
-                becomes the ceiling — and the ≈ note above says so when it does. */}
-            <SettingRow label="Hold" tooltip={tt('How long the button stays pressed (ms). 10 = a normal click; 50-200 for apps that miss short clicks.', 'Quanto tempo o botão fica pressionado (ms). 10 = clique normal; 50-200 para apps que perdem cliques curtos.')}>
-              <ValueField value={hold} unit="ms" min={0} max={CLICK_HOLD_MAX_MS} onCommitValue={(v) => onChange('cursorClickHold', v)} />
-            </SettingRow>
-            {/* "Gap", not "Interval": in Clicker mode one iteration is one click, so this is
-                not a pause between bursts — it is added to every click's period. */}
-            <SettingRow label="Gap" tooltip={tt('Extra time added to every click (ms) — it adds to the rate, it is not a pause between bursts.', 'Tempo extra somado a cada clique (ms) — soma à taxa, não é pausa entre rajadas.')}>
-              <EnableChip
-                value={interval}
-                isOn={useInterval}
-                unit="ms" format min={0} max={MAX_DELAY_MS}
-                onCommitValue={(v) => onChange('cursorClickInterval', v)}
-                onToggle={(v) => onChange('cursorClickUseInterval', v)}
-                onEnterActivate={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
-              />
-            </SettingRow>
-          </Disclosure>
         </Section>
 
         {/* The three "where" modes are a mutex the engine enforces in three places, but as
@@ -782,6 +742,46 @@ function ClickerSection({
               {tt('whichever comes first', 'o que vier primeiro')}
             </div>
           )}
+        </Section>
+
+        {/* Last, because it is the group a routine run never touches — but a plain Section,
+            not a disclosure. Game Mode's "Tuning" caret earns itself: those knobs sit under a
+            master switch and are inert when it is off, so hiding them says something. These
+            three are independently live, so a caret would hide settings that are doing work.
+            The auto-open hedge that would have covered that is the tell: a disclosure that
+            opens itself whenever it matters is just a row of noise for the people it matters to.
+            Same name as the Game Mode group on purpose — same kind of thing, and the two never
+            render together (one is macro mode, the other clicker). */}
+        <Section title="Tuning">
+          <SettingRow label="Jitter" tooltip={tt('Random ±% on each delay — less robotic.', 'Variação ±% aleatória em cada atraso — menos robótico.')}>
+            <EnableChip
+              value={rateJitter}
+              isOn={useRateJitter}
+              unit="%" min={0} max={100}
+              onCommitValue={(v) => onChange('cursorClickDelayJitter', v)}
+              onToggle={(v) => onChange('cursorClickUseJitter', v)}
+              onEnterActivate={() => activateIfOff(useRateJitter, 'cursorClickUseJitter')}
+            />
+          </SettingRow>
+          {/* Hold is reachable again. It was pulled from the panel while it silently STOLE
+              from the rate (it used to stack on top of the delay), which made it a trap. Now
+              that the hold lives inside the period, raising it does not change the rate until
+              it becomes the ceiling — and the ≈ note under Rate says so when it does. */}
+          <SettingRow label="Hold" tooltip={tt('How long the button stays pressed (ms). 10 = a normal click; 50-200 for apps that miss short clicks.', 'Quanto tempo o botão fica pressionado (ms). 10 = clique normal; 50-200 para apps que perdem cliques curtos.')}>
+            <ValueField value={hold} unit="ms" min={0} max={CLICK_HOLD_MAX_MS} onCommitValue={(v) => onChange('cursorClickHold', v)} />
+          </SettingRow>
+          {/* "Gap", not "Interval": in Clicker mode one iteration is one click, so this is not
+              a pause between bursts — it is added to every click's period. */}
+          <SettingRow label="Gap" tooltip={tt('Extra time added to every click (ms) — it adds to the rate, it is not a pause between bursts.', 'Tempo extra somado a cada clique (ms) — soma à taxa, não é pausa entre rajadas.')}>
+            <EnableChip
+              value={interval}
+              isOn={useInterval}
+              unit="ms" format min={0} max={MAX_DELAY_MS}
+              onCommitValue={(v) => onChange('cursorClickInterval', v)}
+              onToggle={(v) => onChange('cursorClickUseInterval', v)}
+              onEnterActivate={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
+            />
+          </SettingRow>
         </Section>
       </>
   );
@@ -1062,6 +1062,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
           { tab: 'profile', title: 'Clicker', icon: MousePointerClick, color: 'var(--color-clicker-fg)' },
           { tab: 'profile', title: 'Target', icon: Crosshair },
           { tab: 'profile', title: 'Stop after', icon: Hourglass },
+          { tab: 'profile', title: 'Tuning', icon: SlidersHorizontal },
         ]
       : [
           { tab: 'profile', title: 'Execution', icon: Timer },
