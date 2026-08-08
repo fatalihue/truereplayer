@@ -86,6 +86,10 @@ namespace TrueReplayer.Services
             // appsettings.json falls through to these initializers, so no migration.
             public int CursorClickMaxDurationMs { get; set; } = 60000;
             public bool CursorClickUseMaxDuration { get; set; } = false;
+            // Game-compatible cursor movement for the Clicker (interpolated path + fast
+            // approach). OFF by default: it only matters when the cursor actually moves —
+            // Fixed and especially Area — and it costs time inside every tick that does.
+            public bool CursorClickGameMove { get; set; } = false;
             // Clicker-exclusive hotkeys — fully decoupled from the global macro hotkeys.
             // Default PageDown = Start/Stop, PageUp = Pause/Resume. Active only in Clicker mode.
             public string CursorClickStartHotkey { get; set; } = "PageDown";

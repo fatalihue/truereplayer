@@ -47,6 +47,7 @@ const defaultSettings = {
   cursorClickUseInterval: false,
   cursorClickMaxDuration: '60000',
   cursorClickUseMaxDuration: false,
+  cursorClickGameMove: false,
   recordMouse: true,
   recordScroll: true,
   recordKeyboard: true,

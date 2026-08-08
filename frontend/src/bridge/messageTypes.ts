@@ -404,6 +404,8 @@ export interface SettingsState {
   /** Wall-clock cap in MS on the wire; the panel edits it in seconds. */
   cursorClickMaxDuration: string;
   cursorClickUseMaxDuration: boolean;
+  /** Interpolated cursor path for the Clicker. Only bites when the cursor moves — Fixed and Area. */
+  cursorClickGameMove: boolean;
   recordMouse: boolean;
   recordScroll: boolean;
   recordKeyboard: boolean;

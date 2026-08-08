@@ -262,6 +262,19 @@ function ClickerRateNote({ unit, cps, ceiling, clamped, holdMs }: {
   );
 }
 
+// Game move only bites when the cursor actually has somewhere to go. In cursor mode the target
+// IS the live cursor, so the setting is switched on and doing nothing — say so rather than let
+// the switch imply an effect it cannot have. Same shape as PathStepZeroNote and the rate note.
+function GameMoveNote({ on, useArea, useFixed }: { on: boolean; useArea: boolean; useFixed: boolean }) {
+  const tt = useTt();
+  if (!on || useArea || useFixed) return null;
+  return (
+    <div className="px-2.5 pb-1 text-[11px] text-text-tertiary text-right">
+      {tt('no effect in cursor mode', 'sem efeito no modo cursor')}
+    </div>
+  );
+}
+
 // Inline disclosure for a handful of secondary rows (e.g. the Game-mode tuning knobs) so the
 // numbers users rarely touch don't clutter the group. One small caret toggle, no card.
 function Disclosure({ label, children }: { label: string; children: React.ReactNode }) {
@@ -409,7 +422,7 @@ function ClickerSection({
   unit, onUnitChange,
   button, rate, rateJitter, useRateJitter, hold, positionJitter, usePositionJitter,
   useArea, area, useFixed, fixedPoint,
-  loops, useLoops, interval, useInterval, maxDuration, useMaxDuration, onChange,
+  loops, useLoops, interval, useInterval, maxDuration, useMaxDuration, gameMove, onChange,
 }: {
   unit: 'ms' | 'cps';
   onUnitChange: (u: 'ms' | 'cps') => void;
@@ -430,6 +443,7 @@ function ClickerSection({
   useInterval: boolean;
   maxDuration: string;
   useMaxDuration: boolean;
+  gameMove: boolean;
   onChange: (key: string, value: string | boolean | number | object | null) => void;
 }) {
   const { send } = useBridge();
@@ -782,6 +796,15 @@ function ClickerSection({
               onEnterActivate={() => activateIfOff(useInterval, 'cursorClickUseInterval')}
             />
           </SettingRow>
+          {/* Deliberately NOT wired to the macro Game Mode switch: this costs real time inside
+              every tick that moves, and silently inheriting a global toggle into a rate-critical
+              loop is exactly how the rate came to lie in the first place. */}
+          <SettingRow label="Game move" tooltip={tt('Moves the cursor along a path instead of teleporting, for games that ignore instant jumps (Roblox). Only affects Area and Fixed — in cursor mode nothing moves. Costs a few ms per click.', 'Move o cursor por um caminho em vez de teletransportar, para jogos que ignoram saltos instantâneos (Roblox). Só afeta Area e Fixed — no modo cursor nada se move. Custa alguns ms por clique.')}>
+            <div className={`${FIELD_W} flex justify-end`}>
+              <CompactToggle isOn={gameMove} onChange={(v) => onChange('cursorClickGameMove', v)} />
+            </div>
+          </SettingRow>
+          <GameMoveNote on={gameMove} useArea={useArea} useFixed={useFixed} />
         </Section>
       </>
   );
@@ -1224,6 +1247,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 useInterval={settings.cursorClickUseInterval}
                 maxDuration={settings.cursorClickMaxDuration}
                 useMaxDuration={settings.cursorClickUseMaxDuration}
+                gameMove={settings.cursorClickGameMove}
                 onChange={changeSetting}
               />
             ) : (

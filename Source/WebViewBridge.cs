@@ -126,6 +126,8 @@ namespace TrueReplayer
         // Wall-clock cap, in MS on the wire (the panel converts to seconds for display).
         public string CursorClickMaxDuration { get; set; } = "60000";
         public bool CursorClickUseMaxDuration { get; set; } = false;
+        // See AppSettings.CursorClickGameMove.
+        public bool CursorClickGameMove { get; set; } = false;
         public bool RecordMouse { get; set; } = true;
         public bool RecordScroll { get; set; } = true;
         public bool RecordKeyboard { get; set; } = true;
@@ -640,6 +642,7 @@ namespace TrueReplayer
             // a typo from parking the number somewhere meaningless.
             CursorClickMaxDuration = ClampNumeric(saved.CursorClickMaxDurationMs.ToString(), 0, 86400000, 60000);
             CursorClickUseMaxDuration = saved.CursorClickUseMaxDuration;
+            CursorClickGameMove = saved.CursorClickGameMove;
             RecordMouse = saved.RecordMouse;
             RecordScroll = saved.RecordScroll;
             RecordKeyboard = saved.RecordKeyboard;
@@ -2076,7 +2079,8 @@ namespace TrueReplayer
             int maxDuration = CursorClickUseMaxDuration && int.TryParse(CursorClickMaxDuration, out var md) && md > 0
                 ? Math.Clamp(md, 1000, 86400000) : 0;
             return new ClickerRunConfig(delay, CursorClickUseJitter, jitterPercent, loops, interval,
-                CursorClickButton, holdMs, positionJitter, area, useFixed, fixedPoint, maxDuration);
+                CursorClickButton, holdMs, positionJitter, area, useFixed, fixedPoint, maxDuration,
+                CursorClickGameMove);
         }
 
         public void PushSettingsLoaded()
@@ -2124,6 +2128,7 @@ namespace TrueReplayer
                     cursorClickUseInterval = CursorClickUseInterval,
                     cursorClickMaxDuration = CursorClickMaxDuration,
                     cursorClickUseMaxDuration = CursorClickUseMaxDuration,
+                    cursorClickGameMove = CursorClickGameMove,
                     recordMouse = RecordMouse,
                     recordScroll = RecordScroll,
                     recordKeyboard = RecordKeyboard,
@@ -2457,6 +2462,7 @@ namespace TrueReplayer
                     cursorClickUseInterval = CursorClickUseInterval,
                     cursorClickMaxDuration = CursorClickMaxDuration,
                     cursorClickUseMaxDuration = CursorClickUseMaxDuration,
+                    cursorClickGameMove = CursorClickGameMove,
                     recordMouse = RecordMouse,
                     recordScroll = RecordScroll,
                     recordKeyboard = RecordKeyboard,
@@ -8509,6 +8515,7 @@ namespace TrueReplayer
                 CursorClickUseInterval = false,
                 CursorClickMaxDurationMs = 60000,
                 CursorClickUseMaxDuration = false,
+                CursorClickGameMove = false,
             };
             AppSettingsManager.Save(defaults);
 
@@ -8549,6 +8556,7 @@ namespace TrueReplayer
             CursorClickUseInterval = defaults.CursorClickUseInterval;
             CursorClickMaxDuration = defaults.CursorClickMaxDurationMs.ToString();
             CursorClickUseMaxDuration = defaults.CursorClickUseMaxDuration;
+            CursorClickGameMove = defaults.CursorClickGameMove;
             // Area and Fixed were written to DISK as cleared by the `defaults` object above but
             // never mirrored back into the bridge, so PushSettingsLoaded kept showing the old
             // rect/point and the next SaveGlobalSettings wrote them straight back — the reset
@@ -8653,6 +8661,7 @@ namespace TrueReplayer
                 CursorClickUseInterval = CursorClickUseInterval,
                 CursorClickMaxDurationMs = int.TryParse(CursorClickMaxDuration, out var mdSave) ? mdSave : 60000,
                 CursorClickUseMaxDuration = CursorClickUseMaxDuration,
+                CursorClickGameMove = CursorClickGameMove,
                 RecordMouse = RecordMouse,
                 RecordScroll = RecordScroll,
                 RecordKeyboard = RecordKeyboard,
@@ -9006,6 +9015,9 @@ namespace TrueReplayer
                     break;
                 case "cursorClickUseMaxDuration":
                     CursorClickUseMaxDuration = valueElement.GetBoolean();
+                    break;
+                case "cursorClickGameMove":
+                    CursorClickGameMove = valueElement.GetBoolean();
                     break;
                 case "recordMouse":
                     RecordMouse = valueElement.GetBoolean();

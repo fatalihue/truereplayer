@@ -448,6 +448,7 @@ namespace TrueReplayer.Services
             // 0 = no cap. Independent of loopCount: either, both or neither may bound the run,
             // and whichever is reached first ends it.
             long maxDurationMs = Math.Max(0, config.MaxDurationMs);
+            bool gameMove = config.GameMove;
             bool useJitter = config.UseJitter;
             string button = config.Button;
 
@@ -494,7 +495,25 @@ namespace TrueReplayer.Services
                 $"Clicker start: button={button}, period={nominalPeriod}ms (~{1000.0 / Math.Max(1, nominalPeriod):0.#}/s){rateNote}, " +
                 $"loops={(loopCount == 0 ? "unbounded" : loopCount.ToString())}, interval={loopInterval}ms, " +
                 $"maxDuration={(maxDurationMs == 0 ? "unbounded" : maxDurationMs + "ms")}, " +
-                $"hold={safeHold}ms, jitter={(useJitter ? jitterPercent + "%" : "off")}, where={whereDesc}");
+                $"hold={safeHold}ms, jitter={(useJitter ? jitterPercent + "%" : "off")}, " +
+                $"gameMove={(gameMove ? "on" : "off")}, where={whereDesc}");
+            // Game-aware movement spends real time INSIDE the tick, and only Area moves on every
+            // one. Estimate that cost and say when it will not fit the period, rather than
+            // letting the run drift and calling the schedule a liar — the B3 mistake, one layer
+            // down. FastApproach caps the walked stretch at SettleDistancePx whatever the
+            // distance, so the estimate is bounded by the settle ring, not by the rect size.
+            if (gameMove && useArea && ActionReplayer.SmoothMovement && ActionReplayer.MoveStepPx > 0)
+            {
+                int walkPx = ActionReplayer.FastApproach && ActionReplayer.SettleDistancePx > 0
+                    ? ActionReplayer.SettleDistancePx
+                    : Math.Max(areaW, areaH);
+                int steps = Math.Max(1, (int)Math.Ceiling((double)walkPx / ActionReplayer.MoveStepPx));
+                int moveCostMs = (steps - 1) * ActionReplayer.MoveStepDelayMs;
+                if (moveCostMs + safeHold >= nominalPeriod)
+                    DiagnosticLog.Info(
+                        $"Clicker: gameMove walk costs ~{moveCostMs}ms/tick (+{safeHold}ms hold) vs period " +
+                        $"{nominalPeriod}ms — effective rate limited to ~{1000.0 / Math.Max(1, moveCostMs + safeHold):0.#}/s.");
+            }
             if (loopCount == 0 && maxDurationMs == 0)
                 DiagnosticLog.Info("Clicker: unbounded run — stop with the Clicker hotkey, the Stop button or the tray.");
 
@@ -664,6 +683,22 @@ namespace TrueReplayer.Services
                         targetY = Math.Clamp(targetY, vy, vy + Math.Max(1, vh) - 1);
                         int absX = (int)(((double)(targetX - vx) * 65535) / Math.Max(1, vw - 1));
                         int absY = (int)(((double)(targetY - vy) * 65535) / Math.Max(1, vh - 1));
+
+                        // ── The move, as its own event, BEFORE the button. ──────────────────
+                        // The loop used to fold position into the click INPUT and send nothing
+                        // else, so an app saw the cursor's whole delta arrive simultaneously
+                        // with the press — no SetCursorPos for GetCursorPos readers, no separate
+                        // move for Raw Input readers, and no chance to process the arrival
+                        // before the click. That breaks hit-testing in Win32 menus and WinUI
+                        // flyouts, and it is the "single large teleport" that Roblox-class games
+                        // reject outright (see MoveCursorTo).
+                        //
+                        // Returns false when the cursor is already on target, which is the
+                        // common case: cursor mode with jitter off aims at the live cursor, so
+                        // the default configuration pays nothing at all for this. Fixed mode
+                        // pays once, on the first tick. Area mode is the only one that moves
+                        // every tick — and it is the one that needed this most.
+                        replayer.ClickerMoveTo(targetX, targetY, gameMove);
 
                         // ── The click. The UP is guaranteed. ────────────────────────────────
                         // Cancelling inside the hold used to skip the UP entirely and leave the
@@ -3594,12 +3629,50 @@ namespace TrueReplayer.Services
 
             int inputSize = NativeMethods.InputSize;
 
-            // ── Move the cursor to (x,y), then build the click event. ──────────────────────
-            // Roblox (and similar) reject a single large "teleport" move — they only follow
-            // movement that progresses through intermediate positions, like a physical mouse.
-            // So when SmoothMovement is on we INTERPOLATE: walk a straight path from the current
-            // cursor to the target in steps of at most MoveStepPx pixels, pausing MoveStepDelayMs
-            // between steps. SmoothMovement off (or MoveStepPx == 0) jumps straight (legacy).
+            MoveCursorTo(x, y, allowFastApproach);
+
+            var clickInput = new NativeMethods.INPUT
+            {
+                type = NativeMethods.INPUT_MOUSE,
+                U = new NativeMethods.InputUnion
+                {
+                    mi = new NativeMethods.MOUSEINPUT { dx = absoluteX, dy = absoluteY, mouseData = (uint)mouseData, dwFlags = mouseEvent | posFlags }
+                }
+            };
+
+            // Small gap before the button fires: after a move it lets the app register the final
+            // position; on the same-spot UP half it provides the press→release dwell. Kept on both
+            // halves so synthetic clicks keep a realistic, non-zero dwell.
+            Thread.Sleep(Math.Max(0, MoveClickDelayMs));
+            lock (_simInputLock)
+            {
+                NativeMethods.SendInput(1, ref clickInput, inputSize);
+
+                // Track currently-pressed buttons here (atomic with the SendInput) so
+                // ResetMouseState releases exactly what's down. Living inside SimulateMouse
+                // means the missing-target early-return above never leaves a flag set — which
+                // previously caused a spurious UP on Stop — and Stop can't observe a torn state.
+                TrackButtonState(mouseEvent);
+            }
+        }
+
+        // ── Move the cursor to (x,y). ───────────────────────────────────────────────────────
+        // Roblox (and similar) reject a single large "teleport" move — they only follow
+        // movement that progresses through intermediate positions, like a physical mouse.
+        // So when SmoothMovement is on we INTERPOLATE: walk a straight path from the current
+        // cursor to the target in steps of at most MoveStepPx pixels, pausing MoveStepDelayMs
+        // between steps. SmoothMovement off (or MoveStepPx == 0) jumps straight (legacy).
+        //
+        // Extracted from SimulateMouse so the Clicker loop can reach the same machinery. The
+        // body is unchanged; SimulateMouse calls it in exactly the place the block used to sit.
+        private void MoveCursorTo(int x, int y, bool allowFastApproach)
+        {
+            var (vx, vy, vw, vh) = NativeMethods.VirtualScreen.Bounds;
+            uint posFlags = NativeMethods.MOUSEEVENTF_MOVE
+                | NativeMethods.MOUSEEVENTF_ABSOLUTE
+                | NativeMethods.MOUSEEVENTF_VIRTUALDESK;
+            int inputSize = NativeMethods.InputSize;
+
             void MoveAbs(int tx, int ty)
             {
                 int nx = (int)(((double)(tx - vx) * 65535) / Math.Max(1, vw - 1));
@@ -3615,9 +3688,9 @@ namespace TrueReplayer.Services
 
             // A click is split across separate SimulateMouse calls (DOWN then UP at the same
             // point); on the UP half the cursor is already on target, so re-issuing the move is a
-            // redundant SetCursorPos/SendInput. Skip that no-op move — but the gap sleep below is
-            // KEPT on both halves so press→release retains a small, realistic dwell (some games /
-            // anti-cheat reject a zero-dwell synthetic click).
+            // redundant SetCursorPos/SendInput. Skip that no-op move — but the gap sleep in
+            // SimulateMouse is KEPT on both halves so press→release retains a small, realistic
+            // dwell (some games / anti-cheat reject a zero-dwell synthetic click).
             int stepPx = MoveStepPx;
             if (SmoothMovement && stepPx > 0 && NativeMethods.GetCursorPos(out var start) && (start.x != x || start.y != y))
             {
@@ -3662,30 +3735,48 @@ namespace TrueReplayer.Services
             {
                 MoveAbs(x, y); // single jump (SmoothMovement off, MoveStepPx == 0, or GetCursorPos failed)
             }
+        }
 
-            var clickInput = new NativeMethods.INPUT
+        // Clicker seam for the move half. gameAware routes through the interpolated path above
+        // (honouring SmoothMovement / FastApproach / MoveStepPx / SettleDistancePx); otherwise it
+        // is the plain dual write — SetCursorPos for GetCursorPos readers, one move INPUT for
+        // Raw Input readers. Either way the move is its OWN event, emitted BEFORE the button,
+        // which is what the clicker never did: it folded position into the click INPUT and sent
+        // nothing else, so a game saw a giant delta arrive simultaneously with the press.
+        //
+        // Returns false when the cursor is already there, so the caller can skip the whole thing.
+        // That is what keeps the default (cursor mode, no jitter) at exactly zero added cost:
+        // its target IS the current position.
+        public bool ClickerMoveTo(int x, int y, bool gameAware)
+        {
+            if (NativeMethods.GetCursorPos(out var cur) && cur.x == x && cur.y == y) return false;
+            if (gameAware)
             {
-                type = NativeMethods.INPUT_MOUSE,
-                U = new NativeMethods.InputUnion
-                {
-                    mi = new NativeMethods.MOUSEINPUT { dx = absoluteX, dy = absoluteY, mouseData = (uint)mouseData, dwFlags = mouseEvent | posFlags }
-                }
-            };
-
-            // Small gap before the button fires: after a move it lets the app register the final
-            // position; on the same-spot UP half it provides the press→release dwell. Kept on both
-            // halves so synthetic clicks keep a realistic, non-zero dwell.
-            Thread.Sleep(Math.Max(0, MoveClickDelayMs));
-            lock (_simInputLock)
-            {
-                NativeMethods.SendInput(1, ref clickInput, inputSize);
-
-                // Track currently-pressed buttons here (atomic with the SendInput) so
-                // ResetMouseState releases exactly what's down. Living inside SimulateMouse
-                // means the missing-target early-return above never leaves a flag set — which
-                // previously caused a spurious UP on Stop — and Stop can't observe a torn state.
-                TrackButtonState(mouseEvent);
+                MoveCursorTo(x, y, allowFastApproach: true);
             }
+            else
+            {
+                var (vx, vy, vw, vh) = NativeMethods.VirtualScreen.Bounds;
+                int nx = (int)(((double)(x - vx) * 65535) / Math.Max(1, vw - 1));
+                int ny = (int)(((double)(y - vy) * 65535) / Math.Max(1, vh - 1));
+                NativeMethods.SetCursorPos(x, y);
+                var mv = new NativeMethods.INPUT
+                {
+                    type = NativeMethods.INPUT_MOUSE,
+                    U = new NativeMethods.InputUnion
+                    {
+                        mi = new NativeMethods.MOUSEINPUT
+                        {
+                            dx = nx, dy = ny,
+                            dwFlags = NativeMethods.MOUSEEVENTF_MOVE
+                                | NativeMethods.MOUSEEVENTF_ABSOLUTE
+                                | NativeMethods.MOUSEEVENTF_VIRTUALDESK,
+                        }
+                    }
+                };
+                NativeMethods.SendInput(1, ref mv, NativeMethods.InputSize);
+            }
+            return true;
         }
 
         // Updates the "currently pressed" flags from a mouse event's button bits.
