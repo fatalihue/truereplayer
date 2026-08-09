@@ -2164,6 +2164,11 @@ namespace TrueReplayer
         public void PushSettingsLoaded()
         {
             var profile = UserProfile.Current;
+            // One read for both fields below. AppSettingsManager.Load() is not cached — every call
+            // does Directory.CreateDirectory, the legacy-path migration check, File.Exists,
+            // File.ReadAllText and a JSON deserialize — and this projection used to call it twice,
+            // four lines apart, for two properties of the same object.
+            var appSettings = AppSettingsManager.Load();
             SendMessage("settings:loaded", new
             {
                 settings = new
@@ -2221,11 +2226,11 @@ namespace TrueReplayer
                     captureSlotHotkey = profile.CaptureSlotHotkey,
                     alwaysOnTop = profile.AlwaysOnTop,
                     minimizeToTray = profile.MinimizeToTray,
-                    runOnStartup = AppSettingsManager.Load().RunOnStartup,
+                    runOnStartup = appSettings.RunOnStartup,
                     startMinimized = profile.StartMinimized,
                     runEndFlash = profile.RunEndFlash,
                     runEndSound = profile.RunEndSound,
-                    runAsAdmin = AppSettingsManager.Load().RunAsAdmin,
+                    runAsAdmin = appSettings.RunAsAdmin,
                     automationEnabled = profile.AutomationEnabled,
                     remaps = ProjectRemaps()
                 }
@@ -2456,6 +2461,10 @@ namespace TrueReplayer
         {
             // Send full state to React
             var profile = UserProfile.Current;
+            // One read for both settings fields in the projection below — see PushSettingsLoaded
+            // for what each Load() costs. This is the cold-start path, where the dispatcher is
+            // already the scarce resource.
+            var appSettings = AppSettingsManager.Load();
             SendMessage("state:init", new
             {
                 status = "ready",
@@ -2614,11 +2623,11 @@ namespace TrueReplayer
                     captureSlotHotkey = profile.CaptureSlotHotkey,
                     alwaysOnTop = profile.AlwaysOnTop,
                     minimizeToTray = profile.MinimizeToTray,
-                    runOnStartup = AppSettingsManager.Load().RunOnStartup,
+                    runOnStartup = appSettings.RunOnStartup,
                     startMinimized = profile.StartMinimized,
                     runEndFlash = profile.RunEndFlash,
                     runEndSound = profile.RunEndSound,
-                    runAsAdmin = AppSettingsManager.Load().RunAsAdmin,
+                    runAsAdmin = appSettings.RunAsAdmin,
                     automationEnabled = profile.AutomationEnabled,
                     remaps = ProjectRemaps()
                 },

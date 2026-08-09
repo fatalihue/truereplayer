@@ -41,21 +41,33 @@ export function UpdateOverlay() {
           // downloading splash — the backend has already kicked off HandleUpdateApply.
           // Without this, the user would see the "Baixar e Instalar" button briefly and
           // then the splash would jump as the download started without their click.
-          if (msg.payload.autoApply) {
-            setPhase({
-              step: 'downloading',
-              percent: 0,
-              version: msg.payload.version,
-              currentVersion: msg.payload.currentVersion,
-            });
-          } else {
-            setPhase({
+          setPhase((prev) => {
+            // Never walk the flow BACKWARDS. The overlay renders nothing during 'checking'
+            // by design, so the Settings panel's "Check for Updates" button stays clickable
+            // while the startup check is still in flight. Click it there and a second check
+            // runs in parallel; both find the same new version and both send update:available.
+            // This handler used to apply unconditionally, so the late one reset a splash that
+            // had already reached 'installing' or 'complete' back to "downloading, 0%" —
+            // with the process about to restart. _updateInProgress on the backend stops the
+            // second DOWNLOAD; nothing stopped the second message.
+            if (prev.step === 'downloading' || prev.step === 'installing' || prev.step === 'complete') {
+              return prev;
+            }
+            if (msg.payload.autoApply) {
+              return {
+                step: 'downloading',
+                percent: 0,
+                version: msg.payload.version,
+                currentVersion: msg.payload.currentVersion,
+              };
+            }
+            return {
               step: 'available',
               version: msg.payload.version,
               currentVersion: msg.payload.currentVersion,
               notes: msg.payload.notes ?? [],
-            });
-          }
+            };
+          });
           break;
         case 'update:progress':
           setPhase((prev) => {
