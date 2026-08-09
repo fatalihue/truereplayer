@@ -753,11 +753,37 @@ namespace TrueReplayer
                 || key.Contains("+Win+", StringComparison.OrdinalIgnoreCase);
         }
 
+        // Compiled title regexes, keyed by the exact pattern string, carried ACROSS snapshots.
+        // CompileTitleRegex emits IL (RegexOptions.Compiled), and this method re-ran it for every
+        // regex-mode profile on every profile-list refresh — which happens on each save, rename,
+        // delete, toggle, reorder and disk-watcher event, on the UI thread. A Regex is immutable and
+        // thread-safe, so reusing one across snapshots is free; the map is only ever touched from
+        // this method (UI thread) and never shrinks — bounded by the number of distinct patterns
+        // the user has ever authored, which is bounded by the profile count.
+        private static readonly Dictionary<string, Regex> _titleRegexCache = new(StringComparer.Ordinal);
+
         public static void RegisterProfileWindowTargets(Dictionary<string, WindowTarget> targets, HashSet<string>? bringToFocusProfiles = null)
         {
             var regexes = new Dictionary<string, Regex?>();
             foreach (var (name, target) in targets)
             {
+                // Only regex mode has a pattern to memoize; contains-mode targets compile to null
+                // and must stay absent from the map (a present-but-null entry is not the same
+                // thing to the matcher). Cache key is the pattern alone because the mode is what
+                // decides whether we get here at all.
+                if (target?.TitleMatchMode == "regex" && !string.IsNullOrEmpty(target.WindowTitle))
+                {
+                    if (!_titleRegexCache.TryGetValue(target.WindowTitle, out var cached))
+                    {
+                        cached = TrueReplayer.Helpers.WindowMatcher.CompileTitleRegex(target)!;
+                        // An invalid pattern compiles to null; cache nothing so it is not stored as
+                        // a valid entry, and let the next refresh find out the same way.
+                        if (cached != null) _titleRegexCache[target.WindowTitle] = cached;
+                    }
+                    if (cached != null) regexes[name] = cached;
+                    continue;
+                }
+
                 var compiled = TrueReplayer.Helpers.WindowMatcher.CompileTitleRegex(target);
                 if (compiled != null) regexes[name] = compiled;
             }
@@ -777,6 +803,13 @@ namespace TrueReplayer
         // (avoids a per-wheel-event List<string> allocation). Touched only on the hook thread,
         // like _windowTextBuffer / _processNameBuffer above — no synchronization required.
         private static readonly StringBuilder _scrollComboBuilder = new(32);
+
+        // Same deal for the KEY combo path (BuildComposedKey / ComposeMouseCombo), which is even
+        // hotter: it ran per key down AND up, plus every auto-repeat while a key is held, and each
+        // call allocated a List<string> + its backing array + the joined string. Both hooks are
+        // installed from the same thread and neither function can be re-entered mid-compose (the
+        // ToString lands before any dispatch), so this needs no synchronization either.
+        private static readonly StringBuilder _comboBuilder = new(32);
 
         private static bool IsForegroundWindowMatch(string profileName)
         {
@@ -1022,6 +1055,16 @@ namespace TrueReplayer
             if (nCode < 0)
                 return NativeMethods.CallNextHookEx(_mouseHookId, nCode, wParam, lParam);
 
+            // WM_MOUSEMOVE is the most frequently delivered message on this hook by orders of
+            // magnitude (the mouse's polling rate, 125-1000 Hz) and NOTHING below handles it: the
+            // button switch has no move case, so `button` stays null and the event falls all the
+            // way through to CallNextHookEx having done nothing but marshal a MSLLHOOKSTRUCT
+            // across the interop boundary. Bail before that. This is the same optimisation the
+            // capture-gate reorder below documents (message-type test first), carried one step
+            // further — if a move ever needs handling, this early-out is what has to go.
+            if ((int)wParam == NativeMethods.WM_MOUSEMOVE)
+                return NativeMethods.CallNextHookEx(_mouseHookId, nCode, wParam, lParam);
+
             // X-button remap pairing release runs BEFORE the capture/suppress gates — same
             // stuck-injected-key hazard as the keyboard hoist above it. Physical ups only.
             if ((int)wParam == NativeMethods.WM_XBUTTONUP && _activeRemapDowns.Count > 0)
@@ -1095,13 +1138,15 @@ namespace TrueReplayer
                 bool altHeld = _vkCodesCurrentlyDown.Contains(0xA4) || _vkCodesCurrentlyDown.Contains(0xA5) || _vkCodesCurrentlyDown.Contains(0x12);
                 bool shiftHeld = _vkCodesCurrentlyDown.Contains(0xA0) || _vkCodesCurrentlyDown.Contains(0xA1) || _vkCodesCurrentlyDown.Contains(0x10);
 
-                var parts = new List<string>();
-                if (winHeld) parts.Add("Win");
-                if (ctrlHeld) parts.Add("Ctrl");
-                if (altHeld) parts.Add("Alt");
-                if (shiftHeld) parts.Add("Shift");
-                parts.Add(scrollKey);
-                string combo = string.Join("+", parts);
+                // Same reusable builder as the non-capture wheel path below — this branch kept the
+                // original List<string> + string.Join when that one was converted.
+                _scrollComboBuilder.Clear();
+                if (winHeld) _scrollComboBuilder.Append("Win+");
+                if (ctrlHeld) _scrollComboBuilder.Append("Ctrl+");
+                if (altHeld) _scrollComboBuilder.Append("Alt+");
+                if (shiftHeld) _scrollComboBuilder.Append("Shift+");
+                _scrollComboBuilder.Append(scrollKey);
+                string combo = _scrollComboBuilder.ToString();
 
                 OnHotkeyCaptured?.Invoke(combo);
                 return (IntPtr)1;
@@ -1320,13 +1365,13 @@ namespace TrueReplayer
             bool ctrlHeld = _vkCodesCurrentlyDown.Contains(0xA2) || _vkCodesCurrentlyDown.Contains(0xA3) || _vkCodesCurrentlyDown.Contains(0x11);
             bool altHeld = _vkCodesCurrentlyDown.Contains(0xA4) || _vkCodesCurrentlyDown.Contains(0xA5) || _vkCodesCurrentlyDown.Contains(0x12);
             bool shiftHeld = _vkCodesCurrentlyDown.Contains(0xA0) || _vkCodesCurrentlyDown.Contains(0xA1) || _vkCodesCurrentlyDown.Contains(0x10);
-            var sb = new System.Text.StringBuilder();
-            if (winHeld) sb.Append("Win+");
-            if (ctrlHeld) sb.Append("Ctrl+");
-            if (altHeld) sb.Append("Alt+");
-            if (shiftHeld) sb.Append("Shift+");
-            sb.Append(mainName);
-            return sb.ToString();
+            _comboBuilder.Clear();
+            if (winHeld) _comboBuilder.Append("Win+");
+            if (ctrlHeld) _comboBuilder.Append("Ctrl+");
+            if (altHeld) _comboBuilder.Append("Alt+");
+            if (shiftHeld) _comboBuilder.Append("Shift+");
+            _comboBuilder.Append(mainName);
+            return _comboBuilder.ToString();
         }
 
         /// <summary>
@@ -1759,24 +1804,42 @@ namespace TrueReplayer
         /// they release and re-press. Acceptable; recovers on next keystroke.
         /// </summary>
         private static string BuildComposedKey(int vkCode)
+            => BuildComposedKey(vkCode, GetKeyName(vkCode));
+
+        /// <summary>
+        /// Overload for callers that already have the key's canonical name. NormalizeKeyName is not
+        /// free — for OEM keys it costs two P/Invokes (GetKeyboardLayout + MapVirtualKeyEx) plus a
+        /// string allocation — and the keyboard hot path was calling it TWICE per event with the
+        /// same vkCode, once here and once through GetKeyName right after.
+        /// </summary>
+        private static string BuildComposedKey(int vkCode, string? mainKey)
         {
             bool winPressed = _vkCodesCurrentlyDown.Contains(0x5B) || _vkCodesCurrentlyDown.Contains(0x5C);
             bool ctrlPressed = _vkCodesCurrentlyDown.Contains(0xA2) || _vkCodesCurrentlyDown.Contains(0xA3) || _vkCodesCurrentlyDown.Contains(0x11);
             bool altPressed = _vkCodesCurrentlyDown.Contains(0xA4) || _vkCodesCurrentlyDown.Contains(0xA5) || _vkCodesCurrentlyDown.Contains(0x12);
             bool shiftPressed = _vkCodesCurrentlyDown.Contains(0xA0) || _vkCodesCurrentlyDown.Contains(0xA1) || _vkCodesCurrentlyDown.Contains(0x10);
 
-            string? mainKey = KeyUtils.NormalizeKeyName(vkCode) ?? SafeKeyFallback(vkCode);
+            // The main key is dropped when it IS one of the modifiers we just appended — the user
+            // pressing Ctrl itself must compose as "Ctrl", not "Ctrl+Ctrl". Testing against the
+            // four flags is what the old parts.Contains(mainKey, OrdinalIgnoreCase) did, minus the
+            // List and the boxed enumerator: note it is deliberately gated on the modifier being
+            // HELD, so "Ctrl" pressed with ctrlPressed still false is appended as before.
+            bool appendMain = !string.IsNullOrEmpty(mainKey)
+                && !(winPressed && string.Equals(mainKey, "Win", StringComparison.OrdinalIgnoreCase))
+                && !(ctrlPressed && string.Equals(mainKey, "Ctrl", StringComparison.OrdinalIgnoreCase))
+                && !(altPressed && string.Equals(mainKey, "Alt", StringComparison.OrdinalIgnoreCase))
+                && !(shiftPressed && string.Equals(mainKey, "Shift", StringComparison.OrdinalIgnoreCase));
 
-            var parts = new List<string>();
-            if (winPressed) parts.Add("Win");
-            if (ctrlPressed) parts.Add("Ctrl");
-            if (altPressed) parts.Add("Alt");
-            if (shiftPressed) parts.Add("Shift");
+            _comboBuilder.Clear();
+            if (winPressed) _comboBuilder.Append("Win+");
+            if (ctrlPressed) _comboBuilder.Append("Ctrl+");
+            if (altPressed) _comboBuilder.Append("Alt+");
+            if (shiftPressed) _comboBuilder.Append("Shift+");
+            if (appendMain) _comboBuilder.Append(mainKey);
+            // No main key to close the combo leaves a trailing '+' that string.Join never produced.
+            else if (_comboBuilder.Length > 0) _comboBuilder.Length--;
 
-            if (!string.IsNullOrEmpty(mainKey) && !parts.Contains(mainKey, StringComparer.OrdinalIgnoreCase))
-                parts.Add(mainKey);
-
-            return string.Join("+", parts);
+            return _comboBuilder.ToString();
         }
 
         private static string SafeKeyFallback(int vkCode)
@@ -2111,8 +2174,10 @@ namespace TrueReplayer
                     }
                 }
 
-                string key = BuildComposedKey(vkCode);
+                // One NormalizeKeyName for both: the composed combo's main key and keyName are the
+                // same expression, and this runs per key down/up plus every auto-repeat.
                 string keyName = GetKeyName(vkCode);
+                string key = BuildComposedKey(vkCode, keyName);
 
                 if (string.IsNullOrEmpty(keyName))
                 {

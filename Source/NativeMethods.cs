@@ -26,6 +26,11 @@ namespace TrueReplayer.Interop
         public const int WH_MOUSE_LL = 14;
         public const int WH_KEYBOARD_LL = 13;
 
+        // Only the mouse hook's early-out uses this: it is the one message WH_MOUSE_LL delivers
+        // that no branch in MouseHookCallbackCore handles, and it arrives at the mouse's polling
+        // rate (125-1000 Hz), so naming it lets that path bail before doing any work.
+        public const int WM_MOUSEMOVE = 0x0200;
+
         public const int WM_LBUTTONDOWN = 0x0201;
         public const int WM_LBUTTONUP = 0x0202;
         public const int WM_RBUTTONDOWN = 0x0204;
