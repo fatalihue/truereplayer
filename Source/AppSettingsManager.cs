@@ -135,7 +135,13 @@ namespace TrueReplayer.Services
             try
             {
                 var json = JsonSerializer.Serialize(settings, AppSettingsJsonContext.Default.AppSettings);
-                FileHelper.WriteAllTextAtomic(GetPath(), json);
+                string path = GetPath();
+                // GetPath used to CreateDirectory on every call, which is what guaranteed the write
+                // below had somewhere to land even if the folder was removed mid-session. The path
+                // is cached now, so the guarantee moves here — to the write path that actually needs
+                // it, instead of being paid by every read.
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                FileHelper.WriteAllTextAtomic(path, json);
             }
             catch (Exception ex)
             {
@@ -210,7 +216,18 @@ namespace TrueReplayer.Services
             Services.TrayIconService.SyncStartupRegistration(s.RunOnStartup);
         }
 
-        private static string GetPath()
+        // Resolved once per process. Load() is not cached and is called from ~25 sites (seven of
+        // them before the window is even interactive), and every one of those paid the
+        // CreateDirectory + two File.Exists below — for a path that cannot change and a one-shot
+        // migration that can only ever fire on the FIRST call: once the file has moved, or was
+        // already at the new location, File.Exists(oldPath) && !File.Exists(newPath) is false
+        // forever. Lazy, not a field initializer, so the directory work still happens on first
+        // use rather than at type load.
+        private static string? _cachedPath;
+
+        private static string GetPath() => _cachedPath ??= ResolvePath();
+
+        private static string ResolvePath()
         {
             // Store in Documents/TrueReplayer so settings survive app updates
             string dir = Path.Combine(

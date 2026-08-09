@@ -1773,7 +1773,9 @@ namespace TrueReplayer
 
         private void PushUndoState()
         {
-            var snapshot = JsonSerializer.Serialize(actions.ToList(), JsonOptions);
+            // No .ToList(): the serializer takes any IEnumerable and emits the same JSON array, so
+            // the copy only duplicated the whole collection on a path that runs on every edit.
+            var snapshot = JsonSerializer.Serialize(actions, JsonOptions);
             _undoStack.Push(snapshot);
             if (_undoStack.Count > MaxHistory)
             {
@@ -1788,7 +1790,7 @@ namespace TrueReplayer
         private void HandleUndo()
         {
             if (_undoStack.Count == 0) return;
-            var current = JsonSerializer.Serialize(actions.ToList(), JsonOptions);
+            var current = JsonSerializer.Serialize(actions, JsonOptions);
             _redoStack.Push(current);
             var snapshot = _undoStack.Pop();
             RestoreActionsFromSnapshot(snapshot);
@@ -1798,7 +1800,7 @@ namespace TrueReplayer
         private void HandleRedo()
         {
             if (_redoStack.Count == 0) return;
-            var current = JsonSerializer.Serialize(actions.ToList(), JsonOptions);
+            var current = JsonSerializer.Serialize(actions, JsonOptions);
             _undoStack.Push(current);
             var snapshot = _redoStack.Pop();
             RestoreActionsFromSnapshot(snapshot);
@@ -9351,6 +9353,11 @@ namespace TrueReplayer
 
         private void SaveGlobalSettings()
         {
+            // ONE read for the three disk-owned fields below (RunOnStartup / RunAsAdmin /
+            // HasAcknowledgedImportWarning — the bridge holds no field for any of them).
+            // AppSettingsManager.Load() is not cached, so calling it once per field meant three
+            // full read+parse cycles per save, and this method runs on every settings:change.
+            var disk = AppSettingsManager.Load();
             var s = new AppSettingsManager.AppSettings
             {
                 AlwaysOnTop = UserProfile.Current.AlwaysOnTop,
@@ -9358,7 +9365,7 @@ namespace TrueReplayer
                 // Persist the user's intent, not the registry state. On dev/portable builds
                 // SetRunOnStartup is a no-op (WindowShellServices guards on IsInstalledLocation),
                 // so sourcing this from the registry would keep resetting the toggle to off.
-                RunOnStartup = AppSettingsManager.Load().RunOnStartup,
+                RunOnStartup = disk.RunOnStartup,
                 StartMinimized = UserProfile.Current.StartMinimized,
                 RunEndFlash = UserProfile.Current.RunEndFlash,
                 RunEndSound = UserProfile.Current.RunEndSound,
@@ -9421,13 +9428,13 @@ namespace TrueReplayer
                 CaptureSlotHotkey = UserProfile.Current.CaptureSlotHotkey,
                 ProfileKeyEnabled = ProfileKeyEnabled,
                 BrowserSelectorEnabled = BrowserSelectorEnabled,
-                RunAsAdmin = AppSettingsManager.Load().RunAsAdmin,
+                RunAsAdmin = disk.RunAsAdmin,
                 AutomationEnabled = UserProfile.Current.AutomationEnabled,
                 // Disk-owned, like RunOnStartup/RunAsAdmin above: the bridge holds no field for it,
                 // so leaving it out of this initializer wrote the class default (false) back on every
                 // save — and this method runs on EVERY settings:change. The import security warning
                 // re-armed itself after the user had ticked "Don't show again".
-                HasAcknowledgedImportWarning = AppSettingsManager.Load().HasAcknowledgedImportWarning,
+                HasAcknowledgedImportWarning = disk.HasAcknowledgedImportWarning,
             };
             AppSettingsManager.Save(s);
         }

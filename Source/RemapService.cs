@@ -36,6 +36,11 @@ namespace TrueReplayer.Services
         public const int MaxRemaps = 32;
         private const string FileName = "remaps.json";
 
+        // One instance each: JsonSerializerOptions is the type-metadata cache, so a fresh one per
+        // call rebuilds the RemapConfig graph. Frozen on first use, so sharing is safe.
+        private static readonly JsonSerializerOptions ReadOptions = new() { PropertyNameCaseInsensitive = true };
+        private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
+
         // Last content of remaps.json that PARSED. Written by Load (the text just proved itself)
         // and refreshed after a successful Save; never touched while the load latch is on, because
         // then it is the only surviving copy of the user's list.
@@ -177,7 +182,7 @@ namespace TrueReplayer.Services
                 Current = config;
                 try
                 {
-                    var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+                    var json = JsonSerializer.Serialize(config, WriteOptions);
 
                     if (LoadFailed && !overwriteUnreadableFile)
                     {
@@ -263,8 +268,7 @@ namespace TrueReplayer.Services
             error = null;
             try
             {
-                return JsonSerializer.Deserialize<RemapConfig>(json,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new RemapConfig();
+                return JsonSerializer.Deserialize<RemapConfig>(json, ReadOptions) ?? new RemapConfig();
             }
             catch (Exception ex)
             {

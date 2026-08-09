@@ -75,6 +75,7 @@ namespace TrueReplayer.Services
 
             ReleaseCurrentIcon();
             currentIconHandle = LoadImage(IntPtr.Zero, iconPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
+            currentIconPath = currentIconHandle == IntPtr.Zero ? "" : iconPath;
             if (currentIconHandle == IntPtr.Zero)
                 DiagnosticLog.Warn($"Tray icon LoadImage failed (Win32 error {Marshal.GetLastWin32Error()}) for '{iconPath}' — tray icon will appear blank");
 
@@ -98,15 +99,29 @@ namespace TrueReplayer.Services
             }
         }
 
+        // Which .ico currentIconHandle was loaded from, so a refresh that does not change the icon
+        // does not re-read it. Cleared by CreateTrayIcon (which releases the handle) and by
+        // ReleaseCurrentIcon.
+        private static string currentIconPath = "";
+
         public static void UpdateTrayIcon()
         {
             var settings = AppSettingsManager.Load();
             string iconPath = ResolveTrayIconPath(settings);
 
-            ReleaseCurrentIcon();
-            currentIconHandle = LoadImage(IntPtr.Zero, iconPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
+            // Only three icon files exist and most callers here (run start/stop, armed-count change,
+            // every settings save, profile switch — 20 sites) only change the TOOLTIP. Re-reading a
+            // 150-230 KB .ico from disk to hand Shell_NotifyIcon back the same image is pure waste.
+            // The IntPtr.Zero test also keeps the previous recovery behaviour: a failed load is
+            // retried on the next refresh instead of being cached as "already correct".
+            if (iconPath != currentIconPath || currentIconHandle == IntPtr.Zero)
+            {
+                ReleaseCurrentIcon();
+                currentIconHandle = LoadImage(IntPtr.Zero, iconPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
+                currentIconPath = currentIconHandle == IntPtr.Zero ? "" : iconPath;
+                notifyIcon.hIcon = currentIconHandle;
+            }
 
-            notifyIcon.hIcon = currentIconHandle;
             notifyIcon.szTip = ResolveTooltip(settings);
             Shell_NotifyIcon(NIM_MODIFY, ref notifyIcon);
         }
@@ -215,6 +230,9 @@ namespace TrueReplayer.Services
                 DestroyIcon(currentIconHandle);
                 currentIconHandle = IntPtr.Zero;
             }
+            // Keep the "which file is loaded" note in lockstep with the handle, so the next
+            // UpdateTrayIcon reloads instead of trusting a destroyed icon.
+            currentIconPath = "";
         }
 
         /// Callback invoked when user clicks "Exit" from the tray. Should return true if exit is allowed.

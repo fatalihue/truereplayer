@@ -39,6 +39,11 @@ namespace TrueReplayer.Services
         // (Task Manager) loses at most a second of progress. Mirrors the icon-cache debounce.
         private const int SaveDebounceMs = 1000;
 
+        // One instance each: JsonSerializerOptions is the type-metadata cache, so a fresh one per
+        // call rebuilds the CursorFile graph. Frozen on first use, so sharing is safe.
+        private static readonly JsonSerializerOptions ReadOptions = new() { PropertyNameCaseInsensitive = true };
+        private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
+
         private sealed class CursorFile
         {
             public Dictionary<string, int> Row { get; set; } = new();
@@ -70,8 +75,7 @@ namespace TrueReplayer.Services
                 {
                     var path = GetPath();
                     if (!File.Exists(path)) return;
-                    var parsed = JsonSerializer.Deserialize<CursorFile>(File.ReadAllText(path),
-                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    var parsed = JsonSerializer.Deserialize<CursorFile>(File.ReadAllText(path), ReadOptions);
                     if (parsed == null) return;
                     foreach (var kv in parsed.Row) if (kv.Value >= 0) _row[kv.Key] = kv.Value;
                     foreach (var kv in parsed.Cycle) if (kv.Value >= 0) _cycle[kv.Key] = kv.Value;
@@ -212,7 +216,7 @@ namespace TrueReplayer.Services
                     Cycle = new Dictionary<string, int>(_cycle, StringComparer.Ordinal),
                 };
                 FileHelper.WriteAllTextAtomic(GetPath(),
-                    JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+                    JsonSerializer.Serialize(payload, WriteOptions));
                 // Cleared only on SUCCESS: clearing up front would make a transient write failure
                 // (antivirus holding the temp file, disk full) drop the change silently, and the
                 // next Flush would think there was nothing to write.
