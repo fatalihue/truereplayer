@@ -854,12 +854,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       recording: isRecording,
       outdated: isOutdated,
     });
-    // Only the popup asks for status, so this fires when the user is actually looking at the
-    // badge — the one moment where waiting out a backed-off alarm is most likely to be wrong,
-    // because they have probably just started TrueReplayer. Reset the ramp and try now.
-    // The reset is awaited before connect(): if this failed attempt schedules the next alarm
-    // before the counter is cleared, the ramp survives the very reset that was meant to undo it.
-    if (!isBridgeReady) {
+    // POPUP ONLY (sender.tab is set for content scripts and absent for the popup — the same
+    // discriminator the RECORDING_TYPES gate above uses). Answering is safe for anyone; forcing a
+    // reconnect is not. content.js asks this on EVERY page load in EVERY frame to recover recording
+    // across navigations, and connect() there calls connectNative, which spawns
+    // TrueReplayer.NativeHost.exe (it retries the pipe and exits when the app is closed) once per
+    // navigation — and resetReconnectBackoff() wiped the ramp each time, so the 0.5→2 min
+    // exponential backoff never actually climbed.
+    //
+    // From the popup it stays right: the user is looking at the badge, which is the one moment
+    // where waiting out a backed-off alarm is most likely to be wrong, because they have probably
+    // just started TrueReplayer. The reset is awaited before connect(): if this failed attempt
+    // schedules the next alarm before the counter is cleared, the ramp survives the very reset
+    // that was meant to undo it.
+    if (!isBridgeReady && !sender.tab) {
       resetReconnectBackoff().then(() => {
         chrome.alarms.clear(RECONNECT_ALARM);
         connect();

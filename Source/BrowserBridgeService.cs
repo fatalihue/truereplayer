@@ -42,7 +42,14 @@ namespace TrueReplayer.Services
         // mid-recording), the overlay marker moved from a page-writable data attribute to a
         // closure-scoped WeakSet, the dead commandResult relay is gone, and reconnect backs off
         // instead of spawning a host process every 30 s forever with the app closed.
-        public const string ExpectedExtensionVersion = "1.4.15";
+        // 1.4.16 = finishes what 1.4.15's backoff started. getStatus still answers anyone, but only
+        // the POPUP may force a reconnect through it. A content script asks getStatus on every page
+        // load in every frame to recover recording across navigations, and the reconnect side effect
+        // there called connectNative — spawning TrueReplayer.NativeHost.exe once per navigation with
+        // the app closed — and reset the backoff counter each time, so the 0.5→2 min ramp never
+        // actually climbed. The gate is sender.tab, the same discriminator the recording-message
+        // check above it already uses.
+        public const string ExpectedExtensionVersion = "1.4.16";
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
         private NamedPipeServerStream? _pipeServer;
         private StreamReader? _reader;
