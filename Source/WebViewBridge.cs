@@ -1550,7 +1550,16 @@ namespace TrueReplayer
             // user drag-selects. This used to be a hand-managed bool that had to be cleared on
             // every exit path, including the early return below (a comment there recorded what
             // happened the time it was not). The scope releases itself.
-            using var interaction = Services.InteractionScope.Enter("automation capture overlay");
+            //
+            // The scope is keep-alive'd against the overlay's own STA thread rather than left on
+            // the default 5-minute deadline. A capture overlay is precisely the surface a user
+            // walks away from, and the sweep firing underneath a live one un-suppresses hotkeys
+            // while a full-screen click target is still up — see InteractionScope.Enter(keepAlive).
+            // Null until the thread is built below; the first deadline is minutes out, so the gap
+            // is never observed.
+            Thread? overlayThread = null;
+            using var interaction = Services.InteractionScope.Enter(
+                "automation capture overlay", () => overlayThread?.IsAlive == true);
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -1573,12 +1582,43 @@ namespace TrueReplayer
                 RegionSelectionResult? selection = null;
                 var thread = new Thread(() =>
                 {
-                    System.Windows.Forms.Application.EnableVisualStyles();
-                    using var overlay = new ScreenOverlayForm(screenshot);
-                    overlay.ShowDialog();
-                    selection = overlay.GetSelectionAsync().Result;
+                    // THE canonical overlay-thread body; the eight siblings in this file point
+                    // here. Two things it must do that the original did not:
+                    //
+                    // CATCH. This is not the main thread, so an exception escaping the delegate —
+                    // constructing the form on a display that just went away, anything inside
+                    // ShowDialog — is an unhandled exception on a non-main thread, and the CLR
+                    // takes the whole process down with it. Every other stage of this pipeline
+                    // logs and degrades (the screenshot failure above returns, a stale EditScope
+                    // announces itself); this was the single piece that could kill the app.
+                    // Swallowing it leaves `selection` null, which every caller below already
+                    // reads as "the user cancelled".
+                    //
+                    // Deliberately NOT re-nulling `selection` in the catch: the only statement
+                    // that can throw after it is assigned is the form's Dispose during unwinding,
+                    // and throwing away a good capture because a window failed to tear down
+                    // cleanly is the worse of the two trades.
+                    try
+                    {
+                        System.Windows.Forms.Application.EnableVisualStyles();
+                        using var overlay = new ScreenOverlayForm(screenshot);
+                        overlay.ShowDialog();
+                        selection = overlay.GetSelectionAsync().Result;
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Error("Automation capture overlay thread failed", ex);
+                    }
                 });
                 thread.SetApartmentState(ApartmentState.STA);
+                // BACKGROUND. A foreground thread keeps the process alive past
+                // Application.Current.Exit(), and the tray's Exit path calls exactly that without
+                // an Environment.Exit behind it. Quitting with an overlay open therefore left a
+                // dead app running behind a full-screen TopMost window with no tray icon to
+                // reach. The sibling STA helper in ProfileController.ShowFileDialogAsync sets
+                // this for the same reason.
+                thread.IsBackground = true;
+                overlayThread = thread;
                 thread.Start();
                 await Task.Run(() => thread.Join());
 
@@ -1593,8 +1633,36 @@ namespace TrueReplayer
                     return;
                 }
 
-                string newImagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, profileName);
-                selection.CroppedImage.Dispose();
+                // SaveReferenceImage does Directory.CreateDirectory + Image.Save, and both throw
+                // on a read-only or policy-redirected profile directory, a full disk, or a path
+                // the OS rejects. This method is fire-and-forget (`_ = HandleAutomationCapture...`),
+                // so an escaping exception became an unobserved task exception: no crash, no log,
+                // no toast. The user watched the app minimise, dragged a rectangle, watched it come
+                // back, and nothing happened.
+                //
+                // The reply matters as much as the log. automation:imageCaptured is what clears
+                // AutomationPanel's captureReqRef; without one on the failure path the panel waits
+                // forever for an answer that is never coming, and the capture button stays dead
+                // until the app restarts. Cancelled, not a silent drop.
+                //
+                // Dispose moved into a finally: it used to sit after the save, so the throw leaked
+                // the cropped bitmap's GDI handle on top of everything else.
+                string newImagePath;
+                try
+                {
+                    newImagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, profileName);
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticLog.Error($"Automation capture image save failed [profile='{profileName}']", ex);
+                    SendMessage("alert:show", new { message = $"Couldn't save the captured image: {ex.Message}", type = "error" });
+                    SendMessage("automation:imageCaptured", new { requestId, cancelled = true });
+                    return;
+                }
+                finally
+                {
+                    selection.CroppedImage.Dispose();
+                }
                 // Carry the base64 on the reply so the panel thumbnails the just-captured image
                 // immediately (the draft is seeded once per selection; automation:state won't re-stomp it).
                 SendMessage("automation:imageCaptured", new { requestId, cancelled = false, imagePath = newImagePath, imageBase64 = GetImageBase64Cached(profileName, newImagePath) });
@@ -2347,9 +2415,45 @@ namespace TrueReplayer
 
         private void HandleUIReady()
         {
-            // UI loaded successfully — cancel the watchdog timer
+            // UI loaded successfully — cancel the watchdog timer. Stays FIRST and unconditional:
+            // the deferral below must never be mistaken for an unresponsive UI.
             window.CancelUIWatchdog();
 
+            // React sends ui:ready the instant it mounts, which on a cold start beats the startup
+            // profile load. state:init REPLACES the frontend store wholesale (AppStateContext
+            // spreads initialState and then the payload), so projecting ProfileEntries at this
+            // instant made an empty sidebar — no hotkey chips, no automation badges — the app's
+            // first frame, corrected only by the profiles:updated push that lands afterwards.
+            //
+            // Deferring is safe precisely because the watchdog is already cancelled. The gate is
+            // completed on EVERY exit of the startup path, including its failure bails, because a
+            // gate that never opens would be a UI that never initialises.
+            //
+            // The body is re-evaluated at send time rather than captured: a snapshot taken here
+            // would be exactly the stale, empty projection this defers past.
+            var initialLoad = window.InitialDataLoaded;
+            if (!initialLoad.IsCompleted)
+            {
+                initialLoad.ContinueWith(
+                    _ => dispatcherQueue.TryEnqueue(SendInitialState),
+                    System.Threading.CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+                return;
+            }
+            // Every ui:ready after the first — UI reload, crash recovery, DevTools refresh — finds
+            // the gate already open and takes this synchronous path, so warm reloads are unchanged.
+            SendInitialState();
+        }
+
+        /// <summary>
+        /// The cold-start payload. Split out of <see cref="HandleUIReady"/> so it can be deferred
+        /// until the startup profile load has published <c>ProfileEntries</c>. Reads UI-thread
+        /// state (UserProfile.Current, ProfileEntries, actions, GetProfileOrder) and must therefore
+        /// run on the dispatcher.
+        /// </summary>
+        private void SendInitialState()
+        {
             // Send full state to React
             var profile = UserProfile.Current;
             SendMessage("state:init", new
@@ -4400,7 +4504,11 @@ namespace TrueReplayer
             // The only difference is what gets inserted at the end: {If, EndIf} pair
             // sharing the same ImagePath + Confidence the WaitImage flow stores, with
             // ConditionType set to "ImageFound" so the engine routes through InstantProbe.
-            using var interaction = Services.InteractionScope.Enter("insert If-Image overlay");
+            // Keep-alive'd against the overlay thread, same as every capture overlay in this file
+            // — see HandleAutomationCaptureImageAsync.
+            Thread? overlayThread = null;
+            using var interaction = Services.InteractionScope.Enter(
+                "insert If-Image overlay", () => overlayThread?.IsAlive == true);
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -4412,7 +4520,7 @@ namespace TrueReplayer
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[InsertIfImage] Screenshot failed: {ex.Message}");
+                DiagnosticLog.Error("Insert If-Image screenshot failed", ex);
                 NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
                 return;
             }
@@ -4422,12 +4530,25 @@ namespace TrueReplayer
                 RegionSelectionResult? selection = null;
                 var thread = new Thread(() =>
                 {
-                    System.Windows.Forms.Application.EnableVisualStyles();
-                    using var overlay = new ScreenOverlayForm(screenshot);
-                    overlay.ShowDialog();
-                    selection = overlay.GetSelectionAsync().Result;
+                    // Catch + IsBackground for the reasons written out on the overlay thread in
+                    // HandleAutomationCaptureImageAsync: an exception escaping a non-main thread
+                    // kills the process, and a foreground thread survives a tray Exit still
+                    // holding a full-screen TopMost window. A null `selection` reads as cancelled.
+                    try
+                    {
+                        System.Windows.Forms.Application.EnableVisualStyles();
+                        using var overlay = new ScreenOverlayForm(screenshot);
+                        overlay.ShowDialog();
+                        selection = overlay.GetSelectionAsync().Result;
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Error("Insert If-Image overlay thread failed", ex);
+                    }
                 });
                 thread.SetApartmentState(ApartmentState.STA);
+                thread.IsBackground = true;
+                overlayThread = thread;
                 thread.Start();
                 await Task.Run(() => thread.Join());
 
@@ -4439,8 +4560,28 @@ namespace TrueReplayer
                 // at. If the scope turns out to be stale below, this file is simply orphaned and
                 // ImageStorageService.CleanupOrphanImages removes it at the next startup — far
                 // cheaper than holding the bitmap to write it on the UI thread.
-                string imagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, StorageProfileName(scope.ProfileName));
-                selection.CroppedImage.Dispose();
+                //
+                // The save can genuinely fail — read-only or policy-redirected profile directory,
+                // full disk, over-long path — and this method is fire-and-forget, so an escaping
+                // exception used to vanish as an unobserved task exception: no row inserted, no
+                // log, no toast, after the user had already dragged a rectangle. Say so instead.
+                // Dispose is in the finally because the old placement (after the save) leaked the
+                // bitmap on exactly the path that already went wrong.
+                string imagePath;
+                try
+                {
+                    imagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, StorageProfileName(scope.ProfileName));
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticLog.Error($"Insert If-Image save failed [profile='{scope.ProfileName}']", ex);
+                    SendMessage("alert:show", new { message = $"Couldn't save the captured image, so no condition was inserted: {ex.Message}", type = "error" });
+                    return;
+                }
+                finally
+                {
+                    selection.CroppedImage.Dispose();
+                }
 
                 dispatcherQueue.TryEnqueue(() =>
                 {
@@ -4495,7 +4636,11 @@ namespace TrueReplayer
             // relative-coord translation. End result: {If(PixelColorMatch + coords + hex),
             // EndIf} pair inserted at insertIndex.
             var scope = Services.EditScope.Capture(CurrentProfileName);
-            using var interaction = Services.InteractionScope.Enter("insert If-Pixel overlay");
+            // Keep-alive'd against the overlay thread, same as every capture overlay in this file
+            // — see HandleAutomationCaptureImageAsync.
+            Thread? overlayThread = null;
+            using var interaction = Services.InteractionScope.Enter(
+                "insert If-Pixel overlay", () => overlayThread?.IsAlive == true);
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -4507,7 +4652,7 @@ namespace TrueReplayer
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[InsertIfPixel] Screenshot failed: {ex.Message}");
+                DiagnosticLog.Error("Insert If-Pixel screenshot failed", ex);
                 dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
                 return;
             }
@@ -4517,16 +4662,29 @@ namespace TrueReplayer
                 RegionSelectionResult? selection = null;
                 var thread = new Thread(() =>
                 {
-                    System.Windows.Forms.Application.EnableVisualStyles();
-                    using var overlay = new ScreenOverlayForm(
-                        screenshot,
-                        regionOnly: false,
-                        pointPick: true,
-                        hintText: "Click on the pixel to check — colour and coords are captured  •  ESC to cancel");
-                    overlay.ShowDialog();
-                    selection = overlay.GetSelectionAsync().Result;
+                    // Catch + IsBackground for the reasons written out on the overlay thread in
+                    // HandleAutomationCaptureImageAsync: an exception escaping a non-main thread
+                    // kills the process, and a foreground thread survives a tray Exit still
+                    // holding a full-screen TopMost window. A null `selection` reads as cancelled.
+                    try
+                    {
+                        System.Windows.Forms.Application.EnableVisualStyles();
+                        using var overlay = new ScreenOverlayForm(
+                            screenshot,
+                            regionOnly: false,
+                            pointPick: true,
+                            hintText: "Click on the pixel to check — colour and coords are captured  •  ESC to cancel");
+                        overlay.ShowDialog();
+                        selection = overlay.GetSelectionAsync().Result;
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Error("Insert If-Pixel overlay thread failed", ex);
+                    }
                 });
                 thread.SetApartmentState(ApartmentState.STA);
+                thread.IsBackground = true;
+                overlayThread = thread;
                 thread.Start();
                 await Task.Run(() => thread.Join());
 
@@ -4760,7 +4918,11 @@ namespace TrueReplayer
         private async Task HandleInsertWaitImageAsync(int insertIndex)
         {
             var scope = Services.EditScope.Capture(CurrentProfileName);
-            using var interaction = Services.InteractionScope.Enter("insert WaitImage overlay");
+            // Keep-alive'd against the overlay thread, same as every capture overlay in this file
+            // — see HandleAutomationCaptureImageAsync.
+            Thread? overlayThread = null;
+            using var interaction = Services.InteractionScope.Enter(
+                "insert WaitImage overlay", () => overlayThread?.IsAlive == true);
             // Minimize main window to get a clean screenshot
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
@@ -4773,7 +4935,7 @@ namespace TrueReplayer
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[WaitImage] Screenshot failed: {ex.Message}");
+                DiagnosticLog.Error("Insert WaitImage screenshot failed", ex);
                 NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
                 return;
             }
@@ -4785,12 +4947,25 @@ namespace TrueReplayer
                 // Run overlay on STA thread (WinForms requirement)
                 var thread = new Thread(() =>
                 {
-                    System.Windows.Forms.Application.EnableVisualStyles();
-                    using var overlay = new ScreenOverlayForm(screenshot);
-                    overlay.ShowDialog();
-                    selection = overlay.GetSelectionAsync().Result;
+                    // Catch + IsBackground for the reasons written out on the overlay thread in
+                    // HandleAutomationCaptureImageAsync: an exception escaping a non-main thread
+                    // kills the process, and a foreground thread survives a tray Exit still
+                    // holding a full-screen TopMost window. A null `selection` reads as cancelled.
+                    try
+                    {
+                        System.Windows.Forms.Application.EnableVisualStyles();
+                        using var overlay = new ScreenOverlayForm(screenshot);
+                        overlay.ShowDialog();
+                        selection = overlay.GetSelectionAsync().Result;
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Error("Insert WaitImage overlay thread failed", ex);
+                    }
                 });
                 thread.SetApartmentState(ApartmentState.STA);
+                thread.IsBackground = true;
+                overlayThread = thread;
                 thread.Start();
                 await Task.Run(() => thread.Join());
 
@@ -4802,9 +4977,28 @@ namespace TrueReplayer
 
                 if (selection?.CroppedImage == null) return; // Cancelled or region-only (no image)
 
-                // Save the cropped image under the SNAPSHOT profile (see the If-Image flow).
-                string imagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, StorageProfileName(scope.ProfileName));
-                selection.CroppedImage.Dispose();
+                // Save the cropped image under the SNAPSHOT profile (see the If-Image flow), and
+                // say so out loud when the write fails. Directory.CreateDirectory + Image.Save both
+                // throw on a read-only or redirected profile dir, a full disk or an over-long path,
+                // and this method is fire-and-forget — the exception used to disappear as an
+                // unobserved task exception, leaving the user with no row and no explanation after
+                // dragging a rectangle. Dispose moved into the finally so the failure path stops
+                // leaking the bitmap too.
+                string imagePath;
+                try
+                {
+                    imagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, StorageProfileName(scope.ProfileName));
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticLog.Error($"Insert WaitImage save failed [profile='{scope.ProfileName}']", ex);
+                    SendMessage("alert:show", new { message = $"Couldn't save the captured image, so no action was inserted: {ex.Message}", type = "error" });
+                    return;
+                }
+                finally
+                {
+                    selection.CroppedImage.Dispose();
+                }
 
                 // Insert the action
                 int delay = int.TryParse(CustomDelay, out var d) ? d : 100;
@@ -4862,7 +5056,11 @@ namespace TrueReplayer
             // means cancel" rule WaitImage already follows, so the grid never grows a
             // half-configured row from a discarded capture.
             var scope = Services.EditScope.Capture(CurrentProfileName);
-            using var interaction = Services.InteractionScope.Enter("insert WaitPixelColor overlay");
+            // Keep-alive'd against the overlay thread, same as every capture overlay in this file
+            // — see HandleAutomationCaptureImageAsync.
+            Thread? overlayThread = null;
+            using var interaction = Services.InteractionScope.Enter(
+                "insert WaitPixelColor overlay", () => overlayThread?.IsAlive == true);
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -4874,7 +5072,7 @@ namespace TrueReplayer
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[WaitPixelColor] Screenshot failed: {ex.Message}");
+                DiagnosticLog.Error("Insert WaitPixelColor screenshot failed", ex);
                 dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
                 return;
             }
@@ -4884,16 +5082,29 @@ namespace TrueReplayer
                 RegionSelectionResult? selection = null;
                 var thread = new Thread(() =>
                 {
-                    System.Windows.Forms.Application.EnableVisualStyles();
-                    using var overlay = new ScreenOverlayForm(
-                        screenshot,
-                        regionOnly: false,
-                        pointPick: true,
-                        hintText: "Click the pixel to watch — colour + coords captured  •  Scroll to zoom  •  ESC to cancel");
-                    overlay.ShowDialog();
-                    selection = overlay.GetSelectionAsync().Result;
+                    // Catch + IsBackground for the reasons written out on the overlay thread in
+                    // HandleAutomationCaptureImageAsync: an exception escaping a non-main thread
+                    // kills the process, and a foreground thread survives a tray Exit still
+                    // holding a full-screen TopMost window. A null `selection` reads as cancelled.
+                    try
+                    {
+                        System.Windows.Forms.Application.EnableVisualStyles();
+                        using var overlay = new ScreenOverlayForm(
+                            screenshot,
+                            regionOnly: false,
+                            pointPick: true,
+                            hintText: "Click the pixel to watch — colour + coords captured  •  Scroll to zoom  •  ESC to cancel");
+                        overlay.ShowDialog();
+                        selection = overlay.GetSelectionAsync().Result;
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Error("Insert WaitPixelColor overlay thread failed", ex);
+                    }
                 });
                 thread.SetApartmentState(ApartmentState.STA);
+                thread.IsBackground = true;
+                overlayThread = thread;
                 thread.Start();
                 await Task.Run(() => thread.Join());
 
@@ -4970,7 +5181,11 @@ namespace TrueReplayer
 
         private async Task HandleWaitImageRecaptureAsync(Services.EditScope scope)
         {
-            using var interaction = Services.InteractionScope.Enter("WaitImage recapture overlay");
+            // Keep-alive'd against the overlay thread, same as every capture overlay in this file
+            // — see HandleAutomationCaptureImageAsync.
+            Thread? overlayThread = null;
+            using var interaction = Services.InteractionScope.Enter(
+                "WaitImage recapture overlay", () => overlayThread?.IsAlive == true);
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -4982,7 +5197,7 @@ namespace TrueReplayer
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[WaitImage] Recapture screenshot failed: {ex.Message}");
+                DiagnosticLog.Error("WaitImage recapture screenshot failed", ex);
                 NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE);
                 return;
             }
@@ -4992,12 +5207,25 @@ namespace TrueReplayer
                 RegionSelectionResult? selection = null;
                 var thread = new Thread(() =>
                 {
-                    System.Windows.Forms.Application.EnableVisualStyles();
-                    using var overlay = new ScreenOverlayForm(screenshot);
-                    overlay.ShowDialog();
-                    selection = overlay.GetSelectionAsync().Result;
+                    // Catch + IsBackground for the reasons written out on the overlay thread in
+                    // HandleAutomationCaptureImageAsync: an exception escaping a non-main thread
+                    // kills the process, and a foreground thread survives a tray Exit still
+                    // holding a full-screen TopMost window. A null `selection` reads as cancelled.
+                    try
+                    {
+                        System.Windows.Forms.Application.EnableVisualStyles();
+                        using var overlay = new ScreenOverlayForm(screenshot);
+                        overlay.ShowDialog();
+                        selection = overlay.GetSelectionAsync().Result;
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Error("WaitImage recapture overlay thread failed", ex);
+                    }
                 });
                 thread.SetApartmentState(ApartmentState.STA);
+                thread.IsBackground = true;
+                overlayThread = thread;
                 thread.Start();
                 await Task.Run(() => thread.Join());
 
@@ -5011,8 +5239,27 @@ namespace TrueReplayer
                 // Keep the old PNG on disk so undo can restore the previous reference image.
                 // Orphan PNGs are cleaned at app startup by ImageStorageService.CleanupOrphanImages.
                 // Saved under the SNAPSHOT profile so it cannot land in another profile's dir.
-                string newImagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, StorageProfileName(scope.ProfileName));
-                selection.CroppedImage.Dispose();
+                //
+                // A failed save is announced rather than swallowed: this method is fire-and-forget,
+                // so the CreateDirectory/Save throw used to become an unobserved task exception and
+                // the row simply kept its OLD image with no hint that the recapture went nowhere —
+                // the worst shape of this bug, because the action still looks configured. Dispose
+                // sits in the finally so the failure path does not also leak the bitmap.
+                string newImagePath;
+                try
+                {
+                    newImagePath = ImageStorageService.SaveReferenceImage(selection.CroppedImage, StorageProfileName(scope.ProfileName));
+                }
+                catch (Exception ex)
+                {
+                    DiagnosticLog.Error($"WaitImage recapture save failed [profile='{scope.ProfileName}']", ex);
+                    SendMessage("alert:show", new { message = $"Couldn't save the recaptured image — the action still points at the old one: {ex.Message}", type = "error" });
+                    return;
+                }
+                finally
+                {
+                    selection.CroppedImage.Dispose();
+                }
 
                 dispatcherQueue.TryEnqueue(() =>
                 {
@@ -5181,7 +5428,13 @@ namespace TrueReplayer
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[WaitImage] Crop failed: {ex.Message}");
+                // Same silent-failure shape as the capture saves above, and the same reason it
+                // must not stay on Debug.WriteLine: that compiles out of Release, so the user's
+                // crop just did nothing and the session log — the only sensor a shipped build has
+                // — recorded nothing either. Its profile-addressed twin
+                // (HandleAutomationCropReference) already logs this properly.
+                DiagnosticLog.Warn($"Reference image crop failed [profile='{profileName}']: {ex.Message}");
+                SendMessage("alert:show", new { message = $"Couldn't save the cropped image: {ex.Message}", type = "error" });
                 return;
             }
 
@@ -5240,7 +5493,15 @@ namespace TrueReplayer
                 }
             }
 
-            using var interaction = Services.InteractionScope.Enter("position pick overlay");
+            // Keep-alive'd against the overlay thread (see HandleAutomationCaptureImageAsync). This
+            // handler is one of the three that most needs it: it writes back nothing but a
+            // coordinate, so there is no EditScope underneath to catch a bad result. If the scope
+            // were swept while the overlay is still up, an automation fire's injected click would
+            // land ON the point-pick overlay and COMMIT a pixel the user never chose — and the
+            // reply looks exactly like a deliberate pick.
+            Thread? overlayThread = null;
+            using var interaction = Services.InteractionScope.Enter(
+                "position pick overlay", () => overlayThread?.IsAlive == true);
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -5252,7 +5513,7 @@ namespace TrueReplayer
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[MousePick] Screenshot failed: {ex.Message}");
+                DiagnosticLog.Error("Position pick screenshot failed", ex);
                 dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
                 SendMessage("mouse:positionPicked", new { requestId, cancelled = true });
                 return;
@@ -5263,16 +5524,30 @@ namespace TrueReplayer
                 RegionSelectionResult? selection = null;
                 var thread = new Thread(() =>
                 {
-                    System.Windows.Forms.Application.EnableVisualStyles();
-                    using var overlay = new ScreenOverlayForm(
-                        screenshot,
-                        regionOnly: false,
-                        pointPick: true,
-                        hintText: "Click anywhere on screen to set X/Y  •  ESC to cancel");
-                    overlay.ShowDialog();
-                    selection = overlay.GetSelectionAsync().Result;
+                    // Catch + IsBackground for the reasons written out on the overlay thread in
+                    // HandleAutomationCaptureImageAsync: an exception escaping a non-main thread
+                    // kills the process, and a foreground thread survives a tray Exit still
+                    // holding a full-screen TopMost window. A null `selection` reads as cancelled,
+                    // which this handler answers with cancelled:true rather than silence.
+                    try
+                    {
+                        System.Windows.Forms.Application.EnableVisualStyles();
+                        using var overlay = new ScreenOverlayForm(
+                            screenshot,
+                            regionOnly: false,
+                            pointPick: true,
+                            hintText: "Click anywhere on screen to set X/Y  •  ESC to cancel");
+                        overlay.ShowDialog();
+                        selection = overlay.GetSelectionAsync().Result;
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Error("Position pick overlay thread failed", ex);
+                    }
                 });
                 thread.SetApartmentState(ApartmentState.STA);
+                thread.IsBackground = true;
+                overlayThread = thread;
                 thread.Start();
                 await Task.Run(() => thread.Join());
 
@@ -5329,7 +5604,14 @@ namespace TrueReplayer
             // translation the If/WaitPixelColor editors want.
             bool absolute = payload.TryGetProperty("absolute", out var absEl) && absEl.ValueKind == JsonValueKind.True;
 
-            using var interaction = Services.InteractionScope.Enter("pixel colour pick overlay");
+            // Keep-alive'd against the overlay thread (see HandleAutomationCaptureImageAsync).
+            // Coordinate-only, so no EditScope backs it — the same exposure as the position picker
+            // just above: a scope swept under a live point-pick overlay lets an automation's
+            // injected click commit a pixel, and nothing downstream can tell it apart from a
+            // deliberate one.
+            Thread? overlayThread = null;
+            using var interaction = Services.InteractionScope.Enter(
+                "pixel colour pick overlay", () => overlayThread?.IsAlive == true);
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -5341,7 +5623,7 @@ namespace TrueReplayer
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[PixelColorPick] Screenshot failed: {ex.Message}");
+                DiagnosticLog.Error("Pixel colour pick screenshot failed", ex);
                 dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
                 SendMessage("pixel:colorPicked", new { requestId, cancelled = true });
                 return;
@@ -5352,16 +5634,30 @@ namespace TrueReplayer
                 RegionSelectionResult? selection = null;
                 var thread = new Thread(() =>
                 {
-                    System.Windows.Forms.Application.EnableVisualStyles();
-                    using var overlay = new ScreenOverlayForm(
-                        screenshot,
-                        regionOnly: false,
-                        pointPick: true,
-                        hintText: "Click the pixel to watch — colour + coords captured  •  Scroll to zoom  •  ESC to cancel");
-                    overlay.ShowDialog();
-                    selection = overlay.GetSelectionAsync().Result;
+                    // Catch + IsBackground for the reasons written out on the overlay thread in
+                    // HandleAutomationCaptureImageAsync: an exception escaping a non-main thread
+                    // kills the process, and a foreground thread survives a tray Exit still
+                    // holding a full-screen TopMost window. A null `selection` reads as cancelled,
+                    // which this handler answers with cancelled:true rather than silence.
+                    try
+                    {
+                        System.Windows.Forms.Application.EnableVisualStyles();
+                        using var overlay = new ScreenOverlayForm(
+                            screenshot,
+                            regionOnly: false,
+                            pointPick: true,
+                            hintText: "Click the pixel to watch — colour + coords captured  •  Scroll to zoom  •  ESC to cancel");
+                        overlay.ShowDialog();
+                        selection = overlay.GetSelectionAsync().Result;
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Error("Pixel colour pick overlay thread failed", ex);
+                    }
                 });
                 thread.SetApartmentState(ApartmentState.STA);
+                thread.IsBackground = true;
+                overlayThread = thread;
                 thread.Start();
                 await Task.Run(() => thread.Join());
 
@@ -5459,8 +5755,13 @@ namespace TrueReplayer
             bool pointPick = false)
         {
             // One scope covers all three callers (search region, click area, click point) —
-            // they reach the overlay only through here.
-            using var interaction = Services.InteractionScope.Enter($"{logPrefix} region overlay");
+            // they reach the overlay only through here. Keep-alive'd against the overlay thread
+            // (see HandleAutomationCaptureImageAsync): none of the three has an EditScope behind
+            // it, they only hand a rect or a point back, so a scope swept under a live overlay
+            // lets an automation's injected clicks drag a rectangle the user never drew.
+            Thread? overlayThread = null;
+            using var interaction = Services.InteractionScope.Enter(
+                $"{logPrefix} region overlay", () => overlayThread?.IsAlive == true);
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -5472,7 +5773,7 @@ namespace TrueReplayer
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[{logPrefix}] Screenshot failed: {ex.Message}");
+                DiagnosticLog.Error($"{logPrefix} region picker screenshot failed", ex);
                 dispatcherQueue.TryEnqueue(() => NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_RESTORE));
                 return null;
             }
@@ -5483,15 +5784,29 @@ namespace TrueReplayer
                 var hint = initialRect.HasValue ? hintWhenSet : hintWhenEmpty;
                 var thread = new Thread(() =>
                 {
-                    System.Windows.Forms.Application.EnableVisualStyles();
-                    // pointPick: a single click returns a zero-size region at the click point
-                    // (ScreenX/ScreenY) — no rect drag. regionOnly stays true (no cropped image).
-                    using var overlay = new ScreenOverlayForm(
-                        screenshot, regionOnly: true, pointPick: pointPick, hintText: hint, initialRect: initialRect);
-                    overlay.ShowDialog();
-                    selection = overlay.GetSelectionAsync().Result;
+                    // Catch + IsBackground for the reasons written out on the overlay thread in
+                    // HandleAutomationCaptureImageAsync: an exception escaping a non-main thread
+                    // kills the process, and a foreground thread survives a tray Exit still
+                    // holding a full-screen TopMost window. A null `selection` is what this method
+                    // already returns for a cancel, so all three callers handle it unchanged.
+                    try
+                    {
+                        System.Windows.Forms.Application.EnableVisualStyles();
+                        // pointPick: a single click returns a zero-size region at the click point
+                        // (ScreenX/ScreenY) — no rect drag. regionOnly stays true (no cropped image).
+                        using var overlay = new ScreenOverlayForm(
+                            screenshot, regionOnly: true, pointPick: pointPick, hintText: hint, initialRect: initialRect);
+                        overlay.ShowDialog();
+                        selection = overlay.GetSelectionAsync().Result;
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Error($"{logPrefix} region picker overlay thread failed", ex);
+                    }
                 });
                 thread.SetApartmentState(ApartmentState.STA);
+                thread.IsBackground = true;
+                overlayThread = thread;
                 thread.Start();
                 await Task.Run(() => thread.Join());
 

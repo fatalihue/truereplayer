@@ -52,16 +52,25 @@ namespace TrueReplayer.Services
 
         private const int SweepIntervalMs = 30_000;
 
-        /// A scope that outlives this is a bug, not a slow user. Overlays are TopMost and
-        /// full-screen, dialogs are answered or abandoned; nothing legitimate sits here for five
-        /// minutes. Call sites that genuinely can (a file picker while the user browses a NAS)
-        /// pass their own.
+        /// A scope that outlives this is a bug, not a slow user — for surfaces the user cannot
+        /// walk away from. Dialogs are answered or abandoned; nothing legitimate sits here for
+        /// five minutes. Call sites that genuinely can pass their own: a file picker while the
+        /// user browses a NAS passes 20 minutes, and the screen-capture overlays pass a liveness
+        /// probe instead of a longer number — see <see cref="Enter(string, Func{bool}, TimeSpan?)"/>.
         private static readonly TimeSpan DefaultTtl = TimeSpan.FromMinutes(5);
 
         private sealed class Entry
         {
             public string Owner = "";
             public DateTime Deadline;
+
+            /// Renewal probe, or null for a plain deadline. See the keepAlive overload of Enter.
+            public Func<bool>? KeepAlive;
+
+            /// How far a successful probe pushes the deadline out. The scope's ORIGINAL ttl, not a
+            /// fixed number, so a renewed scope is still force-closed within one ttl of the probe
+            /// going false — renewal delays the backstop, it never disables it.
+            public TimeSpan Ttl;
         }
 
         /// <summary>True while at least one interaction scope is open. Bare field read.</summary>
@@ -96,7 +105,39 @@ namespace TrueReplayer.Services
         /// </summary>
         /// <param name="owner">Short name of the interaction, used by diagnostics and the sweep.</param>
         /// <param name="ttl">Override the default leak deadline. See <see cref="DefaultTtl"/>.</param>
-        public static IDisposable Enter(string owner, TimeSpan? ttl = null) => Open(owner, ttl, exclusive: false)!;
+        public static IDisposable Enter(string owner, TimeSpan? ttl = null) => Open(owner, ttl, null, exclusive: false)!;
+
+        /// <summary>
+        /// Opens a scope whose deadline RENEWS for as long as <paramref name="keepAlive"/> answers
+        /// true. For the screen-capture overlays, and the reason is a specific way the plain
+        /// deadline fails them.
+        ///
+        /// A region picker is exactly the surface that invites walking away — comparing two
+        /// screens, waiting for a game to load. The overlay is a plain WinForms window, so nothing
+        /// about it is protected: once the sweep force-closes the scope, <see cref="IsAnyOpen"/>
+        /// goes false and hotkey suppression clears WHILE THE OVERLAY IS STILL ON SCREEN. An armed
+        /// interval trigger then fires, switches profile and injects clicks through SendInput —
+        /// and those clicks land in the overlay. In point-pick mode that COMMITS a pixel the user
+        /// never chose; in region mode it drags a rectangle. The three pickers that only return a
+        /// coordinate (position pick, pixel pick, RunRegionPickerAsync) have no EditScope net
+        /// underneath them to catch the result, so the bad value is simply what the user gets.
+        ///
+        /// A longer flat ttl was the other candidate and is strictly worse: it weakens leak
+        /// detection for every overlay AND still eventually fires under a live one, so it trades a
+        /// certain harm for a rarer one. The probe keeps the safety net at full strength — an
+        /// overlay whose owner returned without disposing has a dead probe and is swept on exactly
+        /// the old schedule — while a live overlay is renewed for as long as it is genuinely up.
+        /// </summary>
+        /// <param name="keepAlive">
+        /// Called by the sweep, on a timer thread, only after the deadline has already passed —
+        /// never on the hot path. Must be cheap and must not block. True means "the thing this
+        /// scope describes is still on screen"; the overlay sites pass the STA thread's IsAlive,
+        /// which is true for precisely the window between Start() and the form closing. A probe
+        /// that throws counts as false: an un-closeable scope is the failure this whole class
+        /// exists to prevent.
+        /// </param>
+        public static IDisposable Enter(string owner, Func<bool> keepAlive, TimeSpan? ttl = null)
+            => Open(owner, ttl, keepAlive, exclusive: false)!;
 
         /// <summary>
         /// Opens a scope that also claims exclusivity: returns null when another EXCLUSIVE scope is
@@ -107,9 +148,9 @@ namespace TrueReplayer.Services
         /// Non-exclusive scopes never block this and are never blocked by it: an overlay being up
         /// does not make a picker illegal, it just makes both count.
         /// </summary>
-        public static IDisposable? EnterExclusive(string owner, TimeSpan? ttl = null) => Open(owner, ttl, exclusive: true);
+        public static IDisposable? EnterExclusive(string owner, TimeSpan? ttl = null) => Open(owner, ttl, null, exclusive: true);
 
-        private static IDisposable? Open(string owner, TimeSpan? ttl, bool exclusive)
+        private static IDisposable? Open(string owner, TimeSpan? ttl, Func<bool>? keepAlive, bool exclusive)
         {
             var token = new Token(exclusive);
             lock (_lock)
@@ -120,11 +161,14 @@ namespace TrueReplayer.Services
                     return null;
                 }
 
+                var effectiveTtl = ttl ?? DefaultTtl;
                 token.Id = ++_nextId;
                 _live[token.Id] = new Entry
                 {
                     Owner = string.IsNullOrEmpty(owner) ? "interaction" : owner,
-                    Deadline = DateTime.UtcNow + (ttl ?? DefaultTtl),
+                    Deadline = DateTime.UtcNow + effectiveTtl,
+                    KeepAlive = keepAlive,
+                    Ttl = effectiveTtl,
                 };
                 Volatile.Write(ref _count, _live.Count);
                 if (exclusive) { _exclusive = 1; _exclusiveOwner = _live[token.Id].Owner; }
@@ -150,33 +194,90 @@ namespace TrueReplayer.Services
         }
 
         /// <summary>
-        /// Force-closes scopes past their deadline. Every hit is a leak — a scope whose owner
-        /// returned without disposing — so it is logged as a warning naming the owner, which is the
-        /// only breadcrumb that will exist when someone reports "my hotkeys stopped working".
+        /// Force-closes scopes past their deadline, unless their keep-alive probe says the thing
+        /// they describe is still on screen. A hit with no probe, or a probe that answers false, is
+        /// a leak — a scope whose owner returned without disposing — so it is logged as a warning
+        /// naming the owner, the only breadcrumb that will exist when someone reports "my hotkeys
+        /// stopped working".
+        ///
+        /// Three phases, and the split is not stylistic. KeepAlive is a delegate handed in by a
+        /// caller: running it inside <see cref="_lock"/> would let any future probe that takes a
+        /// lock of its own deadlock the sweep, and a deadlocked sweep is a permanently stuck
+        /// suppression flag — the exact failure this class was written to end. Collect under the
+        /// lock, probe with nothing held, commit under the lock again.
         /// </summary>
         private static void Sweep()
         {
-            List<string>? expired = null;
+            List<(long Id, string Owner, Func<bool>? KeepAlive)>? due = null;
             lock (_lock)
             {
                 var now = DateTime.UtcNow;
-                List<long>? ids = null;
                 foreach (var kv in _live)
                 {
                     if (kv.Value.Deadline > now) continue;
-                    (ids ??= new()).Add(kv.Key);
-                    (expired ??= new()).Add(kv.Value.Owner);
+                    (due ??= new()).Add((kv.Key, kv.Value.Owner, kv.Value.KeepAlive));
                 }
-                if (ids == null) return;
-                foreach (var id in ids) _live.Remove(id);
+            }
+            if (due == null) return;
+
+            var verdicts = new List<(long Id, string Owner, bool Alive)>(due.Count);
+            foreach (var (id, owner, keepAlive) in due)
+            {
+                bool alive = false;
+                if (keepAlive != null)
+                {
+                    // A probe that throws is not evidence of life. Counting it as alive would give
+                    // the scope an unbounded lease off the back of a bug, which is the one outcome
+                    // worse than closing it early.
+                    try { alive = keepAlive(); }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog.Warn($"Interaction keep-alive probe for '{owner}' threw ({ex.Message}) — treating the scope as expired.");
+                    }
+                }
+                verdicts.Add((id, owner, alive));
+            }
+
+            List<string>? renewed = null;
+            List<string>? expired = null;
+            lock (_lock)
+            {
+                foreach (var (id, owner, alive) in verdicts)
+                {
+                    // Absent means Dispose won the race while we were probing. Skip it: writing a
+                    // fresh deadline for a missing id would resurrect a closed scope as a
+                    // permanent one, since nothing is left to dispose it a second time.
+                    if (!_live.TryGetValue(id, out var entry)) continue;
+                    if (alive)
+                    {
+                        entry.Deadline = DateTime.UtcNow + entry.Ttl;
+                        (renewed ??= new()).Add(owner);
+                        continue;
+                    }
+                    _live.Remove(id);
+                    (expired ??= new()).Add(owner);
+                }
                 Volatile.Write(ref _count, _live.Count);
                 // An exclusive scope that leaked would otherwise refuse every future exclusive
                 // claim for the life of the process — the same permanent-death failure the sweep
                 // exists to end, one level up.
                 if (_live.Count == 0) { _exclusive = 0; _exclusiveOwner = ""; }
             }
-            foreach (var owner in expired!)
-                DiagnosticLog.Warn($"Interaction scope '{owner}' expired and was force-closed — it was never disposed. Hotkeys are live again.");
+
+            if (renewed != null)
+            {
+                // Logged, not silent: "the user sat in the capture overlay for twenty minutes" is
+                // the explanation for a whole class of "my automation never fired" reports, and
+                // this line is the only place that fact is ever written down. At most one per
+                // scope per ttl, so it cannot flood the session log.
+                foreach (var owner in renewed)
+                    DiagnosticLog.Info($"Interaction scope '{owner}' passed its deadline but is still on screen — renewed. Hotkeys stay suppressed.");
+            }
+            if (expired != null)
+            {
+                foreach (var owner in expired)
+                    DiagnosticLog.Warn($"Interaction scope '{owner}' expired and was force-closed — it was never disposed. Hotkeys are live again.");
+            }
         }
 
         private sealed class Token : IDisposable
