@@ -158,18 +158,44 @@
     <Exec Command="cmd /c npm run build" WorkingDirectory="frontend" />
   </Target>
 
-  <!-- Copy React build output to wwwroot in binary output directory -->
+  <!-- Copy React build output to wwwroot in binary output directory.
+       Both copies below PRUNE first-class: Copy alone is purely additive, and Vite puts a content
+       hash in every asset filename, so each frontend change used to leave the PREVIOUS bundle
+       behind in wwwroot\assets forever — unreferenced by index.html but still copied into the
+       publish output and shipped. A single stale entry point is ~1 MB of dead JS in a release whose
+       whole delta is a couple of MB, and nothing ever noticed because the app works fine.
+
+       Delete-what's-missing rather than RemoveDir-then-recopy, deliberately: wiping the folder
+       would defeat SkipUnchangedFiles and re-copy the whole bundle on every build, including the
+       C#-only builds that BuildFrontend's incremental cache above exists to keep free. Pruning
+       after the copy (not before) means a failed copy leaves wwwroot complete-plus-stale rather
+       than incomplete. The stale set is disjoint from what was just written, so the order does not
+       change the result — only the failure mode. -->
   <Target Name="CopyFrontendDist" AfterTargets="Build" Condition="Exists('frontend\dist')">
     <ItemGroup>
       <FrontendFiles Include="frontend\dist\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(FrontendFiles)" DestinationFiles="@(FrontendFiles->'$(OutDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <ExpectedWwwroot Include="@(FrontendFiles->'$(OutDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" />
+      <ExistingWwwroot Include="$(OutDir)wwwroot\**\*" />
+      <StaleWwwroot Include="@(ExistingWwwroot)" Exclude="@(ExpectedWwwroot)" />
+    </ItemGroup>
+    <Message Text="Pruning %(StaleWwwroot.Identity) (no longer in frontend/dist)" Importance="high" Condition="'@(StaleWwwroot)' != ''" />
+    <Delete Files="@(StaleWwwroot)" />
   </Target>
   <Target Name="CopyFrontendDistPublish" AfterTargets="Publish" Condition="Exists('frontend\dist')">
     <ItemGroup>
       <FrontendFilesPublish Include="frontend\dist\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(FrontendFilesPublish)" DestinationFiles="@(FrontendFilesPublish->'$(PublishDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <ExpectedWwwrootPublish Include="@(FrontendFilesPublish->'$(PublishDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" />
+      <ExistingWwwrootPublish Include="$(PublishDir)wwwroot\**\*" />
+      <StaleWwwrootPublish Include="@(ExistingWwwrootPublish)" Exclude="@(ExpectedWwwrootPublish)" />
+    </ItemGroup>
+    <Message Text="Pruning %(StaleWwwrootPublish.Identity) from the publish payload (no longer in frontend/dist)" Importance="high" Condition="'@(StaleWwwrootPublish)' != ''" />
+    <Delete Files="@(StaleWwwrootPublish)" />
   </Target>
   <!-- Copy Chrome Extension files to output/publish for bundled distribution -->
   <Target Name="CopyChromeExtension" AfterTargets="Build">
