@@ -1820,6 +1820,12 @@ namespace TrueReplayer.Services
         private int _lockY = 0;
         private bool _restorePosition = false;
         private bool _restoreSize = false;
+        // One-shot latch for the relative-coordinate geometry-drift warning — see
+        // WarnRelativeGeometryDrift. Read on the mouse hot path (twice per click), so it is
+        // deliberately the FIRST term of the guard: once the warning has fired the whole check
+        // collapses to a single bool test. Cleared per RUN, not per sub-profile: a RunProfile
+        // called 200 times in a loop must not write 200 identical lines to the session log.
+        private bool _relGeometryDriftWarned;
 
         private bool _bringToFocus = false;
 
@@ -1972,6 +1978,7 @@ namespace TrueReplayer.Services
                 _rowFaulted = false;
                 _rowFaultReason = null;
                 _softFaultOverride = false;
+                _relGeometryDriftWarned = false;   // one geometry-drift notice per run
                 ResetRunReport();          // the report describes THIS run only
                 // Each run picks its browser tab afresh. Inheriting the previous run's tab would
                 // aim a macro at a page the user has since navigated away from.
@@ -3174,6 +3181,13 @@ namespace TrueReplayer.Services
         private IntPtr FindTargetWindow()
             => TrueReplayer.Helpers.WindowMatcher.FindWindow(_windowTarget, _windowTargetTitleRegex);
 
+        // Windows parks a minimised window at (-32000, -32000); GetWindowRect reports that
+        // instead of the real geometry, and a minimised window still passes IsWindowVisible so
+        // the matcher happily returns it. Anything at or left of this is a parking rect, not a
+        // measurement. Slack of 1000 px covers the parked width without reaching any real
+        // monitor — the leftmost secondary display in practice sits far to the right of -31000.
+        private const int MinimizedParkedLeft = -31000;
+
         /// <summary>
         /// Resolve the offset (window origin) that converts profile-space coordinates to
         /// absolute virtual-desktop coordinates. Used by every replay path that consumes
@@ -3194,9 +3208,111 @@ namespace TrueReplayer.Services
             var hwnd = FindTargetWindow();
             if (hwnd == IntPtr.Zero) return false;
             if (!NativeMethods.GetWindowRect(hwnd, out var rect)) return false;
+
+            // The translation below is exact only while the target is the SIZE it was recorded
+            // at — see WarnRelativeGeometryDrift for why, and for why this warns instead of
+            // rescaling. This is the one place that holds both numbers, so it is the only place
+            // the drift can be noticed at all. Cost on the mouse hot path when nothing is wrong:
+            // one already-false bool, three compares and two subtractions. No allocation, no
+            // log, no extra P/Invoke — the rect is the one GetWindowRect already returned.
+            //
+            // The Left test rejects the (-32000,-32000) parking rect of a MINIMISED window,
+            // which passes IsWindowVisible and would otherwise be measured as a ~160x28 window
+            // and reported as a massive shrink. Done inline rather than with IsIconic on
+            // purpose: an IsIconic call here would be a P/Invoke per mouse event. Because this
+            // path never latches, a genuinely drifted window still gets its one warning as
+            // soon as it is restored.
+            if (!_relGeometryDriftWarned && _lockWidth > 0 && _lockHeight > 0
+                && rect.Left > MinimizedParkedLeft
+                && (rect.Right - rect.Left != _lockWidth || rect.Bottom - rect.Top != _lockHeight))
+            {
+                WarnRelativeGeometryDrift(hwnd, rect);
+            }
+
             dx = rect.Left;
             dy = rect.Top;
             return true;
+        }
+
+        /// <summary>
+        /// Relative coordinates are stored as PHYSICAL-pixel offsets from the target window's
+        /// top-left with no record of the DPI they were measured at, and TryResolveRelativeOffset
+        /// replays them as a pure translation. Record with the target on a 150% laptop panel, drag
+        /// it to a 100% external monitor, and a per-monitor-aware app re-lays-out: a control that
+        /// sat 600 physical px from the left edge is now at 400. Every relative click misses by
+        /// ~33% and the run still reports success. The profile's captured window size
+        /// (_lockWidth/_lockHeight, i.e. UserProfile.WindowWidth/Height, stamped on the first
+        /// recorded click) is the only stamp available, so a size mismatch is the drift signal.
+        ///
+        /// WARN — do not rescale, do not refuse.
+        ///
+        /// Rescaling by the size ratio assumes the target's layout is proportional, and the
+        /// common targets aren't: fixed-size dialogs, toolbars that keep their pixel height while
+        /// only the content area grows, apps that don't re-layout at all, games rendering into a
+        /// fixed backbuffer. Worse, it would break the ordinary "the user resized the window"
+        /// case, where top-left-anchored coordinates are still exactly right today — silently
+        /// moving those clicks would be a regression manufactured out of a guess.
+        ///
+        /// Refusing (the ReportMissingTargetWindow idiom) fails the same test from the other
+        /// side. A missing window is unambiguous — there is nothing to click and every coordinate
+        /// is certainly wrong. A resized window is neither: resizing is routine, usually
+        /// deliberate, and usually harmless, so killing the run over it would strand every
+        /// profile whose target the user ever dragged an edge on.
+        ///
+        /// So: name it precisely, once per run, and keep going. The user decides whether to
+        /// re-record, add Restore Size, or ignore it.
+        ///
+        /// Known blind spot, stated rather than papered over: with Restore Size ON,
+        /// ApplyWindowGeometryAsync forces the target back to _lockWidth x _lockHeight PHYSICAL
+        /// pixels before the run. After a DPI move that makes the two numbers agree again while
+        /// the target's internal layout is still scaled differently — same physical box, more or
+        /// less content inside it — so the sizes match and this check stays quiet even though the
+        /// coordinates are still wrong. Closing that needs the capture DPI written into the
+        /// profile (which is what "no DPI stamp" means) and a scale-aware restore; the size
+        /// comparison here is what the data on disk can support today.
+        /// </summary>
+        private void WarnRelativeGeometryDrift(IntPtr hwnd, in NativeMethods.RECT rect)
+        {
+            _relGeometryDriftWarned = true;   // latch FIRST — this must never fire twice
+
+            int liveW = rect.Right - rect.Left;
+            int liveH = rect.Bottom - rect.Top;
+            if (liveW <= 0 || liveH <= 0) return;   // degenerate rect mid-teardown, not drift
+
+            var name = _windowTarget?.ProcessName ?? "target";
+            uint dpi = NativeMethods.GetDpiForWindowSafe(hwnd);
+            long pct = (long)Math.Round(dpi * 100.0 / 96.0);
+
+            double scaleX = (double)liveW / _lockWidth;
+            double scaleY = (double)liveH / _lockHeight;
+
+            // Both axes scaled by the same factor is the fingerprint of a DPI change; a hand
+            // resize practically never matches on both axes to within 2%. Worth separating,
+            // because the two cases need different advice: a DPI move breaks EVERY coordinate
+            // proportionally, while a plain resize only breaks the ones anchored away from the
+            // top-left corner (which is what the pure translation preserves).
+            bool uniform = Math.Abs(scaleX - scaleY) <= 0.02 && Math.Abs(scaleX - 1.0) > 0.02;
+
+            if (uniform)
+            {
+                DiagnosticLog.Warn(
+                    $"Relative coordinates are stale: target window '{name}' is {liveW}x{liveH} but this profile " +
+                    $"recorded it at {_lockWidth}x{_lockHeight}. Both axes scaled by {scaleX:0.###}x — the signature " +
+                    $"of a DPI change (the window now reports {dpi} DPI / {pct}% scaling). Stored offsets are physical " +
+                    $"pixels with no DPI stamp and are replayed as a plain translation, so every relative click is off " +
+                    $"by about {Math.Abs(1.0 - scaleX) * 100:0}%. Move the target back to the display it was recorded " +
+                    "on, or re-record it here — Restore Size will NOT fix this, it only forces the same physical box " +
+                    "at the new scaling. Continuing — the run is NOT being stopped or rescaled.");
+            }
+            else
+            {
+                DiagnosticLog.Warn(
+                    $"Relative coordinates may be stale: target window '{name}' is {liveW}x{liveH} but this profile " +
+                    $"recorded it at {_lockWidth}x{_lockHeight} (window now reports {dpi} DPI / {pct}% scaling). Offsets " +
+                    $"are replayed as a plain translation from the top-left, so coordinates anchored near the right or " +
+                    $"bottom edge are off by {liveW - _lockWidth}x{liveH - _lockHeight} px. Turn on Restore Size to pin " +
+                    "the window back to its recorded size. Continuing — the run is NOT being stopped or rescaled.");
+            }
         }
 
         /// <summary>
