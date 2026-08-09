@@ -637,123 +637,88 @@ namespace TrueReplayer.Controllers
                 .Where(f => !string.Equals(Path.GetFileName(f), "profile-order.json", StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
-            // Build into LOCALS, then swap in one synchronous block at the end of the loop.
-            // These four used to be cleared up front and filled inside the loop below, which
-            // awaits once per file — so for ~80 profiles the live collections sat empty, then
-            // partial, across ~80 yields to the message pump. Any reader that landed in that
-            // window saw a short list: the Automation panel polls automation:request every 2s
-            // and BuildAutomationStatePayload projects straight off ProfileEntries, which is
-            // why its list visibly vanished and came back whenever a save triggered a reload.
-            // Nothing may observe a partial rebuild, so the swap has to be atomic w.r.t. the
-            // pump — no await between Clear() and the last Add().
+            // Build into LOCALS, then swap in one synchronous block once every file is in.
+            // These four used to be cleared up front and filled inside the read loop — so for
+            // ~80 profiles the live collections sat empty, then partial, across ~80 yields to
+            // the message pump. Any reader that landed in that window saw a short list: the
+            // Automation panel polls automation:request every 2s and BuildAutomationStatePayload
+            // projects straight off ProfileEntries, which is why its list visibly vanished and
+            // came back whenever a save triggered a reload. Nothing may observe a partial
+            // rebuild, so the swap has to be atomic w.r.t. the pump — no await between Clear()
+            // and the last Add().
             var loadedEntries = new List<ProfileEntry>();
             var loadedTargets = new Dictionary<string, WindowTarget>();
             var loadedImages = new Dictionary<string, HashSet<string>>();
             var loadedFailures = new List<string>();
 
-            foreach (var file in files)
+            // Read and deserialize every profile OFF the dispatcher, several files at a time.
+            //
+            // The serial `await SettingsManager.LoadProfileAsync(file)` this replaces cost the SUM
+            // of ~81 file reads rather than the max, and every one of them was paid on the UI
+            // thread: Program.Main installs a DispatcherQueueSynchronizationContext as the
+            // process-wide default and that read carries no ConfigureAwait(false), so each
+            // continuation — the JSON parse plus both projection passes below — resumed on the
+            // dispatcher. On the startup path that is the very dispatcher that owes WebView2 its
+            // handshake inside the ui:ready watchdog's window, so the profile sweep was buying
+            // itself the reload the watchdog exists to perform.
+            //
+            // Task.Run is load-bearing here, not decoration: it is what makes LoadProfileAsync
+            // START on a pool thread. Called directly it would begin on the UI thread and capture
+            // that context at its own await, and no ConfigureAwait on THIS side can undo that —
+            // the await that would need annotating lives in SettingsManager.
+            //
+            // A fixed set of pumps draws indices off a shared counter instead of launching one
+            // task per file, because the folder lives under Documents, which is routinely
+            // OneDrive-backed: eighty simultaneous opens against a sync provider turns a fast
+            // local read into a hydration stampede. Results land in an index-keyed array — the
+            // workers share nothing writable, and the publish below is still plain file order,
+            // so a same-named collision resolves last-wins exactly as the serial loop did.
+            var results = new ProfileLoadResult?[files.Count];
+            if (files.Count > 0)
             {
-                try
+                int nextIndex = -1;
+                var pumps = new Task[Math.Min(files.Count, MaxConcurrentProfileReads)];
+                for (int w = 0; w < pumps.Length; w++)
                 {
-                    var name = Path.GetFileNameWithoutExtension(file);
-                    var profile = await SettingsManager.LoadProfileAsync(file);
-                    if (profile != null)
+                    pumps[w] = Task.Run(async () =>
                     {
-                        bool hasTarget = profile.TargetWindow != null
-                            && (!string.IsNullOrEmpty(profile.TargetWindow.ProcessName)
-                                || !string.IsNullOrEmpty(profile.TargetWindow.WindowTitle));
-
-                        // RunProfile refs this profile calls — free to collect here (the actions are
-                        // already loaded) and lets the Export dialog disclose which sub-profiles ride
-                        // along with a selection. Trimmed + non-empty + distinct ORDINAL, so a
-                        // case-differing ref stays a separate entry and resolves on its own, matching
-                        // the Ordinal lookup ExpandWithRunProfileDependenciesAsync uses when it
-                        // actually bundles them.
-                        var runRefs = profile.Actions
-                            .Where(a => string.Equals(a.ActionType, "RunProfile", StringComparison.OrdinalIgnoreCase))
-                            .Select(a => a.Key?.Trim())
-                            .Where(k => !string.IsNullOrEmpty(k))
-                            .Select(k => k!)
-                            .Distinct(StringComparer.Ordinal)
-                            .ToList();
-
-                        loadedEntries.Add(new ProfileEntry
-                        {
-                            Name = name,
-                            FilePath = file,
-                            Hotkey = profile.CustomHotkey,
-                            Hotstring = profile.CustomHotstring?.Sequence,
-                            HotstringInstant = profile.CustomHotstring?.Instant ?? false,
-                            HasWindowTarget = hasTarget,
-                            WindowTargetProcessName = profile.TargetWindow?.ProcessName,
-                            WindowTargetWindowTitle = profile.TargetWindow?.WindowTitle,
-                            WindowTargetTitleMatchMode = profile.TargetWindow?.TitleMatchMode ?? "contains",
-                            UseRelativeCoordinates = profile.UseRelativeCoordinates,
-                            BringToFocus = profile.BringToFocus,
-                            RestorePosition = profile.RestorePosition,
-                            RestoreSize = profile.RestoreSize,
-                            TriggerMode = profile.TriggerMode,
-                            IsDisabled = profile.IsDisabled,
-                            // Automation trigger mirror — TriggerService re-arms from this and the
-                            // Automation panel projects configs from it (no per-profile re-read).
-                            Triggers = profile.Triggers,
-                            // Mirror sharing metadata into the sidebar entry so the UI can render
-                            // icon/tags/version badges without re-reading the JSON. Null tags stays
-                            // null (don't coerce to empty list — the UI distinguishes "no tags set"
-                            // from "tags were set then all removed").
-                            Description = profile.Description,
-                            Tags = profile.Tags,
-                            IconEmoji = profile.IconEmoji,
-                            ProfileVersion = profile.ProfileVersion,
-                            CreatedAt = profile.CreatedAt,
-                            UpdatedAt = profile.UpdatedAt,
-                            AppMinVersion = profile.AppMinVersion,
-                            ActionCount = profile.Actions.Count,
-                            // null (not an empty list) when the profile calls nothing — keeps the
-                            // profiles:updated payload lean for the common no-RunProfile case.
-                            RunProfileTargets = runRefs.Count > 0 ? runRefs : null
-                        });
-
-                        if (hasTarget)
-                            loadedTargets[name] = profile.TargetWindow!;
-
-                        // Collect referenced PNG filenames for orphan-cleanup at startup.
-                        // IF rows with ConditionType="ImageFound" share the same per-profile
-                        // ImagePath storage as WaitImage — leaving them out of the reference
-                        // set causes the cleanup to delete the captured PNG and the Sheet
-                        // reopens with an empty thumbnail after the next restart.
-                        var refs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                        foreach (var a in profile.Actions)
-                        {
-                            if (string.IsNullOrEmpty(a.ImagePath)) continue;
-                            if (a.ActionType == "WaitImage"
-                                || (a.ActionType == "If" && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)))
-                            {
-                                refs.Add(a.ImagePath);
-                            }
-                        }
-                        // Automation image-watcher PNG lives OUTSIDE Actions — leaving it out
-                        // of the reference set makes this very cleanup delete it at the next
-                        // startup, silently killing the armed watcher.
-                        if (string.Equals(profile.Triggers?.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)
-                            && !string.IsNullOrEmpty(profile.Triggers?.ImagePath))
-                        {
-                            refs.Add(profile.Triggers!.ImagePath!);
-                        }
-                        loadedImages[ImageStorageService.GetSanitizedProfileFolder(name)] = refs;
-                    }
+                        int i;
+                        while ((i = Interlocked.Increment(ref nextIndex)) < files.Count)
+                            results[i] = await ReadOneProfileAsync(files[i]).ConfigureAwait(false);
+                    });
                 }
-                catch (Exception ex)
+
+                // Deliberately NOT ConfigureAwait(false): everything from here down publishes into
+                // ProfileEntries and arms the hooks, the automation daemon and the tray — all
+                // UI-thread state — so this is precisely where the work has to come back. It is
+                // also the only yield left in the method, where there used to be one per profile.
+                await Task.WhenAll(pumps);
+            }
+
+            foreach (var result in results)
+            {
+                // Only null if a pump never reached this slot, which Task.WhenAll would already
+                // have rethrown for. Kept so a future change to the pump can't turn that into a
+                // NullReferenceException halfway through the publish.
+                if (result == null) continue;
+
+                if (result.Failed)
                 {
-                    // Profile JSON is corrupt, has incompatible types, or otherwise can't be
-                    // deserialized. Record the name so the bridge can surface a single
-                    // user-visible alert listing all failed profiles ("3 profiles couldn't
-                    // load: foo, bar, baz") instead of letting the user discover the loss
-                    // by noticing missing entries.
-                    var failedName = Path.GetFileNameWithoutExtension(file);
-                    if (!string.IsNullOrEmpty(failedName)) loadedFailures.Add(failedName);
-                    DiagnosticLog.Error($"Profile load failed: '{failedName}' ({Path.GetFileName(file)})", ex);
+                    if (!string.IsNullOrEmpty(result.Name)) loadedFailures.Add(result.Name);
+                    continue;
                 }
+
+                // Deserialized to null — the file vanished between the enumeration and the read,
+                // or its contents were the literal `null`. Neither an entry nor a failure: the
+                // same silence the serial loop kept.
+                if (result.Entry == null) continue;
+
+                loadedEntries.Add(result.Entry);
+                if (result.Target != null) loadedTargets[result.Name] = result.Target;
+                // Sanitized here rather than inside the worker so the parallel pass calls into no
+                // other service and cannot be broken by one becoming thread-unsafe.
+                loadedImages[ImageStorageService.GetSanitizedProfileFolder(result.Name)] =
+                    result.ImageRefs ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             }
 
             // The swap. No await from here to the last Add(), so the pump never sees a
@@ -811,6 +776,149 @@ namespace TrueReplayer.Controllers
                     (skipped.Count > 0 ? $" Skipped (disabled w/ hotkey): {string.Join(", ", skipped)}." : ""));
             }
             catch (Exception ex) { DiagnosticLog.Info($"Hotkeys armed-summary log failed: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// How many profile files <see cref="LoadProfileListAsync"/> reads at once. The ceiling
+        /// that matters is I/O concurrency, not cores — each unit of work is one small file read
+        /// plus a JSON parse — and it is kept deliberately modest because the profile folder sits
+        /// under Documents, which is commonly redirected to OneDrive. Enough to collapse ~81
+        /// serial round trips into a handful of batches without stampeding a sync provider.
+        /// </summary>
+        private const int MaxConcurrentProfileReads = 8;
+
+        /// <summary>
+        /// Everything one profile file contributes to the list rebuild. Produced entirely off the
+        /// UI thread and published by the caller in file order, so the result is what the old
+        /// serial loop produced, entry for entry.
+        /// <para>
+        /// The three states are distinct on purpose: <see cref="Entry"/> non-null is a loaded
+        /// profile; <see cref="Failed"/> is a file that threw and must be named in the startup
+        /// toast; and neither set is a file that deserialized to null, which the serial loop
+        /// passed over in silence and which must keep doing so — reporting it would turn a
+        /// vanished temp file into a scary "profile couldn't load".
+        /// </para>
+        /// </summary>
+        private sealed class ProfileLoadResult
+        {
+            public string Name = "";
+            public ProfileEntry? Entry;
+            public WindowTarget? Target;
+            public HashSet<string>? ImageRefs;
+            public bool Failed;
+        }
+
+        /// <summary>
+        /// Reads and projects ONE profile file. Deliberately static and self-contained: it touches
+        /// no controller state, no collection anything else can see, and no other service, which
+        /// is what makes running several at a time safe. Never throws — a file that can't be read
+        /// or parsed comes back flagged, so one corrupt profile can't take the whole list with it.
+        /// </summary>
+        private static async Task<ProfileLoadResult> ReadOneProfileAsync(string file)
+        {
+            var name = Path.GetFileNameWithoutExtension(file);
+            try
+            {
+                var profile = await SettingsManager.LoadProfileAsync(file).ConfigureAwait(false);
+                if (profile == null) return new ProfileLoadResult { Name = name };
+
+                bool hasTarget = profile.TargetWindow != null
+                    && (!string.IsNullOrEmpty(profile.TargetWindow.ProcessName)
+                        || !string.IsNullOrEmpty(profile.TargetWindow.WindowTitle));
+
+                // RunProfile refs this profile calls — free to collect here (the actions are
+                // already loaded) and lets the Export dialog disclose which sub-profiles ride
+                // along with a selection. Trimmed + non-empty + distinct ORDINAL, so a
+                // case-differing ref stays a separate entry and resolves on its own, matching
+                // the Ordinal lookup ExpandWithRunProfileDependenciesAsync uses when it
+                // actually bundles them.
+                var runRefs = profile.Actions
+                    .Where(a => string.Equals(a.ActionType, "RunProfile", StringComparison.OrdinalIgnoreCase))
+                    .Select(a => a.Key?.Trim())
+                    .Where(k => !string.IsNullOrEmpty(k))
+                    .Select(k => k!)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+
+                var entry = new ProfileEntry
+                {
+                    Name = name,
+                    FilePath = file,
+                    Hotkey = profile.CustomHotkey,
+                    Hotstring = profile.CustomHotstring?.Sequence,
+                    HotstringInstant = profile.CustomHotstring?.Instant ?? false,
+                    HasWindowTarget = hasTarget,
+                    WindowTargetProcessName = profile.TargetWindow?.ProcessName,
+                    WindowTargetWindowTitle = profile.TargetWindow?.WindowTitle,
+                    WindowTargetTitleMatchMode = profile.TargetWindow?.TitleMatchMode ?? "contains",
+                    UseRelativeCoordinates = profile.UseRelativeCoordinates,
+                    BringToFocus = profile.BringToFocus,
+                    RestorePosition = profile.RestorePosition,
+                    RestoreSize = profile.RestoreSize,
+                    TriggerMode = profile.TriggerMode,
+                    IsDisabled = profile.IsDisabled,
+                    // Automation trigger mirror — TriggerService re-arms from this and the
+                    // Automation panel projects configs from it (no per-profile re-read).
+                    Triggers = profile.Triggers,
+                    // Mirror sharing metadata into the sidebar entry so the UI can render
+                    // icon/tags/version badges without re-reading the JSON. Null tags stays
+                    // null (don't coerce to empty list — the UI distinguishes "no tags set"
+                    // from "tags were set then all removed").
+                    Description = profile.Description,
+                    Tags = profile.Tags,
+                    IconEmoji = profile.IconEmoji,
+                    ProfileVersion = profile.ProfileVersion,
+                    CreatedAt = profile.CreatedAt,
+                    UpdatedAt = profile.UpdatedAt,
+                    AppMinVersion = profile.AppMinVersion,
+                    ActionCount = profile.Actions.Count,
+                    // null (not an empty list) when the profile calls nothing — keeps the
+                    // profiles:updated payload lean for the common no-RunProfile case.
+                    RunProfileTargets = runRefs.Count > 0 ? runRefs : null
+                };
+
+                // Collect referenced PNG filenames for orphan-cleanup at startup.
+                // IF rows with ConditionType="ImageFound" share the same per-profile
+                // ImagePath storage as WaitImage — leaving them out of the reference
+                // set causes the cleanup to delete the captured PNG and the Sheet
+                // reopens with an empty thumbnail after the next restart.
+                var refs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var a in profile.Actions)
+                {
+                    if (string.IsNullOrEmpty(a.ImagePath)) continue;
+                    if (a.ActionType == "WaitImage"
+                        || (a.ActionType == "If" && string.Equals(a.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        refs.Add(a.ImagePath);
+                    }
+                }
+                // Automation image-watcher PNG lives OUTSIDE Actions — leaving it out
+                // of the reference set makes this very cleanup delete it at the next
+                // startup, silently killing the armed watcher.
+                if (string.Equals(profile.Triggers?.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrEmpty(profile.Triggers?.ImagePath))
+                {
+                    refs.Add(profile.Triggers!.ImagePath!);
+                }
+
+                return new ProfileLoadResult
+                {
+                    Name = name,
+                    Entry = entry,
+                    Target = hasTarget ? profile.TargetWindow : null,
+                    ImageRefs = refs
+                };
+            }
+            catch (Exception ex)
+            {
+                // Profile JSON is corrupt, has incompatible types, or otherwise can't be
+                // deserialized. Record the name so the bridge can surface a single
+                // user-visible alert listing all failed profiles ("3 profiles couldn't
+                // load: foo, bar, baz") instead of letting the user discover the loss
+                // by noticing missing entries.
+                DiagnosticLog.Error($"Profile load failed: '{name}' ({Path.GetFileName(file)})", ex);
+                return new ProfileLoadResult { Name = name, Failed = true };
+            }
         }
 
         /// <summary>

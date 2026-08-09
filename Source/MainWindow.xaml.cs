@@ -53,10 +53,10 @@ namespace TrueReplayer
         // ---- ui:ready watchdog policy ------------------------------------------------------
         // This was a flat 5000 ms one-shot, and blowing it walked Reload → Navigate → process
         // restart in about fifteen seconds. A cold start can legitimately cost more than that:
-        // the startup path loads every profile on this same dispatcher (~81 of them for a real
-        // user, serially), and the first run after an update is also the run where antivirus
-        // scans the app-X.Y.Z folder Velopack just extracted. A merely slow machine was being
-        // diagnosed as a hung one and killed mid-load — the user sees an app that "won't open".
+        // the startup path builds the whole profile list (~81 files for a real user) and publishes
+        // it on this same dispatcher, and the first run after an update is also the run where
+        // antivirus scans the app-X.Y.Z folder Velopack just extracted. A merely slow machine was
+        // being diagnosed as a hung one and killed mid-load — an app that "won't open".
         //
         // Two changes make the deadline honest rather than merely bigger:
         //   1. The FIRST ui:ready of a process gets a cold-start allowance. Every load after one
@@ -70,8 +70,9 @@ namespace TrueReplayer
         //      exactly how long the UI thread was unavailable, and during that gap WebView2's
         //      handshake message could not have been serviced anyway. Crediting it back is what
         //      makes this "fires when nothing is progressing" instead of "fires on a clock".
-        //      (Startup's profile load is async and yields between files, so it shows up as many
-        //      small lags rather than one big one — hence the generous base grace as well.)
+        //      (The profile reads themselves now run on the pool, so what lands on the dispatcher
+        //      is the publish, the hook/daemon arming and the image sweep — fewer, chunkier lags
+        //      than the old file-by-file yielding, and the generous base grace still covers them.)
         private const int WatchdogTickMs = 1000;
         private const int FirstLoadReadyGraceMs = 20000;
         private const int ReloadReadyGraceMs = 8000;
@@ -91,6 +92,26 @@ namespace TrueReplayer
         // fired microseconds before ui:ready would reload a UI that had just come up fine.
         private int _watchdogEpoch = 0;
         private bool _uiReadyEverReceived = false;
+
+        // Opened exactly once, when the one-shot startup data load below finishes — on success,
+        // on failure, and on the bridge-is-null bail alike. A gate that never opens is a UI that
+        // never initialises, so every exit path of that lambda has to release it.
+        // RunContinuationsAsynchronously so completing it can never run a waiter's work inline on
+        // whichever thread happened to finish the load.
+        private readonly TaskCompletionSource<bool> _initialDataLoaded =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>
+        /// Completes when the startup data load has finished (or given up). Exists for the
+        /// bridge's ui:ready handler: React sends ui:ready the instant it mounts, which on a cold
+        /// start is well before the profile list exists, and state:init is a WHOLESALE reset of
+        /// the frontend store — so a projection taken at that instant ships an empty sidebar, no
+        /// hotkey chips and no automation badges as the app's first frame, corrected only by the
+        /// profiles:updated push that lands afterwards. Gating the projection on this makes the
+        /// first frame the real one. Already completed for every later ui:ready in the process,
+        /// so a UI reload or a crash recovery sees no deferral at all.
+        /// </summary>
+        public Task InitialDataLoaded => _initialDataLoaded.Task;
 
         // Level 3 (process restart) is the one recovery step that outlives the process, so its
         // budget has to outlive the process too. Every counter above is an instance field the
@@ -378,6 +399,10 @@ namespace TrueReplayer
                     "TrueReplayer couldn't start its UI because the Microsoft Edge WebView2 Runtime " +
                     "failed to initialize.\n\nInstall or repair the WebView2 Runtime, then restart TrueReplayer.",
                     "TrueReplayer", NativeMethods.MB_ICONERROR);
+                // No load will ever run from here, so nothing else would open the gate. Releasing
+                // it on a path where the UI is already dead costs nothing and keeps the invariant
+                // whole: InitialDataLoaded always completes.
+                _initialDataLoaded.TrySetResult(true);
                 return;
             }
 
@@ -632,16 +657,44 @@ namespace TrueReplayer
             // registration and the collision/failure toasts, so wrap the body and best-effort
             // surface the failure. bridge is also null-checked: it's assigned above, but a
             // failed wiring path could leave it null by the time this runs.
-            DispatcherQueue.TryEnqueue(async () =>
+            bool initialLoadQueued = DispatcherQueue.TryEnqueue(async () =>
             {
                 if (bridge == null)
                 {
                     Services.DiagnosticLog.Warn("Initial-data load skipped: bridge is null");
+                    _initialDataLoaded.TrySetResult(true);
                     return;
                 }
 
                 try
                 {
+                // The ACTIVE profile first, and on its own. This reads one fixed file
+                // (Profiles/profile.json) and touches neither ProfileEntries nor anything the
+                // list pass produces, yet it used to be sequenced strictly behind all ~80 of
+                // them — so the single most valuable thing in the first frame, the action grid
+                // of the profile the user was last in, waited on eighty files whose only job is
+                // to fill the sidebar.
+                //
+                // The reorder was checked, not assumed. The list pass reads no
+                // UserProfile.Current. ApplyGlobalSettings' one outward effect is
+                // TriggerService.SetGlobalEnabled, which was already seeded from the same
+                // appsettings value when the daemon was constructed above, so it early-returns
+                // in either order. Hotkey registration reads only ProfileEntries. What DOES
+                // need both halves is the tray tooltip — see below.
+                var defaultProfile = await SettingsManager.LoadProfileAsync();
+                if (defaultProfile != null)
+                {
+                    UserProfile.Current = defaultProfile;
+                    AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
+                    bridge.ApplyProfile(defaultProfile);
+                    bridge.PushProfileLoop();
+                }
+
+                // Belongs with the block above rather than after the sweep: it reports
+                // actions.Count, which ApplyProfile just filled, and the profile name — nothing
+                // from the list.
+                bridge.PushStatusBarUpdate();
+
                 await profileController.RefreshProfileListAsync(true);
 
                 // Sweep WaitImage PNGs that aren't referenced by any action across all profiles.
@@ -656,18 +709,13 @@ namespace TrueReplayer
                 RunCursorService.PruneMissingProfiles(
                     profileController.ProfileEntries.Select(p => p.Name).ToList());
 
-                var defaultProfile = await SettingsManager.LoadProfileAsync();
-                if (defaultProfile != null)
-                {
-                    UserProfile.Current = defaultProfile;
-                    AppSettingsManager.ApplyGlobalSettings(UserProfile.Current);
-                    bridge.ApplyProfile(defaultProfile);
-                    bridge.PushProfileLoop();
-                    TrayIconService.UpdateTrayIcon();
-                }
+                // The one item that genuinely needs BOTH halves, which is why it did not travel
+                // up with the profile it describes: ResolveTooltip reads
+                // UserProfile.Current.ProfileKeyEnabled *and* the daemon's armed-watcher count,
+                // and the watchers are armed by the list pass.
+                TrayIconService.UpdateTrayIcon();
 
                 bridge.PushProfilesUpdate();
-                bridge.PushStatusBarUpdate();
 
                 // Surface any profile.json files that failed to parse. Caught silently
                 // inside LoadProfileListAsync; if we don't tell the user, missing profiles
@@ -683,13 +731,18 @@ namespace TrueReplayer
                     bridge.SendMessage("alert:show", new { message = msg });
                 }
 
-                var hotkeys = profileController.GetProfileHotkeys();
-                InputHookManager.RegisterProfileHotkeys(hotkeys);
-                InputHookManager.RegisterProfileTriggerModes(profileController.GetProfileTriggerModes());
-
-                // Surface hotkey collisions detected during the GetProfileHotkeys pass.
-                // Two profiles bound to the same combo would otherwise silently fight
-                // (only one fires, which depends on Dictionary iteration order).
+                // Hotkeys and trigger modes are deliberately NOT re-registered here.
+                // LoadProfileListAsync arms both as the last thing it does, off the same
+                // ProfileEntries, and nothing between there and here mutates that collection —
+                // the second pass re-ran the whole collision analysis (a LINQ grouping that
+                // rewrites HotkeyConflict on every entry) only to hand InputHookManager a map
+                // identical to the one already installed. The toasts below are unaffected:
+                // GetProfileHotkeys is what fills _hotkeyCollisions and only
+                // GetAndClearHotkeyCollisions drains it, so what the controller's pass found is
+                // still sitting there waiting to be read.
+                //
+                // Two profiles bound to the same combo would otherwise silently fight (only one
+                // fires, and which one depends on Dictionary iteration order).
                 foreach (var msg in profileController.GetAndClearHotkeyCollisions())
                 {
                     bridge.SendMessage("alert:show", new { message = msg });
@@ -701,7 +754,24 @@ namespace TrueReplayer
                     try { bridge.SendMessage("alert:show", new { message = "Startup data couldn't load fully. Some profiles or hotkeys may be unavailable." }); }
                     catch { /* toast is best-effort — never let the failure handler throw */ }
                 }
+                finally
+                {
+                    // Release the ui:ready gate no matter how we got here. A partially loaded
+                    // list is still the truth about this session; a state:init that never
+                    // arrives is a frontend stuck on its empty defaults with nothing to
+                    // correct it.
+                    _initialDataLoaded.TrySetResult(true);
+                }
             });
+
+            // The queue refused the work — it is shutting down, or already drained. The lambda's
+            // finally will never run, so open the gate from here instead of leaving a waiter
+            // holding a promise nobody kept.
+            if (!initialLoadQueued)
+            {
+                Services.DiagnosticLog.Warn("Initial-data load was not queued: dispatcher refused the enqueue");
+                _initialDataLoaded.TrySetResult(true);
+            }
             }
             catch (Exception ex)
             {
@@ -710,6 +780,9 @@ namespace TrueReplayer
                     "TrueReplayer couldn't finish starting its UI.\n\nPlease restart TrueReplayer. " +
                     "If the problem persists, repair the Microsoft Edge WebView2 Runtime.",
                     "TrueReplayer", NativeMethods.MB_ICONERROR);
+                // Same reason as the enqueue guard: a throw before (or during) the enqueue leaves
+                // nothing that would ever complete it.
+                _initialDataLoaded.TrySetResult(true);
             }
         }
 
