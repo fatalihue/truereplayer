@@ -152,6 +152,13 @@ namespace TrueReplayer
         // an entry the user's PHYSICAL key put there (CapsLock→A while A is physically held),
         // and two FROM keys sharing one TO only remove the mirror when the LAST one lifts.
         private static readonly HashSet<int> _remapMirroredVks = new();
+        // FROM keys for which a TO-down was actually PUT ON THE WIRE. A pairing exists from the
+        // moment the down is swallowed, but the injection can still be skipped — a hotstring that
+        // consumes the logical key returns before InjectRemappedKey and sends its own backspaces
+        // and replacement text instead. Without this set the release injected a TO-up for a key
+        // that never went down: harmless on most targets, but it is an input event the app never
+        // asked for, emitted right after a hotstring expansion or a replay start.
+        private static readonly HashSet<int> _remapInjectedDowns = new();
 
         // FROM keys whose DOWN escaped RAW because a gate (a modal scope, IgnoreProfileHotkeys)
         // was up when it arrived: the foreground app is holding that key itself, so no pairing may
@@ -224,9 +231,12 @@ namespace TrueReplayer
         {
             foreach (var kv in _activeRemapDowns)
             {
-                if (kv.Value != 0) InjectRemappedKey(kv.Value, down: false);
+                // Same rule as CloseRemapPairing: only release what was actually injected.
+                if (kv.Value != 0 && _remapInjectedDowns.Contains(kv.Key))
+                    InjectRemappedKey(kv.Value, down: false);
             }
             _activeRemapDowns.Clear();
+            _remapInjectedDowns.Clear();
             foreach (var vk in _remapMirroredVks) _vkCodesCurrentlyDown.Remove(vk);
             _remapMirroredVks.Clear();
         }
@@ -239,10 +249,21 @@ namespace TrueReplayer
         {
             if (!_activeRemapDowns.TryGetValue(fromVk, out var toVk)) return;
             _activeRemapDowns.Remove(fromVk);
+            bool weInjectedTheDown = _remapInjectedDowns.Remove(fromVk);
             if (toVk == 0) return;
             if (_activeRemapDowns.ContainsValue(toVk)) return;   // another FROM still holds this TO
-            if (_remapMirroredVks.Remove(toVk)) _vkCodesCurrentlyDown.Remove(toVk);
-            InjectRemappedKey(toVk, down: false);
+            bool mirrorWasOurs = _remapMirroredVks.Remove(toVk);
+            if (mirrorWasOurs) _vkCodesCurrentlyDown.Remove(toVk);
+
+            // Two independent reasons to send nothing, both of which used to send a KEYUP anyway:
+            //
+            //  - We never put a down on the wire (a hotstring consumed the logical key), so there
+            //    is nothing outstanding to release.
+            //  - The mirror was not ours, which means the TO key was ALREADY physically held when
+            //    this pairing opened — "CapsLock→A" pressed while A is down under the user's own
+            //    finger. Releasing it there lifts a key the user is still holding, and the target
+            //    only recovers on A's next auto-repeat.
+            if (weInjectedTheDown && mirrorWasOurs) InjectRemappedKey(toVk, down: false);
         }
 
         // The AltGr phantom left Ctrl (full story in the filter inside KeyboardHookCallbackCore)
@@ -1131,7 +1152,10 @@ namespace TrueReplayer
                         if (!xConsumedByHotkey && xToVk != 0)
                         {
                             if (!ProcessHotstringKeyDown(xToVk))
+                            {
                                 InjectRemappedKey(xToVk, down: true);
+                                _remapInjectedDowns.Add(xVk);
+                            }
                         }
                         // Unchanged and deliberately outside every branch above: the paired UP
                         // must be consumed whatever happened to the down, or Windows synthesizes
@@ -2079,6 +2103,9 @@ namespace TrueReplayer
                             if (ProcessHotstringKeyDown(toVk))
                                 return (IntPtr)1;   // hotstring consumed the logical key — nothing to inject
                             InjectRemappedKey(toVk, down: true);
+                            // Recorded only here, on the path that actually reached SendInput, so
+                            // the release knows whether it has anything to undo.
+                            _remapInjectedDowns.Add(vkCode);
                         }
                         return (IntPtr)1;
                     }
@@ -2099,7 +2126,15 @@ namespace TrueReplayer
                 // vkCode (physical key) so modifier release order doesn't desync the set.
                 bool isRepeat = isDown && _vkCodesCurrentlyDown.Contains(vkCode);
                 if (isDown) _vkCodesCurrentlyDown.Add(vkCode);
-                else _vkCodesCurrentlyDown.Remove(vkCode);
+                // A physical release must NOT clear a chord entry that a remap pairing is
+                // mirroring. With "CapsLock→Ctrl" held, 0xA2 is in the set because we put it
+                // there; tapping the real Ctrl in the middle of that hold read as auto-repeat on
+                // the way down (the mirror is already in the set) and then took the mirror out on
+                // the way up, leaving _remapMirroredVks holding an entry the chord state no longer
+                // had. From there BuildComposedKey stopped seeing Ctrl and every Ctrl+X hotkey
+                // silently failed to compose for the rest of the hold. The mirror belongs to the
+                // pairing, so CloseRemapPairing is the only thing allowed to remove it.
+                else if (!_remapMirroredVks.Contains(vkCode)) _vkCodesCurrentlyDown.Remove(vkCode);
 
                 // Pause action resume: when a Pause action is awaiting, swallow the configured
                 // resume hotkey and fire the callback. ExecutePause clears the listener via finally.

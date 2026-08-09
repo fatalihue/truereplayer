@@ -670,6 +670,11 @@ namespace TrueReplayer.Services
             TriggerService.Instance?.Flush();
             TriggerService.Instance?.StopAll();
             InputHookManager.Stop();
+            // Put the original WndProc back before the process starts dying. This runs from
+            // Window_Closed, i.e. WHILE the window is being destroyed, so WM_DESTROY and
+            // WM_NCDESTROY are still to come — and with the subclass left installed they would
+            // re-enter a managed thunk after Environment.Exit(0) has begun tearing the CLR down.
+            Interop.HwndHookManager.RemoveHook();
             TrayIconService.RemoveTrayIcon();
             Microsoft.UI.Xaml.Application.Current.Exit();
             Environment.Exit(0);
