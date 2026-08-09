@@ -80,12 +80,18 @@ namespace TrueReplayer.Services
 
         /// <summary>
         /// One capture + one template match, optionally restricted to a search region.
+        ///
+        /// Public for callers that poll the SAME reference image many times and therefore hoist the
+        /// Bitmap→Mat conversion out of their loop (WaitForImageAsync above; the automation
+        /// daemon's ImageFound watcher). That conversion is a LockBits plus a BGRA→BGR CvtColor into
+        /// a freshly allocated native Mat, and the template cannot change while a loop is running.
+        /// One-shot callers should use the Bitmap overload above instead.
         /// </summary>
         /// <param name="reportUnusableRegion">
         /// Log a line when the search region can't be applied. The polling caller sets this on
         /// the first iteration only; single-shot callers always pass true.
         /// </param>
-        private static MatchResult MatchOnce(Mat templateMat, System.Drawing.Rectangle? searchRegion, bool reportUnusableRegion)
+        public static MatchResult MatchOnce(Mat templateMat, System.Drawing.Rectangle? searchRegion, bool reportUnusableRegion)
         {
             using var screenBitmap = ScreenCaptureService.CaptureVirtualScreen();
             using var screenMat = ScreenCaptureService.BitmapToMat(screenBitmap);

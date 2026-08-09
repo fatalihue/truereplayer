@@ -515,13 +515,37 @@ namespace TrueReplayer.Services
                 return;
             }
 
-            // The loop owns the reference bitmap: loaded after start, disposed in OUR
-            // finally — Reload() only cancels the CTS and never touches it (a Dispose from
+            // Everything below is resolved ONCE for the lifetime of the loop, because the loop owns
+            // an immutable snapshot of the config (rt.Config = d.Config.Clone() — a later edit
+            // restarts the loop instead of mutating it), so none of these can change between polls.
+            // ProbeCondition used to redo all of it on every tick — at a cadence the user can push
+            // down to 100 ms, and 250 ms by default on the pixel path.
+            //
+            // The loop owns the reference bitmap and its Mat: loaded after start, disposed in OUR
+            // finally — Reload() only cancels the CTS and never touches them (a Dispose from
             // the UI thread would race MatchOnce's LockBits on this thread).
             System.Drawing.Bitmap? refImage = null;
+            OpenCvSharp.Mat? templateMat = null;
+            // Lowercased once instead of per tick, and it is what the switch in ProbeCondition reads.
+            string? kind = cfg.ConditionType?.ToLowerInvariant();
+            // WindowOpen: CompileTitleRegex emits IL (RegexOptions.Compiled) — its own doc asks
+            // callers to cache the result when the target is reused across many calls.
+            Models.WindowTarget? windowTarget = null;
+            System.Text.RegularExpressions.Regex? titleRegex = null;
+            // PixelColorMatch: a Trim + 3 Substring + 3 Convert.ToInt32 per tick otherwise.
+            System.Drawing.Color? pixelColor = null;
             try
             {
-                if (string.Equals(cfg.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase))
+                if (kind == "windowopen")
+                {
+                    (windowTarget, titleRegex) = ActionReplayer.BuildWindowTarget(
+                        cfg.WindowProcessName, cfg.WindowTitle, cfg.WindowTitleMatchMode);
+                }
+                else if (kind == "pixelcolormatch")
+                {
+                    pixelColor = PixelColorService.ParseHex(cfg.PixelColor);
+                }
+                else if (kind == "imagefound")
                 {
                     refImage = string.IsNullOrEmpty(cfg.ImagePath)
                         ? null
@@ -533,13 +557,14 @@ namespace TrueReplayer.Services
                         NotifyStateChanged();
                         return;
                     }
+                    templateMat = ScreenCaptureService.BitmapToMat(refImage);
                 }
 
                 // Seed the edge state with an INITIAL probe: a condition that is already true
                 // when the loop starts is NOT an edge. Without this, every config edit (which
                 // restarts the loop) — or arming while the condition holds — auto-fired within
                 // one poll. Cooldown lives in TriggerStats so it also survives loop restarts.
-                bool wasTrue = ProbeCondition(cfg, refImage);
+                bool wasTrue = ProbeCondition(cfg, kind, windowTarget, titleRegex, pixelColor, templateMat);
                 rt.ConditionTrue = wasTrue;
                 if (wasTrue) NotifyStateChanged();
                 bool pending = false;
@@ -551,7 +576,7 @@ namespace TrueReplayer.Services
                 {
                     await Task.Delay(pollMs, ct);
 
-                    bool isTrue = ProbeCondition(cfg, refImage);
+                    bool isTrue = ProbeCondition(cfg, kind, windowTarget, titleRegex, pixelColor, templateMat);
                     if (isTrue != rt.ConditionTrue)
                     {
                         rt.ConditionTrue = isTrue;
@@ -615,6 +640,9 @@ namespace TrueReplayer.Services
             }
             finally
             {
+                // Mat before Bitmap: BitmapToMat copies the pixels, so the two are independent, but
+                // releasing the native buffer first keeps the ownership order obvious.
+                templateMat?.Dispose();
                 refImage?.Dispose();
             }
         }
@@ -748,19 +776,31 @@ namespace TrueReplayer.Services
 
         // Raw probes — reuse the app's static primitives; a probe error reads FALSE
         // (transition-only logging keeps DiagnosticLog off the per-poll path).
-        private bool ProbeCondition(ProfileTriggerConfig cfg, System.Drawing.Bitmap? refImage)
+        /// <remarks>
+        /// Everything after <paramref name="cfg"/> is precomputed ONCE by the caller's loop (see
+        /// RunConditionLoopAsync) because none of it can change between polls, and rebuilding a
+        /// compiled Regex / re-parsing a hex colour / re-converting the template bitmap on every
+        /// tick was pure waste on a path that runs 4-10x a second for as long as the watcher is
+        /// armed. Nulls are fine: a probe only ever reads the ones its own condition type needs.
+        /// </remarks>
+        private bool ProbeCondition(
+            ProfileTriggerConfig cfg,
+            string? kind,
+            Models.WindowTarget? windowTarget,
+            System.Text.RegularExpressions.Regex? titleRegex,
+            System.Drawing.Color? pixelColor,
+            OpenCvSharp.Mat? templateMat)
         {
             try
             {
-                switch (cfg.ConditionType?.ToLowerInvariant())
+                switch (kind)
                 {
                     case "windowopen":
                     {
-                        var (target, regex) = ActionReplayer.BuildWindowTarget(
-                            cfg.WindowProcessName, cfg.WindowTitle, cfg.WindowTitleMatchMode);
+                        if (windowTarget == null) return false;
                         if (cfg.WindowMatchForegroundOnly)
-                            return Helpers.WindowMatcher.Matches(NativeMethods.GetForegroundWindow(), target, regex);
-                        return Helpers.WindowMatcher.FindWindow(target, regex) != IntPtr.Zero;
+                            return Helpers.WindowMatcher.Matches(NativeMethods.GetForegroundWindow(), windowTarget, titleRegex);
+                        return Helpers.WindowMatcher.FindWindow(windowTarget, titleRegex) != IntPtr.Zero;
                     }
                     case "processrunning":
                     {
@@ -779,22 +819,24 @@ namespace TrueReplayer.Services
                             && (System.IO.File.Exists(cfg.FilePath) || System.IO.Directory.Exists(cfg.FilePath));
                     case "pixelcolormatch":
                     {
-                        var targetColor = PixelColorService.ParseHex(cfg.PixelColor);
-                        if (targetColor == null) return false;
+                        if (pixelColor == null) return false;
                         var sampled = PixelColorService.GetPixelAt(cfg.PixelX, cfg.PixelY);
                         return sampled != null
-                            && PixelColorService.MatchesWithinTolerance(sampled.Value, targetColor.Value, cfg.PixelTolerance);
+                            && PixelColorService.MatchesWithinTolerance(sampled.Value, pixelColor.Value, cfg.PixelTolerance);
                     }
                     case "imagefound":
                     {
-                        if (refImage == null) return false;
+                        if (templateMat == null) return false;
                         double confidence = Math.Min(0.99, cfg.ImageConfidence <= 0 ? 0.8 : cfg.ImageConfidence);
                         // Optional ROI — constrain the scan to a sub-rect (cheaper + fewer false
                         // positives for a background poll). Absolute coords; no offset translation.
                         System.Drawing.Rectangle? searchRegion = null;
                         if (cfg.SearchRegionW is int sw && cfg.SearchRegionH is int sh && sw > 0 && sh > 0)
                             searchRegion = new System.Drawing.Rectangle(cfg.SearchRegionX ?? 0, cfg.SearchRegionY ?? 0, sw, sh);
-                        return ImageMatchingService.MatchOnce(refImage, searchRegion).Score >= confidence;
+                        // Pre-converted template (see the loop): the Bitmap overload would redo the
+                        // LockBits + BGRA→BGR conversion into a fresh native Mat on every poll.
+                        return ImageMatchingService.MatchOnce(templateMat, searchRegion, reportUnusableRegion: true)
+                            .Score >= confidence;
                     }
                     default:
                         return false;
