@@ -737,7 +737,8 @@ namespace TrueReplayer.Controllers
             var map = GetProfileHotkeys();
             InputHookManager.RegisterProfileHotkeys(map);
             InputHookManager.RegisterProfileTriggerModes(GetProfileTriggerModes());
-            InputHookManager.RegisterProfileWindowTargets(GetProfileWindowTargets(), GetBringToFocusProfiles());
+            var windowTargets = GetProfileWindowTargets();
+            InputHookManager.RegisterProfileWindowTargets(windowTargets, GetBringToFocusProfiles());
             var hotstringMap = GetProfileHotstrings();
             InputHookManager.RegisterProfileHotstrings(hotstringMap);
 
@@ -756,7 +757,9 @@ namespace TrueReplayer.Controllers
             // load/change (low frequency), so it's safe for the disk-per-write logger.
             try
             {
-                var targets = GetProfileWindowTargets();
+                // Same snapshot the registration above used — rebuilding it here walked every
+                // profile against every folder a second time for a log line.
+                var targets = windowTargets;
                 string armed = map.Count == 0
                     ? "none"
                     : string.Join(", ", map.Select(kv =>
@@ -928,8 +931,29 @@ namespace TrueReplayer.Controllers
         /// changes (e.g. user moved profile into/out of a folder). Cheap (linear in
         /// ProfileEntries.Count), so PushProfilesUpdate refreshes before serializing.
         /// </summary>
+        /// <summary>
+        /// profile name → the FIRST folder in <c>_profileOrder.Folders</c> that lists it, i.e. exactly
+        /// what <c>Folders.FirstOrDefault(f =&gt; f.Items.Contains(name))</c> resolves to (first match
+        /// wins, ordinal comparison, matching List&lt;string&gt;.Contains).
+        ///
+        /// Built in ONE pass by the two callers that need folder membership for EVERY profile, which
+        /// were paying O(profiles × folders × items) per profile-list refresh — and a refresh runs on
+        /// every save, rename, delete, toggle, reorder and disk-watcher event. Deliberately a local
+        /// per-call map rather than controller state: nothing to invalidate, so no way for it to go
+        /// stale against the ~10 sites that mutate the order.
+        /// </summary>
+        private Dictionary<string, ProfileFolder> BuildFolderByProfileName()
+        {
+            var map = new Dictionary<string, ProfileFolder>(StringComparer.Ordinal);
+            foreach (var folder in _profileOrder.Folders)
+                foreach (var item in folder.Items)
+                    if (!map.ContainsKey(item)) map[item] = folder;
+            return map;
+        }
+
         public void PopulateEffectiveTargets()
         {
+            var folderByProfile = BuildFolderByProfileName();
             foreach (var entry in ProfileEntries)
             {
                 if (entry.HasWindowTarget)
@@ -947,7 +971,7 @@ namespace TrueReplayer.Controllers
                     continue;
                 }
 
-                var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(entry.Name));
+                folderByProfile.TryGetValue(entry.Name, out var folder);
                 var folderTarget = folder?.TargetWindow;
                 bool folderHasTarget = folderTarget != null
                     && (!string.IsNullOrEmpty(folderTarget.ProcessName) || !string.IsNullOrEmpty(folderTarget.WindowTitle));
@@ -1317,12 +1341,13 @@ namespace TrueReplayer.Controllers
         public Dictionary<string, WindowTarget> GetProfileWindowTargets()
         {
             var effective = new Dictionary<string, WindowTarget>(_cachedWindowTargets);
+            var folderByProfile = BuildFolderByProfileName();
 
             // Add folder-inherited targets for profiles without their own target
             foreach (var entry in ProfileEntries)
             {
                 if (effective.ContainsKey(entry.Name)) continue;
-                var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(entry.Name));
+                folderByProfile.TryGetValue(entry.Name, out var folder);
                 if (folder?.TargetWindow != null &&
                     (!string.IsNullOrEmpty(folder.TargetWindow.ProcessName) || !string.IsNullOrEmpty(folder.TargetWindow.WindowTitle)))
                 {
@@ -1519,6 +1544,7 @@ namespace TrueReplayer.Controllers
         public HashSet<string> GetBringToFocusProfiles()
         {
             var set = new HashSet<string>();
+            var folderByProfile = BuildFolderByProfileName();
             foreach (var entry in ProfileEntries)
             {
                 if (entry.IsDisabled) continue;
@@ -1531,7 +1557,7 @@ namespace TrueReplayer.Controllers
                 // Folder-inherited bring-to-focus
                 if (!entry.HasWindowTarget)
                 {
-                    var folder = _profileOrder.Folders.FirstOrDefault(f => f.Items.Contains(entry.Name));
+                    folderByProfile.TryGetValue(entry.Name, out var folder);
                     if (folder?.BringToFocus == true && folder.TargetWindow != null)
                         set.Add(entry.Name);
                 }

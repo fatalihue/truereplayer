@@ -11,6 +11,28 @@ namespace TrueReplayer.Services
 {
     public static class SettingsManager
     {
+        // JsonSerializerOptions IS the type-metadata cache in System.Text.Json, so a fresh
+        // instance per call rebuilds the whole UserProfile -> ObservableCollection<ActionItem>
+        // -> ActionItem reflection graph from scratch. LoadProfileAsync runs once PER FILE in
+        // ProfileController.LoadProfileListAsync (~80 profiles for a real user) and every
+        // RefreshProfileListAsync goes through it, so that was one metadata rebuild per profile
+        // per refresh. Options are frozen on first use, so sharing one instance is safe —
+        // ProfileController.OrderJsonOptions already does exactly this for profile-order.json.
+        private static readonly JsonSerializerOptions LoadOptions = new()
+        {
+            // The main store writes PascalCase; case-insensitive load lets the camelCase
+            // migration shims (e.g. ActionItem.sendPlainOnly → SendMode) bind, matches the
+            // import path, and tolerates a hand-edited profile with off-case keys.
+            PropertyNameCaseInsensitive = true,
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+        };
+
+        private static readonly JsonSerializerOptions SaveOptions = new()
+        {
+            WriteIndented = true,
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+        };
+
         private static string GetDefaultProfilePath()
         {
             string profileDir = Path.Combine(
@@ -43,17 +65,11 @@ namespace TrueReplayer.Services
             if (saveFix.HadFixups)
                 DiagnosticLog.Info($"[ConditionalBlocks] Save-time repair on '{Path.GetFileNameWithoutExtension(filePath)}': removed {saveFix.OrphansRemoved} orphan(s), appended {saveFix.EndIfsAppended} synthetic ENDIF(s)");
 
-            var options = new JsonSerializerOptions
-            {
-                WriteIndented = true,
-                TypeInfoResolver = new DefaultJsonTypeInfoResolver()
-            };
-
             var originalActions = profile.Actions;
             try
             {
                 profile.Actions = snapshot;
-                var json = JsonSerializer.Serialize(profile, options);
+                var json = JsonSerializer.Serialize(profile, SaveOptions);
                 await FileHelper.WriteAllTextAtomicAsync(filePath, json);
             }
             finally
@@ -193,20 +209,29 @@ namespace TrueReplayer.Services
 
             if (!File.Exists(filePath)) return null;  // Verifica se o arquivo existe
 
-            var options = new JsonSerializerOptions
-            {
-                // The main store writes PascalCase; case-insensitive load lets the camelCase
-                // migration shims (e.g. ActionItem.sendPlainOnly → SendMode) bind, matches the
-                // import path, and tolerates a hand-edited profile with off-case keys.
-                PropertyNameCaseInsensitive = true,
-                TypeInfoResolver = new DefaultJsonTypeInfoResolver()
-            };
-
             var json = await File.ReadAllTextAsync(filePath);  // Lê o arquivo de perfil
             // Raw-JSON migrations (LockPosition rename + pre-split RestoreSize inference). Both
             // gate on a key being absent, which only the undeserialized text can tell us.
-            json = MigrateProfileJson(json);
-            var profile = JsonSerializer.Deserialize<UserProfile>(json, options);
+            //
+            // MigrateProfileJson parses a whole JsonNode DOM to look for two legacy keys, so every
+            // profile was being parsed TWICE — a full DOM of the action array built and thrown away,
+            // once per file, ~80 times per profile-list refresh. Neither migration can apply to a
+            // file that already has RestoreSize and no LockPosition, which is every profile written
+            // since the split, so a substring test skips the DOM for the common case.
+            //
+            // Applied HERE and not inside MigrateProfileJson: profile.json is a single UserProfile
+            // object, so one test speaks for the whole file. The .trprofile import path shares that
+            // method with a multi-profile envelope where one entry can have the key and another not,
+            // and a whole-document substring test would be wrong there.
+            //
+            // Suffix matching ("ockPosition" / "estoreSize") so one test covers both the PascalCase
+            // profile.json spelling and a camelCase hand edit.
+            bool mayNeedMigration =
+                json.Contains("ockPosition", StringComparison.Ordinal) ||
+                !json.Contains("estoreSize", StringComparison.Ordinal);
+            if (mayNeedMigration)
+                json = MigrateProfileJson(json);
+            var profile = JsonSerializer.Deserialize<UserProfile>(json, LoadOptions);
             if (profile != null)
             {
                 MigrateActionIds(profile);     // Backfill stable Id for pre-2.2.6 actions
