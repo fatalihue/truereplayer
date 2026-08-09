@@ -209,8 +209,20 @@ namespace TrueReplayer.Services
             base.OnPaint(e);
             var g = e.Graphics;
 
-            // Draw screenshot as background
-            g.DrawImage(_screenshot, 0, 0);
+            // Draw screenshot as background, forced 1:1.
+            //
+            // The two-argument DrawImage(Image, int, int) is the ONLY resolution-dependent
+            // overload in GDI+: it draws at the image's "physical size", i.e. scaled by
+            // g.DpiX / _screenshot.HorizontalResolution. Every other draw of this same bitmap
+            // in this file passes GraphicsUnit.Pixel and is therefore unscaled, and so is
+            // everything that READS it — GetPixel in OnMouseDown/DrawMagnifier, the magnifier's
+            // srcRect, and the ScreenX/ScreenY the form finally reports (cursor point + virtual
+            // origin). If the two resolutions ever disagree the user would aim at a stretched
+            // background while the coordinate comes out of the unstretched bitmap, so the pick
+            // would be silently off by the DPI ratio. Pinning the background to pixels removes
+            // the possibility instead of relying on the DC and the bitmap both reporting 96.
+            g.DrawImage(_screenshot, new Rectangle(0, 0, _screenshot.Width, _screenshot.Height),
+                        new Rectangle(0, 0, _screenshot.Width, _screenshot.Height), GraphicsUnit.Pixel);
 
             // Dark overlay on entire screen
             using var overlay = new SolidBrush(Color.FromArgb(100, 0, 0, 0));
