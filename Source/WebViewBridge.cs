@@ -1558,8 +1558,20 @@ namespace TrueReplayer
             // Null until the thread is built below; the first deadline is minutes out, so the gap
             // is never observed.
             Thread? overlayThread = null;
-            using var interaction = Services.InteractionScope.Enter(
+            using var interaction = Services.InteractionScope.EnterExclusive(
                 "automation capture overlay", () => overlayThread?.IsAlive == true);
+            // Exclusive, and refusing costs nothing here: the scope is claimed BEFORE the window is
+            // minimised, so an early return leaves the app exactly as it was — no restore to get
+            // right, no bitmap allocated, no STA thread started. Two of these overlays stacked
+            // would be two full-screen TopMost windows showing the same screenshot with no way to
+            // tell which one a click answered. The frontend disabling its buttons while a request
+            // is in flight is what kept this unreachable; that is a UI-layer guard on a backend
+            // invariant, and it is not inherited by a second entry point.
+            if (interaction == null)
+            {
+                SendMessage("automation:imageCaptured", new { requestId, cancelled = true });
+                return;
+            }
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -4516,8 +4528,12 @@ namespace TrueReplayer
             // Keep-alive'd against the overlay thread, same as every capture overlay in this file
             // — see HandleAutomationCaptureImageAsync.
             Thread? overlayThread = null;
-            using var interaction = Services.InteractionScope.Enter(
+            using var interaction = Services.InteractionScope.EnterExclusive(
                 "insert If-Image overlay", () => overlayThread?.IsAlive == true);
+            // Refused — see HandleAutomationCaptureImageAsync for why this is exclusive and why an
+            // early return needs no cleanup. This handler reports nothing on failure (its
+            // screenshot-failure path just returns), so the refusal is silent to the UI too.
+            if (interaction == null) return;
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -4648,8 +4664,10 @@ namespace TrueReplayer
             // Keep-alive'd against the overlay thread, same as every capture overlay in this file
             // — see HandleAutomationCaptureImageAsync.
             Thread? overlayThread = null;
-            using var interaction = Services.InteractionScope.Enter(
+            using var interaction = Services.InteractionScope.EnterExclusive(
                 "insert If-Pixel overlay", () => overlayThread?.IsAlive == true);
+            // Refused — see HandleAutomationCaptureImageAsync.
+            if (interaction == null) return;
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -4930,8 +4948,10 @@ namespace TrueReplayer
             // Keep-alive'd against the overlay thread, same as every capture overlay in this file
             // — see HandleAutomationCaptureImageAsync.
             Thread? overlayThread = null;
-            using var interaction = Services.InteractionScope.Enter(
+            using var interaction = Services.InteractionScope.EnterExclusive(
                 "insert WaitImage overlay", () => overlayThread?.IsAlive == true);
+            // Refused — see HandleAutomationCaptureImageAsync.
+            if (interaction == null) return;
             // Minimize main window to get a clean screenshot
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
@@ -5068,8 +5088,12 @@ namespace TrueReplayer
             // Keep-alive'd against the overlay thread, same as every capture overlay in this file
             // — see HandleAutomationCaptureImageAsync.
             Thread? overlayThread = null;
-            using var interaction = Services.InteractionScope.Enter(
+            using var interaction = Services.InteractionScope.EnterExclusive(
                 "insert WaitPixelColor overlay", () => overlayThread?.IsAlive == true);
+            // Refused — see HandleAutomationCaptureImageAsync. The EditScope captured just above is
+            // simply dropped, which is what every other early return on this path already does: an
+            // uncommitted capture is a discarded undo snapshot, not a leak.
+            if (interaction == null) return;
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -5193,8 +5217,11 @@ namespace TrueReplayer
             // Keep-alive'd against the overlay thread, same as every capture overlay in this file
             // — see HandleAutomationCaptureImageAsync.
             Thread? overlayThread = null;
-            using var interaction = Services.InteractionScope.Enter(
+            using var interaction = Services.InteractionScope.EnterExclusive(
                 "WaitImage recapture overlay", () => overlayThread?.IsAlive == true);
+            // Refused — see HandleAutomationCaptureImageAsync. The caller's EditScope is dropped
+            // uncommitted, same as this handler's own screenshot-failure path.
+            if (interaction == null) return;
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -5509,8 +5536,16 @@ namespace TrueReplayer
             // land ON the point-pick overlay and COMMIT a pixel the user never chose — and the
             // reply looks exactly like a deliberate pick.
             Thread? overlayThread = null;
-            using var interaction = Services.InteractionScope.Enter(
+            using var interaction = Services.InteractionScope.EnterExclusive(
                 "position pick overlay", () => overlayThread?.IsAlive == true);
+            // Refused — see HandleAutomationCaptureImageAsync. This is one of the three handlers
+            // that writes back nothing but a coordinate, so the reply MUST go out: a request the
+            // frontend never hears back from leaves its pick button disabled forever.
+            if (interaction == null)
+            {
+                SendMessage("mouse:positionPicked", new { requestId, cancelled = true });
+                return;
+            }
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -5619,8 +5654,15 @@ namespace TrueReplayer
             // injected click commit a pixel, and nothing downstream can tell it apart from a
             // deliberate one.
             Thread? overlayThread = null;
-            using var interaction = Services.InteractionScope.Enter(
+            using var interaction = Services.InteractionScope.EnterExclusive(
                 "pixel colour pick overlay", () => overlayThread?.IsAlive == true);
+            // Refused — see HandleAutomationCaptureImageAsync. Reply required for the same reason
+            // as the position pick: the frontend is waiting on this requestId.
+            if (interaction == null)
+            {
+                SendMessage("pixel:colorPicked", new { requestId, cancelled = true });
+                return;
+            }
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);
@@ -5769,8 +5811,12 @@ namespace TrueReplayer
             // it, they only hand a rect or a point back, so a scope swept under a live overlay
             // lets an automation's injected clicks drag a rectangle the user never drew.
             Thread? overlayThread = null;
-            using var interaction = Services.InteractionScope.Enter(
+            using var interaction = Services.InteractionScope.EnterExclusive(
                 $"{logPrefix} region overlay", () => overlayThread?.IsAlive == true);
+            // Refused — see HandleAutomationCaptureImageAsync. null is this method's own
+            // "cancelled" answer, identical to Esc and to a failed screenshot, so every caller
+            // already handles it.
+            if (interaction == null) return null;
             var mainHwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             NativeMethods.ShowWindow(mainHwnd, NativeMethods.SW_MINIMIZE);
             await Task.Delay(400);

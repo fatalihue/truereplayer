@@ -140,6 +140,26 @@ namespace TrueReplayer.Services
             => Open(owner, ttl, keepAlive, exclusive: false)!;
 
         /// <summary>
+        /// Both at once: claims exclusivity AND renews against a liveness probe. Returns null when
+        /// another exclusive scope is already open, exactly like <see cref="EnterExclusive(string, TimeSpan?)"/>.
+        /// </summary>
+        /// <remarks>
+        /// This is what the screen-capture overlays need. The exclusivity argument is the same one
+        /// written out for the file picker: two full-screen TopMost windows showing the same
+        /// screenshot, stacked, with no way for the user to tell which one their click answered —
+        /// and each holding a bitmap of the entire virtual desktop. The keep-alive argument is the
+        /// one above. Neither substitutes for the other, and until this overload existed the sites
+        /// had to pick one.
+        ///
+        /// The protection they had instead lived in the frontend, which disables the pick buttons
+        /// while a request is in flight. That works, and it is why this was never reachable — but
+        /// it is a backend invariant defended in the UI layer, which is the wrong place for it: a
+        /// second entry point (a command, a hotkey, a future caller) would not inherit it.
+        /// </remarks>
+        public static IDisposable? EnterExclusive(string owner, Func<bool> keepAlive, TimeSpan? ttl = null)
+            => Open(owner, ttl, keepAlive, exclusive: true);
+
+        /// <summary>
         /// Opens a scope that also claims exclusivity: returns null when another EXCLUSIVE scope is
         /// already open, and the caller must then take its own cancel path without showing
         /// anything. For surfaces where a second instance is not merely redundant but harmful —

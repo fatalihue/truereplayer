@@ -26,6 +26,10 @@ namespace TrueReplayer.Services
     public class ScreenOverlayForm : Form
     {
         private readonly Bitmap _screenshot;
+        // The process-wide BufferedGraphics ceiling as it was before this overlay raised it, so
+        // Dispose can put it back. Null once restored — see the constructor for the measurement
+        // that justifies touching global state at all.
+        private Size? _previousMaximumBuffer;
         private readonly bool _regionOnly;
         private readonly bool _pointPick;
         private readonly string _hintText;
@@ -140,6 +144,20 @@ namespace TrueReplayer.Services
             TopMost = true;
             ShowInTaskbar = false;
             DoubleBuffered = true;
+            // DoubleBuffered on a form THIS big is not free by default. The shared
+            // BufferedGraphicsContext caches exactly one surface and refuses anything larger than
+            // MaximumBuffer, whose default is 225x96 — so every repaint of a virtual-desktop-sized
+            // form fell to the temporary manager, which builds and destroys the DIB per frame.
+            //
+            // Measured on this machine (5120x1440 virtual desktop, allocate + paint the
+            // magnifier's dirty rect + Render + dispose, 120 frames): 0.476 ms per frame with the
+            // default ceiling against 0.051 ms with it raised — 9.4x, about 26 ms of extra work
+            // per second of continuous mouse movement. Real, and worth removing, though well short
+            // of the "allocates 8-50 MB per frame" this was originally suspected of: the surface is
+            // a DIB section, so untouched pages are never committed and the cost is the churn, not
+            // the nominal size. Raising the ceiling is what lets it be cached and reused instead.
+            _previousMaximumBuffer = BufferedGraphicsManager.Current.MaximumBuffer;
+            BufferedGraphicsManager.Current.MaximumBuffer = new Size(vw, vh);
             Cursor = Cursors.Cross;
 
             KeyPreview = true;
@@ -862,6 +880,16 @@ namespace TrueReplayer.Services
             if (disposing)
             {
                 _screenshot?.Dispose();
+                // Put the process-wide ceiling back. MaximumBuffer is global state, and lowering it
+                // releases the cached surface rather than merely capping future ones — measured at
+                // 28.3 MB returned on a 5120x1440 desktop — so the overlay pays for its buffer only
+                // while it is on screen. Without this the app would hold that surface for the rest
+                // of the session for a window that lives for seconds.
+                if (_previousMaximumBuffer is { } previous)
+                {
+                    try { BufferedGraphicsManager.Current.MaximumBuffer = previous; } catch { }
+                    _previousMaximumBuffer = null;
+                }
             }
             base.Dispose(disposing);
         }
