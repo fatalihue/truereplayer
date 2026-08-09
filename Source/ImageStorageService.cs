@@ -4,6 +4,8 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
+// ExternalException — the base GDI+ failure type Bitmap can surface for a damaged image.
+using System.Runtime.InteropServices;
 
 namespace TrueReplayer.Services
 {
@@ -85,7 +87,31 @@ namespace TrueReplayer.Services
 
             string filename = $"wait-{Guid.NewGuid():N}.png";
             string fullPath = Path.Combine(dir, filename);
-            image.Save(fullPath, ImageFormat.Png);
+
+            // Write to a temp file and rename, instead of encoding straight into the final path.
+            // Bitmap.Save streams the PNG out incrementally, so a process death partway through —
+            // a Velopack update restarting the app, a crash, a full disk — used to leave a
+            // TRUNCATED file sitting at the exact name an action already references. That file then
+            // exists (File.Exists is true, so no caller treats it as missing) but cannot be decoded,
+            // which is how LoadReferenceImage came to throw where its callers expected null. The
+            // rename is the same temp+rename pattern FileHelper already gives profile writes; reuse
+            // its retry so an antivirus scan of the freshly-written temp doesn't fail the save.
+            //
+            // The temp deliberately ends in ".png" so CleanupOrphanImages' startup sweep reaps any
+            // leftover as an unreferenced image, and deliberately does NOT use the "wait-" prefix so
+            // a half-written file can never be mistaken for a live reference by a human reading the
+            // folder.
+            string tempPath = Path.Combine(dir, $"partial-{Guid.NewGuid():N}.png");
+            try
+            {
+                image.Save(tempPath, ImageFormat.Png);
+                FileHelper.MoveAtomic(tempPath, fullPath);
+            }
+            catch
+            {
+                try { File.Delete(tempPath); } catch { }
+                throw;
+            }
             return filename;
         }
 
@@ -97,12 +123,38 @@ namespace TrueReplayer.Services
             if (!TryResolveImageFile(profileName, imagePath, out string fullPath)) return null;
             if (!File.Exists(fullPath)) return null;
 
-            // Load into a detached bitmap: System.Drawing.Bitmap keeps a reference to its
-            // backing stream for its lifetime, so copy into an independent Bitmap before the
-            // MemoryStream is disposed — otherwise later pixel access / Save throws GDI+ errors.
-            using var stream = new MemoryStream(File.ReadAllBytes(fullPath));
-            using var loaded = new Bitmap(stream);
-            return new Bitmap(loaded);
+            // Every caller — WaitImage and If-ImageFound in ActionExecution, the image-condition
+            // watcher in TriggerService, the crop/test handlers in WebViewBridge — reads null as
+            // "no usable reference image" and has a policy for it (WaitImage's is the OnTimeout
+            // policy its comment already promises to apply to a PNG that is "missing/unreadable").
+            // The method is even declared Bitmap?. But an undecodable file used to come out as a
+            // THROW, not a null: GDI+ answers a truncated or non-PNG stream with ArgumentException,
+            // and — a long-standing quirk, not a real allocation failure — with OutOfMemoryException
+            // for image data it cannot parse. Neither ever reached the null branch, so the
+            // "unreadable" half of that promise did not exist; the exception escaped into the replay
+            // loop instead. Fail the way the callers were written for, and log so the file can be
+            // found and re-captured.
+            //
+            // The read itself (File.ReadAllBytes) is included: a locked or vanished file is the same
+            // "no usable image" answer, and racing File.Exists above cannot rule it out.
+            try
+            {
+                // Load into a detached bitmap: System.Drawing.Bitmap keeps a reference to its
+                // backing stream for its lifetime, so copy into an independent Bitmap before the
+                // MemoryStream is disposed — otherwise later pixel access / Save throws GDI+ errors.
+                using var stream = new MemoryStream(File.ReadAllBytes(fullPath));
+                using var loaded = new Bitmap(stream);
+                return new Bitmap(loaded);
+            }
+            catch (Exception ex) when (ex is ArgumentException
+                                    || ex is OutOfMemoryException
+                                    || ex is IOException
+                                    || ex is UnauthorizedAccessException
+                                    || ex is ExternalException)
+            {
+                try { DiagnosticLog.Info($"[Images] Reference image '{fullPath}' could not be decoded ({ex.GetType().Name}: {ex.Message}) — treated as missing. Truncated by an interrupted save, or not a PNG; re-capture it."); } catch { }
+                return null;
+            }
         }
 
         /// <summary>
@@ -317,6 +369,42 @@ namespace TrueReplayer.Services
         {
             foreach (char c in Path.GetInvalidFileNameChars())
                 name = name.Replace(c, '_');
+
+            // '.' and ' ' are NOT in Path.GetInvalidFileNameChars(), so "." and ".." come through
+            // the loop completely untouched — and this is the ONLY guard the folder name ever gets.
+            // TryResolveImageFile's containment check protects the FILE name; every caller of
+            // GetImageDirectory (SaveReferenceImage, CloneReferenceImage, RenameProfileDirectory,
+            // DeleteProfileDirectory, GetSanitizedProfileFolder) feeds the folder straight into
+            // Path.Combine with no check of its own. Verified against the real APIs:
+            //   Combine(...\Images, "..")  -> %LocalAppData%\TrueReplayer
+            //   Combine(...\Images, ".")   -> %LocalAppData%\TrueReplayer\Images
+            //   Combine(...\Images, "")    -> %LocalAppData%\TrueReplayer\Images
+            //   Combine(...\Images, "   ") -> %LocalAppData%\TrueReplayer\Images\  (spaces stripped)
+            // so DeleteProfileDirectory("..") is Directory.Delete(recursive: true) on the entire
+            // app-local root — WebView2 data, Logs, Images, run cursors, automation stats,
+            // appsettings, remaps — and "." / "" / "   " wipe the whole Images tree.
+            //
+            // ProfileNameValidator.IsSafe rejects "." and "..", so this is NOT reachable from an
+            // imported .trprofile (import also always writes entry.Name + ".json"). But the
+            // validator does not OWN this path, and its own comment claims coverage it cannot give:
+            // a file literally named "...json" dropped into the Profiles directory by a zip
+            // extraction, a cloud-sync artefact or a manual copy is perfectly legal on NTFS (no
+            // trailing dot, no invalid char), matches LoadProfileListAsync's "*.json" enumeration,
+            // and Path.GetFileNameWithoutExtension splits at the LAST dot — yielding "..". The
+            // "..json" and ".json" variants yield "." and "" the same way. Those names reach the
+            // sidebar without ever passing through the validator, and deleting the phantom profile
+            // is what pulls the trigger. Neutralize at the folder boundary, where it belongs.
+            //
+            // Only names with NO substantive content are rewritten — everything that keeps at least
+            // one non-dot, non-space character is returned byte-identical. That is deliberate: the
+            // on-disk folder key must stay exactly what previous versions wrote, or
+            // CleanupOrphanImages stops matching existing folders and deletes every reference PNG
+            // the user has. (The degenerate names do collide with each other — "" and "." both map
+            // to "_" — which is fine: none of them should exist, and sharing one junk folder is not
+            // in the same universe as erasing LocalAppData.)
+            if (name.TrimEnd('.', ' ').Length == 0)
+                name = name.Length == 0 ? "_" : name.Replace('.', '_').Replace(' ', '_');
+
             return name;
         }
     }

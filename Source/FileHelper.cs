@@ -24,6 +24,24 @@ namespace TrueReplayer.Services
         private const int MoveRetryAttempts = 8;
         private const int MoveRetryInitialDelayMs = 30;
 
+        /// <summary>
+        /// True for the File.Move failures no amount of waiting can fix, so the backoff loop below
+        /// must let them through on the FIRST attempt.
+        ///
+        /// PathTooLongException and DirectoryNotFoundException both derive from IOException, which
+        /// means the plain "ex is IOException" filter used to swallow them into the retry loop and
+        /// burn the whole 30/60/120/…/1920 ms ladder — ~3.8 s — before rethrowing, and then blame
+        /// antivirus in the log. That is merely slow for one save; it is fatal for an import, which
+        /// runs this once per entry: a 50 MB envelope of over-long names turned into an hours-long
+        /// hang with a misleading diagnostic. Neither exception describes a lock — the path is
+        /// impossible (past MAX_PATH) or its directory does not exist — so there is nothing to
+        /// outlast. FileNotFoundException is deliberately NOT listed: a vanished temp file is a
+        /// different failure with a different owner, and folding it in here would change behaviour
+        /// this guard has no business changing.
+        /// </summary>
+        private static bool IsPermanentPathFailure(Exception ex)
+            => ex is PathTooLongException || ex is DirectoryNotFoundException;
+
         private static void MoveWithRetry(string tempPath, string filePath)
         {
             int delay = MoveRetryInitialDelayMs;
@@ -33,6 +51,13 @@ namespace TrueReplayer.Services
                 {
                     File.Move(tempPath, filePath, overwrite: true);
                     return;
+                }
+                // MUST stay above the transient filter — both of its exception types are
+                // IOException subclasses, so whichever catch is written first wins.
+                catch (Exception ex) when (IsPermanentPathFailure(ex))
+                {
+                    DiagnosticLog.Info($"[FileHelper] Move to '{filePath}' failed permanently ({ex.GetType().Name}: {ex.Message}). Not retried — the path itself is unusable (past MAX_PATH, or its directory is gone), so backing off would only postpone the same failure.");
+                    throw;
                 }
                 catch (Exception ex) when (ex is UnauthorizedAccessException || ex is IOException)
                 {
@@ -57,6 +82,13 @@ namespace TrueReplayer.Services
                     File.Move(tempPath, filePath, overwrite: true);
                     return;
                 }
+                // MUST stay above the transient filter — both of its exception types are
+                // IOException subclasses, so whichever catch is written first wins.
+                catch (Exception ex) when (IsPermanentPathFailure(ex))
+                {
+                    DiagnosticLog.Info($"[FileHelper] Move to '{filePath}' failed permanently ({ex.GetType().Name}: {ex.Message}). Not retried — the path itself is unusable (past MAX_PATH, or its directory is gone), so backing off would only postpone the same failure.");
+                    throw;
+                }
                 catch (Exception ex) when (ex is UnauthorizedAccessException || ex is IOException)
                 {
                     // On every attempt EXCEPT the last, we back off and retry. On the last
@@ -73,6 +105,16 @@ namespace TrueReplayer.Services
                 }
             }
         }
+
+        /// <summary>
+        /// Renames a caller-produced temp file over its final path, with the same transient-lock
+        /// backoff the atomic text writers use. Exposed because not every atomic write goes through
+        /// WriteAllTextAtomic: ImageStorageService hands its temp path to GDI+ Bitmap.Save and only
+        /// needs the rename half. A bare File.Move there would reintroduce exactly the antivirus /
+        /// indexer / cloud-sync lock this class exists to absorb — on a file the scanner has *just*
+        /// seen appear, which is the worst case for it.
+        /// </summary>
+        public static void MoveAtomic(string tempPath, string filePath) => MoveWithRetry(tempPath, filePath);
 
         /// <summary>
         /// Writes content to a file atomically by first writing to a temp file,
