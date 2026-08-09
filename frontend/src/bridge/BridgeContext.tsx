@@ -1,4 +1,4 @@
-import { createContext, useContext, useCallback, useEffect, useRef } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { OutgoingMessage, IncomingMessage } from './messageTypes';
 
@@ -88,8 +88,13 @@ export function BridgeProvider({ children }: { children: ReactNode }) {
     send({ type: 'ui:ready', payload: {} });
   }, [send]);
 
+  // Both members are stable useCallbacks, so memoising makes the context value permanently stable —
+  // an object literal here would invalidate every consumer of useBridge on any re-render of this
+  // provider, and this is the context that sits above the whole app.
+  const value = useMemo(() => ({ send, subscribe }), [send, subscribe]);
+
   return (
-    <BridgeContext.Provider value={{ send, subscribe }}>
+    <BridgeContext.Provider value={value}>
       {children}
     </BridgeContext.Provider>
   );

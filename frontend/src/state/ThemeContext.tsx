@@ -84,32 +84,57 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => mql.removeEventListener('change', sync);
   }, [config.uiSettings.matchSystemTheme, config.uiSettings.darkPresetId, config.uiSettings.lightPresetId]);
 
-  // Apply theme to DOM, persist, and notify C# bridge whenever config changes
+  // Apply theme to the DOM. Stays SYNCHRONOUS and undebounced — this is the live preview, and it
+  // is one cssText write (see applyThemeConfig), so it is not what the split below is about.
   useEffect(() => {
     applyThemeConfig(resolvedColors, config.uiSettings);
-    saveThemeConfig(config);
+  }, [config.uiSettings, resolvedColors]);
 
-    // Send theme colors to C# for native dialog styling
-    try {
-      const webview = (window as any).chrome?.webview;
-      if (webview) {
-        webview.postMessage({
-          type: 'theme:colors',
-          payload: {
-            bgSurface: resolvedColors['bg-surface'],
-            bgCard: resolvedColors['bg-card'],
-            textPrimary: resolvedColors['text-primary'],
-            textSecondary: resolvedColors['text-secondary'],
-            accentSolid: resolvedColors['accent-solid'],
-            borderSubtle: resolvedColors['border-subtle'],
-          },
-        });
+  // Persist, and notify C# for native dialog styling — both DEBOUNCED.
+  //
+  // saveThemeConfig is a JSON.stringify + a synchronous localStorage write, and every Theme Editor
+  // slider (the three HSL channels, font size, radius, row height, zoom, and the wheel-over-slider
+  // handler) calls setUISetting/setColorOverride on each input tick. Dragging one slider therefore
+  // meant ~60-120 blocking writes per second, plus a postMessage across the WebView boundary each
+  // time, for a value the user is still in the middle of choosing.
+  useEffect(() => {
+    const flush = () => {
+      saveThemeConfig(config);
+
+      try {
+        const webview = (window as any).chrome?.webview;
+        if (webview) {
+          webview.postMessage({
+            type: 'theme:colors',
+            payload: {
+              bgSurface: resolvedColors['bg-surface'],
+              bgCard: resolvedColors['bg-card'],
+              textPrimary: resolvedColors['text-primary'],
+              textSecondary: resolvedColors['text-secondary'],
+              accentSolid: resolvedColors['accent-solid'],
+              borderSubtle: resolvedColors['border-subtle'],
+            },
+          });
+        }
+      } catch (err) {
+        // Usually just "WebView not available" in dev mode, but log so a real push failure to C#
+        // isn't completely invisible.
+        console.debug('[Theme] push colors to C# failed:', err);
       }
-    } catch (err) {
-      // Usually just "WebView not available" in dev mode, but log so a real push failure to C#
-      // isn't completely invisible.
-      console.debug('[Theme] push colors to C# failed:', err);
-    }
+    };
+
+    const timer = setTimeout(flush, 200);
+    // A change made less than the debounce before the window goes away must NOT be lost. pagehide
+    // is the reliable one in Chromium (beforeunload can be skipped); both are harmless if the
+    // timeout already ran, since flush is idempotent.
+    const onLeave = () => { clearTimeout(timer); flush(); };
+    window.addEventListener('pagehide', onLeave);
+    window.addEventListener('beforeunload', onLeave);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('pagehide', onLeave);
+      window.removeEventListener('beforeunload', onLeave);
+    };
   }, [config, resolvedColors]);
 
   const selectPreset = useCallback((id: string) => {

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react';
 
 // Optional PT-BR tooltip mode. Names/labels across the app stay in English (universal); only the
 // TOOLTIP text is localized. The language lives in localStorage (frontend-only — tooltips never
@@ -21,7 +21,10 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     setLang(l);
     try { localStorage.setItem(STORAGE_KEY, l); } catch { /* quota — ignore */ }
   }, []);
-  return <LanguageContext.Provider value={{ language, setLanguage }}>{children}</LanguageContext.Provider>;
+  // Memoised so the value only changes when the language actually does — a fresh object literal
+  // here invalidates every consumer on any re-render of this provider.
+  const value = useMemo(() => ({ language, setLanguage }), [language, setLanguage]);
+  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
 }
 
 export function useLanguage() { return useContext(LanguageContext); }

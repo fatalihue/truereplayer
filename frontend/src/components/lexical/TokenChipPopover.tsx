@@ -174,13 +174,22 @@ export function TokenChipPopover({
       setPos({ left, top });
     };
     place();
-    window.addEventListener('resize', place);
     // Also reposition on scroll (capture phase so a scroll in ANY ancestor container counts) —
-    // otherwise scrolling the editor leaves the popover detached from its chip.
-    window.addEventListener('scroll', place, true);
+    // otherwise scrolling the editor leaves the popover detached from its chip. Coalesced to one
+    // placement per frame: place() costs three forced layout reads plus a setState, and capture
+    // phase means every scrollable ancestor feeds it. The direct place() above keeps the first
+    // paint unchanged.
+    let raf: number | null = null;
+    const onReflow = () => {
+      if (raf !== null) return;
+      raf = requestAnimationFrame(() => { raf = null; place(); });
+    };
+    window.addEventListener('resize', onReflow);
+    window.addEventListener('scroll', onReflow, true);
     return () => {
-      window.removeEventListener('resize', place);
-      window.removeEventListener('scroll', place, true);
+      if (raf !== null) cancelAnimationFrame(raf);
+      window.removeEventListener('resize', onReflow);
+      window.removeEventListener('scroll', onReflow, true);
     };
   }, [anchor, kind, token]);
 

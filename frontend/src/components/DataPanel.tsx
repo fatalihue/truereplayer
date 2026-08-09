@@ -162,11 +162,22 @@ function HeaderMenu({
       setPos({ left, top });
     };
     place();
-    window.addEventListener('resize', place);
-    window.addEventListener('scroll', place, true);
+    // Coalesced to one placement per frame. place() does three forced layout reads
+    // (getBoundingClientRect + offsetHeight + offsetWidth) and then a setState, and the scroll
+    // listener is capture-phase, so ANY scrollable ancestor fires it — scrolling the grid with a
+    // popover open was one measure-and-render per scroll tick. The direct place() above stays so
+    // the first paint is unchanged.
+    let raf: number | null = null;
+    const onReflow = () => {
+      if (raf !== null) return;
+      raf = requestAnimationFrame(() => { raf = null; place(); });
+    };
+    window.addEventListener('resize', onReflow);
+    window.addEventListener('scroll', onReflow, true);
     return () => {
-      window.removeEventListener('resize', place);
-      window.removeEventListener('scroll', place, true);
+      if (raf !== null) cancelAnimationFrame(raf);
+      window.removeEventListener('resize', onReflow);
+      window.removeEventListener('scroll', onReflow, true);
     };
   }, [anchor]);
 

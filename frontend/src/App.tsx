@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { BridgeProvider, useBridge } from './bridge/BridgeContext';
 import { AppStateProvider, useAppState } from './state/AppStateContext';
 import { SelectionProvider } from './state/SelectionContext';
@@ -20,15 +20,21 @@ import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { UpdateOverlay } from './components/UpdateOverlay';
 import { AskInputHost } from './components/AskInputDialog';
 import { LiveVariablesHost } from './components/LiveVariablesPanel';
-import { RunReportPanel } from './components/RunReportPanel';
 import { ExtensionUpdateBanner } from './components/ExtensionUpdateBanner';
 import { ClickerDashboard } from './components/ClickerDashboard';
 import { CommandPalette } from './components/CommandPalette';
 import { SheetPanel } from './components/SheetPanel';
 import { useCommandToggle } from './hooks/useCommandToggle';
-import { ThemeEditor } from './components/ThemeEditor';
-import { DataPanel } from './components/DataPanel';
-import { AutomationPanel } from './components/AutomationPanel';
+
+// Deferred: these four are already mounted conditionally, but a STATIC import still puts them in
+// the startup chunk, so every launch parsed and compiled ~3700 lines (plus their dependencies) for
+// panels most sessions never open — inside the window the ui:ready watchdog is timing. lazy() moves
+// that to first open. Suspense fallback is null because each one is a full-surface overlay that
+// only appears after a deliberate click; there is no layout to hold open.
+const ThemeEditor = lazy(() => import('./components/ThemeEditor').then(m => ({ default: m.ThemeEditor })));
+const DataPanel = lazy(() => import('./components/DataPanel').then(m => ({ default: m.DataPanel })));
+const AutomationPanel = lazy(() => import('./components/AutomationPanel').then(m => ({ default: m.AutomationPanel })));
+const RunReportPanel = lazy(() => import('./components/RunReportPanel').then(m => ({ default: m.RunReportPanel })));
 
 // AppShell is rendered inside AppStateProvider so it can read settings to drive
 // mode-dependent visuals (Clicker mode glow, ActionTable replacement).
@@ -327,10 +333,12 @@ function AppShell() {
           setSheetLeaving(false);
         }}
       />
-      {showThemeEditor && <ThemeEditor onClose={() => setShowThemeEditor(false)} />}
-      {showDataEditor && <DataPanel onClose={() => setShowDataEditor(false)} />}
-      {showAutomation && <AutomationPanel onClose={() => setShowAutomation(false)} />}
-      {showRunReport && <RunReportPanel onClose={() => setShowRunReport(false)} />}
+      <Suspense fallback={null}>
+        {showThemeEditor && <ThemeEditor onClose={() => setShowThemeEditor(false)} />}
+        {showDataEditor && <DataPanel onClose={() => setShowDataEditor(false)} />}
+        {showAutomation && <AutomationPanel onClose={() => setShowAutomation(false)} />}
+        {showRunReport && <RunReportPanel onClose={() => setShowRunReport(false)} />}
+      </Suspense>
       <UpdateOverlay />
       <AskInputHost />
       <LiveVariablesHost />

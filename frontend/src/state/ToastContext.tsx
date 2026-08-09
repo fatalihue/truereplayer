@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useBridge } from '../bridge/BridgeContext';
 
 export type ToastType = 'success' | 'error' | 'info';
@@ -22,7 +22,6 @@ interface ToastItem {
 }
 
 interface ToastContextValue {
-  toasts: ToastItem[];
   showToast: (message: string, options?: ToastOptions | ToastType) => void;
   dismissToast: (id: number) => void;
   // Hover-pause: the renderer freezes the auto-dismiss countdown while the
@@ -31,7 +30,16 @@ interface ToastContextValue {
   resumeToast: (id: number) => void;
 }
 
+// TWO contexts on purpose, the same split ClickerLiveContext already uses for its 4 Hz push.
+//
+// The list changes on every show AND every auto-dismiss, while nearly every consumer only ever
+// calls showToast: ActionTable, ProfilePanel, SettingsPanel and Toolbar together are ~8900 lines
+// that were re-rendering on every toast because the value object bundled `toasts` with the API.
+// A plain useMemo cannot fix that — the dependency genuinely changes — but splitting can: the API
+// object's members are all stable useCallbacks, so ToastContext never invalidates, and only
+// Toast.tsx (via useToasts) subscribes to the list.
 const ToastContext = createContext<ToastContextValue | null>(null);
+const ToastListContext = createContext<ToastItem[]>([]);
 
 let nextId = 0;
 
@@ -127,15 +135,29 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     });
   }, [subscribe, showToast]);
 
+  // Never invalidates: every member is a stable useCallback.
+  const api = useMemo(
+    () => ({ showToast, dismissToast, pauseToast, resumeToast }),
+    [showToast, dismissToast, pauseToast, resumeToast],
+  );
+
   return (
-    <ToastContext.Provider value={{ toasts, showToast, dismissToast, pauseToast, resumeToast }}>
-      {children}
+    <ToastContext.Provider value={api}>
+      <ToastListContext.Provider value={toasts}>
+        {children}
+      </ToastListContext.Provider>
     </ToastContext.Provider>
   );
 }
 
+/** The toast API (show / dismiss / pause / resume). Stable — subscribing does not re-render. */
 export function useToast() {
   const ctx = useContext(ToastContext);
   if (!ctx) throw new Error('useToast must be used within ToastProvider');
   return ctx;
+}
+
+/** The live toast list. Only the renderer should use this — it changes on every show and dismiss. */
+export function useToasts() {
+  return useContext(ToastListContext);
 }

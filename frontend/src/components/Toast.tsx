@@ -1,5 +1,5 @@
 import { CheckCircle2, XCircle, Info, X } from 'lucide-react';
-import { useToast, type ToastType } from '../state/ToastContext';
+import { useToast, useToasts, type ToastType } from '../state/ToastContext';
 
 const iconMap: Record<ToastType, { Icon: React.ElementType; color: string }> = {
   success: { Icon: CheckCircle2, color: 'var(--color-replay-fg)' },
@@ -8,7 +8,10 @@ const iconMap: Record<ToastType, { Icon: React.ElementType; color: string }> = {
 };
 
 export function Toast() {
-  const { toasts, dismissToast, pauseToast, resumeToast } = useToast();
+  // The list comes from its own context so every other consumer of useToast (which only ever calls
+  // showToast) stops re-rendering on each show and auto-dismiss.
+  const toasts = useToasts();
+  const { dismissToast, pauseToast, resumeToast } = useToast();
 
   if (toasts.length === 0) return null;
 

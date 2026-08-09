@@ -872,6 +872,11 @@ export function LexicalTokenEditor({
         {richMode && <LinkPlugin />}
         {richMode && <AutoLinkPlugin matchers={AUTO_LINK_MATCHERS} />}
         <OnChangePlugin
+          // ignoreSelectionChange: without it (the default is false) this fires on every
+          // selection-only change too — arrow keys, clicks, focus — and each fire walks the whole
+          // document through the serializer and then re-renders the parent panel. Both consumers
+          // want text and never selection, so skipping those is exactly behaviour-preserving.
+          ignoreSelectionChange
           onChange={(state) => {
             state.read(() => {
               // Rich mode uses the single-newline block serializer (see

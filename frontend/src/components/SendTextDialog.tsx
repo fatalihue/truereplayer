@@ -272,11 +272,20 @@ function NamePromptPopover({
       setPos({ left, top });
     };
     place();
-    window.addEventListener('resize', place);
-    window.addEventListener('scroll', place, true);
+    // Coalesced to one placement per frame: place() does three forced layout reads plus a setState,
+    // and the capture-phase scroll listener fires for every scrollable ancestor. The direct place()
+    // above keeps the first paint unchanged.
+    let raf: number | null = null;
+    const onReflow = () => {
+      if (raf !== null) return;
+      raf = requestAnimationFrame(() => { raf = null; place(); });
+    };
+    window.addEventListener('resize', onReflow);
+    window.addEventListener('scroll', onReflow, true);
     return () => {
-      window.removeEventListener('resize', place);
-      window.removeEventListener('scroll', place, true);
+      if (raf !== null) cancelAnimationFrame(raf);
+      window.removeEventListener('resize', onReflow);
+      window.removeEventListener('scroll', onReflow, true);
     };
   }, [anchor]);
 

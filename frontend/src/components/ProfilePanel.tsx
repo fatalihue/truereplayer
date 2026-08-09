@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { Search, SearchX, X, Pencil, Copy, Trash2, FolderOpen, FolderMinus, Keyboard, Crosshair, ArrowLeftRight, Type, Ban, ChevronsLeft, ChevronsRight, ChevronsDownUp, ChevronsUpDown, Pin, PinOff, FolderPlus, FilePlus, ChevronRight, ChevronDown, Palette, ArrowRightFromLine, Zap, Repeat, Repeat2, Hourglass, ArrowUpFromDot, ExternalLink, Info, MoreHorizontal, Hash, Upload, Check } from 'lucide-react';
 import type { ProfileEntry, ImportPreviewPayload, ImportConflictResolution, TriggerMode } from '../bridge/messageTypes';
 import { useAppState } from '../state/AppStateContext';
@@ -11,7 +11,8 @@ import { Button } from './common/Button';
 import { TargetConfigDialog } from './TargetConfigDialog';
 import { SecurityWarningModal } from './SecurityWarningModal';
 import { ImportPreviewDialog } from './ImportPreviewDialog';
-import { ProfileInfoDialog } from './ProfileInfoDialog';
+// Deferred: the only other eager consumer of emoji-picker-react, in a dialog opened on demand.
+const ProfileInfoDialog = lazy(() => import('./ProfileInfoDialog').then(m => ({ default: m.ProfileInfoDialog })));
 import { useToast } from '../state/ToastContext';
 import { useTt } from '../state/LanguageContext';
 import { useFlyoutFlip } from '../hooks/useFlyoutFlip';
@@ -1192,6 +1193,43 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   useEffect(() => {
     if (!dragProfile) return;
 
+    // Everything expensive about a drag move is coalesced to ONE run per frame. Raw mousemove
+    // arrives at the mouse's polling rate (125-1000 Hz for the mice this app targets) and each run
+    // does a getBoundingClientRect per folder plus two setStates that re-render this whole panel —
+    // including renderProfileRow for every visible profile — to move a single floating ghost. The
+    // cheap bookkeeping (threshold, dragActive, cursorY for the autoscroll loop) stays synchronous.
+    let moveRaf: number | null = null;
+    let pendingPos: { x: number; y: number } | null = null;
+
+    const flushMove = () => {
+      moveRaf = null;
+      const p = pendingPos;
+      if (!p) return;
+      // Store the ghost's position in LAYOUT space: clientX/Y are VISUAL, and the transform
+      // that consumes them is a CSS length that `zoom` multiplies again — left raw, the ghost
+      // trails the cursor by (1 − zoom) × distance from the origin (~120 px at x=1200 on the
+      // default 0.90). Converting here keeps the per-frame render free of measurement.
+      const gz = uiZoom();
+      setDragCursorPos({ x: p.x / gz, y: p.y / gz });
+
+      // Hit-test which folder or ungrouped area the mouse is over
+      let foundTarget: string | null = null;
+      folderRefs.current.forEach((el, name) => {
+        const rect = el.getBoundingClientRect();
+        if (p.x >= rect.left && p.x <= rect.right && p.y >= rect.top && p.y <= rect.bottom) {
+          foundTarget = name;
+        }
+      });
+      if (!foundTarget && ungroupedRef.current) {
+        const rect = ungroupedRef.current.getBoundingClientRect();
+        if (p.x >= rect.left && p.x <= rect.right && p.y >= rect.top && p.y <= rect.bottom) {
+          foundTarget = '__ungrouped__';
+        }
+      }
+      setDropTarget(foundTarget);
+      maybeKickAutoScroll(p.y);
+    };
+
     const handleMouseMove = (e: MouseEvent) => {
       if (!dragStartPos.current) return;
       const dx = e.clientX - dragStartPos.current.x;
@@ -1204,30 +1242,11 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         window.dispatchEvent(new CustomEvent('profiledrag:start', { detail: { profileName: dragProfile } }));
       }
       dragActive.current = true;
+      // Read by the autoscroll rAF loop, so it must stay up to date every event, not every frame.
       cursorY.current = e.clientY;
-      // Store the ghost's position in LAYOUT space: clientX/Y are VISUAL, and the transform
-      // that consumes them is a CSS length that `zoom` multiplies again — left raw, the ghost
-      // trails the cursor by (1 − zoom) × distance from the origin (~120 px at x=1200 on the
-      // default 0.90). Converting here keeps the per-mousemove render free of measurement.
-      const gz = uiZoom();
-      setDragCursorPos({ x: e.clientX / gz, y: e.clientY / gz });
 
-      // Hit-test which folder or ungrouped area the mouse is over
-      let foundTarget: string | null = null;
-      folderRefs.current.forEach((el, name) => {
-        const rect = el.getBoundingClientRect();
-        if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
-          foundTarget = name;
-        }
-      });
-      if (!foundTarget && ungroupedRef.current) {
-        const rect = ungroupedRef.current.getBoundingClientRect();
-        if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
-          foundTarget = '__ungrouped__';
-        }
-      }
-      setDropTarget(foundTarget);
-      maybeKickAutoScroll(e.clientY);
+      pendingPos = { x: e.clientX, y: e.clientY };
+      if (moveRaf === null) moveRaf = requestAnimationFrame(flushMove);
     };
 
     const handleMouseUp = (e: MouseEvent) => {
@@ -1288,6 +1307,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
       window.removeEventListener('keydown', handleKeyDown, true);
+      if (moveRaf !== null) cancelAnimationFrame(moveRaf);
       if (autoScrollRaf.current !== null) {
         cancelAnimationFrame(autoScrollRaf.current);
         autoScrollRaf.current = null;
@@ -1312,20 +1332,22 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
   useEffect(() => {
     if (!dragFolder) return;
 
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!folderDragStartPos.current) return;
-      const dx = e.clientX - folderDragStartPos.current.x;
-      const dy = e.clientY - folderDragStartPos.current.y;
-      if (!folderDragActive.current && Math.abs(dx) + Math.abs(dy) < 5) return;
-      if (!folderDragActive.current) document.body.style.cursor = 'grabbing';
-      folderDragActive.current = true;
-      cursorY.current = e.clientY;
+    // Coalesced to one run per frame, same as the profile drag above and for the same reasons:
+    // a getBoundingClientRect per folder plus a setState that re-renders the whole panel, on a
+    // handler fed by raw mousemove.
+    let moveRaf: number | null = null;
+    let pendingPos: { x: number; y: number } | null = null;
+
+    const flushMove = () => {
+      moveRaf = null;
+      const p = pendingPos;
+      if (!p) return;
       // Store the ghost's position in LAYOUT space: clientX/Y are VISUAL, and the transform
       // that consumes them is a CSS length that `zoom` multiplies again — left raw, the ghost
       // trails the cursor by (1 − zoom) × distance from the origin (~120 px at x=1200 on the
-      // default 0.90). Converting here keeps the per-mousemove render free of measurement.
+      // default 0.90). Converting here keeps the per-frame render free of measurement.
       const gz = uiZoom();
-      setDragCursorPos({ x: e.clientX / gz, y: e.clientY / gz });
+      setDragCursorPos({ x: p.x / gz, y: p.y / gz });
 
       // Map the cursor Y to an insertion slot (0..N) CONTINUOUSLY: the first folder
       // whose vertical midpoint is below the cursor wins; past all of them → the end.
@@ -1344,10 +1366,24 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         const el = folderRefs.current.get(folders[idx].name);
         if (!el) continue;
         const rect = el.getBoundingClientRect();
-        if (e.clientY < rect.top + rect.height / 2) { bestIndex = idx; break; }
+        if (p.y < rect.top + rect.height / 2) { bestIndex = idx; break; }
       }
       setDropFolderIndex(bestIndex);
-      maybeKickAutoScroll(e.clientY);
+      maybeKickAutoScroll(p.y);
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!folderDragStartPos.current) return;
+      const dx = e.clientX - folderDragStartPos.current.x;
+      const dy = e.clientY - folderDragStartPos.current.y;
+      if (!folderDragActive.current && Math.abs(dx) + Math.abs(dy) < 5) return;
+      if (!folderDragActive.current) document.body.style.cursor = 'grabbing';
+      folderDragActive.current = true;
+      // Read by the autoscroll rAF loop, so it must stay up to date every event, not every frame.
+      cursorY.current = e.clientY;
+
+      pendingPos = { x: e.clientX, y: e.clientY };
+      if (moveRaf === null) moveRaf = requestAnimationFrame(flushMove);
     };
 
     const handleMouseUp = () => {
@@ -1397,6 +1433,7 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
       window.removeEventListener('keydown', handleKeyDown, true);
+      if (moveRaf !== null) cancelAnimationFrame(moveRaf);
       if (autoScrollRaf.current !== null) {
         cancelAnimationFrame(autoScrollRaf.current);
         autoScrollRaf.current = null;
@@ -3218,10 +3255,12 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
         />
       )}
       {showInfoDialog && (
-        <ProfileInfoDialog
-          profileName={showInfoDialog}
-          onClose={() => setShowInfoDialog(null)}
-        />
+        <Suspense fallback={null}>
+          <ProfileInfoDialog
+            profileName={showInfoDialog}
+            onClose={() => setShowInfoDialog(null)}
+          />
+        </Suspense>
       )}
     </>
   );

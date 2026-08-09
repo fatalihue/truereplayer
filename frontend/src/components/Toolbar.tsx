@@ -1,11 +1,13 @@
-import { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense } from 'react';
 import { Trash2, Undo2, Redo2, Type, ScanSearch, Pipette, Keyboard, Globe, Repeat2, Hourglass, X, GitBranch, ScanEye, Braces, AppWindow, Clipboard, ClipboardCopy, ChevronDown, Dice5, Cpu, FileCheck, Clock, Table2, ShieldCheck } from 'lucide-react';
 import { useAppState } from '../state/AppStateContext';
 import { useBridge } from '../bridge/BridgeContext';
 import { useSelectionRef } from '../state/SelectionContext';
 import { useTt } from '../state/LanguageContext';
 import { useToast } from '../state/ToastContext';
-import { SendTextDialog } from './SendTextDialog';
+// Deferred — see the note on the same import in ActionTable: the Lexical stack plus
+// emoji-picker-react are the bulk of the startup chunk, for a dialog opened on demand.
+const SendTextDialog = lazy(() => import('./SendTextDialog').then(m => ({ default: m.SendTextDialog })));
 import { RunProfileDialog } from './RunProfileDialog';
 import { NavigateDialog } from './NavigateDialog';
 import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
@@ -959,16 +961,18 @@ export function Toolbar(_props: ToolbarProps) {
       </div>
 
       {showSendTextDialog && (
-        <SendTextDialog
-          mode="add"
-          onConfirm={(text, html, markdown, mode) => {
-            const sel = selectionRef.current;
-            const insertIndex = sel.size > 0 ? Math.min(...sel) : undefined;
-            send({ type: 'actions:addSendText', payload: { text, html: html ?? undefined, markdown: markdown ?? undefined, mode, insertIndex } });
-            setShowSendTextDialog(false);
-          }}
-          onClose={() => setShowSendTextDialog(false)}
-        />
+        <Suspense fallback={null}>
+          <SendTextDialog
+            mode="add"
+            onConfirm={(text, html, markdown, mode) => {
+              const sel = selectionRef.current;
+              const insertIndex = sel.size > 0 ? Math.min(...sel) : undefined;
+              send({ type: 'actions:addSendText', payload: { text, html: html ?? undefined, markdown: markdown ?? undefined, mode, insertIndex } });
+              setShowSendTextDialog(false);
+            }}
+            onClose={() => setShowSendTextDialog(false)}
+          />
+        </Suspense>
       )}
 
       {showRunProfileDialog && (

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo, Fragment } from 'react';
+import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo, Fragment, lazy, Suspense } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, closestCenter, pointerWithin } from '@dnd-kit/core';
@@ -18,7 +18,12 @@ import { useToast } from '../state/ToastContext';
 import { getDisplayKey, getDisplayX, getDisplayY, getActionTypeColors, formatKeyCombo, formatMs } from '../utils/displayUtils';
 import { snapIndicesToBlocks } from '../utils/conditionalBlocks';
 import { uiZoom } from '../utils/zoomSpace';
-import { SendTextDialog } from './SendTextDialog';
+// Deferred: already rendered conditionally, but a static import pulls the whole Lexical editor
+// stack and emoji-picker-react (~300 KB minified) into the startup chunk for a dialog most sessions
+// never open. Splitting at the DIALOG boundary and not on emoji-picker-react itself is deliberate —
+// SendTextDialog uses that package's Theme/EmojiStyle enums as runtime VALUES, so importing those
+// statically would keep the package in the entry chunk anyway.
+const SendTextDialog = lazy(() => import('./SendTextDialog').then(m => ({ default: m.SendTextDialog })));
 import { SendTextPreview } from './SendTextPreview';
 import { RunProfileDialog } from './RunProfileDialog';
 import { KeystrokeCaptureDialog } from './KeystrokeCaptureDialog';
@@ -1280,9 +1285,18 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
         profileScrollRaf.current = null;
       }
     };
+    // The measure-and-render half of onMove, coalesced to one run per frame. Raw mousemove arrives
+    // at the mouse's polling rate, and each run costs a querySelectorAll over the tbody, a nested
+    // querySelector plus a getBoundingClientRect per row, and a setDropTarget that re-renders every
+    // row. lastY stays updated on every event because the auto-scroll tick reads it.
+    let moveRaf: number | null = null;
+    const flushMove = () => {
+      moveRaf = null;
+      setDropTarget(computeInsertIndexFromY(lastY));
+    };
     const onMove = (e: MouseEvent) => {
       lastY = e.clientY;
-      setDropTarget(computeInsertIndexFromY(e.clientY));
+      if (moveRaf === null) moveRaf = requestAnimationFrame(flushMove);
       if (profileScrollRaf.current === null) {
         const container = scrollRef.current;
         if (container) {
@@ -1303,6 +1317,9 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       if (!dragging) return;
       dragging = false;
       window.removeEventListener('mousemove', onMove);
+      // Drop the pending frame BEFORE clearing the target, or a queued flushMove would set it
+      // straight back and leave the insertion rail on screen after the drag ended.
+      if (moveRaf !== null) { cancelAnimationFrame(moveRaf); moveRaf = null; }
       stopScroll();
       setDropTarget(null);
     };
@@ -1326,6 +1343,7 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       window.removeEventListener('profiledrag:end', onEnd);
       window.removeEventListener('profiledrag:dropOnGrid', onDrop as EventListener);
       window.removeEventListener('mousemove', onMove);
+      if (moveRaf !== null) cancelAnimationFrame(moveRaf);
       stopScroll();
     };
   }, [computeInsertIndexFromY, showToast, tt]);
@@ -2351,17 +2369,19 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
       </DndContext>
 
       {sendTextEdit && (
-        <SendTextDialog
-          mode="edit"
-          initialText={sendTextEdit.text}
-          initialHtml={sendTextEdit.html}
-          initialMode={sendTextEdit.mode}
-          onConfirm={(text, html, markdown, mode) => {
-            send({ type: 'actions:editSendText', payload: { index: sendTextEdit.index, text, html: html ?? undefined, markdown: markdown ?? undefined, mode } });
-            setSendTextEdit(null);
-          }}
-          onClose={() => setSendTextEdit(null)}
-        />
+        <Suspense fallback={null}>
+          <SendTextDialog
+            mode="edit"
+            initialText={sendTextEdit.text}
+            initialHtml={sendTextEdit.html}
+            initialMode={sendTextEdit.mode}
+            onConfirm={(text, html, markdown, mode) => {
+              send({ type: 'actions:editSendText', payload: { index: sendTextEdit.index, text, html: html ?? undefined, markdown: markdown ?? undefined, mode } });
+              setSendTextEdit(null);
+            }}
+            onClose={() => setSendTextEdit(null)}
+          />
+        </Suspense>
       )}
 
 
