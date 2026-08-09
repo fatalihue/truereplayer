@@ -2,6 +2,21 @@
   const isMainFrame = window === window.top;
 
   /**
+   * The overlay nodes flashHighlight created, held by identity.
+   *
+   * This used to be a `data-tr-overlay` attribute, which put the answer to "is this node ours?"
+   * inside the DOM — where the page can read it and, more to the point, WRITE it. A page that
+   * stamps the attribute on everything it mutates makes waitForClickEffect discard every record,
+   * so `landed` stays false and the click falls through to the native `el.click()` fallback. The
+   * comment on that fallback already names the cost: duplicate orders, duplicate messages, a
+   * counter that reads 2.
+   *
+   * A WeakSet in this closure is not reachable from page script at all, and it holds the nodes
+   * weakly so a removed overlay is still collectable.
+   */
+  const ourOverlays = new WeakSet();
+
+  /**
    * Which frame am I?
    *
    * A content script cannot ask Chrome for its own frameId — MV3 has no API for it — but the
@@ -618,7 +633,7 @@
       // done by filtering the record's TARGET: a childList record reports the PARENT, so an
       // overlay appended to body arrives as a mutation on body. The added/removed nodes are what
       // have to be inspected.
-      const isOurs = (n) => !!(n && n.dataset && n.dataset.trOverlay);
+      const isOurs = (n) => ourOverlays.has(n);
 
       const observer = new MutationObserver((records) => {
         for (const r of records) {
@@ -1119,8 +1134,10 @@
     };
     const c = colors[status] || colors.active;
     const overlay = document.createElement('div');
-    // Marks this node as ours so waitForClickEffect can ignore it — see `touched` there.
-    overlay.dataset.trOverlay = '1';
+    // Marks this node as ours so waitForClickEffect can ignore it. Recorded by identity in a
+    // closure-scoped WeakSet rather than as a DOM attribute — see ourOverlays for why the page
+    // must not be able to claim this.
+    ourOverlays.add(overlay);
     const rect = el.getBoundingClientRect();
     Object.assign(overlay.style, {
       position: 'fixed',

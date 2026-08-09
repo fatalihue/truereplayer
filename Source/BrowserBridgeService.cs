@@ -37,7 +37,12 @@ namespace TrueReplayer.Services
         // already declared for <all_urls>, and chrome.tabs.sendMessage to your own content script
         // needs no host permission — so activeTab granted host access that no code path consumed,
         // on an extension that can already read and type into every page. No behaviour change.
-        public const string ExpectedExtensionVersion = "1.4.14";
+        // 1.4.15 = the recording relay caps every page-controlled string it forwards (a megabyte
+        // -long id used to blow Chrome's 1 MB native-messaging frame and drop the bridge
+        // mid-recording), the overlay marker moved from a page-writable data attribute to a
+        // closure-scoped WeakSet, the dead commandResult relay is gone, and reconnect backs off
+        // instead of spawning a host process every 30 s forever with the app closed.
+        public const string ExpectedExtensionVersion = "1.4.15";
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
         private NamedPipeServerStream? _pipeServer;
         private StreamReader? _reader;
@@ -416,9 +421,23 @@ namespace TrueReplayer.Services
             }
         }
 
-        public void SendMessage(object message)
+        /// <summary>
+        /// Writes one message to the extension. Returns false when it did not go out — either the
+        /// bridge was already down or the write threw.
+        /// </summary>
+        /// <remarks>
+        /// The return value exists because "dropped on the floor" and "sent" used to be
+        /// indistinguishable to the caller. ExecuteBrowserCommandAsync checks IsConnected, registers
+        /// its commandId, and only then sends; if the pipe dies in that window, the disconnect
+        /// cleanup has already swept past without seeing the entry and the message is discarded
+        /// silently. The command then sat there until its own timeout and reported
+        /// ELEMENT_NOT_FOUND — "Element not found or not visible" — for a case where Chrome had
+        /// simply gone away. Actively misleading at the exact moment the user needs the diagnosis.
+        /// Fire-and-forget callers can keep ignoring the result.
+        /// </remarks>
+        public bool SendMessage(object message)
         {
-            if (!IsConnected || _writer == null) return;
+            if (!IsConnected || _writer == null) return false;
 
             try
             {
@@ -427,6 +446,7 @@ namespace TrueReplayer.Services
                     var json = JsonSerializer.Serialize(message);
                     _writer.WriteLine(json);
                 }
+                return true;
             }
             catch (Exception ex)
             {
@@ -435,6 +455,7 @@ namespace TrueReplayer.Services
                 // with no record of the cause. Debug.WriteLine meant that record existed only in a
                 // debugger-attached build.
                 DiagnosticLog.Warn($"[BrowserBridge] Send failed: {ex.GetType().Name}: {ex.Message}");
+                return false;
             }
         }
 
@@ -455,7 +476,12 @@ namespace TrueReplayer.Services
                 throw new InvalidOperationException("Browser extension is not connected.");
 
             var requestId = Guid.NewGuid().ToString("N")[..8];
-            var tcs = new TaskCompletionSource<JsonElement>();
+            // RunContinuationsAsynchronously: these are completed from ReadMessagesAsync, i.e. the
+            // single task that drains the pipe. Without it the awaiting continuation — a replay
+            // step, an If probe, the picker's UI work — runs INLINE on that reader, so the next
+            // message sits unread for as long as the continuation takes, and an exception in it
+            // would surface inside the read loop. Every other TCS in this codebase already opts in.
+            var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
             _pendingCommands[requestId] = tcs;
 
             SendMessage(new { type = "browser:pickElement", requestId });
@@ -513,7 +539,12 @@ namespace TrueReplayer.Services
             if (!IsConnected) return false;
 
             var commandId = Guid.NewGuid().ToString("N")[..8];
-            var tcs = new TaskCompletionSource<JsonElement>();
+            // RunContinuationsAsynchronously: these are completed from ReadMessagesAsync, i.e. the
+            // single task that drains the pipe. Without it the awaiting continuation — a replay
+            // step, an If probe, the picker's UI work — runs INLINE on that reader, so the next
+            // message sits unread for as long as the continuation takes, and an exception in it
+            // would surface inside the read loop. Every other TCS in this codebase already opts in.
+            var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
             _pendingCommands[commandId] = tcs;
 
             SendMessage(new
@@ -639,7 +670,12 @@ namespace TrueReplayer.Services
                 throw new InvalidOperationException("Browser extension is not connected.");
 
             var commandId = Guid.NewGuid().ToString("N")[..8];
-            var tcs = new TaskCompletionSource<JsonElement>();
+            // RunContinuationsAsynchronously: these are completed from ReadMessagesAsync, i.e. the
+            // single task that drains the pipe. Without it the awaiting continuation — a replay
+            // step, an If probe, the picker's UI work — runs INLINE on that reader, so the next
+            // message sits unread for as long as the continuation takes, and an exception in it
+            // would surface inside the read loop. Every other TCS in this codebase already opts in.
+            var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
             _pendingCommands[commandId] = tcs;
 
             string command;
@@ -698,7 +734,7 @@ namespace TrueReplayer.Services
             const int PipeGraceMs = 2000;
             var pipeTimeout = command == "navigate" ? Math.Max(timeoutMs * 6, 30000) : timeoutMs + PipeGraceMs;
 
-            SendMessage(new
+            bool sent = SendMessage(new
             {
                 type = "browser:executeCommand",
                 commandId,
@@ -733,6 +769,20 @@ namespace TrueReplayer.Services
                 // chrome.tabs.query({active:true}), i.e. exactly what the picker already targets.
                 tabId = ignoreTabPin ? (int?)null : _pinnedTabId
             });
+
+            // The IsConnected check at the top of this method and the send are not one atomic step:
+            // the pipe can die in between, and by then the disconnect sweep has already walked
+            // _pendingCommands without seeing this entry. Waiting out pipeTimeout would report
+            // ELEMENT_NOT_FOUND for a browser that is no longer there. Fail now, with the code that
+            // says what actually happened — the same one the disconnect sweep uses.
+            if (!sent)
+            {
+                _pendingCommands.TryRemove(commandId, out _);
+                throw new BrowserActionException(
+                    "EXTENSION_DISCONNECTED",
+                    "The browser bridge disconnected before the action could be sent.",
+                    "Chrome or the TrueReplayer extension was closed, reloaded, or recycled. Reconnect and run again.");
+            }
 
             using var timeoutCts = new CancellationTokenSource(pipeTimeout);
 

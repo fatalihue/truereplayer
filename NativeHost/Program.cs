@@ -61,8 +61,32 @@ class Program
         return json[i..end];
     }
 
+    // The one extension allowed to drive this host. Must stay identical to the allowed_origins
+    // entry Source/Program.cs writes into the native-messaging manifest — the ID is stable
+    // because ChromeExtension/manifest.json pins the "key".
+    private const string AllowedOrigin = "chrome-extension://akbcjaimplfchfaeoedhgkebhjaeebko/";
+
     static async Task<int> Main(string[] args)
     {
+        // Chrome passes the calling extension's origin as the first argument. This process never
+        // looked at it, leaning entirely on the manifest's allowed_origins — but that manifest
+        // lives in AppContext.BaseDirectory and is registered under HKCU, both writable by the
+        // user (and therefore by anything running as them). Edit it to list a second extension and
+        // Chrome will happily launch this host for it; the origin argument is the only place that
+        // substitution is still visible.
+        //
+        // Checked only when an origin is actually supplied: a bare launch (a developer running the
+        // exe, a future non-Chrome caller) is left to the pipe's own defences, which is where the
+        // real boundary is — the server sets CurrentUserOnly and pins the pipe owner.
+        string? origin = args.Length > 0 ? args[0] : null;
+        if (origin != null && origin.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(origin, AllowedOrigin, StringComparison.OrdinalIgnoreCase))
+        {
+            // Before the log is even configured, so this writes nowhere by design: refusing is the
+            // whole behaviour, and a rejected caller must not be able to make us write to disk.
+            return 1;
+        }
+
         // Off unless explicitly asked for. The log was unconditional and append-only, so it grew
         // without bound and paid three flushed writes per browser command for a diagnostic nobody
         // reads on a healthy machine. Nothing in the app consumes the file — it exists purely for
@@ -283,6 +307,9 @@ class Program
     private static volatile bool PipeConnected;
     private static Stream? _stdoutStream;
 
+    // Chrome's documented ceiling for a message sent from a native host to the extension.
+    private const int MaxOutgoingFrameBytes = 1024 * 1024;
+
     private static void SendToStdout(string json)
     {
         lock (StdoutLock)
@@ -291,6 +318,19 @@ class Program
             // wasteful and risks interleaving on a shared handle.
             _stdoutStream ??= Console.OpenStandardOutput();
             var msgBytes = Encoding.UTF8.GetBytes(json);
+
+            // Chrome's native-messaging frame limit for host->extension is 1 MB, and it does not
+            // fail politely: an oversized frame makes Chrome kill the port, which drops the bridge
+            // mid-recording. The C# side is the trusted end here, but the CONTENT is not
+            // necessarily ours — a relayed line can carry page-derived text — so the frame is
+            // checked rather than assumed. Dropping one message beats losing the connection, and
+            // the drop is logged so it is not a silent hole.
+            if (msgBytes.Length > MaxOutgoingFrameBytes)
+            {
+                Log($"dropping {msgBytes.Length}-byte frame: over the {MaxOutgoingFrameBytes}-byte native messaging limit");
+                return;
+            }
+
             var lengthBytes = BitConverter.GetBytes(msgBytes.Length);
             _stdoutStream.Write(lengthBytes, 0, 4);
             _stdoutStream.Write(msgBytes, 0, msgBytes.Length);

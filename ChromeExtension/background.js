@@ -1,6 +1,24 @@
 const NATIVE_HOST = 'com.truereplayer.native';
 const RECONNECT_ALARM = 'truereplayer-reconnect';
-const RECONNECT_INTERVAL_MIN = 0.25; // 15 seconds (minimum chrome.alarms allows in practice)
+// Reconnect backoff. The floor is what MV3 actually honours: chrome.alarms clamps to 30 s, so the
+// old 0.25 (documented as "15 seconds") was already being served as 30 s.
+//
+// Why a backoff at all: with TrueReplayer closed the cycle is fixed and endless — alarm, connect(),
+// connectNative spawns the host process, the host fails to find the pipe and exits, onDisconnect,
+// schedule again. A user who installed the extension and is not running the app paid a process
+// spawn every half minute, forever.
+//
+// The ceiling is deliberately low. A long backoff trades one annoyance for a worse one: the app
+// finally starts and the extension takes until the next alarm to notice. Two minutes cuts the
+// spawn rate by 4x while keeping the worst-case blind window short, and opening the popup resets
+// the ramp and retries at once — someone looking at the badge has almost certainly just started
+// the app.
+const RECONNECT_MIN_MINUTES = 0.5;
+const RECONNECT_MAX_MINUTES = 2;
+// Kept in storage.session, not a module variable: the service worker is torn down between alarms,
+// so a plain counter would reset to zero on every wake and there would be no ramp at all. Session
+// storage also clears itself when the browser restarts, which is the right moment to be eager again.
+const RECONNECT_ATTEMPTS_KEY = 'reconnectAttempts';
 
 let port = null;
 let isRecording = false;
@@ -645,11 +663,30 @@ function connect() {
 
 function scheduleReconnect() {
   // chrome.alarms survives service worker going dormant, unlike setTimeout
-  chrome.alarms.create(RECONNECT_ALARM, { delayInMinutes: RECONNECT_INTERVAL_MIN });
+  chrome.storage.session.get(RECONNECT_ATTEMPTS_KEY).then((got) => {
+    const attempts = Number(got?.[RECONNECT_ATTEMPTS_KEY]) || 0;
+    const delay = Math.min(RECONNECT_MIN_MINUTES * Math.pow(2, attempts), RECONNECT_MAX_MINUTES);
+    chrome.alarms.create(RECONNECT_ALARM, { delayInMinutes: delay });
+    // Stop counting once the ceiling is reached, so the number cannot grow without bound across
+    // a long session — the delay is already pinned at the maximum.
+    if (delay < RECONNECT_MAX_MINUTES) {
+      chrome.storage.session.set({ [RECONNECT_ATTEMPTS_KEY]: attempts + 1 });
+    }
+  }).catch(() => {
+    // storage.session unavailable for any reason — fall back to the flat floor rather than
+    // giving up on reconnecting altogether.
+    chrome.alarms.create(RECONNECT_ALARM, { delayInMinutes: RECONNECT_MIN_MINUTES });
+  });
+}
+
+/// Clears the ramp so the next failure starts from the floor again.
+function resetReconnectBackoff() {
+  return chrome.storage.session.remove(RECONNECT_ATTEMPTS_KEY).catch(() => {});
 }
 
 function stopReconnect() {
   chrome.alarms.clear(RECONNECT_ALARM);
+  resetReconnectBackoff();
 }
 
 // Alarm handler — wakes service worker to retry connection
@@ -682,15 +719,39 @@ function sendToNative(msg) {
  * generator produced something odd" into "the action recorded with no fallbacks and nobody
  * said so". Dropping the noise here keeps that from looking like a recording bug later.
  */
+/**
+ * Length ceilings for anything that crosses the native-messaging boundary.
+ *
+ * Chrome kills the native port outright when a message exceeds 1 MB, and the recording path had
+ * no cap of any kind: generateSelector builds `#${CSS.escape(el.id)}` and `[data-testid="…"]`
+ * straight from page-controlled attributes, and typed text is whatever the input holds. A page
+ * with a megabyte-long id was enough to blow the frame and drop the bridge in the middle of a
+ * recording — no attacker needed, just a pathological page.
+ *
+ * The numbers are far above anything real (a usable CSS selector is tens of characters; the
+ * generator already caps descriptions at 40) and far below the frame limit, so truncation here
+ * only ever happens to input that was never going to work as a selector anyway.
+ */
+const MAX_SELECTOR_CHARS = 2000;
+const MAX_DESCRIPTION_CHARS = 200;
+// Typed text is real user data, so this one is generous: it exists to stop a single field from
+// reaching the frame limit, not to trim anything a person would actually type.
+const MAX_TEXT_CHARS = 100000;
+
+function capString(value, max) {
+  if (typeof value !== 'string') return '';
+  return value.length > max ? value.slice(0, max) : value;
+}
+
 function sanitizeAlternatives(list) {
   if (!Array.isArray(list)) return [];
   const out = [];
   for (const alt of list) {
     if (!alt || typeof alt.selector !== 'string' || !alt.selector) continue;
     out.push({
-      selector: alt.selector,
+      selector: capString(alt.selector, MAX_SELECTOR_CHARS),
       tier: typeof alt.tier === 'string' && alt.tier ? alt.tier : 'C',
-      description: typeof alt.description === 'string' ? alt.description : '',
+      description: capString(alt.description, MAX_DESCRIPTION_CHARS),
     });
     // Mirrors generateSelectorAlternatives' own cap, so a future generator change cannot
     // quietly start writing 40-entry lists into every profile.
@@ -725,13 +786,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'elementClicked' && isRecording) {
     sendToNative({
       type: 'browser:elementClicked',
-      selector: msg.selector,
+      selector: capString(msg.selector, MAX_SELECTOR_CHARS),
       // G1 — ranked fallback selectors, same shape the pick path already relays. Absent from
       // older content scripts (a stale service worker outliving a reload); the C# side reads a
       // missing array as "no fallbacks", which is exactly the pre-G1 behaviour.
       alternatives: sanitizeAlternatives(msg.alternatives),
-      description: msg.description,
-      tagName: msg.tagName,
+      description: capString(msg.description, MAX_DESCRIPTION_CHARS),
+      tagName: capString(msg.tagName, 64),
       button: msg.button || 'left',
       isInput: msg.isInput || false,
       url: sender.tab?.url || '',
@@ -741,9 +802,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // #10 — Typing in an input was observed; bridge fills the BrowserType action's text
     sendToNative({
       type: 'browser:typingCaptured',
-      selector: msg.selector,
+      selector: capString(msg.selector, MAX_SELECTOR_CHARS),
       alternatives: sanitizeAlternatives(msg.alternatives),
-      text: msg.text || '',
+      text: capString(msg.text, MAX_TEXT_CHARS),
       isAppend: !!msg.isAppend,
     });
     sendResponse({ ok: true });
@@ -760,26 +821,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // BrowserSelectOption action targeting the select with the picked option's text.
     sendToNative({
       type: 'browser:selectChanged',
-      selector: msg.selector,
+      selector: capString(msg.selector, MAX_SELECTOR_CHARS),
       alternatives: sanitizeAlternatives(msg.alternatives),
-      description: msg.description || '',
-      selectedValue: msg.selectedValue || '',
-      selectedText: msg.selectedText || '',
+      description: capString(msg.description, MAX_DESCRIPTION_CHARS),
+      // Option value and label are page-controlled too, and travel the same frame.
+      selectedValue: capString(msg.selectedValue, MAX_SELECTOR_CHARS),
+      selectedText: capString(msg.selectedText, MAX_SELECTOR_CHARS),
       selectedIndex: msg.selectedIndex ?? 0,
       url: sender.tab?.url || '',
     });
     sendResponse({ ok: true });
-  } else if (msg.type === 'commandResult') {
-    sendToNative({
-      type: 'browser:commandResult',
-      commandId: msg.commandId,
-      success: msg.success,
-      error: msg.error,
-      // The content script pushing a result on its own knows its page through `sender`, same as
-      // the selectChanged relay just above. One rule everywhere: if the page is known, report it.
-      tabUrl: sender.tab?.url || null,
-    });
-    sendResponse({ ok: true });
+    // A 'commandResult' relay used to sit here. Nothing ever sent it: the only
+    // chrome.runtime.sendMessage calls in content.js are elementClicked, typingCaptured,
+    // selectInteractionStart/End, selectChanged, getStatus and whichFrame. Command results travel
+    // back through the sendMessage RESPONSE that dispatch() awaits, never as a fresh message.
+    //
+    // It was also the one branch of this listener not gated on isRecording, and what it did was
+    // hand the C# side a browser:commandResult with a caller-chosen commandId — which
+    // BrowserBridgeService uses to resolve ANY pending command, with a caller-chosen success or
+    // error. The sender.id / sender.tab checks above close the door today, so it was unreachable
+    // rather than exploitable; it was a command-resolution door waiting for someone to open it.
   } else if (msg.type === 'whichFrame') {
     // The other half of ensureFrameId in content.js: a content script has no way to read its own
     // frameId, and this listener is the only place it is visible. Answering null rather than a
@@ -793,6 +854,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       recording: isRecording,
       outdated: isOutdated,
     });
+    // Only the popup asks for status, so this fires when the user is actually looking at the
+    // badge — the one moment where waiting out a backed-off alarm is most likely to be wrong,
+    // because they have probably just started TrueReplayer. Reset the ramp and try now.
+    // The reset is awaited before connect(): if this failed attempt schedules the next alarm
+    // before the counter is cleared, the ramp survives the very reset that was meant to undo it.
+    if (!isBridgeReady) {
+      resetReconnectBackoff().then(() => {
+        chrome.alarms.clear(RECONNECT_ALARM);
+        connect();
+      });
+    }
   }
   return true;
 });
