@@ -379,10 +379,21 @@ namespace TrueReplayer.Services
             return true;
         }
 
+        // Path.GetInvalidFileNameChars() allocates a FRESH char[] on every call (it hands out a copy
+        // so callers cannot mutate the framework's own array), and SanitizeFolderName runs twice per
+        // TryResolveImageFile. One copy, taken once.
+        private static readonly char[] InvalidFileNameChars = Path.GetInvalidFileNameChars();
+
         private static string SanitizeFolderName(string name)
         {
-            foreach (char c in Path.GetInvalidFileNameChars())
-                name = name.Replace(c, '_');
+            // The overwhelmingly common case is a name with no invalid char at all, and IndexOfAny
+            // answers that in one pass instead of 41 string.Replace calls (each of which allocates
+            // whether or not it replaced anything).
+            if (name.IndexOfAny(InvalidFileNameChars) >= 0)
+            {
+                foreach (char c in InvalidFileNameChars)
+                    name = name.Replace(c, '_');
+            }
 
             // '.' and ' ' are NOT in Path.GetInvalidFileNameChars(), so "." and ".." come through
             // the loop completely untouched — and this is the ONLY guard the folder name ever gets.

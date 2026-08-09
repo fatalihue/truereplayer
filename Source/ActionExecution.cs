@@ -114,6 +114,24 @@ namespace TrueReplayer.Services
         private readonly Action<string, bool>? onButtonStateChanged; // (text, isReplaying)
         private readonly Action<int>? onActionHighlight; // highlight action at index
 
+        // action → grid row index, for the highlight callback. Invalidated (not patched) on any
+        // structural change to `actions`; rebuilt on the next highlight. Only ever touched on the
+        // UI thread: CollectionChanged fires there and the read lives inside a TryEnqueue.
+        private Dictionary<object, int>? _rowIndexCache;
+
+        // Keyed by object with ReferenceEqualityComparer rather than by ActionItem with the default
+        // comparer: both behave identically today (ActionItem overrides neither Equals nor
+        // GetHashCode, so the default comparer IS identity — which is what actions.IndexOf used),
+        // but this way the identity semantics the highlight depends on cannot be changed out from
+        // under it by a later Equals override on the model.
+        private Dictionary<object, int> BuildRowIndexCache()
+        {
+            var map = new Dictionary<object, int>(actions.Count, ReferenceEqualityComparer.Instance);
+            for (int i = 0; i < actions.Count; i++)
+                map[actions[i]] = i;
+            return map;
+        }
+
         public bool IsReplaying { get; private set; }
 
         public ReplayService(
@@ -133,12 +151,23 @@ namespace TrueReplayer.Services
             this.onButtonStateChanged = onButtonStateChanged;
             this.onActionHighlight = onActionHighlight;
 
+            // Any structural change drops the row lookup below. Fires on the same (UI) thread the
+            // lookup is read from, and it is exactly when the row numbers move anyway.
+            actions.CollectionChanged += (_, _) => _rowIndexCache = null;
+
             replayer.OnActionExecuting += (action) =>
             {
                 dispatcherQueue.TryEnqueue(() =>
                 {
-                    int index = actions.IndexOf(action);
-                    if (index >= 0)
+                    // O(1) instead of the O(n) reference scan actions.IndexOf did — this runs for
+                    // EVERY executed action, on the thread that also owns the input hooks and the
+                    // WebView, so a long macro on loop was spending millions of comparisons there.
+                    // "Not in the grid" is load-bearing and preserved: RunProfile executes rows from
+                    // a sub-profile that are absent from `actions`, and the miss is what suppresses
+                    // their highlight. ActionItem declares no Equals override, so a reference-keyed
+                    // dictionary matches what EqualityComparer<ActionItem>.Default was doing.
+                    var map = _rowIndexCache ??= BuildRowIndexCache();
+                    if (map.TryGetValue(action, out int index))
                         onActionHighlight?.Invoke(index);
                 });
             };
@@ -1605,6 +1634,11 @@ namespace TrueReplayer.Services
         private readonly List<RunStepRecord> _runSteps = new();
         private int _runStepsOverflow;
         private DateTime _runStartedAt;
+        // Latches once the cap above is reached, so the per-action path can skip building a Detail
+        // string that RecordRunStep is only going to throw away. Monotone within a run and reset by
+        // ResetRunReport, so a plain volatile read is enough — no need to take the _runSteps lock
+        // on a path that runs once per executed action of an unbounded loop.
+        private volatile bool _runStepsFull;
 
         /// <summary>Snapshot of the last run's step records (a copy — the list keeps mutating).</summary>
         public (List<RunStepRecord> Steps, int Overflow, DateTime StartedAt) GetRunReport()
@@ -1618,6 +1652,7 @@ namespace TrueReplayer.Services
             {
                 _runSteps.Clear();
                 _runStepsOverflow = 0;
+                _runStepsFull = false;
                 _runStartedAt = DateTime.Now;
             }
         }
@@ -1626,8 +1661,9 @@ namespace TrueReplayer.Services
         {
             lock (_runSteps)
             {
-                if (_runSteps.Count >= MaxRunStepRecords) { _runStepsOverflow++; return; }
+                if (_runSteps.Count >= MaxRunStepRecords) { _runStepsOverflow++; _runStepsFull = true; return; }
                 _runSteps.Add(rec);
+                if (_runSteps.Count >= MaxRunStepRecords) _runStepsFull = true;
             }
         }
 
@@ -2355,7 +2391,12 @@ namespace TrueReplayer.Services
                 {
                     Row = i + 1,
                     ActionType = action.ActionType ?? "",
-                    Detail = DescribeStepDetail(action),
+                    // Skipped once the report is full: RecordRunStep discards the whole record from
+                    // there on (it only bumps the overflow counter), so the string work — up to four
+                    // allocations per action, forever, in an unbounded loop — buys nothing. The
+                    // record itself still has to exist for the Status/ErrorCode writes in the catch
+                    // blocks below.
+                    Detail = _runStepsFull ? null : DescribeStepDetail(action),
                 };
                 var stepWatch = System.Diagnostics.Stopwatch.StartNew();
 
