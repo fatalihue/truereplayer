@@ -65,9 +65,19 @@ namespace TrueReplayer.Services
         // code/metadata, not display text, so promoting it would paste garbage (or worse). Every other
         // disallowed element (div, table, h1, img, …) is unwrapped: dropped but its allowed children
         // are kept, so <div><strong>x</strong></div> still pastes "x" bold.
+        //
+        // The raw-text and escapable-raw-text elements are all in this class and the list was
+        // missing five of them: xmp, listing, plaintext, noembed and noframes. Each one is parsed
+        // as raw text and then unwrapped, so its contents were promoted to visible text glued
+        // onto the legitimate content around it — "<p>Order confirmed.</p><noframes>Pay to IBAN
+        // GB00EVIL…</noframes>" pasted as one continuous message. plaintext is the worst of them:
+        // the tokenizer swallows the entire REST of the document as text, closing tag included.
+        // No code execution — for a clipboard payload this is text injection, not XSS — but the
+        // doctrine above ("text content is code/metadata, not display text") already covers them.
         private static readonly HashSet<string> DropSubtree = new(StringComparer.OrdinalIgnoreCase)
         { "script", "style", "iframe", "object", "embed", "template", "noscript", "head", "title",
-          "meta", "link", "base", "textarea", "svg", "math", "frame", "frameset", "applet" };
+          "meta", "link", "base", "textarea", "svg", "math", "frame", "frameset", "applet",
+          "xmp", "listing", "plaintext", "noembed", "noframes" };
 
         /// <summary>
         /// Returns sanitized HTML, or null when the input is empty, sanitizes to nothing (a fully

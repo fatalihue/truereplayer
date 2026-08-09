@@ -1996,8 +1996,30 @@ namespace TrueReplayer.Controllers
                     skipped++;
                     continue;
                 }
-                string targetPath = Path.Combine(profileDir, entry.Name + ".json");
-                string finalName = entry.Name;
+                // Strip a ".json" the envelope already carries, instead of appending a second one.
+                // Import was the only writer that appended unconditionally: the create and rename
+                // paths in WebViewBridge both do `if (!name.EndsWith(".json")) name += ".json"`.
+                // So an entry named "Farm.json" landed on disk as "Farm.json.json" and showed up
+                // as "Farm.json" (the display name is GetFileNameWithoutExtension), while the very
+                // same name typed into the UI produced "Farm.json" on disk and showed "Farm".
+                // Worse, the File.Exists conflict check below compared "Farm.json.json" against an
+                // existing "Farm.json" and found no conflict, so the import silently created a
+                // second profile that every `FirstOrDefault(p => p.Name == name)` lookup in the app
+                // could shadow — one of them unreachable: it would not open, rename or delete.
+                // IsSafeProfileName above is already extension-insensitive (it validates the part
+                // before the dot), so what is stripped here is exactly what it approved.
+                string importName = entry.Name;
+                if (importName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                    importName = importName[..^5];
+                // "\.json" on its own strips to nothing. Skipped and counted like any other
+                // rejected entry rather than allowed to become an empty file name.
+                if (string.IsNullOrWhiteSpace(importName))
+                {
+                    skipped++;
+                    continue;
+                }
+                string targetPath = Path.Combine(profileDir, importName + ".json");
+                string finalName = importName;
 
                 // Treat a name claimed by an earlier batch entry the same as a name already on disk —
                 // both must trigger conflict resolution so we never assign two imports the same path.
@@ -2017,7 +2039,7 @@ namespace TrueReplayer.Controllers
 
                     if (resolution == ImportConflictResult.Rename)
                     {
-                        finalName = AllocateImportName(entry.Name, profileDir, allocatedNames);
+                        finalName = AllocateImportName(importName, profileDir, allocatedNames);
                         targetPath = Path.Combine(profileDir, finalName + ".json");
                     }
                     // Overwrite: leave targetPath / finalName as-is — File.WriteAllTextAsync below
@@ -2026,7 +2048,7 @@ namespace TrueReplayer.Controllers
                     // this name, fall back to a fresh "name (N)" so the later import isn't lost.
                     else if (resolution == ImportConflictResult.Overwrite && allocatedNames.Contains(finalName))
                     {
-                        finalName = AllocateImportName(entry.Name, profileDir, allocatedNames);
+                        finalName = AllocateImportName(importName, profileDir, allocatedNames);
                         targetPath = Path.Combine(profileDir, finalName + ".json");
                     }
                 }

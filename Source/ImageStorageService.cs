@@ -206,6 +206,20 @@ namespace TrueReplayer.Services
             // ImagePath still resolves after import.
             if (!TryResolveImageFile(profileName, filename, out string fullPath)) return false;
 
+            // The payload must BE a PNG (IsValidPng below) but the NAME was unconstrained, so an
+            // envelope could ask for "payload.dll" and get a file whose bytes start with \x89PNG
+            // written into the profile's image folder. Nothing loads that folder and the content is
+            // still a PNG, so this is not code execution — the real cost is that it becomes
+            // permanent litter: CleanupOrphanImages only enumerates "*.png", so the startup sweep
+            // never reaps it, and even deleting the profile leaves it behind unless the whole
+            // directory goes. Every reference image this app writes is a .png; requiring the
+            // extension costs nothing and keeps the folder to one file type.
+            if (!fullPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+            {
+                try { DiagnosticLog.Info($"[Images] Rejected '{filename}': reference images must be .png."); } catch { }
+                return false;
+            }
+
             Directory.CreateDirectory(GetImageDirectory(profileName));
             // base64Data is untrusted import data and this runs once per image inside
             // ConfirmImportAsync's loop. Swallow a malformed payload (log + skip this one

@@ -17,8 +17,23 @@ namespace TrueReplayer.Services
     {
         // Windows reserved device names, matched case-insensitively on the part before the first
         // dot (e.g. "CON", "CON.json", "COM1.foo" all resolve to the device, not a file).
+        //
+        // The full list from "Naming Files, Paths, and Namespaces" is wider than the obvious one:
+        // COM0 and LPT0 are reserved, and so are the SUPERSCRIPT-digit spellings COM¹ COM² COM³ /
+        // LPT¹ LPT² LPT³ (U+00B9, U+00B2, U+00B3), which Windows resolves to the same devices.
+        // None of the superscripts are in Path.GetInvalidFileNameChars(), so a profile named
+        // "COM¹" passed every other check and then failed to create its file or its Images
+        // directory — the exact breakage the rule exists to prevent. CONIN$ and CONOUT$ are on
+        // the same list; the char class avoids a "\$" that C# would reject as an escape.
+        //
+        // The three superscripts are literal U+00B9 / U+00B2 / U+00B3 in the pattern below. This
+        // file is UTF-8 WITHOUT a BOM, so that only holds while the compiler reads it as UTF-8 —
+        // which it does (Roslyn's default, and the rest of this repo already carries accented
+        // Portuguese and em dashes in source). Worth knowing if this ever has to move: a
+        // mis-decoded comment is cosmetic, a mis-decoded pattern silently stops matching.
         private static readonly Regex ReservedDeviceNames =
-            new(@"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            new("^(CON|PRN|AUX|NUL|CONIN[$]|CONOUT[$]|COM[0-9¹²³]|LPT[0-9¹²³])$",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         /// <summary>
         /// Maximum length of a profile name, in characters. Public so a caller can surface the
