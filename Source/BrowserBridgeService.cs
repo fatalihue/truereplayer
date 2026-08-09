@@ -29,7 +29,15 @@ namespace TrueReplayer.Services
         // 1.4.13 = mutating browser commands (click/rightClick/type/selectOption) no longer fan out
         // to every frame. A read-only locateFrame probe elects ONE frame and the command is sent
         // there alone, so an element that exists in both the page and an iframe is acted on once.
-        public const string ExpectedExtensionVersion = "1.4.13";
+        // 1.4.14 = dropped the "activeTab" permission, which nothing used. There is no
+        // chrome.scripting / executeScript / insertCSS anywhere in the extension and no
+        // action.onClicked (the action declares a default_popup, so onClicked could not fire even
+        // if one were added); the only chrome.action calls are setBadgeText and
+        // setBadgeBackgroundColor, neither of which needs a permission. The content script is
+        // already declared for <all_urls>, and chrome.tabs.sendMessage to your own content script
+        // needs no host permission — so activeTab granted host access that no code path consumed,
+        // on an extension that can already read and type into every page. No behaviour change.
+        public const string ExpectedExtensionVersion = "1.4.14";
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
         private NamedPipeServerStream? _pipeServer;
         private StreamReader? _reader;
@@ -37,6 +45,15 @@ namespace TrueReplayer.Services
         private CancellationTokenSource _cts = new();
         private bool _disposed;
         private readonly object _writeLock = new();
+
+        // Run-length state for pipe-listen failures. The listen loop retries every second forever,
+        // so a PERMANENT failure — the pipe name already held by a second instance, an ACL the OS
+        // refuses — would otherwise write one warning per second and bury every other event in the
+        // session log. The log is the only sensor a shipped build has, so flooding it is its own
+        // bug. Both fields are touched only from ListenLoopAsync, which is a single task, so they
+        // need no lock.
+        private string? _lastPipeError;
+        private int _suppressedPipeErrors;
 
         private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonElement>> _pendingCommands = new();
 
@@ -108,6 +125,10 @@ namespace TrueReplayer.Services
 
                     IsConnected = true;
                     ConnectionChanged?.Invoke(true);
+                    // A connection ends any run of identical failures, so the same error recurring
+                    // after a good session is reported again instead of being folded into the old
+                    // run and never mentioned.
+                    EndPipeFailureRun();
 
                     // Send immediate heartbeat so NativeHost's watchdog doesn't timeout
                     try { _writer.WriteLine("{\"type\":\"heartbeat\"}"); } catch { }
@@ -135,7 +156,12 @@ namespace TrueReplayer.Services
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"[BrowserBridge] Pipe error: {ex.Message}");
+                    // Was Debug.WriteLine, which compiles out of Release: creating the server
+                    // stream or waiting for a connection could fail forever and the ONLY symptom
+                    // the user ever got was "extension disconnected", with nothing written
+                    // anywhere to say why. DiagnosticLog.Warn is the idiom the parse-error catch
+                    // below already uses.
+                    LogPipeFailure(ex);
                 }
                 finally
                 {
@@ -167,6 +193,41 @@ namespace TrueReplayer.Services
             }
         }
 
+        /// <summary>
+        /// Logs a pipe-listen failure, collapsing consecutive identical ones into a single entry
+        /// plus a count. See the <see cref="_lastPipeError"/> fields for why the raw 1 Hz stream
+        /// cannot go straight to the log.
+        /// </summary>
+        private void LogPipeFailure(Exception ex)
+        {
+            // Type included: "Access to the path is denied" reads very differently as an
+            // UnauthorizedAccessException (ACL) than as an IOException (name already in use), and
+            // that distinction is the whole diagnosis.
+            string message = $"{ex.GetType().Name}: {ex.Message}";
+            if (message == _lastPipeError)
+            {
+                _suppressedPipeErrors++;
+                return;
+            }
+            EndPipeFailureRun();
+            _lastPipeError = message;
+            DiagnosticLog.Warn($"[BrowserBridge] Pipe listen failed, retrying in 1s: {message}");
+        }
+
+        /// <summary>
+        /// Closes an open run of identical pipe failures, reporting how many were folded away.
+        /// Called both when the message changes and when a connection finally succeeds — without
+        /// the second call, a failure that repeated 3600 times and then cleared would leave the
+        /// log claiming it happened once.
+        /// </summary>
+        private void EndPipeFailureRun()
+        {
+            if (_suppressedPipeErrors > 0)
+                DiagnosticLog.Warn($"[BrowserBridge] ...that same pipe failure repeated {_suppressedPipeErrors} more time(s).");
+            _suppressedPipeErrors = 0;
+            _lastPipeError = null;
+        }
+
         private async Task ReadMessagesAsync(CancellationToken token)
         {
             while (!token.IsCancellationRequested)
@@ -178,7 +239,10 @@ namespace TrueReplayer.Services
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"[BrowserBridge] ReadLineAsync error: {ex.Message}");
+                    // Release-visible for the same reason as the listen catch above. Bounded to
+                    // one line per session — this breaks the read loop, which ends the session —
+                    // so it needs none of the run-collapsing the retry loop does.
+                    DiagnosticLog.Warn($"[BrowserBridge] Read failed, dropping the connection: {ex.GetType().Name}: {ex.Message}");
                     break;
                 }
                 if (line == null) break; // EOF = pipe closed
@@ -366,7 +430,11 @@ namespace TrueReplayer.Services
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[BrowserBridge] Send error: {ex.Message}");
+                // A failed send is how a browser action silently does nothing: the command never
+                // reaches the extension, no reply ever comes, and the caller waits out its timeout
+                // with no record of the cause. Debug.WriteLine meant that record existed only in a
+                // debugger-attached build.
+                DiagnosticLog.Warn($"[BrowserBridge] Send failed: {ex.GetType().Name}: {ex.Message}");
             }
         }
 
