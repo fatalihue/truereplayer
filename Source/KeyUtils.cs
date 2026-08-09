@@ -8,6 +8,101 @@ namespace TrueReplayer.Helpers
 {
     public static class KeyUtils
     {
+        /// <summary>
+        /// The keyboard layout that every name↔vk conversion in this class is resolved against.
+        ///
+        /// It used to be <c>GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow()))</c>
+        /// — ANOTHER PROCESS's layout, picked by whatever the user happened to have in front at
+        /// that instant. Two directions, two different wrong answers:
+        ///
+        ///  - RESOLVING a name (TryResolveVirtualKeyCode → CharToVkCurrentLayout). Anything
+        ///    stored as a single character outside the static map — ç [ ; - ' / , exactly what
+        ///    ABNT2 puts on its own keys — got whatever vk that character has on the foreground
+        ///    app's layout, or no vk at all. RemapService.Publish() is the sharpest case: it runs
+        ///    from Load() in the MainWindow ctor (foreground = whatever the user was using when
+        ///    the app started) and from Save() (foreground = TrueReplayer). Same remaps.json,
+        ///    two different compiled snapshots — the remap targeting the wrong physical key, or
+        ///    silently dropped by the `continue` that follows a failed resolve.
+        ///
+        ///  - NAMING a vk (NormalizeKeyName → VkToCharCurrentLayout), which runs on the hook
+        ///    thread for every keystroke. A key recorded while a US-layout app was focused was
+        ///    named ";" and the same physical key named "ç" a moment later.
+        ///
+        /// Both directions must agree or a name cannot round-trip, so they share this one
+        /// authority: idThread 0 = the CALLING thread's layout. The callers that matter are the
+        /// UI thread and the hook callbacks, which are the same thread here (SetWindowsHookEx
+        /// was called from the MainWindow ctor, so the LL hooks pump on the UI thread), and that
+        /// thread's layout is the one the user is actually switching with Alt+Shift. It is also
+        /// two P/Invokes cheaper per keystroke than asking the foreground window.
+        ///
+        /// Callers on a pool thread get that thread's layout — the system default — which is
+        /// why the compiled remap snapshot is published from the UI thread and nowhere else.
+        /// </summary>
+        public static IntPtr ActiveLayout => NativeMethods.GetKeyboardLayout(0);
+
+        // Cached answer for LayoutHasAltGr, together with the layout it was measured on: the
+        // probe below is ~225 P/Invokes, and the answer only changes when the layout does.
+        // Written from the publish path (UI thread) only — see LayoutHasAltGr.
+        private static IntPtr _altGrProbedLayout = IntPtr.Zero;
+        private static bool _altGrProbeResult;
+
+        /// <summary>
+        /// True when the active layout has a real AltGr key — i.e. when at least one character
+        /// on it is typed with Ctrl+Alt. ABNT2 (@ \ [ ] { } ² ³ °), the European layouts and
+        /// US-International all say yes; plain US says no.
+        ///
+        /// This is the question that decides whether VK_RMENU (0xA5) is "the other Alt" or a
+        /// character-layer modifier, which is not a distinction the vk itself carries.
+        /// VkKeyScanEx answers it directly: it returns the vk in the low byte and the shift
+        /// state needed to produce the character in the high byte, where 1 = Shift, 2 = Ctrl,
+        /// 4 = Alt. Ctrl+Alt together (state &amp; 6) == 6 IS the AltGr signature — no layout
+        /// asks a user to press literal Ctrl+Alt for a printable character.
+        ///
+        /// The probe walks Latin-1, which covers every AltGr character on the layouts this
+        /// matters for, plus € explicitly because it sits outside that range and is the AltGr
+        /// character on several layouts that have almost no others. ToUnicodeEx would answer
+        /// the same question more directly and must never be used: it destroys the OS dead-key
+        /// state, and dead keys are exactly what these layouts are full of.
+        ///
+        /// Only ever called off the hot path (remap publish), so the P/Invoke cost is free.
+        /// </summary>
+        public static bool LayoutHasAltGr()
+        {
+            IntPtr hkl = ActiveLayout;
+            if (hkl == _altGrProbedLayout) return _altGrProbeResult;
+
+            // Numeric, not character literals: these files are UTF-8 with no BOM, and a char
+            // literal is the one place where a decoding slip stops being a mangled comment and
+            // becomes a compile error.
+            const char LatinOneLast = (char)0x00FF;
+            const char EuroSign = (char)0x20AC;   // outside Latin-1, probed separately
+
+            bool found = false;
+            try
+            {
+                for (char ch = ' '; ch <= LatinOneLast && !found; ch++)
+                {
+                    short scan = NativeMethods.VkKeyScanEx(ch, hkl);
+                    if (scan == -1) continue;
+                    found = ((scan >> 8) & 0x06) == 0x06;
+                }
+                if (!found)
+                {
+                    short euro = NativeMethods.VkKeyScanEx(EuroSign, hkl);
+                    found = euro != -1 && ((euro >> 8) & 0x06) == 0x06;
+                }
+            }
+            catch
+            {
+                // Unprobeable layout: answer "no AltGr", which keeps the historical fan-out.
+                return false;
+            }
+
+            _altGrProbeResult = found;
+            _altGrProbedLayout = hkl;   // published last: a reader never sees a matching hkl
+            return found;               // paired with a stale result
+        }
+
         public static string? NormalizeKeyName(int vkCode)
         {
             // 1. Check well-known non-printable / named keys first
@@ -84,7 +179,8 @@ namespace TrueReplayer.Helpers
 
         /// <summary>
         /// Uses MapVirtualKeyEx (MAPVK_VK_TO_CHAR = 2) to resolve an OEM VK code
-        /// to the character it produces on the current keyboard layout.
+        /// to the character it produces on <see cref="ActiveLayout"/> — our own layout, not
+        /// the foreground app's; see that property for why the distinction is load-bearing.
         /// IMPORTANT: This is safe to call from inside a keyboard hook because
         /// unlike ToUnicodeEx, it does NOT consume/destroy the OS dead key state.
         /// </summary>
@@ -92,9 +188,7 @@ namespace TrueReplayer.Helpers
         {
             try
             {
-                uint threadId = NativeMethods.GetWindowThreadProcessId(
-                    NativeMethods.GetForegroundWindow(), out _);
-                IntPtr hkl = NativeMethods.GetKeyboardLayout(threadId);
+                IntPtr hkl = ActiveLayout;
 
                 // MAPVK_VK_TO_CHAR = 2: translates VK to unshifted character
                 // Bit 31 set = dead key, we still want the base character
@@ -245,18 +339,20 @@ namespace TrueReplayer.Helpers
         }
 
         /// <summary>
-        /// Resolves a character to its VK code on the current keyboard layout.
+        /// Resolves a character to its VK code on <see cref="ActiveLayout"/>.
         /// Uses VkKeyScanEx first, then verifies the result with MapVirtualKeyEx.
         /// If VkKeyScanEx returns a wrong VK (known issue with ABNT_C1/C2 keys),
         /// falls back to scanning the OEM VK range.
+        ///
+        /// Returns 0 for "this character is not on this layout", and every caller treats that
+        /// as "skip this entry". That is why the layout has to be ours: resolving a remap or a
+        /// recorded key against a foreign layout does not fail loudly, it drops the entry.
         /// </summary>
         private static ushort CharToVkCurrentLayout(char ch)
         {
             try
             {
-                uint threadId = NativeMethods.GetWindowThreadProcessId(
-                    NativeMethods.GetForegroundWindow(), out _);
-                IntPtr hkl = NativeMethods.GetKeyboardLayout(threadId);
+                IntPtr hkl = ActiveLayout;
 
                 short result = NativeMethods.VkKeyScanEx(ch, hkl);
                 if (result != -1)

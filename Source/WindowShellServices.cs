@@ -556,6 +556,7 @@ namespace TrueReplayer.Services
         private const int WM_RBUTTONUP = 0x0205;
         private const int WM_GETMINMAXINFO = 0x0024;
         private const int WM_DISPLAYCHANGE = 0x007E;
+        private const int WM_INPUTLANGCHANGE = 0x0051;
         private const int WM_SIZING = 0x0214;
         private const int WM_ENTERSIZEMOVE = 0x0231;
         private const int WM_EXITSIZEMOVE = 0x0232;
@@ -726,6 +727,22 @@ namespace TrueReplayer.Services
                 // Monitor/resolution/DPI change — drop the cached virtual-screen bounds so replay
                 // coordinate normalization uses the new geometry instead of stale metrics.
                 NativeMethods.VirtualScreen.Invalidate();
+            }
+            else if (msg == WM_INPUTLANGCHANGE)
+            {
+                // Keyboard layout changed (Alt+Shift, the language bar, a per-app layout switch).
+                // Remaps whose from/to is a single character — ç [ ; - ' / , the whole ABNT2 OEM
+                // row — were compiled to the vks those characters had on the PREVIOUS layout, and
+                // would keep pointing at a different physical key or none at all. This message
+                // arrives after the thread's layout has already changed, and we are on the UI
+                // thread, so KeyUtils.ActiveLayout (GetKeyboardLayout(0)) reads the new one.
+                //
+                // No filtering here on purpose: RepublishForLayoutChange is idempotent and does
+                // no disk I/O — it returns immediately when the layout it already compiled
+                // against is still active. The app can also miss this message entirely (it goes
+                // to the focused window, and TrueReplayer spends most of its life in the tray);
+                // the same idempotent check is what lets the next one it DOES receive re-sync.
+                RemapService.RepublishForLayoutChange();
             }
             return HwndHookManager.CallOriginalWndProc(hwnd, msg, wParam, lParam);
         }

@@ -257,6 +257,38 @@ namespace TrueReplayer
         private static bool IsAltGrPhantomCtrl(int vkCode, IntPtr lParam) =>
             vkCode == 0xA2 && (uint)Marshal.ReadInt32(lParam, 4) == ScanCodeAltGrPhantomCtrl;
 
+        /// <summary>
+        /// Takes back the phantom Ctrl when the remap layer swallows the RIGHT ALT it belongs to.
+        ///
+        /// The filter above is right to pass the phantom through: on an AltGr layout the target
+        /// app needs that Ctrl to compose the character. But it is passed through on the
+        /// assumption that the RAlt behind it is coming too. If a remap swallows the RAlt, that
+        /// assumption breaks and the two halves stop being a pair — the app is left holding a
+        /// Ctrl, and then receives the replacement key under it. Remap "Alt" to W on ABNT2 and
+        /// the app sees LCtrl↓ W↓ W↑ LCtrl↑: every attempt to type an @ was Ctrl+W, which closes
+        /// the browser tab. With TO empty (disable the key) there is no replacement and the app
+        /// still gets a stray Ctrl press it never asked for.
+        ///
+        /// So the moment we decide to swallow a 0xA5 down, we release the Ctrl we let past.
+        /// Injected, therefore LLKHF_INJECTED, therefore invisible to our own hook — it changes
+        /// nothing in our bookkeeping, where the phantom was never recorded in the first place.
+        /// The real phantom Ctrl↑ still arrives after the RAlt↑ and is still filtered there; the
+        /// app sees it as an up for a key it already has up, which is inert (a bare Ctrl has no
+        /// press-alone behaviour — that is why InjectMenuCancelKey exists for Alt and Win and
+        /// not for this).
+        ///
+        /// _altGrPhantomCtrlHeld is deliberately NOT cleared: it is the marker the release
+        /// filter uses for a phantom up that arrives without the 0x21D scan code, and that up
+        /// is still on its way.
+        ///
+        /// Costs one int comparison on every other key.
+        /// </summary>
+        private static void NeutraliseAltGrPhantomCtrl(int fromVk)
+        {
+            if (fromVk != 0xA5 || !_altGrPhantomCtrlHeld) return;
+            InjectRemappedKey(0xA2, down: false);
+        }
+
         // DoubleTap: last swallowed tap, keyed by composed key + monotonic tick. A second tap
         // of the SAME combo within the window fires; anything else restarts the window.
         // Hook-thread-only state (both hooks pump on the same UI thread).
@@ -749,18 +781,34 @@ namespace TrueReplayer
             //     stay silent. The gate is doing its job — user pressed in the wrong context.
             //   - target isn't running at all: surface a toast so the user knows why the
             //     hotkey did nothing. Cooldown'd so a mashed key doesn't flood notifications.
-            // FindWindow walks the full window list which is cheap enough at hotkey-press rate.
             try
             {
-                bool notRunning = TrueReplayer.Helpers.WindowMatcher.FindWindow(target, regex) == IntPtr.Zero;
                 var now = DateTime.UtcNow;
+
+                // BOTH cooldowns are consulted before any work, because everything below is work
+                // done ONLY to feed them: FindWindow walks the entire top-level window list, and
+                // DescribeWindow adds an OpenProcess + GetProcessImageFileName + two
+                // StringBuilders. This method runs inside the low-level keyboard hook — and not
+                // just at hotkey-press rate, since the hotstring engine calls it per typed
+                // character (ProcessHotstringKeyDown → CheckHotstringMatch). A held-down gated
+                // hotkey used to pay for a full window enumeration on every auto-repeat, on the
+                // one thread Windows silently unhooks when its callback overruns
+                // LowLevelHooksTimeout. Both consumers were already throttled; only the price of
+                // deciding that was not.
+                bool logDue = !_lastGateRejectLogUtc.TryGetValue(profileName, out var lastLog)
+                    || now - lastLog >= _gateRejectLogCooldown;
+                bool toastDue = !_lastTargetMissingFireUtc.TryGetValue(profileName, out var last)
+                    || now - last >= _targetMissingCooldown;
+                if (!logDue && !toastDue) return false;
+
+                bool notRunning = TrueReplayer.Helpers.WindowMatcher.FindWindow(target, regex) == IntPtr.Zero;
 
                 // Diagnostic record (throttled, its own cooldown). This is the #1 "my hotkey does
                 // nothing" cause — log WHAT the target wanted vs WHAT was actually in front, so
                 // support can tell a ProcessName/title mismatch from "target not running" (and from
-                // the elevation case, already logged by WindowMatcher).
-                if (!_lastGateRejectLogUtc.TryGetValue(profileName, out var lastLog)
-                    || now - lastLog >= _gateRejectLogCooldown)
+                // the elevation case, already logged by WindowMatcher). DiagnosticLog queues and
+                // returns; it does not touch the disk on this thread.
+                if (logDue)
                 {
                     _lastGateRejectLogUtc[profileName] = now;
                     TrueReplayer.Services.DiagnosticLog.Info(
@@ -768,9 +816,7 @@ namespace TrueReplayer
                 }
 
                 // Toast only when the target isn't running anywhere (existing behaviour).
-                if (notRunning
-                    && (!_lastTargetMissingFireUtc.TryGetValue(profileName, out var last)
-                        || now - last >= _targetMissingCooldown))
+                if (notRunning && toastDue)
                 {
                     _lastTargetMissingFireUtc[profileName] = now;
                     OnProfileTargetMissing?.Invoke(profileName);
@@ -838,12 +884,16 @@ namespace TrueReplayer
             if (vkCode >= 0x30 && vkCode <= 0x39) return (char)('0' + (vkCode - 0x30)); // 0-9
 
             // Use MapVirtualKeyEx for OEM keys — safe inside keyboard hook
-            // (unlike ToUnicodeEx, does NOT destroy the OS dead key state)
+            // (unlike ToUnicodeEx, does NOT destroy the OS dead key state).
+            //
+            // KeyUtils.ActiveLayout, not the foreground window's: this runs on EVERY character
+            // keystroke and the buffer it feeds is compared against a sequence the user typed
+            // into OUR settings panel, so the two have to be read on the same layout. Asking
+            // the foreground window also cost two extra P/Invokes per keystroke on the hook
+            // thread. Full reasoning on the property.
             try
             {
-                uint threadId = NativeMethods.GetWindowThreadProcessId(
-                    NativeMethods.GetForegroundWindow(), out _);
-                IntPtr hkl = NativeMethods.GetKeyboardLayout(threadId);
+                IntPtr hkl = KeyUtils.ActiveLayout;
 
                 // MAPVK_VK_TO_CHAR = 2
                 uint mapped = NativeMethods.MapVirtualKeyEx((uint)vkCode, 2, hkl);
@@ -961,6 +1011,10 @@ namespace TrueReplayer
                     int xRelVk = XButtonVk(XButtonName(xRelStruct.mouseData));
                     if (_activeRemapDowns.ContainsKey(xRelVk))
                     {
+                        // Keyboard-hoist parity: this early return is the only thing a remapped
+                        // side button's release reaches, so a trigger armed by the hotkey hop
+                        // resolves here or never. See DispatchPendingTriggerUp.
+                        DispatchPendingTriggerUp(xRelVk);
                         CloseRemapPairing(xRelVk);
                         _swallowedXDowns.Remove(xRelVk);
                         return (IntPtr)1;
@@ -1058,21 +1112,30 @@ namespace TrueReplayer
                         && MainController.Instance != null && !MainController.Instance.IsRecording()
                         && (_activeRemapDowns.ContainsKey(xVk) || xRemaps.ContainsKey(xVk)))
                     {
+                        // Keyboard-branch parity, and this is the case the hop was reported for:
+                        // "XButton1 → F9" with F9 bound to Replay had the target app receiving
+                        // F9 while the replay never started. Same encoding for a consumed down —
+                        // pairing recorded as 0, no mirror — see the keyboard branch for why.
+                        bool xConsumedByHotkey = false;
                         if (!_activeRemapDowns.TryGetValue(xVk, out var xToVk))
                         {
                             xToVk = xRemaps[xVk];
-                            _activeRemapDowns[xVk] = xToVk;
-                            if (xToVk != 0 && !_vkCodesCurrentlyDown.Contains(xToVk))
+                            xConsumedByHotkey = xToVk != 0 && ProcessRemappedHotkeyDown(xVk, xToVk);
+                            _activeRemapDowns[xVk] = xConsumedByHotkey ? (ushort)0 : xToVk;
+                            if (!xConsumedByHotkey && xToVk != 0 && !_vkCodesCurrentlyDown.Contains(xToVk))
                             {
                                 _vkCodesCurrentlyDown.Add(xToVk);
                                 _remapMirroredVks.Add(xToVk);
                             }
                         }
-                        if (xToVk != 0)
+                        if (!xConsumedByHotkey && xToVk != 0)
                         {
                             if (!ProcessHotstringKeyDown(xToVk))
                                 InjectRemappedKey(xToVk, down: true);
                         }
+                        // Unchanged and deliberately outside every branch above: the paired UP
+                        // must be consumed whatever happened to the down, or Windows synthesizes
+                        // WM_APPCOMMAND Back/Forward from the orphan and navigates the app.
                         _swallowedXDowns.Add(xVk);
                         return (IntPtr)1;
                     }
@@ -1266,46 +1329,64 @@ namespace TrueReplayer
             return consumed;
         }
 
+        /// <summary>
+        /// Resolves whatever trigger state machine is armed on a physical key's RELEASE —
+        /// OnRelease fires, WhilePressed stops, Hold cancels — matched by vkCode so a mid-hold
+        /// config change still finds it (keyboard-hook parity). Returns true when the release
+        /// was consumed.
+        ///
+        /// Extracted from HandleXButtonTriggerCore, whose up-side body this was verbatim, so
+        /// that the REMAP pairing release can call it too. A key whose down was consumed by
+        /// ProcessRemappedHotkeyDown arms these machines on the physical FROM vk, and the
+        /// physical up for a remapped key never reaches the keyboard hook's own up-side
+        /// handlers: the hoisted pairing release at the top of KeyboardHookCallbackCore closes
+        /// the pairing and returns 1 first. Without this hop a remapped OnRelease/WhilePressed/
+        /// Hold trigger would arm and never disarm.
+        ///
+        /// Three volatile reads and three int comparisons when nothing is armed, which is the
+        /// case for every ordinary remap release.
+        /// </summary>
+        private static bool DispatchPendingTriggerUp(int vk)
+        {
+            if (_pendingHoldFireProfile != null && _pendingHoldFireVkCode == vk)
+            {
+                ClearPendingHoldFire();
+                return true;
+            }
+            if (_pendingReleaseProfile != null && _pendingReleaseVkCode == vk
+                && MainController.Instance != null && !MainController.Instance.IsRecording()
+                && !IsReplayingAction)
+            {
+                var pendingProfile = _pendingReleaseProfile;
+                _pendingReleaseProfile = null;
+                _pendingReleaseVkCode = 0;
+                OnHotkeyPressed?.Invoke($"PROFILE::{pendingProfile}");
+                return true;
+            }
+            if (_activeHoldVkCode == vk && _activeHoldProfile != null
+                && MainController.Instance != null && !MainController.Instance.IsRecording())
+            {
+                string? heldProfile;
+                bool wasConfirmed;
+                lock (_holdLock)
+                {
+                    heldProfile = _activeHoldProfile;
+                    wasConfirmed = _holdConfirmed;
+                    ClearActiveHold();
+                }
+                if (wasConfirmed)
+                {
+                    OnHotkeyPressed?.Invoke($"PROFILE_STOP::{heldProfile}");
+                }
+                return true;
+            }
+            return false;
+        }
+
         private static bool HandleXButtonTriggerCore(string xName, int vk, bool isDown)
         {
             if (!isDown)
-            {
-                // Up-side handlers first, matched by pseudo-vk so a mid-hold config change
-                // still resolves the pending state (keyboard-hook parity).
-                if (_pendingHoldFireProfile != null && _pendingHoldFireVkCode == vk)
-                {
-                    ClearPendingHoldFire();
-                    return true;
-                }
-                if (_pendingReleaseProfile != null && _pendingReleaseVkCode == vk
-                    && MainController.Instance != null && !MainController.Instance.IsRecording()
-                    && !IsReplayingAction)
-                {
-                    var pendingProfile = _pendingReleaseProfile;
-                    _pendingReleaseProfile = null;
-                    _pendingReleaseVkCode = 0;
-                    OnHotkeyPressed?.Invoke($"PROFILE::{pendingProfile}");
-                    return true;
-                }
-                if (_activeHoldVkCode == vk && _activeHoldProfile != null
-                    && MainController.Instance != null && !MainController.Instance.IsRecording())
-                {
-                    string? heldProfile;
-                    bool wasConfirmed;
-                    lock (_holdLock)
-                    {
-                        heldProfile = _activeHoldProfile;
-                        wasConfirmed = _holdConfirmed;
-                        ClearActiveHold();
-                    }
-                    if (wasConfirmed)
-                    {
-                        OnHotkeyPressed?.Invoke($"PROFILE_STOP::{heldProfile}");
-                    }
-                    return true;
-                }
-                return false;
-            }
+                return DispatchPendingTriggerUp(vk);
 
             // Down: unconditional swallow while a state machine is armed on this button
             // (the keyboard hook's leak-guards, pseudo-vk keyed).
@@ -1329,7 +1410,7 @@ namespace TrueReplayer
             if (globalResult == GlobalHotkeyResult.Handled) return true;
             if (globalResult == GlobalHotkeyResult.Declined) return false;
 
-            return HandleXButtonProfileHotkeys(combo, vk, isDown);
+            return DispatchProfileHotkey(combo, vk);
         }
 
         /// <summary>
@@ -1418,10 +1499,13 @@ namespace TrueReplayer
             return GlobalHotkeyResult.NotMatched;
         }
 
-        // Profile-hotkey half of the X-button dispatch. Split out from HandleXButtonTriggerCore
-        // purely so the global ladder above could be shared with the wheel path; the body is
-        // unchanged and still uses only these three values.
-        private static bool HandleXButtonProfileHotkeys(string combo, int vk, bool isDown)
+        // Profile-hotkey dispatch for one composed combo, keyed on the PHYSICAL vk that will be
+        // released (a pseudo-vk 0x05/0x06 for the side buttons, the FROM vk for a remapped key).
+        // Originally split out of HandleXButtonTriggerCore purely so the global ladder above
+        // could be shared with the wheel path; the body is unchanged. It carried a third
+        // parameter, isDown, which every caller passed true and the body never read — dropped
+        // when the remap hop became the third caller, because "pass true" is not a contract.
+        private static bool DispatchProfileHotkey(string combo, int vk)
         {
             if (!UserProfile.Current.ProfileKeyEnabled || ProfileHotkeys.Count == 0)
                 return false;
@@ -1563,6 +1647,62 @@ namespace TrueReplayer
             return false;
         }
 
+        /// <summary>
+        /// Feeds one remapped key-down into the hotkey matcher as the LOGICAL (mapped-to) key.
+        /// Returns true when a hotkey OWNED it — the caller must swallow the FROM key and must
+        /// NOT inject the replacement, exactly like the hotstring hop above.
+        ///
+        /// The same bridge, for the same reason. The injected replacement carries
+        /// LLKHF_INJECTED and dies at the gate near the top of KeyboardHookCallbackCore, so the
+        /// matcher never sees it: remapping XButton1 to F9 with F9 bound to Replay made the
+        /// target app see F9 and the replay never start. RemapSection warns about collisions on
+        /// the FROM side; the TO side neither warned nor worked. Swallowing rather than passing
+        /// the key through is the same parity: a physically-pressed F9 bound to Replay is
+        /// swallowed, and a hotkey is a dedicated trigger, not something the app should also get.
+        ///
+        /// It dispatches through the two ladders the mouse path already uses —
+        /// TryDispatchGlobalHotkey and the profile-hotkey half — so global and profile hotkeys,
+        /// every trigger mode, the Declined case (Replay matched but its target is not in front)
+        /// and the menu-cancel pulses all behave identically to a physical press. The state
+        /// machines are armed on the PHYSICAL fromVk, not the logical one: no up will ever
+        /// arrive for a key nobody is holding, and the physical release is picked up by
+        /// DispatchPendingTriggerUp from the pairing-release hoist.
+        ///
+        /// RECURSION. Two paths were checked and neither closes:
+        ///   - a TO key that is itself a remap FROM. This hop is handed the toVk as a value and
+        ///     never re-consults the map, so no chain forms; the only way a TO key re-enters the
+        ///     layer would be as an event, and every event we generate is injected.
+        ///   - a hotkey action that injects input. InjectMenuCancelKey's F15, EraseCharacters'
+        ///     backspaces and everything the replay engine sends all re-enter this hook
+        ///     SYNCHRONOUSLY on this thread (SendInput dispatches low-level hooks inline) — and
+        ///     all of them are LLKHF_INJECTED, so they return at the injected gate before the
+        ///     remap layer. That gate is the bound: only physical hardware produces a
+        ///     non-injected event, and hardware cannot be produced by us.
+        /// The blocks that run ABOVE the injected gate (pairing release, gate bypass, capture)
+        /// each test the injected flag themselves, so the re-entrant events cannot disturb the
+        /// pairing state this method is called in the middle of building either.
+        /// </summary>
+        private static bool ProcessRemappedHotkeyDown(int fromVk, ushort toVk)
+        {
+            // Same preconditions as the hotstring hop: no dispatch mid-recording (the recorder
+            // owns the keystream) and none without a controller to dispatch into.
+            if (MainController.Instance == null || MainController.Instance.IsRecording())
+                return false;
+
+            string combo = BuildComposedKey(toVk);
+            if (string.IsNullOrEmpty(combo)) return false;
+
+            var globalResult = TryDispatchGlobalHotkey(combo);
+            if (globalResult == GlobalHotkeyResult.Handled) return true;
+            // Declined = a global hotkey owns this combo but its window gate said no. Same
+            // contract as the mouse path: do not fall through to profile hotkeys. Returning
+            // false lets the replacement be injected, which is the pass-through equivalent
+            // the keyboard path uses for a declined Replay key.
+            if (globalResult == GlobalHotkeyResult.Declined) return false;
+
+            return DispatchProfileHotkey(combo, fromVk);
+        }
+
         private static string GetKeyName(int vkCode)
         {
             return KeyUtils.NormalizeKeyName(vkCode) ?? SafeKeyFallback(vkCode);
@@ -1663,6 +1803,13 @@ namespace TrueReplayer
                         _remapBypassedDowns.Remove(remapVk);
                         if (_activeRemapDowns.ContainsKey(remapVk))
                         {
+                            // The ONLY point a remapped key's physical release passes through,
+                            // so it is also the only place an OnRelease / WhilePressed / Hold
+                            // armed by the hotkey hop can be resolved — the keyboard hook's own
+                            // up-side handlers sit far below this early return. A no-op (three
+                            // comparisons) for every pairing that isn't a hop, and we swallow
+                            // the event either way, so its verdict is not consulted.
+                            DispatchPendingTriggerUp(remapVk);
                             CloseRemapPairing(remapVk);
                             return (IntPtr)1;
                         }
@@ -1759,6 +1906,11 @@ namespace TrueReplayer
                     {
                         if (_activeRemapDowns.TryGetValue(heldVk, out var heldToVk))
                         {
+                            // Same reason as in the branch below: while an AltGr is held down,
+                            // win32k re-synthesises its phantom left Ctrl on every auto-repeat,
+                            // and we are still swallowing the RAlt that was supposed to justify
+                            // it. A gate being up does not change who is left holding the Ctrl.
+                            NeutraliseAltGrPhantomCtrl(heldVk);
                             if (heldToVk != 0) InjectRemappedKey(heldToVk, down: true);
                             return (IntPtr)1;
                         }
@@ -1848,10 +2000,12 @@ namespace TrueReplayer
                 // ── Key remap layer ──
                 // Runs BEFORE hotkey composition: the FROM key vanishes physically and the TO
                 // key exists logically — chords compose through the _vkCodesCurrentlyDown
-                // mirror, hotstrings track the LOGICAL keystream via ProcessHotstringKeyDown
-                // (the injected replacement is LLKHF_INJECTED and can't re-enter this layer,
-                // so without both hops a remapped modifier would kill every chord and a
-                // remapped letter every hotstring). The DOWN branch is suspended while
+                // mirror, hotstrings track the LOGICAL keystream via ProcessHotstringKeyDown,
+                // and hotkeys match it via ProcessRemappedHotkeyDown (the injected replacement
+                // is LLKHF_INJECTED and can't re-enter this layer, so without all three hops a
+                // remapped modifier would kill every chord, a remapped letter every hotstring,
+                // and a key remapped ONTO a hotkey would fire nothing at all). The DOWN branch
+                // is suspended while
                 // recording (the recorder must see raw physical keys — a remapped key would
                 // otherwise vanish from recordings entirely); UP-side pairing release is
                 // hoisted ABOVE the capture/suppress early-returns (top of this method) so an
@@ -1882,20 +2036,45 @@ namespace TrueReplayer
                         || (remaps.ContainsKey(vkCode) && !_vkCodesCurrentlyDown.Contains(vkCode)
                             && !_remapBypassedDowns.Contains(vkCode)))
                     {
+                        // First statement in the branch, because from here the down is swallowed
+                        // on every path out — including the hotstring one, whose backspaces would
+                        // otherwise go out under a Ctrl the app is still holding, and Ctrl+
+                        // Backspace deletes a whole word rather than a character.
+                        NeutraliseAltGrPhantomCtrl(vkCode);
+
+                        bool consumedByHotkey = false;
                         if (!_activeRemapDowns.TryGetValue(vkCode, out var toVk))
                         {
                             toVk = remaps[vkCode];
-                            _activeRemapDowns[vkCode] = toVk;
+
+                            // Hotkey hop, on the GENUINE first down only — the equivalent of the
+                            // physical path's `if (!isRepeat)` around its global/profile ladders.
+                            // Runs before any pairing or mirror state exists, because a consumed
+                            // key has nothing to inject and therefore nothing to release.
+                            consumedByHotkey = toVk != 0 && ProcessRemappedHotkeyDown(vkCode, toVk);
+
+                            // A consumed key still gets a pairing, recorded as toVk 0 — the same
+                            // encoding "disable this key" already uses, and it means exactly the
+                            // same three things here: swallow the auto-repeats (the physical path
+                            // swallows a held hotkey's repeats too), inject nothing on release,
+                            // and let the physical up be found by the pairing-release hoist,
+                            // which is where DispatchPendingTriggerUp gets its chance to resolve
+                            // an OnRelease / WhilePressed / Hold armed by the hop.
+                            _activeRemapDowns[vkCode] = consumedByHotkey ? (ushort)0 : toVk;
+
                             // Mirror the TO into the chord state only if the physical key (or
                             // another pairing) didn't already put it there — and remember WE
-                            // did, so release can't strip someone else's entry.
-                            if (toVk != 0 && !_vkCodesCurrentlyDown.Contains(toVk))
+                            // did, so release can't strip someone else's entry. Skipped for a
+                            // consumed key: nothing is holding that TO down, and a mirror the
+                            // toVk-0 release path would never clear is a key stuck in the chord
+                            // state for the rest of the session.
+                            if (!consumedByHotkey && toVk != 0 && !_vkCodesCurrentlyDown.Contains(toVk))
                             {
                                 _vkCodesCurrentlyDown.Add(toVk);
                                 _remapMirroredVks.Add(toVk);
                             }
                         }
-                        if (toVk != 0)
+                        if (!consumedByHotkey && toVk != 0)
                         {
                             if (ProcessHotstringKeyDown(toVk))
                                 return (IntPtr)1;   // hotstring consumed the logical key — nothing to inject

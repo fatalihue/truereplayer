@@ -356,10 +356,73 @@ namespace TrueReplayer.Services
             ["Win"] = new ushort[] { 0x5B, 0x5C },
         };
 
+        private static readonly ushort[] LeftAltOnly = { 0xA4 };
+
+        /// <summary>
+        /// The fan-out above, minus the one side that is not a modifier at all.
+        ///
+        /// On a layout with AltGr — ABNT2, the European layouts, US-International — 0xA5
+        /// (VK_RMENU) is NOT "the other Alt". It is the key that reaches an entire third
+        /// character layer: on ABNT2 that is @ \ [ ] { } and the superscripts, characters the
+        /// user has no other way to type. Fanning "Alt" out to it does not remap a modifier,
+        /// it deletes a layer of the keyboard, and it does something worse on the way: because
+        /// win32k synthesises a left Ctrl in front of every AltGr press (see IsAltGrPhantomCtrl
+        /// in InputHookManager), the phantom is delivered to the app while the RAlt is swallowed
+        /// and replaced — so the app receives Ctrl+TO. With the very ordinary remap Alt to W,
+        /// every attempt to type an @ closed the browser tab.
+        ///
+        /// So on those layouts "Alt" means the LEFT Alt and nothing else. The fan-out's own
+        /// justification — hotkey capture emits the side-less name "Alt" for either physical
+        /// key, so honouring only one side would silently target the wrong one — still holds
+        /// everywhere it is true, which is every layout WITHOUT AltGr; there the pair stands.
+        /// A user who really does want the AltGr key itself remapped can still say so with the
+        /// explicit name "RightAlt", which resolves straight to 0xA5 through KeyUtils and
+        /// bypasses this fan-out entirely. That is the deliberate, named, opt-in version of
+        /// what used to happen to everyone on the owner's keyboard by default — and the hook
+        /// neutralises the phantom Ctrl for it, so even chosen deliberately it behaves.
+        /// </summary>
+        private static ushort[] SideVksFor(string name, ushort[] pair)
+        {
+            if (!name.Equals("Alt", StringComparison.OrdinalIgnoreCase)) return pair;
+            return KeyUtils.LayoutHasAltGr() ? LeftAltOnly : pair;
+        }
+
+        // Layout the current snapshot was compiled against. Every from/to that is a single
+        // character outside the static name map resolves through the layout, so a snapshot is
+        // only valid for the layout that produced it — see RepublishForLayoutChange.
+        private static IntPtr _publishedLayout = IntPtr.Zero;
+
+        /// <summary>
+        /// Recompiles the hook snapshot against whatever layout is active NOW, and does nothing
+        /// if that is the layout it was already compiled against.
+        ///
+        /// Publish() only ever ran from Load() and Save(), so the compiled vks were frozen at
+        /// whatever the layout happened to be at startup. Switch layout with Alt+Shift and every
+        /// remap whose from/to is a single character — ç [ ; - ' / , the whole ABNT2 OEM row —
+        /// keeps pointing at the vk that character had on the OLD layout, which on the new one
+        /// is a different physical key or none at all.
+        ///
+        /// The event that says the layout changed is WM_INPUTLANGCHANGE, which arrives at the
+        /// window, not here. This is the half that belongs to the service: the window's handler
+        /// is one call to this method. Cheap and idempotent by design so that handler needs no
+        /// filtering of its own — no disk I/O, and an unchanged layout returns immediately.
+        /// Call it on the UI thread: KeyUtils.ActiveLayout is the CALLING thread's layout.
+        /// </summary>
+        public static void RepublishForLayoutChange()
+        {
+            lock (_lock)
+            {
+                if (KeyUtils.ActiveLayout == _publishedLayout) return;
+                Publish();
+            }
+        }
+
         private static void Publish()
         {
             var map = new Dictionary<int, ushort>();
             int active = 0;
+            bool narrowedAltFanOut = false;
+            _publishedLayout = KeyUtils.ActiveLayout;
             if (Current.Enabled)
             {
                 foreach (var entry in Current.Remaps)
@@ -376,12 +439,20 @@ namespace TrueReplayer.Services
                     if (toVk == 0x05 || toVk == 0x06) continue;
 
                     ushort[] fromVks;
-                    if (ModifierSidePairs.TryGetValue(entry.From.Trim(), out var pair))
-                        fromVks = pair;
+                    var fromName = entry.From.Trim();
+                    if (ModifierSidePairs.TryGetValue(fromName, out var pair))
+                    {
+                        fromVks = SideVksFor(fromName, pair);
+                        if (fromVks.Length < pair.Length) narrowedAltFanOut = true;
+                    }
                     else if (KeyUtils.TryResolveVirtualKeyCode(entry.From, out var fromVk))
+                    {
                         fromVks = new[] { fromVk };
+                    }
                     else
+                    {
                         continue;
+                    }
 
                     bool added = false;
                     foreach (var fv in fromVks)
@@ -400,7 +471,13 @@ namespace TrueReplayer.Services
             string state = !LoadFailed ? ""
                 : LoadedFromBackup ? " — from BACKUP, remaps.json unreadable"
                 : " — remaps.json UNREADABLE, list not recovered";
-            DiagnosticLog.Info($"Key remaps published: {active} active (config {Current.Remaps.Count}, enabled={Current.Enabled}){state}");
+            // Named in the log because it is the one case where the compiled snapshot is
+            // deliberately narrower than the config reads, and "my Alt remap only works on the
+            // left Alt" is otherwise indistinguishable from a bug.
+            string altGr = narrowedAltFanOut
+                ? " — AltGr layout: 'Alt' compiled to LEFT Alt only (right Alt is AltGr here; use \"RightAlt\" to remap it deliberately)"
+                : "";
+            DiagnosticLog.Info($"Key remaps published: {active} active (config {Current.Remaps.Count}, enabled={Current.Enabled}){state}{altGr}");
         }
     }
 }
