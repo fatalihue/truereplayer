@@ -496,7 +496,16 @@ namespace TrueReplayer.Models
         public int RowNumber
         {
             get => _rowNumber;
-            set { _rowNumber = value; OnPropertyChanged(nameof(RowNumber)); }
+            // Equality-guarded because OnActionsChanged renumbers the WHOLE grid on every change,
+            // and an APPEND — which is what recording does — moves no existing row's number. Without
+            // the guard every recorded action raised PropertyChanged once per row in the list for
+            // values that were already correct.
+            set
+            {
+                if (_rowNumber == value) return;
+                _rowNumber = value;
+                OnPropertyChanged(nameof(RowNumber));
+            }
         }
 
         private bool _isInsertionPoint;

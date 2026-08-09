@@ -1123,11 +1123,36 @@ namespace TrueReplayer
 
         public void PushActionsUpdate()
         {
+            PushActionListOnly();
+            PushDataTable();
+        }
+
+        /// <summary>
+        /// The grid and the two action counters — everything here derives from
+        /// <see cref="actions"/> and from nothing else, which is what makes it the correct payload
+        /// for a plain collection change.
+        ///
+        /// Split out from <see cref="PushActionsUpdate"/> for the recording path. Adding one
+        /// recorded action fires OnActionsChanged synchronously INSIDE the low-level hook callback,
+        /// and the data table it used to drag along reads UserProfile.Current.Data — which no
+        /// action add, delete or reorder can touch. It rode on actions:updated only so a profile
+        /// SWITCH would refresh the Data panel, and every switch path (ApplyProfile, the deselect
+        /// branch) calls PushActionsUpdate explicitly after detaching this handler, so it keeps
+        /// getting it. The one path that did rely on the implicit push — deleting the ACTIVE
+        /// profile, which clears the grid without an explicit push — now says so out loud.
+        ///
+        /// Measured before changing anything: at the largest real macro on this machine (87 rows)
+        /// one recorded action costs ~0.6 ms, i.e. 0.2% of the 300 ms LowLevelHooksTimeout, and
+        /// recording that whole macro accumulates ~12 ms. The O(n^2) is real but nowhere near
+        /// reachable here, which is why this is a waste-removal and NOT the debounce that would
+        /// change the grid's refresh cadence during recording.
+        /// </summary>
+        private void PushActionListOnly()
+        {
             var actionsList = ProjectActionsForFrontend();
             SendMessage("actions:updated", new { actions = actionsList });
             PushToolbarUpdate();
             PushStatusBarUpdate();
-            PushDataTable();
         }
 
         // Pushes the active profile's data-loop table to the frontend (empty when none). Rides
@@ -2283,15 +2308,17 @@ namespace TrueReplayer
             });
         }
 
+        // Environment.GetFolderPath is a shell lookup, and this ran on every action recorded, every
+        // row deleted and every edit. The Documents path cannot move while the process is alive.
+        private static readonly string StatusBarProfileDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "TrueReplayer", "Profiles");
+
         public void PushStatusBarUpdate()
         {
-            string profileDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                "TrueReplayer", "Profiles");
-
             SendMessage("statusbar:updated", new
             {
-                directory = profileDir,
+                directory = StatusBarProfileDir,
                 profileName = CurrentProfileName == "No Profile" ? (string?)null : CurrentProfileName,
                 actionCount = actions.Count
             });
@@ -6854,6 +6881,11 @@ namespace TrueReplayer
                     // the global fallback as the deselect branch in HandleProfileClick.
                     ClearLoopEdit();
                     PushProfileLoop();
+                    // UserProfile.Current changed, so the Data panel is now showing a deleted
+                    // profile's table. Unlike every other switch path this branch has no explicit
+                    // PushActionsUpdate — it used to get the refresh as a side effect of the
+                    // actions.Clear() above reaching OnActionsChanged, which no longer carries it.
+                    PushDataTable();
                 }
 
                 await profileController.RemoveProfileFromOrderAsync(name);
@@ -9995,7 +10027,10 @@ namespace TrueReplayer
             if (e.Action == NotifyCollectionChangedAction.Add)
                 HasUnsavedChanges = true;
 
-            PushActionsUpdate();
+            // Not PushActionsUpdate: a collection change cannot alter the data table, and this
+            // handler runs inside the input-hook callback on every recorded action. See
+            // PushActionListOnly for who is responsible for the data table instead.
+            PushActionListOnly();
         }
 
         public void Dispose()
