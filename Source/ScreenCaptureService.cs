@@ -13,10 +13,15 @@ namespace TrueReplayer.Services
         /// </summary>
         public static Bitmap CaptureVirtualScreen()
         {
-            int x = NativeMethods.GetSystemMetrics(76);  // SM_XVIRTUALSCREEN
-            int y = NativeMethods.GetSystemMetrics(77);  // SM_YVIRTUALSCREEN
-            int w = NativeMethods.GetSystemMetrics(78);  // SM_CXVIRTUALSCREEN
-            int h = NativeMethods.GetSystemMetrics(79);  // SM_CYVIRTUALSCREEN
+            // Read the SAME cached bounds ImageMatchingService uses, not GetSystemMetrics directly.
+            // These are one value conceptually, and nothing made the two sources agree: the cache
+            // is invalidated on WM_DISPLAYCHANGE, which is handled on the UI thread, while a
+            // WaitImage poll runs on the pool. In the window between the arrangement changing and
+            // that message being pumped, the bitmap was captured against the NEW origin and the
+            // match translated back with the OLD one — so the hit came out shifted by the delta,
+            // typically a full monitor width. Sharing the cache makes them consistent by
+            // construction instead of by timing.
+            var (x, y, w, h) = NativeMethods.VirtualScreen.Bounds;
 
             // Use managed Bitmap + Graphics.CopyFromScreen to avoid GDI handle leaks.
             // The previous approach (CreateDC/CreateCompatibleBitmap/Image.FromHbitmap)

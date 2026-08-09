@@ -689,8 +689,14 @@ namespace TrueReplayer.Services
                         // Cached virtual-screen bounds — saves 4 P/Invokes per clicker tick.
                         // See NativeMethods.VirtualScreen.
                         var (vx, vy, vw, vh) = NativeMethods.VirtualScreen.Bounds;
-                        // Keep the click on a real pixel: a saved area rect or picked point can
-                        // outlive the display arrangement that produced it.
+                        // Keep the click inside the virtual desktop's BOUNDING BOX: a saved area
+                        // rect or picked point can outlive the display arrangement that produced
+                        // it. Deliberately not promised as "a real pixel" — in a staggered layout
+                        // (1920x1080 at 0,0 next to 1280x1024 at 1920,-400) the bounding box has
+                        // dead zones no monitor covers, and this clamp will happily accept a point
+                        // inside one. Windows silently relocates a SetCursorPos that lands there;
+                        // ScreenOverlayWindow's precision mode documents the same effect and reads
+                        // the cursor back afterwards for exactly that reason.
                         targetX = Math.Clamp(targetX, vx, vx + Math.Max(1, vw) - 1);
                         targetY = Math.Clamp(targetY, vy, vy + Math.Max(1, vh) - 1);
                         int absX = (int)(((double)(targetX - vx) * 65535) / Math.Max(1, vw - 1));
@@ -3765,6 +3771,14 @@ namespace TrueReplayer.Services
             // Cached virtual-screen bounds — saves 4 P/Invokes per mouse action.
             // See NativeMethods.VirtualScreen.
             var (vx, vy, vw, vh) = NativeMethods.VirtualScreen.Bounds;
+
+            // Same clamp the clicker loop applies before normalising, for the same reason and now
+            // by the same rule: a coordinate recorded on a monitor that has since been unplugged
+            // (x = -1000 after vx went back to 0) normalises to roughly -34150, and only Windows'
+            // own saturation at the edge kept that from being a wild pointer jump. Clamping here
+            // makes the two paths agree instead of relying on that saturation.
+            x = Math.Clamp(x, vx, vx + Math.Max(1, vw) - 1);
+            y = Math.Clamp(y, vy, vy + Math.Max(1, vh) - 1);
 
             int absoluteX = (int)(((double)(x - vx) * 65535) / Math.Max(1, vw - 1));
             int absoluteY = (int)(((double)(y - vy) * 65535) / Math.Max(1, vh - 1));
