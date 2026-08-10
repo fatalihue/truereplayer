@@ -421,9 +421,29 @@ export function KeystrokeCaptureDialog({
             />
           </div>
 
-          {/* ── PRESS mode body ── */}
-          {mode === 'press' && (
-            <div className="flex flex-col gap-2.5">
+          {/* ── Mode body ──
+              Both bodies live in the SAME grid cell (row 1, column 1), so this wrapper is always as
+              tall as the taller of the two and the dialog never resizes when you switch tabs. The
+              inactive one keeps its space but is visibility:hidden, which also takes it out of the
+              tab order and off the pointer — no aria-hidden needed for that, but it is set so screen
+              readers agree with what is painted.
+
+              Why stacking rather than a min-h-[Npx] on one wrapper: font size, border radius and row
+              height are all user-adjustable theme settings, so any hardcoded pixel height would be
+              correct at one setting and wrong at the rest. Measuring the real content costs nothing
+              and survives every theme.
+
+              Both bodies are therefore always MOUNTED. That is safe here: every value they edit
+              (repeat, repeatDelay, jitter, holdMs) is state owned by this component, not by the
+              inputs, and no NumberInput in this dialog passes autoFocus (its mount effect
+              early-returns when false), so nothing steals focus from the capture pad. */}
+          <div className="grid">
+            {/* ── PRESS mode body ── */}
+            <div
+              className={`flex flex-col gap-2.5 ${mode === 'press' ? '' : 'invisible pointer-events-none'}`}
+              style={{ gridArea: '1 / 1' }}
+              aria-hidden={mode !== 'press'}
+            >
               <div className="flex items-center justify-between gap-3">
                 <label
                   className="text-[12px] font-medium text-text-secondary"
@@ -496,11 +516,13 @@ export function KeystrokeCaptureDialog({
                 />
               </div>
             </div>
-          )}
 
-          {/* ── HOLD mode body ── */}
-          {mode === 'hold' && (
-            <div className="flex flex-col gap-2.5">
+            {/* ── HOLD mode body ── */}
+            <div
+              className={`flex flex-col gap-2.5 ${mode === 'hold' ? '' : 'invisible pointer-events-none'}`}
+              style={{ gridArea: '1 / 1' }}
+              aria-hidden={mode !== 'hold'}
+            >
               <div className="flex items-center justify-between gap-3">
                 <label
                   className="text-[12px] font-medium text-text-secondary"
@@ -529,27 +551,33 @@ export function KeystrokeCaptureDialog({
               {/* Modifier-strip warning. Captured combo like "Ctrl+S" can't be held
                   by the backend (SimulateKey takes a single virtual-key code), so
                   Save will use only the last token. Surfaced explicitly rather than
-                  silently stripped — left-rail card, warning tone. */}
-              {hasModifiers && (
-                <div
-                  className="border-l-2 rounded px-2.5 py-2 text-[10px] leading-relaxed text-text-secondary"
-                  style={{
-                    background: 'color-mix(in srgb, var(--color-warning) 8%, transparent)',
-                    borderColor: 'var(--color-warning)',
-                  }}
-                >
-                  {tt('Hold mode supports single keys only. Saving will hold', 'O modo Hold aceita apenas teclas únicas. Salvar vai segurar')}{' '}
-                  <kbd className="px-1 py-px bg-bg-elevated border border-border-default rounded font-mono text-[10px] text-warning">
-                    {keystrokeDisplay(heldKey)}
-                  </kbd>{' '}
-                  {tt(
-                    'and ignore the modifiers. To hold a combo, insert two rows: a Hold for the modifier, plus the action under it.',
-                    'e ignorar os modificadores. Para segurar uma combinação, insira duas linhas: um Hold para o modificador e a ação abaixo.',
-                  )}
-                </div>
-              )}
+                  silently stripped — left-rail card, warning tone.
+
+                  ALWAYS RENDERED, visibility-toggled: this used to mount only when the captured
+                  value contained a "+", which grew the dialog the moment the user captured a combo.
+                  Its space is reserved from the start so appearing costs no layout. The text is
+                  fixed and the <kbd> holds a single key name in BOTH states (heldKey is the last
+                  token of the combo, so "Ctrl+S" gives "S" — never longer than the plain-key case),
+                  which is what keeps the reserved height honest instead of merely close. */}
+              <div
+                className={`border-l-2 rounded px-2.5 py-2 text-[10px] leading-relaxed text-text-secondary ${hasModifiers ? '' : 'invisible'}`}
+                style={{
+                  background: 'color-mix(in srgb, var(--color-warning) 8%, transparent)',
+                  borderColor: 'var(--color-warning)',
+                }}
+                aria-hidden={!hasModifiers}
+              >
+                {tt('Hold mode supports single keys only. Saving will hold', 'O modo Hold aceita apenas teclas únicas. Salvar vai segurar')}{' '}
+                <kbd className="px-1 py-px bg-bg-elevated border border-border-default rounded font-mono text-[10px] text-warning">
+                  {keystrokeDisplay(heldKey)}
+                </kbd>{' '}
+                {tt(
+                  'and ignore the modifiers. To hold a combo, insert two rows: a Hold for the modifier, plus the action under it.',
+                  'e ignorar os modificadores. Para segurar uma combinação, insira duas linhas: um Hold para o modificador e a ação abaixo.',
+                )}
+              </div>
             </div>
-          )}
+          </div>
         </div>
     </DialogShell>
   );

@@ -1351,19 +1351,28 @@ export function ActionTable({ columnVisibility, onOpenSheet }: ActionTableProps)
   const isMouseAction = (actionType: string) =>
     actionType.includes('Click');
 
-  // Context menu: right-click on a row
+  // Context menu: right-click on a row.
+  //
+  // Right-click OPENS THE MENU AND NOTHING ELSE — it never changes the selection. Selecting is the
+  // left button's job. It used to select the right-clicked row whenever that row was outside the
+  // current selection, which meant a right-click could silently discard a multi-row selection the
+  // user had just built, and moved the keyboard cursor and the shift-click anchor with it.
+  //
+  // Nothing downstream needs the selection moved here: every menu action resolves its target as
+  // "the selection if it contains the right-clicked row, otherwise just that row" — see
+  // contextSelectionIndices and the same guard inlined in handleDuplicate, handleContextDelete and
+  // the flyout items. So right-clicking an unselected row still acts on exactly that row, and
+  // right-clicking inside a selection still acts on the whole selection.
+  //
+  // lastClickedIndex / kbCursorRef are deliberately NOT touched either: they are the shift-click
+  // anchor and the keyboard cursor, i.e. selection state, and they are read only by the keyboard
+  // navigation block and the shift-range builder — never by a menu item.
   const handleRowContextMenu = useCallback((idx: number, e: React.MouseEvent) => {
     if (!contextMenuEnabled) return;
     e.preventDefault();
-    // If right-clicked row is not in selection, select only it
-    if (!selectedIndices.has(idx)) {
-      setSelectedIndices(new Set([idx]));
-      lastClickedIndex.current = idx;
-      kbCursorRef.current = idx;
-    }
     setActiveSubmenu(null);
     setContextMenu({ x: e.clientX, y: e.clientY, rowIndex: idx });
-  }, [contextMenuEnabled, selectedIndices]);
+  }, [contextMenuEnabled]);
 
   const closeContextMenu = useCallback(() => {
     setContextMenu(null);
