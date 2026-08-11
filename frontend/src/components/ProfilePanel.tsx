@@ -243,6 +243,21 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
     ? profiles.filter(matchesSearch)
     : profiles, [profiles, isSearching, matchesSearch]);
 
+  // Collapsed-rail list: the PANEL's display order (pinned → folders → ungrouped), not
+  // the raw backend order `filtered` carries. With ~80 profiles and ~14 visible slots
+  // the rail shows a prefix, so WHICH prefix matters — pinned lands first and stays
+  // reachable. The three section memos are already search-aware, so an active query
+  // filters the rail too (the search button's dot signals that). Dedup by name defends
+  // against a profile referenced by two sections rendering twice.
+  const railProfiles = useMemo(() => {
+    const seen = new Set<string>();
+    const out: ProfileEntry[] = [];
+    for (const p of [...pinnedProfiles, ...folderSections.flatMap(f => f.profiles), ...ungroupedProfiles]) {
+      if (!seen.has(p.name)) { seen.add(p.name); out.push(p); }
+    }
+    return out;
+  }, [pinnedProfiles, folderSections, ungroupedProfiles]);
+
   // Off-screen-measure-then-reposition for both menus, one hook call each — the two
   // stay independent, so a folder menu opening never disturbs a profile menu's
   // measurement pass. The hook owns the position state, which is why the dismiss
@@ -1711,40 +1726,63 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
       <div className={`flex flex-col bg-bg-surface border border-border-subtle rounded-ui shrink-0 transition-[width,background-color,border-color] duration-200 ${collapsed ? 'w-12' : 'w-[260px]'}`}>
         {collapsed ? (
           <>
-            {/* Collapsed rail — mirrors the SettingsPanel rail: quick actions up
-                top (new profile / search-and-expand), then profile avatars with
-                an accent ring on the active one and a folder-colour dot. Fills the
-                measured strip height; the last slot becomes a "+N expand" chip when
-                there are more profiles than fit (no scrolling — a scroll list would
-                clip the right-side tooltips). */}
-            <div className="flex flex-col items-center gap-1 pt-3 pb-2 shrink-0">
+            {/* Collapsed rail — mirrors the SettingsPanel rail: a 47px header cell
+                (collapse), quick actions (new profile / search-and-expand), then
+                profile avatars in the PANEL's order — pinned → folders → ungrouped —
+                with the active one ringed and always kept in the visible cut. Fills
+                the measured strip height; the last slot becomes a "+N expand" chip
+                when there are more profiles than fit (no scrolling — a scroll list
+                would clip the right-side tooltips). */}
+            <div className="h-[47px] w-full flex items-center justify-center border-b border-border-subtle shrink-0">
               <button
                 onClick={onToggleCollapse}
                 className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+                data-tip={tt('Expand panel', 'Expandir painel')}
+                data-tip-pos="right"
               >
                 <ChevronsRight size={14} />
               </button>
+            </div>
+            <div className="flex flex-col items-center gap-1 pt-2 pb-2 shrink-0">
               <button
                 onClick={handleCreate}
                 className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+                data-tip={tt('New profile', 'Novo profile')}
+                data-tip-pos="right"
               >
                 <FilePlus size={14} />
               </button>
               <button
                 onClick={() => { pendingFocusSearch.current = true; onToggleCollapse?.(); }}
-                className="w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+                className="relative w-7 h-7 flex items-center justify-center rounded hover:bg-bg-elevated text-text-tertiary hover:text-text-primary transition-colors"
+                data-tip={searchQuery.length > 0 ? tt('Search — filter active', 'Buscar — filtro ativo') : tt('Search profiles', 'Buscar profiles')}
+                data-tip-pos="right"
               >
                 <Search size={14} />
+                {/* The rail quietly renders the FILTERED list while a query is active —
+                    without this dot there is no sign the strip is a subset. */}
+                {searchQuery.length > 0 && (
+                  <span
+                    className="absolute right-[3px] top-[3px] w-1.5 h-1.5 rounded-full"
+                    style={{ background: 'var(--color-accent)', outline: '1.5px solid var(--color-bg-surface)' }}
+                  />
+                )}
               </button>
               <div className="w-6 my-1 border-t border-border-subtle" />
             </div>
             <div ref={railRef} className="flex-1 flex flex-col items-center gap-1 px-1 pb-2 overflow-hidden">
               {(() => {
                 // Show all when they fit; otherwise reserve the last slot for the
-                // "+N expand" chip (so visible = capacity − 1).
-                const fitsAll = filtered.length <= railCapacity;
-                const visible = fitsAll ? filtered : filtered.slice(0, Math.max(0, railCapacity - 1));
-                const overflow = filtered.length - visible.length;
+                // "+N expand" chip (so visible = capacity − 1). If the ACTIVE profile
+                // falls outside the cut it takes the last visible slot — the accent
+                // ring is the rail's only "you are here" and must never be off-screen.
+                const fitsAll = railProfiles.length <= railCapacity;
+                let visible = fitsAll ? railProfiles : railProfiles.slice(0, Math.max(0, railCapacity - 1));
+                const active = railProfiles.find(p => p.isActive);
+                if (active && visible.length > 0 && !visible.some(p => p.name === active.name)) {
+                  visible = [...visible.slice(0, -1), active];
+                }
+                const overflow = railProfiles.length - visible.length;
                 return (
                   <>
                     {visible.map((p) => {
@@ -1752,22 +1790,53 @@ export function ProfilePanel({ collapsed = false, onToggleCollapse }: ProfilePan
                       return (
                         <button
                           key={p.name}
-                          onClick={(e) => { send({ type: 'profile:click', payload: { name: p.name } }); (e.target as HTMLElement).blur(); }}
+                          onClick={(e) => { send({ type: 'profile:click', payload: { name: p.name } }); (e.currentTarget as HTMLElement).blur(); }}
                           onContextMenu={(e) => handleContextMenu(e, p.name)}
                           className={`relative w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold transition-colors shrink-0 ${
                             p.isActive
                               ? 'bg-[color-mix(in_srgb,var(--color-accent)_16%,transparent)] text-accent'
                               : 'bg-bg-elevated text-text-secondary hover:bg-bg-card'
                           } ${p.isDisabled ? 'opacity-40' : ''}`}
-                          style={p.isActive ? { boxShadow: '0 0 0 2px var(--color-accent)' } : undefined}
-                          data-tip={p.hotkey ? `${p.name} · ${p.hotkey}` : p.name}
+                          style={p.isActive
+                            ? { boxShadow: '0 0 0 2px var(--color-accent)' }
+                            // kbd-conflict's hue, translated to a ring — the rail has no
+                            // hotkey chip to tint. Active wins: selection outranks warning.
+                            : p.hotkeyConflict
+                              ? { boxShadow: '0 0 0 1.5px color-mix(in srgb, var(--color-recording) 60%, transparent)' }
+                              : undefined}
+                          data-tip={[
+                            p.name,
+                            p.hotkey,
+                            p.hasEffectiveTarget ? targetLabel(p.effectiveTargetProcessName, p.effectiveTargetWindowTitle) : null,
+                          ].filter(Boolean).join(' · ')}
                           data-tip-pos="right"
                         >
-                          {p.name.charAt(0).toUpperCase()}
+                          {/* Identity, best source first: the user's own emoji, the target
+                              app's icon (55% when folder-inherited, same as the expanded
+                              rows), then the first letter as the fallback of last resort. */}
+                          {p.iconEmoji ? (
+                            <span className="text-[15px] leading-none pointer-events-none">{p.iconEmoji}</span>
+                          ) : p.appIconBase64 ? (
+                            <img
+                              src={`data:image/png;base64,${p.appIconBase64}`}
+                              alt=""
+                              className={`w-[18px] h-[18px] object-contain pointer-events-none ${p.effectiveTargetSource === 'folder' ? 'opacity-55' : ''}`}
+                            />
+                          ) : (
+                            p.name.charAt(0).toUpperCase()
+                          )}
                           {folderColor && (
                             <span
                               className="absolute -right-px -bottom-px w-[9px] h-[9px] rounded-full border-2 border-bg-surface"
                               style={{ background: folderColor }}
+                            />
+                          )}
+                          {/* Armed automation — the same 6px replay-green dot the expanded
+                              list wears, on the corner opposite the folder dot. */}
+                          {p.triggerArmed && (
+                            <span
+                              className="absolute -right-px -top-px w-1.5 h-1.5 rounded-full"
+                              style={{ background: 'var(--color-replay)', outline: '1.5px solid var(--color-bg-surface)' }}
                             />
                           )}
                         </button>

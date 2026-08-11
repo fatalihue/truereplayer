@@ -1012,7 +1012,7 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
   // profileLoop: the Execution section's Loops/Interval rows edit the LOADED PROFILE, not the
   // app. `scoped` is what tells the tooltip whether it's describing a profile value or the
   // no-profile fallback.
-  const { settings, settingsResetEpoch, status, profileLoop } = useAppState();
+  const { settings, settingsResetEpoch, status, profileLoop, profiles } = useAppState();
   // Clicker Rate unit — lifted out of ClickerSection so it survives that component's
   // remounts. settingsResetEpoch still bounces it back to the default, which was its only
   // documented job; it just does it through an effect now instead of a remount key.
@@ -1102,7 +1102,12 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
   // sits right under Hotkeys), and Updates lost its entry along with its section (it's
   // the App-tab footer now). Quiet reorg: icons are MONOCHROME (text-tertiary, hover →
   // primary via CSS) — the only surviving hue is the semantic Clicker purple (`color`).
-  type RailEntry = { tab: 'profile' | 'keys' | 'app'; title: string; icon: React.ElementType; color?: string };
+  type RailEntry = { tab: 'profile' | 'keys' | 'app'; title: string; icon: React.ElementType; color?: string; dot?: string; tip?: string };
+  // The rail's only live state, each cue two-channel (tint or glyph + dot) per the
+  // toggle doctrine — color alone dies on ~half the themes. Everything else stays
+  // monochrome navigation.
+  const anyHotkeyConflict = profiles.some(p => p.hotkeyConflict);
+  const anyTriggerArmed = settings.automationEnabled && profiles.some(p => p.triggerArmed);
   const railProfile: RailEntry[] =
     settings.useCursorClick
       /* Three entries, matching the three Sections — and matching macro mode's three, so a
@@ -1116,18 +1121,27 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
         ]
       : [
           { tab: 'profile', title: 'Execution', icon: Timer },
-          { tab: 'profile', title: 'Game Mode', icon: Gamepad2 },
+          // Game Mode ON = accent-tinted icon + dot: the same "hue is the mode cue"
+          // rule the clicker purple follows, but only while the mode is live.
+          { tab: 'profile', title: 'Game Mode', icon: Gamepad2,
+            ...(settings.smoothMovement ? { color: 'var(--color-accent)', dot: 'var(--color-accent)', tip: `Game Mode · ${tt('on', 'ligado')}` } : {}) },
           { tab: 'profile', title: 'Recording', icon: Mic },
         ];
   const railKeys: RailEntry[] = [
-    { tab: 'keys', title: 'Hotkeys', icon: Zap },
+    // Recording-red dot when any profile's hotkey is contested — the only warning
+    // the expanded list shows (kbd-conflict chip) that used to vanish collapsed.
+    { tab: 'keys', title: 'Hotkeys', icon: Zap,
+      ...(anyHotkeyConflict ? { dot: 'var(--color-recording)', tip: `Hotkeys · ${tt('hotkey conflict', 'conflito de hotkey')}` } : {}) },
     { tab: 'keys', title: 'Key Remaps', icon: ArrowLeftRight },
   ];
   const railApp: RailEntry[] = [
     { tab: 'app', title: 'Window', icon: Monitor },
     { tab: 'app', title: 'Startup', icon: Power },
     { tab: 'app', title: 'Notifications', icon: BellRing },
-    { tab: 'app', title: 'Automation', icon: TimerReset },
+    // Replay-green dot = automation master on AND ≥1 armed trigger — mirrors the
+    // armed dot on the profile rail's avatars (same color, same meaning).
+    { tab: 'app', title: 'Automation', icon: TimerReset,
+      ...(anyTriggerArmed ? { dot: 'var(--color-replay)', tip: `Automation · ${tt('armed', 'armada')}` } : {}) },
     { tab: 'app', title: 'Interface', icon: Palette },
   ];
 
@@ -1158,8 +1172,8 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                 <button
                   key={s.title}
                   onClick={() => expandToSection(s.tab, s.title)}
-                  className="group w-8 h-8 flex items-center justify-center rounded hover:bg-bg-elevated transition-colors shrink-0"
-                  data-tip={s.title}
+                  className="group relative w-8 h-8 flex items-center justify-center rounded hover:bg-bg-elevated transition-colors shrink-0"
+                  data-tip={s.tip ?? s.title}
                   data-tip-pos="left"
                 >
                   <s.icon
@@ -1167,6 +1181,12 @@ export function SettingsPanel({ collapsed = false, onToggleCollapse }: SettingsP
                     className={s.color ? undefined : 'text-text-tertiary group-hover:text-text-primary transition-colors'}
                     style={s.color ? { color: s.color } : undefined}
                   />
+                  {s.dot && (
+                    <span
+                      className="absolute right-0.5 top-0.5 w-[7px] h-[7px] rounded-full"
+                      style={{ background: s.dot, outline: '1.5px solid var(--color-bg-surface)' }}
+                    />
+                  )}
                 </button>
               ))}
             </div>
