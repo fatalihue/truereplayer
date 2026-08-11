@@ -140,14 +140,16 @@ export const DEFAULT_UI_SETTINGS: ThemeUISettings = {
   enableAnimations: true,
 };
 
-export const CURRENT_THEME_CONFIG_VERSION = 5;
+export const CURRENT_THEME_CONFIG_VERSION = 6;
 
 export interface ThemeConfig {
   // Schema version. v1 = original; v2 = palette pass (PixelColor / Scroll / Pause
   // defaults swapped); v3 = If color moved from amber to teal to resolve hue
   // collision with SendText gold; v4 = PixelColor lime darkened (#84cc16 →
-  // #65a30d) for deuteranopia lightness separation from Replay green.
-  // loadThemeConfig migrates v1 → … → v4 in place. Writers must use
+  // #65a30d) for deuteranopia lightness separation from Replay green; v5 = default
+  // zoom 95 → 90; v6 = preset ids retired by the 2026-08 curation remapped to
+  // their surviving relatives (REMOVED_THEME_FALLBACKS).
+  // loadThemeConfig migrates v1 → … → v6 in place. Writers must use
   // CURRENT_THEME_CONFIG_VERSION (below) — a stale literal at any write site
   // silently re-runs migrations on the next load. Listed as `number` rather
   // than a literal union so future bumps don't require a type edit everywhere.
@@ -164,99 +166,11 @@ export interface ExportedTheme {
   uiSettings: ThemeUISettings;
 }
 
-// Themes ordered by accent hue: neutral → pink → orange/yellow → green → cyan/blue → red → purple → light.
+// Themes ordered by accent hue: orange/yellow → green → cyan/blue → red → purple → light.
+// Curated 2026-08: 48 → 29 presets. Each surviving dark theme owns a distinct hue/vibe
+// slot; near-duplicates were retired and their ids remapped in REMOVED_THEME_FALLBACKS.
 export const themes: ThemePreset[] = [
-  // ── Neutral ──
-  {
-    id: 'carbon',
-    name: 'Carbon',
-    preview: ['#121212', '#1a1a1a', '#222222', '#90caf9'],
-    colors: {
-      'bg-base': '#121212',
-      'bg-surface': '#1a1a1a',
-      'bg-card': '#222222',
-      'bg-elevated': '#2a2a2a',
-      'bg-input': '#0e0e0e',
-      'border-subtle': 'rgba(255,255,255,0.06)',
-      'border-default': 'rgba(255,255,255,0.1)',
-      'border-strong': 'rgba(255,255,255,0.15)',
-      'text-primary': '#e0e0e0',
-      'text-secondary': '#a0a0a0',
-      'text-tertiary': '#707070',
-      'text-disabled': '#484848',
-      accent: '#90caf9',
-      'accent-solid': '#42a5f5',
-      'accent-hover': '#bbdefb',
-    },
-  },
-  // ── Pink / Rose ──
-  {
-    id: 'sakura',
-    name: 'Sakura',
-    preview: ['#1a1218', '#241c22', '#2e242c', '#f9a8d4'],
-    colors: {
-      'bg-base': '#1a1218',
-      'bg-surface': '#241c22',
-      'bg-card': '#2e242c',
-      'bg-elevated': '#383036',
-      'bg-input': '#150f14',
-      'border-subtle': 'rgba(255,183,197,0.06)',
-      'border-default': 'rgba(255,183,197,0.1)',
-      'border-strong': 'rgba(255,183,197,0.15)',
-      'text-primary': '#f8eef2',
-      'text-secondary': '#d0b8c0',
-      'text-tertiary': '#967888',
-      'text-disabled': '#604858',
-      accent: '#f9a8d4',
-      'accent-solid': '#db6fa0',
-      'accent-hover': '#fbcfe8',
-    },
-  },
   // ── Orange / Yellow ──
-  {
-    id: 'copper',
-    name: 'Copper',
-    preview: ['#1a1210', '#251c18', '#302420', '#e8956a'],
-    colors: {
-      'bg-base': '#1a1210',
-      'bg-surface': '#251c18',
-      'bg-card': '#302420',
-      'bg-elevated': '#3c2e28',
-      'bg-input': '#15100d',
-      'border-subtle': 'rgba(220,160,120,0.06)',
-      'border-default': 'rgba(220,160,120,0.1)',
-      'border-strong': 'rgba(220,160,120,0.15)',
-      'text-primary': '#f5ece5',
-      'text-secondary': '#c8b0a0',
-      'text-tertiary': '#8a7060',
-      'text-disabled': '#5a4a40',
-      accent: '#e8956a',
-      'accent-solid': '#c06030',
-      'accent-hover': '#f0b890',
-    },
-  },
-  {
-    id: 'amber',
-    name: 'Amber',
-    preview: ['#1a1408', '#282010', '#332a18', '#fbbf24'],
-    colors: {
-      'bg-base': '#1a1408',
-      'bg-surface': '#282010',
-      'bg-card': '#332a18',
-      'bg-elevated': '#3f3420',
-      'bg-input': '#151006',
-      'border-subtle': 'rgba(255,200,100,0.06)',
-      'border-default': 'rgba(255,200,100,0.1)',
-      'border-strong': 'rgba(255,200,100,0.15)',
-      'text-primary': '#fff8e8',
-      'text-secondary': '#d5c5a0',
-      'text-tertiary': '#9a8a68',
-      'text-disabled': '#5a5040',
-      accent: '#fbbf24',
-      'accent-solid': '#d97706',
-      'accent-hover': '#fcd34d',
-    },
-  },
   {
     // Gruvbox Dark — morhetz/gruvbox. Hard-contrast bg #1d2021, default
     // bg #282828, fg #ebdbb2, yellow #fabd2f (the iconic accent).
@@ -320,7 +234,9 @@ export const themes: ThemePreset[] = [
       'border-strong': 'rgba(200,200,180,0.15)',
       'text-primary': '#f8f8f2',
       'text-secondary': '#c8c8b8',
-      'text-tertiary': '#75715e',
+      // Canonical comment #75715e sits at 3.03:1 on bg-surface — nudged +1 L to
+      // clear the 3.15 tertiary floor, hue/saturation locked (2026-08).
+      'text-tertiary': '#787460',
       'text-disabled': '#49483e',
       accent: '#a6e22e',
       'accent-solid': '#82b01e',
@@ -351,54 +267,6 @@ export const themes: ThemePreset[] = [
       'accent-hover': '#c0d6a0',
     },
   },
-  {
-    // Green Beautiful Color Themes — "Green Beautiful 2" from the VS Code extension family.
-    // Saturated mint-teal accent over a deep emerald canvas.
-    id: 'green-beautiful-2',
-    name: 'Green Beautiful 2',
-    preview: ['#0a1f14', '#103024', '#163d2e', '#5eead4'],
-    colors: {
-      'bg-base': '#0a1f14',
-      'bg-surface': '#103024',
-      'bg-card': '#163d2e',
-      'bg-elevated': '#1d4a38',
-      'bg-input': '#061a10',
-      'border-subtle': 'rgba(94,234,212,0.06)',
-      'border-default': 'rgba(94,234,212,0.1)',
-      'border-strong': 'rgba(94,234,212,0.15)',
-      'text-primary': '#d4f4e0',
-      'text-secondary': '#98d1b0',
-      'text-tertiary': '#5a8a70',
-      'text-disabled': '#355044',
-      accent: '#5eead4',
-      'accent-solid': '#2dd4bf',
-      'accent-hover': '#8af3da',
-    },
-  },
-  {
-    // Green Beautiful Color Themes — "Green Dark" variant. Classic forest green
-    // accent over near-black greens.
-    id: 'green-dark',
-    name: 'Green Dark',
-    preview: ['#0a1410', '#102018', '#182e22', '#22c55e'],
-    colors: {
-      'bg-base': '#0a1410',
-      'bg-surface': '#102018',
-      'bg-card': '#182e22',
-      'bg-elevated': '#1f3b2d',
-      'bg-input': '#050d09',
-      'border-subtle': 'rgba(34,197,94,0.06)',
-      'border-default': 'rgba(34,197,94,0.1)',
-      'border-strong': 'rgba(34,197,94,0.15)',
-      'text-primary': '#e0f5e8',
-      'text-secondary': '#a4d4b4',
-      'text-tertiary': '#5e8a70',
-      'text-disabled': '#355040',
-      accent: '#22c55e',
-      'accent-solid': '#16a34a',
-      'accent-hover': '#4ade80',
-    },
-  },
   // ── Cyan / Blue ──
   {
     // Hatsune Miku — Crypton's mascot signature teal (#39c5bb) over deep teal-tinted
@@ -425,52 +293,6 @@ export const themes: ThemePreset[] = [
     },
   },
   {
-    id: 'ocean',
-    name: 'Ocean',
-    preview: ['#0a161a', '#102228', '#162e35', '#22d3ee'],
-    colors: {
-      'bg-base': '#0a161a',
-      'bg-surface': '#102228',
-      'bg-card': '#162e35',
-      'bg-elevated': '#1c3a42',
-      'bg-input': '#081215',
-      'border-subtle': 'rgba(100,220,240,0.06)',
-      'border-default': 'rgba(100,220,240,0.1)',
-      'border-strong': 'rgba(100,220,240,0.15)',
-      'text-primary': '#e8fbff',
-      'text-secondary': '#a8d5e0',
-      'text-tertiary': '#6a98a8',
-      'text-disabled': '#405868',
-      accent: '#22d3ee',
-      'accent-solid': '#0891b2',
-      'accent-hover': '#67e8f9',
-    },
-  },
-  {
-    // Ocean Deep — saturated blue accent over very dark navy. Companion of Ocean
-    // shifted toward true blue.
-    id: 'ocean-deep',
-    name: 'Ocean Deep',
-    preview: ['#051323', '#0a1f38', '#102b4c', '#38bdf8'],
-    colors: {
-      'bg-base': '#051323',
-      'bg-surface': '#0a1f38',
-      'bg-card': '#102b4c',
-      'bg-elevated': '#173763',
-      'bg-input': '#030d1b',
-      'border-subtle': 'rgba(56,189,248,0.06)',
-      'border-default': 'rgba(56,189,248,0.10)',
-      'border-strong': 'rgba(56,189,248,0.15)',
-      'text-primary': '#e0eef8',
-      'text-secondary': '#9cc4dc',
-      'text-tertiary': '#5a7d98',
-      'text-disabled': '#344a5c',
-      accent: '#38bdf8',
-      'accent-solid': '#0284c7',
-      'accent-hover': '#7dd3fc',
-    },
-  },
-  {
     id: 'nord',
     name: 'Nord',
     preview: ['#2e3440', '#3b4252', '#434c5e', '#88c0d0'],
@@ -490,28 +312,6 @@ export const themes: ThemePreset[] = [
       accent: '#88c0d0',
       'accent-solid': '#5e81ac',
       'accent-hover': '#8fbcbb',
-    },
-  },
-  {
-    id: 'midnight',
-    name: 'Midnight',
-    preview: ['#0c1220', '#131b2e', '#1a2338', '#60cdff'],
-    colors: {
-      'bg-base': '#0c1220',
-      'bg-surface': '#131b2e',
-      'bg-card': '#1a2338',
-      'bg-elevated': '#212b42',
-      'bg-input': '#0e1628',
-      'border-subtle': 'rgba(255,255,255,0.06)',
-      'border-default': 'rgba(255,255,255,0.1)',
-      'border-strong': 'rgba(255,255,255,0.15)',
-      'text-primary': '#ffffff',
-      'text-secondary': '#c5c5c5',
-      'text-tertiary': '#7a8599',
-      'text-disabled': '#4a5568',
-      accent: '#60cdff',
-      'accent-solid': '#0078d4',
-      'accent-hover': '#7dd6ff',
     },
   },
   {
@@ -567,34 +367,6 @@ export const themes: ThemePreset[] = [
     },
   },
   {
-    // Cursor Dark — official theme from cursor.sh, mirrored by
-    // CedricVerlinden/cursor-dark and BioHazard786/cursor-theme-vscode.
-    // editor.background #1a1a1a; sidebar/activityBar/statusBar/panel all
-    // collapse to #141414 for a deeper chrome. Foreground #D8DEE9 (Nord-like
-    // snow storm). Accent / button / textLink #4c9df3 (saturated blue);
-    // badge #88C0D0 hints at the Nord aurora cyan.
-    id: 'cursor-dark',
-    name: 'Cursor Dark',
-    preview: ['#141414', '#1a1a1a', '#2a2a2a', '#4c9df3'],
-    colors: {
-      'bg-base': '#1a1a1a',
-      'bg-surface': '#141414',
-      'bg-card': '#1a1a1a',
-      'bg-elevated': '#2a2a2a',
-      'bg-input': '#222222',
-      'border-subtle': 'rgba(216,222,233,0.06)',
-      'border-default': 'rgba(216,222,233,0.1)',
-      'border-strong': 'rgba(216,222,233,0.15)',
-      'text-primary': '#D8DEE9',
-      'text-secondary': '#cccccc',
-      'text-tertiary': '#8a8e94',
-      'text-disabled': '#5c6066',
-      accent: '#4c9df3',
-      'accent-solid': '#2f7fd4',
-      'accent-hover': '#6cb0f7',
-    },
-  },
-  {
     // Material Theme Darker — Equinusocio/Mattia Astorino's classic "Darker"
     // variant (now community-maintained as vsc-community-material-theme).
     // editor/sidebar/activityBar/statusBar/panel all collapse to #212121.
@@ -647,30 +419,6 @@ export const themes: ThemePreset[] = [
     },
   },
   {
-    // GitHub Dark — primer/github-vscode-theme. Higher-contrast variant.
-    // canvas #0d1117, canvas-inset #010409, accent #58a6ff (blue).
-    id: 'github-dark',
-    name: 'GitHub Dark',
-    preview: ['#010409', '#0d1117', '#161b22', '#58a6ff'],
-    colors: {
-      'bg-base': '#010409',
-      'bg-surface': '#0d1117',
-      'bg-card': '#161b22',
-      'bg-elevated': '#21262d',
-      'bg-input': '#010409',
-      'border-subtle': 'rgba(240,246,252,0.06)',
-      'border-default': 'rgba(240,246,252,0.1)',
-      'border-strong': 'rgba(240,246,252,0.15)',
-      'text-primary': '#e6edf3',
-      'text-secondary': '#c9d1d9',
-      'text-tertiary': '#8b949e',
-      'text-disabled': '#484f58',
-      accent: '#58a6ff',
-      'accent-solid': '#1f6feb',
-      'accent-hover': '#79c0ff',
-    },
-  },
-  {
     // GitHub Dark Default — github.com's primary dark theme via Primer tokens.
     // canvas #0d1117, fg-default #e6edf3, accent-fg #2f81f7. Slightly airier
     // than GitHub Dark with lighter mid-tones and a less saturated accent.
@@ -718,54 +466,6 @@ export const themes: ThemePreset[] = [
       accent: '#268bd2',
       'accent-solid': '#1a6ea3',
       'accent-hover': '#3aa6ed',
-    },
-  },
-  {
-    // Kanagawa Wave — rebelot/kanagawa.nvim. Inspired by Hokusai's "The Great Wave".
-    // bg sumiInk3 #1f1f28, fg fujiWhite #dcd7ba, signature crystalBlue #7e9cd8.
-    id: 'kanagawa',
-    name: 'Kanagawa',
-    preview: ['#16161d', '#1f1f28', '#2a2a37', '#7e9cd8'],
-    colors: {
-      'bg-base': '#16161d',
-      'bg-surface': '#1f1f28',
-      'bg-card': '#2a2a37',
-      'bg-elevated': '#363646',
-      'bg-input': '#181820',
-      'border-subtle': 'rgba(220,215,186,0.06)',
-      'border-default': 'rgba(220,215,186,0.1)',
-      'border-strong': 'rgba(220,215,186,0.15)',
-      'text-primary': '#dcd7ba',
-      'text-secondary': '#c8c093',
-      'text-tertiary': '#727169',
-      'text-disabled': '#54546d',
-      accent: '#7e9cd8',
-      'accent-solid': '#5878b8',
-      'accent-hover': '#a3bfee',
-    },
-  },
-  {
-    // Kanagawa Dragon — monochromatic warm variant of Kanagawa. Charcoal blacks
-    // with a single dragonBlue #658594 accent.
-    id: 'kanagawa-dragon',
-    name: 'Kanagawa Dragon',
-    preview: ['#0d0c0c', '#181616', '#282727', '#658594'],
-    colors: {
-      'bg-base': '#0d0c0c',
-      'bg-surface': '#181616',
-      'bg-card': '#282727',
-      'bg-elevated': '#393836',
-      'bg-input': '#12120f',
-      'border-subtle': 'rgba(197,201,197,0.06)',
-      'border-default': 'rgba(197,201,197,0.10)',
-      'border-strong': 'rgba(197,201,197,0.15)',
-      'text-primary': '#c5c9c5',
-      'text-secondary': '#a6a69c',
-      'text-tertiary': '#6a6661',
-      'text-disabled': '#393836',
-      accent: '#658594',
-      'accent-solid': '#4a6b7a',
-      'accent-hover': '#8aabbe',
     },
   },
   {
@@ -833,61 +533,13 @@ export const themes: ThemePreset[] = [
       'border-strong': 'rgba(189,147,249,0.15)',
       'text-primary': '#f8f8f2',
       'text-secondary': '#c8c0d8',
-      'text-tertiary': '#6272a4',
+      // Canonical comment #6272a4 sits at 3.03:1 on bg-surface — nudged +2 L to
+      // clear the 3.15 tertiary floor, hue/saturation locked (2026-08).
+      'text-tertiary': '#6776a7',
       'text-disabled': '#44475a',
       accent: '#bd93f9',
       'accent-solid': '#9570d4',
       'accent-hover': '#d4b8ff',
-    },
-  },
-  {
-    // Catppuccin Frappé — official catppuccin palette, mid-range dark.
-    // base #303446, mantle #292c3c, crust #232634, surface0 #414559,
-    // text #c6d0f5, mauve #ca9ee6.
-    id: 'catppuccin-frappe',
-    name: 'Catppuccin Frappé',
-    preview: ['#232634', '#303446', '#414559', '#ca9ee6'],
-    colors: {
-      'bg-base': '#232634',
-      'bg-surface': '#303446',
-      'bg-card': '#414559',
-      'bg-elevated': '#51576d',
-      'bg-input': '#292c3c',
-      'border-subtle': 'rgba(198,208,245,0.06)',
-      'border-default': 'rgba(198,208,245,0.10)',
-      'border-strong': 'rgba(198,208,245,0.15)',
-      'text-primary': '#c6d0f5',
-      'text-secondary': '#b5bfe2',
-      'text-tertiary': '#838ba7',
-      'text-disabled': '#626880',
-      accent: '#ca9ee6',
-      'accent-solid': '#a571c4',
-      'accent-hover': '#dab5ed',
-    },
-  },
-  {
-    // Catppuccin Macchiato — official catppuccin palette, deep dark.
-    // base #24273a, mantle #1e2030, crust #181926, surface0 #363a4f,
-    // text #cad3f5, mauve #c6a0f6.
-    id: 'catppuccin-macchiato',
-    name: 'Catppuccin Macchiato',
-    preview: ['#181926', '#24273a', '#363a4f', '#c6a0f6'],
-    colors: {
-      'bg-base': '#181926',
-      'bg-surface': '#24273a',
-      'bg-card': '#363a4f',
-      'bg-elevated': '#494d64',
-      'bg-input': '#1e2030',
-      'border-subtle': 'rgba(202,211,245,0.06)',
-      'border-default': 'rgba(202,211,245,0.10)',
-      'border-strong': 'rgba(202,211,245,0.15)',
-      'text-primary': '#cad3f5',
-      'text-secondary': '#b8c0e0',
-      'text-tertiary': '#8087a2',
-      'text-disabled': '#5b6078',
-      accent: '#c6a0f6',
-      'accent-solid': '#a070d4',
-      'accent-hover': '#d4baf9',
     },
   },
   {
@@ -937,54 +589,6 @@ export const themes: ThemePreset[] = [
       accent: '#c4a7e7',
       'accent-solid': '#a173d9',
       'accent-hover': '#d4baf2',
-    },
-  },
-  {
-    // Violet Dusk — saturated violet over near-black indigo. Crepuscular vibe,
-    // pairs well with the Genshin / mystical themes nearby.
-    id: 'violet-dusk',
-    name: 'Violet Dusk',
-    preview: ['#100c1d', '#18132e', '#221c40', '#a78bfa'],
-    colors: {
-      'bg-base': '#100c1d',
-      'bg-surface': '#18132e',
-      'bg-card': '#221c40',
-      'bg-elevated': '#2c2552',
-      'bg-input': '#0c0918',
-      'border-subtle': 'rgba(167,139,250,0.06)',
-      'border-default': 'rgba(167,139,250,0.10)',
-      'border-strong': 'rgba(167,139,250,0.15)',
-      'text-primary': '#efeaff',
-      'text-secondary': '#bba8dc',
-      'text-tertiary': '#7c6da5',
-      'text-disabled': '#4b3f6a',
-      accent: '#a78bfa',
-      'accent-solid': '#8b5cf6',
-      'accent-hover': '#c4b5fd',
-    },
-  },
-  {
-    // Genshin Vibes — inspired by HoYoverse's open-world RPG. Twilight violet
-    // canvases with Mora-gold accent (#bd9560).
-    id: 'genshin-vibes',
-    name: 'Genshin Vibes',
-    preview: ['#14101d', '#1e1a2e', '#29243f', '#bd9560'],
-    colors: {
-      'bg-base': '#14101d',
-      'bg-surface': '#1e1a2e',
-      'bg-card': '#29243f',
-      'bg-elevated': '#342e4d',
-      'bg-input': '#100d18',
-      'border-subtle': 'rgba(189,149,96,0.06)',
-      'border-default': 'rgba(189,149,96,0.10)',
-      'border-strong': 'rgba(189,149,96,0.15)',
-      'text-primary': '#f0eaff',
-      'text-secondary': '#d0c8d8',
-      'text-tertiary': '#8e8398',
-      'text-disabled': '#58506a',
-      accent: '#bd9560',
-      'accent-solid': '#9c7a48',
-      'accent-hover': '#d4b079',
     },
   },
   // ── Light ──
@@ -1184,29 +788,6 @@ export const themes: ThemePreset[] = [
   },
   // ── Vivid (high-saturation dark palettes) ──
   {
-    // Cyberpunk Neon — hot pink + cyan on near-black. Heavy contrast.
-    id: 'cyberpunk-neon',
-    name: 'Cyberpunk Neon',
-    preview: ['#0a0a14', '#12121e', '#1c1c2e', '#ff2bd1'],
-    colors: {
-      'bg-base': '#0a0a14',
-      'bg-surface': '#12121e',
-      'bg-card': '#1c1c2e',
-      'bg-elevated': '#262640',
-      'bg-input': '#06060c',
-      'border-subtle': 'rgba(255,43,209,0.08)',
-      'border-default': 'rgba(255,43,209,0.18)',
-      'border-strong': 'rgba(255,43,209,0.32)',
-      'text-primary': '#f0eaff',
-      'text-secondary': '#b8a8d4',
-      'text-tertiary': '#7e6e98',
-      'text-disabled': '#4a4060',
-      accent: '#ff2bd1',
-      'accent-solid': '#d61eb0',
-      'accent-hover': '#ff66dc',
-    },
-  },
-  {
     // Synthwave '84 — robb0wen/synthwave-84 inspired. Magenta + deep purple.
     id: 'synthwave-84',
     name: 'Synthwave \'84',
@@ -1227,31 +808,6 @@ export const themes: ThemePreset[] = [
       accent: '#ff7edb',
       'accent-solid': '#e455c0',
       'accent-hover': '#ffa1e5',
-    },
-  },
-  {
-    // Hotline Miami — electric yellow on near-black. Differentiates from Cyberpunk Neon
-    // (magenta-on-black) by hue: yellow accent with pink borders for that 1980s arcade
-    // / Miami-at-night vibe.
-    id: 'hotline-miami',
-    name: 'Hotline Miami',
-    preview: ['#100c14', '#1a1620', '#26202e', '#f4d03f'],
-    colors: {
-      'bg-base': '#100c14',
-      'bg-surface': '#1a1620',
-      'bg-card': '#26202e',
-      'bg-elevated': '#322a3a',
-      'bg-input': '#0a070c',
-      'border-subtle': 'rgba(255,0,170,0.08)',
-      'border-default': 'rgba(255,0,170,0.22)',
-      'border-strong': 'rgba(255,0,170,0.38)',
-      'text-primary': '#fff8e0',
-      'text-secondary': '#d4c8a0',
-      'text-tertiary': '#988868',
-      'text-disabled': '#5a4e3a',
-      accent: '#f4d03f',
-      'accent-solid': '#d4af0a',
-      'accent-hover': '#ffe066',
     },
   },
   // ── Pastel (soft / low-saturation light palettes) ──
@@ -1328,6 +884,33 @@ export const themes: ThemePreset[] = [
 
 export const DEFAULT_THEME_ID = 'lavender-coal';
 
+// Where each preset retired by the 2026-08 curation lands: its closest surviving
+// relative (same hue family / same vibe). Consumed by the v6 migration in
+// loadThemeConfig so a stored id keeps resolving to something familiar instead of
+// snapping to the default. Custom presets can't collide — their ids are
+// 'custom-'-prefixed by makeCustomPresetId.
+const REMOVED_THEME_FALLBACKS: Record<string, string> = {
+  'carbon': 'lavender-coal',
+  'sakura': 'rose-pine',
+  'copper': 'gruvbox-dark',
+  'amber': 'gruvbox-dark',
+  'green-beautiful-2': 'hatsune-miku',
+  'green-dark': 'minimal-kiwi',
+  'ocean': 'hatsune-miku',
+  'ocean-deep': 'tokyo-night',
+  'midnight': 'tokyo-night',
+  'cursor-dark': 'lavender-coal',
+  'github-dark': 'github-dark-default',
+  'kanagawa': 'tokyo-night',
+  'kanagawa-dragon': 'lavender-coal',
+  'catppuccin-frappe': 'catppuccin-mocha',
+  'catppuccin-macchiato': 'catppuccin-mocha',
+  'violet-dusk': 'dracula',
+  'genshin-vibes': 'wuthering-waves',
+  'cyberpunk-neon': 'synthwave-84',
+  'hotline-miami': 'synthwave-84',
+};
+
 // Filterable tags for the Themes tab — every preset is "dark" or "light", plus
 // optional style tags (vivid / pastel / monochrome) when those traits dominate.
 // Kept as a separate map (not inline on each preset) so adding a new tag dimension
@@ -1335,40 +918,23 @@ export const DEFAULT_THEME_ID = 'lavender-coal';
 export type ThemeTag = 'dark' | 'light' | 'vivid' | 'pastel' | 'monochrome';
 
 export const THEME_TAGS: Record<string, ThemeTag[]> = {
-  'carbon': ['dark', 'monochrome'],
-  'sakura': ['dark', 'pastel'],
-  'copper': ['dark', 'vivid'],
-  'amber': ['dark', 'vivid'],
   'gruvbox-dark': ['dark', 'vivid'],
   'minimal-kiwi': ['dark', 'monochrome'],
   'monokai': ['dark', 'vivid'],
   'dark-ever': ['dark', 'pastel'],
-  'green-beautiful-2': ['dark', 'vivid'],
-  'green-dark': ['dark', 'vivid'],
   'hatsune-miku': ['dark', 'vivid'],
-  'ocean': ['dark', 'vivid'],
-  'ocean-deep': ['dark', 'vivid'],
   'nord': ['dark', 'pastel'],
-  'midnight': ['dark'],
   'one-dark-pro': ['dark'],
   'lavender-coal': ['dark', 'monochrome'],
-  'cursor-dark': ['dark', 'monochrome'],
   'material-theme-darker': ['dark', 'monochrome'],
   'tokyo-night': ['dark'],
-  'github-dark': ['dark'],
   'github-dark-default': ['dark'],
   'solarized-dark': ['dark'],
-  'kanagawa': ['dark', 'pastel'],
-  'kanagawa-dragon': ['dark', 'monochrome'],
   'wuthering-waves': ['dark', 'vivid'],
   'crimson-night': ['dark', 'vivid'],
   'dracula': ['dark', 'vivid'],
-  'catppuccin-frappe': ['dark', 'pastel'],
-  'catppuccin-macchiato': ['dark', 'pastel'],
   'catppuccin-mocha': ['dark', 'pastel'],
   'rose-pine': ['dark', 'pastel'],
-  'violet-dusk': ['dark', 'vivid'],
-  'genshin-vibes': ['dark'],
   'catppuccin-latte': ['light', 'pastel'],
   'github-light': ['light'],
   'solarized-light': ['light'],
@@ -1377,9 +943,7 @@ export const THEME_TAGS: Record<string, ThemeTag[]> = {
   'material-lighter': ['light'],
   'cream-paper': ['light'],
   'notebook': ['light', 'monochrome'],
-  'cyberpunk-neon': ['dark', 'vivid'],
   'synthwave-84': ['dark', 'vivid'],
-  'hotline-miami': ['dark', 'vivid'],
   'cotton-candy': ['light', 'pastel'],
   'mint-sorbet': ['light', 'pastel'],
   'peach-fuzz': ['light', 'pastel'],
@@ -1503,16 +1067,16 @@ export function pickInk(fillHex: string): string {
  * get their ink from pickInk above).
  *
  * recordingColor/replayColor/clickerColor live in ThemeUISettings, not in the
- * preset, so all 48 presets receive the same three values — and the defaults
- * were picked against a dark canvas. On the 11 light presets the raw hues wash
+ * preset, so every preset receives the same three values — and the defaults
+ * were picked against a dark canvas. On the light presets the raw hues wash
  * out: replay green measures 1.77:1 as text on GitHub Light's bar, recording red
  * 2.16:1, clicker purple 2.13:1, all under the 3:1 floor for non-text UI.
  *
  * A fixed mix percentage cannot fix that. It has to be large enough for the
- * worst light preset, which then needlessly desaturates all 36 dark ones. So
+ * worst light preset, which then needlessly desaturates every dark one. So
  * walk the hue toward the theme's own text colour and STOP at the first step
  * that clears `target`. Measured across every preset x hue: the dark presets
- * clear at 100% (they keep the user's colour untouched, all 108 combinations),
+ * clear at 100% (they keep the user's colour untouched, all combinations),
  * and the light ones keep 70% of it on average.
  *
  * `target` is 3.0 — the WCAG 1.4.11 floor for graphics and UI boundaries, which
@@ -1650,12 +1214,27 @@ export function loadThemeConfig(): ThemeConfig {
         if (ui.zoom === 95) ui.zoom = DEFAULT_UI_SETTINGS.zoom;
       }
 
+      // v5 → v6 migration: the 2026-08 curation retired 19 dark presets. A stored
+      // id pointing at one of them is remapped to its closest surviving relative
+      // (REMOVED_THEME_FALLBACKS) so the user's aesthetic carries over instead of
+      // falling through to themes[0]. Unlike the colour migrations above this one
+      // is unconditional — a removed id has nothing to stay faithful to. Covers
+      // the active theme and both matchSystemTheme slots.
+      if (parsed.version < 6) {
+        const ui = merged.uiSettings;
+        merged.baseThemeId = REMOVED_THEME_FALLBACKS[merged.baseThemeId] ?? merged.baseThemeId;
+        ui.darkPresetId = REMOVED_THEME_FALLBACKS[ui.darkPresetId] ?? ui.darkPresetId;
+        ui.lightPresetId = REMOVED_THEME_FALLBACKS[ui.lightPresetId] ?? ui.lightPresetId;
+      }
+
       return merged;
     }
   } catch {
-    // Not JSON — old format (plain theme ID string)
-    if (getThemeById(raw)) {
-      return { version: CURRENT_THEME_CONFIG_VERSION, baseThemeId: raw, colorOverrides: {}, uiSettings: { ...DEFAULT_UI_SETTINGS } };
+    // Not JSON — old format (plain theme ID string). Run it through the removed-id
+    // map too so an ancient install lands on a surviving relative.
+    const legacyId = REMOVED_THEME_FALLBACKS[raw] ?? raw;
+    if (getThemeById(legacyId)) {
+      return { version: CURRENT_THEME_CONFIG_VERSION, baseThemeId: legacyId, colorOverrides: {}, uiSettings: { ...DEFAULT_UI_SETTINGS } };
     }
   }
 
@@ -1697,8 +1276,12 @@ export function resolveThemeColors(config: ThemeConfig, customPresets: ThemePres
   // Custom presets take precedence over built-in ids — the user might intentionally
   // override a built-in name. In practice ids should never collide thanks to the
   // 'custom-' prefix from makeCustomPresetId, but the lookup order keeps user wins.
+  // An id that resolves to nothing (corrupt storage, deleted custom preset) lands on
+  // the DEFAULT theme, not themes[0] — array order is hue-sorted, so slot 0 is an
+  // arbitrary palette, not a neutral one.
   const base = customPresets.find(t => t.id === config.baseThemeId)
     ?? getThemeById(config.baseThemeId)
+    ?? getThemeById(DEFAULT_THEME_ID)
     ?? themes[0];
   return { ...base.colors, ...config.colorOverrides };
 }
