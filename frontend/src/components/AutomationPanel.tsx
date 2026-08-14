@@ -460,11 +460,9 @@ export function AutomationPanel({ onClose }: { onClose: () => void }) {
             <span className="text-[12px] text-text-secondary">Automations enabled</span>
           </div>
           <Button variant="secondary" onClick={() => navigateTo({ kind: 'close' })}>Close</Button>
-          {/* The tooltip is the point: an inert Save with no explanation was the previous
-              behaviour, and it read as a broken button rather than a blocked one. */}
-          <span data-tip={!hasUnsavedWork
-            ? tt('Nothing to save.', 'Nada para salvar.')
-            : cannotFire ?? undefined}>
+          {/* The tooltip explains a blocked Save (cannotFire); when there's simply nothing
+              unsaved, the button just sits disabled with no tooltip. */}
+          <span data-tip={hasUnsavedWork ? cannotFire ?? undefined : undefined}>
             <Button variant="primary" onClick={handleSave} disabled={!canSave}>Save</Button>
           </span>
         </>
