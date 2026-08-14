@@ -169,6 +169,9 @@ export interface ExportedTheme {
 // Themes ordered by accent hue: orange/yellow → green → cyan/blue → red → purple → light.
 // Curated 2026-08: 48 → 29 presets. Each surviving dark theme owns a distinct hue/vibe
 // slot; near-duplicates were retired and their ids remapped in REMOVED_THEME_FALLBACKS.
+// 2026-08-13: +8 in-house duotone presets built from owner-picked colour pairs (37
+// total) — each palette carries its pair's reference hexes literally (see per-theme
+// comments).
 export const themes: ThemePreset[] = [
   // ── Orange / Yellow ──
   {
@@ -195,7 +198,83 @@ export const themes: ThemePreset[] = [
       'accent-hover': '#ffd866',
     },
   },
+  {
+    // Butter Pine — in-house duotone (2026-08 owner pair): butter yellow #ffefb3
+    // over deep pine green #013e37. The green is the canvas (reference hex at
+    // bg-card); the text ramp warms toward the butter side so the theme reads
+    // cream-on-green rather than white-on-teal.
+    id: 'butter-pine',
+    name: 'Butter Pine',
+    preview: ['#012620', '#013129', '#013e37', '#ffefb3'],
+    colors: {
+      'bg-base': '#012620',
+      'bg-surface': '#013129',
+      'bg-card': '#013e37',
+      'bg-elevated': '#024c43',
+      'bg-input': '#011d19',
+      'border-subtle': 'rgba(255,239,179,0.06)',
+      'border-default': 'rgba(255,239,179,0.10)',
+      'border-strong': 'rgba(255,239,179,0.15)',
+      'text-primary': '#f4efd8',
+      'text-secondary': '#c9cfae',
+      'text-tertiary': '#7d9a84',
+      'text-disabled': '#3f5c50',
+      accent: '#ffefb3',
+      'accent-solid': '#dcc571',
+      'accent-hover': '#fff7d1',
+    },
+  },
+  {
+    // Bumblebee — in-house duotone (2026-08 owner pair): aureolin yellow #fbe311
+    // on bistre brown #261606 (reference hex at bg-surface). High-voltage hazard
+    // look; the text ramp stays warm cream so only the accent buzzes.
+    id: 'bumblebee',
+    name: 'Bumblebee',
+    preview: ['#1c0f04', '#261606', '#33200b', '#fbe311'],
+    colors: {
+      'bg-base': '#1c0f04',
+      'bg-surface': '#261606',
+      'bg-card': '#33200b',
+      'bg-elevated': '#402a10',
+      'bg-input': '#150b03',
+      'border-subtle': 'rgba(251,227,17,0.06)',
+      'border-default': 'rgba(251,227,17,0.10)',
+      'border-strong': 'rgba(251,227,17,0.15)',
+      'text-primary': '#f5ecd9',
+      'text-secondary': '#d1c2a4',
+      'text-tertiary': '#96835f',
+      'text-disabled': '#57452a',
+      accent: '#fbe311',
+      'accent-solid': '#d3bd09',
+      'accent-hover': '#fdef5e',
+    },
+  },
   // ── Green ──
+  {
+    // Lime Spark — in-house duotone (2026-08 owner pair): electric chartreuse
+    // #b6ff2e on cool graphite blue-grey #23262f (reference hex at bg-surface).
+    // Instrument-cluster look: neutral cold canvas, one loud needle.
+    id: 'lime-spark',
+    name: 'Lime Spark',
+    preview: ['#1a1d24', '#23262f', '#2c303b', '#b6ff2e'],
+    colors: {
+      'bg-base': '#1a1d24',
+      'bg-surface': '#23262f',
+      'bg-card': '#2c303b',
+      'bg-elevated': '#363b48',
+      'bg-input': '#15171d',
+      'border-subtle': 'rgba(182,255,46,0.06)',
+      'border-default': 'rgba(182,255,46,0.10)',
+      'border-strong': 'rgba(182,255,46,0.15)',
+      'text-primary': '#e9ebee',
+      'text-secondary': '#b5b9c3',
+      'text-tertiary': '#7a8090',
+      'text-disabled': '#494e5b',
+      accent: '#b6ff2e',
+      'accent-solid': '#8fd214',
+      'accent-hover': '#c9ff60',
+    },
+  },
   {
     // Minimal Kiwi — minimalist near-black backgrounds with a single kiwi-green pop accent.
     id: 'minimal-kiwi',
@@ -517,6 +596,31 @@ export const themes: ThemePreset[] = [
       'accent-hover': '#f87171',
     },
   },
+  {
+    // Imperial Violet — in-house duotone (2026-08 owner pair): imperial red
+    // #f15153 on deep royal violet #321847 (reference hex at bg-card). Warm
+    // coral-red signal over a cool regal canvas.
+    id: 'imperial-violet',
+    name: 'Imperial Violet',
+    preview: ['#1f0e2e', '#29123b', '#321847', '#f15153'],
+    colors: {
+      'bg-base': '#1f0e2e',
+      'bg-surface': '#29123b',
+      'bg-card': '#321847',
+      'bg-elevated': '#3e2156',
+      'bg-input': '#180a24',
+      'border-subtle': 'rgba(241,81,83,0.06)',
+      'border-default': 'rgba(241,81,83,0.10)',
+      'border-strong': 'rgba(241,81,83,0.15)',
+      'text-primary': '#f1e9f8',
+      'text-secondary': '#c9b6dd',
+      'text-tertiary': '#9280a8',
+      'text-disabled': '#574768',
+      accent: '#f15153',
+      'accent-solid': '#d63033',
+      'accent-hover': '#f57e7f',
+    },
+  },
   // ── Purple / Violet / Mauve ──
   {
     id: 'dracula',
@@ -764,6 +868,32 @@ export const themes: ThemePreset[] = [
     },
   },
   {
+    // Emerald Ink — in-house duotone (2026-08 owner pair): emerald green ink
+    // #064e3b on champagne paper #f8e7c9 (reference hex at bg-base). Luxury-
+    // stationery light theme; the whole text ramp is green-tinted so the accent
+    // feels native.
+    id: 'emerald-ink',
+    name: 'Emerald Ink',
+    preview: ['#f8e7c9', '#f0dcb7', '#e6cd9d', '#064e3b'],
+    colors: {
+      'bg-base': '#f8e7c9',
+      'bg-surface': '#f0dcb7',
+      'bg-card': '#e6cd9d',
+      'bg-elevated': '#d8bb82',
+      'bg-input': '#fdf3e0',
+      'border-subtle': 'rgba(30,58,48,0.09)',
+      'border-default': 'rgba(30,58,48,0.17)',
+      'border-strong': 'rgba(30,58,48,0.27)',
+      'text-primary': '#1e3a30',
+      'text-secondary': '#3e5c4e',
+      'text-tertiary': '#64806f',
+      'text-disabled': '#a9a488',
+      accent: '#064e3b',
+      'accent-solid': '#053c2d',
+      'accent-hover': '#0e6b52',
+    },
+  },
+  {
     // Notebook — near-white with navy accent. Minimal, high-legibility light.
     id: 'notebook',
     name: 'Notebook',
@@ -784,6 +914,57 @@ export const themes: ThemePreset[] = [
       accent: '#1f3a93',
       'accent-solid': '#162a6d',
       'accent-hover': '#3a5cc7',
+    },
+  },
+  {
+    // Porcelain — in-house duotone (2026-08 owner pair): signal blue #0057ff on
+    // warm porcelain white #f8f7f4 (reference hex at bg-base). Swiss-poster
+    // light theme: near-black ink, one electric primary.
+    id: 'porcelain',
+    name: 'Porcelain',
+    preview: ['#f8f7f4', '#efede8', '#e3e1da', '#0057ff'],
+    colors: {
+      'bg-base': '#f8f7f4',
+      'bg-surface': '#efede8',
+      'bg-card': '#e3e1da',
+      'bg-elevated': '#d5d2c8',
+      'bg-input': '#ffffff',
+      'border-subtle': 'rgba(28,28,30,0.08)',
+      'border-default': 'rgba(28,28,30,0.15)',
+      'border-strong': 'rgba(28,28,30,0.25)',
+      'text-primary': '#1c1c1e',
+      'text-secondary': '#4c4c52',
+      'text-tertiary': '#71717a',
+      'text-disabled': '#ababb2',
+      accent: '#0057ff',
+      'accent-solid': '#0043c4',
+      'accent-hover': '#3377ff',
+    },
+  },
+  {
+    // Ultra Apricot — in-house duotone (2026-08 owner pair): ultra violet
+    // #6a00f4 on soft apricot #ffd6a5 (reference hex at bg-base). The boldest
+    // light canvas in the set; the ink ramp leans deep violet so text and
+    // accent share one family.
+    id: 'ultra-apricot',
+    name: 'Ultra Apricot',
+    preview: ['#ffd6a5', '#f9c98e', '#f2ba79', '#6a00f4'],
+    colors: {
+      'bg-base': '#ffd6a5',
+      'bg-surface': '#f9c98e',
+      'bg-card': '#f2ba79',
+      'bg-elevated': '#e8a962',
+      'bg-input': '#ffe7cd',
+      'border-subtle': 'rgba(60,29,94,0.10)',
+      'border-default': 'rgba(60,29,94,0.18)',
+      'border-strong': 'rgba(60,29,94,0.28)',
+      'text-primary': '#3c1d5e',
+      'text-secondary': '#5f3a85',
+      'text-tertiary': '#82589f',
+      'text-disabled': '#bb9a79',
+      accent: '#6a00f4',
+      'accent-solid': '#5500c4',
+      'accent-hover': '#8433f6',
     },
   },
   // ── Vivid (high-saturation dark palettes) ──
@@ -808,6 +989,32 @@ export const themes: ThemePreset[] = [
       accent: '#ff7edb',
       'accent-solid': '#e455c0',
       'accent-hover': '#ffa1e5',
+    },
+  },
+  {
+    // Dragonfruit Night — in-house duotone (2026-08 owner pair): dragon-fruit
+    // pink #ff4696 on night violet #1e1033 (reference hex at bg-surface).
+    // Deeper and bluer than Synthwave '84 with a hotter, redder pink — the
+    // flesh-and-rind colours of the actual fruit; text ramp is pink-tinted.
+    id: 'dragonfruit-night',
+    name: 'Dragonfruit Night',
+    preview: ['#150b26', '#1e1033', '#2a1745', '#ff4696'],
+    colors: {
+      'bg-base': '#150b26',
+      'bg-surface': '#1e1033',
+      'bg-card': '#2a1745',
+      'bg-elevated': '#351e55',
+      'bg-input': '#100820',
+      'border-subtle': 'rgba(255,70,150,0.07)',
+      'border-default': 'rgba(255,70,150,0.12)',
+      'border-strong': 'rgba(255,70,150,0.18)',
+      'text-primary': '#f6ebf1',
+      'text-secondary': '#d4b3c7',
+      'text-tertiary': '#9d7595',
+      'text-disabled': '#5c3d57',
+      accent: '#ff4696',
+      'accent-solid': '#d92a7c',
+      'accent-hover': '#ff73b1',
     },
   },
   // ── Pastel (soft / low-saturation light palettes) ──
@@ -919,6 +1126,9 @@ export type ThemeTag = 'dark' | 'light' | 'vivid' | 'pastel' | 'monochrome';
 
 export const THEME_TAGS: Record<string, ThemeTag[]> = {
   'gruvbox-dark': ['dark', 'vivid'],
+  'butter-pine': ['dark'],
+  'bumblebee': ['dark', 'vivid'],
+  'lime-spark': ['dark', 'vivid'],
   'minimal-kiwi': ['dark', 'monochrome'],
   'monokai': ['dark', 'vivid'],
   'dark-ever': ['dark', 'pastel'],
@@ -932,6 +1142,7 @@ export const THEME_TAGS: Record<string, ThemeTag[]> = {
   'solarized-dark': ['dark'],
   'wuthering-waves': ['dark', 'vivid'],
   'crimson-night': ['dark', 'vivid'],
+  'imperial-violet': ['dark', 'vivid'],
   'dracula': ['dark', 'vivid'],
   'catppuccin-mocha': ['dark', 'pastel'],
   'rose-pine': ['dark', 'pastel'],
@@ -942,8 +1153,12 @@ export const THEME_TAGS: Record<string, ThemeTag[]> = {
   'atom-one-light': ['light'],
   'material-lighter': ['light'],
   'cream-paper': ['light'],
+  'emerald-ink': ['light'],
   'notebook': ['light', 'monochrome'],
+  'porcelain': ['light', 'monochrome'],
+  'ultra-apricot': ['light', 'vivid'],
   'synthwave-84': ['dark', 'vivid'],
+  'dragonfruit-night': ['dark', 'vivid'],
   'cotton-candy': ['light', 'pastel'],
   'mint-sorbet': ['light', 'pastel'],
   'peach-fuzz': ['light', 'pastel'],
