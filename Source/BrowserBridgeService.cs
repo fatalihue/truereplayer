@@ -49,7 +49,11 @@ namespace TrueReplayer.Services
         // the app closed — and reset the backoff counter each time, so the 0.5→2 min ramp never
         // actually climbed. The gate is sender.tab, the same discriminator the recording-message
         // check above it already uses.
-        public const string ExpectedExtensionVersion = "1.4.16";
+        // 1.4.17 = content.js only asks getStatus from the MAIN frame (each iframe's ask woke the
+        // MV3 service worker, whose top-level connect() spawned a NativeHost), text= resolution
+        // computes aggregate text in one post-order pass instead of textContent per node, and
+        // isTextUnique drops its three per-node array allocations for a sibling walk.
+        public const string ExpectedExtensionVersion = "1.4.17";
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
         private NamedPipeServerStream? _pipeServer;
         private StreamReader? _reader;

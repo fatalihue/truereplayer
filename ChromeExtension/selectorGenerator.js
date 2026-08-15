@@ -337,10 +337,7 @@ function generateSelectorAlternatives(el) {
   }
 
   // Tier B — text= match if this element's visible text is unique on the page
-  const directText = Array.from(el.childNodes)
-    .filter(n => n.nodeType === Node.TEXT_NODE)
-    .map(n => n.textContent.trim())
-    .join(' ').trim();
+  const directText = directTextOf(el);
   const visibleText = (directText || el.textContent?.trim() || '').slice(0, 80);
   if (visibleText && visibleText.length >= 2 && visibleText.length <= 80) {
     if (isTextUnique(visibleText)) {
@@ -370,6 +367,24 @@ function generateSelectorAlternatives(el) {
   return alts.slice(0, 5);
 }
 
+// An element's OWN text nodes, excluding descendants — a plain sibling walk, same shape as
+// content.js's directTextOf (this file does not import from content.js, so the helper is local).
+// isTextUnique below runs it for every element in the document, and the old
+// Array.from(childNodes).filter().map().join() allocated three intermediate arrays per node.
+// Joining with ' ' between EVERY text node (empties included) before the final trim reproduces
+// the old join() exactly, so no generated text= selector changes.
+function directTextOf(el) {
+  let out = '';
+  let first = true;
+  for (let n = el.firstChild; n; n = n.nextSibling) {
+    if (n.nodeType !== Node.TEXT_NODE) continue;
+    if (!first) out += ' ';
+    out += n.textContent.trim();
+    first = false;
+  }
+  return out.trim();
+}
+
 // #2 — Check whether a visible-text query would resolve uniquely.
 // We approximate: walk the DOM and count visible elements whose direct text matches.
 function isTextUnique(text) {
@@ -377,10 +392,7 @@ function isTextUnique(text) {
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
   while (walker.nextNode()) {
     const el = walker.currentNode;
-    const direct = Array.from(el.childNodes)
-      .filter(n => n.nodeType === Node.TEXT_NODE)
-      .map(n => n.textContent.trim())
-      .join(' ').trim();
+    const direct = directTextOf(el);
     if (direct === text) {
       count++;
       if (count > 1) return false;

@@ -757,14 +757,48 @@
    * reads the same twin as proof the element has gone.
    */
   function findByParsedText(parsed, includeHidden = false) {
+    // One post-order pass computes every element's aggregate text up front. Reading
+    // el.textContent per walked node is O(subtree) PER NODE — O(text × depth) for the whole
+    // walk — and this function is the body of the check that re-runs on every DOM mutation
+    // while a text wait is pending, so that cost was paid thousands of times per second on a
+    // live page. The map entry is built exactly the way textContent is: descendant text nodes
+    // concatenated in document order with NO separator (comments/PIs contribute nothing), and
+    // only trimmed at the point of use — byte-identical to what el.textContent?.trim() read.
+    const aggText = new Map();
+    {
+      const elStack = [document.body];
+      const accStack = [''];
+      let node = document.body.firstChild;
+      while (elStack.length) {
+        while (node) {
+          if (node.nodeType === Node.TEXT_NODE || node.nodeType === Node.CDATA_SECTION_NODE) {
+            accStack[accStack.length - 1] += node.textContent;
+            node = node.nextSibling;
+          } else if (node.nodeType === Node.ELEMENT_NODE) {
+            elStack.push(node);
+            accStack.push('');
+            node = node.firstChild;
+          } else {
+            node = node.nextSibling;
+          }
+        }
+        const done = elStack.pop();
+        const agg = accStack.pop();
+        aggText.set(done, agg);
+        if (elStack.length) {
+          accStack[accStack.length - 1] += agg;
+          node = done.nextSibling;
+        }
+      }
+    }
+
     const candidates = [];
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
     while (walker.nextNode()) {
       const el = walker.currentNode;
-      // Both strings computed ONCE and threaded through everything that needs them. This loop is
-      // the body of the check that re-runs on every DOM mutation while a text wait is pending, so
-      // the per-node cost is paid thousands of times per second on a live page.
-      const elText = el.textContent?.trim();
+      // Both strings computed ONCE and threaded through everything that needs them — elText now
+      // comes from the map above instead of a fresh O(subtree) textContent read per element.
+      const elText = (aggText.get(el) || '').trim();
       if (!elText) continue;
       const directText = directTextOf(el);
 
@@ -1855,10 +1889,15 @@
   // that never saw the broadcast — browser events on the new page silently stopped
   // being captured. Pull the current state from the background on load so recording
   // survives navigations.
-  try {
-    chrome.runtime.sendMessage({ type: 'getStatus' }, (status) => {
-      if (chrome.runtime.lastError) return;
-      if (status && status.recording) startRecording();
-    });
-  } catch { /* extension context invalidated (e.g. extension was reloaded) */ }
+  // Main frame only: a subframe's answer is unusable anyway (startRecording has its own
+  // isMainFrame guard), and each iframe's sendMessage wakes the MV3 service worker — whose
+  // top-level connect() then spawns a fresh NativeHost. Ad-heavy pages made that a trigger.
+  if (isMainFrame) {
+    try {
+      chrome.runtime.sendMessage({ type: 'getStatus' }, (status) => {
+        if (chrome.runtime.lastError) return;
+        if (status && status.recording) startRecording();
+      });
+    } catch { /* extension context invalidated (e.g. extension was reloaded) */ }
+  }
 })();
