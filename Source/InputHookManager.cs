@@ -206,23 +206,20 @@ namespace TrueReplayer
         {
             uint flags = down ? 0u : NativeMethods.KEYEVENTF_KEYUP;
             if (_extendedVkCodes.Contains(vk)) flags |= NativeMethods.KEYEVENTF_EXTENDEDKEY;
-            var inputs = new NativeMethods.INPUT[]
+            var input = new NativeMethods.INPUT
             {
-                new NativeMethods.INPUT
+                type = NativeMethods.INPUT_KEYBOARD,
+                U = new NativeMethods.InputUnion
                 {
-                    type = NativeMethods.INPUT_KEYBOARD,
-                    U = new NativeMethods.InputUnion
+                    ki = new NativeMethods.KEYBDINPUT
                     {
-                        ki = new NativeMethods.KEYBDINPUT
-                        {
-                            wVk = vk,
-                            wScan = (ushort)NativeMethods.MapVirtualKey(vk, 0),
-                            dwFlags = flags,
-                        }
+                        wVk = vk,
+                        wScan = (ushort)NativeMethods.MapVirtualKey(vk, 0),
+                        dwFlags = flags,
                     }
                 }
             };
-            NativeMethods.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<NativeMethods.INPUT>());
+            NativeMethods.SendInput(1, ref input, NativeMethods.InputSize);
         }
 
         // App-exit / hook-stop safety: release anything the remap layer is holding down so
