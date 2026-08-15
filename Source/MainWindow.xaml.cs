@@ -1363,14 +1363,18 @@ namespace TrueReplayer
             UserProfile.Current.UseRelativeCoordinates = profileController.GetEffectiveRelativeCoordinates(profileName);
             UserProfile.Current.BringToFocus = profileController.GetEffectiveBringToFocus(profileName);
             if (bridge == null) return TriggerFireResult.NotReady;
-            // Set CurrentProfileName BEFORE ApplyProfile: ApplyProfile pushes the action
-            // grid, which reads each WaitImage/IF-Image thumbnail's base64 keyed by
-            // CurrentProfileName. With the old order the push ran under the STALE name
-            // (e.g. a previous profile, or "No Profile" → "default"), so the reference
-            // PNG resolved to the wrong dir, missed, and showed a placeholder. Setting
-            // the name first also clears the base64 cache so the push re-reads cleanly.
+            // Set CurrentProfileName BEFORE the action-grid push: the push reads each
+            // WaitImage/IF-Image thumbnail's base64 keyed by CurrentProfileName. With the
+            // old order the push ran under the STALE name (e.g. a previous profile, or
+            // "No Profile" → "default"), so the reference PNG resolved to the wrong dir,
+            // missed, and showed a placeholder. Setting the name first also clears the
+            // base64 cache so the push re-reads cleanly. Still holds with the deferral
+            // below — the push now runs even later, in the post-start block.
             bridge.CurrentProfileName = profileName;
-            bridge.ApplyProfile(profile);
+            // Fill-only, no visual push: serializing the grid (thumbnails included) here
+            // would sit between the hotkey and the first replayed action. The grid/button
+            // pushes are deferred to the post-start block below.
+            bridge.ApplyProfileActions(profile);
             bridge.CurrentProfilePath = entry?.FilePath;
             bridge.HasUnsavedChanges = false;
             // A hotkey / hotstring / automation fire swaps the visible profile just like a click
@@ -1437,6 +1441,10 @@ namespace TrueReplayer
 
             profileController.UpdateProfileColors(profileName);
             bridge.PushProfileLoop();
+            // Deferred from the ApplyProfileActions call above: the replay is already running,
+            // so the grid/button serialization no longer costs hotkey→first-action latency.
+            bridge.PushActionsUpdate();
+            bridge.PushButtonStates();
             bridge.PushProfilesUpdate();
             bridge.PushToolbarUpdate();
             bridge.PushStatusBarUpdate();

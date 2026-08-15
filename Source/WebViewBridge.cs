@@ -1941,6 +1941,12 @@ namespace TrueReplayer
             // folder membership or folder targets don't always call RefreshProfileListAsync,
             // and the UI relies on these fields to render the inherited-target badge.
             profileController.PopulateEffectiveTargets();
+            // Per-call dedup only, NOT a persistent cache (AppIconService owns caching) — it just
+            // collapses GetIconBase64's per-hit revalidation I/O across profiles sharing a target.
+            var iconLookup = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            string? Icon(string? proc) => string.IsNullOrWhiteSpace(proc) ? null
+                : iconLookup.TryGetValue(proc, out var v) ? v
+                : (iconLookup[proc] = AppIconService.GetIconBase64(proc));
             var profiles = profileController.ProfileEntries.Select(p => new
             {
                 name = p.Name,
@@ -1966,7 +1972,7 @@ namespace TrueReplayer
                 // effectiveTargetSource to decide opacity (own = 100 %, folder-inherited = 55 %).
                 // Null when no target or icon extraction failed (UWP host, portable not in
                 // PATH, etc.) — the existing crosshair badge renders as fallback.
-                appIconBase64 = AppIconService.GetIconBase64(p.EffectiveTargetProcessName),
+                appIconBase64 = Icon(p.EffectiveTargetProcessName),
                 useRelativeCoordinates = p.UseRelativeCoordinates,
                 bringToFocus = p.BringToFocus,
                 restorePosition = p.RestorePosition,
@@ -2007,7 +2013,7 @@ namespace TrueReplayer
                     windowTargetProcessName = f.TargetWindow?.ProcessName,
                     windowTargetWindowTitle = f.TargetWindow?.WindowTitle,
                     windowTargetTitleMatchMode = f.TargetWindow?.TitleMatchMode ?? "contains",
-                    appIconBase64 = AppIconService.GetIconBase64(f.TargetWindow?.ProcessName),
+                    appIconBase64 = Icon(f.TargetWindow?.ProcessName),
                     useRelativeCoordinates = f.UseRelativeCoordinates,
                     bringToFocus = f.BringToFocus,
                     restorePosition = f.RestorePosition,
@@ -2200,14 +2206,16 @@ namespace TrueReplayer
                 CursorClickGameMove);
         }
 
-        public void PushSettingsLoaded()
+        // Optional instance = same-handler pass-through from SaveGlobalSettings ONLY — never a
+        // cache held across handlers (appsettings.json is hand-editable; a stale copy would win).
+        public void PushSettingsLoaded(AppSettingsManager.AppSettings? appSettings = null)
         {
             var profile = UserProfile.Current;
             // One read for both fields below. AppSettingsManager.Load() is not cached — every call
             // does Directory.CreateDirectory, the legacy-path migration check, File.Exists,
             // File.ReadAllText and a JSON deserialize — and this projection used to call it twice,
             // four lines apart, for two properties of the same object.
-            var appSettings = AppSettingsManager.Load();
+            appSettings ??= AppSettingsManager.Load();
             SendMessage("settings:loaded", new
             {
                 settings = new
@@ -2398,6 +2406,17 @@ namespace TrueReplayer
 
         public void ApplyProfile(UserProfile profile)
         {
+            ApplyProfileActions(profile);
+            PushActionsUpdate();
+            PushButtonStates();
+        }
+
+        // Fill-only half of ApplyProfile — swaps the action list without any frontend push.
+        // The epoch bump stays on THIS side of the split: fail-closed invalidation must ride
+        // with the list replacement itself, never with the (deferrable) visual push. Called
+        // directly by the trigger-fire path, which pushes only after the replay has started.
+        public void ApplyProfileActions(UserProfile profile)
+        {
             // Bumps even though most callers set CurrentProfileName first (which already bumped).
             // Two of them do NOT: the post-import reload (HandleProfileConfirmImport) and the
             // reset-settings path both refill the list under the SAME name, and those are the
@@ -2416,8 +2435,6 @@ namespace TrueReplayer
             {
                 actions.CollectionChanged += OnActionsChanged;
             }
-            PushActionsUpdate();
-            PushButtonStates();
         }
 
         public UserProfile CreateProfileFromState()
@@ -3233,38 +3250,48 @@ namespace TrueReplayer
             if (pasteFix.HadFixups)
                 DiagnosticLog.Info($"[ConditionalBlocks] Paste auto-completed: removed {pasteFix.OrphansRemoved} orphan(s), appended {pasteFix.EndIfsAppended} synthetic ENDIF(s)");
 
-            foreach (var clone in paste)
+            // Suppress CollectionChanged during batch insert — the renumber + single push below
+            // replace the one-full-projection-per-row it would have fired.
+            actions.CollectionChanged -= OnActionsChanged;
+            try
             {
-                // `paste` already holds freshly-cloned items (auto-completed by the
-                // validator above), so we insert them directly. Image reference cloning
-                // is still per-row: a WaitImage row (or an If Image conditional) carries
-                // a profile-scoped PNG that must be duplicated into the destination
-                // profile so deleting the source doesn't break the paste.
-                bool refsImage = !string.IsNullOrEmpty(clone.ImagePath) && (
-                                    clone.ActionType == "WaitImage"
-                                    || (clone.ActionType == "If" && string.Equals(clone.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)));
-                if (refsImage)
+                foreach (var clone in paste)
                 {
-                    var newPath = ImageStorageService.CloneReferenceImage(srcProfile, clone.ImagePath!, dstProfile);
-                    if (newPath != null)
+                    // `paste` already holds freshly-cloned items (auto-completed by the
+                    // validator above), so we insert them directly. Image reference cloning
+                    // is still per-row: a WaitImage row (or an If Image conditional) carries
+                    // a profile-scoped PNG that must be duplicated into the destination
+                    // profile so deleting the source doesn't break the paste.
+                    bool refsImage = !string.IsNullOrEmpty(clone.ImagePath) && (
+                                        clone.ActionType == "WaitImage"
+                                        || (clone.ActionType == "If" && string.Equals(clone.ConditionType, "ImageFound", StringComparison.OrdinalIgnoreCase)));
+                    if (refsImage)
                     {
-                        clone.ImagePath = newPath;
+                        var newPath = ImageStorageService.CloneReferenceImage(srcProfile, clone.ImagePath!, dstProfile);
+                        if (newPath != null)
+                        {
+                            clone.ImagePath = newPath;
+                        }
+                        else
+                        {
+                            // Clone failed — usually because the source profile was deleted
+                            // between copy and paste. Keeping the original ImagePath would
+                            // leave the pasted row pointing at a now-missing PNG. Clear the
+                            // reference instead so the user sees an empty thumbnail and a
+                            // visible "no image captured" hint in the Sheet, prompting them
+                            // to recapture rather than silently shipping a broken row.
+                            clone.ImagePath = null;
+                            DiagnosticLog.Info($"[Paste] Reference image clone failed for {clone.ActionType} (src='{srcProfile}' → dst='{dstProfile}'); ImagePath cleared.");
+                        }
                     }
-                    else
-                    {
-                        // Clone failed — usually because the source profile was deleted
-                        // between copy and paste. Keeping the original ImagePath would
-                        // leave the pasted row pointing at a now-missing PNG. Clear the
-                        // reference instead so the user sees an empty thumbnail and a
-                        // visible "no image captured" hint in the Sheet, prompting them
-                        // to recapture rather than silently shipping a broken row.
-                        clone.ImagePath = null;
-                        DiagnosticLog.Info($"[Paste] Reference image clone failed for {clone.ActionType} (src='{srcProfile}' → dst='{dstProfile}'); ImagePath cleared.");
-                    }
+                    clone.RowNumber = insertIndex + 1;
+                    actions.Insert(insertIndex, clone);
+                    insertIndex++;
                 }
-                clone.RowNumber = insertIndex + 1;
-                actions.Insert(insertIndex, clone);
-                insertIndex++;
+            }
+            finally
+            {
+                actions.CollectionChanged += OnActionsChanged;
             }
 
             // Recalculate row numbers
@@ -3623,17 +3650,32 @@ namespace TrueReplayer
 
             PushUndoState();
 
-            // We intentionally don't delete the PNG of WaitImage actions here so undo can restore
-            // the action with its original reference image still on disk. Orphan PNGs (those no
-            // longer referenced by any action in any profile) are cleaned up at app startup by
-            // ImageStorageService.CleanupOrphanImages.
-            foreach (var idx in indices)
+            // Suppress CollectionChanged during batch delete
+            actions.CollectionChanged -= OnActionsChanged;
+            try
             {
-                if (idx >= 0 && idx < actions.Count)
-                    actions.RemoveAt(idx);
+                // We intentionally don't delete the PNG of WaitImage actions here so undo can restore
+                // the action with its original reference image still on disk. Orphan PNGs (those no
+                // longer referenced by any action in any profile) are cleaned up at app startup by
+                // ImageStorageService.CleanupOrphanImages.
+                foreach (var idx in indices)
+                {
+                    if (idx >= 0 && idx < actions.Count)
+                        actions.RemoveAt(idx);
+                }
+            }
+            finally
+            {
+                actions.CollectionChanged += OnActionsChanged;
             }
 
+            // Recalculate row numbers and push single update. List-only, like OnActionsChanged
+            // would have: a delete cannot touch UserProfile.Current.Data.
+            for (int i = 0; i < actions.Count; i++)
+                actions[i].RowNumber = i + 1;
+
             HasUnsavedChanges = true;
+            PushActionListOnly();
             mainController.UpdateButtonStates();
         }
 
@@ -9383,7 +9425,9 @@ namespace TrueReplayer
             TrayIconService.UpdateTrayIcon();
         }
 
-        private void SaveGlobalSettings()
+        // Returns the instance it just persisted so a caller can hand it straight to
+        // PushSettingsLoaded and skip that method's disk re-read (same handler only).
+        private AppSettingsManager.AppSettings SaveGlobalSettings()
         {
             // ONE read for the three disk-owned fields below (RunOnStartup / RunAsAdmin /
             // HasAcknowledgedImportWarning — the bridge holds no field for any of them).
@@ -9469,6 +9513,7 @@ namespace TrueReplayer
                 HasAcknowledgedImportWarning = disk.HasAcknowledgedImportWarning,
             };
             AppSettingsManager.Save(s);
+            return s;
         }
 
         private static readonly HashSet<string> ProfileLoopSettingKeys = new()
@@ -9857,10 +9902,10 @@ namespace TrueReplayer
                     break;
             }
 
-            SaveGlobalSettings();
-
-            // Echo updated settings back to React so controlled components update
-            PushSettingsLoaded();
+            // Echo updated settings back to React so controlled components update. Passing the
+            // just-saved instance spares PushSettingsLoaded its disk re-read (same handler, so
+            // no staleness window — see the parameter's comment).
+            PushSettingsLoaded(SaveGlobalSettings());
             // Mode change affects record/replay button enable/text and tray icon color.
             if (key == "useCursorClick")
             {
